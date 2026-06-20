@@ -8,7 +8,7 @@ use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{lookup_id, read_credential};
 use gradient_ci::actions::encrypt_secret_with_file;
-use gradient_ci::{GITHUB_APP_INTEGRATION_NAME, IntegrationKind};
+use gradient_ci::IntegrationKind;
 use gradient_types::ForgeType;
 use crate::config::*;
 use gradient_types::*;
@@ -65,20 +65,11 @@ impl<'a> StateApplicator<'a> {
             if matches!(forge, ForgeType::GitHub) {
                 return Err(format!(
                     "Integration '{}' has forge_type 'github': GitHub integrations are managed \
-                     through the server-wide GitHub App; bind installations on the org via \
-                     `github_installation_id`, not via integration rows.",
+                     automatically via `github_installations` on the org.",
                     state_int.name
                 )
                 .into());
             }
-            if state_int.name == GITHUB_APP_INTEGRATION_NAME {
-                return Err(format!(
-                    "Integration '{}' uses the reserved name '{}' (auto-managed GitHub App row).",
-                    state_int.name, GITHUB_APP_INTEGRATION_NAME
-                )
-                .into());
-            }
-
             let encrypted_secret = self.read_and_encrypt_integration_field(
                 state_int.secret_file.as_deref(),
                 &state_int.name,

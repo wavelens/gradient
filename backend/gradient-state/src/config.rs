@@ -47,13 +47,12 @@ pub struct StateOrganization {
     pub public: bool,
     #[serde(default)]
     pub hide_build_requests: bool,
-    /// GitHub App installation id to bind to this org. When `Some`, the
-    /// state-driven provisioner writes it on every reconciliation (state wins
-    /// over runtime updates). When `None`, the field is left untouched on
-    /// update so a webhook-recorded id survives reconciliation, and is
-    /// initialised to `NULL` on create.
+    /// Declarative list of GitHub App installations to bind to this org.
+    /// Each entry provisions a `github_installation` row + inbound/outbound
+    /// integration pair. An empty list leaves webhook-recorded installations
+    /// untouched (no deletion on reconcile).
     #[serde(default)]
-    pub github_installation_id: Option<i64>,
+    pub github_installations: Vec<StateGithubInstallation>,
     pub created_by: String,
     /// Declarative org membership. Empty preserves the legacy behavior of
     /// auto-adding `created_by` as Admin. Non-empty makes the list
@@ -69,6 +68,13 @@ pub struct StateOrganization {
 pub struct StateOrgMemberEntry {
     pub user: String,
     pub role: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StateGithubInstallation {
+    pub installation_id: i64,
+    #[serde(default)]
+    pub account_login: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -353,5 +359,33 @@ impl StateConfiguration {
         let content = fs::read_to_string(path)?;
         let config: StateConfiguration = serde_json::from_str(&content)?;
         Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_github_installations_list() {
+        let json = r#"{
+            "organizations": {
+                "acme": {
+                    "name": "acme",
+                    "display_name": "ACME",
+                    "private_key_file": "/dev/null",
+                    "public": false,
+                    "created_by": "alice",
+                    "github_installations": [
+                        { "installation_id": 42, "account_login": "acme" }
+                    ]
+                }
+            }
+        }"#;
+        let config: StateConfiguration = serde_json::from_str(json).unwrap();
+        let org = config.organizations.get("acme").unwrap();
+        assert_eq!(org.github_installations.len(), 1);
+        assert_eq!(org.github_installations[0].installation_id, 42);
+        assert_eq!(org.github_installations[0].account_login.as_deref(), Some("acme"));
     }
 }
