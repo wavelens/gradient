@@ -2741,45 +2741,6 @@ The metric encoder itself is exercised by a unit test
 that drives `render` with a fixed `Observations` struct and asserts the
 resulting `# HELP` / `# TYPE` lines and value formatting.
 
-## GitHub App as a server-managed integration row
-
-Coverage of the explicit `outbound_integration` opt-in for GitHub status
-reporting and the protections around the auto-managed `forge_type=github`
-integration rows. Run with
-`cargo test -p web --test projects_integration` and
-`cargo test -p core --tests ensure_tests`.
-
-`backend/web/tests/projects_integration.rs`:
-
-- `put_project_integration_accepts_github_outbound_row` - linking a project
-  to the auto-managed GitHub outbound integration via its UUID succeeds.
-- `put_project_integration_accepts_non_github_outbound_row` - Gitea/GitLab
-  outbound rows continue to work the same way (regression).
-- `patch_integration_rejects_github_row` /
-  `delete_integration_rejects_github_row` - server-managed rows can't be
-  edited or deleted via the org integrations API.
-- `delete_integration_accepts_non_github_row` - non-managed rows still
-  delete normally (regression).
-- `put_integration_still_rejects_github_forge_type` - POST with
-  `forge_type=github` continues to be rejected (no manual rows).
-- `put_integration_rejects_reserved_github_name` - name `"github"` is
-  reserved for the auto-managed row; user-created integrations using it
-  are rejected with 400.
-
-`backend/gradient-ci/src/integration_lookup.rs::ensure_tests`:
-
-- `creates_both_rows_when_none_exist` - calling
-  `ensure_github_app_integrations` on an org with no existing rows inserts
-  the inbound and outbound GitHub rows.
-- `skips_kinds_that_already_exist` - repeated calls are idempotent; rows
-  that already exist for that org/kind are not duplicated.
-
-The resolver simplification (URL-based auto-detection removed) is
-indirectly covered by the `put_project_integration_accepts_*` tests:
-linking returns the row id and the resolver now branches purely on
-`project_integration.outbound_integration` plus the integration's
-`forge_type`.
-
 ## Worker: empty `built_outputs` self-heals from the parsed `.drv`
 
 Modern daemons can legitimately return `BuildResult::Success` with an
@@ -4593,11 +4554,17 @@ created via `PUT /orgs/{org}/integrations` with `forge_type=github` and
 - `uses_account_login_when_present` - `github_integration_name(Some("Acme-Corp"), 42)` yields `"github-acme-corp"` (lowercased, prefixed).
 - `falls_back_to_installation_id` - `github_integration_name(None, 42)` yields `"github-42"` when no login is available.
 
+`backend/gradient-ci/src/integration_lookup.rs` - `ensure_tests`:
+- `creates_both_rows_when_none_exist` - `ensure_github_app_integrations` on an org with no existing rows inserts the inbound and outbound pair linked to the specific `github_installation`.
+- `skips_kinds_that_already_exist` - repeated calls are idempotent per installation; rows that already exist for that org/installation/kind are not duplicated.
+
 `backend/gradient-forge/src/github_app.rs` - `parses_installation_account_login`:
 - `InstallationResponse` deserialises `{"id":42,"account":{"login":"acme-corp"}}` and returns `account.login = "acme-corp"`. Guards the `get_installation` API call that validates an installation id on `PUT`.
 
-`backend/gradient-web/tests/orgs_integrations.rs` - `github_create_without_app_config_is_rejected`:
-- `PUT /orgs/{org}/integrations` with `forge_type=github` returns `400` when the server has no GitHub App configured (`GRADIENT_GITHUB_APP_ID` absent). Guards the "App must be configured" prerequisite before any installation lookup.
+`backend/gradient-web/tests/orgs_integrations.rs`:
+- `github_create_without_app_config_is_rejected` - `PUT /orgs/{org}/integrations` with `forge_type=github` returns `400` when the server has no GitHub App configured (`GRADIENT_GITHUB_APP_ID` absent). Guards the "App must be configured" prerequisite before any installation lookup.
+- PATCH on a `forge_type=github` row returns `400`; github rows are installation-managed and not editable via PATCH (delete to remove). The `PatchIntegrationRequest.forge_type` enum excludes `github` at the schema level.
+- github rows CAN be deleted via `DELETE /orgs/{org}/integrations/{id}`; removing the row also removes the `github_installation` binding.
 
 `backend/gradient-web/tests/forge_hooks.rs` - reworked GitHub App dispatch tests routing by `github_installation` FK:
 - `github_app_webhook_push_fires_trigger` (Test 10) - a push event dispatched via a `github_installation` row fires the matching project trigger and returns one queued evaluation.
