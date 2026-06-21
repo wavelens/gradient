@@ -41,6 +41,17 @@ read (e.g. `PUT /orgs/{org}/integrations`) failed to decode the column (#449).
 E2E CI against real PostgreSQL; sea-orm `MockDatabase` cannot reproduce the
 column-type decode error.
 
+`event_repo_matches_project_is_host_agnostic_on_owner_repo`,
+`event_repo_rejects_a_sibling_repo_in_the_same_org`,
+`event_repo_empty_urls_match_every_project`, and
+`event_repo_unparsable_project_never_matches` cover the fan-out repo gate: an
+org-wide inbound integration (a GitHub App installation spans every repo in the
+org) must fire only triggers whose project tracks the repository the webhook
+event came from. Matching is host-agnostic on `owner/repo`. Without it a push/PR
+to one repo fanned out to sibling projects, whose eval carried the wrong repo's
+commit and made the reporter post a check-run for a SHA absent from the project's
+repo (GitHub 422 "No commit found for SHA", #449).
+
 ## Forge action "Test" button connectivity probe
 
 `backend/gradient-forge/src/reporter.rs`: `verify_reads_repo_without_reporting`
