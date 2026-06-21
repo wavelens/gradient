@@ -14,6 +14,7 @@ use gradient_entity::cache::Model as MCache;
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::sea_query::{Alias, SimpleExpr};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
+use tracing::warn;
 
 /// Park threshold: a cache with less than this much free headroom is "full".
 pub const STORAGE_HEADROOM_BYTES: i64 = 10 * 1024 * 1024;
@@ -214,13 +215,16 @@ pub async fn diagnose_missing_input<C: ConnectionTrait>(
 
 /// Purge a cached output proven unfetchable, so the next evaluation rebuilds it
 /// from scratch as if it had never been cached. Clears `is_cached` /
-/// `cached_path` on every `derivation_output` with this store-path `hash`, then
+/// `cached_path` on every `derivation_output` with this store-path `hash`,
 /// deletes the `cached_path` row itself (its `cached_path_signature` rows
-/// cascade; the `derivation_output` FK is `ON DELETE SET NULL`). The derivation
+/// cascade; the `derivation_output` FK is `ON DELETE SET NULL`), and removes the
+/// NAR object from storage so the row⟺object invariant holds. The derivation
 /// graph is left intact - only the cache artifact is removed. Returns the
-/// producing derivations for logging.
+/// producing derivations for logging (empty for a `.drv`/source, which the next
+/// eval re-instantiates and re-pushes).
 pub async fn demote_cached_output<C: ConnectionTrait>(
     db: &C,
+    nar_storage: &gradient_storage::NarStore,
     hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
     use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
@@ -240,6 +244,10 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     }
 
     ECP::delete_many().filter(CCP::Hash.eq(hash)).exec(db).await?;
+
+    if let Err(e) = nar_storage.delete(hash).await {
+        warn!(%hash, error = %e, "demote: failed to delete NAR object from storage");
+    }
 
     Ok(producers)
 }
