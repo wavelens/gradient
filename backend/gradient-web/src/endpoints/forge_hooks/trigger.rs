@@ -228,6 +228,31 @@ pub(super) fn normalize_repo_url(url: &str) -> String {
     s.to_string()
 }
 
+/// Lowercased `owner/repo` identity of a repository URL, ignoring host, scheme,
+/// and `.git` suffix. Used to decide whether a webhook event and a candidate
+/// project point at the same repository.
+fn repo_identity(url: &str) -> Option<String> {
+    parse_owner_repo(url).map(|(owner, repo)| format!("{owner}/{repo}").to_ascii_lowercase())
+}
+
+/// Whether a webhook event originating from `event_repo_urls` targets a project
+/// tracking `project_repository`. A single inbound integration (notably a
+/// GitHub App installation) spans every repository in the org, so without this
+/// gate a push/PR to one repo fans out to sibling projects whose evals would
+/// then carry the wrong repo's commit. An empty `event_repo_urls` (the source
+/// repo could not be determined) matches every project, preserving prior fan-out.
+fn event_repo_matches_project(event_repo_urls: &[String], project_repository: &str) -> bool {
+    let mut keys = event_repo_urls.iter().filter_map(|u| repo_identity(u)).peekable();
+    if keys.peek().is_none() {
+        return true;
+    }
+
+    match repo_identity(project_repository) {
+        Some(target) => keys.any(|k| k == target),
+        None => false,
+    }
+}
+
 /// Resolve a GitHub App webhook to the set of inbound GitHub integrations
 /// whose org owns a project matching one of the webhook's `repository_urls`.
 ///
@@ -329,10 +354,12 @@ pub(super) enum PushRefKind<'a> {
 
 // ── Fan-out functions ───────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn trigger_push_for_integration(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
+    event_repo_urls: &[String],
     ref_kind: PushRefKind<'_>,
     commit_hash: Vec<u8>,
     commit_message: Option<String>,
@@ -342,6 +369,7 @@ pub(super) async fn trigger_push_for_integration(
         state,
         scheduler,
         integration_id,
+        event_repo_urls,
         TriggerType::ReporterPush,
         commit_hash,
         commit_message,
@@ -382,6 +410,7 @@ pub(super) async fn trigger_pr_for_integration(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
+    event_repo_urls: &[String],
     branch: Option<&str>,
     action: &str,
     commit_hash: Vec<u8>,
@@ -399,6 +428,7 @@ pub(super) async fn trigger_pr_for_integration(
         state,
         scheduler,
         integration_id,
+        event_repo_urls,
         TriggerType::ReporterPullRequest,
         commit_hash,
         commit_message,
@@ -435,10 +465,12 @@ pub(super) async fn trigger_pr_for_integration(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn trigger_release_for_integration(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
+    event_repo_urls: &[String],
     tag: Option<&str>,
     commit_hash: Vec<u8>,
     commit_message: Option<String>,
@@ -448,6 +480,7 @@ pub(super) async fn trigger_release_for_integration(
         state,
         scheduler,
         integration_id,
+        event_repo_urls,
         TriggerType::ReporterPush,
         commit_hash,
         commit_message,
@@ -501,6 +534,7 @@ async fn fan_out_triggers<F>(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
     integration_id: IntegrationId,
+    event_repo_urls: &[String],
     trigger_type: TriggerType,
     commit_hash: Vec<u8>,
     commit_message: Option<String>,
@@ -545,6 +579,25 @@ where
             }
         };
 
+        let project = match EProject::find_by_id(trig.project).one(&state.web_db).await {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                warn!(trigger_id = %trig.id, project_id = %trig.project, "project not found for trigger");
+                continue;
+            }
+            Err(e) => {
+                warn!(error = %e, trigger_id = %trig.id, "DB error fetching project for trigger");
+                continue;
+            }
+        };
+
+        // Skip triggers whose project tracks a different repository than the one
+        // this event came from; otherwise an org-wide installation would report
+        // a check-run for a SHA absent from the sibling project's repo.
+        if !event_repo_matches_project(event_repo_urls, &project.repository) {
+            continue;
+        }
+
         let pr_require_approval = match filter(&cfg) {
             FilterResult::Skip => continue,
             FilterResult::SkipFilter => {
@@ -559,18 +612,6 @@ where
             }
             FilterResult::Fire => false,
             FilterResult::FirePr { require_approval } => require_approval,
-        };
-
-        let project = match EProject::find_by_id(trig.project).one(&state.web_db).await {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                warn!(trigger_id = %trig.id, project_id = %trig.project, "project not found for trigger");
-                continue;
-            }
-            Err(e) => {
-                warn!(error = %e, trigger_id = %trig.id, "DB error fetching project for trigger");
-                continue;
-            }
         };
         outcome.projects_scanned += 1;
 
@@ -1522,10 +1563,12 @@ pub(super) async fn handle_issue_comment(
                 "comment_id": t.comment_id,
             })
         });
+        let event_repo_urls = [format!("https://github.com/{owner}/{repo}")];
         let outcome = trigger_pr_for_integration(
             state,
             scheduler,
             *integration_id,
+            &event_repo_urls,
             Some(snapshot.head_branch.as_str()),
             "synchronize",
             commit_hash,
@@ -1790,10 +1833,45 @@ async fn active_project_ids_for_integration(
 mod tests {
     use super::super::WebhookTriggerOutcome;
     use super::{
-        GitHubInstallationPayload, GradientCommand, PullRequestApprovalContext, gate_decision,
-        github_full_name, glob_match_pattern, glob_matches, normalize_repo_url,
-        parse_gradient_command,
+        GitHubInstallationPayload, GradientCommand, PullRequestApprovalContext,
+        event_repo_matches_project, gate_decision, github_full_name, glob_match_pattern,
+        glob_matches, normalize_repo_url, parse_gradient_command,
     };
+
+    #[test]
+    fn event_repo_matches_project_is_host_agnostic_on_owner_repo() {
+        let event = [
+            "https://github.com/NuschtOS/search.nuschtos.de.git".to_string(),
+            "git@github.com:NuschtOS/search.nuschtos.de.git".to_string(),
+        ];
+        for project in [
+            "https://github.com/NuschtOS/search.nuschtos.de",
+            "https://github.com/nuschtos/search.nuschtos.de.git",
+            "git@github.com:NuschtOS/search.nuschtos.de.git",
+        ] {
+            assert!(event_repo_matches_project(&event, project), "{project}");
+        }
+    }
+
+    #[test]
+    fn event_repo_rejects_a_sibling_repo_in_the_same_org() {
+        let event = ["https://github.com/NuschtOS/search.git".to_string()];
+        assert!(!event_repo_matches_project(
+            &event,
+            "https://github.com/NuschtOS/search.nuschtos.de"
+        ));
+    }
+
+    #[test]
+    fn event_repo_empty_urls_match_every_project() {
+        assert!(event_repo_matches_project(&[], "https://github.com/NuschtOS/search"));
+    }
+
+    #[test]
+    fn event_repo_unparsable_project_never_matches() {
+        let event = ["https://github.com/NuschtOS/search".to_string()];
+        assert!(!event_repo_matches_project(&event, "not-a-url"));
+    }
 
     #[test]
     fn github_full_name_parses_every_url_form() {
