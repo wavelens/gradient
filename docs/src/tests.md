@@ -841,6 +841,18 @@ persisting `derivation_output.external_url` + metadata, and `query()` serving th
 persisted URL without re-running narinfo) is covered end-to-end in CI - there is
 no real-Postgres/HTTP unit harness for it.
 
+## Eval BFS pruning honours substitutable closures
+
+Backend (`cargo test -p gradient-proto --lib prunable_known_derivations_tests`):
+- `prunes_outputs_available_anywhere_not_just_in_our_cache` - the
+  `QueryKnownDerivations` handler may prune a derivation's subtree only when its
+  full output set is fetchable without building: in our cache (`is_cached`, or
+  the output hash present in `cached_path`) or on a known upstream
+  (`external_url`). The regression it guards: keying the prune solely on
+  `is_cached` left the entire upstream closure (every output substituted, never
+  in our own cache) un-prunable, so the worker re-walked it on every evaluation.
+  A derivation with any output unavailable, no outputs, or no rows is not pruned.
+
 ## Worker prefetch robustness - uncached inputs and broken daemon connections
 
 Backend (`cargo test -p worker --tests`):

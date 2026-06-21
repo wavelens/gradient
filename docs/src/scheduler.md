@@ -62,6 +62,15 @@ own nix config). Existing build-once anchors a prior eval left not-yet-succeeded
 are flipped substitutable when an upstream is newly found, so a previously-failed
 fetcher substitutes instead of rebuilding.
 
+The eval closure walk prunes the same way. As the worker walks the graph it
+asks the server which dependency derivations it already knows
+(`QueryKnownDerivations`); the server prunes a subtree only when the derivation's
+complete output set is fetchable without building it - every output is in our
+cache (`is_cached`, or its hash recorded in `cached_path`) or on a known upstream
+(`external_url`). This mirrors the eval-time substitutability decision, so the
+worker skips re-walking the whole upstream closure (e.g. nixpkgs) on every
+evaluation instead of descending into subtrees it will never build.
+
 #### Access and GC
 
 Read-only build endpoints (`GET /builds/{id}`, `/log`, `/downloads`,
