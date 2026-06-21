@@ -298,7 +298,7 @@ impl<G: DiscardOnDrop> Drop for ScopedGuard<G> {
 
 /// Normalise to absolute `/nix/store/<hash>-<name>`. Bare hash-name input is
 /// prefixed; already-absolute input is left as-is.
-fn canonicalize_store_path(path: &str) -> String {
+pub(crate) fn canonicalize_store_path(path: &str) -> String {
     if path.starts_with('/') {
         path.to_owned()
     } else {

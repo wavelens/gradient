@@ -4757,3 +4757,24 @@ created via `PUT /orgs/{org}/integrations` with `forge_type=github` and
 - `createIntegration rejects a non-integer installation_id` - a non-numeric installation id string fails client-side validation without sending a request.
 
 Migration backfill (`m20260620_*_github_installation_table`) and the `github_installation` FK wiring are verified by E2E CI against real PostgreSQL.
+
+## Eval push discovers input sources by parsing the `.drv`
+
+A real build failed `InputsUnavailable` on a `.drv`'s input source (a
+`builtins.toFile` config like `grub-config.xml`) that the evaluation never
+pushed: `push_drv_closure` discovered paths via the daemon's reference walk,
+which does not reliably report a `.drv`'s `inputSrcs`. Input sources have no
+producing derivation, so the miss could not self-heal - every re-eval re-walked
+the same way and re-failed.
+
+`backend/gradient-worker/src/executor/mod.rs` - `drv_input_sources` now parses
+each produced `.drv` and unions its `inputSrcs` into the push set (mirroring the
+build-side `InputPrefetcher::enumerate_inputs`), so every source a build worker
+will demand is pushed by the evaluation that produced it. NAR bytes already
+upload from the filesystem (`NarByteStream`), so filesystem-parsed discovery is
+sufficient.
+
+- `drv_input_sources_parses_inputsrcs_not_via_daemon` - a `.drv` fixture's two
+  `grub-config.xml` `inputSrcs` are returned; its input *derivation* is not.
+- `drv_input_sources_skips_unreadable_drv` - a missing `.drv` is skipped, not
+  fatal (the daemon closure still covers it).

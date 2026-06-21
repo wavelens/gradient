@@ -101,6 +101,15 @@ own nix config). Existing build-once anchors a prior eval left not-yet-succeeded
 are flipped substitutable when an upstream is newly found, so a previously-failed
 fetcher substitutes instead of rebuilding.
 
+As the worker walks the graph it pushes each produced `.drv`'s runtime closure
+to the cache before reporting its batch, so a build dispatched mid-evaluation
+finds its inputs already present. A `.drv`'s build-time input sources
+(`inputSrcs` - e.g. `builtins.toFile` configs) have no producing derivation and
+cannot self-heal if missing, so they are discovered by parsing each `.drv`
+directly rather than via the daemon's reference walk, which does not reliably
+report them; this mirrors the build-side prefetch so every source a build worker
+will demand is guaranteed pushed by the evaluation that produced it.
+
 The eval closure walk prunes the same way. As the worker walks the graph it
 asks the server which dependency derivations it already knows
 (`QueryKnownDerivations`); the server prunes a subtree only when the derivation's

@@ -79,6 +79,12 @@ async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -
 /// every store path needed to interpret a produced `.drv` is in the cache
 /// before this eval job's `JobCompleted` reaches the server.
 ///
+/// The daemon's reference walk is unreliable for a `.drv`'s `inputSrcs`, so the
+/// sources are additionally discovered by parsing each `.drv`
+/// ([`drv_input_sources`]), mirroring the build-side prefetch. They have no
+/// producing derivation, so a missed source cannot self-heal - the build just
+/// fails `InputsUnavailable` forever.
+///
 /// A failed closure upload fails the evaluation (propagated to the caller),
 /// so a downstream build never starts against a source the cache is missing.
 pub(crate) async fn push_drv_closure(
@@ -90,7 +96,15 @@ pub(crate) async fn push_drv_closure(
         return Ok(());
     }
 
-    let closure = store.collect_runtime_closure(drv_paths).await;
+    let mut closure = store.collect_runtime_closure(drv_paths).await;
+
+    // The daemon's reference walk drops a `.drv`'s `inputSrcs`, so discover them
+    // authoritatively by parsing each `.drv` - mirroring the build-side prefetch
+    // (`InputPrefetcher::enumerate_inputs`). Without this a build worker fetches
+    // the cached `.drv`, parses out an input source, and fails `InputsUnavailable`
+    // on a source the eval never pushed.
+    closure.extend(drv_input_sources(drv_paths).await);
+
     if closure.is_empty() {
         return Ok(());
     }
@@ -107,6 +121,34 @@ pub(crate) async fn push_drv_closure(
     }
 
     Ok(())
+}
+
+/// The `inputSrcs` declared by each `.drv`, read by parsing the file directly
+/// rather than via the daemon's reference walk (which is unreliable for a
+/// `.drv`'s sources). Mirrors the build-side prefetch so every source a build
+/// worker will demand is pushed by the eval that produced it. A `.drv` that
+/// cannot be read or parsed is skipped (logged), not fatal - the daemon closure
+/// still covers it.
+async fn drv_input_sources(drv_paths: &[String]) -> std::collections::HashSet<String> {
+    use crate::nix::store::canonicalize_store_path;
+
+    let mut sources = std::collections::HashSet::new();
+    for drv_path in drv_paths {
+        let full = canonicalize_store_path(drv_path);
+        match tokio::fs::read(&full).await {
+            Ok(bytes) => match gradient_db::parse_drv(&bytes) {
+                Ok(drv) => sources.extend(drv.input_sources),
+                Err(e) => {
+                    tracing::warn!(drv = %drv_path, error = %e, "push: cannot parse .drv for input sources")
+                }
+            },
+            Err(e) => {
+                tracing::warn!(drv = %drv_path, error = %e, "push: cannot read .drv for input sources")
+            }
+        }
+    }
+
+    sources
 }
 
 /// Upload one path's NAR using the method the server advertised in its
@@ -429,4 +471,41 @@ pub(crate) fn check_abort(abort: &mut watch::Receiver<bool>) -> Result<()> {
         anyhow::bail!("job aborted by server");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: a `.drv`'s `inputSrcs` (e.g. `builtins.toFile` configs like
+    /// `grub-config.xml`) must be discovered by parsing the `.drv`, not via the
+    /// daemon reference walk - the latter drops them, so the eval never pushed
+    /// them and the build failed `InputsUnavailable` with no self-heal.
+    #[tokio::test]
+    async fn drv_input_sources_parses_inputsrcs_not_via_daemon() {
+        let dir = tempfile::tempdir().unwrap();
+        let drv = dir.path().join("nixos-system.drv");
+        tokio::fs::write(
+            &drv,
+            br#"Derive([("out","/nix/store/abc-out","","")],[("/nix/store/dep.drv",["out"])],["/nix/store/s1-grub-config.xml","/nix/store/s2-grub-config.xml"],"x86_64-linux","/nix/store/bash",["-e"],[("name","nixos-system")])"#,
+        )
+        .await
+        .unwrap();
+
+        let srcs = drv_input_sources(&[drv.to_string_lossy().into_owned()]).await;
+
+        assert!(srcs.contains("/nix/store/s1-grub-config.xml"));
+        assert!(srcs.contains("/nix/store/s2-grub-config.xml"));
+        assert!(
+            !srcs.contains("/nix/store/dep.drv"),
+            "an input derivation is not an input source"
+        );
+    }
+
+    /// An unreadable `.drv` is skipped, not fatal - the daemon closure covers it.
+    #[tokio::test]
+    async fn drv_input_sources_skips_unreadable_drv() {
+        let srcs = drv_input_sources(&["/nix/store/does-not-exist.drv".to_string()]).await;
+        assert!(srcs.is_empty());
+    }
 }
