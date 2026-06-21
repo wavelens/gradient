@@ -777,7 +777,7 @@ in {
         LimitNOFILE = 65535;
         # Secrets are mlock'd to keep them off swap; without this the lock
         # fails (EPERM) and floods the log on every SSH-key git operation.
-        LimitMEMLOCK = "64M";
+        LimitMEMLOCK = "128M";
         RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
         RestrictNamespaces = true;
         RestrictRealtime = true;
