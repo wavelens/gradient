@@ -65,6 +65,17 @@ permanent failure (or an exhausted substitute budget) therefore does not poison
 every later evaluation that needs the derivation - the world (upstream cache,
 network) may have changed since it failed.
 
+A terminal-*success* anchor (`Completed`/`Substituted`) encodes the invariant
+"this output's NAR is fetchable". When that artifact is removed -
+`demote_cached_output` (purging a stale/zombie `cached_path`, or self-healing a
+NAR missing from storage, or `reconcile_missing_inputs` after a build reported its
+inputs unfetchable) deletes the NAR - the invariant no longer holds, so demote
+also resets the producing anchor back to `Created` (a real build, not a
+re-substitute of the deleted artifact). Without this the producer would stay
+"succeeded" forever and every dependent fail `InputsUnavailable` indefinitely; the
+reset lets it rebuild and the next eval re-marks it substitutable if it is
+genuinely still on an upstream.
+
 #### Upstream substitutability
 
 A derivation is just another build that can be substituted when its output is

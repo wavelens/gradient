@@ -984,9 +984,17 @@ Backend (`cargo test -p gradient-worker -p gradient-scheduler --tests`):
 
 The purge path itself (`gradient_db::demote_cached_output`) deletes the
 `cached_path` row (its `cached_path_signature` rows cascade; the
-`derivation_output` FK is `ON DELETE SET NULL`) and is shared with the
-NAR-serve self-heal in `socket.rs`. It is exercised end-to-end in CI (the db
-crate has no real-Postgres unit harness).
+`derivation_output` FK is `ON DELETE SET NULL`), deletes the NAR object, and is
+shared with the NAR-serve self-heal in `socket.rs`. It also **resets the
+producing anchor** from terminal-success (`Completed`/`Substituted`) back to
+`Created` (`substitutable`/`substituted` cleared, `attempt = 0`): the artifact is
+gone, so the build-once "succeeded" invariant no longer holds, and `resolve_anchors`
+never re-queues terminal-success anchors. Without the reset a producer whose NAR
+was demoted/zombie-purged stays "succeeded" forever and every dependent fails
+`InputsUnavailable` indefinitely (e.g. `search-meta` missing a `nixpkgs--.json`
+input). `demote_deletes_the_nar_object` covers the `.drv` (no-producer) path; the
+anchor reset is raw SQL like `requeue_failed_anchors` and is exercised end-to-end
+in CI (the db crate has no real-Postgres unit harness).
 
 Preventively, `expand_substituted_closure` now only marks a closure dep
 `Substituted` when its `derivation_output` rows are all `is_cached = true`;

@@ -13,7 +13,9 @@ use gradient_types::ids::{CacheId, DerivationId, OrganizationId};
 use gradient_entity::cache::Model as MCache;
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::sea_query::{Alias, SimpleExpr};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QuerySelect, Statement,
+};
 use tracing::warn;
 
 /// Park threshold: a cache with less than this much free headroom is "full".
@@ -241,6 +243,28 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
         active.is_cached = Set(false);
         active.cached_path = Set(None);
         active.update(db).await?;
+    }
+
+    // The artifact is gone, so a producer the graph trusts as build-once success
+    // (Completed=3 / Substituted=7) is no longer fetchable. `resolve_anchors`
+    // only re-queues terminal-failure anchors, so without this such a producer
+    // would stay "succeeded" forever and every dependent fail `InputsUnavailable`
+    // indefinitely. Reset it to a fresh build intent (Created, real build - not a
+    // re-substitute of the deleted artifact); the next eval re-marks it
+    // substitutable if it is genuinely still on an upstream.
+    if !producers.is_empty() {
+        let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
+        db.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            UPDATE derivation_build
+            SET status = 0, substitutable = false, substituted = false,
+                attempt = 0, updated_at = (now() AT TIME ZONE 'UTC')
+            WHERE derivation = ANY($1) AND status IN (3, 7)
+            "#,
+            [ids.into()],
+        ))
+        .await?;
     }
 
     ECP::delete_many().filter(CCP::Hash.eq(hash)).exec(db).await?;
