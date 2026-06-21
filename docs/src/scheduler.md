@@ -121,3 +121,18 @@ cannot make progress, auto-unparking once the blocker clears:
 
 Approval, no-cache and full-cache parks are owned by the webhook and cache hooks
 and are never unparked by the worker reconciler.
+
+## Re-offering re-queued jobs
+
+Job offers and scores are deltas: the server only offers a candidate a worker
+has not been sent, and the worker only scores candidates new or changed against
+its local cache. A build that was dispatched and then returned to the pool (a
+failed/transient requeue, or a worker reject because it was draining or at
+capacity) must therefore be re-offered so it is *scored a second time* -
+otherwise it sits unassigned even while a worker has free capacity. Three things
+make that happen: `enqueue_build_job` clears the build's sent-candidate flag on
+every (re-)enqueue; the worker drops a job from its candidate + score caches on
+reject (not only on accept), so a re-offer is treated as new; and the build
+dispatch loop bumps the job-notify each pass while any job is pending, so a
+re-queued job reaches workers (including one that just freed capacity) without
+waiting for the next enqueue.

@@ -566,6 +566,21 @@ mod tests {
     }
 
     #[test]
+    fn remove_sent_candidate_allows_reoffer() {
+        // A build re-queued after a failed/rejected dispatch must lose its
+        // sent flag so the next delta push re-offers it (workers re-score it).
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+        pool.mark_candidates_sent("w1", &["build:a".to_string(), "build:b".to_string()]);
+        assert!(pool.sent_candidates_for("w1").unwrap().contains("build:a"));
+
+        pool.remove_sent_candidate("build:a");
+        let sent = pool.sent_candidates_for("w1").unwrap();
+        assert!(!sent.contains("build:a"), "cleared job is re-offerable");
+        assert!(sent.contains("build:b"), "other jobs stay sent");
+    }
+
+    #[test]
     fn build_capacity_strict_at_limit() {
         // Worker at exactly max_concurrent_builds must reject new builds.
         // Guards against `<` → `<=` off-by-one in `has_build_capacity`.

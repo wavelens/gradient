@@ -248,6 +248,38 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
+    /// Demoting a proven-unfetchable output must remove the NAR object from
+    /// storage as well as the `cached_path` row, so a re-eval re-pushes it
+    /// instead of trusting a row whose object is gone.
+    #[tokio::test]
+    async fn demote_deletes_the_nar_object() {
+        use gradient_storage::NarStore;
+        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+        let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("nars").join(&hash[..2]);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(format!("{}.nar.zst", &hash[2..]));
+        std::fs::write(&file, b"x").unwrap();
+        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+
+        // A `.drv` hash has no `derivation_output` rows; demote still deletes the
+        // `cached_path` row (one exec) and the object.
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            .into_connection();
+
+        let producers = demote_cached_output(&db, &nar_storage, hash).await.unwrap();
+
+        assert!(producers.is_empty(), "a .drv has no producing derivation");
+        assert!(!file.exists(), "demote must delete the NAR object from storage");
+    }
+
     #[test]
     fn file_size_sum_casts_to_bigint() {
         use gradient_entity::cached_path::Entity as ECP;

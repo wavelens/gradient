@@ -540,9 +540,22 @@ impl<'a> MessageHandler<'a> {
 
     // ── Job lifecycle ─────────────────────────────────────────────────────────
 
+    /// Drop a job from the local candidate + score caches so a later server
+    /// re-offer is treated as new and re-scored (the delta filter skips
+    /// unchanged cached entries).
+    fn forget_candidate(&self, job_id: &str) {
+        self.candidates.lock().unwrap().remove(job_id);
+        self.last_scores.lock().unwrap().remove(job_id);
+    }
+
     fn on_assign_job(self, job_id: String, job: Job) -> Result<()> {
+        // Drop the cached candidate + score on any reject too (not just accept):
+        // the server re-queues a rejected job and re-offers it, but our delta
+        // filter would skip an unchanged cached entry, so it would never be
+        // re-scored and would sit unassigned despite free capacity.
         if *self.draining {
             warn!(%job_id, "rejecting assigned job - draining");
+            self.forget_candidate(&job_id);
             self.writer.send(ClientMessage::AssignJobResponse {
                 job_id,
                 accepted: false,
@@ -563,6 +576,7 @@ impl<'a> MessageHandler<'a> {
 
         if active_count >= max {
             warn!(%job_id, ?kind, active = active_count, limit = max, "rejecting assigned job - at capacity");
+            self.forget_candidate(&job_id);
             self.writer.send(ClientMessage::AssignJobResponse {
                 job_id,
                 accepted: false,
@@ -579,8 +593,7 @@ impl<'a> MessageHandler<'a> {
         })?;
 
         self.job_kinds.insert(job_id.clone(), kind.clone());
-        self.candidates.lock().unwrap().remove(&job_id);
-        self.last_scores.lock().unwrap().remove(&job_id);
+        self.forget_candidate(&job_id);
 
         let (abort_tx, abort_rx) = watch::channel(false);
         self.abort_senders.insert(job_id.clone(), abort_tx);

@@ -885,6 +885,11 @@ impl JobTracker {
         (active, pending)
     }
 
+    /// Whether any job is waiting to be dispatched.
+    pub fn has_pending(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
     /// Increment every pending job's `rescore_count`. Called once per build
     /// dispatch tick so long-waiting jobs accrue a rescore-wait bonus.
     pub fn bump_rescore_counts(&mut self) {

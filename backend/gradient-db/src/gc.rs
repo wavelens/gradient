@@ -184,7 +184,7 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     let rows = db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"SELECT d.id
+            r#"SELECT d.id, d.hash
                FROM derivation d
                LEFT JOIN build_job bj ON bj.derivation = d.id
                LEFT JOIN entry_point ep ON ep.derivation = d.id
@@ -196,10 +196,17 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
         .await
         .context("Failed to query orphan derivations")?;
 
-    let candidate_ids: Vec<DerivationId> = rows
+    // Capture each candidate's own `.drv` hash before deletion so the reclaim
+    // set can drop the `.drv` NAR + cached_path, not just the outputs.
+    let candidate_drv_hash: std::collections::HashMap<DerivationId, String> = rows
         .iter()
-        .filter_map(|r| r.try_get::<Uuid>("", "id").ok().map(DerivationId::new))
+        .filter_map(|r| {
+            let id = r.try_get::<Uuid>("", "id").ok().map(DerivationId::new)?;
+            let hash = r.try_get::<String>("", "hash").ok()?;
+            Some((id, hash))
+        })
         .collect();
+    let candidate_ids: Vec<DerivationId> = candidate_drv_hash.keys().copied().collect();
 
     if candidate_ids.is_empty() {
         return Ok(());
@@ -272,7 +279,37 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
         .collect()
     };
 
-    let to_delete = reclaimable_hashes(deleted_hashes, &still_referenced);
+    // A derivation's own `.drv` NAR + cached_path are reclaimed too: they were
+    // never tied to a `derivation_output`, so the old output-only reclaim leaked
+    // them on every orphan sweep. Keep a `.drv` hash only if a concurrent eval
+    // re-created the derivation (a surviving `derivation` row shares it).
+    let deleted_drv_hashes: HashSet<String> = deleted
+        .iter()
+        .filter_map(|id| candidate_drv_hash.get(id).cloned())
+        .collect();
+    let surviving_drv_hashes: HashSet<String> = if deleted_drv_hashes.is_empty() {
+        HashSet::new()
+    } else {
+        let hash_vec: Vec<String> = deleted_drv_hashes.iter().cloned().collect();
+        crate::fetch_in_chunks(&hash_vec, |chunk| async move {
+            EDerivation::find()
+                .filter(CDerivation::Hash.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .context("GC: failed to query surviving derivations for deleted drv hashes")?
+        .into_iter()
+        .map(|d| d.hash)
+        .collect()
+    };
+
+    let to_delete = reclaimable_after_delete(
+        deleted_hashes,
+        &still_referenced,
+        deleted_drv_hashes,
+        &surviving_drv_hashes,
+    );
 
     for hash in &to_delete {
         if let Err(e) = ctx.storage.nar_storage.delete(hash).await {
@@ -317,6 +354,23 @@ fn reclaimable_hashes(
         .collect()
 }
 
+/// Every NAR/`cached_path` hash reclaimable after an orphan-derivation sweep:
+/// the deleted derivations' output hashes (minus any a surviving
+/// `derivation_output` still shares) plus their own `.drv` hashes (minus any a
+/// concurrent eval re-created as a surviving `derivation`). The two guards
+/// differ - outputs against surviving outputs, `.drv`s against surviving
+/// derivations - because a derivation's own `.drv` has no `derivation_output`.
+fn reclaimable_after_delete(
+    deleted_output_hashes: std::collections::HashSet<String>,
+    surviving_output_hashes: &std::collections::HashSet<String>,
+    deleted_drv_hashes: std::collections::HashSet<String>,
+    surviving_drv_hashes: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    let mut out = reclaimable_hashes(deleted_output_hashes, surviving_output_hashes);
+    out.extend(reclaimable_hashes(deleted_drv_hashes, surviving_drv_hashes));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +388,21 @@ mod tests {
         let mut got = reclaimable_hashes(set(&["solo", "shared"]), &set(&["shared"]));
         got.sort();
         assert_eq!(got, vec!["solo".to_string()]);
+    }
+
+    #[test]
+    fn reclaims_drv_hash_unless_a_surviving_derivation_recreated_it() {
+        // A deleted derivation's own `.drv` hash is reclaimed alongside its
+        // outputs, but `d2` was re-created by a concurrent eval (surviving
+        // `derivation` row shares the hash) so it must be kept.
+        let mut got = reclaimable_after_delete(
+            set(&["o1"]),
+            &set(&[]),
+            set(&["d1", "d2"]),
+            &set(&["d2"]),
+        );
+        got.sort();
+        assert_eq!(got, vec!["d1".to_string(), "o1".to_string()]);
     }
 
     #[test]

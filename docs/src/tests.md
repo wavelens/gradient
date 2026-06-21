@@ -805,6 +805,16 @@ eval-time substitutability probe (scheduler), so it lives in `gradient-core`.
 - `parse_upstream_narinfo_ignores_unparseable_sizes` - malformed `NarSize` /
   `FileSize` fall back to `None` rather than aborting the parse.
 
+## Re-offering re-queued jobs
+
+Backend (`cargo test -p gradient-scheduler --lib worker_pool`):
+- `remove_sent_candidate_allows_reoffer` - a re-queued build loses its
+  sent-candidate flag so the next delta push re-offers it (other jobs stay sent).
+  Backs the dispatch self-heal: re-queued/rejected jobs get scored a second time
+  and dispatch into free capacity instead of sitting unassigned. The worker-side
+  cache drop on reject and the loop's per-pass re-offer are covered end-to-end in
+  CI.
+
 ## Upstream substitutability (eval-time lookup)
 
 Backend (`cargo test -p gradient-scheduler --lib upstream_substitutable_tests`):

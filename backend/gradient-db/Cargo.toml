@@ -35,3 +35,6 @@ serde_json        = { workspace = true }
 tokio             = { workspace = true, features = ["sync", "rt", "macros", "time"] }
 tracing           = { workspace = true }
 uuid              = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

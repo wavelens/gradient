@@ -341,6 +341,15 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
         if let Err(e) = scheduler.reconcile_waiting_state().await {
             error!(error = %e, "reconcile_waiting_state in dispatch loop failed");
         }
+
+        // Re-offer still-pending jobs to all sessions each pass. A build
+        // re-queued after a failed/rejected dispatch had its sent-flag cleared,
+        // so this re-offers it (workers score it a second time) - including to a
+        // worker that just freed capacity via the kick. Sessions ignore an empty
+        // delta, so this is cheap when nothing changed.
+        if scheduler.job_tracker.read().await.has_pending() {
+            scheduler.job_notify.send_modify(|g| *g = g.wrapping_add(1));
+        }
     }
 }
 
