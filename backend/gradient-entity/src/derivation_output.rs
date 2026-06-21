@@ -23,6 +23,17 @@ pub struct Model {
     pub nar_size: Option<i64>,
     pub is_cached: bool,
     pub cached_path: Option<CachedPathId>,
+    /// Upstream NAR URL resolved once via the org's upstream-cache narinfo
+    /// lookup. Set (with `is_cached` false) when the output is available upstream
+    /// but not yet pulled into the gradient cache.
+    pub external_url: Option<String>,
+    /// NAR hash from the upstream narinfo, needed to import the path.
+    pub nar_hash: Option<String>,
+    /// Compressed NAR size from the upstream narinfo.
+    pub file_size: Option<i64>,
+    #[sea_orm(column_name = "references_list")]
+    pub references: Option<String>,
+    pub deriver: Option<String>,
     pub created_at: NaiveDateTime,
 }
 
@@ -70,5 +81,12 @@ impl Model {
             (true, Some(id)) => CacheLink::Cached { cached_path: id },
             _ => CacheLink::NotCached,
         }
+    }
+
+    /// Whether this output is available anywhere: in the gradient cache
+    /// (`is_cached`) or resolved at an org upstream (`external_url`). A
+    /// derivation is only substitutable when every output is cached somewhere.
+    pub fn is_cached_anywhere(&self) -> bool {
+        self.is_cached || self.external_url.is_some()
     }
 }

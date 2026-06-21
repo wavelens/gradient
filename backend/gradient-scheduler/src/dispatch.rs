@@ -774,6 +774,7 @@ impl BuildDispatchMaps {
                 build_id: anchor.id.to_string(),
                 drv_path: derivation.store_path(),
                 external_cached: substitute,
+                is_fixed_output: derivation.is_fixed_output,
                 timeout_secs: resolve_limit(anchor.timeout_secs, self.default_timeout_secs),
                 max_silent_secs: resolve_limit(anchor.max_silent_secs, self.default_max_silent_secs),
             }],

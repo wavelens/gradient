@@ -980,6 +980,7 @@ mod tests {
                     build_id: derivation_build.to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                     external_cached: false,
+                    is_fixed_output: false,
                     timeout_secs: None,
                     max_silent_secs: None,
                 }],

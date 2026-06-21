@@ -42,6 +42,26 @@ permanent failure (or an exhausted substitute budget) therefore does not poison
 every later evaluation that needs the derivation - the world (upstream cache,
 network) may have changed since it failed.
 
+#### Upstream substitutability
+
+A derivation is just another build that can be substituted when its output is
+available on a cache, exactly like any other - fixed-output derivations are not
+special-cased. At eval time `resolve_anchors` runs an org-scoped lookup
+(`compute_upstream_substitutable`): for every derivation not already in the
+gradient cache it probes each output's `.narinfo` across the org's configured
+upstream caches. A derivation is marked substitutable only when *every* one of
+its outputs is cached somewhere (the gradient cache or an upstream); otherwise it
+is built. The resolved upstream NAR URL plus narinfo metadata is persisted once
+onto `derivation_output` (`external_url`, `nar_hash`, `file_size`,
+`references_list`, `deriver`), so the narinfo lookup runs only once. Substitutable
+anchors dispatch through the existing `external_cached` path: the worker reads the
+persisted URL via `CacheQuery`, downloads the NAR directly from the upstream,
+recompresses it, and pushes it into the gradient cache (`use_substitutes` stays
+off in the daemon - substitution always goes through gradient, never the worker's
+own nix config). Existing build-once anchors a prior eval left not-yet-succeeded
+are flipped substitutable when an upstream is newly found, so a previously-failed
+fetcher substitutes instead of rebuilding.
+
 #### Access and GC
 
 Read-only build endpoints (`GET /builds/{id}`, `/log`, `/downloads`,

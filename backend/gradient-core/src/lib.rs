@@ -5,6 +5,7 @@
  */
 
 pub mod state_root;
+pub mod upstream;
 
 pub use state_root::{AppState, ServerState};
 

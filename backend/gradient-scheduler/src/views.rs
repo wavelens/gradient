@@ -166,6 +166,7 @@ mod tests {
                     build_id: "b1".into(),
                     drv_path: "/nix/store/aaa-curl.drv".into(),
                     external_cached: false,
+                    is_fixed_output: false,
                     timeout_secs: None,
                     max_silent_secs: None,
                 }],

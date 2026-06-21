@@ -20,7 +20,7 @@ use gradient_exec::strip_nix_store_prefix;
 use gradient_sources::{get_hash_from_path, parse_drv_hash_name};
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, error, info};
 
 use super::build::check_evaluation_done;
@@ -207,6 +207,18 @@ impl<'a> EvalResultProcessor<'a> {
             .collect();
 
         let truly_substituted = self.compute_truly_substituted(&all_drv_ids).await?;
+        let not_substituted: Vec<DerivationId> = all_drv_ids
+            .iter()
+            .copied()
+            .filter(|id| !truly_substituted.contains(id))
+            .collect();
+        let upstream_substitutable = self
+            .compute_upstream_substitutable(&not_substituted)
+            .await
+            .unwrap_or_else(|e| {
+                error!(error = %e, "upstream substitutability probe failed");
+                std::collections::HashSet::new()
+            });
 
         let mut anchors: Vec<ADerivationBuild> = Vec::new();
         let mut seen: std::collections::HashSet<DerivationId> = std::collections::HashSet::new();
@@ -220,6 +232,8 @@ impl<'a> EvalResultProcessor<'a> {
 
             let (status, substitutable) = if truly_substituted.contains(&drv_id) {
                 (BuildStatus::Substituted, false)
+            } else if upstream_substitutable.contains(&drv_id) {
+                (BuildStatus::Created, true)
             } else {
                 (BuildStatus::Created, d.substituted)
             };
@@ -322,6 +336,29 @@ impl<'a> EvalResultProcessor<'a> {
         // may have changed). promote_ready then re-queues the reset Created rows.
         if let Err(e) = gradient_db::requeue_failed_anchors(db, &all_drv_ids).await {
             error!(error = %e, "failed to re-queue failed anchors for new eval");
+        }
+
+        // `ON CONFLICT DO NOTHING` leaves existing build-once anchors untouched,
+        // so flip not-yet-succeeded ones to substitutable when an upstream now
+        // offers the output: a previously-built/failed derivation substitutes
+        // instead of rebuilding (its fetcher origin may have rotted).
+        if !upstream_substitutable.is_empty() {
+            let ids: Vec<DerivationId> = upstream_substitutable.iter().copied().collect();
+            if let Err(e) = gradient_db::for_each_chunk(&ids, |chunk| async move {
+                EDerivationBuild::update_many()
+                    .col_expr(CDerivationBuild::Substitutable, sea_orm::sea_query::Expr::value(true))
+                    .filter(CDerivationBuild::Derivation.is_in(chunk))
+                    .filter(CDerivationBuild::Status.is_not_in([
+                        i32::from(BuildStatus::Completed),
+                        i32::from(BuildStatus::Substituted),
+                    ]))
+                    .exec(db)
+                    .await
+            })
+            .await
+            {
+                error!(error = %e, "failed to flag existing anchors substitutable from upstream");
+            }
         }
 
         // Promotion is deferred to stream completion (`handle_eval_job_completed`),
@@ -448,6 +485,139 @@ impl<'a> EvalResultProcessor<'a> {
             }
         }
         Ok(substituted)
+    }
+
+    /// Org-scoped upstream substitutability probe. For derivations not already in
+    /// the gradient cache, look up each output's `.narinfo` on the org's
+    /// configured upstream caches and persist hits onto `derivation_output`
+    /// (`external_url` + narinfo metadata) so the lookup runs once and the worker
+    /// downloads directly from that URL. Returns the derivations whose *every*
+    /// output is cached somewhere (gradient cache or an upstream) and may
+    /// therefore be substituted instead of built.
+    async fn compute_upstream_substitutable(
+        &self,
+        drv_ids: &[DerivationId],
+    ) -> Result<std::collections::HashSet<DerivationId>> {
+        use std::collections::{HashMap, HashSet};
+
+        if drv_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let db = &self.state.worker_db;
+        let Some(org_id) =
+            crate::dispatch::organization_id_for_eval(self.state, &self.evaluation).await
+        else {
+            return Ok(HashSet::new());
+        };
+        let upstream_urls = gradient_db::upstream_urls_for_org(db, org_id)
+            .await
+            .unwrap_or_default();
+        if upstream_urls.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let outputs = gradient_db::fetch_in_chunks(drv_ids, |chunk| async move {
+            EDerivationOutput::find()
+                .filter(CDerivationOutput::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .context("compute_upstream_substitutable: load derivation_output")?;
+        if outputs.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        // Outputs not yet available anywhere need a narinfo probe (deduped by hash).
+        let to_probe: Vec<(String, String)> = outputs
+            .iter()
+            .filter(|o| !o.is_cached_anywhere())
+            .map(|o| (o.hash.clone(), format!("/nix/store/{}-{}", o.hash, o.package)))
+            .collect::<HashMap<_, _>>()
+            .into_iter()
+            .collect();
+
+        let found = self.probe_upstreams(&upstream_urls, to_probe).await;
+
+        // Persist each hit onto every derivation_output row sharing that hash.
+        for o in outputs.iter().filter(|o| !o.is_cached_anywhere()) {
+            let Some(cp) = found.get(&o.hash) else {
+                continue;
+            };
+            let mut am = o.clone().into_active_model();
+            am.external_url = Set(cp.url.clone());
+            am.nar_hash = Set(cp.nar_hash.clone());
+            am.file_size = Set(cp.file_size.map(|v| v as i64));
+            am.references = Set(cp.references.as_ref().map(|r| r.join(" ")));
+            am.deriver = Set(cp.deriver.clone());
+            if o.nar_size.is_none() {
+                am.nar_size = Set(cp.nar_size.map(|v| v as i64));
+            }
+            if o.ca.is_none() {
+                am.ca = Set(cp.ca.clone());
+            }
+            if let Err(e) = am.update(db).await {
+                error!(hash = %o.hash, error = %e, "failed to persist upstream availability");
+            }
+        }
+
+        // A derivation is substitutable iff every output is cached somewhere.
+        let available: HashSet<String> = outputs
+            .iter()
+            .filter(|o| o.is_cached_anywhere())
+            .map(|o| o.hash.clone())
+            .chain(found.keys().cloned())
+            .collect();
+
+        Ok(derivations_all_outputs_available(&outputs, &available))
+    }
+
+    /// Probe `<hash>.narinfo` across `upstream_urls` for each `(hash, store_path)`
+    /// at bounded concurrency, returning the resolved narinfo per found hash.
+    async fn probe_upstreams(
+        &self,
+        upstream_urls: &[String],
+        targets: Vec<(String, String)>,
+    ) -> std::collections::HashMap<String, gradient_types::proto::CachedPath> {
+        use futures::stream::{FuturesUnordered, StreamExt as _};
+        const CONCURRENCY: usize = 16;
+
+        let mut found = std::collections::HashMap::new();
+        if targets.is_empty() {
+            return found;
+        }
+        let urls = Arc::new(upstream_urls.to_vec());
+        let http = self.state.http.clone();
+        let mut futs = FuturesUnordered::new();
+        let mut iter = targets.into_iter();
+        let push = |futs: &mut FuturesUnordered<_>, hash: String, path: String| {
+            let http = http.clone();
+            let urls = Arc::clone(&urls);
+            let key = hash.clone();
+            futs.push(async move {
+                (
+                    key,
+                    gradient_core::upstream::lookup_upstream_narinfo(http, urls, hash, path).await,
+                )
+            });
+        };
+
+        for _ in 0..CONCURRENCY {
+            match iter.next() {
+                Some((hash, path)) => push(&mut futs, hash, path),
+                None => break,
+            }
+        }
+        while let Some((hash, res)) = futs.next().await {
+            if let Some(cp) = res {
+                found.insert(hash, cp);
+            }
+            if let Some((hash, path)) = iter.next() {
+                push(&mut futs, hash, path);
+            }
+        }
+        found
     }
 
     /// Record per-derivation system-feature requirements in the DB.
@@ -808,4 +978,60 @@ pub async fn handle_eval_job_failed(
         .await;
     }
     Ok(())
+}
+
+/// Derivations whose *every* output hash is in `available` (cached in the
+/// gradient cache or resolved at an org upstream). All-or-nothing: a derivation
+/// is substitutable only when none of its outputs would still have to be built.
+fn derivations_all_outputs_available(
+    outputs: &[MDerivationOutput],
+    available: &std::collections::HashSet<String>,
+) -> std::collections::HashSet<DerivationId> {
+    let mut by_drv: HashMap<DerivationId, Vec<&MDerivationOutput>> = HashMap::new();
+    for o in outputs {
+        by_drv.entry(o.derivation).or_default().push(o);
+    }
+
+    by_drv
+        .into_iter()
+        .filter(|(_, outs)| !outs.is_empty() && outs.iter().all(|o| available.contains(&o.hash)))
+        .map(|(drv_id, _)| drv_id)
+        .collect()
+}
+
+#[cfg(test)]
+mod upstream_substitutable_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn output(drv: DerivationId, hash: &str) -> MDerivationOutput {
+        MDerivationOutput {
+            derivation: drv,
+            hash: hash.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn substitutable_only_when_all_outputs_available() {
+        let a = DerivationId::now_v7();
+        let b = DerivationId::now_v7();
+        let outputs = vec![
+            output(a, "h1"),
+            output(a, "h2"),
+            output(b, "h3"),
+            output(b, "h4"),
+        ];
+        let available: HashSet<String> =
+            ["h1", "h2", "h3"].iter().map(|s| s.to_string()).collect();
+
+        let got = derivations_all_outputs_available(&outputs, &available);
+        assert!(got.contains(&a), "all of a's outputs are available");
+        assert!(!got.contains(&b), "b has an output (h4) not cached anywhere");
+    }
+
+    #[test]
+    fn no_outputs_is_not_substitutable() {
+        assert!(derivations_all_outputs_available(&[], &HashSet::new()).is_empty());
+    }
 }

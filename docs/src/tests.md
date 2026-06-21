@@ -786,13 +786,17 @@ Backend (`cargo test -p core --test nar_extract`):
 
 ## Upstream narinfo metadata for worker prefetch
 
-Backend (`cargo test -p proto --lib handler::cache::tests`):
-- `parse_upstream_narinfo_full_fields` - verifies the server parses
+Backend (`cargo test -p gradient-core --lib upstream::tests`): the narinfo
+lookup/parse is shared by the cache-query handler (worker pulls) and the
+eval-time substitutability probe (scheduler), so it lives in `gradient-core`.
+- `parse_upstream_narinfo_full_fields` - verifies the parser reads
   `NarHash`, `NarSize`, `FileSize`, `References`, `Deriver`, and `Sig` from an
   upstream `.narinfo` body so the worker receives enough metadata to build a
   `ValidPathInfo` and call `add_to_store_nar`. Without this the worker
   silently failed imports and the build died with
   "dependency does not exist, and substitution is disabled".
+- `parse_upstream_narinfo_ca_field` - parses the `CA:` field so content-addressed
+  (fixed-output) paths import correctly.
 - `parse_upstream_narinfo_requires_url` - a narinfo without `URL:` is rejected.
 - `parse_upstream_narinfo_trims_base_url_trailing_slash` - joins
   `base_url` + `URL:` without double slashes.
@@ -800,6 +804,21 @@ Backend (`cargo test -p proto --lib handler::cache::tests`):
   no paths yields `Some(vec![])`, not `None`.
 - `parse_upstream_narinfo_ignores_unparseable_sizes` - malformed `NarSize` /
   `FileSize` fall back to `None` rather than aborting the parse.
+
+## Upstream substitutability (eval-time lookup)
+
+Backend (`cargo test -p gradient-scheduler --lib upstream_substitutable_tests`):
+- `substitutable_only_when_all_outputs_available` - `derivations_all_outputs_available`
+  marks a derivation substitutable only when *every* one of its outputs is cached
+  somewhere (gradient cache or an upstream); a derivation with any output missing
+  is built. This is the all-or-nothing rule behind `compute_upstream_substitutable`.
+- `no_outputs_is_not_substitutable` - a derivation with no recorded outputs is
+  never substitutable.
+
+The full probe (`compute_upstream_substitutable`: org-scoped `.narinfo` lookup,
+persisting `derivation_output.external_url` + metadata, and `query()` serving the
+persisted URL without re-running narinfo) is covered end-to-end in CI - there is
+no real-Postgres/HTTP unit harness for it.
 
 ## Worker prefetch robustness - uncached inputs and broken daemon connections
 

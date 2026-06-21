@@ -142,6 +142,9 @@ pub struct BuildTask {
     /// recompresses to zstd, and pushes via `NarUploaded`. No daemon
     /// build invocation, no input prefetch.
     pub external_cached: bool,
+    /// Fixed-output (content-addressed) derivation. Carried for worker-side
+    /// scoring; substitution itself is attempted for every build regardless.
+    pub is_fixed_output: bool,
     /// Wall-clock limit in seconds for this build; `None` = no limit.
     pub timeout_secs: Option<u64>,
     /// Silent (no-output) limit in seconds; `None` = no limit.
