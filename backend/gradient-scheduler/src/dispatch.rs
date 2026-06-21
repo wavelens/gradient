@@ -326,6 +326,20 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
         // fire many times per interval) just run an extra dispatch pass.
         if timer_tick {
             scheduler.job_tracker.write().await.bump_rescore_counts();
+
+            // Promotion is otherwise event-driven (promote_ready at eval
+            // completion, promote_dependents at build completion), so a ready
+            // anchor whose triggering event never fired - failed eval after its
+            // edges were flushed, a dep that completed in a missed window, a
+            // restart - sits in Created forever. This periodic sweep is the
+            // backstop. It is safe because promote_ready now gates on
+            // edges_complete: only fully-flushed anchors are promotable, so the
+            // sweep can never dispatch a 0-edge anchor without its inputs.
+            match gradient_db::promote_ready(&scheduler.state.worker_db).await {
+                Ok(n) if n > 0 => info!(promoted = n, "promote_ready swept ready anchors"),
+                Ok(_) => {}
+                Err(e) => error!(error = %e, "periodic promote_ready failed"),
+            }
         }
 
         if let Err(e) = requeue_transient_failures(&scheduler).await {

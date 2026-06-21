@@ -49,6 +49,15 @@ edges never change once written, so a later requeue keeps the anchor promotable
 without re-evaluation. `promote_ready`, `promote_dependents`, and the dispatch
 readiness query all require it.
 
+Promotion is otherwise event-driven (`promote_ready` at eval completion,
+`promote_dependents` at build completion), so a ready anchor whose triggering
+event never fired - a failed eval after its edges were flushed, a dependency that
+completed in a missed window, a restart - would sit in `Created` forever. The
+build dispatch loop therefore runs `promote_ready` once per timer tick as a
+backstop. The `edges_complete` gate is what makes this periodic sweep safe: it
+can only ever promote fully-flushed anchors, so it can never dispatch a 0-edge
+anchor without its inputs.
+
 Because the anchor is global and build-once, a new evaluation is treated as a
 fresh build intent: `resolve_anchors` re-queues anchors a previous eval left
 terminal-failed, and the substitute-miss budget is scoped per evaluation. A
