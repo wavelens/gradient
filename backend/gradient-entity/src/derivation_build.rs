@@ -27,6 +27,11 @@ pub struct Model {
     pub status: BuildStatus,
     pub substitutable: bool,
     pub substituted: bool,
+    /// True once this anchor's dependency edges have been flushed (at the
+    /// flushing eval's completion). Promotion and dispatch gate on it: an anchor
+    /// created mid-stream by a still-running, failed, or interrupted eval has no
+    /// edges yet and must not be promoted as if it were dependency-free.
+    pub edges_complete: bool,
     pub attempt: i32,
     pub timeout_secs: Option<i64>,
     pub max_silent_secs: Option<i64>,

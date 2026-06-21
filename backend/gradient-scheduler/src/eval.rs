@@ -835,9 +835,19 @@ pub async fn handle_eval_job_completed(
         error!(error = %e, %evaluation_id, "seed_entry_point_dep_counts failed (non-fatal)");
     }
 
-    // The dependency graph is now complete (edges flushed). Seed the graph-driven
-    // promotion from its ready frontier: leaves and anchors whose deps were
-    // already cached/substituted. Each subsequent completion cascades upward.
+    // The dependency graph is now complete (edges flushed). Mark this eval's
+    // anchors edges_complete so promotion and dispatch may consider them: an
+    // anchor stays gated until the eval that owns it flushes a full edge set, so
+    // a still-running, failed, or interrupted eval can never get its 0-edge
+    // anchors promoted as if they were dependency-free.
+    if let Err(e) = gradient_db::mark_edges_complete_for_eval(&state.worker_db, evaluation_id).await
+    {
+        error!(error = %e, %evaluation_id, "mark_edges_complete_for_eval failed");
+    }
+
+    // Seed the graph-driven promotion from its ready frontier: leaves and
+    // anchors whose deps were already cached/substituted. Each subsequent
+    // completion cascades upward.
     if let Err(e) = gradient_db::promote_ready(&state.worker_db).await {
         error!(error = %e, %evaluation_id, "promote_ready failed");
     }

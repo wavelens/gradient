@@ -59,6 +59,7 @@ pub async fn promote_dependents<C: ConnectionTrait>(
             SET status = 1, queued_at = (now() AT TIME ZONE 'UTC'),
                 updated_at = (now() AT TIME ZONE 'UTC')
             WHERE db.status = 0
+              AND db.edges_complete
               AND db.derivation IN (
                 SELECT dd.derivation FROM derivation_dependency dd WHERE dd.dependency = $1)
               AND EXISTS (
@@ -124,6 +125,7 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
             SET status = 1, queued_at = (now() AT TIME ZONE 'UTC'),
                 updated_at = (now() AT TIME ZONE 'UTC')
             WHERE status = 0
+              AND edges_complete
               AND EXISTS (
                 SELECT 1 FROM build_job bj WHERE bj.derivation = derivation_build.derivation)
               AND NOT EXISTS (
@@ -133,6 +135,33 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
                   AND (dep.status IS NULL OR dep.status NOT IN (3, 7)))
             "#
             .to_string(),
+        ))
+        .await?
+        .rows_affected();
+
+    Ok(affected)
+}
+
+/// Mark every anchor reachable from `evaluation`'s `build_job` rows
+/// `edges_complete`. Called once the eval's dependency edges are flushed, so its
+/// anchors become eligible for promotion. Idempotent and never clears the flag:
+/// edges are content-addressed and permanent once written, so a later requeue
+/// keeps the anchor promotable without re-evaluation.
+pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
+    db: &C,
+    evaluation: gradient_types::EvaluationId,
+) -> Result<u64, DbErr> {
+    let affected = db
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            UPDATE derivation_build
+            SET edges_complete = true
+            WHERE edges_complete = false
+              AND derivation IN (
+                SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1)
+            "#,
+            [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
         ))
         .await?
         .rows_affected();

@@ -889,6 +889,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
             SELECT db.*
             FROM public.derivation_build db
             WHERE db.status = {queued}
+              AND db.edges_complete
               AND EXISTS (
                   SELECT 1 FROM public.build_job bj WHERE bj.derivation = db.derivation
               )

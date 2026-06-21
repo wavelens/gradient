@@ -35,6 +35,20 @@ seeded for every derivation, so without the gate promotion would queue
 derivations no surviving evaluation needs, leaving the dispatcher unable to
 attribute the build to a driving evaluation.
 
+They are also gated on `derivation_build.edges_complete`. Anchors are created
+per-batch as the evaluation streams, but `derivation_dependency` edges are
+deferred and flushed in one pass at the eval's completion. An anchor with no
+edges is therefore ambiguous: a genuine leaf, or a node whose edges are not
+written yet. A failed, aborted, or restart-interrupted eval leaves its anchors
+edge-less; promoting them as if they were dependency-free dispatches builds
+without their inputs (`InputsUnavailable`). So an anchor is promotable only once
+the eval that owns it flushes its edges and calls
+`mark_edges_complete_for_eval`, which sets `edges_complete` for every anchor that
+eval's `build_job`s reference. The flag is monotonic and content-addressed:
+edges never change once written, so a later requeue keeps the anchor promotable
+without re-evaluation. `promote_ready`, `promote_dependents`, and the dispatch
+readiness query all require it.
+
 Because the anchor is global and build-once, a new evaluation is treated as a
 fresh build intent: `resolve_anchors` re-queues anchors a previous eval left
 terminal-failed, and the substitute-miss budget is scoped per evaluation. A

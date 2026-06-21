@@ -853,6 +853,23 @@ Backend (`cargo test -p gradient-proto --lib prunable_known_derivations_tests`):
   in our own cache) un-prunable, so the worker re-walked it on every evaluation.
   A derivation with any output unavailable, no outputs, or no rows is not pruned.
 
+## Promotion gated on `edges_complete`
+
+`derivation_build.edges_complete` gates `promote_ready`, `promote_dependents`, and
+the `dispatch_ready_builds` readiness query. Anchors are created per-batch while an
+evaluation streams, but `derivation_dependency` edges are flushed in one pass at
+its completion - so an anchor left edge-less by a failed/aborted/restart-interrupted
+or still-running eval would otherwise look dependency-free and be dispatched without
+its inputs (`InputsUnavailable`, observed as `recorded_edges = 0` on a build that
+still needs inputs). `handle_eval_job_completed` calls `mark_edges_complete_for_eval`
+right after the flush, setting the flag for every anchor that eval's `build_job`s
+reference; the flag is monotonic (edges are content-addressed, never rewritten), so
+a later `requeue_failed_anchors` keeps the anchor promotable without re-evaluation.
+The migration backfills existing rows complete unless they are `Created`, never
+dispatched, and have zero edges - the exact shape of an anchor stranded by an
+incomplete eval. The promotion/dispatch statements are raw SQL (no MockDatabase
+harness, per the backend test notes); covered end-to-end in CI.
+
 ## External-cached substitution fetches outputs, not the `.drv`
 
 The dispatcher carries the derivation's output `(name, store_path)` pairs in the
