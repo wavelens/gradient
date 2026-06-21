@@ -61,14 +61,21 @@ When a project is created and its repository URL unambiguously matches one of th
 ### Gitea / Forgejo
 
 Repository or organization webhook → `POST` → `application/json`, URL from
-Gradient, secret = the integration's secret, trigger on *Push events*.
+Gradient, secret = the integration's secret. Under **Trigger On** choose
+*Custom Events* (or *Send everything*) and enable **Push**, **Pull Request**,
+**Issue Comment**, **Pull Request Comment**, **Pull Request Review**, and
+**Release**. A push-only webhook never delivers PR CI, the `/gradient run` /
+`/gradient approve` comment commands, or review-based approval.
 Signatures are verified via `X-Gitea-Signature` (HMAC-SHA256 over the raw body).
 
 ### GitLab
 
 Project or group webhook → URL from Gradient, **Secret token** = the
-integration's secret, trigger = *Push events*. Gradient compares the
-`X-Gitlab-Token` header against the stored secret.
+integration's secret. Enable the **Push events**, **Tag push events**, **Merge
+request events**, **Comments** (note events), and **Releases events** triggers.
+A push-only webhook never delivers MR CI or the `/gradient run` / `/gradient
+approve` comment commands (GitLab emits no review webhook). Gradient compares
+the `X-Gitlab-Token` header against the stored secret.
 
 ### GitHub App
 
@@ -190,4 +197,5 @@ honored only when the peer is in `GRADIENT_NETWORK_TRUSTED_PROXIES`.
 | `403 forbidden_source_ip`          | The forge's egress IP isn't in the integration's `allowed_ips` list. Add it or clear the list.   |
 | `404 Not Found`                   | Wrong organization or integration name in the URL, or `{forge}=github` (use the App webhook).   |
 | `200 OK` but no evaluation runs   | No project links to this inbound integration, or the repository URL doesn't match any project.  |
+| PR CI or `/gradient` comments never fire | The forge webhook is push-only. Enable PR/merge-request, comment/note, and review events (see [Configure the forge webhook](#3-configure-the-forge-webhook)). |
 | `503 Service Unavailable`         | The integration row has no secret set yet - paste or generate one on the Integrations page.     |

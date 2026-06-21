@@ -397,6 +397,12 @@ export class IntegrationsComponent implements OnInit {
     return `${window.location.origin}/api/v1/hooks/${forge}/${this.orgName}/${integration.name}`;
   }
 
+  requiredWebhookEvents(id: string): string {
+    return this.inboundForge(id) === 'gitlab'
+      ? 'Push, Tag push, Merge request, Comments (note), and Releases events'
+      : 'Push, Pull Request, Issue Comment, Pull Request Comment, Pull Request Review, and Release';
+  }
+
   copyInboundUrl(integration: Integration): void {
     const url = this.inboundUrl(integration);
     navigator.clipboard.writeText(url).then(() => {

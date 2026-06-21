@@ -52,6 +52,17 @@ to one repo fanned out to sibling projects, whose eval carried the wrong repo's
 commit and made the reporter post a check-run for a SHA absent from the project's
 repo (GitHub 422 "No commit found for SHA", #449).
 
+## Per-forge webhook events guidance (Gitea/Forgejo/GitLab `/gradient` commands)
+
+`frontend/.../integrations/integrations.component.spec.ts`: two specs assert
+`requiredWebhookEvents` lists the events the server actually classifies - Gitea/
+Forgejo get `Issue Comment` + `Pull Request Review` (and never push-only), GitLab
+gets `Merge request` + `Comments (note)`. A push-only forge webhook never
+delivers the comment/note or PR/review events, so `/gradient run` / `/gradient
+approve` and PR CI silently never fire on these forges (unlike the GitHub App,
+whose manifest auto-subscribes to `issue_comment`/`pull_request_review`); the
+inbound-integration card and the setup docs now surface the full event set.
+
 ## Forge action "Test" button connectivity probe
 
 `backend/gradient-forge/src/reporter.rs`: `verify_reads_repo_without_reporting`
@@ -869,6 +880,20 @@ The migration backfills existing rows complete unless they are `Created`, never
 dispatched, and have zero edges - the exact shape of an anchor stranded by an
 incomplete eval. The promotion/dispatch statements are raw SQL (no MockDatabase
 harness, per the backend test notes); covered end-to-end in CI.
+
+## Startup recovery aborts interrupted evals' anchors
+
+Backend (`cargo test -p gradient-db --lib recovery`):
+- `all_operations_populate_report` - `recover_interrupted_work` reports all five
+  recovery actions, including the new `builds_aborted`: the anchors driven by the
+  pre-build evals it aborts are themselves aborted (`abort_anchors_for_evals`),
+  mirroring the explicit-abort path so the server matches the builder, which
+  aborts the eval's builds when the server dies. The forced re-evaluation
+  re-drives them (`requeue_failed_anchors` resets `Aborted -> Created`).
+- `project_force_step_skipped_when_no_pre_build_evals` - with no in-flight
+  pre-build evals, the abort-anchors, abort-evals, and force-eval steps are all
+  skipped and `builds_aborted` stays 0. The shared-anchor exclusion (an anchor a
+  still-live eval also needs is left running) is raw SQL, covered E2E in CI.
 
 ## External-cached substitution fetches outputs, not the `.drv`
 
