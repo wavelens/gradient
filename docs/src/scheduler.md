@@ -164,3 +164,23 @@ reject (not only on accept), so a re-offer is treated as new; and the build
 dispatch loop bumps the job-notify each pass while any job is pending, so a
 re-queued job reaches workers (including one that just freed capacity) without
 waiting for the next enqueue.
+
+## Startup recovery
+
+A server restart kills every in-flight job, so `recover_interrupted_work` runs
+once at startup to reconcile the durable state the dead process left behind:
+
+- Orphaned `Running` build attempts are marked `Aborted`.
+- `Building` anchors are re-queued to `Queued` for re-dispatch (their evaluation
+  reached the build phase, so their edges are already flushed).
+- Pre-build in-flight evaluations (`Fetching`/`EvaluatingFlake`/
+  `EvaluatingDerivation`) are aborted - their dependency edges were never
+  flushed - and their projects get `ForceEvaluation` so a fresh evaluation
+  re-walks them and writes a complete graph.
+- The anchors those aborted evaluations drove are aborted too
+  (`Created`/`Queued`/`Building` -> `Aborted`), mirroring the explicit-abort
+  path: the builder aborts the evaluation's builds when the server dies, so the
+  server reflects it. A global build-once anchor a still-live evaluation also
+  needs is left running (shared-anchor safety). The forced re-evaluation
+  re-drives the aborted anchors - `requeue_failed_anchors` resets them to
+  `Created` - and they promote once their edges are flushed.

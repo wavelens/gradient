@@ -796,10 +796,11 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     }
 
     match gradient_db::recover_interrupted_work(&state.worker_db).await {
-        Ok(r) if r.attempts_aborted > 0 || r.builds_requeued > 0 || r.evals_aborted > 0 || r.projects_forced > 0 => {
+        Ok(r) if r.attempts_aborted > 0 || r.builds_requeued > 0 || r.builds_aborted > 0 || r.evals_aborted > 0 || r.projects_forced > 0 => {
             tracing::warn!(
                 attempts_aborted = r.attempts_aborted,
                 builds_requeued = r.builds_requeued,
+                builds_aborted = r.builds_aborted,
                 evals_aborted = r.evals_aborted,
                 projects_forced = r.projects_forced,
                 "recovered interrupted work from previous process"
