@@ -21,18 +21,6 @@ pub(crate) fn arch_available(connected: &std::collections::HashSet<String>, arch
     arch == "builtin" || connected.contains(arch)
 }
 
-/// Whether an anchor should be substituted rather than built. A fixed-output
-/// derivation is content-addressed, so its output is fetchable from any upstream
-/// cache regardless of the recorded anchor flag (unless it opts out of
-/// substitution); preferring substitution avoids re-running a rotting fetcher.
-pub(crate) fn anchor_substitutable(
-    anchor_flag: bool,
-    is_fixed_output: bool,
-    allow_substitutes: bool,
-) -> bool {
-    anchor_flag || (is_fixed_output && allow_substitutes)
-}
-
 pub(crate) fn decide_dispatch_mode(
     substitutable: bool,
     miss_count: i64,
@@ -75,18 +63,6 @@ mod tests {
     fn stalls_when_budget_spent_and_no_arch_worker() {
         assert_eq!(decide_dispatch_mode(true, 2, 2, false), BuildDispatchMode::SubstituteStalled);
         assert_eq!(decide_dispatch_mode(true, 9, 2, false), BuildDispatchMode::SubstituteStalled);
-    }
-
-    #[test]
-    fn fods_are_substitutable_even_when_flag_unset() {
-        assert!(anchor_substitutable(false, true, true));
-        assert!(anchor_substitutable(true, false, false));
-    }
-
-    #[test]
-    fn non_fods_follow_the_anchor_flag() {
-        assert!(!anchor_substitutable(false, false, true));
-        assert!(!anchor_substitutable(false, true, false));
     }
 
     #[test]

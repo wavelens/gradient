@@ -218,21 +218,10 @@ impl<'a> EvalResultProcessor<'a> {
                 continue;
             }
 
-            // A fixed-output derivation is content-addressed, so its output is
-            // fetchable from any upstream cache: prefer substituting it over
-            // re-running its fetcher (origin URLs rot; a failed fetch otherwise
-            // strands the FOD FailedPermanent).
             let (status, substitutable) = if truly_substituted.contains(&drv_id) {
                 (BuildStatus::Substituted, false)
             } else {
-                (
-                    BuildStatus::Created,
-                    crate::dispatch_mode::anchor_substitutable(
-                        d.substituted,
-                        d.is_fixed_output,
-                        d.allow_substitutes,
-                    ),
-                )
+                (BuildStatus::Created, d.substituted)
             };
 
             anchors.push(MDerivationBuild {

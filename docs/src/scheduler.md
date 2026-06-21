@@ -40,9 +40,7 @@ fresh build intent: `resolve_anchors` re-queues anchors a previous eval left
 terminal-failed, and the substitute-miss budget is scoped per evaluation. A
 permanent failure (or an exhausted substitute budget) therefore does not poison
 every later evaluation that needs the derivation - the world (upstream cache,
-network) may have changed since it failed. A fixed-output derivation is also
-always substitutable, so it is fetched from an upstream cache rather than
-re-running its (rot-prone) fetcher.
+network) may have changed since it failed.
 
 #### Access and GC
 

@@ -1043,7 +1043,6 @@ Backend (`cargo test -p scheduler --lib jobs::tests::add_pending_does_not_requeu
 
 Backend (`cargo test -p gradient-scheduler --lib dispatch_mode::tests`):
 - `non_substitutable_is_real_arch` / `substitutable_under_threshold_is_builtin` / `escalates_only_when_arch_worker_present` / `stalls_when_budget_spent_and_no_arch_worker` / `arch_available_builtin_always_true` - verify `decide_dispatch_mode` and `arch_available` for the (substitutable, miss_count, threshold, arch_has_worker) combinations.
-- `fods_are_substitutable_even_when_flag_unset` / `non_fods_follow_the_anchor_flag` - `anchor_substitutable` treats a fixed-output derivation (with `allow_substitutes`) as substitutable regardless of the anchor flag, so an FOD is fetched from an upstream cache instead of re-running its fetcher and stranding `FailedPermanent` (#449-followup). Both `resolve_anchors` (creation) and `make_pending_job` (dispatch) route through it, so pre-existing anchors substitute too.
 
 Two retry-scoping changes make a *new* evaluation a fresh build intent against
 the global, build-once anchor (covered E2E in CI; the SQL is not MockDatabase-
