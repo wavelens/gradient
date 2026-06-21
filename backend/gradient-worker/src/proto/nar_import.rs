@@ -793,28 +793,36 @@ pub async fn fetch_external_cached_outputs(
 ) -> Result<Vec<(String, String)>> {
     let mut prefetcher = InputPrefetcher::new(store, task, updater);
 
-    // Step 1 - ensure the .drv is local so we can read its outputs.
-    prefetcher.ensure_self_drv_present().await?;
-
-    // Step 2 - parse the .drv to discover outputs.
-    let full_drv_path = nix_store_path(&task.drv_path);
-    let drv_bytes = tokio::fs::read(&full_drv_path)
-        .await
-        .with_context(|| format!("read .drv {} for external_cached fetch", full_drv_path))?;
-    let drv = parse_drv(&drv_bytes)
-        .with_context(|| format!("parse .drv {} for external_cached fetch", full_drv_path))?;
-
-    let outputs: Vec<(String, String)> = drv
-        .outputs
-        .into_iter()
-        .filter_map(|o| (!o.path.is_empty()).then_some((o.name, o.path)))
-        .collect();
+    // Output paths come from the server (`BuildTask.outputs`) so a substitution
+    // never fetches or imports the `.drv`: it needs only the output NAR plus the
+    // output's runtime closure, never the `.drv`'s build-time `input_sources`
+    // (binary caches don't serve those, so importing the `.drv` would fail with
+    // a spurious `SubstituteUnavailable`). Fall back to reading the `.drv` only
+    // when the server sent no output paths.
+    let outputs: Vec<(String, String)> = if !task.outputs.is_empty() {
+        task.outputs
+            .iter()
+            .map(|o| (o.name.clone(), o.path.clone()))
+            .collect()
+    } else {
+        prefetcher.ensure_self_drv_present().await?;
+        let full_drv_path = nix_store_path(&task.drv_path);
+        let drv_bytes = tokio::fs::read(&full_drv_path)
+            .await
+            .with_context(|| format!("read .drv {} for external_cached fetch", full_drv_path))?;
+        let drv = parse_drv(&drv_bytes)
+            .with_context(|| format!("parse .drv {} for external_cached fetch", full_drv_path))?;
+        drv.outputs
+            .into_iter()
+            .filter_map(|o| (!o.path.is_empty()).then_some((o.name, o.path)))
+            .collect()
+    };
     if outputs.is_empty() {
         return Ok(Vec::new());
     }
 
-    // Step 3 - fetch any output not already in the local store, plus its
-    // transitive runtime closure (so the daemon will accept the imports).
+    // Fetch any output not already in the local store, plus its transitive
+    // runtime closure (so the daemon will accept the imports).
     let missing = prefetcher
         .filter_missing(outputs.iter().map(|(_, p)| p.clone()).collect())
         .await?;

@@ -34,7 +34,7 @@ use tracing::{debug, error, info};
 use super::Scheduler;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
 use gradient_types::proto::{
-    BuildJob, BuildTask, CacheInfo, FlakeJob, FlakeTask, RequiredPath,
+    BuildJob, BuildTask, CacheInfo, DerivationOutput, FlakeJob, FlakeTask, RequiredPath,
 };
 
 /// Spawns all dispatch loops on the shared shutdown tracker so they drain on SIGTERM.
@@ -394,6 +394,10 @@ struct BuildDispatchMaps {
     /// download to start this build. `inputSrcs` are not included - they
     /// live in the `.drv` file and are not stored in the scheduler DB.
     direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
+    /// derivation_id → this derivation's own output `(name, store_path)` pairs,
+    /// sent in the `external_cached` `BuildTask` so the worker substitutes the
+    /// outputs without fetching the `.drv`.
+    self_outputs: HashMap<DerivationId, Vec<DerivationOutput>>,
     /// derivation_id → transitive closure size (bytes). Loaded from
     /// `derivation.closure_size`; NULLs are computed once and persisted here.
     closure_sizes: HashMap<DerivationId, Option<i64>>,
@@ -637,6 +641,26 @@ impl BuildDispatchMaps {
             direct_inputs.insert(*drv_id, paths);
         }
 
+        // This derivation's own outputs, for the external_cached BuildTask: the
+        // worker substitutes these output paths directly without fetching the
+        // .drv (whose build-time input_sources binary caches do not serve).
+        let mut self_outputs: HashMap<DerivationId, Vec<DerivationOutput>> = HashMap::new();
+        for o in gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
+            EDerivationOutput::find()
+                .filter(CDerivationOutput::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .unwrap_or_default()
+        {
+            let path = get_path_from_derivation_output(o.clone()).full();
+            self_outputs
+                .entry(o.derivation)
+                .or_default()
+                .push(DerivationOutput { name: o.name, path });
+        }
+
         // Closure sizes and historical predictions are only consumed by
         // policies that read history (resource-aware). Under the simple policy
         // we skip the walk entirely and use whatever is already persisted.
@@ -693,6 +717,7 @@ impl BuildDispatchMaps {
             feature_names,
             dep_counts,
             direct_inputs,
+            self_outputs,
             closure_sizes,
             histories,
             substitute_misses,
@@ -778,12 +803,21 @@ impl BuildDispatchMaps {
             BuildDispatchMode::SubstituteBuiltin | BuildDispatchMode::SubstituteStalled
         );
         // The worker round-trips this anchor uuid as the opaque BuildTask.build_id.
+        let outputs = if substitute {
+            self.self_outputs
+                .get(&anchor.derivation)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let build_job = BuildJob {
             builds: vec![BuildTask {
                 build_id: anchor.id.to_string(),
                 drv_path: derivation.store_path(),
                 external_cached: substitute,
                 is_fixed_output: derivation.is_fixed_output,
+                outputs,
                 timeout_secs: resolve_limit(anchor.timeout_secs, self.default_timeout_secs),
                 max_silent_secs: resolve_limit(anchor.max_silent_secs, self.default_max_silent_secs),
             }],

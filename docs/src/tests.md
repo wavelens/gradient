@@ -853,7 +853,20 @@ Backend (`cargo test -p gradient-proto --lib prunable_known_derivations_tests`):
   in our own cache) un-prunable, so the worker re-walked it on every evaluation.
   A derivation with any output unavailable, no outputs, or no rows is not pruned.
 
-## Worker prefetch robustness - uncached inputs and broken daemon connections
+## External-cached substitution fetches outputs, not the `.drv`
+
+The dispatcher carries the derivation's output `(name, store_path)` pairs in the
+`external_cached` `BuildTask` (`BuildDispatchMaps::self_outputs`), and the worker's
+`fetch_external_cached_outputs` substitutes those paths directly. It no longer
+imports the `.drv` for output discovery, which under `ClosureMode::InputsOnly`
+pulled the `.drv`'s build-time `input_sources` - paths binary caches do not serve.
+A `-source` derivation whose `.drv` referenced an `input_source` absent from the
+gradient cache and every upstream therefore failed every substitution attempt with
+`SubstituteUnavailable` (e.g. missing `/nix/store/…-source`), looping forever. A
+substitution now needs only the output NAR plus its runtime closure. Covered
+end-to-end in CI - `fetch_external_cached_outputs` needs a real daemon + cache, so
+there is no local unit harness; the reused output-closure walk
+(`drv_closure_seeds`) keeps its existing unit tests.
 
 Backend (`cargo test -p worker --tests`):
 - `nix::store::tests::scoped_guard_discards_inner_when_not_marked_ok` -

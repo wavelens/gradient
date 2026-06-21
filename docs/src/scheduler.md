@@ -54,7 +54,12 @@ its outputs is cached somewhere (the gradient cache or an upstream); otherwise i
 is built. The resolved upstream NAR URL plus narinfo metadata is persisted once
 onto `derivation_output` (`external_url`, `nar_hash`, `file_size`,
 `references_list`, `deriver`), so the narinfo lookup runs only once. Substitutable
-anchors dispatch through the existing `external_cached` path: the worker reads the
+anchors dispatch through the existing `external_cached` path. The dispatch carries
+the derivation's output `(name, store_path)` pairs in the `BuildTask` so the worker
+fetches the outputs directly and never touches the `.drv`: a substitution needs
+only the output NAR plus its runtime closure, never the `.drv`'s build-time
+`input_sources` (binary caches do not serve those, so importing the `.drv` would
+fail with a spurious `SubstituteUnavailable`). The worker reads each output's
 persisted URL via `CacheQuery`, downloads the NAR directly from the upstream,
 recompresses it, and pushes it into the gradient cache (`use_substitutes` stays
 off in the daemon - substitution always goes through gradient, never the worker's

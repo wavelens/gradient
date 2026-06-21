@@ -986,6 +986,7 @@ mod tests {
                     drv_path: "/nix/store/abc.drv".into(),
                     external_cached: false,
                     is_fixed_output: false,
+                    outputs: vec![],
                     timeout_secs: None,
                     max_silent_secs: None,
                 }],

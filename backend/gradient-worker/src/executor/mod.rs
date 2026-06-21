@@ -306,12 +306,6 @@ impl JobExecutor {
             // would show the build hanging in `Queued` forever.
             updater.report_building(build_task.build_id.clone())?;
 
-            // Pin the .drv as an indirect GC root before prefetching its
-            // inputs. Nix's reachability walks .drv references
-            // (input_drvs + input_sources), so one root covers the entire
-            // build-time closure.
-            gc_handles.push(self.gcroots.add(&build_task.drv_path).await);
-
             if build_task.external_cached {
                 // Substitute attempt: the output was reported cache-available
                 // during eval, so this build was dispatched arch-agnostically
@@ -358,6 +352,13 @@ impl JobExecutor {
                 all_output_paths.extend(outputs.into_iter().map(|(_, p)| p));
                 continue;
             }
+
+            // Pin the .drv as an indirect GC root before prefetching its
+            // inputs. Nix's reachability walks .drv references
+            // (input_drvs + input_sources), so one root covers the entire
+            // build-time closure. external_cached substitutions never fetch the
+            // .drv, so this only applies to real builds.
+            gc_handles.push(self.gcroots.add(&build_task.drv_path).await);
 
             // Import cache-resident inputs the daemon will need. A hard
             // local-store error (e.g. `store.has_path` failing) aborts the

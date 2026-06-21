@@ -145,6 +145,13 @@ pub struct BuildTask {
     /// Fixed-output (content-addressed) derivation. Carried for worker-side
     /// scoring; substitution itself is attempted for every build regardless.
     pub is_fixed_output: bool,
+    /// Output `(name, store_path)` pairs, populated only for `external_cached`
+    /// substitutions. The worker fetches these outputs directly instead of the
+    /// `.drv`: a substitution needs only the output NAR plus its runtime
+    /// closure, never the `.drv`'s build-time `input_sources` (which binary
+    /// caches do not serve, so importing the `.drv` would spuriously fail with
+    /// `SubstituteUnavailable`). Empty for normal builds.
+    pub outputs: Vec<DerivationOutput>,
     /// Wall-clock limit in seconds for this build; `None` = no limit.
     pub timeout_secs: Option<u64>,
     /// Silent (no-output) limit in seconds; `None` = no limit.
