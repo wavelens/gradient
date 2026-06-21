@@ -311,18 +311,28 @@ async fn purge_zombie_cached_paths(
         .await
         .context("Failed to load cached_path rows for zombie purge")?;
 
+    let zombie_ids: Vec<_> = rows
+        .into_iter()
+        .filter(|row| !on_disk.contains(&row.hash))
+        .map(|row| row.id)
+        .collect();
+    if zombie_ids.is_empty() {
+        return Ok(0);
+    }
+
+    // Batch the deletes: a full fleet eval leaves hundreds of thousands of
+    // `cached_path` rows, and per-row round-trips made the hourly pass never
+    // finish (and never log). `cached_path_signature` cascades from `cached_path`.
+    const ZOMBIE_DELETE_BATCH: usize = 8000;
     let mut purged = 0u64;
-    for row in rows {
-        if on_disk.contains(&row.hash) {
-            continue;
-        }
-        let id = row.id;
-        let hash = row.hash.clone();
-        if let Err(e) = row.into_active_model().delete(&state.worker_db).await {
-            warn!(cached_path = %id, %hash, error = %e, "failed to purge zombie cached_path");
-        } else {
-            debug!(cached_path = %id, %hash, "Purged zombie cached_path (NAR missing from storage)");
-            purged += 1;
+    for chunk in zombie_ids.chunks(ZOMBIE_DELETE_BATCH) {
+        match ECachedPath::delete_many()
+            .filter(CCachedPath::Id.is_in(chunk.to_vec()))
+            .exec(&state.worker_db)
+            .await
+        {
+            Ok(res) => purged += res.rows_affected,
+            Err(e) => warn!(error = %e, batch = chunk.len(), "failed to purge zombie cached_path batch"),
         }
     }
 

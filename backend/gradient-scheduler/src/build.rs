@@ -441,16 +441,17 @@ impl<'a> BuildStateHandler<'a> {
 
     /// Self-heal for `BuildFailureKind::InputsUnavailable`. A build attempt
     /// proved these input paths are unfetchable from the cache, so purge each
-    /// one's stale cache artifact (delete the `cached_path`, clear the output's
-    /// `is_cached` / `cached_path`) while leaving the derivation graph intact.
-    /// The next evaluation then sees the outputs as never cached and rebuilds
-    /// them from scratch. This build is already terminal for this eval
-    /// (`InputsUnavailable` is permanent), so we don't re-queue anything here -
-    /// the rebuild belongs to the next evaluation.
+    /// one's stale cache artifact (delete the `cached_path` row + the NAR object,
+    /// clear the output's `is_cached` / `cached_path`) while leaving the
+    /// derivation graph intact. The next evaluation then sees the path as never
+    /// cached and rebuilds or re-fetches it. This build is already terminal for
+    /// this eval (`InputsUnavailable` is permanent), so we don't re-queue
+    /// anything here - the rebuild belongs to the next evaluation.
     ///
-    /// A missing input with no producing derivation (a lost source or
-    /// fixed-output input) can't be rebuilt from the graph; it is logged so the
-    /// otherwise-silent dead-end is diagnosable.
+    /// A missing input with no producing derivation (a `.drv` file or a source
+    /// path) has its stale row + object purged just the same; the next eval
+    /// re-instantiates the `.drv` and re-pushes it, so this is a recoverable
+    /// purge, not a dead-end.
     async fn reconcile_missing_inputs(
         &self,
         failed_derivation: DerivationId,
@@ -458,7 +459,7 @@ impl<'a> BuildStateHandler<'a> {
     ) -> Result<()> {
         let db = &self.state.worker_db;
         let mut purged = 0usize;
-        let mut unrecoverable: Vec<&str> = Vec::new();
+        let mut sources_purged: Vec<&str> = Vec::new();
         for path in missing_paths {
             let Some(hash) = store_path_hash(path) else {
                 continue;
@@ -484,29 +485,29 @@ impl<'a> BuildStateHandler<'a> {
                 Err(e) => warn!(%path, error = %e, "missing input: diagnosis query failed"),
             }
 
-            match gradient_db::demote_cached_output(db, hash).await {
+            match gradient_db::demote_cached_output(db, &self.state.nar_storage, hash).await {
                 Ok(drvs) if !drvs.is_empty() => purged += 1,
-                Ok(_) => unrecoverable.push(path),
+                Ok(_) => sources_purged.push(path),
                 Err(e) => warn!(%path, error = %e, "reconcile: purge cached output failed"),
             }
         }
 
-        if !unrecoverable.is_empty() {
-            warn!(
+        if !sources_purged.is_empty() {
+            info!(
                 %failed_derivation,
-                count = unrecoverable.len(),
-                sample = ?unrecoverable.iter().take(5).collect::<Vec<_>>(),
-                "reconcile: missing inputs have no producing derivation; cannot rebuild \
-                 (lost source or fixed-output input - re-evaluate to refetch)"
+                count = sources_purged.len(),
+                sample = ?sources_purged.iter().take(5).collect::<Vec<_>>(),
+                "reconcile: purged stale cache rows + objects for inputs with no producing \
+                 derivation (.drv / source); the next evaluation re-instantiates and re-pushes them"
             );
         }
 
         info!(
             %failed_derivation,
             purged,
-            unrecoverable = unrecoverable.len(),
+            sources_purged = sources_purged.len(),
             paths = missing_paths.len(),
-            "reconciled missing inputs; stale cache outputs purged for next-eval rebuild"
+            "reconciled missing inputs; stale cache rows + objects purged for next-eval rebuild"
         );
         Ok(())
     }
