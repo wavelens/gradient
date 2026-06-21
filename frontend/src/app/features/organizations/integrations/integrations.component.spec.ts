@@ -178,6 +178,27 @@ describe('IntegrationsComponent - github installations', () => {
   });
 });
 
+describe('IntegrationsComponent - required webhook events', () => {
+  it('lists PR/comment/review events for Gitea/Forgejo and never push-only', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [baseIntegration]);
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    const events = comp.requiredWebhookEvents(baseIntegration.id);
+    expect(events).toContain('Issue Comment');
+    expect(events).toContain('Pull Request Review');
+  });
+
+  it('lists Merge request + Comments (note) events for GitLab', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [baseIntegration]);
+    await settled(fixture);
+    const comp = fixture.componentInstance;
+    comp.setInboundForge(baseIntegration.id, 'gitlab');
+    const events = comp.requiredWebhookEvents(baseIntegration.id);
+    expect(events).toContain('Merge request');
+    expect(events).toContain('Comments (note)');
+  });
+});
+
 describe('IntegrationsComponent - create github integration', () => {
   it('createIntegration sends forge_type=github with installation_id', () => {
     const createSpy = vi.fn().mockReturnValue(of({}));
