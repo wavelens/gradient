@@ -34,6 +34,10 @@ fn forge_status_mapping() {
         Some(CiStatus::Pending)
     ));
     assert!(matches!(
+        forge_status_for_event("evaluation.building"),
+        Some(CiStatus::Success)
+    ));
+    assert!(matches!(
         forge_status_for_event("evaluation.completed"),
         Some(CiStatus::Success)
     ));
@@ -98,6 +102,7 @@ fn matches_event_forge_status_ignores_stored_events() {
     assert!(matches_event(&a, "build.failed"));
     assert!(matches_event(&a, "build.substituted"));
     assert!(matches_event(&a, "evaluation.queued"));
+    assert!(matches_event(&a, "evaluation.building"));
     assert!(matches_event(&a, "evaluation.completed"));
     assert!(matches_event(&a, "evaluation.action_required"));
     assert!(matches_event(&a, "evaluation.approval_granted"));

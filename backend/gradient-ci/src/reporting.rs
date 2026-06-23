@@ -63,6 +63,7 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
         "evaluation.approval_granted" => Some(CheckContextKind::Approval),
         "evaluation.queued"
         | "evaluation.started"
+        | "evaluation.building"
         | "evaluation.completed"
         | "evaluation.failed"
         | "evaluation.aborted" => Some(CheckContextKind::Evaluation),
@@ -73,6 +74,17 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
         | "build.substituted" => Some(CheckContextKind::Build),
         _ => None,
     }
+}
+
+/// Whether a forge report for the Evaluation check should be suppressed.
+///
+/// The Evaluation check tracks the evaluation phase, which concludes
+/// successfully the moment the eval reaches `Building`. A later `Failure`/
+/// `Error` is a build-phase failure or a post-build abort - surfaced by the
+/// per-Build checks - so it must not redden an already-green Evaluation check
+/// once `Building` has been reached.
+pub fn suppress_evaluation_failure(status: &CiStatus, reached_building: bool) -> bool {
+    reached_building && matches!(status, CiStatus::Failure | CiStatus::Error)
 }
 
 /// Maps an [`EvaluationStatus`] to the [`CiStatus`] reported to external forges.
@@ -157,6 +169,15 @@ mod tests {
             build_check_context("my-project", "my-package"),
             "gradient/my-project: Build my-package"
         );
+    }
+
+    #[test]
+    fn suppresses_eval_failure_only_after_building() {
+        assert!(suppress_evaluation_failure(&CiStatus::Failure, true));
+        assert!(suppress_evaluation_failure(&CiStatus::Error, true));
+        assert!(!suppress_evaluation_failure(&CiStatus::Failure, false));
+        assert!(!suppress_evaluation_failure(&CiStatus::Success, true));
+        assert!(!suppress_evaluation_failure(&CiStatus::Pending, true));
     }
 
     #[test]

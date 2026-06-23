@@ -191,6 +191,10 @@ pub(super) async fn build_ci_report_from_payload(
             None => return Ok(None),
         },
         Some(reporting::CheckContextKind::Evaluation) | None => {
+            if reporting::suppress_evaluation_failure(&status, evaluation.building_started_at.is_some()) {
+                return Ok(None);
+            }
+
             let wildcard_suffix =
                 (evaluation.wildcard != project.wildcard).then_some(evaluation.wildcard.as_str());
             reporting::evaluation_check_context(&project.name, wildcard_suffix)

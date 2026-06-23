@@ -91,6 +91,10 @@ fn forge_status_mapping_complete() {
         Some(CiStatus::Pending)
     ));
     assert!(matches!(
+        forge_status_for_event("evaluation.building"),
+        Some(CiStatus::Success)
+    ));
+    assert!(matches!(
         forge_status_for_event("evaluation.completed"),
         Some(CiStatus::Success)
     ));
