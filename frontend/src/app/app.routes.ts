@@ -7,6 +7,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
+import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
 import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
 import { cacheAccessResolver } from '@core/resolvers/cache-access.resolver';
 import { organizationAccessResolver } from '@core/resolvers/organization-access.resolver';
@@ -452,6 +453,7 @@ export const routes: Routes = [
     path: 'admin/github-app',
     title: 'GitHub App (admin)',
     canActivate: [authGuard, adminGuard],
+    canDeactivate: [unsavedChangesGuard],
     loadComponent: () =>
       import('./features/admin/github-app/github-app.component').then(
         (m) => m.GithubAppComponent,

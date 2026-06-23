@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, HostListener, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -30,6 +30,11 @@ export class GithubAppComponent implements OnInit {
   showResult = signal(false);
   credentials = signal<GithubAppCredentials | null>(null);
   credentialsMissing = signal(false);
+
+  private keysVisible = computed(() => this.showResult() && this.credentials() !== null);
+
+  private readonly leaveWarning =
+    'The generated credentials are shown only once and cannot be recovered. Leave anyway?';
 
   ngOnInit(): void {
     const ready = this.route.snapshot.queryParamMap.get('ready');
@@ -84,5 +89,17 @@ export class GithubAppComponent implements OnInit {
 
   copy(value: string): void {
     navigator.clipboard.writeText(value).catch(() => {});
+  }
+
+  canDeactivate(): boolean {
+    return !this.keysVisible() || window.confirm(this.leaveWarning);
+  }
+
+  @HostListener('window:beforeunload', ['$event'])
+  onBeforeUnload(event: BeforeUnloadEvent): void {
+    if (this.keysVisible()) {
+      event.preventDefault();
+      event.returnValue = this.leaveWarning;
+    }
   }
 }
