@@ -58,6 +58,19 @@ backstop. The `edges_complete` gate is what makes this periodic sweep safe: it
 can only ever promote fully-flushed anchors, so it can never dispatch a 0-edge
 anchor without its inputs.
 
+Promotion and dispatch are finally gated on a derivation's `inputSrcs` being in
+the cache. A `.drv`'s build-time source paths (`inputSrcs`, e.g.
+`builtins.toFile` configs) have no producing derivation, so the dependency-anchor
+check does not cover them; they are recorded per derivation in
+`derivation_input_source` (parsed from the `.drv` at `report_eval_result`) and a
+non-substitutable anchor is promotable only when every one of its sources is
+`fully_cached`. Without this a requeued anchor - reset to `Created` but still
+`edges_complete` with all dependency anchors cached - would re-dispatch the
+instant the periodic backstop runs, before the new evaluation re-pushed its
+sources, and fail `InputsUnavailable`; with the gate it waits for the walk to
+push them. A substitutable anchor needs no sources, since it fetches its outputs
+directly, so the gate skips it.
+
 Because the anchor is global and build-once, a new evaluation is treated as a
 fresh build intent: `resolve_anchors` re-queues anchors a previous eval left
 terminal-failed, and the substitute-miss budget is scoped per evaluation. A

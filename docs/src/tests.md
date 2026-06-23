@@ -4778,3 +4778,26 @@ sufficient.
   `grub-config.xml` `inputSrcs` are returned; its input *derivation* is not.
 - `drv_input_sources_skips_unreadable_drv` - a missing `.drv` is skipped, not
   fatal (the daemon closure still covers it).
+
+## Dispatch gate requires inputSrcs cached
+
+Pushing a `.drv`'s `inputSrcs` is necessary but not sufficient: the readiness
+gate trusted only dependency *anchors*, never the sources, so a requeued anchor
+(reset to `Created` but still `edges_complete` with all deps cached) re-dispatched
+the instant the periodic `promote_ready` backstop ran - before the new evaluation
+re-pushed its sources - and failed `InputsUnavailable`. Under a perpetual abort
+the source push never won the race and the anchor poisoned to `FailedPermanent`.
+
+The fix records each derivation's `inputSrcs` in `derivation_input_source`
+(parsed from the `.drv`, persisted at `report_eval_result` via
+`persist_input_sources`, idempotent on `(derivation, hash)`) and adds a gate to
+`promote_ready`, `promote_dependents`, and `dispatch_ready_builds`: a
+non-substitutable anchor promotes/dispatches only when every source hash is
+`fully_cached` in `cached_path`. The SQL gate is covered by mirroring across the
+three queries plus E2E (no real-Postgres unit harness); the worker-side mapping
+has a unit test:
+
+- `build_discovered_derivation_carries_input_sources`
+  (`backend/gradient-worker/src/executor/eval.rs`) - a parsed `Derivation` with
+  two `inputSrcs` yields a `DiscoveredDerivation` carrying them, so they reach the
+  server for persistence and gating.

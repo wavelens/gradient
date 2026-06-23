@@ -409,6 +409,8 @@ fn build_discovered_derivation(
         .map(|(p, _)| p.clone())
         .collect();
 
+    let input_sources = drv.input_sources.clone();
+
     let meta = drv.build_meta();
     let name = drv
         .environment
@@ -421,6 +423,7 @@ fn build_discovered_derivation(
         drv_path,
         outputs,
         dependencies,
+        input_sources,
         architecture: drv.system.clone(),
         required_features: meta.required_features,
         timeout_secs: meta.timeout_secs,
@@ -561,6 +564,7 @@ impl<'a> ClosureWalker<'a> {
                     drv_path: dep,
                     outputs: vec![],
                     dependencies: vec![],
+                    input_sources: vec![],
                     architecture: String::new(),
                     required_features: vec![],
                     timeout_secs: None,
@@ -907,6 +911,35 @@ mod tests {
             commit: "c".into(),
         };
         assert_eq!(required_local_source(&repo), None);
+    }
+
+    #[test]
+    fn build_discovered_derivation_carries_input_sources() {
+        let drv = gradient_db::Derivation {
+            outputs: vec![gradient_db::DerivationOutput {
+                name: "out".into(),
+                path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-out".into(),
+                hash_algo: String::new(),
+                hash: String::new(),
+            }],
+            input_derivations: vec![],
+            input_sources: vec![
+                "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-pipewire-extra-config".into(),
+                "/nix/store/cccccccccccccccccccccccccccccccc-source-stdenv.sh".into(),
+            ],
+            system: "x86_64-linux".into(),
+            builder: "/bin/sh".into(),
+            args: vec![],
+            environment: std::collections::HashMap::new(),
+        };
+
+        let discovered = build_discovered_derivation(
+            Some("attr".into()),
+            "/nix/store/dddddddddddddddddddddddddddddddd-foo.drv".into(),
+            &drv,
+        );
+
+        assert_eq!(discovered.input_sources, drv.input_sources);
     }
 
     #[tokio::test]
