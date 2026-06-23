@@ -15,6 +15,7 @@ pub const FORGE_STATUS_EVENTS: &[&str] = &[
     "build.substituted",
     "evaluation.queued",
     "evaluation.started",
+    "evaluation.building",
     "evaluation.completed",
     "evaluation.failed",
     "evaluation.aborted",
@@ -58,6 +59,9 @@ pub fn forge_status_for_event(event: &str) -> Option<CiStatus> {
         "build.substituted" => Some(CiStatus::Success),
         "evaluation.queued" => Some(CiStatus::Pending),
         "evaluation.started" => Some(CiStatus::Running),
+        // The evaluation phase is done the moment builds start; the Evaluation
+        // check goes green here rather than waiting on every build to finish.
+        "evaluation.building" => Some(CiStatus::Success),
         "evaluation.completed" => Some(CiStatus::Success),
         "evaluation.failed" => Some(CiStatus::Failure),
         "evaluation.aborted" => Some(CiStatus::Error),
