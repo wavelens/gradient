@@ -89,6 +89,14 @@ re-substitute of the deleted artifact). Without this the producer would stay
 reset lets it rebuild and the next eval re-marks it substitutable if it is
 genuinely still on an upstream.
 
+When the demanded output's producer is instead terminal-*failed*
+(`FailedPermanent`/`Aborted`/`FailedTimeout`), `reconcile_missing_inputs`
+re-queues it on the spot (`requeue_failed_anchors` over the demoted producers):
+the dependent that just failed is a fresh build intent, so the producer retries
+immediately rather than waiting for a new evaluation - which matters when evals
+are being aborted and would otherwise never requeue it, leaving the dependent
+dead-ended on `InputsUnavailable`.
+
 #### Upstream substitutability
 
 A derivation is just another build that can be substituted when its output is

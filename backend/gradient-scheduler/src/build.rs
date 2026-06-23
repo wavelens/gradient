@@ -461,6 +461,7 @@ impl<'a> BuildStateHandler<'a> {
         let mut purged = 0usize;
         let mut referrers_demoted = 0usize;
         let mut sources_purged: Vec<&str> = Vec::new();
+        let mut demoted_producers: Vec<DerivationId> = Vec::new();
         for path in missing_paths {
             let Some(hash) = store_path_hash(path) else {
                 continue;
@@ -487,7 +488,10 @@ impl<'a> BuildStateHandler<'a> {
             }
 
             match gradient_db::demote_cached_output(db, &self.state.nar_storage, hash).await {
-                Ok(drvs) if !drvs.is_empty() => purged += 1,
+                Ok(drvs) if !drvs.is_empty() => {
+                    purged += 1;
+                    demoted_producers.extend(drvs);
+                }
                 Ok(_) => {
                     sources_purged.push(path);
                     // No producing derivation (a source / `.drv`): it only returns
@@ -495,13 +499,32 @@ impl<'a> BuildStateHandler<'a> {
                     // referrers - a pruned/substituted parent would otherwise never
                     // re-push it, stranding dependents forever.
                     match gradient_db::demote_referrers_of(db, &self.state.nar_storage, hash).await {
-                        Ok(drvs) => referrers_demoted += drvs.len(),
+                        Ok(drvs) => {
+                            referrers_demoted += drvs.len();
+                            demoted_producers.extend(drvs);
+                        }
                         Err(e) => warn!(%path, error = %e, "reconcile: demote referrers failed"),
                     }
                 }
                 Err(e) => warn!(%path, error = %e, "reconcile: purge cached output failed"),
             }
         }
+
+        // A demanded output whose producer is terminal-*failed* (not 3/7, which
+        // `demote_cached_output` already reset) must retry: the dependent that just
+        // failed is a fresh build intent, and waiting for an eval to requeue it
+        // dead-ends whenever evals are aborted. Re-queue on demand, decoupled from
+        // eval completion - `requeue_failed_anchors` only touches statuses 4/5/6/9.
+        let requeued = if demoted_producers.is_empty() {
+            0
+        } else {
+            gradient_db::requeue_failed_anchors(db, &demoted_producers)
+                .await
+                .unwrap_or_else(|e| {
+                    warn!(error = %e, "reconcile: requeue failed producers failed");
+                    0
+                })
+        };
 
         if !sources_purged.is_empty() {
             info!(
@@ -518,6 +541,7 @@ impl<'a> BuildStateHandler<'a> {
             purged,
             sources_purged = sources_purged.len(),
             referrers_demoted,
+            requeued,
             paths = missing_paths.len(),
             "reconciled missing inputs; stale cache rows + objects purged for next-eval rebuild"
         );
