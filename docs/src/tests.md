@@ -996,6 +996,16 @@ input). `demote_deletes_the_nar_object` covers the `.drv` (no-producer) path; th
 anchor reset is raw SQL like `requeue_failed_anchors` and is exercised end-to-end
 in CI (the db crate has no real-Postgres unit harness).
 
+The cache is closure-complete by invariant: `compress_and_push_paths` pushes each
+output's full runtime closure (`collect_runtime_closure`), not just the output, so
+a referenced source (`-source`) can never be stranded uncached while its referrer
+is cached. The reactive half, `demote_referrers_of`, demotes every cached output
+whose `references_list` names a reported-missing producerless path, so a closure
+left incomplete by an older write re-acquires on the next build/substitute.
+`references_contains_hash_matches_token_prefix_only` covers the precise reference
+match (hash as a `hash-name` token prefix, never a substring of a name); the
+closure-complete push and the referrer demote are exercised end-to-end in CI.
+
 Preventively, `expand_substituted_closure` now only marks a closure dep
 `Substituted` when its `derivation_output` rows are all `is_cached = true`;
 otherwise it inserts a `Created + substitutable = true` build so the dep

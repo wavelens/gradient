@@ -276,9 +276,58 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     Ok(producers)
 }
 
+/// Whether `references` (space-separated `hash-name` tokens) names store-path
+/// `hash` - matched on the hash prefix of a token, never a substring of a name.
+fn references_contains_hash(references: Option<&str>, hash: &str) -> bool {
+    references
+        .unwrap_or_default()
+        .split_whitespace()
+        .any(|tok| tok.split('-').next() == Some(hash))
+}
+
+/// Demote every cached output whose stored runtime references include
+/// `missing_hash`. A referenced path that is gone leaves its referrers
+/// closure-incomplete; since a missing path with no producing derivation (a
+/// source / `.drv`) only ever returns to the cache as part of a referrer's
+/// closure, the referrers must re-acquire - rebuild or re-substitute - rather
+/// than stay trusted-but-unbuildable. This is the reactive half of the
+/// closure-complete-cache invariant. Returns the producers reset to `Created`.
+pub async fn demote_referrers_of<C: ConnectionTrait>(
+    db: &C,
+    nar_storage: &gradient_storage::NarStore,
+    missing_hash: &str,
+) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
+    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
+
+    let referrers = ECP::find()
+        .filter(CCP::References.contains(missing_hash))
+        .all(db)
+        .await?;
+
+    let mut producers = Vec::new();
+    for cp in referrers {
+        if references_contains_hash(cp.references.as_deref(), missing_hash) {
+            producers.extend(demote_cached_output(db, nar_storage, &cp.hash).await?);
+        }
+    }
+
+    Ok(producers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn references_contains_hash_matches_token_prefix_only() {
+        let refs = Some("lakab5bv611q7dcck616w286cdgzzr2v-source gik3rh1vz2jlgnifb9dh6vc6sxwwz9jj-bash-5.3p9");
+        assert!(references_contains_hash(refs, "lakab5bv611q7dcck616w286cdgzzr2v"));
+        assert!(references_contains_hash(refs, "gik3rh1vz2jlgnifb9dh6vc6sxwwz9jj"));
+        // A hash that only appears inside a name, never as a token prefix.
+        assert!(!references_contains_hash(refs, "source"));
+        assert!(!references_contains_hash(refs, "bash"));
+        assert!(!references_contains_hash(None, "lakab5bv611q7dcck616w286cdgzzr2v"));
+    }
 
     /// Demoting a proven-unfetchable output must remove the NAR object from
     /// storage as well as the `cached_path` row, so a re-eval re-pushes it

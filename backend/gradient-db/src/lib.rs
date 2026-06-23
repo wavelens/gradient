@@ -40,7 +40,8 @@ pub use self::build_attempt::*;
 pub use self::cache_reach::*;
 pub use self::cache_storage::{
     MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, cache_used_bytes, demote_cached_output,
-    diagnose_missing_input, instance_used_bytes, org_caches_all_full, org_writable_caches,
+    demote_referrers_of, diagnose_missing_input, instance_used_bytes, org_caches_all_full,
+    org_writable_caches,
 };
 pub use self::cache_upstream::{
     GradientProtoUpstream, gradient_proto_upstreams_for_org, upstream_urls_for_org,

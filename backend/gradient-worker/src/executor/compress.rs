@@ -43,7 +43,19 @@ pub async fn compress_and_push_paths(
 
     updater.report_compressing()?;
 
-    let entries = super::query_fetched_paths(updater, store_paths.to_vec()).await;
+    // Push each output's full runtime closure, not just the output itself: the
+    // gradient cache must be closure-complete so a downstream build can fetch
+    // every reference (a build's input is a dep output *and its closure*).
+    // `upload_one_nar` skips members the cache already holds, so this only
+    // uploads paths the cache is missing - e.g. a `-source` referenced by a
+    // config that would otherwise strand dependents on `InputsUnavailable`.
+    let closure: Vec<String> = store
+        .collect_runtime_closure(store_paths)
+        .await
+        .into_iter()
+        .collect();
+
+    let entries = super::query_fetched_paths(updater, closure).await;
     for cp in &entries {
         check_abort(abort)?;
         super::upload_one_nar(updater, cp, store).await?;

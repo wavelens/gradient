@@ -459,6 +459,7 @@ impl<'a> BuildStateHandler<'a> {
     ) -> Result<()> {
         let db = &self.state.worker_db;
         let mut purged = 0usize;
+        let mut referrers_demoted = 0usize;
         let mut sources_purged: Vec<&str> = Vec::new();
         for path in missing_paths {
             let Some(hash) = store_path_hash(path) else {
@@ -487,7 +488,17 @@ impl<'a> BuildStateHandler<'a> {
 
             match gradient_db::demote_cached_output(db, &self.state.nar_storage, hash).await {
                 Ok(drvs) if !drvs.is_empty() => purged += 1,
-                Ok(_) => sources_purged.push(path),
+                Ok(_) => {
+                    sources_purged.push(path);
+                    // No producing derivation (a source / `.drv`): it only returns
+                    // to the cache as part of a referrer's closure, so demote the
+                    // referrers - a pruned/substituted parent would otherwise never
+                    // re-push it, stranding dependents forever.
+                    match gradient_db::demote_referrers_of(db, &self.state.nar_storage, hash).await {
+                        Ok(drvs) => referrers_demoted += drvs.len(),
+                        Err(e) => warn!(%path, error = %e, "reconcile: demote referrers failed"),
+                    }
+                }
                 Err(e) => warn!(%path, error = %e, "reconcile: purge cached output failed"),
             }
         }
@@ -506,6 +517,7 @@ impl<'a> BuildStateHandler<'a> {
             %failed_derivation,
             purged,
             sources_purged = sources_purged.len(),
+            referrers_demoted,
             paths = missing_paths.len(),
             "reconciled missing inputs; stale cache rows + objects purged for next-eval rebuild"
         );
