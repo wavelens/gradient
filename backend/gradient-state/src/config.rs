@@ -47,12 +47,6 @@ pub struct StateOrganization {
     pub public: bool,
     #[serde(default)]
     pub hide_build_requests: bool,
-    /// Declarative list of GitHub App installations to bind to this org.
-    /// Each entry provisions a `github_installation` row + inbound/outbound
-    /// integration pair. An empty list leaves webhook-recorded installations
-    /// untouched (no deletion on reconcile).
-    #[serde(default)]
-    pub github_installations: Vec<StateGithubInstallation>,
     pub created_by: String,
     /// Declarative org membership. Empty preserves the legacy behavior of
     /// auto-adding `created_by` as Admin. Non-empty makes the list
@@ -68,13 +62,6 @@ pub struct StateOrganization {
 pub struct StateOrgMemberEntry {
     pub user: String,
     pub role: String,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct StateGithubInstallation {
-    pub installation_id: i64,
-    #[serde(default)]
-    pub account_login: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,6 +173,14 @@ pub struct StateIntegration {
     pub endpoint_url: Option<String>,
     #[serde(default)]
     pub access_token_file: Option<String>,
+    /// GitHub App installation id. Required when `forge_type = "github"`,
+    /// ignored otherwise; provisions/links a `github_installation` row in place
+    /// of the secret/token credentials other forges use.
+    #[serde(default)]
+    pub installation_id: Option<i64>,
+    /// Optional GitHub account login for the installation, used only for naming.
+    #[serde(default)]
+    pub account_login: Option<String>,
     pub created_by: String,
 }
 
@@ -367,25 +362,25 @@ mod config_tests {
     use super::*;
 
     #[test]
-    fn deserializes_github_installations_list() {
+    fn deserializes_github_integration_with_installation_id() {
         let json = r#"{
-            "organizations": {
-                "acme": {
-                    "name": "acme",
-                    "display_name": "ACME",
-                    "private_key_file": "/dev/null",
-                    "public": false,
-                    "created_by": "alice",
-                    "github_installations": [
-                        { "installation_id": 42, "account_login": "acme" }
-                    ]
+            "integrations": {
+                "acme-gh-in": {
+                    "name": "acme-gh-in",
+                    "organization": "acme",
+                    "kind": "inbound",
+                    "forge_type": "github",
+                    "installation_id": 42,
+                    "account_login": "acme",
+                    "created_by": "alice"
                 }
             }
         }"#;
         let config: StateConfiguration = serde_json::from_str(json).unwrap();
-        let org = config.organizations.get("acme").unwrap();
-        assert_eq!(org.github_installations.len(), 1);
-        assert_eq!(org.github_installations[0].installation_id, 42);
-        assert_eq!(org.github_installations[0].account_login.as_deref(), Some("acme"));
+        let int = config.integrations.get("acme-gh-in").unwrap();
+        assert_eq!(int.forge_type, "github");
+        assert_eq!(int.installation_id, Some(42));
+        assert_eq!(int.account_login.as_deref(), Some("acme"));
+        assert_eq!(int.created_by, "alice");
     }
 }

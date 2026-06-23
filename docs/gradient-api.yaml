@@ -4114,10 +4114,10 @@ paths:
         Every credential-file field (`password_file`, `private_key_file`,
         `signing_key_file`, `token_file`, `key_file`, `secret_file`,
         `access_token_file`) is redacted to `null` - the hashed/encrypted
-        secrets cannot be recovered and must be filled in by hand. The
-        auto-managed `build-request` project, GitHub integration rows (exported
-        as `github_installations` on the org instead), and the built-in
-        `Admin`/`Write`/`View` roles are omitted.
+        secrets cannot be recovered and must be filled in by hand. GitHub
+        integration rows are exported with their `installation_id` /
+        `account_login`. The auto-managed `build-request` project and the
+        built-in `Admin`/`Write`/`View` roles are omitted.
 
         Requires `superuser`.
       operationId: exportState

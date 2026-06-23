@@ -30,6 +30,21 @@ pub fn reporter_cfg(integration_name: &str, integrations_json: &str) -> StateCon
     serde_json::from_str(&json).unwrap()
 }
 
+pub fn integration_cfg(integrations_json: &str) -> StateConfiguration {
+    let json = format!(
+        r#"{{
+            "users": {{
+                "alice": {{ "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }}
+            }},
+            "organizations": {{
+                "acme": {{ "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null", "public": false, "created_by": "alice" }}
+            }},
+            "integrations": {integrations_json}
+        }}"#
+    );
+    serde_json::from_str(&json).unwrap()
+}
+
 pub fn worker_cfg(orgs_json: &str) -> StateConfiguration {
     let json = format!(
         r#"{{

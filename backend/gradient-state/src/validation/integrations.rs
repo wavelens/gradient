@@ -41,5 +41,14 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 ),
             );
         }
+
+        if integration.forge_type == "github"
+            && integration.installation_id.is_none_or(|id| id <= 0)
+        {
+            errors.push(
+                format!("integrations.{}.installation_id", integration.name),
+                "forge_type 'github' requires a positive installation_id",
+            );
+        }
     }
 }

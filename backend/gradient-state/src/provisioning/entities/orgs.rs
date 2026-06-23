@@ -18,11 +18,10 @@ use std::collections::{HashMap, HashSet};
 impl<'a> StateApplicator<'a> {
     // ── apply_organizations_without_members ───────────────────────────────────
 
-    /// Create/update the `organization` row (and seed the GitHub App
-    /// integration if needed). Membership reconciliation happens later in
-    /// `apply_organization_members`, after `apply_roles` so custom org roles
-    /// referenced by `members` can be resolved against rows inserted in the
-    /// same apply pass.
+    /// Create/update the `organization` row. Membership reconciliation happens
+    /// later in `apply_organization_members`, after `apply_roles` so custom org
+    /// roles referenced by `members` can be resolved against rows inserted in
+    /// the same apply pass.
     pub(crate) async fn apply_organizations_without_members(
         &self,
         state_orgs: &HashMap<String, StateOrganization>,
@@ -56,7 +55,7 @@ impl<'a> StateApplicator<'a> {
                 None => None,
             };
 
-            let org_id = if let Some(existing) = existing_org {
+            let _org_id = if let Some(existing) = existing_org {
                 let org_id = existing.id;
                 if let Some(declared) = declared_id
                     && declared != org_id
@@ -100,32 +99,6 @@ impl<'a> StateApplicator<'a> {
                 tracing::info!(name = %state_org.name, "Created managed organization");
                 org_id
             };
-
-            for e in &state_org.github_installations {
-                let inst = gradient_ci::upsert_github_installation(
-                    self.db,
-                    org_id,
-                    e.installation_id,
-                    e.account_login.as_deref(),
-                    created_by_id,
-                )
-                .await?;
-
-                let name = gradient_ci::github_integration_name(
-                    e.account_login.as_deref(),
-                    e.installation_id,
-                );
-
-                gradient_ci::ensure_github_app_integrations(
-                    self.db,
-                    org_id,
-                    inst,
-                    &name,
-                    "GitHub",
-                    created_by_id,
-                )
-                .await?;
-            }
         }
 
         Ok(())

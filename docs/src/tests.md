@@ -3733,6 +3733,47 @@ Run with: `cargo test -p web --lib forge_hooks` and
 - `reporting::tests::evaluation_context_format_with_custom_wildcard` - custom
   wildcard produces `gradient/{project}: Evaluation: {wildcard}`.
 
+## Evaluation check goes green when the eval finishes, not all builds (#453)
+
+The forge Evaluation check used to flip green only on `evaluation.completed`,
+which fires after every build finishes. It now succeeds at `evaluation.building`
+(the moment the eval phase concludes and builds start); per-build checks carry
+build outcomes. Once `evaluation.building_started_at` is set, a later
+Failure/Error on the Evaluation context is suppressed so a build failure or a
+user abort cannot redden the already-green eval check.
+
+Run with: `cargo test -p gradient-ci --lib` and
+`cargo test -p gradient-core --test actions_dispatch`.
+
+- `reporting::tests::suppresses_eval_failure_only_after_building` -
+  `suppress_evaluation_failure` returns true for Failure/Error only when
+  `reached_building`, and never for Success/Pending.
+- `actions::tests::forge_status_mapping` /
+  `actions_dispatch::forge_status_mapping_complete` -
+  `evaluation.building → Success`.
+- `actions::tests::matches_event_forge_status_ignores_stored_events` -
+  `forge_status_report` actions also match the `evaluation.building` event.
+
+## GitHub installations declared as `github` integrations (#453)
+
+State-managed GitHub installations live in the `integrations` map as
+`forge_type=github` entries carrying an `installation_id` (no secret/token), not
+a separate top-level resource or an org-state list. Apply upserts the
+`github_installation` row and links it from the integration; export round-trips
+the `installation_id`/`account_login`; validation requires a positive
+`installation_id` for github entries.
+
+Run with: `cargo test -p gradient-state`.
+
+- `config::config_tests::deserializes_github_integration_with_installation_id` -
+  a `forge_type=github` integration deserialises with `installation_id` +
+  optional `account_login`.
+- `tests::state_github_integration_requires_installation_id` - a github
+  integration with no `installation_id` fails validation on
+  `integrations.{name}.installation_id`.
+- `tests::state_github_integration_with_installation_id_is_valid` - the same
+  entry with a positive `installation_id` validates.
+
 ## Cache upload - NAR ingest, endpoint, connector, and CLI (issue #261)
 
 ### Shared NAR ingest (`gradient_proto::ingest`)
@@ -4749,8 +4790,8 @@ created via `PUT /orgs/{org}/integrations` with `forge_type=github` and
 - `github_app_webhook_multi_org_routes_to_matching_org` (Test 15) - a push event routes only to the org whose project URL matches the push payload; the sibling org with a different repo URL is not queued.
 - `github_app_webhook_no_matching_repo_returns_zero` (Test 16) - a push against a repo URL not tracked by any project returns `projects_scanned=0`.
 
-`backend/gradient-state/src/config.rs` - `deserializes_github_installations_list`:
-- `StateOrganization.github_installations` deserialises from a JSON list with `installation_id` + optional `account_login`, covering the new state provisioning path.
+`backend/gradient-state/src/config.rs` - `deserializes_github_integration_with_installation_id`:
+- A `forge_type=github` entry in the `integrations` map deserialises with `installation_id` + optional `account_login`, covering the state provisioning path that links the `github_installation`.
 
 `frontend/src/app/features/organizations/integrations/integrations.component.spec.ts` - `IntegrationsComponent - create github integration`:
 - `createIntegration sends forge_type=github with installation_id` - form submit with `forge_type=github` and a numeric `installation_id` string calls `PUT` with the parsed integer.

@@ -148,29 +148,6 @@
         '';
       };
 
-      github_installations = mkOption {
-        type = types.listOf (types.submodule {
-          options = {
-            installation_id = mkOption {
-              type = types.int;
-              description = "GitHub App installation id (trailing number in the installation URL).";
-            };
-            account_login = mkOption {
-              type = types.nullOr types.str;
-              default = null;
-              description = "GitHub account login; used to name the integration `github-<login>`. Falls back to `github-<installation_id>` when null.";
-            };
-          };
-        });
-        default = [];
-        description = ''
-          GitHub App installations bound to this org. Each entry provisions a
-          `github-<account>` inbound + outbound integration pair. Multiple
-          entries are supported (one per GitHub account). An empty list leaves
-          webhook-recorded installations untouched on reconciliation.
-        '';
-      };
-
       created_by = mkOption {
         type = types.str;
         description = "Username of the user who created this organization";
@@ -457,17 +434,32 @@
       };
 
       forge_type = mkOption {
-        type = types.enum [ "gitea" "forgejo" "gitlab" ];
+        type = types.enum [ "gitea" "forgejo" "gitlab" "github" ];
         description = ''
           Which forge this integration targets. For inbound integrations this
           is display metadata only - a single inbound row can serve
           Gitea/Forgejo/GitLab via the forge path segment of the webhook URL.
 
-          GitHub is intentionally absent: GitHub integration rows are
-          server-managed (auto-created when the App is installed on the org)
-          and referenced from `triggers` / project `actions` by the name
-          `"github"`.
+          `github` requires `installation_id` (no secret/token/endpoint); it
+          provisions the linked GitHub App installation in place of those
+          credentials. GitHub rows are also auto-created when the App is
+          installed on the org, so a declared one is reconciled additively.
         '';
+      };
+
+      installation_id = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = ''
+          GitHub App installation id (trailing number in the installation URL).
+          Required when `forge_type = "github"`, ignored otherwise.
+        '';
+      };
+
+      account_login = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "GitHub account login for the installation; naming metadata only.";
       };
 
       secret_file = mkOption {
@@ -507,7 +499,6 @@
     };
   });
 
-
   triggerType = types.submodule ({ name, ... }: {
     options = {
       type = mkOption {
@@ -521,10 +512,9 @@
         description = ''
           Name of an inbound integration in the same organization that backs
           this trigger. Required for `reporter_push` and `reporter_pull_request`;
-          ignored for `polling` and `time`. Must be declared in
-          `services.gradient.state.integrations`, except for the auto-managed
-          GitHub App row, which is referenced as `"github"` and is seeded
-          automatically once the App is installed on the org.
+          ignored for `polling` and `time`. Must name an integration in
+          `services.gradient.state.integrations` or a GitHub App row auto-seeded
+          when the App is installed on the org.
         '';
       };
 
@@ -1039,6 +1029,14 @@
               forge_type = "gitea";
               endpoint_url = "https://gitea.example.com";
               access_token_file = "/etc/gradient/secrets/acme-gitea-token";
+              created_by = "alice";
+            };
+            acme-github-out = {
+              organization = "acme-corp";
+              kind = "outbound";
+              forge_type = "github";
+              installation_id = 12345678;
+              account_login = "acme-corp";
               created_by = "alice";
             };
           }

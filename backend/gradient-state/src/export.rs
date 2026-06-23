@@ -16,7 +16,7 @@
 
 use super::{
     StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry, StateConfiguration,
-    StateFlakeInputOverride, StateGithubInstallation, StateIntegration, StateOrgMemberEntry,
+    StateFlakeInputOverride, StateIntegration, StateOrgMemberEntry,
     StateOrganization, StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use gradient_ci::IntegrationKind;
@@ -77,6 +77,8 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let role_name = id_name_map(roles.iter().map(|r| (r.id, r.name.clone())));
     let cache_role_name = id_name_map(cache_roles.iter().map(|r| (r.id, r.name.clone())));
     let integration_name = id_name_map(integrations.iter().map(|i| (i.id, i.name.clone())));
+    let github_install_by_id: HashMap<_, _> =
+        github_installs.iter().map(|g| (g.id, g)).collect();
 
     let mut config = StateConfiguration {
         users: HashMap::new(),
@@ -124,14 +126,6 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 private_key_file: String::new(),
                 public: o.public,
                 hide_build_requests: o.hide_build_requests,
-                github_installations: github_installs
-                    .iter()
-                    .filter(|gi| gi.organization == o.id)
-                    .map(|gi| StateGithubInstallation {
-                        installation_id: gi.installation_id,
-                        account_login: gi.account_login.clone(),
-                    })
-                    .collect(),
                 created_by: name_or_blank(&username, o.created_by),
                 members,
             },
@@ -334,12 +328,10 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         ) else {
             continue;
         };
-        // GitHub integration rows are server-managed and cannot be hand-authored.
-        if forge == ForgeType::GitHub {
-            continue;
-        }
+        let install = i
+            .github_installation
+            .and_then(|fk| github_install_by_id.get(&fk));
 
-        let forge_type = forge.as_path_segment();
         config.integrations.insert(
             i.name.clone(),
             StateIntegration {
@@ -351,10 +343,12 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                     IntegrationKind::Outbound => "outbound",
                 }
                 .to_string(),
-                forge_type: forge_type.to_string(),
+                forge_type: forge.as_path_segment().to_string(),
                 secret_file: None,
                 endpoint_url: i.endpoint_url.clone(),
                 access_token_file: None,
+                installation_id: install.map(|g| g.installation_id),
+                account_login: install.and_then(|g| g.account_login.clone()),
                 created_by: name_or_blank(&username, i.created_by),
             },
         );
