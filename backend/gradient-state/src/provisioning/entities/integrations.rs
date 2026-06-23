@@ -58,18 +58,33 @@ impl<'a> StateApplicator<'a> {
 
             let forge = ForgeType::from_path_segment(&state_int.forge_type).ok_or_else(|| {
                 format!(
-                    "Integration '{}' has invalid forge_type '{}': expected gitea/forgejo/gitlab",
+                    "Integration '{}' has invalid forge_type '{}': expected gitea/forgejo/gitlab/github",
                     state_int.name, state_int.forge_type
                 )
             })?;
-            if matches!(forge, ForgeType::GitHub) {
-                return Err(format!(
-                    "Integration '{}' has forge_type 'github': GitHub integrations are managed \
-                     automatically via `github_installations` on the org.",
-                    state_int.name
+
+            let github_installation = if matches!(forge, ForgeType::GitHub) {
+                let installation_id =
+                    state_int.installation_id.filter(|id| *id > 0).ok_or_else(|| {
+                        format!(
+                            "Integration '{}' has forge_type 'github' but no positive installation_id",
+                            state_int.name
+                        )
+                    })?;
+                let fk = gradient_ci::upsert_github_installation(
+                    self.db,
+                    org_id,
+                    installation_id,
+                    state_int.account_login.as_deref(),
+                    created_by_id,
                 )
-                .into());
-            }
+                .await?;
+
+                Some(fk)
+            } else {
+                None
+            };
+
             let encrypted_secret = self.read_and_encrypt_integration_field(
                 state_int.secret_file.as_deref(),
                 &state_int.name,
@@ -106,6 +121,7 @@ impl<'a> StateApplicator<'a> {
                 active.endpoint_url = Set(endpoint);
                 active.secret = Set(encrypted_secret);
                 active.access_token = Set(encrypted_token);
+                active.github_installation = Set(github_installation);
                 active.created_by = Set(created_by_id);
                 active.update(self.db).await?;
                 tracing::info!(name = %state_int.name, "Updated managed integration");
@@ -120,6 +136,7 @@ impl<'a> StateApplicator<'a> {
                     secret: encrypted_secret,
                     endpoint_url: endpoint,
                     access_token: encrypted_token,
+                    github_installation,
                     created_by: created_by_id,
                     created_at: now(),
                     ..Default::default()

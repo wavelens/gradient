@@ -9,7 +9,7 @@ mod fixtures;
 use super::{StateConfiguration, resolve_oidc_group_roles, resolve_scim_group_roles};
 use gradient_types::triggers::ConcurrencyPolicy;
 use gradient_types::{OrganizationId, RoleId};
-use fixtures::{reporter_cfg, worker_cfg};
+use fixtures::{integration_cfg, reporter_cfg, worker_cfg};
 use std::collections::HashMap;
 
 #[test]
@@ -276,6 +276,33 @@ fn state_reporter_trigger_rejects_outbound_integration() {
 #[test]
 fn state_reporter_trigger_accepts_github_app_name() {
     let cfg = reporter_cfg("github", "{}");
+    let v = cfg.validate();
+    assert!(v.is_valid, "errors: {:?}", v.errors);
+}
+
+#[test]
+fn state_github_integration_requires_installation_id() {
+    let integrations = r#"{
+        "gh": { "name": "gh", "organization": "acme", "kind": "outbound", "forge_type": "github", "created_by": "alice" }
+    }"#;
+    let cfg = integration_cfg(integrations);
+    let v = cfg.validate();
+    assert!(!v.is_valid);
+    assert!(
+        v.errors
+            .iter()
+            .any(|e| e.field == "integrations.gh.installation_id"),
+        "expected installation_id requirement, got: {:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn state_github_integration_with_installation_id_is_valid() {
+    let integrations = r#"{
+        "gh": { "name": "gh", "organization": "acme", "kind": "outbound", "forge_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
+    }"#;
+    let cfg = integration_cfg(integrations);
     let v = cfg.validate();
     assert!(v.is_valid, "errors: {:?}", v.errors);
 }
