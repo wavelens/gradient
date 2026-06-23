@@ -102,4 +102,53 @@ describe('GithubAppComponent', () => {
     );
     expect(banner).toBeTruthy();
   });
+
+  describe('navigation guard while credentials are shown', () => {
+    function withCredentials() {
+      setup({ ready: '1' });
+      admin.fetchGithubAppCredentials.mockReturnValue(
+        of({
+          id: 7,
+          slug: 'gradient',
+          html_url: 'https://github.com/apps/gradient',
+          pem: 'PEM',
+          webhook_secret: 'whsec',
+          client_id: 'cid',
+          client_secret: 'csec',
+        }),
+      );
+      const fixture = TestBed.createComponent(GithubAppComponent);
+      fixture.detectChanges();
+      return fixture;
+    }
+
+    it('allows leaving the setup view without prompting', () => {
+      const confirmSpy = vi.spyOn(window, 'confirm');
+      setup({});
+      const fixture = TestBed.createComponent(GithubAppComponent);
+      fixture.detectChanges();
+      expect(fixture.componentInstance.canDeactivate()).toBe(true);
+      expect(confirmSpy).not.toHaveBeenCalled();
+    });
+
+    it('prompts and blocks leaving when the user cancels', () => {
+      const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const fixture = withCredentials();
+      expect(fixture.componentInstance.canDeactivate()).toBe(false);
+      expect(confirmSpy).toHaveBeenCalledOnce();
+    });
+
+    it('prompts and allows leaving when the user confirms', () => {
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const fixture = withCredentials();
+      expect(fixture.componentInstance.canDeactivate()).toBe(true);
+    });
+
+    it('flags beforeunload while credentials are shown', () => {
+      const fixture = withCredentials();
+      const event = new Event('beforeunload', { cancelable: true });
+      fixture.componentInstance.onBeforeUnload(event as BeforeUnloadEvent);
+      expect(event.defaultPrevented).toBe(true);
+    });
+  });
 });

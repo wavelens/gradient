@@ -546,6 +546,17 @@ Frontend (`pnpm --dir frontend exec ng test --include='**/github-app.component.s
 - `clicking create-button calls requestGithubAppManifest with host`
 - `renders credentials when ready=1 and the API returns them`
 
+## GitHub App setup cleanup (#457)
+
+Frontend (`pnpm --dir frontend exec ng test --include='**/health.component.spec.ts' --watch=false`):
+- `hides the "Set up GitHub App" link` - the System Health admin action is omitted once the App is configured.
+
+Frontend (`pnpm --dir frontend exec ng test --include='**/github-app.component.spec.ts' --watch=false`):
+- `allows leaving the setup view without prompting` - `canDeactivate()` returns true when no credentials are shown.
+- `prompts and blocks leaving when the user cancels` - `canDeactivate()` confirms and returns false while one-shot credentials are visible.
+- `prompts and allows leaving when the user confirms`.
+- `flags beforeunload while credentials are shown` - the `beforeunload` handler cancels the event so the browser warns before unload.
+
 ## Narinfo Deriver field
 
 Backend (`cargo test -p web --tests narinfo`):

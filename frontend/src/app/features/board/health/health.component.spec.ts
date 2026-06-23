@@ -86,11 +86,10 @@ describe('BoardHealthComponent', () => {
       expect(fixture.nativeElement.textContent).toContain('deep_gc');
     });
 
-    it('shows "GitHub App configured" text with disabled class on the link', () => {
+    it('hides the "Set up GitHub App" link', () => {
       const link: HTMLAnchorElement = fixture.nativeElement.querySelector('a.btn');
-      expect(link).toBeTruthy();
-      expect(link.textContent?.trim()).toBe('GitHub App configured');
-      expect(link.classList.contains('disabled')).toBe(true);
+      expect(link).toBeNull();
+      expect(fixture.nativeElement.textContent).not.toContain('Set up GitHub App');
     });
   });
 

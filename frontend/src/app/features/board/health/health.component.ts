@@ -47,10 +47,9 @@ const MIB = 1024 ** 2;
 
       <h2>Admin</h2>
       <div class="admin-actions">
-        <a class="btn" [class.disabled]="githubConfigured()" routerLink="/admin/github-app"
-           [attr.aria-disabled]="githubConfigured()">
-          {{ githubConfigured() ? 'GitHub App configured' : 'Set up GitHub App' }}
-        </a>
+        @if (!githubConfigured()) {
+          <a class="btn" routerLink="/admin/github-app">Set up GitHub App</a>
+        }
         <button class="btn" (click)="runDeepGc()" [disabled]="gcBusy()">Run Deep GC</button>
         <button class="btn" [class.danger]="!h.draining" (click)="toggleDraining(h.draining)" [disabled]="drainBusy()">
           {{ h.draining ? 'Disable Draining' : 'Enable Draining' }}
