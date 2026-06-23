@@ -69,6 +69,12 @@ pub async fn promote_dependents<C: ConnectionTrait>(
                 LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
                 WHERE e.derivation = db.derivation
                   AND (dep.status IS NULL OR dep.status NOT IN (3, 7)))
+              AND (db.substitutable OR NOT EXISTS (
+                SELECT 1 FROM derivation_input_source s
+                WHERE s.derivation = db.derivation
+                  AND NOT EXISTS (
+                    SELECT 1 FROM cached_path cp
+                    WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL)))
             "#,
             [id()],
         ))
@@ -133,6 +139,12 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
                 LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
                 WHERE e.derivation = derivation_build.derivation
                   AND (dep.status IS NULL OR dep.status NOT IN (3, 7)))
+              AND (derivation_build.substitutable OR NOT EXISTS (
+                SELECT 1 FROM derivation_input_source s
+                WHERE s.derivation = derivation_build.derivation
+                  AND NOT EXISTS (
+                    SELECT 1 FROM cached_path cp
+                    WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL)))
             "#
             .to_string(),
         ))

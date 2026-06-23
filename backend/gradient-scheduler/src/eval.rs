@@ -188,6 +188,66 @@ impl<'a> EvalResultProcessor<'a> {
         .context("query existing derivations")
     }
 
+    /// Persist each derivation's `inputSrcs` - build-time source paths (e.g.
+    /// `builtins.toFile` configs) that have no producing derivation. Idempotent
+    /// on `(derivation, hash)` so a re-seen derivation backfills its sources
+    /// without duplicating. The readiness gate requires every source cached
+    /// before a non-substitutable build dispatches, so a source the eval has not
+    /// pushed yet holds the build instead of letting it dispatch input-blind and
+    /// fail `InputsUnavailable`.
+    async fn persist_input_sources(
+        &self,
+        derivations: &[DiscoveredDerivation],
+        drv_path_to_id: &HashMap<String, DerivationId>,
+    ) {
+        let now = gradient_types::now();
+        let mut rows: Vec<ADerivationInputSource> = Vec::new();
+        let mut seen: std::collections::HashSet<(DerivationId, String)> =
+            std::collections::HashSet::new();
+        for d in derivations {
+            let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
+                continue;
+            };
+
+            for src in &d.input_sources {
+                let Ok((hash, _)) = get_hash_from_path(src.clone()) else {
+                    continue;
+                };
+
+                if !seen.insert((drv_id, hash.clone())) {
+                    continue;
+                }
+
+                rows.push(MDerivationInputSource {
+                    id: DerivationInputSourceId::now_v7(),
+                    derivation: drv_id,
+                    hash,
+                    store_path: src.clone(),
+                    created_at: now,
+                }.into_active_model());
+            }
+        }
+
+        for chunk in rows.chunks(BATCH_SIZE) {
+            let res = EDerivationInputSource::insert_many(chunk.to_vec())
+                .on_conflict(
+                    sea_orm::sea_query::OnConflict::columns([
+                        CDerivationInputSource::Derivation,
+                        CDerivationInputSource::Hash,
+                    ])
+                    .do_nothing()
+                    .to_owned(),
+                )
+                .exec(&self.state.worker_db)
+                .await;
+            if let Err(e) = res
+                && !matches!(e, sea_orm::DbErr::RecordNotInserted)
+            {
+                error!(error = %e, "failed to insert derivation input sources");
+            }
+        }
+    }
+
     /// Upsert the global `derivation_build` anchor for each discovered
     /// derivation. Build-once: `ON CONFLICT (derivation) DO NOTHING` leaves any
     /// existing anchor (from a prior eval) untouched, so a derivation builds at
@@ -776,6 +836,8 @@ pub async fn handle_eval_result(
     let existing = proc.load_existing_derivations(&derivations).await?;
     let batch = DerivationInsertBatch::prepare(&derivations, &existing);
     let drv_path_to_id = batch.insert(state, &proc.evaluation).await?;
+
+    proc.persist_input_sources(&derivations, &drv_path_to_id).await;
 
     // Dependency edges are NOT created here. The BFS walks roots→leaves, so
     // batch N may contain derivation A whose dep B lands in batch N+1. Edges are

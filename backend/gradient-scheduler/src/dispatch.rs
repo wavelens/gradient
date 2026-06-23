@@ -918,6 +918,15 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
                           AND dep_db.status IN ({completed}, {substituted})
                     )
               )
+              AND (db.substitutable OR NOT EXISTS (
+                  SELECT 1
+                  FROM public.derivation_input_source s
+                  WHERE s.derivation = db.derivation
+                    AND NOT EXISTS (
+                        SELECT 1 FROM public.cached_path cp
+                        WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL
+                    )
+              ))
             ORDER BY
                 (SELECT count(*)
                    FROM public.derivation_dependency dd

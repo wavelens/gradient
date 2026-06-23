@@ -382,6 +382,9 @@ pub struct DiscoveredDerivation {
     pub drv_path: String,
     pub outputs: Vec<DerivationOutput>,
     pub dependencies: Vec<String>,
+    /// `.drv` `inputSrcs` (e.g. `builtins.toFile` configs). They have no
+    /// producing derivation and are gated on cache presence before dispatch.
+    pub input_sources: Vec<String>,
     pub architecture: String,
     pub required_features: Vec<String>,
     pub timeout_secs: Option<u64>,

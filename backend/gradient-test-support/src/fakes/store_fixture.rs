@@ -138,6 +138,7 @@ pub fn load_store(dir: &Path) -> StoreFixture {
             drv_path: drv_path.clone(),
             outputs,
             dependencies: dep_paths,
+            input_sources: drv.input_sources.clone(),
             architecture: drv.system.clone(),
             required_features: drv.required_system_features(),
             timeout_secs: None,
