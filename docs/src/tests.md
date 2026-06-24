@@ -1068,11 +1068,21 @@ store) stalled `Building -> Waiting` indefinitely when the flag was set after
 promotion, because the last dependency to complete promoted its dependents while
 its own `closure_complete` was still false. `promote_ready` / `promote_dependents` /
 `dispatch_ready_builds` require every dependency to be terminal-success **and**
-`closure_complete`. This closes the runtime-vs-build-time edge gap (a dep marked
-done whose transitive runtime ref - e.g. `unit-bird.service` via `system-units` -
-was never cached would otherwise let a dependent dispatch and fail
-`InputsUnavailable` on a path the gate never checked). `compute_truly_substituted`
-likewise requires `closure_complete`.
+`closure_complete`, **or itself `substitutable`**. This closes the runtime-vs-
+build-time edge gap (a dep marked done whose transitive runtime ref - e.g.
+`unit-bird.service` via `system-units` - was never cached would otherwise let a
+dependent dispatch and fail `InputsUnavailable` on a path the gate never checked).
+`compute_truly_substituted` likewise requires `closure_complete`.
+
+Out-of-order substitution (#456): a `substitutable` anchor (NAR on an upstream
+cache) skips the dependency gate entirely in all three of `promote_ready` /
+`promote_dependents` / `dispatch_ready_builds` - it needs neither its build
+dependencies nor its runtime closure in our cache, since the worker fetches the
+output plus closure from upstream on demand (never the `.drv`'s build-time
+`input_sources`). The substitute job carries empty `required_paths`, so the worker
+pulls no build deps and every worker scores it a uniform zero. The gate rewrites
+are exercised end-to-end in CI (no real-Postgres unit harness); `decide_dispatch_
+mode` unit tests still cover the substitute/escalate/stall decision.
 
 Self-heal clears the flag so the gate re-blocks: a reported-missing leaf with a
 producer is purged + rebuilt and `clear_closure_complete_for_referrers` drops

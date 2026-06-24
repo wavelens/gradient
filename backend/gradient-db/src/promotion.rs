@@ -64,18 +64,23 @@ pub async fn promote_dependents<C: ConnectionTrait>(
                 SELECT dd.derivation FROM derivation_dependency dd WHERE dd.dependency = $1)
               AND EXISTS (
                 SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
-              AND NOT EXISTS (
-                SELECT 1 FROM derivation_dependency e
-                LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
-                WHERE e.derivation = db.derivation
-                  AND (dep.status IS NULL OR dep.status NOT IN (3, 7)
-                       OR NOT dep.closure_complete))
-              AND (db.substitutable OR NOT EXISTS (
-                SELECT 1 FROM derivation_input_source s
-                WHERE s.derivation = db.derivation
+              AND (
+                db.substitutable
+                OR (
+                  NOT EXISTS (
+                    SELECT 1 FROM derivation_dependency e
+                    LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
+                    WHERE e.derivation = db.derivation
+                      AND (dep.status IS NULL
+                           OR NOT (((dep.status IN (3, 7)) AND dep.closure_complete)
+                                   OR dep.substitutable)))
                   AND NOT EXISTS (
-                    SELECT 1 FROM cached_path cp
-                    WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL)))
+                    SELECT 1 FROM derivation_input_source s
+                    WHERE s.derivation = db.derivation
+                      AND NOT EXISTS (
+                        SELECT 1 FROM cached_path cp
+                        WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL))
+                ))
             "#,
             [id()],
         ))
@@ -135,18 +140,23 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
               AND edges_complete
               AND EXISTS (
                 SELECT 1 FROM build_job bj WHERE bj.derivation = derivation_build.derivation)
-              AND NOT EXISTS (
-                SELECT 1 FROM derivation_dependency e
-                LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
-                WHERE e.derivation = derivation_build.derivation
-                  AND (dep.status IS NULL OR dep.status NOT IN (3, 7)
-                       OR NOT dep.closure_complete))
-              AND (derivation_build.substitutable OR NOT EXISTS (
-                SELECT 1 FROM derivation_input_source s
-                WHERE s.derivation = derivation_build.derivation
+              AND (
+                derivation_build.substitutable
+                OR (
+                  NOT EXISTS (
+                    SELECT 1 FROM derivation_dependency e
+                    LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
+                    WHERE e.derivation = derivation_build.derivation
+                      AND (dep.status IS NULL
+                           OR NOT (((dep.status IN (3, 7)) AND dep.closure_complete)
+                                   OR dep.substitutable)))
                   AND NOT EXISTS (
-                    SELECT 1 FROM cached_path cp
-                    WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL)))
+                    SELECT 1 FROM derivation_input_source s
+                    WHERE s.derivation = derivation_build.derivation
+                      AND NOT EXISTS (
+                        SELECT 1 FROM cached_path cp
+                        WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL))
+                ))
             "#
             .to_string(),
         ))

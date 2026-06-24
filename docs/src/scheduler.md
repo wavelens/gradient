@@ -173,14 +173,20 @@ the instant its dependents are gated, or they stall behind a flag that flips onl
 afterward.
 
 `promote_ready` and `dispatch_ready_builds` require every dependency to be
-`status IN (Completed, Substituted) AND closure_complete`, and
+`status IN (Completed, Substituted) AND closure_complete` **or itself
+`substitutable`** (its NAR is on an upstream cache, so the building worker fetches
+it on demand and the gate never waits for it to land in our cache), and
 `compute_truly_substituted` only marks an output Substituted when its cache entry
-is closure-complete. The gate stays O(1) (no hot-path closure walk) because the
-flag amortizes the check. Partial indexes on `derivation_build` keyed by the
-dispatch (`status = Queued AND edges_complete`) and promote
-(`status = Created AND edges_complete`) predicates keep these per-tick scans off
-the full anchor table; `mark_closure_complete` prunes its BFS at already-complete
-subtrees so each build finalizes in O(new paths), not O(closure).
+is closure-complete. A `substitutable` anchor skips the dependency gate entirely
+and dispatches out of order (#456): its NAR is prebuilt upstream, so it needs
+neither its build dependencies nor its runtime closure to be in our cache; the
+substitute job carries no `required_paths`, so the worker pulls no build deps and
+the job scores a uniform zero (no meaningful scoring). The gate stays O(1) (no
+hot-path closure walk) because the flag amortizes the check. Partial indexes on
+`derivation_build` keyed by the dispatch (`status = Queued AND edges_complete`)
+and promote (`status = Created AND edges_complete`) predicates keep these per-tick
+scans off the full anchor table; `mark_closure_complete` prunes its BFS at
+already-complete subtrees so each build finalizes in O(new paths), not O(closure).
 
 When a build still reports a path missing, `reconcile_missing_inputs` self-heals:
 a missing leaf with a producer is purged + rebuilt (`demote_cached_output`) and
