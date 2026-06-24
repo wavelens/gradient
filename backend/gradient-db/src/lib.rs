@@ -39,9 +39,10 @@ pub mod status_reactor;
 pub use self::build_attempt::*;
 pub use self::cache_reach::*;
 pub use self::cache_storage::{
-    MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, cache_used_bytes, demote_cached_output,
-    demote_referrers_of, diagnose_missing_input, instance_used_bytes, org_caches_all_full,
-    org_writable_caches,
+    MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, cache_used_bytes,
+    clear_closure_complete_for_referrers, demote_cached_output, demote_referrers_of,
+    diagnose_missing_input, instance_used_bytes, org_caches_all_full, org_writable_caches,
+    propagate_closure_complete, rollup_closure_complete_for_derivation,
 };
 pub use self::cache_upstream::{
     GradientProtoUpstream, gradient_proto_upstreams_for_org, upstream_urls_for_org,

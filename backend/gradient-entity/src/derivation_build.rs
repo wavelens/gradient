@@ -32,6 +32,11 @@ pub struct Model {
     /// created mid-stream by a still-running, failed, or interrupted eval has no
     /// edges yet and must not be promoted as if it were dependency-free.
     pub edges_complete: bool,
+    /// True once this anchor reached a terminal-success status (Completed /
+    /// Substituted) AND every output's full runtime closure is present in our
+    /// cache. Dispatch gates dependents on it: a dep marked done whose closure
+    /// is incomplete would otherwise strand the dependent on `InputsUnavailable`.
+    pub closure_complete: bool,
     pub attempt: i32,
     pub timeout_secs: Option<i64>,
     pub max_silent_secs: Option<i64>,

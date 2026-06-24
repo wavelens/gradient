@@ -143,23 +143,41 @@ evaluation instead of descending into subtrees it will never build.
 #### Closure-complete cache
 
 The cache holds a binary-cache invariant: *if an output is in our cache, its
-entire runtime closure is too*. The prune and substitutability gates trust it -
-they check an output's own availability, never walk its closure on the hot path -
-so it must be maintained at every write. A build (and a substitution, which
-fetches the output's closure locally first) pushes the **full runtime closure**
-of its outputs, not just the output paths; already-cached members are skipped, so
-only paths the cache is actually missing upload. Without this a config output
-like `nginx.conf` could be cached while a `-source` it references is not, and any
-downstream build would fail `InputsUnavailable` on a path with no producing
-derivation that nothing would ever re-push.
+entire runtime closure is too*. A build (and a substitution, which fetches the
+output's closure locally first) pushes the **full runtime closure** of its
+outputs, not just the output paths; already-cached members are skipped, so only
+paths the cache is actually missing upload.
 
-A closure member with no producer (a source / `.drv`) only returns to the cache
-as part of a referrer's closure, so when a build reports such a path missing,
-`reconcile_missing_inputs` demotes its **referrers** (`demote_referrers_of`):
-every cached output whose stored `references_list` names the gone path is reset
-so it re-acquires its full closure on the next build/substitute. This is the
-reactive half of the invariant - it converges any closure-incomplete entry left
-by an older write without re-walking closures on read.
+The dispatch gate does not merely *trust* this - it **enforces** it. A build's
+build-time dependency edges (`derivation_dependency`) do not include a dep's
+transitive runtime references, so "dep is Completed/Substituted" alone does not
+guarantee the dep's runtime closure is fetchable. A dependent dispatched on that
+weaker signal fails `InputsUnavailable` on a runtime path the gate never checked
+(e.g. `nixos-system` needs `unit-bird.service` via `system-units`, which has no
+direct edge). So completeness is tracked explicitly:
+
+- `cached_path.closure_complete` - a NAR is complete once present **and** every
+  non-self reference is itself present and complete. Maintained inductively by
+  `propagate_closure_complete` on each ingest (leaves settle first, then cascade
+  to referrers).
+- `derivation_build.closure_complete` - rolled up onto a terminal-success anchor
+  once all its outputs are complete (`rollup_closure_complete_for_derivation`,
+  run when the build finalizes after its closure is pushed).
+
+`promote_ready` and `dispatch_ready_builds` require every dependency to be
+`status IN (Completed, Substituted) AND closure_complete`, and
+`compute_truly_substituted` only marks an output Substituted when its cache entry
+is closure-complete. The gate stays O(1) (no hot-path closure walk) because the
+flag amortizes the check.
+
+When a build still reports a path missing, `reconcile_missing_inputs` self-heals:
+a missing leaf with a producer is purged + rebuilt (`demote_cached_output`) and
+`closure_complete` is cleared up the referrer chain
+(`clear_closure_complete_for_referrers`) so dependents re-block until the leaf
+re-pushes closure-complete; a producerless source (no producer to rebuild)
+demotes its direct **referrers** (`demote_referrers_of`) so a referrer rebuild
+re-pushes it. The migration backfills the flag to a fixpoint over the existing
+cache and resets any closure-incomplete terminal anchor so it rebuilds.
 
 #### Access and GC
 

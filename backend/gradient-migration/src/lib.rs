@@ -167,6 +167,7 @@ mod m20260620_000004_fix_github_installation_created_at_tz;
 mod m20260620_000005_derivation_output_upstream;
 mod m20260621_000001_derivation_build_edges_complete;
 mod m20260623_000000_create_derivation_input_source;
+mod m20260624_000001_closure_complete;
 
 pub struct Migrator;
 
@@ -335,6 +336,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260620_000005_derivation_output_upstream::Migration),
             Box::new(m20260621_000001_derivation_build_edges_complete::Migration),
             Box::new(m20260623_000000_create_derivation_input_source::Migration),
+            Box::new(m20260624_000001_closure_complete::Migration),
         ]
     }
 }
