@@ -395,17 +395,55 @@ pub async fn mark_closure_complete<C: ConnectionTrait>(
     db: &C,
     seed_hashes: &[String],
 ) -> Result<(), sea_orm::DbErr> {
-    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
+    use gradient_entity::cached_path::{Column as CCP, Entity as ECP, Model as MCP};
 
-    let reached = crate::runtime_closure::runtime_closure_reachable(db, seed_hashes).await?;
-    if reached.is_empty() {
+    if seed_hashes.is_empty() {
         return Ok(());
     }
 
+    // Pruned BFS over `cached_path.references` from the seeds. A node already
+    // `closure_complete` has, by invariant, a fully-complete subtree, so record it
+    // as complete and do NOT descend. This bounds the walk to the newly-pushed
+    // frontier instead of the full runtime closure, keeping per-completion cost
+    // O(new paths) not O(closure) - re-walking the whole closure on every build
+    // re-loaded every cached_path row and starved the worker's other messages on
+    // its serial connection.
+    let mut frontier: Vec<String> = seed_hashes.to_vec();
+    let mut visited: std::collections::HashSet<String> = seed_hashes.iter().cloned().collect();
+    let mut pending: std::collections::HashMap<String, MCP> = std::collections::HashMap::new();
     let mut complete: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    while !frontier.is_empty() {
+        let rows = crate::fetch_in_chunks(&frontier, |chunk| async move {
+            ECP::find().filter(CCP::Hash.is_in(chunk)).all(db).await
+        })
+        .await?;
+        frontier.clear();
+        for row in rows {
+            if row.closure_complete {
+                complete.insert(row.hash);
+                continue;
+            }
+
+            for token in row.references.clone().unwrap_or_default().split_whitespace() {
+                if let Some(h) = crate::runtime_closure::parse_reference_hash(token)
+                    && visited.insert(h.clone())
+                {
+                    frontier.push(h);
+                }
+            }
+
+            pending.insert(row.hash.clone(), row);
+        }
+    }
+
+    if pending.is_empty() {
+        return Ok(());
+    }
+
     loop {
         let mut changed = false;
-        for (hash, cp) in &reached {
+        for (hash, cp) in &pending {
             if complete.contains(hash) || cp.file_hash.is_none() {
                 continue;
             }
@@ -428,12 +466,17 @@ pub async fn mark_closure_complete<C: ConnectionTrait>(
         }
     }
 
-    let complete: Vec<String> = complete.into_iter().collect();
-    if complete.is_empty() {
+    // Only the freshly-completed frontier nodes need a write; pruned nodes are
+    // already `true` in the DB.
+    let newly: Vec<String> = pending
+        .into_keys()
+        .filter(|h| complete.contains(h))
+        .collect();
+    if newly.is_empty() {
         return Ok(());
     }
 
-    for chunk in complete.chunks(crate::IN_CHUNK_SIZE) {
+    for chunk in newly.chunks(crate::IN_CHUNK_SIZE) {
         ECP::update_many()
             .col_expr(CCP::ClosureComplete, sea_orm::sea_query::Expr::value(true))
             .filter(CCP::Hash.is_in(chunk.to_vec()))
@@ -443,7 +486,7 @@ pub async fn mark_closure_complete<C: ConnectionTrait>(
 
     // An anchor is closure-complete once every one of its outputs is - Nix
     // produces (and the push covers) all outputs of a derivation together.
-    for chunk in complete.chunks(crate::IN_CHUNK_SIZE) {
+    for chunk in newly.chunks(crate::IN_CHUNK_SIZE) {
         db.execute(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
