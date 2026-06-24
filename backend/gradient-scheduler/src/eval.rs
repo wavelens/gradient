@@ -473,7 +473,7 @@ impl<'a> EvalResultProcessor<'a> {
             if substituted.contains(&job.derivation_build) {
                 self.state
                     .reactor
-                    .on_build_terminal(&self.state.db(), job, BuildStatus::Substituted)
+                    .on_build_status_changed(&self.state.db(), job, BuildStatus::Substituted)
                     .await;
             }
         }
@@ -915,8 +915,11 @@ pub async fn handle_eval_job_completed(
     // Seed the graph-driven promotion from its ready frontier: leaves and
     // anchors whose deps were already cached/substituted. Each subsequent
     // completion cascades upward.
-    if let Err(e) = gradient_db::promote_ready(&state.worker_db).await {
-        error!(error = %e, %evaluation_id, "promote_ready failed");
+    match gradient_db::promote_ready(&state.worker_db).await {
+        Ok(queued) => {
+            gradient_db::notify_build_status_for_derivations(&state.db(), &queued).await
+        }
+        Err(e) => error!(error = %e, %evaluation_id, "promote_ready failed"),
     }
 
     // Promotion is graph-driven (gradient_db::promotion), independent of eval

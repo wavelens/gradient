@@ -5,9 +5,9 @@
  */
 
 //! Inversion point for the former `db -> ci` edge: `db` defines and *awaits*
-//! this trait when a build/evaluation reaches a terminal status; the `ci` layer
-//! implements it. The call stays an in-process awaited trait call, so ordering
-//! and error handling match the prior inline dispatch exactly.
+//! this trait when a build/evaluation changes status; the `ci` layer implements
+//! it. The call stays an in-process awaited trait call, so ordering and error
+//! handling match the prior inline dispatch exactly.
 
 use async_trait::async_trait;
 use gradient_entity::build::BuildStatus;
@@ -18,10 +18,16 @@ use gradient_types::{MBuildJob, MEvaluation};
 
 #[async_trait]
 pub trait StatusReactor: Send + Sync + std::fmt::Debug {
-    /// Called once per referencing eval's `build_job` when its anchor reaches a
-    /// terminal status. The `build_job` carries the eval + derivation needed to
-    /// post per-target CI status.
-    async fn on_build_terminal(&self, ctx: &DbContext, build_job: MBuildJob, status: BuildStatus);
+    /// Called once per referencing eval's `build_job` whenever its anchor changes
+    /// to a status the CI side reports (`Queued`, `Building`, or terminal). The
+    /// `build_job` carries the eval + derivation needed to post per-target CI
+    /// status.
+    async fn on_build_status_changed(
+        &self,
+        ctx: &DbContext,
+        build_job: MBuildJob,
+        status: BuildStatus,
+    );
     async fn on_eval_terminal(
         &self,
         ctx: &DbContext,
@@ -36,6 +42,6 @@ pub struct NoReactor;
 
 #[async_trait]
 impl StatusReactor for NoReactor {
-    async fn on_build_terminal(&self, _: &DbContext, _: MBuildJob, _: BuildStatus) {}
+    async fn on_build_status_changed(&self, _: &DbContext, _: MBuildJob, _: BuildStatus) {}
     async fn on_eval_terminal(&self, _: &DbContext, _: MEvaluation, _: EvaluationStatus) {}
 }

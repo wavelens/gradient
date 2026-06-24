@@ -2,6 +2,25 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## Per-build forge check tracks the whole lifecycle
+
+`backend/gradient-ci/src/reporting.rs`: `build_event_for_status` maps a build
+status to the dispatch event the per-entry-point forge check reports.
+- `build_event_posts_live_progress` - `Queued` -> `build.queued` (Pending),
+  `Building` -> `build.started` (Running), `Completed`/`Substituted` -> their
+  terminal events, so the `Build {label}` check tracks progress instead of only
+  appearing once the build is done.
+- `build_event_dependency_failure_and_abort_are_failures` - `FailedPermanent`,
+  `FailedTimeout`, `DependencyFailed`, and `Aborted` all report `build.failed`
+  (which `forge_status_for_event` maps to `Failure`), so a dependency-failed or
+  aborted entry point shows a failed check rather than a check stuck on Pending.
+- `build_event_skips_created` - the initial `Created` state posts no check.
+
+Queued/dependency-failed/aborted transitions run as bulk SQL updates that bypass
+`update_derivation_build_status`; `notify_build_status_for_derivations`
+(`backend/gradient-db/src/status/derivation_build_status.rs`) fires the reactor
+for the affected entry points so those events still reach the forge.
+
 ## S3 build logs are not cached on local disk
 
 `backend/gradient-storage/src/log.rs`: `s3_chunks_are_not_cached_on_local_disk`

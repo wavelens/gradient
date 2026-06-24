@@ -17,7 +17,8 @@ use crate::state_machine::BuildStateMachine;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, IntoActiveModel};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use std::collections::{HashMap, HashSet};
 use tracing::{error, info};
 
 pub async fn update_derivation_build_status(
@@ -113,26 +114,35 @@ pub async fn update_derivation_build_status(
             error!(error = %e, "failed to finalize closure_complete");
         }
 
-        if let Err(e) = crate::promotion::promote_dependents(&ctx.worker_db, updated.derivation).await
-        {
-            error!(error = %e, "failed to promote dependents");
+        match crate::promotion::promote_dependents(&ctx.worker_db, updated.derivation).await {
+            Ok(changed) => notify_build_status_for_derivations(ctx, &changed).await,
+            Err(e) => error!(error = %e, "failed to promote dependents"),
         }
     }
 
     if matches!(
         status,
         BuildStatus::FailedPermanent | BuildStatus::FailedTimeout | BuildStatus::DependencyFailed
-    ) && let Err(e) =
-        crate::promotion::cascade_dependency_failed(&ctx.worker_db, updated.derivation).await
-    {
-        error!(error = %e, "failed to cascade dependency failure");
+    ) {
+        match crate::promotion::cascade_dependency_failed(&ctx.worker_db, updated.derivation).await {
+            Ok(failed) => notify_build_status_for_derivations(ctx, &failed).await,
+            Err(e) => error!(error = %e, "failed to cascade dependency failure"),
+        }
     }
 
-    if BuildStateMachine::is_terminal(&status) {
+    // Post the per-entry-point forge check on every status the CI side reports -
+    // `Queued` (Pending) and `Building` (Running), not just the terminal result -
+    // so the check tracks live progress instead of only appearing once done.
+    if matches!(status, BuildStatus::Queued | BuildStatus::Building)
+        || BuildStateMachine::is_terminal(&status)
+    {
         for job in jobs {
             let action_ctx = ctx.clone();
             ctx.shutdown.spawn(async move {
-                action_ctx.reactor.on_build_terminal(&action_ctx, job, status).await;
+                action_ctx
+                    .reactor
+                    .on_build_status_changed(&action_ctx, job, status)
+                    .await;
             });
         }
     }
@@ -166,4 +176,74 @@ pub async fn update_derivation_build_status(
     }
 
     updated
+}
+
+/// Fan the CI status reactor out over the entry-point builds of `derivations` at
+/// each anchor's current status. The bulk graph transitions (`promote_ready`,
+/// `promote_dependents`, `cascade_dependency_failed`, abort) move anchors with a
+/// single SQL statement and so bypass [`update_derivation_build_status`]; this
+/// keeps every per-entry-point forge check in step with them. Only declared entry
+/// points get a forge check, so non-entry-point builds are filtered out here
+/// rather than spawning a reactor call per intermediate build.
+pub async fn notify_build_status_for_derivations(ctx: &DbContext, derivations: &[DerivationId]) {
+    if derivations.is_empty() {
+        return;
+    }
+
+    let db = &ctx.worker_db;
+
+    let status_by_drv: HashMap<DerivationId, BuildStatus> =
+        crate::fetch_in_chunks(derivations, |chunk| async move {
+            EDerivationBuild::find()
+                .filter(CDerivationBuild::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|a| (a.derivation, a.status))
+        .collect();
+
+    let entry_keys: HashSet<(EvaluationId, DerivationId)> =
+        crate::fetch_in_chunks(derivations, |chunk| async move {
+            EEntryPoint::find()
+                .filter(CEntryPoint::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|ep| (ep.evaluation, ep.derivation))
+        .collect();
+    if entry_keys.is_empty() {
+        return;
+    }
+
+    let jobs = crate::fetch_in_chunks(derivations, |chunk| async move {
+        EBuildJob::find()
+            .filter(CBuildJob::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .unwrap_or_default();
+
+    for job in jobs {
+        if !entry_keys.contains(&(job.evaluation, job.derivation)) {
+            continue;
+        }
+        let Some(&status) = status_by_drv.get(&job.derivation) else {
+            continue;
+        };
+
+        let action_ctx = ctx.clone();
+        ctx.shutdown.spawn(async move {
+            action_ctx
+                .reactor
+                .on_build_status_changed(&action_ctx, job, status)
+                .await;
+        });
+    }
 }

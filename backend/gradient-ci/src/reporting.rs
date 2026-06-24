@@ -122,6 +122,27 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
     }
 }
 
+/// The dispatch event a per-entry-point build transition reports, or `None` for
+/// statuses that produce no CI check: the initial `Created`, and `FailedTransient`
+/// (a build that will retry, so its check stays put). `Queued`/`Building` post the
+/// live Pending/Running progress; a dependency failure or an abort surface as a
+/// failed check so a build that already posted Pending/Running resolves rather
+/// than hanging.
+pub fn build_event_for_status(status: BuildStatus) -> Option<&'static str> {
+    Some(match status {
+        BuildStatus::Queued => "build.queued",
+        BuildStatus::Building => "build.started",
+        BuildStatus::Completed => "build.completed",
+        BuildStatus::FailedPermanent
+        | BuildStatus::FailedTimeout
+        | BuildStatus::DependencyFailed
+        | BuildStatus::Aborted => "build.failed",
+        BuildStatus::FailedTransient => "build.failed_transient",
+        BuildStatus::Substituted => "build.substituted",
+        BuildStatus::Created => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +268,36 @@ mod tests {
         ] {
             assert_eq!(ci_status_for_evaluation(&s), None);
         }
+    }
+
+    #[test]
+    fn build_event_posts_live_progress() {
+        // Queued/Building report before the terminal result so the per-build
+        // check tracks progress, not just completion.
+        assert_eq!(build_event_for_status(BuildStatus::Queued), Some("build.queued"));
+        assert_eq!(build_event_for_status(BuildStatus::Building), Some("build.started"));
+        assert_eq!(build_event_for_status(BuildStatus::Completed), Some("build.completed"));
+        assert_eq!(build_event_for_status(BuildStatus::Substituted), Some("build.substituted"));
+    }
+
+    #[test]
+    fn build_event_dependency_failure_and_abort_are_failures() {
+        for s in [
+            BuildStatus::FailedPermanent,
+            BuildStatus::FailedTimeout,
+            BuildStatus::DependencyFailed,
+            BuildStatus::Aborted,
+        ] {
+            assert_eq!(build_event_for_status(s), Some("build.failed"));
+            assert_eq!(
+                crate::actions::forge_status_for_event(build_event_for_status(s).unwrap()),
+                Some(CiStatus::Failure)
+            );
+        }
+    }
+
+    #[test]
+    fn build_event_skips_created() {
+        assert_eq!(build_event_for_status(BuildStatus::Created), None);
     }
 }

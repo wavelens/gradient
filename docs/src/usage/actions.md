@@ -29,7 +29,7 @@ Actions are per-project. Four types ship in v1:
 | `build.failed` | Build failed |
 | `build.substituted` | Build output came from an upstream cache substitution |
 
-An action with an empty `events` list never fires. `forge_status_report` ignores the `events` list - it is hard-wired to `build.started`, `build.completed`, and `build.failed`.
+An action with an empty `events` list never fires. `forge_status_report` ignores the `events` list - it is hard-wired to the full evaluation and build lifecycle (every `evaluation.*` and `build.*` event above), so the per-build check tracks live progress, not just the terminal result.
 
 ## Send Mail
 
@@ -83,7 +83,9 @@ Token management: the plaintext token is revealed exactly once - on create or af
 
 ## Forge Status Report
 
-Posts commit status (pending / success / failure / action-required) back to the forge as three separate check runs per PR - `gradient/{project}: Approval` (fork-PR gate), `gradient/{project}: Evaluation` (eval phase), and `gradient/{project}: Build {label}` (one per build, labelled by entry-point name or by `{drv-name}.{architecture}` when no entry-point matched). Each check is updated in place as the phase progresses; the Approval check flips to Success when a maintainer clears the gate, and the Evaluation check is posted as Pending at the same instant so the PR immediately reflects that the pipeline is in flight.
+Posts commit status (pending / success / failure / action-required) back to the forge as three separate check runs per PR - `gradient/{project}: Approval` (fork-PR gate), `gradient/{project}: Evaluation` (eval phase), and `gradient/{project}: Build {label}` (one per entry point, labelled by its entry-point name). Each check is updated in place as the phase progresses; the Approval check flips to Success when a maintainer clears the gate, and the Evaluation check is posted as Pending at the same instant so the PR immediately reflects that the pipeline is in flight.
+
+Each `Build {label}` check tracks its entry point's whole lifecycle, not just the final result: Pending when the build is queued, Running while it builds, then Success when it completes or is substituted from cache. A build that fails reports Failure - and a dependency failure or an abort surfaces as a failed Build check too, rather than leaving the check stuck on Pending. (The graph transitions that queue, dependency-fail, or abort a build run as bulk SQL updates outside the per-build status path, so the reporter is notified for the affected entry points explicitly.)
 
 A run that targets a wildcard other than the project default - e.g. `/gradient run packages.x86_64-linux.foo` - reports under `gradient/{project}: Evaluation: {wildcard}` so the custom run shows as its own check line instead of overwriting the default evaluation check.
 

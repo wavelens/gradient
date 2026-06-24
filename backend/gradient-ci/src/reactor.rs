@@ -56,16 +56,9 @@ impl CiStatusReactor {
 
 #[async_trait]
 impl StatusReactor for CiStatusReactor {
-    async fn on_build_terminal(&self, db: &DbContext, build_job: MBuildJob, status: BuildStatus) {
-        let event = match status {
-            BuildStatus::Queued => "build.queued",
-            BuildStatus::Building => "build.started",
-            BuildStatus::Completed => "build.completed",
-            BuildStatus::FailedPermanent => "build.failed",
-            BuildStatus::FailedTimeout => "build.failed",
-            BuildStatus::FailedTransient => "build.failed_transient",
-            BuildStatus::Substituted => "build.substituted",
-            BuildStatus::Created | BuildStatus::Aborted | BuildStatus::DependencyFailed => return,
+    async fn on_build_status_changed(&self, db: &DbContext, build_job: MBuildJob, status: BuildStatus) {
+        let Some(event) = crate::reporting::build_event_for_status(status) else {
+            return;
         };
 
         let ctx = self.ci_context(db);

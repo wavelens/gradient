@@ -97,7 +97,7 @@ pub(super) async fn build_ci_report_from_payload(
     }
 
     // `build_id` takes precedence over `evaluation_id` even when both are
-    // present: the build-status dispatch (CiStatusReactor::on_build_terminal)
+    // present: the build-status dispatch (CiStatusReactor::on_build_status_changed)
     // emits a payload carrying BOTH so downstream actions can correlate the
     // build_job to its eval, but the forge reporter must load the build_job so
     // it can pick the per-build check context. Falling back to the

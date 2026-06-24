@@ -336,8 +336,17 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
             // edges_complete: only fully-flushed anchors are promotable, so the
             // sweep can never dispatch a 0-edge anchor without its inputs.
             match gradient_db::promote_ready(&scheduler.state.worker_db).await {
-                Ok(n) if n > 0 => info!(promoted = n, "promote_ready swept ready anchors"),
-                Ok(_) => {}
+                Ok(queued) => {
+                    if !queued.is_empty() {
+                        info!(promoted = queued.len(), "promote_ready swept ready anchors");
+                    }
+
+                    gradient_db::notify_build_status_for_derivations(
+                        &scheduler.state.db(),
+                        &queued,
+                    )
+                    .await;
+                }
                 Err(e) => error!(error = %e, "periodic promote_ready failed"),
             }
         }

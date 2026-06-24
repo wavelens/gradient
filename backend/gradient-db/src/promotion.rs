@@ -17,23 +17,34 @@
 //! the dispatcher then cannot attribute to a driving evaluation.
 
 use gradient_types::DerivationId;
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement, Value};
+use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, QueryResult, Statement, Value};
 
 // derivation_build.status numeric values: Created=0, Queued=1, Completed=3,
 // FailedPermanent=4, DependencyFailed=6, Substituted=7, FailedTimeout=9.
 
+/// Collect the `derivation` column of a `RETURNING derivation` result set. The
+/// bulk transitions return the anchors they actually moved so the caller can fan
+/// the CI status reactor out over exactly those (and only those) builds.
+fn returned_derivations(rows: Vec<QueryResult>) -> Vec<DerivationId> {
+    rows.into_iter()
+        .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+        .map(DerivationId::new)
+        .collect()
+}
+
 /// Re-evaluate the dependents of a just-finished `completed_derivation`:
 /// mark any dependent with a terminal-failed dependency `DependencyFailed`,
 /// then promote every `Created` dependent whose dependency anchors are all
-/// terminal-success to `Queued`. Returns the number of rows changed.
+/// terminal-success to `Queued`. Returns the derivations it moved (queued or
+/// dependency-failed) so the caller can post their CI status.
 pub async fn promote_dependents<C: ConnectionTrait>(
     db: &C,
     completed_derivation: DerivationId,
-) -> Result<u64, DbErr> {
+) -> Result<Vec<DerivationId>, DbErr> {
     let id = || Value::Uuid(Some(Box::new(completed_derivation.into_inner())));
 
-    let failed = db
-        .execute(Statement::from_sql_and_values(
+    let mut affected = returned_derivations(
+        db.query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
             UPDATE derivation_build AS db
@@ -45,14 +56,15 @@ pub async fn promote_dependents<C: ConnectionTrait>(
                 SELECT 1 FROM derivation_dependency e
                 JOIN derivation_build dep ON dep.derivation = e.dependency
                 WHERE e.derivation = db.derivation AND dep.status IN (4, 6, 9))
+            RETURNING db.derivation
             "#,
             [id()],
         ))
-        .await?
-        .rows_affected();
+        .await?,
+    );
 
-    let queued = db
-        .execute(Statement::from_sql_and_values(
+    affected.extend(returned_derivations(
+        db.query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
             UPDATE derivation_build AS db
@@ -81,25 +93,27 @@ pub async fn promote_dependents<C: ConnectionTrait>(
                         SELECT 1 FROM cached_path cp
                         WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL))
                 ))
+            RETURNING db.derivation
             "#,
             [id()],
         ))
-        .await?
-        .rows_affected();
+        .await?,
+    ));
 
-    Ok(failed + queued)
+    Ok(affected)
 }
 
 /// Recursively mark every dependent of `failed_derivation` `DependencyFailed`.
 /// Walks the global `derivation_dependency` graph upward: any non-terminal
 /// anchor (`Created`/`Queued`/`FailedTransient`) reachable from the failure can
-/// never build, so it is failed in one recursive statement. Returns rows changed.
+/// never build, so it is failed in one recursive statement. Returns the
+/// derivations it failed so the caller can post their CI status.
 pub async fn cascade_dependency_failed<C: ConnectionTrait>(
     db: &C,
     failed_derivation: DerivationId,
-) -> Result<u64, DbErr> {
-    let affected = db
-        .execute(Statement::from_sql_and_values(
+) -> Result<Vec<DerivationId>, DbErr> {
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
             WITH RECURSIVE dependents AS (
@@ -112,13 +126,13 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
             SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
             WHERE db.status IN (0, 1, 8)
               AND db.derivation IN (SELECT derivation FROM dependents WHERE derivation <> $1)
+            RETURNING db.derivation
             "#,
             [Value::Uuid(Some(Box::new(failed_derivation.into_inner())))],
         ))
-        .await?
-        .rows_affected();
+        .await?;
 
-    Ok(affected)
+    Ok(returned_derivations(rows))
 }
 
 /// Promote every `Created` anchor whose dependency anchors are all terminal-
@@ -127,10 +141,10 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
 /// this seeds the graph from its leaves and from anchors whose deps were already
 /// cached/substituted at resolve time (for which no completion event ever
 /// fires). Subsequent completions cascade via [`promote_dependents`]. Returns
-/// the number promoted.
-pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
-    let affected = db
-        .execute(Statement::from_string(
+/// the derivations it queued so the caller can post their CI status.
+pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationId>, DbErr> {
+    let rows = db
+        .query_all(Statement::from_string(
             DatabaseBackend::Postgres,
             r#"
             UPDATE derivation_build
@@ -157,13 +171,13 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
                         SELECT 1 FROM cached_path cp
                         WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL))
                 ))
+            RETURNING derivation_build.derivation
             "#
             .to_string(),
         ))
-        .await?
-        .rows_affected();
+        .await?;
 
-    Ok(affected)
+    Ok(returned_derivations(rows))
 }
 
 /// Mark every anchor reachable from `evaluation`'s `build_job` rows
