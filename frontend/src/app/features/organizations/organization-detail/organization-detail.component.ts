@@ -20,8 +20,9 @@ import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { LabelHelpComponent } from '@shared/components/form';
+import { EvalStatusBadgeComponent } from '@shared/components/eval-status-badge/eval-status-badge.component';
 import { slugify } from '@shared/text';
-import { Organization, Project, EvaluationStatus } from '@core/models';
+import { Organization, Project } from '@core/models';
 
 const RESERVED_PROJECT_NAMES = ['build-request'];
 
@@ -39,6 +40,7 @@ const RESERVED_PROJECT_NAMES = ['build-request'];
     LoadingSpinnerComponent,
     EmptyStateComponent,
     LabelHelpComponent,
+    EvalStatusBadgeComponent,
   ],
   templateUrl: './organization-detail.component.html',
   styleUrl: './organization-detail.component.scss',
@@ -142,37 +144,6 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
     }
     this.nameCheckState.set('checking');
     this.nameCheck$.next(name);
-  }
-
-  isRunningStatus(status: EvaluationStatus): boolean {
-    return status === 'Queued' || status === 'Fetching' || status === 'EvaluatingFlake' || status === 'EvaluatingDerivation' || status === 'Building' || status === 'Waiting';
-  }
-
-  getEvalStatusClass(status: EvaluationStatus): string {
-    switch (status) {
-      case 'Completed': return 'status-success';
-      case 'Failed': return 'status-danger';
-      case 'Aborted': return 'status-secondary';
-      case 'Waiting': return 'status-warning';
-      default: return 'status-running';
-    }
-  }
-
-  getEvalStatusIcon(status: EvaluationStatus): string {
-    switch (status) {
-      case 'Completed': return 'check_circle';
-      case 'Failed': return 'error';
-      case 'Aborted': return 'cancel';
-      case 'Queued': return 'hourglass_empty';
-      case 'Waiting': return 'pause_circle';
-      default: return 'sync';
-    }
-  }
-
-  getEvalStatusLabel(status: EvaluationStatus): string {
-    if (status === 'Fetching') return 'Fetching';
-    if (status === 'EvaluatingFlake' || status === 'EvaluatingDerivation') return 'Evaluating';
-    return status;
   }
 
   get wildcardInvalid(): boolean {

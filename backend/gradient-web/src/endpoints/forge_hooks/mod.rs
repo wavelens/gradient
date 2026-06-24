@@ -410,7 +410,7 @@ pub async fn forge_webhook(
         WebError::internal("internal error")
     })?;
 
-    let signature = first_header(&headers, &[provider.signature_header()]);
+    let signature = first_header(&headers, provider.signature_headers());
     if !provider.verify_signature(plaintext_secret.expose(), signature, &body) {
         warn!(org = %org_name, forge = %forge, integration = %integration_name, "Forge webhook: invalid signature");
         return Err(WebError::unauthorized("invalid webhook signature"));

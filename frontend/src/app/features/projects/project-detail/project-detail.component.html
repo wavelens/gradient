@@ -12,12 +12,19 @@
       <div class="breadcrumb">
         <a [routerLink]="['/organization', orgName]">{{ orgDisplayName() || orgName }}</a>
       </div>
-      <h1>{{ proj.display_name }}</h1>
+      <div class="title-row">
+        <h1>{{ proj.display_name }}</h1>
+        @if (evaluationInProgress() && latestEvaluation(); as ev) {
+          <app-eval-status-badge [status]="ev.status" />
+        }
+      </div>
     </div>
     <div class="head-actions">
       @if (authService.isAuthenticated()) {
         <button *appWritable="triggerAccess()" pButton label="Start Evaluation" icon="pi pi-play"
-                (click)="startEvaluation()" [loading]="starting()" [disabled]="starting()"></button>
+                (click)="startEvaluation()" [loading]="starting()"
+                [disabled]="starting() || evaluationInProgress()"
+                [pTooltip]="evaluationInProgress() ? 'An evaluation is already in progress' : ''"></button>
         <button *appWritable="triggerAccess()" pButton label="Restart Failed Builds" icon="pi pi-refresh"
                 severity="secondary" (click)="restartFailedBuilds()" [disabled]="starting()"></button>
         @if (proj.name !== 'build-request') {

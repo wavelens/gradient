@@ -44,8 +44,9 @@ pub trait ForgeProvider: Send + Sync + std::fmt::Debug {
         true
     }
 
-    /// Header carrying the webhook signature/token to pass to [`verify_signature`](Self::verify_signature).
-    fn signature_header(&self) -> &'static str;
+    /// Header(s) carrying the webhook signature/token, tried in order (first
+    /// present wins), passed to [`verify_signature`](Self::verify_signature).
+    fn signature_headers(&self) -> &'static [&'static str];
 
     /// Verify a webhook signature/token (HMAC for Gitea/GitHub, constant-time
     /// token equality for GitLab) against the integration secret.

@@ -63,6 +63,42 @@ approve` and PR CI silently never fire on these forges (unlike the GitHub App,
 whose manifest auto-subscribes to `issue_comment`/`pull_request_review`); the
 inbound-integration card and the setup docs now surface the full event set.
 
+## Forgejo webhook header support (#460)
+
+`backend/gradient-forge/src/providers/gitea.rs`:
+- `accepts_forgejo_and_gitea_headers` - the Gitea/Forgejo provider lists both
+  `X-Forgejo-Event`/`X-Forgejo-Signature` and the Gitea-prefixed equivalents, so
+  a Forgejo host (e.g. Codeberg) that sends only its own header family is still
+  classified and signature-verified instead of falling through to a silent
+  `Unknown`-event 200. The signature check runs before event classification, so
+  a missing header family previously dropped every webhook.
+- `classifies_pr_comment_as_comment` - `issue_comment` / `pull_request_comment`
+  map to `WebhookEventKind::Comment`.
+
+When a `/gradient` comment is delivered but the integration has no project with a
+usable forge reporter (no API token), `handle_issue_comment` now logs a `warn`
+instead of silently returning, making the "nothing happened" case diagnosable.
+
+## GitHub App setup cleanup + state surfacing + breadcrumbs (#441, #452)
+
+Frontend (`pnpm --dir frontend exec ng test --include='**/eval-status-badge.component.spec.ts' --watch=false`):
+- shared `EvalStatusBadgeComponent` collapses `Evaluating*` to `Evaluating`,
+  applies the success class for `Completed`, spins a running icon, and pulses a
+  queued icon. Reused by the organization detail list and the project detail
+  title (one source of truth for the eval status tag).
+
+Frontend (`**/project-detail.component.spec.ts`):
+- `disables Start Evaluation while an evaluation is in progress` and `enables
+  Start Evaluation once the latest evaluation finished` - the button is gated on
+  `evaluationInProgress()` so it no longer surfaces "evaluation already in
+  progress".
+- `shows the eval status badge in the title while in progress` / `hides the title
+  badge when the latest evaluation is terminal`.
+
+Frontend (`**/project-actions.component.spec.ts`):
+- `includes a Settings link in the breadcrumb` - Actions breadcrumb is now
+  `[Org] / [Project] / Settings / Actions`.
+
 ## Forge action "Test" button connectivity probe
 
 `backend/gradient-forge/src/reporter.rs`: `verify_reads_repo_without_reporting`

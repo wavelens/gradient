@@ -6,6 +6,13 @@
 
 @use '../../../styles/variables' as *;
 
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  flex-wrap: wrap;
+}
+
 .evaluation-error {
   display: flex;
   align-items: center;

@@ -1454,6 +1454,12 @@ pub(super) async fn handle_issue_comment(
         // answer is the same. This also lets us fire the eyes/confused
         // reaction exactly once per integration.
         let Some(probe_project) = first_project_with_reporter(state, &project_ids).await else {
+            warn!(
+                %integration_id,
+                pr_number,
+                projects = project_ids.len(),
+                "/gradient comment ignored: integration has no project with a usable forge reporter (needs an API token)"
+            );
             continue;
         };
         let is_maintainer = sender_is_trusted(state, probe_project, owner, repo, &sender).await;
