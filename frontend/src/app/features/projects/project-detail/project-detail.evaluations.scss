@@ -76,6 +76,7 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
 .panel-title { display: flex; align-items: center; gap: 12px; }
 .s-ico { width: 34px; height: 34px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0; }
+.panel-title .title-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .panel-title h2 { font-size: 17.5px; margin: 0; }
 .panel-title .sub { color: #818181; font-size: 12.5px; margin-top: 2px; }
 .panel-actions { display: flex; gap: 8px; align-items: center; }

@@ -14,9 +14,6 @@
       </div>
       <div class="title-row">
         <h1>{{ proj.display_name }}</h1>
-        @if (evaluationInProgress() && latestEvaluation(); as ev) {
-          <app-eval-status-badge [status]="ev.status" />
-        }
       </div>
     </div>
     <div class="head-actions">
@@ -90,7 +87,12 @@
               <div class="panel-title">
                 <span class="s-ico {{ statusClass(sel.status) }} material-symbols-outlined">{{ statusIcon(sel.status) }}</span>
                 <div>
-                  <h2>{{ evalTitle(sel) }}</h2>
+                  <div class="title-line">
+                    <h2>{{ evalTitle(sel) }}</h2>
+                    @if (isRunning(sel.status)) {
+                      <app-eval-status-badge [status]="sel.status" />
+                    }
+                  </div>
                   <div class="sub">
                     <span class="mono" [title]="sel.commit">{{ sel.commit.substring(0, 8) }}</span> ·
                     {{ triggerLabel(sel) }} · started {{ sel.created_at + 'Z' | date: 'MMM d, HH:mm' }}
