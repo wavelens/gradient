@@ -208,6 +208,15 @@ rollups require (`uuidv7()`). `backend/gradient-db/src/connection.rs::pg_version
 covers the pure decision: `170_004`/`179_999` are rejected (with a `17.4`-style
 detected-version message) and `180_000`+ are accepted.
 
+## Migration start logging (#446)
+
+`run_migrations` in `backend/gradient-db/src/connection.rs` logs the pending
+migration count and names at `info` before calling `Migrator::up`, then logs
+completion, so a slow schema change is not mistaken for a hung process. No
+applied migrations logs `database schema up to date`. The behaviour depends on
+the live `seaql_migrations` table (after `install`/prune) so it is exercised at
+server startup, not via the MockDatabase unit harness.
+
 ## OIDC - CSRF cookie, ID-token verification, identity binding
 
 Tests in `backend/web/src/authorization/oidc.rs` cover the security
