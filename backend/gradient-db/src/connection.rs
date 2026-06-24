@@ -103,11 +103,30 @@ pub async fn connect_db(cli: &Cli) -> Result<DatabaseConnection> {
     prune_removed_migrations(&db)
         .await
         .context("Failed to prune removed-migration entries from seaql_migrations")?;
-    Migrator::up(&db, None)
-        .await
-        .context("Failed to run database migrations")?;
+    run_migrations(&db).await?;
     update_db(&db).await.context("Failed to update database")?;
     Ok(db)
+}
+
+/// Run pending migrations, logging the start so a slow migration is not
+/// mistaken for a hung process.
+async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
+    let pending = Migrator::get_pending_migrations(db)
+        .await
+        .context("Failed to determine pending database migrations")?;
+    if pending.is_empty() {
+        tracing::info!("database schema up to date; no migrations to run");
+        return Ok(());
+    }
+
+    let names: Vec<&str> = pending.iter().map(|m| m.name()).collect();
+    tracing::info!(count = pending.len(), migrations = ?names, "running database migrations; this may take a while");
+    Migrator::up(db, None)
+        .await
+        .context("Failed to run database migrations")?;
+    tracing::info!(count = pending.len(), "database migrations complete");
+
+    Ok(())
 }
 
 /// Purge `seaql_migrations` rows whose `version` is no longer in the
