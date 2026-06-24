@@ -1057,10 +1057,12 @@ output's full runtime closure (`collect_runtime_closure`), not just the output, 
 a referenced source (`-source`) can never be stranded uncached while its referrer
 is cached. The invariant is now **enforced at dispatch**, not merely trusted:
 `cached_path.closure_complete` (a NAR is complete once present and every non-self
-reference is present + complete, maintained by `propagate_closure_complete` on
-ingest) rolls up to `derivation_build.closure_complete`
-(`rollup_closure_complete_for_derivation` on build finalize), and `promote_ready`
-/ `dispatch_ready_builds` require every dependency to be terminal-success **and**
+reference is present + complete) and `derivation_build.closure_complete` (all of
+an anchor's outputs complete) are set in one deterministic pass by
+`mark_closure_complete` when a build/substitute finalizes - it BFS-walks the
+just-pushed full runtime closure and takes the completeness fixpoint within it
+(no fragile per-ingest cascade). `promote_ready` / `promote_dependents` /
+`dispatch_ready_builds` require every dependency to be terminal-success **and**
 `closure_complete`. This closes the runtime-vs-build-time edge gap (a dep marked
 done whose transitive runtime ref - e.g. `unit-bird.service` via `system-units` -
 was never cached would otherwise let a dependent dispatch and fail
@@ -1075,8 +1077,8 @@ so a referrer rebuild re-pushes it. The migration backfills the flag to a fixpoi
 over the existing cache and resets closure-incomplete terminal anchors so they
 rebuild. `references_contains_hash_matches_token_prefix_only` covers the precise
 reference match (hash as a `hash-name` token prefix, never a substring of a name);
-the closure-complete propagation, gate, and migration backfill are exercised
-end-to-end in CI (the db crate has no real-Postgres unit harness).
+the closure marker, gate, and migration backfill are exercised end-to-end in CI
+(the db crate has no real-Postgres unit harness).
 
 Preventively, `expand_substituted_closure` now only marks a closure dep
 `Substituted` when its `derivation_output` rows are all `is_cached = true`;

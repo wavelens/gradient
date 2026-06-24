@@ -250,17 +250,21 @@ impl<'a> BuildStateHandler<'a> {
         let terminal = terminal_success_status(anchor.substituted);
         update_derivation_build_status(&self.state.db(), anchor, terminal).await;
 
-        // The output NARs (and their full runtime closure) are pushed by now, so
-        // finalize the closure-complete flag the dispatch gate trusts. Ingest-time
-        // propagation runs while the anchor is still Building and skips it; this
-        // sets it once the anchor is terminal-success.
-        if let Err(e) = gradient_db::rollup_closure_complete_for_derivation(
-            &self.state.worker_db,
-            derivation_id,
-        )
-        .await
-        {
-            warn!(%derivation_build, error = %e, "failed to roll up closure_complete");
+        // The output NARs and their full runtime closure are pushed by now
+        // (`compress_and_push_paths`), so finalize the closure-complete flag the
+        // dispatch gate requires: mark this closure complete and roll it up onto
+        // the anchor (and any deeper anchor the push just completed).
+        match gradient_db::output_hashes_for_drvs(&self.state.worker_db, &[derivation_id]).await {
+            Ok(seeds) => {
+                if let Err(e) =
+                    gradient_db::mark_closure_complete(&self.state.worker_db, &seeds).await
+                {
+                    warn!(%derivation_build, error = %e, "failed to mark closure_complete");
+                }
+            }
+            Err(e) => {
+                warn!(%derivation_build, error = %e, "failed to load output hashes for closure_complete")
+            }
         }
 
         if was_external_cached {

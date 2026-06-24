@@ -290,7 +290,8 @@ impl<'a> EvalResultProcessor<'a> {
                 continue;
             }
 
-            let (status, substitutable) = if truly_substituted.contains(&drv_id) {
+            let is_truly_substituted = truly_substituted.contains(&drv_id);
+            let (status, substitutable) = if is_truly_substituted {
                 (BuildStatus::Substituted, false)
             } else if upstream_substitutable.contains(&drv_id) {
                 (BuildStatus::Created, true)
@@ -304,6 +305,10 @@ impl<'a> EvalResultProcessor<'a> {
                 status,
                 substitutable,
                 substituted: matches!(status, BuildStatus::Substituted),
+                // truly-substituted means every output is already closure-complete
+                // in our cache (`compute_truly_substituted` checks it), so this
+                // anchor satisfies the dispatch gate for its dependents immediately.
+                closure_complete: is_truly_substituted,
                 timeout_secs: d.timeout_secs.map(|v| v as i64),
                 max_silent_secs: d.max_silent_secs.map(|v| v as i64),
                 prefer_local_build: d.prefer_local_build,

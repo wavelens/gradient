@@ -157,12 +157,16 @@ weaker signal fails `InputsUnavailable` on a runtime path the gate never checked
 direct edge). So completeness is tracked explicitly:
 
 - `cached_path.closure_complete` - a NAR is complete once present **and** every
-  non-self reference is itself present and complete. Maintained inductively by
-  `propagate_closure_complete` on each ingest (leaves settle first, then cascade
-  to referrers).
-- `derivation_build.closure_complete` - rolled up onto a terminal-success anchor
-  once all its outputs are complete (`rollup_closure_complete_for_derivation`,
-  run when the build finalizes after its closure is pushed).
+  non-self reference is itself present and complete.
+- `derivation_build.closure_complete` - true once all of a terminal-success
+  anchor's outputs are complete.
+
+Both are set in one deterministic pass by `mark_closure_complete` when a build or
+substitution finalizes: `compress_and_push_paths` has just pushed the anchor's
+**full runtime closure**, so the pass BFS-walks that closure over
+`cached_path.references`, takes the fixpoint of "present and every ref present +
+complete" within it, bulk-sets the flag, and marks every anchor whose outputs are
+all complete (Nix produces all of a derivation's outputs together).
 
 `promote_ready` and `dispatch_ready_builds` require every dependency to be
 `status IN (Completed, Substituted) AND closure_complete`, and
