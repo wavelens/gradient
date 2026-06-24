@@ -98,6 +98,21 @@ pub async fn update_derivation_build_status(
         let _ = ctx
             .board_events
             .send(gradient_types::BoardEvent::CacheChanged);
+
+        // Finalize closure-completeness before promoting: the output NARs and
+        // their runtime closure are pushed by the time a build reports terminal
+        // success, so set this anchor's `closure_complete` now so the dispatch
+        // gate accepts it. Doing it before `promote_dependents` is essential -
+        // otherwise the last dep to land strands its dependents behind a flag
+        // that flips only afterward. `mark_closure_complete` self-guards on NAR
+        // presence, so it is a no-op on any path where outputs are not yet cached.
+        let seeds = crate::output_hashes_for_drvs(&ctx.worker_db, &[updated.derivation])
+            .await
+            .unwrap_or_default();
+        if let Err(e) = crate::mark_closure_complete(&ctx.worker_db, &seeds).await {
+            error!(error = %e, "failed to finalize closure_complete");
+        }
+
         if let Err(e) = crate::promotion::promote_dependents(&ctx.worker_db, updated.derivation).await
         {
             error!(error = %e, "failed to promote dependents");

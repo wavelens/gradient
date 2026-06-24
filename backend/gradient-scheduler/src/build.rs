@@ -245,27 +245,11 @@ impl<'a> BuildStateHandler<'a> {
         // `JobCompleted` arrives, so it is now safe to make the anchor
         // dispatch-ready. `Substituted` when the daemon found the outputs
         // already valid (recorded on the anchor by `handle_build_output`), else
-        // `Completed`. `update_derivation_build_status` promotes dependents and
-        // fans the reactor/eval-done signal across referencing evals.
+        // `Completed`. `update_derivation_build_status` finalizes the
+        // closure-complete flag, promotes dependents, and fans the reactor/
+        // eval-done signal across referencing evals.
         let terminal = terminal_success_status(anchor.substituted);
         update_derivation_build_status(&self.state.db(), anchor, terminal).await;
-
-        // The output NARs and their full runtime closure are pushed by now
-        // (`compress_and_push_paths`), so finalize the closure-complete flag the
-        // dispatch gate requires: mark this closure complete and roll it up onto
-        // the anchor (and any deeper anchor the push just completed).
-        match gradient_db::output_hashes_for_drvs(&self.state.worker_db, &[derivation_id]).await {
-            Ok(seeds) => {
-                if let Err(e) =
-                    gradient_db::mark_closure_complete(&self.state.worker_db, &seeds).await
-                {
-                    warn!(%derivation_build, error = %e, "failed to mark closure_complete");
-                }
-            }
-            Err(e) => {
-                warn!(%derivation_build, error = %e, "failed to load output hashes for closure_complete")
-            }
-        }
 
         if was_external_cached {
             let state = Arc::clone(self.state);

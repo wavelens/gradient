@@ -1059,9 +1059,14 @@ is cached. The invariant is now **enforced at dispatch**, not merely trusted:
 `cached_path.closure_complete` (a NAR is complete once present and every non-self
 reference is present + complete) and `derivation_build.closure_complete` (all of
 an anchor's outputs complete) are set in one deterministic pass by
-`mark_closure_complete` when a build/substitute finalizes - it BFS-walks the
+`mark_closure_complete`, run from `update_derivation_build_status` at the
+terminal-success transition **before** it promotes dependents - it BFS-walks the
 just-pushed full runtime closure and takes the completeness fixpoint within it
-(no fragile per-ingest cascade). `promote_ready` / `promote_dependents` /
+(no fragile per-ingest cascade). Finalizing before promotion is load-bearing: the
+gradient-cache NixOS VM test (`hello` built bottom-up from a preseeded worker
+store) stalled `Building -> Waiting` indefinitely when the flag was set after
+promotion, because the last dependency to complete promoted its dependents while
+its own `closure_complete` was still false. `promote_ready` / `promote_dependents` /
 `dispatch_ready_builds` require every dependency to be terminal-success **and**
 `closure_complete`. This closes the runtime-vs-build-time edge gap (a dep marked
 done whose transitive runtime ref - e.g. `unit-bird.service` via `system-units` -

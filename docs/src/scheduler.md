@@ -161,12 +161,16 @@ direct edge). So completeness is tracked explicitly:
 - `derivation_build.closure_complete` - true once all of a terminal-success
   anchor's outputs are complete.
 
-Both are set in one deterministic pass by `mark_closure_complete` when a build or
-substitution finalizes: `compress_and_push_paths` has just pushed the anchor's
-**full runtime closure**, so the pass BFS-walks that closure over
+Both are set in one deterministic pass by `mark_closure_complete`, called from
+`update_derivation_build_status` **the moment an anchor reaches terminal success,
+before it promotes dependents**: `compress_and_push_paths` has by then pushed the
+anchor's **full runtime closure**, so the pass BFS-walks that closure over
 `cached_path.references`, takes the fixpoint of "present and every ref present +
 complete" within it, bulk-sets the flag, and marks every anchor whose outputs are
-all complete (Nix produces all of a derivation's outputs together).
+all complete (Nix produces all of a derivation's outputs together). Finalizing
+before promotion is essential: the last dependency to land must carry the flag at
+the instant its dependents are gated, or they stall behind a flag that flips only
+afterward.
 
 `promote_ready` and `dispatch_ready_builds` require every dependency to be
 `status IN (Completed, Substituted) AND closure_complete`, and
