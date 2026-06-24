@@ -53,8 +53,8 @@ impl ForgeProvider for GithubProvider {
         false
     }
 
-    fn signature_header(&self) -> &'static str {
-        "X-Hub-Signature-256"
+    fn signature_headers(&self) -> &'static [&'static str] {
+        &["X-Hub-Signature-256"]
     }
 
     fn verify_signature(&self, secret: &str, signature: &str, body: &[u8]) -> bool {

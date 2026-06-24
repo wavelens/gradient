@@ -50,7 +50,11 @@ function activatedRouteStub(access: AccessState): ActivatedRoute {
   } as unknown as ActivatedRoute;
 }
 
-function projectFor(access: AccessState, extraEvals: EvaluationSummary[] = []) {
+function projectFor(
+  access: AccessState,
+  extraEvals: EvaluationSummary[] = [],
+  primaryStatus: EvaluationSummary['status'] = 'Building',
+) {
   return {
     id: 'p',
     name: 'demo',
@@ -63,7 +67,7 @@ function projectFor(access: AccessState, extraEvals: EvaluationSummary[] = []) {
     keep_evaluations: 5,
     last_check_at: '2026-01-01T00:00:00',
     queue: { building: 0, queued: 0 },
-    last_evaluations: [evalSummary('e1'), ...extraEvals],
+    last_evaluations: [evalSummary('e1', primaryStatus), ...extraEvals],
     can_edit: access.canEdit,
     can_trigger: access.canTrigger,
     managed: access.managed,
@@ -83,10 +87,11 @@ function makeProjectsService(access: AccessState, overrides: Partial<{
   abortEvaluation: (org: string, proj: string, id: string) => ReturnType<ProjectsService['abortEvaluation']>;
   getEntryPoints: () => ReturnType<ProjectsService['getEntryPoints']>;
   extraEvals: EvaluationSummary[];
+  primaryStatus: EvaluationSummary['status'];
 }> = {}): ProjectsService {
   const extraEvals = overrides.extraEvals ?? [];
   return {
-    getProject: () => of(projectFor(access, extraEvals)),
+    getProject: () => of(projectFor(access, extraEvals, overrides.primaryStatus)),
     getEntryPoints: overrides.getEntryPoints ?? (() => of([])),
     startEvaluation: overrides.startEvaluation ?? (() => of('ok')),
     restartFailedBuilds: overrides.restartFailedBuilds ?? (() => of('ok')),
@@ -125,7 +130,7 @@ describe('ProjectDetailComponent - access gating', () => {
   });
 
   it('keeps Start Evaluation / Restart / Abort enabled on state-managed projects', () => {
-    const { fixture } = setup({ managed: true, canEdit: true, canTrigger: true });
+    const { fixture } = setup({ managed: true, canEdit: true, canTrigger: true }, { primaryStatus: 'Completed' });
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
     const restartBtn = findByText(fixture.nativeElement, 'restart failed') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
@@ -135,13 +140,41 @@ describe('ProjectDetailComponent - access gating', () => {
   });
 
   it('shows Start / Restart to a caller with TriggerEvaluation but not EditProject', () => {
-    const { fixture } = setup({ managed: false, canEdit: false, canTrigger: true });
+    const { fixture } = setup({ managed: false, canEdit: false, canTrigger: true }, { primaryStatus: 'Completed' });
     const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
     const restartBtn = findByText(fixture.nativeElement, 'restart failed') as HTMLButtonElement | null;
     expect(startBtn).not.toBeNull();
     expect(startBtn!.disabled).toBe(false);
     expect(restartBtn).not.toBeNull();
     expect(restartBtn!.disabled).toBe(false);
+  });
+});
+
+describe('ProjectDetailComponent - in-progress state (#452)', () => {
+  it('disables Start Evaluation while an evaluation is in progress', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Fetching' });
+    const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
+    expect(startBtn).not.toBeNull();
+    expect(startBtn!.disabled).toBe(true);
+    expect(fixture.componentInstance.evaluationInProgress()).toBe(true);
+  });
+
+  it('enables Start Evaluation once the latest evaluation finished', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Completed' });
+    const startBtn = findByText(fixture.nativeElement, 'start evaluation') as HTMLButtonElement | null;
+    expect(startBtn!.disabled).toBe(false);
+    expect(fixture.componentInstance.evaluationInProgress()).toBe(false);
+  });
+
+  it('shows the eval status badge in the title while in progress', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Building' });
+    const badge = fixture.nativeElement.querySelector('.title-row app-eval-status-badge');
+    expect(badge).toBeTruthy();
+  });
+
+  it('hides the title badge when the latest evaluation is terminal', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Completed' });
+    expect(fixture.nativeElement.querySelector('.title-row app-eval-status-badge')).toBeNull();
   });
 });
 

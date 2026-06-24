@@ -41,8 +41,8 @@ impl ForgeProvider for GitlabProvider {
         Ok(Arc::new(GitlabReporter::new(http, base_url, token)?))
     }
 
-    fn signature_header(&self) -> &'static str {
-        "X-Gitlab-Token"
+    fn signature_headers(&self) -> &'static [&'static str] {
+        &["X-Gitlab-Token"]
     }
 
     fn verify_signature(&self, secret: &str, signature: &str, _body: &[u8]) -> bool {

@@ -48,8 +48,8 @@ impl ForgeProvider for GiteaProvider {
         Ok(Arc::new(GiteaReporter::new(http, base_url, token)?))
     }
 
-    fn signature_header(&self) -> &'static str {
-        "X-Gitea-Signature"
+    fn signature_headers(&self) -> &'static [&'static str] {
+        &["X-Forgejo-Signature", "X-Gitea-Signature"]
     }
 
     fn verify_signature(&self, secret: &str, signature: &str, body: &[u8]) -> bool {
@@ -57,7 +57,7 @@ impl ForgeProvider for GiteaProvider {
     }
 
     fn event_headers(&self) -> &'static [&'static str] {
-        &["X-Gitea-Event", "X-Gogs-Event"]
+        &["X-Forgejo-Event", "X-Gitea-Event", "X-Gogs-Event"]
     }
 
     fn classify_event(&self, event: &str) -> WebhookEventKind {
@@ -92,5 +92,21 @@ mod tests {
     fn rejects_missing_signature() {
         let p = GiteaProvider::new(ForgeType::Gitea);
         assert!(!p.verify_signature("s3cret", "", b"body"));
+    }
+
+    #[test]
+    fn accepts_forgejo_and_gitea_headers() {
+        let p = GiteaProvider::new(ForgeType::Forgejo);
+        assert!(p.event_headers().contains(&"X-Forgejo-Event"));
+        assert!(p.event_headers().contains(&"X-Gitea-Event"));
+        assert!(p.signature_headers().contains(&"X-Forgejo-Signature"));
+        assert!(p.signature_headers().contains(&"X-Gitea-Signature"));
+    }
+
+    #[test]
+    fn classifies_pr_comment_as_comment() {
+        let p = GiteaProvider::new(ForgeType::Forgejo);
+        assert!(matches!(p.classify_event("issue_comment"), WebhookEventKind::Comment));
+        assert!(matches!(p.classify_event("pull_request_comment"), WebhookEventKind::Comment));
     }
 }

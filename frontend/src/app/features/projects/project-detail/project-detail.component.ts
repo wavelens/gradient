@@ -12,6 +12,7 @@ import { auditTime } from 'rxjs/operators';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
 import { MenuModule } from 'primeng/menu';
+import { TooltipModule } from 'primeng/tooltip';
 import { MenuItem } from 'primeng/api';
 import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
@@ -19,6 +20,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { EvalStatusBadgeComponent } from '@shared/components/eval-status-badge/eval-status-badge.component';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectProjectAccess } from '@core/resolvers/inject-access';
 import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, BuildStatusCounts } from '@core/models';
@@ -29,9 +31,9 @@ import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
   selector: 'app-project-detail',
   standalone: true,
   imports: [
-    CommonModule, RouterModule, ButtonModule, DialogModule, MenuModule,
+    CommonModule, RouterModule, ButtonModule, DialogModule, MenuModule, TooltipModule,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
-    SegmentedBarComponent,
+    SegmentedBarComponent, EvalStatusBadgeComponent,
   ],
   templateUrl: './project-detail.component.html',
   styleUrls: [
@@ -89,6 +91,12 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   selectedList = computed<EvaluationSummary[]>(() => {
     const s = this.selected();
     return s ? [s] : [];
+  });
+
+  latestEvaluation = computed<EvaluationSummary | null>(() => this.evaluations()[0] ?? null);
+  evaluationInProgress = computed(() => {
+    const e = this.latestEvaluation();
+    return !!e && isRunningEvaluationStatus(e.status);
   });
 
   ngOnInit(): void {

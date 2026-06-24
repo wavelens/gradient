@@ -66,7 +66,9 @@ Gradient, secret = the integration's secret. Under **Trigger On** choose
 **Issue Comment**, **Pull Request Comment**, **Pull Request Review**, and
 **Release**. A push-only webhook never delivers PR CI, the `/gradient run` /
 `/gradient approve` comment commands, or review-based approval.
-Signatures are verified via `X-Gitea-Signature` (HMAC-SHA256 over the raw body).
+Both the Forgejo (`X-Forgejo-Event` / `X-Forgejo-Signature`) and Gitea
+(`X-Gitea-Event` / `X-Gitea-Signature`) header families are accepted; signatures
+are HMAC-SHA256 over the raw body.
 
 ### GitLab
 

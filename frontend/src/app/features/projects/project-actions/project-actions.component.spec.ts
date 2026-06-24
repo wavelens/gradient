@@ -102,6 +102,15 @@ describe('ProjectActionsComponent', () => {
     expect(testBtn!.disabled).toBe(false);
   });
 
+  it('includes a Settings link in the breadcrumb', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    const link = Array.from(
+      fixture.nativeElement.querySelectorAll('.breadcrumb a.breadcrumb-link'),
+    ).find((a) => (a as HTMLElement).textContent?.trim() === 'Settings') as HTMLAnchorElement | undefined;
+    expect(link).toBeTruthy();
+    expect(link!.getAttribute('href')).toContain('/settings');
+  });
+
   it('renders action name and event chips', () => {
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
     const text = fixture.nativeElement.textContent ?? '';
