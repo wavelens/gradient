@@ -1078,12 +1078,18 @@ Self-heal clears the flag so the gate re-blocks: a reported-missing leaf with a
 producer is purged + rebuilt and `clear_closure_complete_for_referrers` drops
 `closure_complete` up the (transitive) referrer chain without deleting healthy
 NARs; a producerless source demotes its direct referrers (`demote_referrers_of`)
-so a referrer rebuild re-pushes it. The migration backfills the flag to a fixpoint
-over the existing cache and resets closure-incomplete terminal anchors so they
-rebuild. `references_contains_hash_matches_token_prefix_only` covers the precise
-reference match (hash as a `hash-name` token prefix, never a substring of a name);
-the closure marker, gate, and migration backfill are exercised end-to-end in CI
-(the db crate has no real-Postgres unit harness).
+so a referrer rebuild re-pushes it. References are fully normalized into `cached_path_reference` (one row per referrer
+-> referenced store path, with `reference_hash` for indexed lookup and `position`
+for stored order); the `cached_path.references` text column is dropped. Referrer
+lookups (`referrers_of_hash`) and the runtime-closure walks become exact index
+scans instead of a `references LIKE '%hash%'` full-table scan, and the narinfo
+`References:` line plus the signature fingerprint reconstruct verbatim via
+`references_for_hash` (`ORDER BY position`) - the worker sends references in nix
+`StorePathSet` order, so `position` preserves the exact bytes the signature
+covers. The migration backfills the flag to a fixpoint over the existing cache and
+resets closure-incomplete terminal anchors so they rebuild. The closure marker, gate, reference index, and
+migration backfill are exercised end-to-end in CI (the db crate has no
+real-Postgres unit harness).
 
 Preventively, `expand_substituted_closure` now only marks a closure dep
 `Substituted` when its `derivation_output` rows are all `is_cached = true`;

@@ -222,6 +222,7 @@ pub async fn show(
         .await?
         .or_not_found("Signature")?;
     let store_path = cp.as_store_path().base();
+    let references = gradient_db::references_for_hash(&state.web_db, &hash).await?;
     Ok(ok_json(NarDetail {
         hash: cp.hash,
         store_path,
@@ -230,13 +231,7 @@ pub async fn show(
         file_size: cp.file_size,
         file_hash: cp.file_hash,
         nar_hash: cp.nar_hash,
-        references: cp
-            .references
-            .as_deref()
-            .unwrap_or("")
-            .split_whitespace()
-            .map(str::to_owned)
-            .collect(),
+        references,
         deriver: cp.deriver,
         ca: cp.ca,
         created_at: cp.created_at,

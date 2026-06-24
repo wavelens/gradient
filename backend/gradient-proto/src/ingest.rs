@@ -72,6 +72,32 @@ pub async fn ingest_metadata_only<C: ConnectionTrait>(
     upsert_and_sign(db, sp.hash(), sp.name(), input, targets).await
 }
 
+/// Record a path's hash-name references in the normalized `cached_path_reference`
+/// relation: `reference_hash` indexes referrer lookups, and `position` preserves
+/// the worker's order (nix store-path order) so the narinfo `References:` line and
+/// signature fingerprint reconstruct verbatim. Content-addressed, so re-ingest is
+/// a no-op.
+async fn sync_reference_index<C: ConnectionTrait>(
+    db: &C,
+    hash: &str,
+    references: &[String],
+) -> Result<(), sea_orm::DbErr> {
+    db.execute(sea_orm::Statement::from_sql_and_values(
+        sea_orm::DatabaseBackend::Postgres,
+        r#"
+        INSERT INTO cached_path_reference (id, referrer, reference, reference_hash, position)
+        SELECT uuidv7(), $1, t.tok, split_part(t.tok, '-', 1), t.ord
+        FROM unnest($2::text[]) WITH ORDINALITY AS t(tok, ord)
+        WHERE t.tok <> ''
+        ON CONFLICT (referrer, reference) DO NOTHING
+        "#,
+        [hash.into(), references.to_vec().into()],
+    ))
+    .await?;
+
+    Ok(())
+}
+
 async fn upsert_and_sign<C: ConnectionTrait>(
     db: &C,
     hash: &str,
@@ -80,11 +106,6 @@ async fn upsert_and_sign<C: ConnectionTrait>(
     targets: SignTargets,
 ) -> anyhow::Result<IngestOutcome> {
     let ts = now();
-    let references_str = if input.references.is_empty() {
-        None
-    } else {
-        Some(input.references.join(" "))
-    };
 
     let (cached_path_id, created) = match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
@@ -98,9 +119,6 @@ async fn upsert_and_sign<C: ConnectionTrait>(
             active.file_hash = Set(Some(normalize_nar_hash(input.file_hash)));
             active.nar_size = Set(Some(input.nar_size));
             active.nar_hash = Set(Some(normalize_nar_hash(input.nar_hash)));
-            if references_str.is_some() {
-                active.references = Set(references_str);
-            }
             if input.deriver.is_some() {
                 active.deriver = Set(input.deriver.map(str::to_owned));
             }
@@ -116,7 +134,6 @@ async fn upsert_and_sign<C: ConnectionTrait>(
                 file_size: Some(input.file_size),
                 nar_size: Some(input.nar_size),
                 nar_hash: Some(normalize_nar_hash(input.nar_hash)),
-                references: references_str,
                 deriver: input.deriver.map(str::to_owned),
                 created_at: ts,
                 ..Default::default()
@@ -139,6 +156,10 @@ async fn upsert_and_sign<C: ConnectionTrait>(
             }
         }
     };
+
+    if !input.references.is_empty() {
+        sync_reference_index(db, hash, input.references).await?;
+    }
 
     let cache_ids: Vec<CacheId> = match targets {
         SignTargets::None => vec![],

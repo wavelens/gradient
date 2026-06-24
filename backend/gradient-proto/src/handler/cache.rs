@@ -221,7 +221,12 @@ async fn fetch_pull_metadata(
         }
     };
 
-    let references = expand_references(cached_row.references.as_deref());
+    let reference_tokens = gradient_db::references_for_hash(&state.worker_db, hash)
+        .await
+        .unwrap_or_default();
+    let references = (!reference_tokens.is_empty())
+        .then(|| expand_references(Some(&reference_tokens.join(" "))))
+        .flatten();
     let signatures = load_cached_path_signatures(state, cached_row.id, hash).await;
 
     (

@@ -111,7 +111,6 @@ async fn narinfo_served_from_db_inner() {
         nar_size: Some(67890),
         // Valid nix32 SHA-256 (of the empty string, as a stable test vector).
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
-        references: Some(String::new()),
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_HASH)),
         created_at: test_date(),
         ..Default::default()
@@ -135,11 +134,13 @@ async fn narinfo_served_from_db_inner() {
     //   1. EDerivationOutput::find (by hash)   → drv_output_row
     //   2. ECachedPath::find (by hash)         → cached_path_row
     //   3. ECachedPathSignature::find          → cached_path_sig_row
+    //   4. references_for_hash (cached_path_reference) → no references
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row]])
         .append_query_results([vec![drv_output_row]])
         .append_query_results([vec![cached_path_row]])
         .append_query_results([vec![cached_path_sig_row]])
+        .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
         .into_connection();
 
     let cli = test_cli();
@@ -248,7 +249,6 @@ async fn narinfo_unsigned_inner() {
         file_size: Some(12345),
         nar_size: Some(67890),
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
-        references: Some(String::new()),
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_HASH)),
         created_at: test_date(),
         ..Default::default()

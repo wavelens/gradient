@@ -277,15 +277,6 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     Ok(producers)
 }
 
-/// Whether `references` (space-separated `hash-name` tokens) names store-path
-/// `hash` - matched on the hash prefix of a token, never a substring of a name.
-fn references_contains_hash(references: Option<&str>, hash: &str) -> bool {
-    references
-        .unwrap_or_default()
-        .split_whitespace()
-        .any(|tok| tok.split('-').next() == Some(hash))
-}
-
 /// Demote every cached output that directly references `missing_hash`. A missing
 /// path with no producing derivation (a source / `.drv`) only ever returns to
 /// the cache as part of a referrer's build closure, so a direct referrer must
@@ -326,9 +317,11 @@ pub async fn clear_closure_complete_for_referrers<C: ConnectionTrait>(
             continue;
         }
 
-        let referrers = ECP::find().filter(CCP::References.contains(&hash)).all(db).await?;
-        for cp in referrers {
-            if !references_contains_hash(cp.references.as_deref(), &hash) || !cp.closure_complete {
+        for referrer_hash in referrers_of_hash(db, &hash).await? {
+            let Some(cp) = ECP::find().filter(CCP::Hash.eq(&referrer_hash)).one(db).await? else {
+                continue;
+            };
+            if !cp.closure_complete {
                 continue;
             }
 
@@ -365,29 +358,37 @@ async fn clear_anchor_closure_complete_for_output<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Hashes of cached paths whose runtime `references` name `hash` (token-prefix
-/// match, never a substring of a name).
+/// Hashes of cached paths whose runtime references name `hash`, via the
+/// `cached_path_reference` reverse index (an exact `reference_hash` match, so no
+/// substring false positives and no full-table scan).
 async fn referrers_of_hash<C: ConnectionTrait>(
     db: &C,
     hash: &str,
 ) -> Result<Vec<String>, sea_orm::DbErr> {
-    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
+    use sea_orm::FromQueryResult;
 
-    Ok(ECP::find()
-        .filter(CCP::References.contains(hash))
-        .all(db)
-        .await?
-        .into_iter()
-        .filter(|cp| references_contains_hash(cp.references.as_deref(), hash))
-        .map(|cp| cp.hash)
-        .collect())
+    #[derive(sea_orm::FromQueryResult)]
+    struct Referrer {
+        referrer: String,
+    }
+
+    Ok(Referrer::find_by_statement(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "SELECT DISTINCT referrer FROM cached_path_reference WHERE reference_hash = $1",
+        [hash.into()],
+    ))
+    .all(db)
+    .await?
+    .into_iter()
+    .map(|r| r.referrer)
+    .collect())
 }
 
 /// Mark the runtime closure seeded at `seed_hashes` (a freshly-built anchor's
 /// output paths) closure-complete, then roll the result up onto anchors. Called
 /// once a build/substitute finishes pushing - `compress_and_push_paths` guarantees
 /// the whole runtime closure is now in our cache, so this is a single
-/// deterministic pass: BFS the closure over `cached_path.references`, take the
+/// deterministic pass: BFS the closure over `cached_path_reference`, take the
 /// fixpoint of "present and every non-self ref present + complete" within it (so a
 /// partially-pushed closure marks only the genuinely-whole subset), bulk-set the
 /// flag, and mark every anchor whose outputs are all complete.
@@ -401,7 +402,7 @@ pub async fn mark_closure_complete<C: ConnectionTrait>(
         return Ok(());
     }
 
-    // Pruned BFS over `cached_path.references` from the seeds. A node already
+    // Pruned BFS over `cached_path_reference` from the seeds. A node already
     // `closure_complete` has, by invariant, a fully-complete subtree, so record it
     // as complete and do NOT descend. This bounds the walk to the newly-pushed
     // frontier instead of the full runtime closure, keeping per-completion cost
@@ -411,6 +412,8 @@ pub async fn mark_closure_complete<C: ConnectionTrait>(
     let mut frontier: Vec<String> = seed_hashes.to_vec();
     let mut visited: std::collections::HashSet<String> = seed_hashes.iter().cloned().collect();
     let mut pending: std::collections::HashMap<String, MCP> = std::collections::HashMap::new();
+    let mut refs_by_hash: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     let mut complete: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     while !frontier.is_empty() {
@@ -418,18 +421,23 @@ pub async fn mark_closure_complete<C: ConnectionTrait>(
             ECP::find().filter(CCP::Hash.is_in(chunk)).all(db).await
         })
         .await?;
+        let edges = crate::runtime_closure::reference_edges(db, &frontier).await?;
         frontier.clear();
+
+        for (referrer, reference_hash) in edges {
+            refs_by_hash.entry(referrer).or_default().push(reference_hash);
+        }
         for row in rows {
             if row.closure_complete {
                 complete.insert(row.hash);
                 continue;
             }
 
-            for token in row.references.clone().unwrap_or_default().split_whitespace() {
-                if let Some(h) = crate::runtime_closure::parse_reference_hash(token)
-                    && visited.insert(h.clone())
-                {
-                    frontier.push(h);
+            if let Some(refs) = refs_by_hash.get(&row.hash) {
+                for r in refs {
+                    if visited.insert(r.clone()) {
+                        frontier.push(r.clone());
+                    }
                 }
             }
 
@@ -448,13 +456,10 @@ pub async fn mark_closure_complete<C: ConnectionTrait>(
                 continue;
             }
 
-            let satisfied = cp
-                .references
-                .as_deref()
-                .unwrap_or_default()
-                .split_whitespace()
-                .filter_map(crate::runtime_closure::parse_reference_hash)
-                .all(|ref_hash| ref_hash == *hash || complete.contains(&ref_hash));
+            let satisfied = refs_by_hash
+                .get(hash)
+                .map(|refs| refs.iter().all(|r| r == hash || complete.contains(r)))
+                .unwrap_or(true);
             if satisfied {
                 complete.insert(hash.clone());
                 changed = true;
@@ -510,17 +515,6 @@ pub async fn mark_closure_complete<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn references_contains_hash_matches_token_prefix_only() {
-        let refs = Some("lakab5bv611q7dcck616w286cdgzzr2v-source gik3rh1vz2jlgnifb9dh6vc6sxwwz9jj-bash-5.3p9");
-        assert!(references_contains_hash(refs, "lakab5bv611q7dcck616w286cdgzzr2v"));
-        assert!(references_contains_hash(refs, "gik3rh1vz2jlgnifb9dh6vc6sxwwz9jj"));
-        // A hash that only appears inside a name, never as a token prefix.
-        assert!(!references_contains_hash(refs, "source"));
-        assert!(!references_contains_hash(refs, "bash"));
-        assert!(!references_contains_hash(None, "lakab5bv611q7dcck616w286cdgzzr2v"));
-    }
 
     /// Demoting a proven-unfetchable output must remove the NAR object from
     /// storage as well as the `cached_path` row, so a re-eval re-pushes it

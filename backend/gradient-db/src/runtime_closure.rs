@@ -7,14 +7,29 @@
 //! Runtime-closure walks over store-path references.
 //!
 //! Unlike the build closure (a walk of `derivation_dependency`), the runtime
-//! closure follows `cached_path.references` - the narinfo `References:` field -
-//! starting from a build's output store paths. It captures exactly what a built
-//! artefact needs at runtime, and is only populated once outputs are cached.
+//! closure follows the normalized `cached_path_reference` relation (referrer ->
+//! referenced store hash) starting from a build's output store paths. It captures
+//! exactly what a built artefact needs at runtime, and is only populated once
+//! outputs are cached.
 
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, FromQueryResult, QueryFilter,
+    Statement,
+};
 use std::collections::{HashMap, HashSet};
 
 use gradient_types::*;
+
+#[derive(FromQueryResult)]
+struct ReferenceEdge {
+    referrer: String,
+    reference_hash: String,
+}
+
+#[derive(FromQueryResult)]
+struct ReferenceToken {
+    reference: String,
+}
 
 /// Extract the 32-char store hash from a `hash-name` reference token. Store
 /// hashes are dash-free, so the hash is everything before the first `-`.
@@ -43,7 +58,51 @@ pub async fn output_hashes_for_drvs<C: ConnectionTrait>(
     .collect())
 }
 
-/// BFS over `cached_path.references` from `seed_hashes`; returns every reached
+/// Runtime reference edges of `referrers`: `(referrer hash, referenced hash)`
+/// pairs from `cached_path_reference`. The reverse index makes this an index
+/// scan instead of parsing a text blob.
+pub async fn reference_edges<C: ConnectionTrait>(
+    db: &C,
+    referrers: &[String],
+) -> Result<Vec<(String, String)>, DbErr> {
+    if referrers.is_empty() {
+        return Ok(vec![]);
+    }
+    Ok(crate::fetch_in_chunks(referrers, |chunk| async move {
+        ReferenceEdge::find_by_statement(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT referrer, reference_hash FROM cached_path_reference WHERE referrer = ANY($1)",
+            [chunk.into()],
+        ))
+        .all(db)
+        .await
+    })
+    .await?
+    .into_iter()
+    .map(|e| (e.referrer, e.reference_hash))
+    .collect())
+}
+
+/// Runtime references of `hash` as `hash-name` tokens in their stored order
+/// (the order the worker sent them, i.e. nix `StorePathSet` / store-path order).
+/// Used to reconstruct the narinfo `References:` line and signature fingerprint.
+pub async fn references_for_hash<C: ConnectionTrait>(
+    db: &C,
+    hash: &str,
+) -> Result<Vec<String>, DbErr> {
+    Ok(ReferenceToken::find_by_statement(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        "SELECT reference FROM cached_path_reference WHERE referrer = $1 ORDER BY position",
+        [hash.into()],
+    ))
+    .all(db)
+    .await?
+    .into_iter()
+    .map(|r| r.reference)
+    .collect())
+}
+
+/// BFS over `cached_path_reference` from `seed_hashes`; returns every reached
 /// `cached_path` row keyed by hash. Seeds and references without a `cached_path`
 /// row (NAR not yet uploaded) are simply absent from the result.
 pub async fn runtime_closure_reachable<C: ConnectionTrait>(
@@ -62,16 +121,16 @@ pub async fn runtime_closure_reachable<C: ConnectionTrait>(
                 .await
         })
         .await?;
+        let edges = reference_edges(db, &frontier).await?;
         frontier.clear();
+
         for row in rows {
-            for token in row.references.clone().unwrap_or_default().split_whitespace() {
-                if let Some(hash) = parse_reference_hash(token)
-                    && visited.insert(hash.clone())
-                {
-                    frontier.push(hash);
-                }
-            }
             reached.insert(row.hash.clone(), row);
+        }
+        for (_, reference_hash) in edges {
+            if visited.insert(reference_hash.clone()) {
+                frontier.push(reference_hash);
+            }
         }
     }
 
@@ -90,26 +149,7 @@ pub async fn runtime_closure_size<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_entity::cached_path;
     use sea_orm::{DatabaseBackend, MockDatabase};
-
-    fn now() -> chrono::NaiveDateTime {
-        chrono::Utc::now().naive_utc()
-    }
-
-    fn cp(hash: &str, nar_size: i64, references: &str) -> cached_path::Model {
-        cached_path::Model {
-            id: CachedPathId::now_v7(),
-            hash: hash.into(),
-            package: "foo".into(),
-            file_hash: Some("sha256:dummy".into()),
-            file_size: Some(nar_size / 2),
-            nar_size: Some(nar_size),
-            references: (!references.is_empty()).then(|| references.to_string()),
-            created_at: now(),
-            ..Default::default()
-        }
-    }
 
     #[test]
     fn reference_hash_strips_name() {
@@ -118,32 +158,9 @@ mod tests {
         assert_eq!(parse_reference_hash(""), None);
     }
 
-    // root -refs-> child (size 100 + 40) => total 140 over two reached rows.
-    #[tokio::test]
-    async fn walks_references_and_sums() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![cp("root", 100, "child-foo")]])
-            .append_query_results([vec![cp("child", 40, "")]])
-            .into_connection();
-
-        let reached = runtime_closure_reachable(&db, &["root".into()]).await.unwrap();
-        assert_eq!(reached.len(), 2);
-        assert_eq!(reached.values().filter_map(|r| r.nar_size).sum::<i64>(), 140);
-    }
-
-    // root -> a, root -> b, a -> c, b -> c: c counted once.
-    #[tokio::test]
-    async fn dedups_diamond() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![cp("root", 10, "a-foo b-foo")]])
-            .append_query_results([vec![cp("a", 20, "c-foo"), cp("b", 30, "c-foo")]])
-            .append_query_results([vec![cp("c", 40, "")]])
-            .into_connection();
-
-        let total = runtime_closure_size(&db, &["root".into()]).await.unwrap();
-        assert_eq!(total, 100);
-    }
-
+    // Empty seeds never query and sum to zero. The non-trivial walk over
+    // `cached_path_reference` is covered end-to-end by the cache integration test
+    // (MockDatabase cannot represent the per-level model + edge queries).
     #[tokio::test]
     async fn empty_seeds_is_zero() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();

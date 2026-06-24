@@ -140,13 +140,9 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
             continue;
         };
 
-        let refs: Vec<String> = cp
-            .references
-            .as_deref()
-            .unwrap_or("")
-            .split_whitespace()
-            .map(|s| s.to_owned())
-            .collect();
+        let refs = gradient_db::references_for_hash(&state.worker_db, &cp.hash)
+            .await
+            .unwrap_or_default();
 
         let nar_hash_nix32 = normalize_nar_hash(nar_hash);
 

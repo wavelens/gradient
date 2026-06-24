@@ -100,7 +100,6 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         file_size: Some(12345),
         nar_size: Some(67890),
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
-        references: Some(String::new()),
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_PATH_HASH)),
         created_at: test_date(),
         ..Default::default()
@@ -519,7 +518,6 @@ fn cached_path_row_fixture() -> gradient_entity::cached_path::Model {
         file_size: Some(12345),
         nar_size: Some(67890),
         nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
-        references: Some(String::new()),
         deriver: Some(format!("/nix/store/{}-hello.drv", FIXTURE_PATH_HASH)),
         created_at: test_date(),
         ..Default::default()
