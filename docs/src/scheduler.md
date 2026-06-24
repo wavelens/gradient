@@ -176,7 +176,11 @@ afterward.
 `status IN (Completed, Substituted) AND closure_complete`, and
 `compute_truly_substituted` only marks an output Substituted when its cache entry
 is closure-complete. The gate stays O(1) (no hot-path closure walk) because the
-flag amortizes the check.
+flag amortizes the check. Partial indexes on `derivation_build` keyed by the
+dispatch (`status = Queued AND edges_complete`) and promote
+(`status = Created AND edges_complete`) predicates keep these per-tick scans off
+the full anchor table; `mark_closure_complete` prunes its BFS at already-complete
+subtrees so each build finalizes in O(new paths), not O(closure).
 
 When a build still reports a path missing, `reconcile_missing_inputs` self-heals:
 a missing leaf with a producer is purged + rebuilt (`demote_cached_output`) and
