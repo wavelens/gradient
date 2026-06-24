@@ -36,6 +36,10 @@ pub struct Model {
     pub nar_hash: Option<String>,
     /// Space-separated list of store-path references (hash-name format).
     pub references: Option<String>,
+    /// True when this NAR is present AND every non-self reference is itself
+    /// present and closure-complete - i.e. the whole runtime closure is in our
+    /// cache. Maintained inductively on ingest; cleared when a member is purged.
+    pub closure_complete: bool,
     /// Content-address field, if the path is content-addressed.
     pub ca: Option<String>,
     /// Full `.drv` path that produced this output, if known.

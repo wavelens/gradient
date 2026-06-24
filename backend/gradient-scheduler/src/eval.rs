@@ -527,7 +527,7 @@ impl<'a> EvalResultProcessor<'a> {
             .await
             .context("compute_truly_substituted: load cached_path")?
             .into_iter()
-            .filter(|cp| cp.is_fully_cached())
+            .filter(|cp| cp.is_fully_cached() && cp.closure_complete)
             .map(|cp| cp.hash)
             .collect();
 

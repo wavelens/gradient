@@ -892,7 +892,9 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
     // Ready anchors: a global `derivation_build` is Queued, some `build_job`
     // still references its derivation (reachable from a surviving evaluation),
     // and every dependency anchor over `derivation_dependency` is terminal-
-    // success (Completed or Substituted). The reachability check skips anchors
+    // success (Completed or Substituted) AND `closure_complete` - its whole
+    // runtime closure is in our cache, so the build's prefetch cannot miss. The
+    // reachability check skips anchors
     // left Queued after their last referencing eval was torn down, which have
     // no driving evaluation to attribute the build to. Ordered by dependency
     // count desc (integration builds first), then by age.
@@ -916,6 +918,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
                         FROM public.derivation_build dep_db
                         WHERE dep_db.derivation = dep_edge.dependency
                           AND dep_db.status IN ({completed}, {substituted})
+                          AND dep_db.closure_complete
                     )
               )
               AND (db.substitutable OR NOT EXISTS (

@@ -184,6 +184,13 @@ async fn upsert_and_sign<C: ConnectionTrait>(
         }
     }
 
+    // Newly-present NAR may complete its own runtime closure (and cascade to
+    // referrers), maintaining the closure-complete invariant the dispatch gate
+    // trusts. Best-effort: a propagation error never fails the ingest itself.
+    if let Err(e) = gradient_db::propagate_closure_complete(db, &[hash.to_owned()]).await {
+        warn!(hash, error = %e, "closure-complete propagation failed after ingest");
+    }
+
     Ok(IngestOutcome { cached_path: cached_path_id, created })
 }
 

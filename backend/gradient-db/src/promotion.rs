@@ -68,7 +68,8 @@ pub async fn promote_dependents<C: ConnectionTrait>(
                 SELECT 1 FROM derivation_dependency e
                 LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
                 WHERE e.derivation = db.derivation
-                  AND (dep.status IS NULL OR dep.status NOT IN (3, 7)))
+                  AND (dep.status IS NULL OR dep.status NOT IN (3, 7)
+                       OR NOT dep.closure_complete))
               AND (db.substitutable OR NOT EXISTS (
                 SELECT 1 FROM derivation_input_source s
                 WHERE s.derivation = db.derivation
@@ -138,7 +139,8 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<u64, DbErr> {
                 SELECT 1 FROM derivation_dependency e
                 LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
                 WHERE e.derivation = derivation_build.derivation
-                  AND (dep.status IS NULL OR dep.status NOT IN (3, 7)))
+                  AND (dep.status IS NULL OR dep.status NOT IN (3, 7)
+                       OR NOT dep.closure_complete))
               AND (derivation_build.substitutable OR NOT EXISTS (
                 SELECT 1 FROM derivation_input_source s
                 WHERE s.derivation = derivation_build.derivation
@@ -200,7 +202,8 @@ pub async fn requeue_failed_anchors<C: ConnectionTrait>(
                 DatabaseBackend::Postgres,
                 r#"
                 UPDATE derivation_build
-                SET status = 0, attempt = 0, updated_at = (now() AT TIME ZONE 'UTC')
+                SET status = 0, attempt = 0, closure_complete = false,
+                    updated_at = (now() AT TIME ZONE 'UTC')
                 WHERE derivation = ANY($1) AND status IN (4, 5, 6, 9)
                 "#,
                 [ids.into()],

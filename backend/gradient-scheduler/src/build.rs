@@ -250,6 +250,19 @@ impl<'a> BuildStateHandler<'a> {
         let terminal = terminal_success_status(anchor.substituted);
         update_derivation_build_status(&self.state.db(), anchor, terminal).await;
 
+        // The output NARs (and their full runtime closure) are pushed by now, so
+        // finalize the closure-complete flag the dispatch gate trusts. Ingest-time
+        // propagation runs while the anchor is still Building and skips it; this
+        // sets it once the anchor is terminal-success.
+        if let Err(e) = gradient_db::rollup_closure_complete_for_derivation(
+            &self.state.worker_db,
+            derivation_id,
+        )
+        .await
+        {
+            warn!(%derivation_build, error = %e, "failed to roll up closure_complete");
+        }
+
         if was_external_cached {
             let state = Arc::clone(self.state);
             tokio::spawn(async move {
@@ -491,6 +504,14 @@ impl<'a> BuildStateHandler<'a> {
                 Ok(drvs) if !drvs.is_empty() => {
                     purged += 1;
                     demoted_producers.extend(drvs);
+                    // The leaf rebuilds + re-pushes closure-complete; meanwhile drop
+                    // the now-stale `closure_complete` up the chain so the dispatch
+                    // gate re-blocks dependents until the closure is whole again.
+                    if let Err(e) =
+                        gradient_db::clear_closure_complete_for_referrers(db, hash).await
+                    {
+                        warn!(%path, error = %e, "reconcile: clear closure_complete failed");
+                    }
                 }
                 Ok(_) => {
                     sources_purged.push(path);

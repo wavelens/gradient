@@ -259,7 +259,8 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
             r#"
             UPDATE derivation_build
             SET status = 0, substitutable = false, substituted = false,
-                attempt = 0, updated_at = (now() AT TIME ZONE 'UTC')
+                attempt = 0, closure_complete = false,
+                updated_at = (now() AT TIME ZONE 'UTC')
             WHERE derivation = ANY($1) AND status IN (3, 7)
             "#,
             [ids.into()],
@@ -285,33 +286,226 @@ fn references_contains_hash(references: Option<&str>, hash: &str) -> bool {
         .any(|tok| tok.split('-').next() == Some(hash))
 }
 
-/// Demote every cached output whose stored runtime references include
-/// `missing_hash`. A referenced path that is gone leaves its referrers
-/// closure-incomplete; since a missing path with no producing derivation (a
-/// source / `.drv`) only ever returns to the cache as part of a referrer's
-/// closure, the referrers must re-acquire - rebuild or re-substitute - rather
-/// than stay trusted-but-unbuildable. This is the reactive half of the
-/// closure-complete-cache invariant. Returns the producers reset to `Created`.
+/// Demote every cached output that directly references `missing_hash`. A missing
+/// path with no producing derivation (a source / `.drv`) only ever returns to
+/// the cache as part of a referrer's build closure, so a direct referrer must
+/// rebuild to re-push it - rather than stay trusted-but-unbuildable. The
+/// transitive completeness invariant is handled separately by
+/// [`clear_closure_complete_for_referrers`], which only flips the flag and
+/// leaves healthy NARs in place. Returns the producers reset to `Created`.
 pub async fn demote_referrers_of<C: ConnectionTrait>(
     db: &C,
     nar_storage: &gradient_storage::NarStore,
     missing_hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
-    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
-
-    let referrers = ECP::find()
-        .filter(CCP::References.contains(missing_hash))
-        .all(db)
-        .await?;
-
     let mut producers = Vec::new();
-    for cp in referrers {
-        if references_contains_hash(cp.references.as_deref(), missing_hash) {
-            producers.extend(demote_cached_output(db, nar_storage, &cp.hash).await?);
-        }
+    for referrer_hash in referrers_of_hash(db, missing_hash).await? {
+        producers.extend(demote_cached_output(db, nar_storage, &referrer_hash).await?);
     }
 
     Ok(producers)
+}
+
+/// Self-heal flag clear: a proven-missing path leaves every (transitive)
+/// referrer closure-incomplete, so drop `closure_complete` up the chain - on the
+/// cached NARs and the anchors that produced them - without deleting the healthy
+/// NARs themselves. The missing leaf rebuilds + re-pushes; its closure-complete
+/// push then re-marks the chain via [`propagate_closure_complete`]. The walk
+/// stops at already-false referrers: by the invariant their ancestors are false too.
+pub async fn clear_closure_complete_for_referrers<C: ConnectionTrait>(
+    db: &C,
+    missing_hash: &str,
+) -> Result<u64, sea_orm::DbErr> {
+    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
+
+    let mut cleared = 0u64;
+    let mut worklist = vec![missing_hash.to_owned()];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(hash) = worklist.pop() {
+        if !seen.insert(hash.clone()) {
+            continue;
+        }
+
+        let referrers = ECP::find().filter(CCP::References.contains(&hash)).all(db).await?;
+        for cp in referrers {
+            if !references_contains_hash(cp.references.as_deref(), &hash) || !cp.closure_complete {
+                continue;
+            }
+
+            ECP::update_many()
+                .col_expr(CCP::ClosureComplete, sea_orm::sea_query::Expr::value(false))
+                .filter(CCP::Hash.eq(&cp.hash))
+                .exec(db)
+                .await?;
+            clear_anchor_closure_complete_for_output(db, &cp.hash).await?;
+            cleared += 1;
+            worklist.push(cp.hash);
+        }
+    }
+
+    Ok(cleared)
+}
+
+/// Clear `closure_complete` on every anchor producing `output_hash`.
+async fn clear_anchor_closure_complete_for_output<C: ConnectionTrait>(
+    db: &C,
+    output_hash: &str,
+) -> Result<(), sea_orm::DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        r#"
+        UPDATE derivation_build db SET closure_complete = false
+        WHERE db.closure_complete
+          AND db.derivation IN (SELECT o.derivation FROM derivation_output o WHERE o.hash = $1)
+        "#,
+        [output_hash.into()],
+    ))
+    .await?;
+
+    Ok(())
+}
+
+/// Hashes of cached paths whose runtime `references` name `hash` (token-prefix
+/// match, never a substring of a name).
+async fn referrers_of_hash<C: ConnectionTrait>(
+    db: &C,
+    hash: &str,
+) -> Result<Vec<String>, sea_orm::DbErr> {
+    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
+
+    Ok(ECP::find()
+        .filter(CCP::References.contains(hash))
+        .all(db)
+        .await?
+        .into_iter()
+        .filter(|cp| references_contains_hash(cp.references.as_deref(), hash))
+        .map(|cp| cp.hash)
+        .collect())
+}
+
+/// Propagate the `closure_complete` flag upward from freshly-ingested `seeds`. A
+/// present NAR becomes complete once every non-self reference is itself present
+/// and complete; marking one complete can complete its referrers, so this walks
+/// them transitively and rolls each newly-complete output up onto its producing
+/// `derivation_build`. Cheap on the push path: most parents stay incomplete
+/// (still missing a sibling) so the cascade settles fast.
+pub async fn propagate_closure_complete<C: ConnectionTrait>(
+    db: &C,
+    seeds: &[String],
+) -> Result<(), sea_orm::DbErr> {
+    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
+
+    let mut worklist: std::collections::VecDeque<String> = seeds.iter().cloned().collect();
+    let mut seen = std::collections::HashSet::new();
+    while let Some(hash) = worklist.pop_front() {
+        if !seen.insert(hash.clone()) {
+            continue;
+        }
+
+        let Some(cp) = ECP::find().filter(CCP::Hash.eq(&hash)).one(db).await? else {
+            continue;
+        };
+        if cp.closure_complete || cp.file_hash.is_none() || !closure_refs_satisfied(db, &cp).await? {
+            continue;
+        }
+
+        ECP::update_many()
+            .col_expr(CCP::ClosureComplete, sea_orm::sea_query::Expr::value(true))
+            .filter(CCP::Hash.eq(&hash))
+            .exec(db)
+            .await?;
+        rollup_anchor_for_output(db, &hash).await?;
+
+        for referrer_hash in referrers_of_hash(db, &hash).await? {
+            worklist.push_back(referrer_hash);
+        }
+    }
+
+    Ok(())
+}
+
+/// Whether every non-self runtime reference of `cp` is present (`file_hash`) and
+/// itself `closure_complete`. An empty reference set is trivially satisfied.
+async fn closure_refs_satisfied<C: ConnectionTrait>(
+    db: &C,
+    cp: &gradient_entity::cached_path::Model,
+) -> Result<bool, sea_orm::DbErr> {
+    let references = cp.references.clone().unwrap_or_default();
+    if references.trim().is_empty() {
+        return Ok(true);
+    }
+
+    let row = db
+        .query_one(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            SELECT NOT EXISTS (
+                SELECT 1
+                FROM regexp_split_to_table($1, '\s+') AS tok
+                WHERE tok <> ''
+                  AND split_part(tok, '-', 1) <> $2
+                  AND NOT EXISTS (
+                    SELECT 1 FROM cached_path r
+                    WHERE r.hash = split_part(tok, '-', 1)
+                      AND r.file_hash IS NOT NULL
+                      AND r.closure_complete)) AS ok
+            "#,
+            [references.into(), cp.hash.clone().into()],
+        ))
+        .await?;
+
+    Ok(row.and_then(|r| r.try_get::<bool>("", "ok").ok()).unwrap_or(false))
+}
+
+/// Mark every terminal-success anchor producing `output_hash` `closure_complete`
+/// when all of its outputs are now complete in cache. Idempotent.
+async fn rollup_anchor_for_output<C: ConnectionTrait>(
+    db: &C,
+    output_hash: &str,
+) -> Result<(), sea_orm::DbErr> {
+    db.execute(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        r#"
+        UPDATE derivation_build db SET closure_complete = true
+        WHERE db.status IN (3, 7) AND NOT db.closure_complete
+          AND db.derivation IN (SELECT o.derivation FROM derivation_output o WHERE o.hash = $1)
+          AND NOT EXISTS (
+            SELECT 1 FROM derivation_output o
+            LEFT JOIN cached_path cp ON cp.hash = o.hash
+            WHERE o.derivation = db.derivation AND (cp.closure_complete IS NOT TRUE))
+        "#,
+        [output_hash.into()],
+    ))
+    .await?;
+
+    Ok(())
+}
+
+/// Set `closure_complete` on a single anchor once it is terminal-success and
+/// every output's runtime closure is in cache. Called when a build finalizes,
+/// after its NARs (and their closure) have been pushed. Returns whether it flipped.
+pub async fn rollup_closure_complete_for_derivation<C: ConnectionTrait>(
+    db: &C,
+    derivation: DerivationId,
+) -> Result<bool, sea_orm::DbErr> {
+    let affected = db
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            UPDATE derivation_build db SET closure_complete = true
+            WHERE db.derivation = $1 AND db.status IN (3, 7) AND NOT db.closure_complete
+              AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
+              AND NOT EXISTS (
+                SELECT 1 FROM derivation_output o
+                LEFT JOIN cached_path cp ON cp.hash = o.hash
+                WHERE o.derivation = db.derivation AND (cp.closure_complete IS NOT TRUE))
+            "#,
+            [sea_orm::Value::Uuid(Some(Box::new(derivation.into_inner())))],
+        ))
+        .await?
+        .rows_affected();
+
+    Ok(affected > 0)
 }
 
 #[cfg(test)]

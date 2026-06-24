@@ -1055,12 +1055,28 @@ in CI (the db crate has no real-Postgres unit harness).
 The cache is closure-complete by invariant: `compress_and_push_paths` pushes each
 output's full runtime closure (`collect_runtime_closure`), not just the output, so
 a referenced source (`-source`) can never be stranded uncached while its referrer
-is cached. The reactive half, `demote_referrers_of`, demotes every cached output
-whose `references_list` names a reported-missing producerless path, so a closure
-left incomplete by an older write re-acquires on the next build/substitute.
-`references_contains_hash_matches_token_prefix_only` covers the precise reference
-match (hash as a `hash-name` token prefix, never a substring of a name); the
-closure-complete push and the referrer demote are exercised end-to-end in CI.
+is cached. The invariant is now **enforced at dispatch**, not merely trusted:
+`cached_path.closure_complete` (a NAR is complete once present and every non-self
+reference is present + complete, maintained by `propagate_closure_complete` on
+ingest) rolls up to `derivation_build.closure_complete`
+(`rollup_closure_complete_for_derivation` on build finalize), and `promote_ready`
+/ `dispatch_ready_builds` require every dependency to be terminal-success **and**
+`closure_complete`. This closes the runtime-vs-build-time edge gap (a dep marked
+done whose transitive runtime ref - e.g. `unit-bird.service` via `system-units` -
+was never cached would otherwise let a dependent dispatch and fail
+`InputsUnavailable` on a path the gate never checked). `compute_truly_substituted`
+likewise requires `closure_complete`.
+
+Self-heal clears the flag so the gate re-blocks: a reported-missing leaf with a
+producer is purged + rebuilt and `clear_closure_complete_for_referrers` drops
+`closure_complete` up the (transitive) referrer chain without deleting healthy
+NARs; a producerless source demotes its direct referrers (`demote_referrers_of`)
+so a referrer rebuild re-pushes it. The migration backfills the flag to a fixpoint
+over the existing cache and resets closure-incomplete terminal anchors so they
+rebuild. `references_contains_hash_matches_token_prefix_only` covers the precise
+reference match (hash as a `hash-name` token prefix, never a substring of a name);
+the closure-complete propagation, gate, and migration backfill are exercised
+end-to-end in CI (the db crate has no real-Postgres unit harness).
 
 Preventively, `expand_substituted_closure` now only marks a closure dep
 `Substituted` when its `derivation_output` rows are all `is_cached = true`;
