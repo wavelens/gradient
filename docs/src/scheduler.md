@@ -279,13 +279,18 @@ cannot make progress, auto-unparking once the blocker clears:
   pending set is `Created`, blocked behind the `closure_complete` gate with no
   in-flight build to drive a promotion. `propagate_closure_complete` only fires
   on completion events, so it can never reach this deadlock. The reconciler
-  detects it and self-heals in three steps: `requeue_failed_closure_for_eval`
+  detects it and self-heals in four steps: `requeue_failed_closure_for_eval`
   thaws any terminal-failed anchor in the eval's full dependency closure (a
   transitive dep a prior eval left failed and this eval pruned has no `build_job`
   here, so `requeue_failed_anchors` never reaches it and it blocks its dependents
-  with no dispatch to fail), then the `reconcile_closure_complete` fixpoint, then a
-  re-promote. It re-assesses: recovers to `Building` when the heal frees an anchor,
-  else parks `graph_stuck` (the blocked count) and retries each pass.
+  with no dispatch to fail); `reconcile_cached_anchors_for_eval` marks every anchor
+  in the closure whose outputs are all in our cache `Completed` + `closure_complete`
+  (build-graph state desyncs from the durable cache state - a derivation whose
+  artifacts exist sits `Created` after a requeue/cascade/demote and blocks its
+  dependents, so cache presence is trusted as the ground truth); then the
+  `reconcile_closure_complete` fixpoint and a re-promote. It re-assesses: recovers
+  to `Building` when the heal frees an anchor, else parks `graph_stuck` (the blocked
+  count) and retries each pass.
 
 Approval, no-cache and full-cache parks are owned by the webhook and cache hooks
 and are never unparked by the worker reconciler.

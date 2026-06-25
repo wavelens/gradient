@@ -962,6 +962,16 @@ impl<'a> BuildStateHandler<'a> {
             Err(e) => error!(error = %e, %evaluation_id, "requeue_failed_closure_for_eval during graph-unstick failed"),
         }
 
+        // Reconcile anchor state from cache state: an anchor whose outputs are all
+        // cached but whose build-graph state was reset (requeue/cascade/demote)
+        // sits Created and blocks its dependents though its artifacts exist. Mark
+        // it Completed + closure_complete so the gate sees the cached truth.
+        match gradient_db::reconcile_cached_anchors_for_eval(db, evaluation_id).await {
+            Ok(n) if n > 0 => info!(%evaluation_id, reconciled = n, "graph-unstick: reconciled fully-cached anchors to Completed"),
+            Ok(_) => {}
+            Err(e) => error!(error = %e, %evaluation_id, "reconcile_cached_anchors_for_eval during graph-unstick failed"),
+        }
+
         if let Err(e) = gradient_db::reconcile_closure_complete(db).await {
             error!(error = %e, %evaluation_id, "reconcile_closure_complete during graph-unstick failed");
         }

@@ -380,3 +380,49 @@ pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
 
     Ok(affected)
 }
+
+/// Reconcile anchor state from cache state across an evaluation's dependency
+/// closure: any anchor whose outputs are **all** present in our cache
+/// (`cached_path.file_hash`) is marked `Completed` + `closure_complete`, even if a
+/// requeue / dependency-failed cascade / demote previously reset it. The dispatch
+/// gate keys on the build-graph anchor state, which repeatedly desyncs from the
+/// durable cache state - a derivation whose artifacts exist sits `Created` and
+/// blocks its dependents with nothing to build. Cache presence is the ground truth
+/// for "is this built", so trust it here; the reactive heals
+/// (`demote_referrers_of` / absent-orphan recovery) remain the backstop for the
+/// rare case where a cached output's runtime closure is itself incomplete. Returns
+/// the number reconciled.
+pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
+    db: &C,
+    evaluation: gradient_types::EvaluationId,
+) -> Result<u64, DbErr> {
+    let affected = db
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            WITH RECURSIVE closure AS (
+                SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1
+                UNION
+                SELECT e.dependency FROM derivation_dependency e
+                JOIN closure c ON c.derivation = e.derivation
+            )
+            UPDATE derivation_build db
+            SET status = CASE WHEN db.status IN (3, 7) THEN db.status ELSE 3 END,
+                closure_complete = true,
+                edges_complete = true,
+                updated_at = (now() AT TIME ZONE 'UTC')
+            WHERE db.derivation IN (SELECT derivation FROM closure)
+              AND (db.status NOT IN (3, 7) OR NOT db.closure_complete)
+              AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
+              AND NOT EXISTS (
+                SELECT 1 FROM derivation_output o
+                LEFT JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
+                WHERE o.derivation = db.derivation AND cp.hash IS NULL)
+            "#,
+            [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
+        ))
+        .await?
+        .rows_affected();
+
+    Ok(affected)
+}

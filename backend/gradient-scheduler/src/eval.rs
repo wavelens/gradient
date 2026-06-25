@@ -947,6 +947,17 @@ pub async fn handle_eval_job_completed(
         error!(error = %e, %evaluation_id, "mark_edges_complete_for_eval failed");
     }
 
+    // Reconcile anchor state from cache state: a dep whose outputs are all cached
+    // but whose anchor was reset by a prior requeue/cascade/demote sits Created and
+    // blocks its dependents though its artifacts exist. Cache presence is the
+    // ground truth for "is this built", so mark such anchors Completed +
+    // closure_complete before promoting.
+    if let Err(e) =
+        gradient_db::reconcile_cached_anchors_for_eval(&state.worker_db, evaluation_id).await
+    {
+        error!(error = %e, %evaluation_id, "reconcile_cached_anchors_for_eval failed");
+    }
+
     // Self-heal stale `closure_complete` before promoting: anchors that
     // completed under older code (pre output-only substitution) never got the
     // build-edge flag set, so without this their dependents would sit in

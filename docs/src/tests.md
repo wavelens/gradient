@@ -2450,6 +2450,20 @@ The recursive-closure requeue walks `derivation_dependency` down from the eval's
 anchors and resets every `4/5/6/9` node to `Created`, so promotion (keyed on any
 `build_job`, not this eval's) rebuilds the failed subtree bottom-up.
 
+`reconcile_cached_anchors_for_eval` closes the underlying class: the dispatch gate
+keys on build-graph anchor state (`status` + `closure_complete`), which repeatedly
+desyncs from the durable cache state. A requeue / dependency-failed cascade / demote
+resets an anchor whose **outputs are all still in our cache** (`cached_path.file_hash`)
+to `Created`/`DependencyFailed`, so it satisfies neither gate arm and blocks its
+dependents though its artifacts exist (observed live: `tzdata-2026b` with all four
+outputs cached, anchor `status=0`/`closure_complete=f`, blocking the `etc` chain).
+Cache presence is the ground truth for "is this built", so the reconcile (over the
+eval's closure, in both the graph-stuck heal and `handle_eval_job_completed`) marks
+every fully-cached anchor `Completed` + `closure_complete`. The rare case where a
+cached output's runtime closure is itself incomplete is left to the reactive heals
+(`demote_referrers_of` / absent-orphan recovery) as the backstop. Exercised
+end-to-end in CI (the db crate has no real-Postgres unit harness).
+
 ## Pre-build evaluation stall when no worker exists (issue #97)
 
 `backend/gradient-db/src/state_machine/eval.rs::tests` extends the evaluation
