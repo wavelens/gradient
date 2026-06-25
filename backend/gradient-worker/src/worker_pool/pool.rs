@@ -10,24 +10,54 @@ use std::ops::{Deref, DerefMut};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, error, trace, warn};
 
-use crate::nix::eval_worker::{EvalRequest, EvalResponse, ResolvedItem};
+use crate::nix::eval_worker::{
+    EvalRequest, EvalResponse, ResolvedItem, MAX_EVAL_FRAME, decode_response, encode_request,
+};
 use crate::worker_pool::eval_stats::StatsDelta;
+
+async fn write_frame_async<W: tokio::io::AsyncWrite + Unpin>(
+    w: &mut W,
+    payload: &[u8],
+) -> std::io::Result<()> {
+    w.write_all(&(payload.len() as u32).to_le_bytes()).await?;
+    w.write_all(payload).await?;
+    w.flush().await
+}
+
+async fn read_frame_async<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> std::io::Result<Vec<u8>> {
+    let mut len_buf = [0u8; 4];
+    r.read_exact(&mut len_buf).await?;
+    let len = u32::from_le_bytes(len_buf) as usize;
+    if len > MAX_EVAL_FRAME {
+        return Err(std::io::Error::other(format!("frame too large: {len}")));
+    }
+
+    let mut buf = vec![0u8; len];
+    r.read_exact(&mut buf).await?;
+    Ok(buf)
+}
+
+pub(super) struct ResolveStream {
+    pub items: Vec<ResolvedItem>,
+    pub warnings: Vec<String>,
+    pub stats: Option<StatsDelta>,
+    pub crashed: bool,
+}
 
 /// Handle to a single live eval-worker subprocess.
 ///
-/// Owns the child plus its piped stdin/stdout. Each request writes one JSON
-/// line to stdin and reads one JSON line back from stdout - the protocol is
-/// strictly request/response so a single buffer is sufficient.
+/// Owns the child plus its piped stdin/stdout. The protocol is strictly
+/// request/response: one rkyv frame written to stdin, one rkyv frame read
+/// from stdout.
 pub struct EvalWorker {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
-    line: String,
     /// Number of `list` / `resolve` calls served since spawn. The pool
     /// uses this to recycle the subprocess after a configurable number
     /// of evaluations so Nix's Boehm-GC-allocated memory (which is
@@ -107,7 +137,6 @@ impl EvalWorker {
             child,
             stdin,
             stdout,
-            line: String::new(),
             evaluations_served: 0,
         })
     }
@@ -117,30 +146,20 @@ impl EvalWorker {
     /// instead of being returned to the pool).
     async fn request(&mut self, req: &EvalRequest) -> Result<EvalResponse> {
         trace!(pid = self.child.id(), ?req, "sending eval worker request");
-        let mut bytes = serde_json::to_vec(req).context("serializing request")?;
-        bytes.push(b'\n');
-        self.stdin
-            .write_all(&bytes)
+        let payload = encode_request(req).context("serializing request")?;
+        write_frame_async(&mut self.stdin, &payload)
             .await
             .context("writing to eval worker stdin")?;
 
-        self.stdin
-            .flush()
-            .await
-            .context("flushing eval worker stdin")?;
-
-        self.line.clear();
-        let n = self
-            .stdout
-            .read_line(&mut self.line)
-            .await
-            .context("reading eval worker response")?;
-
-        if n == 0 {
-            let pid = self.child.id();
-            let status =
-                match tokio::time::timeout(std::time::Duration::from_secs(2), self.child.wait())
-                    .await
+        let bytes = match read_frame_async(&mut self.stdout).await {
+            Ok(b) => b,
+            Err(_eof) => {
+                let pid = self.child.id();
+                let status = match tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    self.child.wait(),
+                )
+                .await
                 {
                     Ok(Ok(s)) => format!("{s}"),
                     Ok(Err(e)) => format!("wait error: {e}"),
@@ -162,23 +181,14 @@ impl EvalWorker {
                         diag
                     }
                 };
-            anyhow::bail!("eval worker closed pipe (pid={pid:?}, exit={status})");
-        }
+                anyhow::bail!("eval worker closed pipe (pid={pid:?}, exit={status})");
+            }
+        };
 
-        trace!(
-            pid = self.child.id(),
-            bytes = n,
-            "received eval worker response"
-        );
-        serde_json::from_str(self.line.trim_end())
-            .inspect_err(|error| {
-                error!(
-                    %error,
-                    raw_input = self.line.trim_end(),
-                    "Failed to parse eval worker JSON response"
-                );
-            })
-            .context("parsing eval worker response")
+        trace!(pid = self.child.id(), bytes = bytes.len(), "received eval worker response");
+        decode_response(&bytes)
+            .inspect_err(|error| error!(%error, "Failed to decode eval worker rkyv response"))
+            .context("decoding eval worker response")
     }
 
     pub(super) async fn plan(
@@ -255,19 +265,17 @@ impl EvalWorker {
     pub(super) async fn shutdown(mut self) {
         let pid = self.child.id();
         trace!(pid, "sending Shutdown to eval worker");
-        let mut bytes = match serde_json::to_vec(&EvalRequest::Shutdown) {
+        let payload = match encode_request(&EvalRequest::Shutdown) {
             Ok(b) => b,
             Err(e) => {
                 warn!(pid, error = %e, "failed to serialize Shutdown request");
                 return;
             }
         };
-        bytes.push(b'\n');
-        if let Err(e) = self.stdin.write_all(&bytes).await {
+        if let Err(e) = write_frame_async(&mut self.stdin, &payload).await {
             debug!(pid, error = %e, "failed to write Shutdown to eval worker");
             return;
         }
-        let _ = self.stdin.flush().await;
         drop(self.stdin);
         trace!(pid, "Shutdown sent; waiting for eval worker to exit");
         match tokio::time::timeout(std::time::Duration::from_secs(5), self.child.wait()).await {
@@ -284,19 +292,32 @@ impl EvalWorker {
         &mut self,
         repository: String,
         attrs: Vec<String>,
-    ) -> Result<(Vec<ResolvedItem>, Vec<String>, Option<StatsDelta>)> {
+    ) -> Result<ResolveStream> {
         self.evaluations_served += 1;
-        match self
-            .request(&EvalRequest::Resolve { repository, attrs })
-            .await?
-        {
-            EvalResponse::ResolveOk {
-                items,
-                warnings,
-                stats,
-            } => Ok((items, warnings, stats)),
-            EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
-            _ => anyhow::bail!("eval worker: unexpected response to Resolve"),
+        let payload = encode_request(&EvalRequest::Resolve { repository, attrs })
+            .context("serializing Resolve")?;
+        write_frame_async(&mut self.stdin, &payload)
+            .await
+            .context("writing Resolve to eval worker stdin")?;
+
+        let mut items = Vec::new();
+        loop {
+            let bytes = match read_frame_async(&mut self.stdout).await {
+                Ok(b) => b,
+                Err(_eof) => {
+                    return Ok(ResolveStream { items, warnings: vec![], stats: None, crashed: true });
+                }
+            };
+            match decode_response(&bytes).context("decoding Resolve frame")? {
+                EvalResponse::ResolveItem { item } => items.push(item),
+                EvalResponse::ResolveEnd { warnings, stats } => {
+                    return Ok(ResolveStream { items, warnings, stats, crashed: false });
+                }
+                EvalResponse::Err { .. } => {
+                    return Ok(ResolveStream { items, warnings: vec![], stats: None, crashed: true });
+                }
+                _ => anyhow::bail!("eval worker: unexpected frame during Resolve"),
+            }
         }
     }
 
