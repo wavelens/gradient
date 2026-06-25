@@ -300,6 +300,50 @@ pub async fn demote_referrers_of<C: ConnectionTrait>(
     Ok(producers)
 }
 
+/// Demote every output-only-cached **direct build dependency** of `derivation`
+/// (output present in our cache, not on a real upstream). Recovers an *absent
+/// orphan*: when a build fails on an input that has no producer row and no
+/// reference-index referrer, the orphan was pruned out of the graph under one of
+/// this build's cached deps - and being absent, it cannot be reached upward. So
+/// reach it from the known failing build downward: demoting its output-only-cached
+/// deps forces the next eval to re-walk them, re-record the dropped edges, and
+/// schedule the orphan. Upstream-fetchable deps (`external_url`) are left intact -
+/// their closure is served whole by the upstream. Returns producers reset to
+/// `Created`.
+pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
+    db: &C,
+    nar_storage: &gradient_storage::NarStore,
+    derivation: DerivationId,
+) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
+    use sea_orm::FromQueryResult;
+
+    #[derive(sea_orm::FromQueryResult)]
+    struct OutputHash {
+        hash: String,
+    }
+
+    let hashes = OutputHash::find_by_statement(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        r#"
+        SELECT DISTINCT o.hash
+        FROM derivation_dependency e
+        JOIN derivation_output o ON o.derivation = e.dependency
+        JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
+        WHERE e.derivation = $1 AND o.external_url IS NULL
+        "#,
+        [derivation.into_inner().into()],
+    ))
+    .all(db)
+    .await?;
+
+    let mut producers = Vec::new();
+    for h in hashes {
+        producers.extend(demote_cached_output(db, nar_storage, &h.hash).await?);
+    }
+
+    Ok(producers)
+}
+
 /// Self-heal flag clear: a proven-missing path leaves every (transitive)
 /// referrer closure-incomplete, so drop `closure_complete` up the chain - on the
 /// cached NARs and the anchors that produced them - without deleting the healthy

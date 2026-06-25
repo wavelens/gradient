@@ -1145,7 +1145,22 @@ incomplete edge set before the re-walk re-flushes a full one. Reproduced live: a
 crane `vendor-cargo-deps` was `Completed`/`closure_complete` with only 2 of its
 edges recorded, its `vendor-registry` dependency a 0-edge/0-`build_job` orphan, so
 `gradient-server-deps` dispatched and the prefetch closure-walk died
-`InputsUnavailable` on the orphan's output. References are fully normalized into `cached_path_reference` (one row per referrer
+`InputsUnavailable` on the orphan's output.
+
+The fourth and self-healing case is the **absent orphan**: the missing input has
+no producer row *and* no indexed referrer (pruned out so thoroughly it was never
+recorded, or its rows were deleted by an admin), so it cannot be reached upward -
+`demote_referrers_of` finds nothing. `reconcile_missing_inputs` flags this
+(`needs_dep_rewalk`) and reaches it downward from the known failing build:
+`demote_output_only_cached_deps` demotes that build's output-only-cached direct
+dependencies (`cached_path.file_hash` present, `external_url` NULL), so the next
+eval re-walks them and re-records the orphan plus its now-buildable subtree.
+Upstream deps (`external_url`) are left intact - a real upstream serves their
+closure. This is what lets an accidental cache-row deletion recover on the next
+evaluation instead of needing a manual reset; reproduced live with
+`cargo-package-lzma-sys-0.1.20`, which had no `derivation`/`derivation_output`/
+`cached_path_reference` rows at all. Exercised end-to-end in CI (the db crate has
+no real-Postgres unit harness). References are fully normalized into `cached_path_reference` (one row per referrer
 -> referenced store path, with `reference_hash` for indexed lookup and `position`
 for stored order); the `cached_path.references` text column is dropped. Referrer
 lookups (`referrers_of_hash`) and the runtime-closure walks become exact index

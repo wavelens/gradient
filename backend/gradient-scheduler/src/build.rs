@@ -477,6 +477,11 @@ impl<'a> BuildStateHandler<'a> {
         let mut referrers_demoted = 0usize;
         let mut sources_purged: Vec<&str> = Vec::new();
         let mut demoted_producers: Vec<DerivationId> = Vec::new();
+        // Set when a missing input cannot be reached upward (no producer row and
+        // no indexed referrer, or an orphan producer with no indexed referrer):
+        // an absent orphan pruned out of the graph. Recovered after the loop by
+        // demoting the failed build's cached deps so the next eval re-walks them.
+        let mut needs_dep_rewalk = false;
         for path in missing_paths {
             let Some(hash) = store_path_hash(path) else {
                 continue;
@@ -527,10 +532,11 @@ impl<'a> BuildStateHandler<'a> {
                         match gradient_db::demote_referrers_of(db, &self.state.nar_storage, hash)
                             .await
                         {
-                            Ok(refs) => {
+                            Ok(refs) if !refs.is_empty() => {
                                 referrers_demoted += refs.len();
                                 demoted_producers.extend(refs);
                             }
+                            Ok(_) => needs_dep_rewalk = true,
                             Err(e) => warn!(%path, error = %e, "reconcile: demote referrers (orphan producer) failed"),
                         }
                     }
@@ -542,14 +548,40 @@ impl<'a> BuildStateHandler<'a> {
                     // referrers - a pruned/substituted parent would otherwise never
                     // re-push it, stranding dependents forever.
                     match gradient_db::demote_referrers_of(db, &self.state.nar_storage, hash).await {
-                        Ok(drvs) => {
+                        Ok(drvs) if !drvs.is_empty() => {
                             referrers_demoted += drvs.len();
                             demoted_producers.extend(drvs);
                         }
+                        Ok(_) => needs_dep_rewalk = true,
                         Err(e) => warn!(%path, error = %e, "reconcile: demote referrers failed"),
                     }
                 }
                 Err(e) => warn!(%path, error = %e, "reconcile: purge cached output failed"),
+            }
+        }
+
+        // Absent orphan: a missing input with no producer row and no indexed
+        // referrer cannot be reached upward, so reach it downward from the failing
+        // build - demote its output-only-cached direct deps to force the next eval
+        // to re-walk them and re-record the orphan (and its now-buildable subtree).
+        if needs_dep_rewalk {
+            match gradient_db::demote_output_only_cached_deps(
+                db,
+                &self.state.nar_storage,
+                failed_derivation,
+            )
+            .await
+            {
+                Ok(drvs) => {
+                    referrers_demoted += drvs.len();
+                    demoted_producers.extend(&drvs);
+                    info!(
+                        %failed_derivation,
+                        count = drvs.len(),
+                        "reconcile: demoted output-only-cached direct deps to re-walk an absent orphan input"
+                    );
+                }
+                Err(e) => warn!(%failed_derivation, error = %e, "reconcile: demote output-only-cached deps failed"),
             }
         }
 

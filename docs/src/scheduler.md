@@ -205,6 +205,18 @@ dropped edge, and schedules the orphan. `demote_cached_output` also clears
 `edges_complete` on the reset producer, so a demoted anchor is re-walked before
 promotion can dispatch it on a stale, incomplete edge set.
 
+An **absent orphan** is the fourth case and the one that makes the whole thing
+self-heal without operator surgery: the missing input has *no* producer row and
+*no* indexed referrer (it was pruned out so thoroughly it was never recorded, or
+an admin deleted its rows), so it cannot be reached upward at all. Instead it is
+reached downward from the known failing build: `demote_output_only_cached_deps`
+demotes that build's output-only-cached direct dependencies (output present in our
+cache, no `external_url`), forcing the next eval to re-walk them and re-record the
+orphan plus its now-buildable subtree. Upstream-fetchable deps (`external_url`) are
+left untouched, since a real upstream serves their closure whole. So an accidental
+cache-row deletion recovers on the next evaluation rather than requiring a manual
+reset.
+
 #### Access and GC
 
 Read-only build endpoints (`GET /builds/{id}`, `/log`, `/downloads`,
