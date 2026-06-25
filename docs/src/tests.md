@@ -3059,6 +3059,39 @@ Unit tests in `backend/worker/src/worker_pool/pool.rs`:
   branch in `Drop` instead of being pushed back into the (now drained)
   idle vec.
 
+## Eval-worker IPC - rkyv framing + streaming resolve crash isolation
+
+The parent to `--eval-worker` subprocess IPC moved from line-delimited JSON to
+rkyv messages framed as a `u32` length prefix plus the archived bytes
+(`backend/gradient-worker/src/nix/eval_worker.rs`). `decode_request` /
+`decode_response` realign into `AlignedVec<16>` before `rkyv::from_bytes` (same
+constraint as the proto wire decoders above; a pipe-read `Vec<u8>` carries only
+`align_of::<u8>()`), and a `MAX_EVAL_FRAME` guard rejects a corrupt length
+prefix before allocating. `Resolve` now streams: the worker emits one
+`ResolveItem` frame per attr in request order, then a `ResolveEnd` terminator
+carrying the batch's warnings and stats; `Plan` / `List` / `Fingerprint` /
+`Checkpoint` stay single-frame.
+
+Unit tests (`backend/gradient-worker/src/nix/eval_worker.rs`):
+
+- `eval_request_rkyv_roundtrip` / `eval_response_rkyv_roundtrip` - every
+  request and response variant (including `ResolveItem` / `ResolveEnd`) survives
+  `encode` then `decode` unchanged, asserting via `PartialEq`.
+
+Crash-isolation tests (`backend/gradient-worker/src/worker_pool/resolver.rs`): a
+mid-stream worker death is recoverable because items stream in request order, so
+the streamed prefix is already resolved and only the unstreamed remainder is
+bisected. The stub models this by streaming the prefix before the first crasher
+and flagging `crashed`.
+
+- `no_crash_resolves_all_in_one_call` - a clean batch resolves in a single call
+  (no bisection).
+- `single_crasher_among_healthy_isolates_one_error` /
+  `two_crashers_isolate_independently` - a crashing attr is bisected down to a
+  per-attr error while its neighbours still resolve.
+- `transient_crash_succeeds_on_retry` - a single-attr remainder that crashes
+  once is retried (capped by `MAX_CRASH_ATTEMPTS`) and resolves on the retry.
+
 ## Prometheus metrics endpoint - `web/tests/metrics.rs`
 
 Covers `GET /metrics`, the Prometheus exposition endpoint introduced
