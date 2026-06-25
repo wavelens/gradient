@@ -194,6 +194,17 @@ demotes its direct **referrers** (`demote_referrers_of`) so a referrer rebuild
 re-pushes it. The migration backfills the flag to a fixpoint over the existing
 cache and resets any closure-incomplete terminal anchor so it rebuilds.
 
+An **orphan producer** is the third case: the missing leaf has a producing
+derivation, but that producer has no `build_job` (it was pruned out of the build
+graph because a referrer's output was cached without its closure under output-only
+substitution), so promotion can never queue it and the gentle flag clear leaves
+the referrer cached, pruned, and never re-walked. When `demote_cached_output`'s
+producer is not reachable (`derivation_is_reachable` is false), the referrers are
+demoted (`demote_referrers_of`) so the next eval re-walks them, re-records the
+dropped edge, and schedules the orphan. `demote_cached_output` also clears
+`edges_complete` on the reset producer, so a demoted anchor is re-walked before
+promotion can dispatch it on a stale, incomplete edge set.
+
 #### Access and GC
 
 Read-only build endpoints (`GET /builds/{id}`, `/log`, `/downloads`,

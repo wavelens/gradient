@@ -116,6 +116,20 @@ fn store_path_hash(store_path: &str) -> Option<&str> {
         .filter(|h| !h.is_empty())
 }
 
+/// Whether any of `derivations` is reachable (has a `build_job`, so promotion can
+/// schedule it). A producer with none is an orphan: pruned out of the build graph
+/// because a referrer was cached without its closure, it can never be queued and
+/// must instead be revived by re-walking its cached referrers.
+async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[DerivationId]) -> bool {
+    for d in derivations {
+        if gradient_db::derivation_is_reachable(db, *d).await.unwrap_or(false) {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Wraps `&ServerState` so build-lifecycle helpers don't repeat `state` as a parameter.
 pub(crate) struct BuildStateHandler<'a> {
     state: &'a Arc<ServerState>,
@@ -491,7 +505,6 @@ impl<'a> BuildStateHandler<'a> {
             match gradient_db::demote_cached_output(db, &self.state.nar_storage, hash).await {
                 Ok(drvs) if !drvs.is_empty() => {
                     purged += 1;
-                    demoted_producers.extend(drvs);
                     // The leaf rebuilds + re-pushes closure-complete; meanwhile drop
                     // the now-stale `closure_complete` up the chain so the dispatch
                     // gate re-blocks dependents until the closure is whole again.
@@ -499,6 +512,27 @@ impl<'a> BuildStateHandler<'a> {
                         gradient_db::clear_closure_complete_for_referrers(db, hash).await
                     {
                         warn!(%path, error = %e, "reconcile: clear closure_complete failed");
+                    }
+
+                    // If the producer is an orphan (no `build_job`, so promotion can
+                    // never queue it - it was pruned out of the build graph because
+                    // some referrer's output was cached without its closure), the
+                    // gentle flag clear is not enough: the referrer stays cached,
+                    // stays pruned, and the orphan is never re-walked. Demote the
+                    // referrers so the next eval re-walks them, re-records the edge,
+                    // and schedules the producer.
+                    let orphan = !any_reachable(db, &drvs).await;
+                    demoted_producers.extend(drvs);
+                    if orphan {
+                        match gradient_db::demote_referrers_of(db, &self.state.nar_storage, hash)
+                            .await
+                        {
+                            Ok(refs) => {
+                                referrers_demoted += refs.len();
+                                demoted_producers.extend(refs);
+                            }
+                            Err(e) => warn!(%path, error = %e, "reconcile: demote referrers (orphan producer) failed"),
+                        }
                     }
                 }
                 Ok(_) => {

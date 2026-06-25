@@ -251,7 +251,10 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     // would stay "succeeded" forever and every dependent fail `InputsUnavailable`
     // indefinitely. Reset it to a fresh build intent (Created, real build - not a
     // re-substitute of the deleted artifact); the next eval re-marks it
-    // substitutable if it is genuinely still on an upstream.
+    // substitutable if it is genuinely still on an upstream. `edges_complete` is
+    // cleared too: the artifact was gone because its build graph was incomplete
+    // (a pruned subtree under output-only substitution), so it must be re-walked
+    // before promotion can dispatch it on a stale edge set.
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
         db.execute(Statement::from_sql_and_values(
@@ -259,7 +262,7 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
             r#"
             UPDATE derivation_build
             SET status = 0, substitutable = false, substituted = false,
-                attempt = 0, closure_complete = false,
+                attempt = 0, closure_complete = false, edges_complete = false,
                 updated_at = (now() AT TIME ZONE 'UTC')
             WHERE derivation = ANY($1) AND status IN (3, 7)
             "#,

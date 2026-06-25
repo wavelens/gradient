@@ -1131,7 +1131,21 @@ Self-heal clears the flag so the gate re-blocks: a reported-missing leaf with a
 producer is purged + rebuilt and `clear_closure_complete_for_referrers` drops
 `closure_complete` up the (transitive) referrer chain without deleting healthy
 NARs; a producerless source demotes its direct referrers (`demote_referrers_of`)
-so a referrer rebuild re-pushes it. References are fully normalized into `cached_path_reference` (one row per referrer
+so a referrer rebuild re-pushes it. A third case is the **orphan producer**: the
+missing leaf has a producing derivation, but the eval pruned it out of the build
+graph (a referrer's output was cached without its closure under output-only
+substitution), so it carries no `build_job` and promotion can never queue it - the
+gentle flag clear leaves the referrer cached, pruned, and never re-walked.
+`reconcile_missing_inputs` detects this (`derivation_is_reachable` false for the
+demoted producer) and demotes the referrers so the next eval re-walks them,
+re-records the dropped `derivation_dependency` edge, and schedules the orphan.
+`demote_cached_output` additionally clears `edges_complete` on every reset
+producer, so a demoted anchor cannot be promoted and dispatched on its stale,
+incomplete edge set before the re-walk re-flushes a full one. Reproduced live: a
+crane `vendor-cargo-deps` was `Completed`/`closure_complete` with only 2 of its
+edges recorded, its `vendor-registry` dependency a 0-edge/0-`build_job` orphan, so
+`gradient-server-deps` dispatched and the prefetch closure-walk died
+`InputsUnavailable` on the orphan's output. References are fully normalized into `cached_path_reference` (one row per referrer
 -> referenced store path, with `reference_hash` for indexed lookup and `position`
 for stored order); the `cached_path.references` text column is dropped. Referrer
 lookups (`referrers_of_hash`) and the runtime-closure walks become exact index
