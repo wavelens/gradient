@@ -4837,6 +4837,16 @@ Backend (`cargo test -p gradient-nix --lib update_input`):
   `rev`/`narHash` with a natively recomputed hash (one case per supported input
   type).
 
+Backend (`cargo test -p gradient-flake-lock --lib`):
+- `only_git_keeps_ref_in_locked` - `LockedRef::locked_keeps_ref` is true only for
+  plain `git`; the github-family schemes pin by `rev` alone.
+- `bumps_changed_input` / `drops_stale_ref_from_github_locked` - a bumped
+  `github` node never carries a `ref` in its `locked` block (nix rejects a github
+  input holding both a `rev` and a branch/tag), and an already-poisoned lock
+  heals on the next bump.
+- `keeps_ref_for_git_inputs` - a `git` node keeps its `ref` alongside the bumped
+  `rev`, matching what nix writes for that fetcher.
+
 Backend (`cargo test -p gradient-ci --lib actions::open_pr`):
 - `matcher_fires_only_on_input_update` - the action's verify-gate matcher
   (default `build.completed`) fires for an `input_update` evaluation and is a

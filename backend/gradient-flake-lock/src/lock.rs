@@ -105,6 +105,13 @@ impl Node {
 }
 
 impl LockedRef {
+    /// Whether nix keeps a branch/tag `ref` in this fetcher's `locked` block.
+    /// The github-family schemes pin by `rev` alone and reject a locked node
+    /// carrying both, so only plain `git` keeps its `ref`.
+    pub fn locked_keeps_ref(&self) -> bool {
+        matches!(self, Self::Git { .. })
+    }
+
     /// Parse a typed reference from a `locked`/`original` block.
     pub fn from_map(map: &Map<String, Value>) -> Result<Self> {
         let ty = map.get("type").and_then(Value::as_str).context("ref has no `type`")?;
@@ -192,6 +199,19 @@ mod tests {
                 repo: "nixpkgs".into(),
                 ref_: Some("nixos-unstable".into()),
             }
+        );
+    }
+
+    #[test]
+    fn only_git_keeps_ref_in_locked() {
+        assert!(LockedRef::Git { url: "u".into(), ref_: Some("main".into()) }.locked_keeps_ref());
+        assert!(
+            !LockedRef::Github { owner: "o".into(), repo: "r".into(), ref_: Some("main".into()) }
+                .locked_keeps_ref()
+        );
+        assert!(
+            !LockedRef::Gitlab { owner: "o".into(), repo: "r".into(), ref_: None }
+                .locked_keeps_ref()
         );
     }
 

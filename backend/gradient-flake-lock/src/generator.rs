@@ -116,11 +116,11 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
                 .resolve(&reference)
                 .await
                 .with_context(|| format!("resolving newest revision for input `{input}`"))?;
-            resolutions.push((input.clone(), node_name.clone(), old_rev, resolved));
+            resolutions.push((input.clone(), node_name.clone(), old_rev, reference, resolved));
         }
 
         let mut bumped = Vec::new();
-        for (input, node_name, old_rev, resolved) in resolutions {
+        for (input, node_name, old_rev, reference, resolved) in resolutions {
             if old_rev.as_deref() == Some(resolved.rev.as_str()) {
                 continue;
             }
@@ -133,9 +133,11 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
             locked.insert("rev".into(), Value::from(resolved.rev.clone()));
             locked.insert("narHash".into(), Value::from(resolved.nar_hash));
             locked.insert("lastModified".into(), Value::from(resolved.last_modified));
-            if let Some(r) = resolved.ref_ {
-                locked.insert("ref".into(), Value::from(r));
-            }
+
+            match resolved.ref_.filter(|_| reference.locked_keeps_ref()) {
+                Some(r) => locked.insert("ref".into(), Value::from(r)),
+                None => locked.remove("ref"),
+            };
 
             bumped.push(BumpedInput { name: input, old_rev, new_rev: resolved.rev });
         }
@@ -167,6 +169,7 @@ mod tests {
         async fn resolve(&self, reference: &LockedRef) -> Result<ResolvedRev> {
             let key = match reference {
                 LockedRef::Github { repo, .. } => repo.clone(),
+                LockedRef::Git { url, .. } => url.clone(),
                 _ => anyhow::bail!("unexpected ref in test"),
             };
             self.0.get(&key).cloned().context("no canned resolution")
@@ -226,6 +229,107 @@ mod tests {
         assert_eq!(
             node.locked.as_ref().unwrap()["narHash"].as_str().unwrap(),
             "sha256-NEW0000000000000000000000000000000000000000="
+        );
+        assert!(
+            !node.locked.as_ref().unwrap().contains_key("ref"),
+            "github locked blocks must pin by rev alone; a ref makes nix reject the input"
+        );
+    }
+
+    #[tokio::test]
+    async fn drops_stale_ref_from_github_locked() {
+        let dir = tempfile::tempdir().unwrap();
+        let poisoned = r#"{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1700000000,
+        "narHash": "sha256-OLD0000000000000000000000000000000000000000=",
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "rev": "1111111111111111111111111111111111111111",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": { "inputs": { "nixpkgs": "nixpkgs" } }
+  },
+  "root": "root",
+  "version": 7
+}
+"#;
+        std::fs::write(dir.path().join("flake.lock"), poisoned).unwrap();
+
+        let resolved = ResolvedRev {
+            rev: "2222222222222222222222222222222222222222".into(),
+            ref_: Some("nixos-unstable".into()),
+            nar_hash: "sha256-NEW0000000000000000000000000000000000000000=".into(),
+            last_modified: 1800000000,
+        };
+        let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::from([("nixpkgs".into(), resolved)])));
+
+        let patch = lockgen.produce(dir.path(), &["nixpkgs".into()]).await.unwrap().unwrap();
+        let out = FlakeLock::parse(&patch.edits[0].contents).unwrap();
+        assert!(
+            !out.nodes["nixpkgs"].locked.as_ref().unwrap().contains_key("ref"),
+            "a previously poisoned github locked block must heal on the next bump"
+        );
+    }
+
+    #[tokio::test]
+    async fn keeps_ref_for_git_inputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock = r#"{
+  "nodes": {
+    "dep": {
+      "locked": {
+        "lastModified": 1700000000,
+        "narHash": "sha256-OLD0000000000000000000000000000000000000000=",
+        "ref": "refs/heads/main",
+        "rev": "1111111111111111111111111111111111111111",
+        "revCount": 10,
+        "type": "git",
+        "url": "https://example.com/dep.git"
+      },
+      "original": {
+        "ref": "refs/heads/main",
+        "type": "git",
+        "url": "https://example.com/dep.git"
+      }
+    },
+    "root": { "inputs": { "dep": "dep" } }
+  },
+  "root": "root",
+  "version": 7
+}
+"#;
+        std::fs::write(dir.path().join("flake.lock"), lock).unwrap();
+
+        let resolved = ResolvedRev {
+            rev: "2222222222222222222222222222222222222222".into(),
+            ref_: Some("refs/heads/main".into()),
+            nar_hash: "sha256-NEW0000000000000000000000000000000000000000=".into(),
+            last_modified: 1800000000,
+        };
+        let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::from([(
+            "https://example.com/dep.git".into(),
+            resolved,
+        )])));
+
+        let patch = lockgen.produce(dir.path(), &["dep".into()]).await.unwrap().unwrap();
+        let out = FlakeLock::parse(&patch.edits[0].contents).unwrap();
+        let locked = out.nodes["dep"].locked.as_ref().unwrap();
+        assert_eq!(locked["rev"].as_str().unwrap(), "2222222222222222222222222222222222222222");
+        assert_eq!(
+            locked["ref"].as_str().unwrap(),
+            "refs/heads/main",
+            "git locked blocks keep their ref alongside rev"
         );
     }
 
