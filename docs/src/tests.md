@@ -1464,6 +1464,13 @@ Backend (`cargo test -p scheduler --tests scheduler_tests::job_notify_bump_is_no
   worker idle only after its last in-flight job is released, so the dispatch kick
   fires for a now-idle worker (serial chain) but not while it is still building
   (e.g. 1 of 8 done).
+- `worker_pool::tests::reregister_preserves_reported_capabilities` - a reconnect
+  or server-initiated re-auth re-registers a worker, but architectures/features/
+  sizing arrive once per session via a separate `WorkerCapabilities` message the
+  worker need not re-send. `register` must carry the prior slot's reported
+  capabilities over; otherwise the slot resets to empty architectures,
+  `can_build` rejects every real-arch job, and builds queue forever against an
+  idle worker (eval parked `Waiting` with a stale, empty-`unmet` reason).
 
 ## Push-mode signature placeholders - param-limit chunking
 

@@ -93,6 +93,23 @@ impl WorkerPool {
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<OrganizationId>,
     ) -> (Arc<Notify>, mpsc::UnboundedReceiver<(String, String)>) {
+        // Carry the prior connection's reported capabilities into the new slot.
+        // Architectures/features/sizing arrive once per session via a separate
+        // `WorkerCapabilities` message, but a reconnect or server-initiated
+        // re-auth re-registers the worker without it re-sending them - so without
+        // this the slot resets to empty architectures and `can_build` rejects
+        // every real-arch job, stranding the worker idle while builds queue.
+        let prior = self.workers.get(&id).map(|slot| {
+            let s = slot.shared();
+            (
+                s.architectures.clone(),
+                s.system_features.clone(),
+                s.max_concurrent_builds,
+                s.cpu_count,
+                s.ram_total_mb,
+                s.cpu_core_score,
+            )
+        });
         let notify = Arc::new(Notify::new());
         let (abort_tx, abort_rx) = mpsc::unbounded_channel();
         let worker = TypedWorker::<Active>::new(
@@ -101,7 +118,18 @@ impl WorkerPool {
             Arc::clone(&notify),
             abort_tx,
         );
-        self.workers.insert(id, WorkerSlot::Active(worker));
+        self.workers.insert(id.clone(), WorkerSlot::Active(worker));
+        if let Some((architectures, system_features, max_concurrent_builds, cpu_count, ram_total_mb, cpu_core_score)) = prior
+            && let Some(slot) = self.workers.get_mut(&id)
+        {
+            let s = slot.shared_mut();
+            s.architectures = architectures;
+            s.system_features = system_features;
+            s.max_concurrent_builds = max_concurrent_builds;
+            s.cpu_count = cpu_count;
+            s.ram_total_mb = ram_total_mb;
+            s.cpu_core_score = cpu_core_score;
+        }
         (notify, abort_rx)
     }
 
@@ -466,6 +494,25 @@ mod tests {
         assert_eq!(view.cpu_count, 8);
         assert_eq!(view.ram_total_mb, 16384);
         assert_eq!(view.cpu_core_score, 1200);
+    }
+
+    #[test]
+    fn reregister_preserves_reported_capabilities() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec!["kvm".into()], 4, 8, 16384, 1200);
+
+        // A reconnect/re-auth re-registers without the worker re-sending caps;
+        // architectures and sizing must survive so the worker stays matchable.
+        pool.register("w1".into(), caps(), HashSet::new());
+
+        let workers = pool.all_workers();
+        assert_eq!(workers[0].architectures, vec!["x86_64-linux"]);
+        assert_eq!(workers[0].system_features, vec!["kvm"]);
+        assert_eq!(workers[0].max_concurrent_builds, 4);
+        let view = pool.metrics_for("w1").unwrap();
+        assert_eq!(view.cpu_count, 8);
+        assert_eq!(view.ram_total_mb, 16384);
     }
 
     #[test]
