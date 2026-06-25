@@ -902,6 +902,19 @@ eval-time substitutability probe (scheduler), so it lives in `gradient-core`.
 - `parse_upstream_narinfo_ignores_unparseable_sizes` - malformed `NarSize` /
   `FileSize` fall back to `None` rather than aborting the parse.
 
+`compute_upstream_substitutable` flags an anchor `substitutable` only when every
+output is available on an **upstream** cache (`external_url`, set from a narinfo
+probe hit - upstream serves the whole closure). Internal cache presence
+(`is_cached`) is deliberately excluded: an output sitting in our store with an
+**incomplete** runtime closure (a dependency failed or was purged) would
+otherwise be flagged substitutable, fail substitution, and escalate into a build
+whose inputs were never produced - the `activate`/`unit-bird.service`
+`InputsUnavailable` loop. The genuinely-whole internal case is handled earlier by
+`is_truly_substituted` (gated on `closure_complete`, which resigns rather than
+dispatches). Exercised end-to-end by the cache integration test (the narinfo
+probe + DB writes have no MockDatabase harness); `derivations_all_outputs_available`
+covers the all-outputs-available predicate in isolation.
+
 ## Re-offering re-queued jobs
 
 Backend (`cargo test -p gradient-scheduler --lib worker_pool`):

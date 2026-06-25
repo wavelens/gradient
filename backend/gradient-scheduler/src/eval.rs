@@ -627,10 +627,17 @@ impl<'a> EvalResultProcessor<'a> {
             }
         }
 
-        // A derivation is substitutable iff every output is cached somewhere.
+        // A derivation is substitutable iff every output is available on an
+        // upstream cache (which serves the whole closure). Internal cache presence
+        // (`is_cached`) does NOT count here: an output sitting in our store but
+        // whose runtime closure is incomplete (a dep failed/was purged) would
+        // otherwise be flagged substitutable, then fail substitution and escalate
+        // into a build whose inputs were never produced - the activate/unit-bird
+        // InputsUnavailable loop. The genuinely-whole internal case is handled
+        // earlier by `is_truly_substituted` (gated on `closure_complete` → resign).
         let available: HashSet<String> = outputs
             .iter()
-            .filter(|o| o.is_cached_anywhere())
+            .filter(|o| o.external_url.is_some())
             .map(|o| o.hash.clone())
             .chain(found.keys().cloned())
             .collect();
