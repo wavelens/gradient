@@ -295,6 +295,11 @@ impl ProtoSession<Registered> {
         let nar_serve_semaphore = Arc::new(Semaphore::new(proto_cfg.max_concurrent_nar_serves));
         let mut eval_cache = EvalCacheReceiveStore::new(max_partial_bytes);
 
+        // Lock-free handle into the worker's `last_seen`, stamped on every
+        // inbound frame so the liveness watchdog can spot a worker that died
+        // without a clean TCP close.
+        let last_seen = scheduler.worker_last_seen(&peer_id).await;
+
         loop {
             let msg = tokio::select! {
                 msg = recv_client_msg(&mut reader) => match msg {
@@ -327,6 +332,15 @@ impl ProtoSession<Registered> {
                     None => break,
                 },
             };
+
+            // Reaching here means a real inbound frame (the other select arms
+            // all `continue`), so the worker is alive: refresh its deadline.
+            if let Some(ls) = &last_seen {
+                ls.store(
+                    gradient_types::now().and_utc().timestamp_millis(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+            }
 
             let mut ctx = DispatchContext {
                 writer: &writer,

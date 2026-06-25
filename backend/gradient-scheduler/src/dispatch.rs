@@ -29,7 +29,7 @@ use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use super::Scheduler;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
@@ -50,6 +50,43 @@ pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     shutdown.spawn(async move { build_dispatch_loop(s2).await });
     shutdown.spawn(async move { worker_sample_loop(s4).await });
     shutdown.spawn(async move { instance_metrics_loop(s5).await });
+    let s6 = Arc::clone(&scheduler);
+    shutdown.spawn(async move { worker_liveness_loop(s6).await });
+}
+
+/// Unregister workers that have gone silent past the heartbeat deadline.
+///
+/// A worker heartbeats every 10 s; the server otherwise learns of a departure
+/// only when the TCP connection closes. A hard OOM-kill, a frozen host, or a
+/// network partition can leave the socket half-open with no clean close, so the
+/// worker stays "connected" and its in-flight eval/build jobs sit non-terminal
+/// forever. This watchdog stamps each worker's `last_seen` (in the session loop)
+/// and reuses [`Scheduler::unregister_worker`] - which re-queues the orphaned
+/// jobs and resets their DB rows - the moment a worker exceeds the deadline.
+async fn worker_liveness_loop(scheduler: Arc<Scheduler>) {
+    let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
+    if timeout_secs == 0 {
+        info!("worker liveness watchdog disabled (worker_heartbeat_timeout_secs = 0)");
+        return;
+    }
+
+    let timeout_ms = (timeout_secs as i64) * 1000;
+    // Poll ~3x per deadline so worst-case detection latency is timeout + tick.
+    let tick = (timeout_secs / 3).max(5);
+    let mut interval = tokio::time::interval(Duration::from_secs(tick));
+    loop {
+        interval.tick().await;
+        let now_ms = gradient_types::now().and_utc().timestamp_millis();
+        for peer_id in scheduler.stale_workers(now_ms, timeout_ms).await {
+            warn!(
+                %peer_id,
+                timeout_secs,
+                "worker silent past heartbeat deadline - presumed dead (OOM-kill / frozen \
+                 host / network partition); unregistering and re-queuing its jobs"
+            );
+            scheduler.unregister_worker(&peer_id).await;
+        }
+    }
 }
 
 /// Periodically recompute the windowed [`gradient_score::InstanceContext`] snapshot

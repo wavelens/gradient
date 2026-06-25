@@ -56,6 +56,20 @@ impl Scheduler {
         self.worker_pool.read().await.is_connected(peer_id)
     }
 
+    /// Clone a connected worker's `last_seen` handle so the session loop can
+    /// stamp it lock-free on every inbound frame.
+    pub async fn worker_last_seen(
+        &self,
+        peer_id: &str,
+    ) -> Option<std::sync::Arc<std::sync::atomic::AtomicI64>> {
+        self.worker_pool.read().await.last_seen_handle(peer_id)
+    }
+
+    /// Connected peers silent longer than `timeout_ms` as of `now_ms`.
+    pub async fn stale_workers(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
+        self.worker_pool.read().await.stale_peers(now_ms, timeout_ms)
+    }
+
     pub async fn worker_authorized_for_org(&self, worker_id: &str, org: OrganizationId) -> bool {
         self.worker_pool
             .read()

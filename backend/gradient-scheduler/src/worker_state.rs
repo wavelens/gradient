@@ -20,6 +20,7 @@
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 
 use gradient_types::ids::OrganizationId;
 use tokio::sync::{Notify, mpsc};
@@ -84,6 +85,11 @@ pub struct WorkerShared {
     pub reauth_notify: Arc<Notify>,
     /// Channel for sending abort messages to the handler for this worker.
     pub abort_tx: mpsc::UnboundedSender<(String, String)>,
+    /// Wall-clock epoch-millis of the last message received from this worker.
+    /// Bumped lock-free by the session loop on every inbound frame and read by
+    /// the liveness watchdog to detect a worker that died without a clean TCP
+    /// close. Shared so the session loop holds a handle without the pool lock.
+    pub last_seen: Arc<AtomicI64>,
 }
 
 // ── TypedWorker<S> ────────────────────────────────────────────────────────────
@@ -137,6 +143,9 @@ impl TypedWorker<Active> {
                 sent_candidates: HashSet::new(),
                 reauth_notify,
                 abort_tx,
+                last_seen: Arc::new(AtomicI64::new(
+                    gradient_types::now().and_utc().timestamp_millis(),
+                )),
             },
             _state: PhantomData,
         }

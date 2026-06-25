@@ -696,6 +696,19 @@ in {
           default = 86400;
         };
 
+        workerHeartbeatTimeoutSecs = lib.mkOption {
+          description = ''
+            Seconds a connected worker may go silent before the server declares
+            it dead and re-queues its in-flight jobs. The worker heartbeats every
+            10 s, so the default 30 s tolerates three missed beats. This is the
+            only detector for a worker that dies without a clean TCP close (hard
+            OOM-kill, frozen host, network partition). Set to 0 to disable the
+            liveness watchdog.
+          '';
+          type = lib.types.ints.unsigned;
+          default = 30;
+        };
+
         allowAnonymousCache = lib.mkOption {
           description = ''
             Allow unauthenticated clients to access `GET /cache/{cache}/proto`
@@ -866,6 +879,7 @@ in {
         GRADIENT_MAX_CONCURRENT_NAR_SERVES = toString cfg.settings.maxConcurrentNarServes;
         GRADIENT_MAX_NAR_BUFFER_BYTES = toString cfg.settings.maxNarBufferBytes;
         GRADIENT_NAR_PARTIAL_TTL_SECS = toString cfg.settings.narPartialTtlSecs;
+        GRADIENT_WORKER_HEARTBEAT_TIMEOUT_SECS = toString cfg.settings.workerHeartbeatTimeoutSecs;
         GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE = lib.boolToString cfg.settings.allowAnonymousCache;
         GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP = toString cfg.settings.anonMaxConnectionsPerIp;
         GRADIENT_PROTO_ANON_RATE_PER_SECOND = toString cfg.settings.anonRatePerSecond;

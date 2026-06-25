@@ -278,6 +278,8 @@ WorkerMetrics {
 
 The server replaces the previous values immediately on each heartbeat; a worker that never reports metrics is scored against zeroed dynamic fields (its static caps still apply). The reference worker emits `WorkerMetrics` on its ~10 s heartbeat tick, sampling host load off the dispatch thread. `disk_speed_mbps` and `network_speed_mbps` are passive EWMAs: disk from per-build cgroup `io.stat` over build wall-time, network from real NAR transfer bytes over time. Both stay `None` until the first build / NAR transfer.
 
+**Liveness.** The 10 s heartbeat doubles as the server's liveness signal: the session loop stamps each worker's `last_seen` on every inbound frame, and a watchdog (`worker_liveness_loop`) unregisters any worker silent past `worker_heartbeat_timeout_secs` (default 30 s), re-queuing its in-flight jobs via the normal `unregister_worker` path. Without this, a worker that dies without a clean TCP close - a hard OOM-kill, a frozen host, or a network partition leaving the socket half-open - would stay "connected" and its eval/build jobs would sit non-terminal forever. A graceful disconnect is still handled immediately on connection close; the watchdog only covers the silent-death case.
+
 ### Ephemeral Workers
 
 Workers can run in ephemeral VMs (e.g. RAM-only, no persistent disk). To prevent resource leaks and state accumulation, workers can decide internally when to stop accepting work (e.g. after N jobs, or based on memory pressure). When ready to recycle, the worker sends `Draining`, waits for in-flight jobs to finish, then disconnects cleanly. The VM can then be destroyed and a fresh one spawned.

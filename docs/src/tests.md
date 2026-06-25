@@ -5135,3 +5135,22 @@ The upstream `FileHash` is parsed into `CachedPath.file_hash` by
 `parse_upstream_narinfo` (`backend/gradient-core/src/upstream.rs`), asserted in
 `parse_upstream_narinfo_full_fields`, and persisted on `derivation_output.file_hash`
 (migration `m20260625_000001`) so the relay can report it without recomputation.
+
+## Worker liveness watchdog detects silent (OOM-killed) workers
+
+The server otherwise learns of a departing worker only when its TCP connection
+closes; a hard OOM-kill, a frozen host, or a network partition can leave the
+socket half-open, so the worker stays "connected" and its in-flight eval/build
+jobs sit non-terminal forever. The session loop stamps each worker's `last_seen`
+on every inbound frame (the worker heartbeats every 10 s) and a watchdog
+(`worker_liveness_loop`, `backend/gradient-scheduler/src/dispatch.rs`) unregisters
+any worker silent past `worker_heartbeat_timeout_secs` (default 30 s), reusing
+`unregister_worker` to re-queue its jobs. The deadline logic is covered in
+`backend/gradient-scheduler/src/worker_pool.rs`:
+
+- `stale_peers_flags_only_silent_workers` - a just-heard-from worker is not
+  stale, a worker exactly at the deadline is not yet stale (strict `>`), one
+  millisecond past it is flagged, and a freshly registered worker is stamped
+  with `now` so it is never immediately stale.
+- `last_seen_handle_none_for_unknown_worker` - the handle lookup returns `None`
+  for a peer that is not connected.

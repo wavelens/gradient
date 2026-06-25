@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use tokio::sync::{Notify, mpsc};
 
@@ -378,6 +379,26 @@ impl WorkerPool {
             .map(|(id, slot)| self.info_for(id, slot))
             .collect()
     }
+
+    /// Clone the `last_seen` handle for a connected worker so the session loop
+    /// can stamp it lock-free on each inbound frame. `None` if not connected.
+    pub fn last_seen_handle(&self, id: &str) -> Option<Arc<AtomicI64>> {
+        self.workers
+            .get(id)
+            .map(|slot| Arc::clone(&slot.shared().last_seen))
+    }
+
+    /// Peers whose last inbound frame is older than `timeout_ms` relative to
+    /// `now_ms` - i.e. silent past the heartbeat deadline, so presumed dead.
+    pub fn stale_peers(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
+        self.workers
+            .iter()
+            .filter(|(_, slot)| {
+                now_ms - slot.shared().last_seen.load(Ordering::Relaxed) > timeout_ms
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
 }
 
 // ── WorkerInfo ────────────────────────────────────────────────────────────────
@@ -737,5 +758,41 @@ mod tests {
     fn test_request_reauth_noop_for_unknown_worker() {
         let pool = WorkerPool::new();
         pool.request_reauth("nonexistent");
+    }
+
+    #[test]
+    fn last_seen_handle_none_for_unknown_worker() {
+        let pool = WorkerPool::new();
+        assert!(pool.last_seen_handle("nope").is_none());
+    }
+
+    #[test]
+    fn stale_peers_flags_only_silent_workers() {
+        let mut pool = WorkerPool::new();
+        pool.register("w1".into(), caps(), HashSet::new());
+        let handle = pool
+            .last_seen_handle("w1")
+            .expect("registered worker exposes a last_seen handle");
+
+        let now_ms = 1_000_000_000_000i64;
+        let timeout_ms = 30_000i64;
+
+        // Just heard from it: not stale.
+        handle.store(now_ms, Ordering::Relaxed);
+        assert!(pool.stale_peers(now_ms, timeout_ms).is_empty());
+
+        // Exactly at the deadline: still not stale (strict `>`).
+        handle.store(now_ms - timeout_ms, Ordering::Relaxed);
+        assert!(pool.stale_peers(now_ms, timeout_ms).is_empty());
+
+        // One millisecond past the deadline: stale.
+        handle.store(now_ms - timeout_ms - 1, Ordering::Relaxed);
+        assert_eq!(pool.stale_peers(now_ms, timeout_ms), vec!["w1".to_string()]);
+
+        // A freshly registered worker is stamped with `now`, so it is never
+        // immediately stale against the real clock.
+        pool.register("w2".into(), caps(), HashSet::new());
+        let real_now = gradient_types::now().and_utc().timestamp_millis();
+        assert!(!pool.stale_peers(real_now, timeout_ms).contains(&"w2".to_string()));
     }
 }
