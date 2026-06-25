@@ -42,6 +42,13 @@ async fn read_frame_async<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> std::io
     Ok(buf)
 }
 
+pub(super) struct ResolveStream {
+    pub items: Vec<ResolvedItem>,
+    pub warnings: Vec<String>,
+    pub stats: Option<StatsDelta>,
+    pub crashed: bool,
+}
+
 /// Handle to a single live eval-worker subprocess.
 ///
 /// Owns the child plus its piped stdin/stdout. The protocol is strictly
@@ -285,11 +292,33 @@ impl EvalWorker {
         &mut self,
         repository: String,
         attrs: Vec<String>,
-    ) -> Result<(Vec<ResolvedItem>, Vec<String>, Option<StatsDelta>)> {
-        // TODO(task-3): replace with streaming ResolveItem/ResolveEnd reader
-        let _ = (repository, attrs);
+    ) -> Result<ResolveStream> {
         self.evaluations_served += 1;
-        anyhow::bail!("resolve not yet implemented for streaming protocol")
+        let payload = encode_request(&EvalRequest::Resolve { repository, attrs })
+            .context("serializing Resolve")?;
+        write_frame_async(&mut self.stdin, &payload)
+            .await
+            .context("writing Resolve to eval worker stdin")?;
+
+        let mut items = Vec::new();
+        loop {
+            let bytes = match read_frame_async(&mut self.stdout).await {
+                Ok(b) => b,
+                Err(_eof) => {
+                    return Ok(ResolveStream { items, warnings: vec![], stats: None, crashed: true });
+                }
+            };
+            match decode_response(&bytes).context("decoding Resolve frame")? {
+                EvalResponse::ResolveItem { item } => items.push(item),
+                EvalResponse::ResolveEnd { warnings, stats } => {
+                    return Ok(ResolveStream { items, warnings, stats, crashed: false });
+                }
+                EvalResponse::Err { .. } => {
+                    return Ok(ResolveStream { items, warnings: vec![], stats: None, crashed: true });
+                }
+                _ => anyhow::bail!("eval worker: unexpected frame during Resolve"),
+            }
+        }
     }
 
     /// Resident set size of the subprocess in bytes, read from
