@@ -826,16 +826,6 @@ pub async fn relay_external_cached_outputs(
             .ok_or_else(|| anyhow::anyhow!("upstream reported {path} but the NAR object is missing"))?;
 
         let kind = meta.url.as_deref().map(detect_compression).unwrap_or(Compression::Zstd);
-        let raw = decompress(&compressed, kind)
-            .with_context(|| format!("{kind:?} decompress for {path}"))?;
-        if let Some(claimed) = meta.nar_hash.as_deref() {
-            let actual: [u8; 32] = Sha256::digest(&raw).into();
-            let want = parse_nar_hash_to_bytes(claimed)
-                .with_context(|| format!("invalid upstream nar_hash for {path}"))?;
-            if actual != want {
-                anyhow::bail!("upstream NAR hash mismatch for {path}");
-            }
-        }
 
         let put_url = push
             .get(path)
@@ -850,6 +840,52 @@ pub async fn relay_external_cached_outputs(
             .into_iter()
             .map(|r| r.strip_prefix("/nix/store/").unwrap_or(r.as_str()).to_string())
             .collect();
+
+        // Pure relay: the upstream NAR is already zstd with a window at our
+        // level-6 threshold and carries the file/nar metadata, so store the
+        // bytes verbatim - no decompress, no recompress, no rehash.
+        let verbatim = (kind == Compression::Zstd
+            && zstd_window_size(&compressed).is_some_and(|w| w >= LEVEL6_WINDOW_BYTES))
+            .then(|| Some((meta.file_hash.clone()?, meta.nar_hash.clone()?, meta.nar_size?)))
+            .flatten();
+
+        if let Some((file_hash, nar_hash, nar_size)) = verbatim {
+            crate::proto::nar::upload_presigned_compressed(
+                &updater.job_id,
+                path,
+                &compressed,
+                crate::proto::nar::CompressedNarMeta {
+                    file_hash,
+                    file_size: compressed.len() as u64,
+                    nar_hash,
+                    nar_size,
+                },
+                references,
+                meta.deriver.clone(),
+                &put_url,
+                "PUT",
+                &[],
+                &updater.writer,
+            )
+            .await
+            .with_context(|| format!("relay-push {path} into our cache"))?;
+
+            debug!(%path, "relayed substitute NAR verbatim into our cache");
+            continue;
+        }
+
+        // Weaker/absent upstream compression: decompress (verifying against the
+        // upstream nar_hash) and let upload_presigned_bytes recompress at level 6.
+        let raw = decompress(&compressed, kind)
+            .with_context(|| format!("{kind:?} decompress for {path}"))?;
+        if let Some(claimed) = meta.nar_hash.as_deref() {
+            let actual: [u8; 32] = Sha256::digest(&raw).into();
+            let want = parse_nar_hash_to_bytes(claimed)
+                .with_context(|| format!("invalid upstream nar_hash for {path}"))?;
+            if actual != want {
+                anyhow::bail!("upstream NAR hash mismatch for {path}");
+            }
+        }
 
         crate::proto::nar::upload_presigned_bytes(
             &updater.job_id,
@@ -1088,6 +1124,52 @@ fn decompress(compressed: &[u8], kind: Compression) -> Result<Vec<u8>> {
         Compression::Xz => decompress_xz(compressed),
         Compression::Bzip2 => decompress_bzip2(compressed),
     }
+}
+
+/// zstd window size produced by compression level 6 (`windowLog` 21 = 2 MiB).
+/// An upstream zstd NAR with a window at least this large is relayed verbatim;
+/// a smaller window (levels 1-2) is recompressed at level 6 before storing.
+const LEVEL6_WINDOW_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Read the `Window_Size` encoded in a zstd frame header (RFC 8878 §3.1.1.1).
+/// Returns `None` when `frame` isn't a zstd frame or its header is truncated.
+/// For single-segment frames (no `Window_Descriptor`) the window equals the
+/// `Frame_Content_Size`.
+fn zstd_window_size(frame: &[u8]) -> Option<u64> {
+    if frame.len() < 5 || frame[0..4] != [0x28, 0xB5, 0x2F, 0xFD] {
+        return None;
+    }
+
+    let descriptor = frame[4];
+    let fcs_flag = (descriptor >> 6) as usize;
+    let single_segment = descriptor & 0x20 != 0;
+    let dict_id_flag = (descriptor & 0x03) as usize;
+
+    if !single_segment {
+        let wd = *frame.get(5)?;
+        let exponent = u32::from(wd >> 3);
+        let mantissa = u64::from(wd & 0x7);
+        let window_base = 1u64.checked_shl(10 + exponent)?;
+
+        return Some(window_base + (window_base / 8) * mantissa);
+    }
+
+    // Single-segment: Window_Size == Frame_Content_Size, located after the
+    // optional Dictionary_ID. FCS_flag 0 is a single byte in this mode.
+    let dict_size = [0usize, 1, 2, 4][dict_id_flag];
+    let fcs_size = [1usize, 2, 4, 8][fcs_flag];
+    let start = 5 + dict_size;
+    let bytes = frame.get(start..start + fcs_size)?;
+
+    let mut fcs = bytes
+        .iter()
+        .enumerate()
+        .fold(0u64, |acc, (i, b)| acc | (u64::from(*b) << (8 * i)));
+    if fcs_flag == 1 {
+        fcs += 256;
+    }
+
+    Some(fcs)
 }
 
 /// Extract the single regular-file payload from a NAR. `.drv` files are
@@ -1373,6 +1455,47 @@ mod tests {
         assert_eq!(out, payload);
     }
 
+    /// Build a minimal multi-segment zstd frame header (magic + descriptor +
+    /// `Window_Descriptor`) encoding `window_log` with the given `mantissa`.
+    fn zstd_header(window_log: u8, mantissa: u8) -> Vec<u8> {
+        let wd = ((window_log - 10) << 3) | (mantissa & 0x7);
+        vec![0x28, 0xB5, 0x2F, 0xFD, 0x00, wd]
+    }
+
+    #[test]
+    fn zstd_window_size_decodes_window_descriptor() {
+        // windowLog 21 (level 6) == exactly 2 MiB.
+        assert_eq!(zstd_window_size(&zstd_header(21, 0)), Some(2 * 1024 * 1024));
+        // windowLog 20 (level 2) is below the threshold.
+        assert_eq!(zstd_window_size(&zstd_header(20, 0)), Some(1024 * 1024));
+        // Mantissa adds windowBase/8 per unit.
+        assert_eq!(
+            zstd_window_size(&zstd_header(21, 4)),
+            Some(2 * 1024 * 1024 + (2 * 1024 * 1024 / 8) * 4)
+        );
+    }
+
+    #[test]
+    fn zstd_window_size_rejects_non_zstd_and_truncated() {
+        assert_eq!(zstd_window_size(b"not a zstd frame at all"), None);
+        assert_eq!(zstd_window_size(&[0x28, 0xB5, 0x2F, 0xFD]), None); // no descriptor
+        assert_eq!(zstd_window_size(&[0x28, 0xB5, 0x2F, 0xFD, 0x00]), None); // no window byte
+    }
+
+    #[test]
+    fn zstd_window_size_matches_level6_threshold() {
+        // A real level-6 frame over >2 MiB of data carries a >= 2 MiB window;
+        // a level-1 frame over the same data stays below it. This anchors the
+        // LEVEL6_WINDOW_BYTES assumption end-to-end.
+        let data: Vec<u8> = (0..3 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+
+        let level6 = zstd::encode_all(std::io::Cursor::new(&data), 6).unwrap();
+        assert!(zstd_window_size(&level6).unwrap() >= LEVEL6_WINDOW_BYTES);
+
+        let level1 = zstd::encode_all(std::io::Cursor::new(&data), 1).unwrap();
+        assert!(zstd_window_size(&level1).unwrap() < LEVEL6_WINDOW_BYTES);
+    }
+
     #[test]
     fn parse_sha256_nix32_roundtrip() {
         // SHA-256 of the empty string in nix32 form.
@@ -1391,6 +1514,7 @@ mod tests {
             nar_size: Some(123),
             url: None,
             nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
+            file_hash: None,
             references: None,
             signatures: None,
             deriver: None,
@@ -1415,6 +1539,7 @@ mod tests {
             nar_size: Some(0),
             url: None,
             nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
+            file_hash: None,
             references: Some(vec![
                 "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-y".into(),
                 "/nix/store/cccccccccccccccccccccccccccccccc-z".into(),
@@ -1443,6 +1568,7 @@ mod tests {
             nar_size: Some(0),
             url: url.map(|s| s.to_owned()),
             nar_hash: Some("sha256:0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73".into()),
+            file_hash: None,
             references: None,
             signatures: None,
             deriver: None,
@@ -1458,6 +1584,7 @@ mod tests {
             nar_size: None,
             url: None,
             nar_hash: None,
+            file_hash: None,
             references: None,
             signatures: None,
             deriver: None,
@@ -1516,6 +1643,7 @@ mod tests {
             nar_size: Some(0),
             url: None,
             nar_hash: None,
+            file_hash: None,
             references: None,
             signatures: None,
             deriver: None,

@@ -217,6 +217,9 @@ fn cache_status_roundtrip() {
                 nar_hash: Some(
                     "sha256:0000000000000000000000000000000000000000000000000000".into(),
                 ),
+                file_hash: Some(
+                    "sha256:1111111111111111111111111111111111111111111111111111".into(),
+                ),
                 references: Some(vec!["/nix/store/cccc-dep".into()]),
                 signatures: Some(vec!["cache.example.com-1:abcd".into()]),
                 deriver: Some("/nix/store/aaaa-foo.drv".into()),
@@ -229,6 +232,7 @@ fn cache_status_roundtrip() {
                 nar_size: None,
                 url: Some("https://s3.example.com/nars/bb/bb.nar.zst".into()),
                 nar_hash: None,
+                file_hash: None,
                 references: None,
                 signatures: None,
                 deriver: None,
@@ -251,6 +255,7 @@ fn cached_path_not_cached_no_url() {
         nar_size: None,
         url: None,
         nar_hash: None,
+        file_hash: None,
         references: None,
         signatures: None,
         deriver: None,

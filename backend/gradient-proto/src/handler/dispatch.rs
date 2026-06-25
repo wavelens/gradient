@@ -1123,13 +1123,12 @@ impl<'a> DispatchContext<'a> {
                 if candidates.is_empty() {
                     vec![]
                 } else {
-                    // Prune only derivations whose full output set is recorded AND
-                    // every output is fetchable without building it: in our cache
-                    // (is_cached, or its hash fully recorded in cached_path) or on a
-                    // known upstream (external_url). This mirrors the eval-time
-                    // substitutability decision - keying on is_cached alone re-walked
-                    // the whole upstream closure every eval, since substituted
-                    // outputs are never in our own cache.
+                    // Prune a subtree only when every output is on a real upstream
+                    // (`external_url`), which serves a complete closure. Our own
+                    // cache is output-only and may be missing a node's subtree, so
+                    // it is not accepted for pruning - otherwise a config-specific
+                    // node off-upstream is pruned, never recorded/built, and dead-ends
+                    // its dependents on `InputsUnavailable`.
                     let drv_ids: Vec<DerivationId> = candidates.iter().map(|d| d.id).collect();
                     let outputs = EDerivationOutput::find()
                         .filter(CDerivationOutput::Derivation.is_in(drv_ids))
@@ -1137,25 +1136,9 @@ impl<'a> DispatchContext<'a> {
                         .await
                         .unwrap_or_default();
 
-                    let output_hashes: Vec<String> = outputs
-                        .iter()
-                        .map(|o| o.hash.clone())
-                        .collect::<HashSet<_>>()
-                        .into_iter()
-                        .collect();
-                    let cached_hashes: HashSet<String> = ECachedPath::find()
-                        .filter(CCachedPath::Hash.is_in(output_hashes))
-                        .all(&self.state.worker_db)
-                        .await
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter(|cp| cp.is_fully_cached())
-                        .map(|cp| cp.hash)
-                        .collect();
-
                     let candidates: Vec<(DerivationId, String)> =
                         candidates.into_iter().map(|d| (d.id, d.store_path())).collect();
-                    prunable_known_derivations(candidates, &outputs, &cached_hashes)
+                    prunable_known_derivations(candidates, &outputs)
                 }
             }
             None => {
@@ -1175,24 +1158,28 @@ impl<'a> DispatchContext<'a> {
 
 /// Decide which `(derivation_id, store_path)` candidates the eval BFS may prune.
 ///
-/// A derivation is safe to prune (skip subtree traversal) only when the server
-/// holds its complete output set AND every output is fetchable without building
-/// it: in our cache (`is_cached`, or its hash present in `cached_hashes`) or on a
-/// known upstream (`external_url`). This mirrors the eval-time substitutability
-/// decision. An output-less or not-yet-available derivation must keep being
-/// walked so its outputs get recorded and a build is scheduled - otherwise it is
-/// stranded as a permanent `InputsUnavailable` dead-end.
+/// A derivation is safe to prune (skip subtree traversal) ONLY when every one of
+/// its outputs is available on a real upstream cache (`external_url`). An upstream
+/// binary cache serves a *complete closure*, so a build worker can fetch the
+/// pruned subtree's outputs on demand. Our own cache is deliberately NOT accepted
+/// here: it is populated output-only (substitution relays just the output NAR, and
+/// a config-specific node's subtree may never have been pushed), so pruning on
+/// `is_cached`/`cached_path` strands that subtree - it is never walked, recorded,
+/// or built, and being off-upstream it is unfetchable, a permanent
+/// `InputsUnavailable` dead-end (observed: `unit-*.service` -> `X-Restart-Triggers-*`
+/// / `unit-script-*`, none of which exist on cache.nixos.org). A derivation with
+/// any output not on an upstream keeps being walked so its subtree is recorded and
+/// scheduled - the eval re-walking our own (unreliable) cached closures is the
+/// correctness price of an output-only cache.
 fn prunable_known_derivations(
     candidates: Vec<(DerivationId, String)>,
     outputs: &[MDerivationOutput],
-    cached_hashes: &HashSet<String>,
 ) -> Vec<String> {
     let mut counts: HashMap<DerivationId, (usize, usize)> = HashMap::new();
     for o in outputs {
         let entry = counts.entry(o.derivation).or_insert((0, 0));
         entry.0 += 1;
-        let available = o.is_cached_anywhere() || cached_hashes.contains(&o.hash);
-        if !available {
+        if o.external_url.is_none() {
             entry.1 += 1;
         }
     }
@@ -1200,8 +1187,8 @@ fn prunable_known_derivations(
     candidates
         .into_iter()
         .filter(|(id, _)| {
-            let (total, unavailable) = counts.get(id).copied().unwrap_or((0, 0));
-            total > 0 && unavailable == 0
+            let (total, off_upstream) = counts.get(id).copied().unwrap_or((0, 0));
+            total > 0 && off_upstream == 0
         })
         .map(|(_, store_path)| store_path)
         .collect()
@@ -1212,7 +1199,6 @@ mod prunable_known_derivations_tests {
     use super::prunable_known_derivations;
     use gradient_types::MDerivationOutput;
     use gradient_types::ids::{DerivationId, DerivationOutputId};
-    use std::collections::HashSet;
 
     fn output(drv: DerivationId, hash: &str) -> MDerivationOutput {
         MDerivationOutput {
@@ -1224,11 +1210,13 @@ mod prunable_known_derivations_tests {
     }
 
     #[test]
-    fn prunes_outputs_available_anywhere_not_just_in_our_cache() {
-        let local = DerivationId::now_v7(); // is_cached in our cache
-        let upstream = DerivationId::now_v7(); // external_url set
-        let by_hash = DerivationId::now_v7(); // hash recorded in cached_path
-        let partial = DerivationId::now_v7(); // one output unavailable
+    fn prunes_only_outputs_on_a_real_upstream() {
+        // Only `external_url` (a real upstream that serves a complete closure) is
+        // safe to prune; our own output-only cache (`is_cached` / `cached_path`) is
+        // not, because a config-specific node's subtree may never have been pushed.
+        let local = DerivationId::now_v7(); // is_cached in our cache, NOT upstream
+        let upstream = DerivationId::now_v7(); // every output on an upstream
+        let partial = DerivationId::now_v7(); // one output upstream, one not
         let output_less = DerivationId::now_v7(); // recorded drv, no outputs
         let unknown = DerivationId::now_v7(); // no rows at all
 
@@ -1236,33 +1224,23 @@ mod prunable_known_derivations_tests {
         o_local.is_cached = true;
         let mut o_upstream = output(upstream, "bbb");
         o_upstream.external_url = Some("https://cache.example/bbb.narinfo".to_string());
-        let o_by_hash = output(by_hash, "ccc");
         let mut o_partial_a = output(partial, "ddd");
-        o_partial_a.is_cached = true;
-        let o_partial_b = output(partial, "eee");
+        o_partial_a.external_url = Some("https://cache.example/ddd.narinfo".to_string());
+        let mut o_partial_b = output(partial, "eee");
+        o_partial_b.is_cached = true; // in our cache, but not upstream
 
-        let outputs = vec![o_local, o_upstream, o_by_hash, o_partial_a, o_partial_b];
-        let cached_hashes: HashSet<String> = ["ccc".to_string()].into_iter().collect();
+        let outputs = vec![o_local, o_upstream, o_partial_a, o_partial_b];
 
         let candidates = vec![
             (local, "/nix/store/aaa-local".to_string()),
             (upstream, "/nix/store/bbb-upstream".to_string()),
-            (by_hash, "/nix/store/ccc-byhash".to_string()),
             (partial, "/nix/store/ddd-partial".to_string()),
             (output_less, "/nix/store/fff-output-less".to_string()),
             (unknown, "/nix/store/ggg-unknown".to_string()),
         ];
 
-        let mut prunable = prunable_known_derivations(candidates, &outputs, &cached_hashes);
-        prunable.sort();
-        assert_eq!(
-            prunable,
-            vec![
-                "/nix/store/aaa-local".to_string(),
-                "/nix/store/bbb-upstream".to_string(),
-                "/nix/store/ccc-byhash".to_string(),
-            ]
-        );
+        let prunable = prunable_known_derivations(candidates, &outputs);
+        assert_eq!(prunable, vec!["/nix/store/bbb-upstream".to_string()]);
     }
 }
 

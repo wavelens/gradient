@@ -116,7 +116,8 @@ only the output NAR plus its runtime closure, never the `.drv`'s build-time
 `input_sources` (binary caches do not serve those, so importing the `.drv` would
 fail with a spurious `SubstituteUnavailable`). The worker reads each output's
 persisted URL via `CacheQuery`, downloads the NAR directly from the upstream,
-recompresses it, and pushes it into the gradient cache (`use_substitutes` stays
+relays it verbatim when it is already zstd-compressed at our 2 MiB level-6
+window (else recompresses), and pushes it into the gradient cache (`use_substitutes` stays
 off in the daemon - substitution always goes through gradient, never the worker's
 own nix config). Existing build-once anchors a prior eval left not-yet-succeeded
 are flipped substitutable when an upstream is newly found, so a previously-failed
@@ -133,12 +134,17 @@ will demand is guaranteed pushed by the evaluation that produced it.
 
 The eval closure walk prunes the same way. As the worker walks the graph it
 asks the server which dependency derivations it already knows
-(`QueryKnownDerivations`); the server prunes a subtree only when the derivation's
-complete output set is fetchable without building it - every output is in our
-cache (`is_cached`, or its hash recorded in `cached_path`) or on a known upstream
-(`external_url`). This mirrors the eval-time substitutability decision, so the
-worker skips re-walking the whole upstream closure (e.g. nixpkgs) on every
-evaluation instead of descending into subtrees it will never build.
+(`QueryKnownDerivations`); the server prunes a subtree only when **every** output
+is on a real upstream cache (`external_url`). An upstream binary cache serves a
+*complete closure*, so a build worker can fetch the pruned subtree's outputs on
+demand. Our own cache (`is_cached` / `cached_path`) is deliberately not accepted
+for pruning: it is populated output-only (substitution relays just the output NAR,
+and a config-specific node's subtree may never have been pushed), so pruning on it
+would strand that subtree - never walked, recorded, or built, and off-upstream so
+unfetchable, a permanent `InputsUnavailable` dead-end (e.g. `unit-*.service` ->
+`X-Restart-Triggers-*`, which exist on no upstream). nixpkgs still prunes via its
+persisted `external_url`; the worker re-walking our own (unreliable) cached
+closures is the correctness price of an output-only cache.
 
 #### Closure-complete cache
 

@@ -299,12 +299,21 @@ pub async fn push_direct(
     Ok(())
 }
 
+/// Compressed-NAR metadata reported alongside a relayed upload. `file_*`
+/// describe the compressed object actually stored; `nar_*` describe the
+/// uncompressed NAR. All hashes are `sha256:<nix32>`.
+pub struct CompressedNarMeta {
+    pub file_hash: String,
+    pub file_size: u64,
+    pub nar_hash: String,
+    pub nar_size: u64,
+}
+
 /// Upload an already-in-memory raw NAR (e.g. relayed from an upstream
-/// substituter) to the presigned `url`: zstd-compress it, PUT it, and confirm
-/// with [`ClientMessage::NarUploaded`] using the supplied `references`/`deriver`
-/// (taken from the upstream narinfo, hash-name format, no `/nix/store/` prefix).
-/// No nix-store involvement - this never packs from a store path, so a build's
-/// output can be mirrored into our cache without realizing its closure.
+/// substituter) to the presigned `url`: zstd-compress it at level 6, then hand
+/// off to [`upload_presigned_compressed`]. Used when the upstream payload's
+/// compression is weaker than our level-6 window (or absent) and must be
+/// re-encoded before storing.
 #[allow(clippy::too_many_arguments)]
 pub async fn upload_presigned_bytes(
     job_id: &str,
@@ -317,19 +326,57 @@ pub async fn upload_presigned_bytes(
     headers: &[(String, String)],
     writer: &ProtoWriter,
 ) -> Result<()> {
-    let store_path = ensure_full_store_path(store_path);
-    let store_path = store_path.as_str();
-
     let nar_size = raw_nar.len() as u64;
     let nar_hash = format!("sha256:{}", nix32_encode(&Sha256::digest(raw_nar)));
 
-    let mut encoder =
-        zstd::stream::Encoder::new(Vec::with_capacity(raw_nar.len() / 2), 6)
-            .context("failed to create zstd encoder")?;
+    let mut encoder = zstd::stream::Encoder::new(Vec::with_capacity(raw_nar.len() / 2), 6)
+        .context("failed to create zstd encoder")?;
     encoder.write_all(raw_nar).context("zstd compression failed")?;
     let compressed = encoder.finish().context("failed to finish zstd encoder")?;
     let file_size = compressed.len() as u64;
     let file_hash = format!("sha256:{}", nix32_encode(&Sha256::digest(&compressed)));
+
+    upload_presigned_compressed(
+        job_id,
+        store_path,
+        &compressed,
+        CompressedNarMeta {
+            file_hash,
+            file_size,
+            nar_hash,
+            nar_size,
+        },
+        references,
+        deriver,
+        url,
+        method,
+        headers,
+        writer,
+    )
+    .await
+}
+
+/// PUT an already-compressed NAR to the presigned `url` verbatim and confirm
+/// with [`ClientMessage::NarUploaded`] using the supplied `meta`/`references`/
+/// `deriver` (hash-name format, no `/nix/store/` prefix). No nix-store
+/// involvement and - crucially - no (re)compression or rehashing: the bytes and
+/// `meta` come straight from the upstream narinfo so a substitutable output is
+/// mirrored into our cache as a pure copy.
+#[allow(clippy::too_many_arguments)]
+pub async fn upload_presigned_compressed(
+    job_id: &str,
+    store_path: &str,
+    compressed: &[u8],
+    meta: CompressedNarMeta,
+    references: Vec<String>,
+    deriver: Option<String>,
+    url: &str,
+    method: &str,
+    headers: &[(String, String)],
+    writer: &ProtoWriter,
+) -> Result<()> {
+    let store_path = ensure_full_store_path(store_path);
+    let store_path = store_path.as_str();
 
     let client = crate::http::client();
     let http_method = reqwest::Method::from_bytes(method.as_bytes())
@@ -337,7 +384,7 @@ pub async fn upload_presigned_bytes(
     let mut req = client
         .request(http_method, url)
         .header("Content-Type", "application/x-nix-nar")
-        .body(compressed);
+        .body(compressed.to_vec());
     for (name, value) in headers {
         req = req.header(name.as_str(), value.as_str());
     }
@@ -354,15 +401,20 @@ pub async fn upload_presigned_bytes(
     writer.send(ClientMessage::NarUploaded {
         job_id: job_id.to_owned(),
         store_path: store_path.to_owned(),
-        file_hash,
-        file_size,
-        nar_size,
-        nar_hash,
+        file_hash: meta.file_hash,
+        file_size: meta.file_size,
+        nar_size: meta.nar_size,
+        nar_hash: meta.nar_hash,
         references,
         deriver,
     })?;
 
-    debug!(store_path, file_size, nar_size, "relayed NAR upload complete");
+    debug!(
+        store_path,
+        file_size = meta.file_size,
+        nar_size = meta.nar_size,
+        "relayed NAR upload complete"
+    );
     Ok(())
 }
 

@@ -52,6 +52,7 @@ pub fn parse_upstream_narinfo(
 ) -> Option<CachedPath> {
     let mut nar_path: Option<&str> = None;
     let mut nar_hash: Option<String> = None;
+    let mut file_hash: Option<String> = None;
     let mut nar_size: Option<u64> = None;
     let mut file_size: Option<u64> = None;
     let mut references: Option<Vec<String>> = None;
@@ -64,6 +65,8 @@ pub fn parse_upstream_narinfo(
             nar_path = Some(v.trim());
         } else if let Some(v) = line.strip_prefix("NarHash: ") {
             nar_hash = Some(v.trim().to_owned());
+        } else if let Some(v) = line.strip_prefix("FileHash: ") {
+            file_hash = Some(v.trim().to_owned());
         } else if let Some(v) = line.strip_prefix("NarSize: ") {
             nar_size = v.trim().parse().ok();
         } else if let Some(v) = line.strip_prefix("FileSize: ") {
@@ -109,6 +112,7 @@ pub fn parse_upstream_narinfo(
         nar_size,
         url: Some(url),
         nar_hash,
+        file_hash,
         references,
         signatures: if sigs.is_empty() { None } else { Some(sigs) },
         deriver,
@@ -148,6 +152,10 @@ mod tests {
         assert_eq!(
             cp.nar_hash.as_deref(),
             Some("sha256:1bnnhb0pfx49mg15fmk3jx34wj8j24ygqcq7xww9g8qcyaf23rkf")
+        );
+        assert_eq!(
+            cp.file_hash.as_deref(),
+            Some("sha256:124l7vc762nsgl8wmfgp1gm9vsl3gk0j6136nyv3ff7s7da11yvz")
         );
         let refs = cp.references.unwrap();
         assert_eq!(refs.len(), 2);

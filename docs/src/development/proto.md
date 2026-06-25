@@ -623,6 +623,7 @@ CachedPath {
     nar_size: Option<u64>,              // uncompressed NAR size (bytes)
     url: Option<String>,                // presigned S3 GET URL; None = use NarRequest
     nar_hash: Option<String>,           // sha256:<nix32> of the uncompressed NAR
+    file_hash: Option<String>,          // sha256:<nix32> of the compressed NAR (verbatim relay)
     references: Vec<String>,            // full /nix/store/... runtime references
     signatures: Vec<String>,            // narinfo wire format `<key-name>:<base64>`
     deriver: Option<String>,            // full /nix/store/*.drv that produced this path
@@ -667,7 +668,7 @@ sequenceDiagram
 
 The server checks its local NAR store first. For paths not found locally, it fetches `.narinfo` from any upstream external caches configured for the org (`org → organization_cache → cache → cache_upstream`). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
 
-The worker marks derivations as `substituted` for all entries with `cached: true` regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL, re-zstd-compresses (upstream compression may differ), and uploads the compressed bytes to the Gradient cache.
+The worker marks derivations as `substituted` for all entries with `cached: true` regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL and relays it into the Gradient cache. When the upstream payload is already zstd-compressed with a window of at least 2 MiB - the window zstd level 6 produces (`windowLog` 21) - it is **stored verbatim**: no decompress, no recompress, no rehash, reusing the upstream `file_hash`/`nar_hash` from the narinfo. Only weaker windows (zstd levels 1-2) or non-zstd formats (xz, bzip2, uncompressed) are decompressed, verified against the upstream `nar_hash`, and recompressed at level 6.
 
 ### Cache population
 

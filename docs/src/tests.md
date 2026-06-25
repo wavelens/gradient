@@ -943,14 +943,19 @@ no real-Postgres/HTTP unit harness for it.
 ## Eval BFS pruning honours substitutable closures
 
 Backend (`cargo test -p gradient-proto --lib prunable_known_derivations_tests`):
-- `prunes_outputs_available_anywhere_not_just_in_our_cache` - the
-  `QueryKnownDerivations` handler may prune a derivation's subtree only when its
-  full output set is fetchable without building: in our cache (`is_cached`, or
-  the output hash present in `cached_path`) or on a known upstream
-  (`external_url`). The regression it guards: keying the prune solely on
-  `is_cached` left the entire upstream closure (every output substituted, never
-  in our own cache) un-prunable, so the worker re-walked it on every evaluation.
-  A derivation with any output unavailable, no outputs, or no rows is not pruned.
+- `prunes_only_outputs_on_a_real_upstream` - the `QueryKnownDerivations` handler
+  may prune a derivation's subtree only when **every** output is on a real upstream
+  cache (`external_url`). An upstream binary cache serves a *complete closure*, so
+  the pruned subtree's outputs are fetchable on demand. Our own cache (`is_cached`
+  / `cached_path`) is **not** accepted: it is output-only (substitution relays just
+  the output NAR; a config-specific node's subtree may never have been pushed), so
+  pruning on it strands that subtree - never walked, recorded, or built, and
+  off-upstream so unfetchable, a permanent `InputsUnavailable` dead-end (observed
+  live: `unit-*.service` -> `X-Restart-Triggers-*` / `unit-script-*`, none on
+  cache.nixos.org, 0 rows in the DB). The cost - re-walking our own (unreliable)
+  cached closures every eval - is the correctness price of an output-only cache;
+  upstream-served nixpkgs stays pruned via persisted `external_url`. A derivation
+  with any output not on an upstream, no outputs, or no rows is not pruned.
 
 ## Promotion gated on `edges_complete`
 
@@ -5107,3 +5112,26 @@ has a unit test:
   (`backend/gradient-worker/src/executor/eval.rs`) - a parsed `Derivation` with
   two `inputSrcs` yields a `DiscoveredDerivation` carrying them, so they reach the
   server for persistence and gating.
+
+## Substitute relay reuses upstream NARs at the level-6 window
+
+When the worker relays a substitutable output from an upstream cache
+(`relay_external_cached_outputs`, `backend/gradient-worker/src/proto/nar_import.rs`),
+it stores the downloaded bytes verbatim - no decompress, no recompress, no rehash -
+when they are already zstd-compressed with a window of at least 2 MiB (the window
+zstd level 6 produces, `windowLog` 21), reusing the upstream `file_hash`/`nar_hash`
+plumbed through `CachedPath`. Weaker windows (levels 1-2) and non-zstd payloads are
+recompressed at level 6. The window is read straight from the zstd frame header:
+
+- `zstd_window_size_decodes_window_descriptor` - `windowLog` 21 -> exactly 2 MiB,
+  `windowLog` 20 -> 1 MiB, and the mantissa adds `windowBase/8` per unit.
+- `zstd_window_size_rejects_non_zstd_and_truncated` - non-zstd bytes and headers
+  cut off before the descriptor / window byte return `None`.
+- `zstd_window_size_matches_level6_threshold` - a real level-6 frame over >2 MiB of
+  data carries a window `>= LEVEL6_WINDOW_BYTES`, a level-1 frame stays below it,
+  anchoring the threshold end-to-end.
+
+The upstream `FileHash` is parsed into `CachedPath.file_hash` by
+`parse_upstream_narinfo` (`backend/gradient-core/src/upstream.rs`), asserted in
+`parse_upstream_narinfo_full_fields`, and persisted on `derivation_output.file_hash`
+(migration `m20260625_000001`) so the relay can report it without recomputation.

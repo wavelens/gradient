@@ -641,6 +641,7 @@ impl<'a> EvalResultProcessor<'a> {
             let mut am = o.clone().into_active_model();
             am.external_url = Set(cp.url.clone());
             am.nar_hash = Set(cp.nar_hash.clone());
+            am.file_hash = Set(cp.file_hash.clone());
             am.file_size = Set(cp.file_size.map(|v| v as i64));
             am.references = Set(cp.references.as_ref().map(|r| r.join(" ")));
             am.deriver = Set(cp.deriver.clone());

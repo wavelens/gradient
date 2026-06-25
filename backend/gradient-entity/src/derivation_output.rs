@@ -29,6 +29,9 @@ pub struct Model {
     pub external_url: Option<String>,
     /// NAR hash from the upstream narinfo, needed to import the path.
     pub nar_hash: Option<String>,
+    /// Compressed-NAR hash from the upstream narinfo, in `sha256:<nix32>` form.
+    /// Lets the worker relay a verbatim NAR without recomputing the file hash.
+    pub file_hash: Option<String>,
     /// Compressed NAR size from the upstream narinfo.
     pub file_size: Option<i64>,
     #[sea_orm(column_name = "references_list")]

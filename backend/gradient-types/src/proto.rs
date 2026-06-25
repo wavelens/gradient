@@ -323,6 +323,10 @@ pub struct CachedPath {
     /// SHA-256 of the uncompressed NAR in `sha256:<nix32>` format.
     /// Populated for cached paths in [`QueryMode::Pull`].
     pub nar_hash: Option<String>,
+    /// SHA-256 of the compressed NAR (`FileHash`) in `sha256:<nix32>` format.
+    /// Populated for cached paths in [`QueryMode::Pull`]; lets the worker relay
+    /// a verbatim upstream NAR without recomputing its file hash.
+    pub file_hash: Option<String>,
     /// Other store paths this path references (full `/nix/store/...` paths).
     /// Populated for cached paths in [`QueryMode::Pull`].
     pub references: Option<Vec<String>>,

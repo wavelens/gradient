@@ -193,6 +193,7 @@ async fn fetch_pull_metadata(
     hash: &str,
 ) -> (
     Option<String>,      // nar_hash
+    Option<String>,      // file_hash
     Option<Vec<String>>, // references (full /nix/store/... paths)
     Option<Vec<String>>, // signatures (narinfo wire format)
     Option<String>,      // deriver
@@ -204,10 +205,10 @@ async fn fetch_pull_metadata(
         .await
     {
         Ok(Some(row)) => row,
-        Ok(None) => return (None, None, None, None, None),
+        Ok(None) => return (None, None, None, None, None, None),
         Err(e) => {
             warn!(%hash, error = %e, "failed to load cached_path for Pull metadata");
-            return (None, None, None, None, None);
+            return (None, None, None, None, None, None);
         }
     };
 
@@ -221,6 +222,7 @@ async fn fetch_pull_metadata(
 
     (
         cached_row.nar_hash,
+        cached_row.file_hash,
         references,
         signatures,
         cached_row.deriver,
@@ -248,6 +250,7 @@ async fn build_cached_entry(
             nar_size: None,
             url: None,
             nar_hash: None,
+            file_hash: None,
             references: None,
             signatures: None,
             deriver: None,
@@ -255,7 +258,7 @@ async fn build_cached_entry(
         };
     }
 
-    let (url, nar_hash, references, signatures, deriver, ca) = match mode {
+    let (url, nar_hash, file_hash, references, signatures, deriver, ca) = match mode {
         QueryMode::Pull => {
             let url = match state.nar_storage.presigned_get_url(hash, expire).await {
                 Ok(u) => u,
@@ -265,9 +268,9 @@ async fn build_cached_entry(
                 }
             };
             let meta = fetch_pull_metadata(state, hash).await;
-            (url, meta.0, meta.1, meta.2, meta.3, meta.4)
+            (url, meta.0, meta.1, meta.2, meta.3, meta.4, meta.5)
         }
-        _ => (None, None, None, None, None, None),
+        _ => (None, None, None, None, None, None, None),
     };
 
     CachedPath {
@@ -277,6 +280,7 @@ async fn build_cached_entry(
         nar_size: nar_size.map(|v| v as u64),
         url,
         nar_hash,
+        file_hash,
         references,
         signatures,
         deriver,
@@ -317,6 +321,7 @@ async fn build_uncached_push_entry(
         nar_size: None,
         url,
         nar_hash: None,
+        file_hash: None,
         references: None,
         signatures: None,
         deriver: None,
@@ -370,6 +375,7 @@ async fn extend_with_persisted_upstream(
             nar_size: row.nar_size.map(|v| v as u64),
             url: Some(url),
             nar_hash: row.nar_hash.clone(),
+            file_hash: row.file_hash.clone(),
             references: expand_references(row.references.as_deref()),
             signatures: None,
             deriver: row.deriver.clone(),
@@ -606,6 +612,7 @@ fn build_uncached_pull_entry(path: &str) -> gradient_types::proto::CachedPath {
         nar_size: None,
         url: None,
         nar_hash: None,
+        file_hash: None,
         references: None,
         signatures: None,
         deriver: None,

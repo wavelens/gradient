@@ -56,6 +56,7 @@ async fn query_fetched_paths(updater: &mut JobUpdater, all_paths: Vec<String>) -
                     nar_size: None,
                     url: None,
                     nar_hash: None,
+                    file_hash: None,
                     references: None,
                     signatures: None,
                     deriver: None,
@@ -366,8 +367,9 @@ impl JobExecutor {
             if build_task.external_cached {
                 // Substitute attempt: the output is on an upstream cache (flagged
                 // at eval). Relay it as a pure NAR copy - download the output NAR
-                // from upstream, recompress to zstd, push it to our cache - without
-                // importing into the nix store or fetching the closure (the closure
+                // from upstream, store it verbatim (recompress only when its zstd
+                // window is below our level-6 2 MiB threshold), push it to our
+                // cache - without importing into the nix store or fetching the closure (the closure
                 // is mirrored by each member's own anchor). There is no local-build
                 // fallback (this worker may be the wrong arch); on a miss fail with
                 // `SubstituteUnavailable` and let the scheduler re-dispatch/escalate.
