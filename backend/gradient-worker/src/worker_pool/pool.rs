@@ -6,10 +6,12 @@
 
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
+use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -33,6 +35,28 @@ pub struct EvalWorker {
     /// of evaluations so Nix's Boehm-GC-allocated memory (which is
     /// never released back to the OS) cannot grow unbounded.
     pub(super) evaluations_served: usize,
+    /// RAII deregistration of this subprocess's pid from the pool's live
+    /// registry. A field (rather than `impl Drop for EvalWorker`) so `shutdown`
+    /// can still move individual fields out of `self`.
+    pid_guard: PidGuard,
+}
+
+/// Removes an eval subprocess pid from the pool's live registry on drop, so the
+/// memory reaper never targets a worker we have already discarded. The child
+/// itself is reaped by `kill_on_drop`.
+struct PidGuard {
+    /// Live-pid registry of the owning pool. `None` for test workers built via
+    /// `from_command` (no pool, nothing to deregister from).
+    live: Option<Arc<Mutex<HashSet<u32>>>>,
+    pid: Option<u32>,
+}
+
+impl Drop for PidGuard {
+    fn drop(&mut self) {
+        if let (Some(live), Some(pid)) = (&self.live, self.pid) {
+            live.lock().unwrap().remove(&pid);
+        }
+    }
 }
 
 impl EvalWorker {
@@ -42,7 +66,10 @@ impl EvalWorker {
     ///
     /// `eval_cache_dir` is exported as `NIX_CACHE_HOME` so parent and worker
     /// agree on where Nix's `eval-cache-v6/<fingerprint>.sqlite` lives.
-    pub(super) async fn spawn(eval_cache_dir: &str) -> Result<Self> {
+    pub(super) async fn spawn(
+        eval_cache_dir: &str,
+        live: Arc<Mutex<HashSet<u32>>>,
+    ) -> Result<Self> {
         let exe = std::env::current_exe().context("locating current executable")?;
         trace!(exe = %exe.display(), "spawning eval worker subprocess");
         let mut command = Command::new(&exe);
@@ -75,7 +102,14 @@ impl EvalWorker {
             });
         }
 
-        let worker = Self::from_command(command)?;
+        let mut worker = Self::from_command(command)?;
+
+        // Register the pid so the memory reaper can find this subprocess even
+        // while it is checked out of the pool. Deregistered by `PidGuard`.
+        if let Some(pid) = worker.pid_guard.pid {
+            live.lock().unwrap().insert(pid);
+        }
+        worker.pid_guard.live = Some(live);
 
         // Mark the subprocess as the preferred OOM-kill target so that the kernel
         // sacrifices eval workers (which hold large Nix/Boehm-GC heaps) before
@@ -101,6 +135,7 @@ impl EvalWorker {
             .stderr(Stdio::inherit())
             .kill_on_drop(true);
         let mut child = command.spawn().context("spawning eval worker subprocess")?;
+        let pid = child.id();
         let stdin = child.stdin.take().context("worker stdin missing")?;
         let stdout = BufReader::new(child.stdout.take().context("worker stdout missing")?);
         Ok(Self {
@@ -109,6 +144,7 @@ impl EvalWorker {
             stdout,
             line: String::new(),
             evaluations_served: 0,
+            pid_guard: PidGuard { live: None, pid },
         })
     }
 
@@ -346,6 +382,87 @@ pub fn budgeted_pool_size(fork_workers: usize, max_eval_rss: u64, ram_budget: u6
     fork_workers.min(mem_bound).max(1)
 }
 
+/// Adaptive free-RAM margin (bytes): the configured `min_free_ram_mb` if set,
+/// else `max(1 GiB, 10% of total RAM)`. Below this the reaper acts and `acquire`
+/// back-pressures. Lifted out for unit testing.
+pub fn memory_guard_bytes(min_free_ram_mb: u64, total_ram_bytes: u64) -> u64 {
+    if min_free_ram_mb > 0 {
+        min_free_ram_mb * 1024 * 1024
+    } else {
+        (total_ram_bytes / 10).max(1024 * 1024 * 1024)
+    }
+}
+
+/// RSS (bytes) of an arbitrary pid from `/proc/<pid>/statm` (field 2 = resident
+/// pages × 4 KiB). `None` if the pid is gone or the read fails.
+#[cfg(target_os = "linux")]
+fn rss_of_pid(pid: u32) -> Option<u64> {
+    let statm = std::fs::read_to_string(format!("/proc/{pid}/statm")).ok()?;
+    statm
+        .split_whitespace()
+        .nth(1)
+        .and_then(|pages| pages.parse::<u64>().ok())
+        .map(|pages| pages * 4096)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn rss_of_pid(_pid: u32) -> Option<u64> {
+    None
+}
+
+/// Background memory guard: when host `MemAvailable` drops below
+/// `min_free_bytes`, SIGKILL the largest live eval subprocess so a runaway
+/// evaluation cannot take the whole host down. The victim's parent task then
+/// sees its pipe close and reports the eval failed - converting a would-be host
+/// OOM (which could kill the worker itself and strand the job, since the server
+/// only learns of a clean disconnect) into a single bounded eval failure.
+///
+/// Exits when the pool is dropped (worker shutdown). A no-op when disabled.
+pub(super) async fn memory_reaper_loop(pool: std::sync::Weak<EvalWorkerPool>, min_free_bytes: u64) {
+    if min_free_bytes == 0 {
+        return;
+    }
+
+    use sysinfo::{MemoryRefreshKind, RefreshKind, System};
+    let mut sys = System::new_with_specifics(
+        RefreshKind::nothing().with_memory(MemoryRefreshKind::nothing().with_ram()),
+    );
+    let mut interval = tokio::time::interval(Duration::from_millis(500));
+    loop {
+        interval.tick().await;
+        let Some(pool) = pool.upgrade() else {
+            return;
+        };
+
+        sys.refresh_memory();
+        let available = sys.available_memory();
+        let pressured = available < min_free_bytes;
+        pool.under_pressure.store(pressured, Ordering::Relaxed);
+        if !pressured {
+            continue;
+        }
+
+        let victim = pool
+            .live_pids()
+            .into_iter()
+            .filter_map(|pid| rss_of_pid(pid).map(|rss| (pid, rss)))
+            .max_by_key(|&(_, rss)| rss);
+        if let Some((pid, rss)) = victim {
+            warn!(
+                pid,
+                rss_mb = rss / (1024 * 1024),
+                available_mb = available / (1024 * 1024),
+                min_free_mb = min_free_bytes / (1024 * 1024),
+                "host memory below safety margin; reaping largest eval subprocess to avoid OOM"
+            );
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(pid as i32, libc::SIGKILL);
+            }
+        }
+    }
+}
+
 /// Pool of [`EvalWorker`]s.
 ///
 /// Workers are created lazily on `acquire`. Idle workers are reused; broken
@@ -365,6 +482,15 @@ pub struct EvalWorkerPool {
     /// to gracefully shut its worker down instead of returning it to the
     /// (now-closed) idle vec.
     shutting_down: Arc<AtomicBool>,
+    /// Pids of every live eval subprocess (idle or checked out), so the memory
+    /// reaper can target the largest under host memory pressure.
+    live: Arc<Mutex<HashSet<u32>>>,
+    /// Free-RAM margin (bytes) below which the reaper acts and `acquire`
+    /// back-pressures. `0` disables both. Set by [`Self::configure_memory_guard`].
+    min_free_bytes: AtomicU64,
+    /// Latched by the reaper each tick when host `MemAvailable` is below the
+    /// margin, read by `acquire` to throttle new evaluations.
+    under_pressure: Arc<AtomicBool>,
 }
 
 impl EvalWorkerPool {
@@ -377,6 +503,9 @@ impl EvalWorkerPool {
             max_eval_rss,
             eval_cache_dir,
             shutting_down: Arc::new(AtomicBool::new(false)),
+            live: Arc::new(Mutex::new(HashSet::new())),
+            min_free_bytes: AtomicU64::new(0),
+            under_pressure: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -388,6 +517,17 @@ impl EvalWorkerPool {
         self.max_eval_rss
     }
 
+    /// Arm the memory guard: the back-pressure margin read by `acquire`. The
+    /// reaper loop uses the same value. `0` leaves it disabled.
+    pub fn configure_memory_guard(&self, min_free_bytes: u64) {
+        self.min_free_bytes.store(min_free_bytes, Ordering::Relaxed);
+    }
+
+    /// Snapshot of every live eval-subprocess pid.
+    pub(super) fn live_pids(&self) -> Vec<u32> {
+        self.live.lock().unwrap().iter().copied().collect()
+    }
+
     /// Acquire a worker, blocking until one is available. Reuses an idle
     /// worker if any, otherwise spawns a fresh subprocess.
     pub async fn acquire(&self) -> Result<PooledEvalWorker> {
@@ -396,10 +536,21 @@ impl EvalWorkerPool {
             .await
             .map_err(|_| anyhow::anyhow!("EvalWorkerPool semaphore closed"))?;
 
+        // Back-pressure: under host memory pressure, don't pile a new eval onto
+        // others - wait for it to clear. We always let a lone eval proceed
+        // (available_permits + 1 == max means this is the only one), so the
+        // pool can never deadlock under sustained pressure; it just serialises.
+        while self.min_free_bytes.load(Ordering::Relaxed) > 0
+            && self.under_pressure.load(Ordering::Relaxed)
+            && self.semaphore.available_permits() + 1 < self.max
+        {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+
         let worker = self.idle.lock().unwrap().pop();
         let worker = match worker {
             Some(w) => w,
-            None => EvalWorker::spawn(&self.eval_cache_dir)
+            None => EvalWorker::spawn(&self.eval_cache_dir, Arc::clone(&self.live))
                 .await
                 .context("spawning fresh eval worker")?,
         };
@@ -581,6 +732,33 @@ mod tests {
         assert_eq!(budgeted_pool_size(16, 8 * GIB, 6 * GIB), 1);
         // Degenerate cap never divides by zero.
         assert_eq!(budgeted_pool_size(4, 0, 6 * GIB), 4);
+    }
+
+    #[test]
+    fn memory_guard_bytes_configured_and_adaptive() {
+        // A configured margin wins, converted MiB -> bytes.
+        assert_eq!(memory_guard_bytes(2048, 64 * GIB), 2048 * 1024 * 1024);
+        // Adaptive: 10% of total when that clears the 1 GiB floor.
+        assert_eq!(memory_guard_bytes(0, 64 * GIB), 64 * GIB / 10);
+        // Adaptive floor: at least 1 GiB on a small host (10% of 4 GiB < 1 GiB).
+        assert_eq!(memory_guard_bytes(0, 4 * GIB), GIB);
+    }
+
+    #[test]
+    fn pid_guard_deregisters_pid_on_drop() {
+        let live = Arc::new(Mutex::new(HashSet::new()));
+        live.lock().unwrap().insert(4242u32);
+        {
+            let _guard = PidGuard {
+                live: Some(Arc::clone(&live)),
+                pid: Some(4242),
+            };
+            assert!(live.lock().unwrap().contains(&4242));
+        }
+        assert!(
+            !live.lock().unwrap().contains(&4242),
+            "PidGuard must remove its pid from the live registry on drop"
+        );
     }
 
     #[tokio::test]

@@ -215,6 +215,12 @@ in {
         default = 8589934592;
       };
 
+      minFreeRamMb = lib.mkOption {
+        description = "Free-RAM safety margin in MiB for the eval-subprocess reaper. When host MemAvailable falls below this, the worker SIGKILLs the largest live eval subprocess to forestall a host OOM (the parent then reports the eval failed instead of the machine freezing). 0 selects an adaptive margin of max(1 GiB, 10% of total RAM). maxEvalRss still bounds steady-state RSS; this is the proactive peak guard.";
+        type = lib.types.ints.unsigned;
+        default = 0;
+      };
+
       evalCacheDir = lib.mkOption {
         description = "Eval-cache directory exported to eval workers as NIX_CACHE_HOME. When null, resolves to {baseDir}/eval-cache.";
         type = lib.types.nullOr lib.types.str;
@@ -443,6 +449,7 @@ in {
           GRADIENT_NAR_PARTIAL_TTL_SECS               = toString cfg.settings.narPartialTtlSecs;
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
           GRADIENT_MAX_EVAL_RSS                       = toString cfg.settings.maxEvalRss;
+          GRADIENT_MIN_FREE_RAM_MB                    = toString cfg.settings.minFreeRamMb;
           GRADIENT_EVAL_CACHE_SHARE                   = lib.boolToString cfg.settings.evalCacheShare;
           GRADIENT_EVAL_METRICS_ENABLED               = lib.boolToString cfg.settings.evalMetricsEnabled;
           GRADIENT_MAX_PROTO_CONNECTIONS              = toString cfg.settings.maxProtoConnections;

@@ -105,6 +105,7 @@ impl WorkerEvaluator {
         _eval_workers: usize,
         fork_workers: usize,
         max_eval_rss: u64,
+        min_free_ram_mb: u64,
         eval_cache_dir: String,
         eval_cache_share: bool,
     ) -> Self {
@@ -113,7 +114,8 @@ impl WorkerEvaluator {
         // OOM, falling back to fewer shards (down to one) on a small host. Shards
         // share one eval-cache safely because per-shard commits only append to
         // the WAL (no checkpoint); the single end-of-eval checkpoint folds it in.
-        let ram_budget = (total_memory_bytes() as f64 * EVAL_RAM_SHARE) as u64;
+        let total_ram = total_memory_bytes();
+        let ram_budget = (total_ram as f64 * EVAL_RAM_SHARE) as u64;
         let pool_size = budgeted_pool_size(fork_workers, max_eval_rss, ram_budget);
         if pool_size < fork_workers {
             info!(
@@ -125,12 +127,20 @@ impl WorkerEvaluator {
             );
         }
 
+        // `max_eval_rss` only recycles between calls; the reaper is the peak
+        // guard that kills a runaway eval before the host OOMs (issue: OOM
+        // kills not registered by the server).
+        let min_free_bytes =
+            crate::worker_pool::memory_guard_bytes(min_free_ram_mb, total_ram);
+        let resolver = Arc::new(WorkerPoolResolver::new(
+            pool_size,
+            max_eval_rss,
+            eval_cache_dir,
+        ));
+        resolver.start_memory_reaper(min_free_bytes);
+
         Self {
-            resolver: Arc::new(WorkerPoolResolver::new(
-                pool_size,
-                max_eval_rss,
-                eval_cache_dir,
-            )),
+            resolver,
             eval_cache_share,
         }
     }

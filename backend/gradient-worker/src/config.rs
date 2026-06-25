@@ -94,6 +94,15 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_MAX_EVAL_RSS", default_value_t = 8 * 1024 * 1024 * 1024)]
     pub max_eval_rss: u64,
 
+    /// Free-RAM safety margin in MiB for the eval-subprocess reaper. When host
+    /// `MemAvailable` falls below this, the worker SIGKILLs the largest live eval
+    /// subprocess to forestall a host OOM (the parent then reports the eval as
+    /// failed instead of the machine freezing). `0` selects an adaptive margin
+    /// of `max(1 GiB, 10% of total RAM)`. `max_eval_rss` still bounds
+    /// steady-state RSS; this is the proactive peak guard.
+    #[arg(long, env = "GRADIENT_MIN_FREE_RAM_MB", default_value_t = 0)]
+    pub min_free_ram_mb: u64,
+
     /// Directory holding the Nix eval cache (exported to eval workers as
     /// `NIX_CACHE_HOME`). When unset, resolves to `{data_dir}/eval-cache`.
     #[arg(long, env = "GRADIENT_EVAL_CACHE_DIR")]
@@ -399,6 +408,7 @@ mod tests {
             eval_workers: 1,
             eval_fork_workers: 2,
             max_eval_rss: 8 * 1024 * 1024 * 1024,
+            min_free_ram_mb: 0,
             eval_cache_dir: None,
             eval_cache_share: true,
             max_concurrent_evaluations: 1,
@@ -495,6 +505,7 @@ mod tests {
             eval_workers: 1,
             eval_fork_workers: 2,
             max_eval_rss: 8 * 1024 * 1024 * 1024,
+            min_free_ram_mb: 0,
             eval_cache_dir: None,
             eval_cache_share: true,
             max_concurrent_evaluations: 1,
@@ -568,6 +579,7 @@ mod tests {
             eval_workers: 1,
             eval_fork_workers: 2,
             max_eval_rss: 8 * 1024 * 1024 * 1024,
+            min_free_ram_mb: 0,
             eval_cache_dir: None,
             eval_cache_share: true,
             max_concurrent_evaluations: 1,

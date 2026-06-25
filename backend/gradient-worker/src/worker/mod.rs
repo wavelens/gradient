@@ -251,6 +251,7 @@ impl Worker<Connected> {
             config.eval_workers,
             config.eval_fork_workers,
             config.max_eval_rss,
+            config.min_free_ram_mb,
             config.eval_cache_dir(),
             config.eval_cache_share,
         );

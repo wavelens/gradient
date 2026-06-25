@@ -5154,3 +5154,20 @@ any worker silent past `worker_heartbeat_timeout_secs` (default 30 s), reusing
   with `now` so it is never immediately stale.
 - `last_seen_handle_none_for_unknown_worker` - the handle lookup returns `None`
   for a peer that is not connected.
+
+## Free-RAM reaper caps a runaway eval before the host OOMs
+
+`maxEvalRss` only recycles an eval subprocess *between* `list`/`resolve` calls, so
+a single call can balloon past it and OOM the host first. The reaper
+(`memory_reaper_loop`, `backend/gradient-worker/src/worker_pool/pool.rs`) samples
+host `MemAvailable` every 500 ms and SIGKILLs the largest live eval subprocess
+when free RAM falls below the margin (`min_free_ram_mb`, `0` = adaptive
+`max(1 GiB, 10% of total RAM)`); the victim's parent reports the eval failed
+rather than the host freezing. Covered in the same file:
+
+- `memory_guard_bytes_configured_and_adaptive` - a configured `min_free_ram_mb`
+  wins (MiB→bytes), `0` yields 10% of total RAM, and the adaptive margin floors
+  at 1 GiB on small hosts.
+- `pid_guard_deregisters_pid_on_drop` - the `PidGuard` RAII field removes a
+  subprocess pid from the pool's live registry on drop, so the reaper never
+  targets a worker that has already been discarded.

@@ -8,5 +8,5 @@ pub(crate) mod eval_stats;
 mod pool;
 mod resolver;
 
-pub use self::pool::budgeted_pool_size;
+pub use self::pool::{budgeted_pool_size, memory_guard_bytes};
 pub use self::resolver::WorkerPoolResolver;

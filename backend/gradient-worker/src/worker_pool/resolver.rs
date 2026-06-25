@@ -179,6 +179,20 @@ impl WorkerPoolResolver {
         }
     }
 
+    /// Arm the pool's memory guard and spawn the eval-subprocess reaper. The
+    /// margin is shared between the reaper (which kills the largest eval under
+    /// pressure) and `acquire` back-pressure. No-op when `min_free_bytes` is 0
+    /// or no tokio runtime is available (e.g. in unit tests).
+    pub fn start_memory_reaper(&self, min_free_bytes: u64) {
+        self.pool.configure_memory_guard(min_free_bytes);
+        if min_free_bytes == 0 || tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
+
+        let weak = Arc::downgrade(&self.pool);
+        tokio::spawn(super::pool::memory_reaper_loop(weak, min_free_bytes));
+    }
+
     /// Bucket one worker delta under `entry_point`, folding peak RSS in too.
     fn observe_stats(&self, entry_point: &str, delta: StatsDelta, rss: u64) {
         self.stats.lock().unwrap().observe(entry_point, delta, rss);

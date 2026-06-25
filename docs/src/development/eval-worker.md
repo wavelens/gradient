@@ -17,3 +17,9 @@ Gradient evaluates flakes with a pool of `--eval-worker` subprocesses that drive
 | Cross-machine eval compute | Roadmap; today it is a single-host pool | Single-host |
 
 Gradient's main advantage is treating the eval-cache as a first-class, persistent, fleet-shared artifact, so repeat and CI evaluations of the same locked flake are near-instant across the whole worker fleet, together with automatic memory-budgeted sizing that guarantees an evaluation completes instead of relying on manual worker and memory tuning.
+
+## Memory safety
+
+Two layers bound eval memory. **Pool sizing** (`maxEvalRss`, `GRADIENT_MAX_EVAL_RSS`, default 8 GiB) caps how many eval subprocesses run at once - `pool_size * maxEvalRss` stays within a host-RAM share - and recycles a worker whose RSS exceeds the cap *between* `list`/`resolve` calls. But that check is post-call: a single evaluation unit (a large aggregate, IFD chains, an accidental recursion blow-up) can balloon the Boehm-GC heap past the cap *within* one call and OOM the host before the recycle runs.
+
+The **free-RAM reaper** is the proactive peak guard. A background loop samples host `MemAvailable` every 500 ms; when it falls below the safety margin (`minFreeRamMb`, `GRADIENT_MIN_FREE_RAM_MB`; `0` = adaptive `max(1 GiB, 10% of total RAM)`) it SIGKILLs the **largest live eval subprocess**. The victim's parent task sees its pipe close and reports the eval as failed - converting a would-be host OOM (which could kill the worker itself and, because the server only registers a *clean* disconnect, strand the job non-terminal) into a single bounded eval failure. Under sustained pressure `acquire` also back-pressures, serialising evaluations (always letting one proceed, so it can never deadlock). Eval subprocesses keep `oom_score_adj = 600` as a last-resort kernel fallback.
