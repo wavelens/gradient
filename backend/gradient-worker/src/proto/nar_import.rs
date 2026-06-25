@@ -770,83 +770,104 @@ pub async fn ensure_path(
         .await
 }
 
-/// Worker side of an `external_cached` build: the build's outputs are
-/// known to be available in an upstream cache (cache.nixos.org and friends)
-/// but are not yet in the gradient cache. Skip the daemon build entirely;
-/// instead:
-///
-/// 1. Ensure the build's `.drv` is present locally (fetch via cache if not),
-///    so we can read its declared output paths.
-/// 2. Fetch every declared output path into the local nix store. Closure
-///    expansion runs as in [`prefetch_inputs`], so any transitive runtime
-///    references the outputs need also land locally.
-/// 3. Return the output paths so the caller can re-emit them via
-///    `compress_and_push_paths` - those uploads put the bytes into our
-///    cache and write the `cached_path` rows.
-///
-/// This bridges the "upstream-only → gradient cache" gap that forced
-/// downstream builds to fail with `dependency does not exist` previously.
-pub async fn fetch_external_cached_outputs(
-    store: &LocalNixStore,
+/// Substitute a build's outputs as a pure NAR relay: for each output, download
+/// its NAR from upstream, decompress + verify, recompress to zstd, and push it
+/// straight into our cache - without importing into the nix store or fetching the
+/// runtime closure. The closure is mirrored separately as each of its members is
+/// substituted by its own anchor; the `closure_complete` gate orders dependents.
+/// Returns the output `(name, path)` pairs. Errors map to `SubstituteUnavailable`.
+pub async fn relay_external_cached_outputs(
     task: &BuildTask,
     updater: &mut JobUpdater,
 ) -> Result<Vec<(String, String)>> {
-    let mut prefetcher = InputPrefetcher::new(store, task, updater);
-
-    // Output paths come from the server (`BuildTask.outputs`) so a substitution
-    // never fetches or imports the `.drv`: it needs only the output NAR plus the
-    // output's runtime closure, never the `.drv`'s build-time `input_sources`
-    // (binary caches don't serve those, so importing the `.drv` would fail with
-    // a spurious `SubstituteUnavailable`). Fall back to reading the `.drv` only
-    // when the server sent no output paths.
-    let outputs: Vec<(String, String)> = if !task.outputs.is_empty() {
-        task.outputs
-            .iter()
-            .map(|o| (o.name.clone(), o.path.clone()))
-            .collect()
-    } else {
-        prefetcher.ensure_self_drv_present().await?;
-        let full_drv_path = nix_store_path(&task.drv_path);
-        let drv_bytes = tokio::fs::read(&full_drv_path)
-            .await
-            .with_context(|| format!("read .drv {} for external_cached fetch", full_drv_path))?;
-        let drv = parse_drv(&drv_bytes)
-            .with_context(|| format!("parse .drv {} for external_cached fetch", full_drv_path))?;
-        drv.outputs
-            .into_iter()
-            .filter_map(|o| (!o.path.is_empty()).then_some((o.name, o.path)))
-            .collect()
-    };
+    let outputs: Vec<(String, String)> = task
+        .outputs
+        .iter()
+        .filter(|o| !o.path.is_empty())
+        .map(|o| (o.name.clone(), o.path.clone()))
+        .collect();
     if outputs.is_empty() {
         return Ok(Vec::new());
     }
+    let paths: Vec<String> = outputs.iter().map(|(_, p)| p.clone()).collect();
 
-    // Fetch any output not already in the local store, plus its transitive
-    // runtime closure (so the daemon will accept the imports).
-    let missing = prefetcher
-        .filter_missing(outputs.iter().map(|(_, p)| p.clone()).collect())
-        .await?;
-    if !missing.is_empty() {
-        prefetcher
-            .fetch_closure(missing, ClosureMode::FollowOutputs)
-            .await?;
-    }
+    // Pull = upstream availability + narinfo (URL, nar_hash, references);
+    // Push = presigned PUT targets in our own cache.
+    let pull: HashMap<String, CachedPath> = updater
+        .query_cache(paths.clone(), QueryMode::Pull)
+        .await
+        .with_context(|| format!("CacheQuery Pull (substitute) for {}", task.drv_path))?
+        .into_iter()
+        .map(|c| (c.path.clone(), c))
+        .collect();
+    let push: HashMap<String, CachedPath> = updater
+        .query_cache(paths.clone(), QueryMode::Push)
+        .await
+        .with_context(|| format!("CacheQuery Push (substitute) for {}", task.drv_path))?
+        .into_iter()
+        .map(|c| (c.path.clone(), c))
+        .collect();
 
-    // Belt-and-suspenders: the daemon can return `is_valid_path=true` for paths
-    // whose registry entry exists but whose on-disk NAR is gone (manual
-    // deletion, interrupted import, GC race), and our own fetch could leave a
-    // path unimported despite returning Ok. Either way, an absent file means
-    // the upcoming NAR-pack step will fail with an opaque IO error - bail now
-    // so the caller can fall back to a real build.
+    let http = crate::http::client();
     for (_, path) in &outputs {
-        if !tokio::fs::try_exists(path).await.unwrap_or(false) {
-            anyhow::bail!(
-                "external_cached output {} is registered but not present on disk; \
-                 cache is missing the NAR or the path was removed locally",
-                path
-            );
+        // Already in our cache (push reports it cached): nothing to relay.
+        if push.get(path).map(|c| c.cached).unwrap_or(false) {
+            continue;
         }
+        let upstream = pull
+            .get(path)
+            .filter(|c| c.cached && c.url.is_some())
+            .ok_or_else(|| anyhow::anyhow!("substitute {path}: not available on any upstream cache"))?;
+
+        let (_, fetched) = download_one_presigned(http, upstream.clone())
+            .await
+            .with_context(|| format!("download upstream NAR for {path}"))?;
+        let (compressed, meta) = fetched
+            .ok_or_else(|| anyhow::anyhow!("upstream reported {path} but the NAR object is missing"))?;
+
+        let kind = meta.url.as_deref().map(detect_compression).unwrap_or(Compression::Zstd);
+        let raw = decompress(&compressed, kind)
+            .with_context(|| format!("{kind:?} decompress for {path}"))?;
+        if let Some(claimed) = meta.nar_hash.as_deref() {
+            let actual: [u8; 32] = Sha256::digest(&raw).into();
+            let want = parse_nar_hash_to_bytes(claimed)
+                .with_context(|| format!("invalid upstream nar_hash for {path}"))?;
+            if actual != want {
+                anyhow::bail!("upstream NAR hash mismatch for {path}");
+            }
+        }
+
+        let put_url = push
+            .get(path)
+            .and_then(|c| c.url.clone())
+            .ok_or_else(|| anyhow::anyhow!("no presigned PUT url for {path}"))?;
+        // Upstream references arrive as full /nix/store paths; NarUploaded wants
+        // hash-name tokens.
+        let references: Vec<String> = meta
+            .references
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| r.strip_prefix("/nix/store/").unwrap_or(r.as_str()).to_string())
+            .collect();
+
+        crate::proto::nar::upload_presigned_bytes(
+            &updater.job_id,
+            path,
+            &raw,
+            references,
+            meta.deriver.clone(),
+            &put_url,
+            "PUT",
+            &[],
+            &updater.writer,
+        )
+        .await
+        .with_context(|| format!("relay-push {path} into our cache"))?;
+
+        debug!(%path, "relayed substitute NAR into our cache");
     }
+
     Ok(outputs)
 }
 

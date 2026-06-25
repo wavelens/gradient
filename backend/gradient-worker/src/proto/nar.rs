@@ -299,6 +299,73 @@ pub async fn push_direct(
     Ok(())
 }
 
+/// Upload an already-in-memory raw NAR (e.g. relayed from an upstream
+/// substituter) to the presigned `url`: zstd-compress it, PUT it, and confirm
+/// with [`ClientMessage::NarUploaded`] using the supplied `references`/`deriver`
+/// (taken from the upstream narinfo, hash-name format, no `/nix/store/` prefix).
+/// No nix-store involvement - this never packs from a store path, so a build's
+/// output can be mirrored into our cache without realizing its closure.
+#[allow(clippy::too_many_arguments)]
+pub async fn upload_presigned_bytes(
+    job_id: &str,
+    store_path: &str,
+    raw_nar: &[u8],
+    references: Vec<String>,
+    deriver: Option<String>,
+    url: &str,
+    method: &str,
+    headers: &[(String, String)],
+    writer: &ProtoWriter,
+) -> Result<()> {
+    let store_path = ensure_full_store_path(store_path);
+    let store_path = store_path.as_str();
+
+    let nar_size = raw_nar.len() as u64;
+    let nar_hash = format!("sha256:{}", nix32_encode(&Sha256::digest(raw_nar)));
+
+    let mut encoder =
+        zstd::stream::Encoder::new(Vec::with_capacity(raw_nar.len() / 2), 6)
+            .context("failed to create zstd encoder")?;
+    encoder.write_all(raw_nar).context("zstd compression failed")?;
+    let compressed = encoder.finish().context("failed to finish zstd encoder")?;
+    let file_size = compressed.len() as u64;
+    let file_hash = format!("sha256:{}", nix32_encode(&Sha256::digest(&compressed)));
+
+    let client = crate::http::client();
+    let http_method = reqwest::Method::from_bytes(method.as_bytes())
+        .with_context(|| format!("invalid HTTP method: {method}"))?;
+    let mut req = client
+        .request(http_method, url)
+        .header("Content-Type", "application/x-nix-nar")
+        .body(compressed);
+    for (name, value) in headers {
+        req = req.header(name.as_str(), value.as_str());
+    }
+    let resp = req
+        .send()
+        .await
+        .context("HTTP request to presigned URL failed")?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        anyhow::bail!("presigned upload returned {}: {}", status, body);
+    }
+
+    writer.send(ClientMessage::NarUploaded {
+        job_id: job_id.to_owned(),
+        store_path: store_path.to_owned(),
+        file_hash,
+        file_size,
+        nar_size,
+        nar_hash,
+        references,
+        deriver,
+    })?;
+
+    debug!(store_path, file_size, nar_size, "relayed NAR upload complete");
+    Ok(())
+}
+
 /// Upload `store_path` as a zstd-compressed NAR to the presigned `url`, then
 /// send [`ClientMessage::NarUploaded`] with compressed+uncompressed metadata.
 ///

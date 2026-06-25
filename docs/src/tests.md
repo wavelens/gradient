@@ -983,20 +983,24 @@ Backend (`cargo test -p gradient-db --lib recovery`):
   skipped and `builds_aborted` stays 0. The shared-anchor exclusion (an anchor a
   still-live eval also needs is left running) is raw SQL, covered E2E in CI.
 
-## External-cached substitution fetches outputs, not the `.drv`
+## External-cached substitution is a pure NAR relay (no store, no closure)
 
-The dispatcher carries the derivation's output `(name, store_path)` pairs in the
-`external_cached` `BuildTask` (`BuildDispatchMaps::self_outputs`), and the worker's
-`fetch_external_cached_outputs` substitutes those paths directly. It no longer
-imports the `.drv` for output discovery, which under `ClosureMode::InputsOnly`
-pulled the `.drv`'s build-time `input_sources` - paths binary caches do not serve.
-A `-source` derivation whose `.drv` referenced an `input_source` absent from the
-gradient cache and every upstream therefore failed every substitution attempt with
-`SubstituteUnavailable` (e.g. missing `/nix/store/…-source`), looping forever. A
-substitution now needs only the output NAR plus its runtime closure. Covered
-end-to-end in CI - `fetch_external_cached_outputs` needs a real daemon + cache, so
-there is no local unit harness; the reused output-closure walk
-(`drv_closure_seeds`) keeps its existing unit tests.
+A substitute build (`external_cached`) is done by `relay_external_cached_outputs`:
+for each output it `CacheQuery Pull`s the upstream narinfo (URL, `nar_hash`,
+`references`), downloads the **one** output NAR from upstream, decompresses +
+verifies it, recompresses to zstd (`nar::upload_presigned_bytes`), and pushes it
+straight into our cache via a presigned PUT - **without** `add_to_store_nar` or
+fetching the runtime closure. The previous path imported the output **plus its
+whole runtime closure** into the local nix store (`add_to_store_nar` requires every
+reference to be a valid store path), so any gap in the closure failed the import,
+surfaced as `SubstituteUnavailable`, and escalated into a real build that then died
+on `InputsUnavailable`. The closure no longer matters for the substitute itself:
+each closure member is mirrored by its own anchor, and the `closure_complete` gate
+orders dependents. A relayed output is therefore in our cache but not
+`closure_complete` until its closure is also mirrored - exactly what the gate
+expects. Covered end-to-end in CI (the relay needs a real upstream + object store,
+so there is no local unit harness); `nar::upload_presigned`'s helpers keep their
+existing tests.
 
 Backend (`cargo test -p worker --tests`):
 - `nix::store::tests::scoped_guard_discards_inner_when_not_marked_ok` -

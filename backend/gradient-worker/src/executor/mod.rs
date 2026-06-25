@@ -349,14 +349,14 @@ impl JobExecutor {
             updater.report_building(build_task.build_id.clone())?;
 
             if build_task.external_cached {
-                // Substitute attempt: the output was reported cache-available
-                // during eval, so this build was dispatched arch-agnostically
-                // (`builtin`). Pulling it through is the whole job - there is no
-                // safe local-build fallback (this worker may be the wrong arch).
-                // On a miss, fail with `SubstituteUnavailable`; the scheduler
-                // re-dispatches or escalates to a real arch-bound build.
-                let outputs = crate::proto::nar_import::fetch_external_cached_outputs(
-                    &self.store,
+                // Substitute attempt: the output is on an upstream cache (flagged
+                // at eval). Relay it as a pure NAR copy - download the output NAR
+                // from upstream, recompress to zstd, push it to our cache - without
+                // importing into the nix store or fetching the closure (the closure
+                // is mirrored by each member's own anchor). There is no local-build
+                // fallback (this worker may be the wrong arch); on a miss fail with
+                // `SubstituteUnavailable` and let the scheduler re-dispatch/escalate.
+                let outputs = crate::proto::nar_import::relay_external_cached_outputs(
                     build_task,
                     updater,
                 )
@@ -365,33 +365,29 @@ impl JobExecutor {
                     tracing::warn!(
                         build_id = %build_task.build_id,
                         error = %e,
-                        "external_cached fetch missed; reporting SubstituteUnavailable"
+                        "external_cached relay missed; reporting SubstituteUnavailable"
                     );
                     crate::executor::build::BuildError::substitute_unavailable(e)
                 })?;
 
-                let mut reported = Vec::with_capacity(outputs.len());
-                for (name, path) in &outputs {
-                    let hash = gradient_sources::get_hash_from_path(path.clone())
-                        .map(|(h, _)| h)
-                        .unwrap_or_default();
-                    let products = build::load_products(path).await;
-                    reported.push(gradient_proto::messages::BuildOutput {
+                let reported: Vec<gradient_proto::messages::BuildOutput> = outputs
+                    .iter()
+                    .map(|(name, path)| gradient_proto::messages::BuildOutput {
                         name: name.clone(),
                         store_path: path.clone(),
-                        hash,
+                        hash: gradient_sources::get_hash_from_path(path.clone())
+                            .map(|(h, _)| h)
+                            .unwrap_or_default(),
                         nar_size: None,
                         nar_hash: None,
-                        products,
-                    });
-                }
+                        products: Vec::new(),
+                    })
+                    .collect();
 
+                // The relay already pushed each NAR (NarUploaded), and nothing
+                // landed in the local store, so no GC roots and no post-loop
+                // compress_and_push for these outputs.
                 updater.report_build_output(build_task.build_id.clone(), reported, None, false)?;
-                for (_, p) in &outputs {
-                    gc_handles.push(self.gcroots.add(p).await);
-                }
-
-                all_output_paths.extend(outputs.into_iter().map(|(_, p)| p));
                 continue;
             }
 
