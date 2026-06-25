@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Whether per-eval metrics collection is enabled (default on). Disabling skips
@@ -32,7 +31,8 @@ pub(crate) fn eval_worker_stats_env(metrics_enabled: bool) -> &'static [(&'stati
 /// Counters are diffs since the worker's prior request; gc_heap_size is the
 /// current gauge at report time. Canonical delta type, shared internally and
 /// on the eval-worker wire protocol.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+#[rkyv(derive(Debug))]
 pub struct StatsDelta {
     pub nr_thunks: u64,
     pub nr_function_calls: u64,

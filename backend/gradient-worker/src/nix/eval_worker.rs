@@ -16,90 +16,110 @@
 //! subprocess entry point [`run_eval_worker`]. The pool implementation lives
 //! in [`super::worker_pool`].
 
-use serde::{Deserialize, Serialize};
-use std::io::{BufRead, Write};
+use std::io::{Read, Write};
 use tracing::{error, trace};
+
+use rkyv::rancor::Error as RkyvError;
+use rkyv::util::AlignedVec;
 
 use crate::nix::nix_eval::NixEvaluator;
 use crate::worker_pool::eval_stats::StatsDelta;
 
-/// Request from parent → worker. One JSON object per line on the worker's stdin.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
+/// Guards against a corrupt length prefix allocating an absurd buffer. The
+/// child is trusted, but a torn frame must fail fast, not OOM the parent.
+pub(crate) const MAX_EVAL_FRAME: usize = 512 * 1024 * 1024;
+
+/// Request from parent to worker. One rkyv frame per message on stdin.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug))]
 pub enum EvalRequest {
-    /// Split `wildcards` into disjoint sub-patterns (one per first-wildcard
-    /// child) so the parent can fan discovery across the pool, one shard per
-    /// system within each worker's memory budget.
-    Plan {
-        repository: String,
-        wildcards: Vec<String>,
-    },
-    /// Discover all attribute paths in `repository` matching `wildcards`.
-    List {
-        repository: String,
-        wildcards: Vec<String>,
-    },
-    /// Resolve a batch of attribute paths to `(drv_path, references)` tuples.
-    /// Per-attr failures are reported in the response, not as a top-level err.
-    Resolve {
-        repository: String,
-        attrs: Vec<String>,
-    },
-    /// Return `repository`'s eval-cache fingerprint without evaluating it.
-    /// `None` in the response for mutable/dirty flakes.
+    Plan { repository: String, wildcards: Vec<String> },
+    List { repository: String, wildcards: Vec<String> },
+    Resolve { repository: String, attrs: Vec<String> },
     Fingerprint { repository: String },
-    /// Fold the eval-cache WAL into the main `.sqlite` (truncate checkpoint).
-    /// Run once after all shards finish, before the fleet-share push.
     Checkpoint { repository: String },
-    /// Ask the worker to exit cleanly. Parent uses this on graceful shutdown.
     Shutdown,
 }
 
-/// Response from worker → parent. One JSON object per line on the worker's stdout.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+/// Response from worker to parent. One rkyv frame per message on stdout.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug))]
 pub enum EvalResponse {
-    PlanOk {
-        sub_patterns: Vec<String>,
-    },
+    PlanOk { sub_patterns: Vec<String> },
     ListOk {
         attrs: Vec<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<String>,
-        #[serde(default)]
-        stats: Option<crate::worker_pool::eval_stats::StatsDelta>,
+        stats: Option<StatsDelta>,
     },
     ResolveOk {
         items: Vec<ResolvedItem>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<String>,
-        #[serde(default)]
-        stats: Option<crate::worker_pool::eval_stats::StatsDelta>,
+        stats: Option<StatsDelta>,
     },
-    FingerprintOk {
-        fingerprint: Option<String>,
-    },
+    FingerprintOk { fingerprint: Option<String> },
     CheckpointOk,
-    Err {
-        message: String,
-    },
+    Err { message: String },
 }
 
-/// One element of a `ResolveOk` payload. Either `drv_path` is set (success)
-/// or `error` is set (failure for that one attr).
-#[derive(Debug, Serialize, Deserialize)]
+/// One element of a `ResolveOk` payload: `drv_path` set on success, `error`
+/// set on a per-attr failure.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
+#[rkyv(derive(Debug))]
 pub struct ResolvedItem {
     pub attr: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drv_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub references: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 
-/// Subprocess entry point. Reads `EvalRequest` lines from stdin, processes
-/// them with one persistent `NixEvaluator`, writes `EvalResponse` lines to
+pub(crate) fn encode_request(req: &EvalRequest) -> Result<AlignedVec, RkyvError> {
+    rkyv::to_bytes::<RkyvError>(req)
+}
+
+pub(crate) fn encode_response(resp: &EvalResponse) -> Result<AlignedVec, RkyvError> {
+    rkyv::to_bytes::<RkyvError>(resp)
+}
+
+pub(crate) fn decode_request(bytes: &[u8]) -> Result<EvalRequest, RkyvError> {
+    let mut aligned = AlignedVec::<16>::new();
+    aligned.extend_from_slice(bytes);
+    rkyv::from_bytes::<EvalRequest, RkyvError>(&aligned)
+}
+
+pub(crate) fn decode_response(bytes: &[u8]) -> Result<EvalResponse, RkyvError> {
+    let mut aligned = AlignedVec::<16>::new();
+    aligned.extend_from_slice(bytes);
+    rkyv::from_bytes::<EvalResponse, RkyvError>(&aligned)
+}
+
+/// Read one `u32`-length-prefixed frame from a blocking reader. `Ok(None)` is a
+/// clean EOF at a frame boundary (the parent closed the pipe).
+fn read_frame<R: Read>(r: &mut R) -> std::io::Result<Option<Vec<u8>>> {
+    let mut len_buf = [0u8; 4];
+    match r.read_exact(&mut len_buf) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e),
+    }
+
+    let len = u32::from_le_bytes(len_buf) as usize;
+    if len > MAX_EVAL_FRAME {
+        return Err(std::io::Error::other(format!("frame too large: {len}")));
+    }
+
+    let mut buf = vec![0u8; len];
+    r.read_exact(&mut buf)?;
+    Ok(Some(buf))
+}
+
+fn write_frame<W: Write>(w: &mut W, payload: &[u8]) -> std::io::Result<()> {
+    w.write_all(&(payload.len() as u32).to_le_bytes())?;
+    w.write_all(payload)?;
+    w.flush()
+}
+
+/// Subprocess entry point. Reads `EvalRequest` frames from stdin, processes
+/// them with one persistent `NixEvaluator`, writes `EvalResponse` frames to
 /// stdout. Returns when stdin reaches EOF or a `Shutdown` request is received.
 ///
 /// Diagnostics go through `tracing` (configured in `worker::main` to write
@@ -107,11 +127,6 @@ pub struct ResolvedItem {
 /// and stdin errors stay visible to JSON log aggregators with structured
 /// fields, target metadata, and `RUST_LOG` filtering applied.
 pub fn run_eval_worker() -> std::io::Result<()> {
-    let stdin = std::io::stdin();
-    let stdout = std::io::stdout();
-    let mut reader = stdin.lock();
-    let mut writer = stdout.lock();
-
     // Construct the evaluator once. If init fails we still loop so that the
     // parent gets an error response per request instead of a silent EOF; the
     // parent will then mark this worker dead and respawn.
@@ -160,29 +175,25 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         })
     };
 
-    let mut line = String::new();
+    let mut reader = std::io::BufReader::new(std::io::stdin());
+    let mut writer = std::io::BufWriter::new(std::io::stdout());
+
     loop {
-        line.clear();
-        let n = match reader.read_line(&mut line) {
-            Ok(n) => n,
+        let frame = match read_frame(&mut reader) {
+            Ok(Some(f)) => f,
+            Ok(None) => return Ok(()),
             Err(e) => {
                 error!(error = %e, "eval worker: stdin read error");
                 return Err(e);
             }
         };
-        if n == 0 {
-            // EOF: parent closed the pipe.
-            return Ok(());
-        }
 
-        let req: EvalRequest = match serde_json::from_str(line.trim_end()) {
+        let req: EvalRequest = match decode_request(&frame) {
             Ok(r) => r,
             Err(e) => {
                 write_response(
                     &mut writer,
-                    &EvalResponse::Err {
-                        message: format!("malformed request: {}", e),
-                    },
+                    &EvalResponse::Err { message: format!("malformed request: {e}") },
                 )?;
                 continue;
             }
@@ -371,10 +382,8 @@ pub fn run_eval_worker() -> std::io::Result<()> {
 }
 
 fn write_response<W: Write>(w: &mut W, resp: &EvalResponse) -> std::io::Result<()> {
-    let mut bytes = serde_json::to_vec(resp).map_err(std::io::Error::other)?;
-    bytes.push(b'\n');
-    w.write_all(&bytes)?;
-    w.flush()
+    let payload = encode_response(resp).map_err(std::io::Error::other)?;
+    write_frame(w, &payload)
 }
 
 /// Runs `f` while capturing everything written to stderr (fd 2).
@@ -499,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn eval_request_serde_roundtrip() {
+    fn eval_request_rkyv_roundtrip() {
         let requests = [
             EvalRequest::Plan {
                 repository: "github:nixos/nixpkgs".into(),
@@ -523,19 +532,14 @@ mod tests {
         ];
 
         for req in &requests {
-            let json = serde_json::to_string(req).expect("serialize failed");
-            let back: EvalRequest = serde_json::from_str(&json).expect("deserialize failed");
-            // Re-serialize and compare JSON strings (no PartialEq on enums)
-            assert_eq!(
-                serde_json::to_string(&back).unwrap(),
-                json,
-                "roundtrip mismatch for request"
-            );
+            let bytes = encode_request(req).expect("encode");
+            let back = decode_request(&bytes).expect("decode");
+            assert_eq!(&back, req);
         }
     }
 
     #[test]
-    fn eval_response_serde_roundtrip() {
+    fn eval_response_rkyv_roundtrip() {
         let responses: Vec<EvalResponse> = vec![
             EvalResponse::PlanOk {
                 sub_patterns: vec!["packages.x86_64-linux.#".into()],
@@ -565,13 +569,9 @@ mod tests {
         ];
 
         for resp in &responses {
-            let json = serde_json::to_string(resp).expect("serialize failed");
-            let back: EvalResponse = serde_json::from_str(&json).expect("deserialize failed");
-            assert_eq!(
-                serde_json::to_string(&back).unwrap(),
-                json,
-                "roundtrip mismatch for response"
-            );
+            let bytes = encode_response(resp).expect("encode");
+            let back = decode_response(&bytes).expect("decode");
+            assert_eq!(&back, resp);
         }
     }
 }
