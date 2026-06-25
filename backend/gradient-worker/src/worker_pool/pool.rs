@@ -286,19 +286,10 @@ impl EvalWorker {
         repository: String,
         attrs: Vec<String>,
     ) -> Result<(Vec<ResolvedItem>, Vec<String>, Option<StatsDelta>)> {
+        // TODO(task-3): replace with streaming ResolveItem/ResolveEnd reader
+        let _ = (repository, attrs);
         self.evaluations_served += 1;
-        match self
-            .request(&EvalRequest::Resolve { repository, attrs })
-            .await?
-        {
-            EvalResponse::ResolveOk {
-                items,
-                warnings,
-                stats,
-            } => Ok((items, warnings, stats)),
-            EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {}", message)),
-            _ => anyhow::bail!("eval worker: unexpected response to Resolve"),
-        }
+        anyhow::bail!("resolve not yet implemented for streaming protocol")
     }
 
     /// Resident set size of the subprocess in bytes, read from

@@ -6,15 +6,9 @@
 
 //! Long-lived Nix evaluator worker subprocess.
 //!
-//! The parent process spawns one or more copies of the gradient-worker binary
-//! with `--eval-worker` to host a persistent [`NixEvaluator`]. Parent and
-//! worker exchange line-delimited JSON over the worker's stdin/stdout, so the
-//! libnix init cost is paid only once per worker (vs. once per `resolve` call
-//! when using the in-process resolver).
-//!
-//! This file defines the wire protocol shared by both sides plus the
-//! subprocess entry point [`run_eval_worker`]. The pool implementation lives
-//! in [`super::worker_pool`].
+//! Parent and worker exchange rkyv length-prefixed frames (`u32 LE` + payload)
+//! over stdin/stdout. `Resolve` streams one `ResolveItem` frame per attr then a
+//! `ResolveEnd` terminator; all other exchanges are single-response.
 
 use std::io::{Read, Write};
 use tracing::{error, trace};
@@ -51,8 +45,8 @@ pub enum EvalResponse {
         warnings: Vec<String>,
         stats: Option<StatsDelta>,
     },
-    ResolveOk {
-        items: Vec<ResolvedItem>,
+    ResolveItem { item: ResolvedItem },
+    ResolveEnd {
         warnings: Vec<String>,
         stats: Option<StatsDelta>,
     },
@@ -61,8 +55,7 @@ pub enum EvalResponse {
     Err { message: String },
 }
 
-/// One element of a `ResolveOk` payload: `drv_path` set on success, `error`
-/// set on a per-attr failure.
+/// One resolved attr: `drv_path` set on success, `error` set on per-attr failure.
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug))]
 pub struct ResolvedItem {
@@ -269,15 +262,12 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 let Some(ev) = evaluator.as_ref() else {
                     write_response(
                         &mut writer,
-                        &EvalResponse::Err {
-                            message: "evaluator not initialized".to_string(),
-                        },
+                        &EvalResponse::Err { message: "evaluator not initialized".to_string() },
                     )?;
                     continue;
                 };
 
                 let mut all_warnings = Vec::new();
-                let mut items = Vec::with_capacity(attrs.len());
                 let (walker, build_warnings) = capture_warnings_during(|| ev.walker(&repository));
                 all_warnings.extend(build_warnings);
 
@@ -287,44 +277,46 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                             let (result, warnings) =
                                 capture_warnings_during(|| walker.resolve(&attr));
                             all_warnings.extend(warnings);
-                            match result {
-                                Ok((drv, references)) => items.push(ResolvedItem {
+                            let item = match result {
+                                Ok((drv, references)) => ResolvedItem {
                                     attr,
                                     drv_path: Some(drv),
                                     references,
                                     error: None,
-                                }),
-                                Err(e) => items.push(ResolvedItem {
+                                },
+                                Err(e) => ResolvedItem {
                                     attr,
                                     drv_path: None,
                                     references: vec![],
-                                    error: Some(format!("{:#}", e)),
-                                }),
-                            }
+                                    error: Some(format!("{e:#}")),
+                                },
+                            };
+                            write_response(&mut writer, &EvalResponse::ResolveItem { item })?;
                         }
 
                         let _ = walker.commit_cache();
                     }
                     Err(e) => {
-                        let msg = format!("{:#}", e);
+                        let msg = format!("{e:#}");
                         for attr in attrs {
-                            items.push(ResolvedItem {
+                            let item = ResolvedItem {
                                 attr,
                                 drv_path: None,
                                 references: vec![],
                                 error: Some(msg.clone()),
-                            });
+                            };
+                            write_response(&mut writer, &EvalResponse::ResolveItem { item })?;
                         }
                     }
                 }
 
                 all_warnings.dedup();
                 let stats = take_delta(ev);
-                EvalResponse::ResolveOk {
-                    items,
-                    warnings: all_warnings,
-                    stats,
-                }
+                write_response(
+                    &mut writer,
+                    &EvalResponse::ResolveEnd { warnings: all_warnings, stats },
+                )?;
+                continue;
             }
             EvalRequest::Fingerprint { repository } => {
                 let Some(ev) = evaluator.as_ref() else {
@@ -369,12 +361,12 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 format!("PlanOk({} shards)", sub_patterns.len())
             }
             EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
-            EvalResponse::ResolveOk { items, .. } => format!("ResolveOk({} items)", items.len()),
             EvalResponse::FingerprintOk { fingerprint } => {
                 format!("FingerprintOk({})", fingerprint.is_some())
             }
             EvalResponse::CheckpointOk => "CheckpointOk".to_string(),
             EvalResponse::Err { message } => format!("Err({message})"),
+            EvalResponse::ResolveItem { .. } | EvalResponse::ResolveEnd { .. } => unreachable!(),
         };
         trace!(%kind, "eval worker sending response");
         write_response(&mut writer, &resp)?;
@@ -549,14 +541,16 @@ mod tests {
                 warnings: vec![],
                 stats: None,
             },
-            EvalResponse::ResolveOk {
-                items: vec![ResolvedItem {
+            EvalResponse::ResolveItem {
+                item: ResolvedItem {
                     attr: "packages.x86_64-linux.hello".into(),
                     drv_path: Some("aaaa-hello.drv".into()),
                     references: vec![],
                     error: None,
-                }],
-                warnings: vec![],
+                },
+            },
+            EvalResponse::ResolveEnd {
+                warnings: vec!["warning: insecure".into()],
                 stats: None,
             },
             EvalResponse::FingerprintOk {
