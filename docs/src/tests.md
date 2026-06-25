@@ -2430,11 +2430,22 @@ gate leaves nothing dispatchable) round-trips in
 `backend/gradient-types/src/waiting_reason.rs::graph_stuck_round_trip`
 (`kind: "graph_stuck"`, `pending_anchors`). Its scheduler trigger -
 `build_phase_decision` detecting a `workers` verdict with empty `unmet`, running
-`reconcile_closure_complete` + `promote_ready`, then re-assessing to `Building`
-or parking `graph_stuck` - is exercised end-to-end in CI (the db crate has no
-real-Postgres unit harness). The frontend renders it in
+`requeue_failed_closure_for_eval` + `reconcile_closure_complete` + `promote_ready`,
+then re-assessing to `Building` or parking `graph_stuck` - is exercised end-to-end
+in CI (the db crate has no real-Postgres unit harness). The frontend renders it in
 `evaluation-log.component.spec.ts::titles and explains a graph-stuck stall`
 (`waitingTitle` "Recovering Build Graph", `formatWaitingReason` blocked count).
+
+`requeue_failed_closure_for_eval` is the load-bearing addition for the most common
+stuck case: a transitive dependency a *prior* eval left terminal-failed
+(`DependencyFailed`/etc.), which this eval pruned out so it carries no `build_job`
+here. `resolve_anchors` only requeues the eval's re-reported derivations
+(`all_drv_ids`), so such a dep stays failed, blocks its dependents
+(`etc`->`activate`->`nixos-system` observed live on `system-units`), and since the
+gate correctly refuses to dispatch it, nothing fails to trigger the reactive heal.
+The recursive-closure requeue walks `derivation_dependency` down from the eval's
+anchors and resets every `4/5/6/9` node to `Created`, so promotion (keyed on any
+`build_job`, not this eval's) rebuilds the failed subtree bottom-up.
 
 ## Pre-build evaluation stall when no worker exists (issue #97)
 

@@ -342,3 +342,41 @@ pub async fn requeue_failed_anchors<C: ConnectionTrait>(
 
     Ok(total)
 }
+
+/// Re-queue terminal-failed anchors across the full build-dependency **closure**
+/// of an evaluation's anchors, not just the derivations its walk re-reported.
+/// `requeue_failed_anchors` only thaws the eval's own derivations; a transitive
+/// dependency a prior eval left terminal-failed - and which this eval pruned or
+/// never re-walked (so it has no `build_job` here) - stays failed forever and
+/// blocks its dependents with no dispatch (hence no failure) to trigger any
+/// reactive heal. Walks `derivation_dependency` down from the eval's anchors and
+/// resets every `FailedPermanent`/`Aborted`/`DependencyFailed`/`FailedTimeout`
+/// node to `Created` so promotion (which keys on any `build_job`, not this eval's)
+/// can rebuild the failed subtree bottom-up. Returns the number re-queued.
+pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
+    db: &C,
+    evaluation: gradient_types::EvaluationId,
+) -> Result<u64, DbErr> {
+    let affected = db
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            WITH RECURSIVE closure AS (
+                SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1
+                UNION
+                SELECT e.dependency FROM derivation_dependency e
+                JOIN closure c ON c.derivation = e.derivation
+            )
+            UPDATE derivation_build db
+            SET status = 0, attempt = 0, closure_complete = false,
+                updated_at = (now() AT TIME ZONE 'UTC')
+            WHERE db.derivation IN (SELECT derivation FROM closure)
+              AND db.status IN (4, 5, 6, 9)
+            "#,
+            [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
+        ))
+        .await?
+        .rows_affected();
+
+    Ok(affected)
+}

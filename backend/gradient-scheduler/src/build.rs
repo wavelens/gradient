@@ -952,6 +952,16 @@ impl<'a> BuildStateHandler<'a> {
         let db = &self.state.worker_db;
         info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing closure_complete");
 
+        // Thaw terminal-failed anchors anywhere in this eval's dependency closure -
+        // a transitive dep a prior eval left failed (and this eval pruned, so it has
+        // no build_job here) blocks its dependents with no dispatch to fail and
+        // trigger a reactive heal. Reset to Created so promotion can rebuild it.
+        match gradient_db::requeue_failed_closure_for_eval(db, evaluation_id).await {
+            Ok(n) if n > 0 => info!(%evaluation_id, requeued = n, "graph-unstick: re-queued terminal-failed closure anchors"),
+            Ok(_) => {}
+            Err(e) => error!(error = %e, %evaluation_id, "requeue_failed_closure_for_eval during graph-unstick failed"),
+        }
+
         if let Err(e) = gradient_db::reconcile_closure_complete(db).await {
             error!(error = %e, %evaluation_id, "reconcile_closure_complete during graph-unstick failed");
         }
