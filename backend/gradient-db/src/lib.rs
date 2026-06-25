@@ -41,7 +41,7 @@ pub use self::cache_reach::*;
 pub use self::cache_storage::{
     MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, cache_used_bytes,
     clear_closure_complete_for_referrers, demote_cached_output, demote_referrers_of,
-    diagnose_missing_input, instance_used_bytes, mark_closure_complete, org_caches_all_full,
+    diagnose_missing_input, instance_used_bytes, org_caches_all_full,
     org_writable_caches,
 };
 pub use self::cache_upstream::{
@@ -61,7 +61,7 @@ pub use self::org_cache::org_has_writable_cache;
 pub use self::org_derivations::derivation_ids_for_org;
 pub use self::promotion::{
     cascade_dependency_failed, mark_edges_complete_for_eval, promote_dependents, promote_ready,
-    requeue_failed_anchors,
+    propagate_closure_complete, requeue_failed_anchors,
 };
 pub use self::reachability::{
     build_jobs_for_derivation, derivation_is_reachable, eval_anchor_statuses,

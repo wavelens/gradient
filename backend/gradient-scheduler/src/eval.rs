@@ -426,6 +426,34 @@ impl<'a> EvalResultProcessor<'a> {
             }
         }
 
+        // Conversely, clear the flag on not-yet-succeeded anchors no upstream
+        // offers this eval. A stale `substitutable=true` (from an earlier eval, or
+        // the old is_cached-based detection) would otherwise let the anchor bypass
+        // the dependency gate and dispatch a substitute that escalates into a build
+        // whose closure was never produced - the activate/etc/unit-bird loop.
+        let not_upstream: Vec<DerivationId> = all_drv_ids
+            .iter()
+            .copied()
+            .filter(|d| !upstream_substitutable.contains(d))
+            .collect();
+        if !not_upstream.is_empty()
+            && let Err(e) = gradient_db::for_each_chunk(&not_upstream, |chunk| async move {
+                EDerivationBuild::update_many()
+                    .col_expr(CDerivationBuild::Substitutable, sea_orm::sea_query::Expr::value(false))
+                    .filter(CDerivationBuild::Derivation.is_in(chunk))
+                    .filter(CDerivationBuild::Substitutable.eq(true))
+                    .filter(CDerivationBuild::Status.is_not_in([
+                        i32::from(BuildStatus::Completed),
+                        i32::from(BuildStatus::Substituted),
+                    ]))
+                    .exec(db)
+                    .await
+            })
+            .await
+        {
+            error!(error = %e, "failed to clear stale substitutable flags");
+        }
+
         // Promotion is deferred to stream completion (`handle_eval_job_completed`),
         // after `flush_deferred_deps` writes the dependency edges. Promoting here
         // would run before any edge exists and queue every anchor regardless of

@@ -103,6 +103,78 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     Ok(affected)
 }
 
+/// Recompute closure-completeness up the build-dependency graph from a just-
+/// finished `completed` derivation. A built (`Completed`) anchor becomes
+/// `closure_complete` once its outputs are cached, its edges are flushed, and
+/// every build dependency is itself `closure_complete` **or** `substitutable`
+/// (its closure is fetchable from upstream on demand). Substituted anchors are
+/// not marked here - we hold only their output NAR, not their build closure, so
+/// dependents reach them via the `substitutable` arm of the gate instead.
+///
+/// Marking ripples to dependents: completing one anchor can complete those that
+/// were waiting only on it. This is the missing up-propagation - a dependent that
+/// finished before its dependency did never re-evaluated its own completeness.
+pub async fn propagate_closure_complete<C: ConnectionTrait>(
+    db: &C,
+    completed: DerivationId,
+) -> Result<(), DbErr> {
+    // Round-1 candidates: `completed` itself (it may now be closure_complete)
+    // plus its direct dependents - a *substituted* `completed` is never marked
+    // here, but it satisfies its dependents through the `substitutable` arm, so
+    // they must still be re-checked even though `completed` never enters `newly`.
+    let mut frontier = returned_derivations(
+        db.query_all(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = $1",
+            [completed.into_inner().into()],
+        ))
+        .await?,
+    );
+    frontier.push(completed);
+    while !frontier.is_empty() {
+        let ids: Vec<uuid::Uuid> = frontier.iter().map(|d| d.into_inner()).collect();
+        let newly = returned_derivations(
+            db.query_all(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                r#"
+                UPDATE derivation_build db SET closure_complete = true
+                WHERE db.derivation = ANY($1)
+                  AND NOT db.closure_complete
+                  AND db.status = 3
+                  AND db.edges_complete
+                  AND NOT EXISTS (
+                    SELECT 1 FROM derivation_output o
+                    LEFT JOIN cached_path cp ON cp.hash = o.hash
+                    WHERE o.derivation = db.derivation AND cp.file_hash IS NULL)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM derivation_dependency e
+                    LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
+                    WHERE e.derivation = db.derivation
+                      AND (dep.derivation IS NULL
+                           OR NOT (dep.closure_complete OR dep.substitutable)))
+                RETURNING db.derivation
+                "#,
+                [ids.into()],
+            ))
+            .await?,
+        );
+        if newly.is_empty() {
+            break;
+        }
+
+        let newly_ids: Vec<uuid::Uuid> = newly.iter().map(|d| d.into_inner()).collect();
+        frontier = returned_derivations(
+            db.query_all(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = ANY($1)",
+                [newly_ids.into()],
+            ))
+            .await?,
+        );
+    }
+    Ok(())
+}
+
 /// Recursively mark every dependent of `failed_derivation` `DependencyFailed`.
 /// Walks the global `derivation_dependency` graph upward: any non-terminal
 /// anchor (`Created`/`Queued`/`FailedTransient`) reachable from the failure can

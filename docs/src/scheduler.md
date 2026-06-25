@@ -156,37 +156,34 @@ weaker signal fails `InputsUnavailable` on a runtime path the gate never checked
 (e.g. `nixos-system` needs `unit-bird.service` via `system-units`, which has no
 direct edge). So completeness is tracked explicitly:
 
-- `cached_path.closure_complete` - a NAR is complete once present **and** every
-  non-self reference is itself present and complete.
-- `derivation_build.closure_complete` - true once all of a terminal-success
-  anchor's outputs are complete.
+`derivation_build.closure_complete` means a **built** anchor's whole build
+closure is fetchable: its outputs are cached, its edges are flushed
+(`edges_complete`), and every build dependency is itself `closure_complete` **or**
+`substitutable` (its closure lives on an upstream cache, fetchable on demand). A
+build's runtime references are a subset of its build inputs, so a fetchable build
+closure guarantees a fetchable runtime closure too - closing the runtime-vs-build
+edge gap without a runtime walk.
 
-Both are set in one deterministic pass by `mark_closure_complete`, called from
-`update_derivation_build_status` **the moment an anchor reaches terminal success,
-before it promotes dependents**: `compress_and_push_paths` has by then pushed the
-anchor's **full runtime closure**, so the pass BFS-walks that closure over
-`cached_path.references`, takes the fixpoint of "present and every ref present +
-complete" within it, bulk-sets the flag, and marks every anchor whose outputs are
-all complete (Nix produces all of a derivation's outputs together). Finalizing
-before promotion is essential: the last dependency to land must carry the flag at
-the instant its dependents are gated, or they stall behind a flag that flips only
-afterward.
+`propagate_closure_complete` (called from `update_derivation_build_status` the
+moment an anchor reaches terminal success, before it promotes dependents) computes
+this over `derivation_dependency` and **ripples up**: it marks the just-finished
+anchor complete if its deps are all satisfied, then re-checks that anchor's
+dependents, and so on. The up-ripple is essential - a dependent that finished
+before its dependency did would otherwise never re-evaluate its own completeness.
+A **substituted** anchor is deliberately *not* marked complete (we hold only its
+output NAR, not its build closure); dependents reach it through the `substitutable`
+arm instead.
 
-`promote_ready` and `dispatch_ready_builds` require every dependency to be
-`status IN (Completed, Substituted) AND closure_complete` **or itself
-`substitutable`** (its NAR is on an upstream cache, so the building worker fetches
-it on demand and the gate never waits for it to land in our cache), and
-`compute_truly_substituted` only marks an output Substituted when its cache entry
-is closure-complete. A `substitutable` anchor skips the dependency gate entirely
-and dispatches out of order (#456): its NAR is prebuilt upstream, so it needs
-neither its build dependencies nor its runtime closure to be in our cache; the
-substitute job carries no `required_paths`, so the worker pulls no build deps and
-the job scores a uniform zero (no meaningful scoring). The gate stays O(1) (no
-hot-path closure walk) because the flag amortizes the check. Partial indexes on
-`derivation_build` keyed by the dispatch (`status = Queued AND edges_complete`)
-and promote (`status = Created AND edges_complete`) predicates keep these per-tick
-scans off the full anchor table; `mark_closure_complete` prunes its BFS at
-already-complete subtrees so each build finalizes in O(new paths), not O(closure).
+`promote_ready`, `promote_dependents`, and `dispatch_ready_builds` therefore gate
+each dependency on `(status IN (Completed, Substituted) AND closure_complete)`
+**or** `substitutable`. A `substitutable` anchor skips the dependency gate
+entirely and dispatches out of order (#456); its substitute job carries no
+`required_paths`, so the worker pulls no build deps and the job scores a uniform
+zero. The gate stays O(1) (a flag check), and the propagation touches only the
+completing anchor's dependent sub-tree. Partial indexes on `derivation_build`
+keyed by the dispatch (`status = Queued AND edges_complete`) and promote
+(`status = Created AND edges_complete`) predicates keep the per-tick scans off the
+full anchor table.
 
 When a build still reports a path missing, `reconcile_missing_inputs` self-heals:
 a missing leaf with a producer is purged + rebuilt (`demote_cached_output`) and

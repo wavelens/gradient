@@ -1091,24 +1091,22 @@ in CI (the db crate has no real-Postgres unit harness).
 The cache is closure-complete by invariant: `compress_and_push_paths` pushes each
 output's full runtime closure (`collect_runtime_closure`), not just the output, so
 a referenced source (`-source`) can never be stranded uncached while its referrer
-is cached. The invariant is now **enforced at dispatch**, not merely trusted:
-`cached_path.closure_complete` (a NAR is complete once present and every non-self
-reference is present + complete) and `derivation_build.closure_complete` (all of
-an anchor's outputs complete) are set in one deterministic pass by
-`mark_closure_complete`, run from `update_derivation_build_status` at the
-terminal-success transition **before** it promotes dependents - it BFS-walks the
-just-pushed full runtime closure and takes the completeness fixpoint within it
-(no fragile per-ingest cascade). Finalizing before promotion is load-bearing: the
-gradient-cache NixOS VM test (`hello` built bottom-up from a preseeded worker
-store) stalled `Building -> Waiting` indefinitely when the flag was set after
-promotion, because the last dependency to complete promoted its dependents while
-its own `closure_complete` was still false. `promote_ready` / `promote_dependents` /
-`dispatch_ready_builds` require every dependency to be terminal-success **and**
-`closure_complete`, **or itself `substitutable`**. This closes the runtime-vs-
-build-time edge gap (a dep marked done whose transitive runtime ref - e.g.
-`unit-bird.service` via `system-units` - was never cached would otherwise let a
-dependent dispatch and fail `InputsUnavailable` on a path the gate never checked).
-`compute_truly_substituted` likewise requires `closure_complete`.
+is cached. The invariant is **enforced at dispatch** via `derivation_build.closure_complete`:
+a **built** anchor is complete once its outputs are cached, its edges are flushed,
+and every build dependency is itself `closure_complete` **or** `substitutable`
+(closure fetchable from upstream). A build's runtime refs are a subset of its build
+inputs, so a fetchable build closure implies a fetchable runtime closure - closing
+the runtime-vs-build-time edge gap (`unit-bird.service` via `system-units`) without
+a runtime walk. `propagate_closure_complete` (from `update_derivation_build_status`
+at terminal success, **before** promoting) computes it over `derivation_dependency`
+and **ripples up**: it marks the just-finished anchor, then re-checks that anchor's
+dependents, etc. The up-ripple is load-bearing - a dependent that finished before
+its dependency did would otherwise never re-evaluate its completeness, and earlier
+the VM test stalled `Building -> Waiting` for exactly this. A **substituted** anchor
+is deliberately not marked complete (we hold only its output NAR, not its build
+closure); dependents reach it through `substitutable`. `promote_ready` /
+`promote_dependents` / `dispatch_ready_builds` gate each dependency on
+`(terminal-success AND closure_complete)` **or** `substitutable`.
 
 Out-of-order substitution (#456): a `substitutable` anchor (NAR on an upstream
 cache) skips the dependency gate entirely in all three of `promote_ready` /

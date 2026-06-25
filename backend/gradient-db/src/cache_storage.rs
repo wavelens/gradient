@@ -300,8 +300,8 @@ pub async fn demote_referrers_of<C: ConnectionTrait>(
 /// Self-heal flag clear: a proven-missing path leaves every (transitive)
 /// referrer closure-incomplete, so drop `closure_complete` up the chain - on the
 /// cached NARs and the anchors that produced them - without deleting the healthy
-/// NARs themselves. The missing leaf rebuilds + re-pushes; its closure-complete
-/// push then re-marks the chain via [`mark_closure_complete`]. The walk stops at
+/// NARs themselves. The missing leaf rebuilds + re-pushes; the next completion
+/// re-marks the chain via `propagate_closure_complete`. The walk stops at
 /// already-false referrers: by the invariant their ancestors are false too.
 pub async fn clear_closure_complete_for_referrers<C: ConnectionTrait>(
     db: &C,
@@ -382,134 +382,6 @@ async fn referrers_of_hash<C: ConnectionTrait>(
     .into_iter()
     .map(|r| r.referrer)
     .collect())
-}
-
-/// Mark the runtime closure seeded at `seed_hashes` (a freshly-built anchor's
-/// output paths) closure-complete, then roll the result up onto anchors. Called
-/// once a build/substitute finishes pushing - `compress_and_push_paths` guarantees
-/// the whole runtime closure is now in our cache, so this is a single
-/// deterministic pass: BFS the closure over `cached_path_reference`, take the
-/// fixpoint of "present and every non-self ref present + complete" within it (so a
-/// partially-pushed closure marks only the genuinely-whole subset), bulk-set the
-/// flag, and mark every anchor whose outputs are all complete.
-pub async fn mark_closure_complete<C: ConnectionTrait>(
-    db: &C,
-    seed_hashes: &[String],
-) -> Result<(), sea_orm::DbErr> {
-    use gradient_entity::cached_path::{Column as CCP, Entity as ECP, Model as MCP};
-
-    if seed_hashes.is_empty() {
-        return Ok(());
-    }
-
-    // Pruned BFS over `cached_path_reference` from the seeds. A node already
-    // `closure_complete` has, by invariant, a fully-complete subtree, so record it
-    // as complete and do NOT descend. This bounds the walk to the newly-pushed
-    // frontier instead of the full runtime closure, keeping per-completion cost
-    // O(new paths) not O(closure) - re-walking the whole closure on every build
-    // re-loaded every cached_path row and starved the worker's other messages on
-    // its serial connection.
-    let mut frontier: Vec<String> = seed_hashes.to_vec();
-    let mut visited: std::collections::HashSet<String> = seed_hashes.iter().cloned().collect();
-    let mut pending: std::collections::HashMap<String, MCP> = std::collections::HashMap::new();
-    let mut refs_by_hash: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-    let mut complete: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    while !frontier.is_empty() {
-        let rows = crate::fetch_in_chunks(&frontier, |chunk| async move {
-            ECP::find().filter(CCP::Hash.is_in(chunk)).all(db).await
-        })
-        .await?;
-        let edges = crate::runtime_closure::reference_edges(db, &frontier).await?;
-        frontier.clear();
-
-        for (referrer, reference_hash) in edges {
-            refs_by_hash.entry(referrer).or_default().push(reference_hash);
-        }
-        for row in rows {
-            if row.closure_complete {
-                complete.insert(row.hash);
-                continue;
-            }
-
-            if let Some(refs) = refs_by_hash.get(&row.hash) {
-                for r in refs {
-                    if visited.insert(r.clone()) {
-                        frontier.push(r.clone());
-                    }
-                }
-            }
-
-            pending.insert(row.hash.clone(), row);
-        }
-    }
-
-    if pending.is_empty() {
-        return Ok(());
-    }
-
-    loop {
-        let mut changed = false;
-        for (hash, cp) in &pending {
-            if complete.contains(hash) || cp.file_hash.is_none() {
-                continue;
-            }
-
-            let satisfied = refs_by_hash
-                .get(hash)
-                .map(|refs| refs.iter().all(|r| r == hash || complete.contains(r)))
-                .unwrap_or(true);
-            if satisfied {
-                complete.insert(hash.clone());
-                changed = true;
-            }
-        }
-
-        if !changed {
-            break;
-        }
-    }
-
-    // Only the freshly-completed frontier nodes need a write; pruned nodes are
-    // already `true` in the DB.
-    let newly: Vec<String> = pending
-        .into_keys()
-        .filter(|h| complete.contains(h))
-        .collect();
-    if newly.is_empty() {
-        return Ok(());
-    }
-
-    for chunk in newly.chunks(crate::IN_CHUNK_SIZE) {
-        ECP::update_many()
-            .col_expr(CCP::ClosureComplete, sea_orm::sea_query::Expr::value(true))
-            .filter(CCP::Hash.is_in(chunk.to_vec()))
-            .exec(db)
-            .await?;
-    }
-
-    // An anchor is closure-complete once every one of its outputs is - Nix
-    // produces (and the push covers) all outputs of a derivation together.
-    for chunk in newly.chunks(crate::IN_CHUNK_SIZE) {
-        db.execute(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"
-            UPDATE derivation_build db SET closure_complete = true
-            WHERE db.status IN (3, 7) AND NOT db.closure_complete
-              AND db.derivation IN (
-                SELECT o.derivation FROM derivation_output o WHERE o.hash = ANY($1))
-              AND NOT EXISTS (
-                SELECT 1 FROM derivation_output o
-                LEFT JOIN cached_path cp ON cp.hash = o.hash
-                WHERE o.derivation = db.derivation AND (cp.closure_complete IS NOT TRUE))
-            "#,
-            [chunk.to_vec().into()],
-        ))
-        .await?;
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
