@@ -1139,9 +1139,12 @@ gentle flag clear leaves the referrer cached, pruned, and never re-walked.
 `reconcile_missing_inputs` detects this (`derivation_is_reachable` false for the
 demoted producer) and demotes the referrers so the next eval re-walks them,
 re-records the dropped `derivation_dependency` edge, and schedules the orphan.
-`demote_cached_output` additionally clears `edges_complete` on every reset
-producer, so a demoted anchor cannot be promoted and dispatched on its stale,
-incomplete edge set before the re-walk re-flushes a full one. Reproduced live: a
+`demote_cached_output` leaves `edges_complete` intact - it deletes the
+`cached_path`, so the uncached output is re-walked by the next eval regardless
+(uncached nodes are never pruned), and clearing the flag would only strand a
+complete-edge node (e.g. a shared dep `tzdata` swept up by the absent-orphan
+recovery) behind the closure gate until that re-walk, which manifests as a
+`graph_stuck` deadlock. Reproduced live: a
 crane `vendor-cargo-deps` was `Completed`/`closure_complete` with only 2 of its
 edges recorded, its `vendor-registry` dependency a 0-edge/0-`build_job` orphan, so
 `gradient-server-deps` dispatched and the prefetch closure-walk died

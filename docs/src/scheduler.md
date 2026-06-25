@@ -201,9 +201,10 @@ substitution), so promotion can never queue it and the gentle flag clear leaves
 the referrer cached, pruned, and never re-walked. When `demote_cached_output`'s
 producer is not reachable (`derivation_is_reachable` is false), the referrers are
 demoted (`demote_referrers_of`) so the next eval re-walks them, re-records the
-dropped edge, and schedules the orphan. `demote_cached_output` also clears
-`edges_complete` on the reset producer, so a demoted anchor is re-walked before
-promotion can dispatch it on a stale, incomplete edge set.
+dropped edge, and schedules the orphan. Demote leaves `edges_complete` intact: it
+deletes the `cached_path`, so the output is uncached and the next eval re-walks the
+derivation regardless (uncached nodes are never pruned) - clearing the flag would
+only strand a complete-edge node behind the closure gate until that re-walk.
 
 An **absent orphan** is the fourth case and the one that makes the whole thing
 self-heal without operator surgery: the missing input has *no* producer row and
