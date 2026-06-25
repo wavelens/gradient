@@ -961,9 +961,19 @@ its completion - so an anchor left edge-less by a failed/aborted/restart-interru
 or still-running eval would otherwise look dependency-free and be dispatched without
 its inputs (`InputsUnavailable`, observed as `recorded_edges = 0` on a build that
 still needs inputs). `handle_eval_job_completed` calls `mark_edges_complete_for_eval`
-right after the flush, setting the flag for every anchor that eval's `build_job`s
-reference; the flag is monotonic (edges are content-addressed, never rewritten), so
-a later `requeue_failed_anchors` keeps the anchor promotable without re-evaluation.
+right after the flush; the flag is monotonic (edges are content-addressed, never
+rewritten), so a later `requeue_failed_anchors` keeps the anchor promotable without
+re-evaluation. It marks the eval's **full dependency closure**, not just its
+directly-reported `build_job`s: a transitive dep reached only via global edges
+(pruned or substituted in this eval, so no `build_job` here) would otherwise never
+get its flag maintained, and a prior demote that cleared it leaves the dep
+`edges_complete = false` forever - unpromotable behind the gate even though its edge
+set is complete and satisfied (observed live: `tzdata-2026b`, `edges_complete=f`, 0
+unmet deps, 30 build_jobs, blocking the `etc`->`activate`->`nixos-system` chain). A
+closure node is marked when it has recorded build edges or is one of this eval's own
+0-dep `build_job` leaves; ambiguous 0-edge transitive nodes stay gated. The
+graph-stuck heal (`attempt_graph_unstick`) re-runs it so an already-parked eval
+recovers without a re-trigger.
 The migration backfills existing rows complete unless they are `Created`, never
 dispatched, and have zero edges - the exact shape of an anchor stranded by an
 incomplete eval. The promotion/dispatch statements are raw SQL (no MockDatabase

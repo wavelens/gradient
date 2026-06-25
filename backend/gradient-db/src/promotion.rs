@@ -284,11 +284,16 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationI
     Ok(returned_derivations(rows))
 }
 
-/// Mark every anchor reachable from `evaluation`'s `build_job` rows
-/// `edges_complete`. Called once the eval's dependency edges are flushed, so its
-/// anchors become eligible for promotion. Idempotent and never clears the flag:
-/// edges are content-addressed and permanent once written, so a later requeue
-/// keeps the anchor promotable without re-evaluation.
+/// Mark `edges_complete` across `evaluation`'s full build-dependency closure, not
+/// just its directly-reported `build_job` rows. Called once the eval's dependency
+/// edges are flushed. A transitive dep reached only via global edges (pruned or
+/// substituted in this eval, so it has no `build_job` here) would otherwise never
+/// get its flag maintained, so a prior demote that cleared it leaves the dep
+/// `edges_complete = false` forever - unpromotable behind the dispatch gate even
+/// though its edge set is complete and satisfied. A closure node is marked when it
+/// has recorded build edges (its edge set is known) or is one of this eval's own
+/// `build_job` leaves (0-dep); ambiguous 0-edge transitive nodes stay gated.
+/// Idempotent and never clears the flag.
 pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
@@ -297,11 +302,21 @@ pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
         .execute(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
-            UPDATE derivation_build
+            WITH RECURSIVE closure AS (
+                SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1
+                UNION
+                SELECT e.dependency FROM derivation_dependency e
+                JOIN closure c ON c.derivation = e.derivation
+            )
+            UPDATE derivation_build db
             SET edges_complete = true
-            WHERE edges_complete = false
-              AND derivation IN (
-                SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1)
+            WHERE db.edges_complete = false
+              AND db.derivation IN (SELECT derivation FROM closure)
+              AND (
+                EXISTS (SELECT 1 FROM derivation_dependency e WHERE e.derivation = db.derivation)
+                OR EXISTS (SELECT 1 FROM build_job bj
+                           WHERE bj.derivation = db.derivation AND bj.evaluation = $1)
+              )
             "#,
             [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
         ))

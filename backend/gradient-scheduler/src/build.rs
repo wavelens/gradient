@@ -952,6 +952,15 @@ impl<'a> BuildStateHandler<'a> {
         let db = &self.state.worker_db;
         info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing closure_complete");
 
+        // Restore edges_complete across the eval's closure: a transitive dep whose
+        // flag a prior demote cleared sits unpromotable behind the gate even with a
+        // complete, satisfied edge set (observed: tzdata-2026b, edges_complete=f,
+        // 0 unmet deps, blocking the etc chain). The eval has completed walking, so
+        // its closure edges are flushed and this is safe.
+        if let Err(e) = gradient_db::mark_edges_complete_for_eval(db, evaluation_id).await {
+            error!(error = %e, %evaluation_id, "mark_edges_complete_for_eval during graph-unstick failed");
+        }
+
         // Thaw terminal-failed anchors anywhere in this eval's dependency closure -
         // a transitive dep a prior eval left failed (and this eval pruned, so it has
         // no build_job here) blocks its dependents with no dispatch to fail and
