@@ -5068,6 +5068,18 @@ will demand is pushed by the evaluation that produced it. NAR bytes already
 upload from the filesystem (`NarByteStream`), so filesystem-parsed discovery is
 sufficient.
 
+`push_drv_closure` extracts those sources from **every `.drv` in the collected
+closure**, not just its seed `.drv`s. `collect_runtime_closure` already returns the
+full nix-level closure (including subtrees gradient pruned during the BFS), so
+parsing only the seeds left a pruned/transitive node's `inputSrcs` unpushed - and
+when that node later had to rebuild (its output demoted or never fetchable), it
+failed `InputsUnavailable` forever on a producerless source only the eval worker
+held (observed live across a large multi-system flake: `etc-machine-id`,
+`X-Restart-Triggers-polkit`, `staticPaths`, `smartd-notify.sh`, vendored
+`cargo-src-*`). `drv_input_sources` parses the closure's `.drv` members
+concurrently (`buffer_unordered`) since the set is now closure-sized. Covered
+end-to-end in CI; the two `drv_input_sources_*` unit tests still pin the parse.
+
 - `drv_input_sources_parses_inputsrcs_not_via_daemon` - a `.drv` fixture's two
   `grub-config.xml` `inputSrcs` are returned; its input *derivation* is not.
 - `drv_input_sources_skips_unreadable_drv` - a missing `.drv` is skipped, not

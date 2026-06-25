@@ -100,10 +100,17 @@ pub(crate) async fn push_drv_closure(
 
     // The daemon's reference walk drops a `.drv`'s `inputSrcs`, so discover them
     // authoritatively by parsing each `.drv` - mirroring the build-side prefetch
-    // (`InputPrefetcher::enumerate_inputs`). Without this a build worker fetches
-    // the cached `.drv`, parses out an input source, and fails `InputsUnavailable`
-    // on a source the eval never pushed.
-    closure.extend(drv_input_sources(drv_paths).await);
+    // (`InputPrefetcher::enumerate_inputs`). Parse EVERY `.drv` in the closure, not
+    // just the seeds: a pruned/transitive node's input source (a producerless
+    // config file like `etc-machine-id`, or a vendored `cargo-src-*`) is otherwise
+    // never pushed, and a later rebuild of that node fails `InputsUnavailable`
+    // forever on a source that has no producer and only the eval worker holds.
+    let drv_members: Vec<String> = closure
+        .iter()
+        .filter(|p| p.ends_with(".drv"))
+        .cloned()
+        .collect();
+    closure.extend(drv_input_sources(&drv_members).await);
 
     if closure.is_empty() {
         return Ok(());
@@ -131,24 +138,32 @@ pub(crate) async fn push_drv_closure(
 /// still covers it.
 async fn drv_input_sources(drv_paths: &[String]) -> std::collections::HashSet<String> {
     use crate::nix::store::canonicalize_store_path;
+    use futures::stream::{self, StreamExt as _};
 
-    let mut sources = std::collections::HashSet::new();
-    for drv_path in drv_paths {
-        let full = canonicalize_store_path(drv_path);
-        match tokio::fs::read(&full).await {
-            Ok(bytes) => match gradient_db::parse_drv(&bytes) {
-                Ok(drv) => sources.extend(drv.input_sources),
+    const DRV_READ_CONCURRENCY: usize = 64;
+
+    stream::iter(drv_paths.iter().cloned())
+        .map(|drv_path| async move {
+            let full = canonicalize_store_path(&drv_path);
+            match tokio::fs::read(&full).await {
+                Ok(bytes) => match gradient_db::parse_drv(&bytes) {
+                    Ok(drv) => drv.input_sources,
+                    Err(e) => {
+                        tracing::warn!(drv = %drv_path, error = %e, "push: cannot parse .drv for input sources");
+                        Vec::new()
+                    }
+                },
                 Err(e) => {
-                    tracing::warn!(drv = %drv_path, error = %e, "push: cannot parse .drv for input sources")
+                    tracing::warn!(drv = %drv_path, error = %e, "push: cannot read .drv for input sources");
+                    Vec::new()
                 }
-            },
-            Err(e) => {
-                tracing::warn!(drv = %drv_path, error = %e, "push: cannot read .drv for input sources")
             }
-        }
-    }
-
-    sources
+        })
+        .buffer_unordered(DRV_READ_CONCURRENCY)
+        .concat()
+        .await
+        .into_iter()
+        .collect()
 }
 
 /// Upload one path's NAR using the method the server advertised in its
