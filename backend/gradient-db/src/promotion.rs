@@ -103,6 +103,24 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     Ok(affected)
 }
 
+/// Closure-complete gate for a built anchor `db`: outputs cached, edges flushed,
+/// and every build dependency itself `closure_complete` **or** `substitutable`.
+/// Shared verbatim by the targeted up-ripple (`propagate_closure_complete`) and
+/// the global self-heal fixpoint (`reconcile_closure_complete`).
+const CLOSURE_COMPLETE_GATE: &str = r#"
+    db.status = 3
+    AND db.edges_complete
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation_output o
+        LEFT JOIN cached_path cp ON cp.hash = o.hash
+        WHERE o.derivation = db.derivation AND cp.file_hash IS NULL)
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation_dependency e
+        LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
+        WHERE e.derivation = db.derivation
+          AND (dep.derivation IS NULL OR NOT (dep.closure_complete OR dep.substitutable)))
+"#;
+
 /// Recompute closure-completeness up the build-dependency graph from a just-
 /// finished `completed` derivation. A built (`Completed`) anchor becomes
 /// `closure_complete` once its outputs are cached, its edges are flushed, and
@@ -131,29 +149,17 @@ pub async fn propagate_closure_complete<C: ConnectionTrait>(
         .await?,
     );
     frontier.push(completed);
+    let update = format!(
+        "UPDATE derivation_build db SET closure_complete = true \
+         WHERE db.derivation = ANY($1) AND NOT db.closure_complete AND {CLOSURE_COMPLETE_GATE} \
+         RETURNING db.derivation"
+    );
     while !frontier.is_empty() {
         let ids: Vec<uuid::Uuid> = frontier.iter().map(|d| d.into_inner()).collect();
         let newly = returned_derivations(
             db.query_all(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
-                r#"
-                UPDATE derivation_build db SET closure_complete = true
-                WHERE db.derivation = ANY($1)
-                  AND NOT db.closure_complete
-                  AND db.status = 3
-                  AND db.edges_complete
-                  AND NOT EXISTS (
-                    SELECT 1 FROM derivation_output o
-                    LEFT JOIN cached_path cp ON cp.hash = o.hash
-                    WHERE o.derivation = db.derivation AND cp.file_hash IS NULL)
-                  AND NOT EXISTS (
-                    SELECT 1 FROM derivation_dependency e
-                    LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
-                    WHERE e.derivation = db.derivation
-                      AND (dep.derivation IS NULL
-                           OR NOT (dep.closure_complete OR dep.substitutable)))
-                RETURNING db.derivation
-                "#,
+                &update,
                 [ids.into()],
             ))
             .await?,
@@ -172,6 +178,32 @@ pub async fn propagate_closure_complete<C: ConnectionTrait>(
             .await?,
         );
     }
+    Ok(())
+}
+
+/// Global self-heal fixpoint over `closure_complete`. `propagate_closure_complete`
+/// only fires on a fresh completion event, so anchors that completed under older
+/// code (e.g. before output-only substitution) sit at `closure_complete = false`
+/// forever and strand their dependents in `Created` with no error to trigger a
+/// reactive heal. Run at eval completion before promotion: each pass marks a
+/// layer of satisfied anchors, a freshly marked dep unblocks its dependents next
+/// pass, converging in O(longest unmarked chain). Converged graphs cost one
+/// zero-row statement.
+pub async fn reconcile_closure_complete<C: ConnectionTrait>(db: &C) -> Result<(), DbErr> {
+    let update = format!(
+        "UPDATE derivation_build db SET closure_complete = true \
+         WHERE NOT db.closure_complete AND {CLOSURE_COMPLETE_GATE}"
+    );
+    loop {
+        let changed = db
+            .execute(Statement::from_string(DatabaseBackend::Postgres, &update))
+            .await?
+            .rows_affected();
+        if changed == 0 {
+            break;
+        }
+    }
+
     Ok(())
 }
 

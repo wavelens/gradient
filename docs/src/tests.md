@@ -1108,6 +1108,15 @@ closure); dependents reach it through `substitutable`. `promote_ready` /
 `promote_dependents` / `dispatch_ready_builds` gate each dependency on
 `(terminal-success AND closure_complete)` **or** `substitutable`.
 
+`propagate_closure_complete` only fires on a fresh completion event, so anchors
+that completed under older code never get the build-edge flag and would strand
+their dependents in `Created` with no error to trigger a reactive heal.
+`reconcile_closure_complete` (global fixpoint, run at eval completion before
+`promote_ready`) closes that gap: it re-applies the same gate to every unflagged
+built anchor, converging bottom-up in O(longest unmarked chain); a converged
+graph costs one zero-row statement. The same fixpoint unsticks a live instance
+manually via a single `DO` loop over `derivation_build`.
+
 Out-of-order substitution (#456): a `substitutable` anchor (NAR on an upstream
 cache) skips the dependency gate entirely in all three of `promote_ready` /
 `promote_dependents` / `dispatch_ready_builds` - it needs neither its build

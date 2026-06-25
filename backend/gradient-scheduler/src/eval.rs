@@ -947,6 +947,15 @@ pub async fn handle_eval_job_completed(
         error!(error = %e, %evaluation_id, "mark_edges_complete_for_eval failed");
     }
 
+    // Self-heal stale `closure_complete` before promoting: anchors that
+    // completed under older code (pre output-only substitution) never got the
+    // build-edge flag set, so without this their dependents would sit in
+    // `Created` forever - no completion event ever re-runs `propagate` for an
+    // already-finished anchor. Idempotent and cheap once converged.
+    if let Err(e) = gradient_db::reconcile_closure_complete(&state.worker_db).await {
+        error!(error = %e, %evaluation_id, "reconcile_closure_complete failed");
+    }
+
     // Seed the graph-driven promotion from its ready frontier: leaves and
     // anchors whose deps were already cached/substituted. Each subsequent
     // completion cascades upward.

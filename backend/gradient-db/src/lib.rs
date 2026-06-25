@@ -61,7 +61,7 @@ pub use self::org_cache::org_has_writable_cache;
 pub use self::org_derivations::derivation_ids_for_org;
 pub use self::promotion::{
     cascade_dependency_failed, mark_edges_complete_for_eval, promote_dependents, promote_ready,
-    propagate_closure_complete, requeue_failed_anchors,
+    propagate_closure_complete, reconcile_closure_complete, requeue_failed_anchors,
 };
 pub use self::reachability::{
     build_jobs_for_derivation, derivation_is_reachable, eval_anchor_statuses,
