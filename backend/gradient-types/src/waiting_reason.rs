@@ -26,6 +26,11 @@
 //! - `Draining` - the instance is draining (superuser action): all in-flight
 //!   evaluations are parked so the server can be stopped safely. Cleared on the
 //!   next startup or when draining is disabled.
+//! - `GraphStuck` - workers can satisfy every pending build, yet none is
+//!   dispatchable: all anchors are `Created`, blocked behind the
+//!   `closure_complete` gate with no in-flight build to fire a promotion. The
+//!   reconciler self-heals the gate and re-promotes; this reason surfaces the
+//!   stall while recovery is attempted.
 
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +75,12 @@ pub enum WaitingReason {
     /// stops handing out its builds, then its builds are aborted and the eval
     /// transitions to `Aborted`. The reconciler never unparks this reason.
     Aborting,
+    /// The connected pool can build every pending anchor, but none is
+    /// dispatchable - the whole pending set is `Created`, blocked behind the
+    /// `closure_complete` gate with no in-flight build to drive promotion. The
+    /// reconciler attempts a self-heal (`reconcile_closure_complete` +
+    /// re-promote) each pass; `pending_anchors` is the blocked count.
+    GraphStuck { pending_anchors: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,6 +135,10 @@ impl WaitingReason {
             capability,
             connected_workers,
         }
+    }
+
+    pub fn graph_stuck(pending_anchors: u32) -> Self {
+        Self::GraphStuck { pending_anchors }
     }
 }
 
@@ -186,6 +201,15 @@ mod tests {
         let r = WaitingReason::Aborting;
         let v = r.to_json();
         assert_eq!(v["kind"], "aborting");
+        assert_eq!(WaitingReason::from_json(&v).unwrap(), r);
+    }
+
+    #[test]
+    fn graph_stuck_round_trip() {
+        let r = WaitingReason::graph_stuck(9);
+        let v = r.to_json();
+        assert_eq!(v["kind"], "graph_stuck");
+        assert_eq!(v["pending_anchors"], 9);
         assert_eq!(WaitingReason::from_json(&v).unwrap(), r);
     }
 

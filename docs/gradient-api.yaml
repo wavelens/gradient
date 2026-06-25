@@ -8329,12 +8329,18 @@ components:
         - `cache_storage_full`: every writable cache for the organisation is
           within the headroom threshold of its (or the instance-wide)
           max-storage limit, so build outputs would have nowhere to land.
+        - `graph_stuck`: the connected pool can build every pending anchor, but
+          none is dispatchable - the whole pending set is blocked behind the
+          dependency-closure gate with no in-flight build to drive promotion. The
+          scheduler self-heals the gate and re-promotes on each pass;
+          `pending_anchors` is the blocked count.
       oneOf:
         - $ref: '#/components/schemas/WaitingReasonWorkers'
         - $ref: '#/components/schemas/WaitingReasonEvalWorkers'
         - $ref: '#/components/schemas/WaitingReasonApproval'
         - $ref: '#/components/schemas/WaitingReasonNoCache'
         - $ref: '#/components/schemas/WaitingReasonCacheStorageFull'
+        - $ref: '#/components/schemas/WaitingReasonGraphStuck'
       discriminator:
         propertyName: kind
         mapping:
@@ -8343,6 +8349,7 @@ components:
           approval: '#/components/schemas/WaitingReasonApproval'
           no_cache: '#/components/schemas/WaitingReasonNoCache'
           cache_storage_full: '#/components/schemas/WaitingReasonCacheStorageFull'
+          graph_stuck: '#/components/schemas/WaitingReasonGraphStuck'
 
     WaitingReasonWorkers:
       type: object
@@ -8422,6 +8429,18 @@ components:
         kind:
           type: string
           enum: [cache_storage_full]
+
+    WaitingReasonGraphStuck:
+      type: object
+      required: [kind, pending_anchors]
+      properties:
+        kind:
+          type: string
+          enum: [graph_stuck]
+        pending_anchors:
+          type: integer
+          minimum: 0
+          description: Number of pending builds blocked behind the dependency-closure gate.
 
     UnmetRequirement:
       type: object

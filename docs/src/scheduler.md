@@ -250,6 +250,14 @@ cannot make progress, auto-unparking once the blocker clears:
 - **Build phase** - a `Building` eval parks with a `workers` reason listing the
   unmet `(architecture, required_features)` combinations when no connected
   worker can satisfy any pending build.
+- **Graph stuck** - the pool *can* build every pending anchor (so the `workers`
+  reason would carry an empty `unmet` set) yet none is dispatchable: the whole
+  pending set is `Created`, blocked behind the `closure_complete` gate with no
+  in-flight build to drive a promotion. `propagate_closure_complete` only fires
+  on completion events, so it can never reach this deadlock. The reconciler
+  detects it, runs the `reconcile_closure_complete` fixpoint plus a re-promote,
+  then re-assesses: it recovers to `Building` when the heal frees an anchor, else
+  parks with a `graph_stuck` reason (the blocked count) and retries each pass.
 
 Approval, no-cache and full-cache parks are owned by the webhook and cache hooks
 and are never unparked by the worker reconciler.

@@ -125,7 +125,8 @@ export type WaitingReason =
   | EvalWorkersWaitingReason
   | ApprovalWaitingReason
   | NoCacheWaitingReason
-  | CacheStorageFullWaitingReason;
+  | CacheStorageFullWaitingReason
+  | GraphStuckWaitingReason;
 
 export interface WorkersWaitingReason {
   kind: 'workers';
@@ -154,6 +155,11 @@ export interface NoCacheWaitingReason {
 
 export interface CacheStorageFullWaitingReason {
   kind: 'cache_storage_full';
+}
+
+export interface GraphStuckWaitingReason {
+  kind: 'graph_stuck';
+  pending_anchors: number;
 }
 
 export interface UnmetRequirement {

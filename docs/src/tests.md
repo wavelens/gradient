@@ -2396,6 +2396,17 @@ returned by `GET /evals/{evaluation}` is locked in:
 
 Run with `cargo test -p scheduler --tests waiting_reason_tests`.
 
+The `graph_stuck` reason (pool can build everything but the dependency-closure
+gate leaves nothing dispatchable) round-trips in
+`backend/gradient-types/src/waiting_reason.rs::graph_stuck_round_trip`
+(`kind: "graph_stuck"`, `pending_anchors`). Its scheduler trigger -
+`build_phase_decision` detecting a `workers` verdict with empty `unmet`, running
+`reconcile_closure_complete` + `promote_ready`, then re-assessing to `Building`
+or parking `graph_stuck` - is exercised end-to-end in CI (the db crate has no
+real-Postgres unit harness). The frontend renders it in
+`evaluation-log.component.spec.ts::titles and explains a graph-stuck stall`
+(`waitingTitle` "Recovering Build Graph", `formatWaitingReason` blocked count).
+
 ## Pre-build evaluation stall when no worker exists (issue #97)
 
 `backend/gradient-db/src/state_machine/eval.rs::tests` extends the evaluation

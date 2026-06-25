@@ -807,7 +807,34 @@ impl<'a> BuildStateHandler<'a> {
     /// `Waiting` from whether the connected pool can satisfy any of the eval's
     /// pending anchors. Returns `None` when the eval has no pending anchor
     /// (nothing to decide).
+    ///
+    /// A `Waiting` verdict with an empty `unmet` set means the pool *can* build
+    /// every pending anchor yet none is dispatchable - the whole set is `Created`,
+    /// blocked behind the `closure_complete` gate with no in-flight build to fire
+    /// a promotion. `propagate_closure_complete` can't reach this (it runs on
+    /// completion events), so we self-heal here: [`attempt_graph_unstick`].
+    ///
+    /// [`attempt_graph_unstick`]: Self::attempt_graph_unstick
     async fn build_phase_decision(
+        &self,
+        evaluation_id: EvaluationId,
+        worker_caps: &[(Vec<String>, Vec<String>)],
+    ) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
+        let outcome = self.assess_buildability(evaluation_id, worker_caps).await?;
+
+        if let Some((EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. }))) =
+            &outcome
+            && unmet.is_empty()
+        {
+            return Ok(Some(self.attempt_graph_unstick(evaluation_id, worker_caps).await?));
+        }
+
+        Ok(outcome)
+    }
+
+    /// Decide `Building` vs `Waiting` for an eval's current pending anchors.
+    /// Returns `None` when nothing is pending (nothing to decide).
+    async fn assess_buildability(
         &self,
         evaluation_id: EvaluationId,
         worker_caps: &[(Vec<String>, Vec<String>)],
@@ -832,6 +859,40 @@ impl<'a> BuildStateHandler<'a> {
         };
 
         Ok(Some((target, reason)))
+    }
+
+    /// Self-heal a graph-stuck evaluation: reconcile stale `closure_complete`
+    /// flags to a fixpoint and re-promote, then re-assess. Recovers to `Building`
+    /// when the heal frees a dispatchable anchor; otherwise reports `GraphStuck`
+    /// with the blocked count so the stall is legible while later passes retry.
+    async fn attempt_graph_unstick(
+        &self,
+        evaluation_id: EvaluationId,
+        worker_caps: &[(Vec<String>, Vec<String>)],
+    ) -> Result<(EvaluationStatus, Option<WaitingReason>)> {
+        let db = &self.state.worker_db;
+        info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing closure_complete");
+
+        if let Err(e) = gradient_db::reconcile_closure_complete(db).await {
+            error!(error = %e, %evaluation_id, "reconcile_closure_complete during graph-unstick failed");
+        }
+
+        match gradient_db::promote_ready(db).await {
+            Ok(queued) => {
+                gradient_db::notify_build_status_for_derivations(&self.state.db(), &queued).await
+            }
+            Err(e) => error!(error = %e, %evaluation_id, "promote_ready during graph-unstick failed"),
+        }
+
+        if let Some((EvaluationStatus::Building, reason)) =
+            self.assess_buildability(evaluation_id, worker_caps).await?
+        {
+            return Ok((EvaluationStatus::Building, reason));
+        }
+
+        let blocked = self.eval_pending_anchors(evaluation_id).await?.len() as u32;
+
+        Ok((EvaluationStatus::Waiting, Some(WaitingReason::graph_stuck(blocked))))
     }
 
     /// The non-terminal `derivation_build` anchors an evaluation still needs:

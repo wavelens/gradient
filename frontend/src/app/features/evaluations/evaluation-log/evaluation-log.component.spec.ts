@@ -191,5 +191,14 @@ describe('EvaluationLogComponent', () => {
       const { cmp } = setup();
       expect(cmp.waitingTitle({ kind: 'cache_storage_full' })).toBe('Cache Storage Full');
     });
+
+    it('titles and explains a graph-stuck stall', () => {
+      const { cmp } = setup();
+      const reason = { kind: 'graph_stuck', pending_anchors: 9 } as const;
+      expect(cmp.waitingTitle(reason)).toBe('Recovering Build Graph');
+      expect(cmp.formatWaitingReason(reason)).toBe(
+        'Workers are available, but 9 builds are blocked on dependencies. Recovering automatically.',
+      );
+    });
   });
 });
