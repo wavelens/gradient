@@ -4641,6 +4641,13 @@ build status transition.
   CTE-fallback branch - is DB-dependent and covered end-to-end by CI (no local
   Postgres unit harness; counts are atomic per-row, deltas are spawned, and
   restart reconciliation recomputes in-flight evals).
+- The incremental deltas fire only from the single-row status hook; every bulk
+  status path (`promote_ready`/`promote_dependents`/`cascade_dependency_failed`/
+  `requeue_failed_anchors`) moves anchors with raw SQL that bypasses it, so the
+  live histogram drifts. `check_evaluation_done` runs an authoritative
+  `reconcile_eval_dep_counts` on the terminal transition (alongside the existing
+  abort/startup/read-when-empty reconciles), so a settled eval's bar always
+  matches its final graph regardless of which bulk paths ran. Covered E2E by CI.
 
 ## Pre-build Waiting state for missing fetch/eval workers (#381)
 

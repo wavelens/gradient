@@ -636,6 +636,19 @@ impl<'a> BuildStateHandler<'a> {
             eval_errors = eval_error_messages.len(),
             "evaluation finished"
         );
+
+        // Authoritative resync of the entry-point histogram now the eval has
+        // settled. The incremental deltas (#383) fire only from the single-row
+        // status hook; every bulk path (promote_ready/promote_dependents/
+        // cascade_dependency_failed/requeue_failed_anchors) moves anchors with
+        // raw SQL that bypasses it, so the live counts drift. A terminal eval has
+        // a fixed graph, so one recompute makes the displayed bar exact.
+        if let Err(e) =
+            gradient_db::reconcile_eval_dep_counts(&self.state.worker_db, evaluation_id).await
+        {
+            warn!(error = %e, %evaluation_id, "reconcile_eval_dep_counts at eval settle failed");
+        }
+
         update_evaluation_status(&self.state.db(), eval, target).await;
         Ok(())
     }
