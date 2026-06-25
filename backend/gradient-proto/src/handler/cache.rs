@@ -7,11 +7,10 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
+use gradient_types::ids::{CacheId, CachedPathId, OrganizationId};
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::sea_query::OnConflict;
-use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use tracing::{error, warn};
 
 async fn build_local_cache_map(
@@ -104,40 +103,31 @@ async fn ensure_push_signatures(
         return;
     }
 
-    let now = gradient_types::now();
-    let rows: Vec<ACachedPathSignature> = cached_path_rows
-        .iter()
-        .flat_map(|cp| {
-            org_caches.iter().map(move |oc| {
-                MCachedPathSignature {
-                    id: CachedPathSignatureId::now_v7(),
-                    cached_path: cp.id,
-                    cache: oc.cache,
-                    created_at: now,
-                    ..Default::default()
-                }
-                .into_active_model()
-            })
-        })
-        .collect();
+    let cache_ids: Vec<uuid::Uuid> = org_caches.iter().map(|oc| oc.cache.into_inner()).collect();
+    let path_ids: Vec<uuid::Uuid> = cached_path_rows.iter().map(|cp| cp.id.into_inner()).collect();
 
-    // Postgres binds at most 65535 params per statement; cached_path_signature
-    // binds 7 columns per row, so cap each insert well under that. A worker
-    // reconnecting with a large store times this against every org cache.
-    const SIGNATURE_INSERT_BATCH: usize = 8000;
+    // Insert via `SELECT FROM cached_path` (cross-joined with the org caches) so a
+    // path concurrently purged between the lookup and here is simply skipped,
+    // instead of failing the whole batch on the cached_path FK. Array params keep
+    // each statement to two binds regardless of row count; chunk the path list so
+    // a worker reconnecting with a large store does not insert millions at once.
+    const SIGNATURE_PATH_BATCH: usize = 8000;
 
-    for chunk in rows.chunks(SIGNATURE_INSERT_BATCH) {
-        let result = ECachedPathSignature::insert_many(chunk.to_vec())
-            .on_conflict(
-                OnConflict::columns([
-                    CCachedPathSignature::CachedPath,
-                    CCachedPathSignature::Cache,
-                ])
-                .do_nothing()
-                .to_owned(),
-            )
-            .do_nothing()
-            .exec(&state.worker_db)
+    for chunk in path_ids.chunks(SIGNATURE_PATH_BATCH) {
+        let result = state
+            .worker_db
+            .execute(sea_orm::Statement::from_sql_and_values(
+                sea_orm::DatabaseBackend::Postgres,
+                r#"
+                INSERT INTO cached_path_signature (id, cached_path, cache, created_at)
+                SELECT uuidv7(), cp.id, c.cache_id, (now() AT TIME ZONE 'UTC')
+                FROM cached_path cp
+                CROSS JOIN unnest($2::uuid[]) AS c(cache_id)
+                WHERE cp.id = ANY($1::uuid[])
+                ON CONFLICT (cached_path, cache) DO NOTHING
+                "#,
+                [chunk.to_vec().into(), cache_ids.clone().into()],
+            ))
             .await;
         if let Err(e) = result {
             warn!(

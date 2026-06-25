@@ -1472,16 +1472,19 @@ Backend (`cargo test -p scheduler --tests scheduler_tests::job_notify_bump_is_no
   `can_build` rejects every real-arch job, and builds queue forever against an
   idle worker (eval parked `Waiting` with a stale, empty-`unmet` reason).
 
-## Push-mode signature placeholders - param-limit chunking
+## Push-mode signature placeholders - insert-select, FK-race-safe
 
-`ensure_push_signatures` (`backend/gradient-proto/src/handler/cache.rs`) inserts
+`ensure_push_signatures` (`backend/gradient-proto/src/handler/cache.rs`) creates
 one `cached_path_signature` placeholder per (cached_path, org cache) pair when a
-worker connects in Push mode - a cartesian product over the worker's whole
-store. `cached_path_signature` binds 7 columns per row, so the insert is chunked
-at `SIGNATURE_INSERT_BATCH = 8000` rows (56 000 params) to stay under Postgres's
-65 535-parameter-per-statement cap; an unchunked insert failed with "too many
-arguments for query" for large stores. Verified by E2E CI (MockDatabase cannot
-exercise the real param-count error).
+worker connects in Push mode - a cartesian product over the worker's whole store.
+It inserts via `INSERT ... SELECT FROM cached_path ... CROSS JOIN unnest(caches)`
+keyed on `cp.id = ANY($paths)`, so a path concurrently purged (demote/GC) between
+the worker's CacheQuery and this insert is simply skipped rather than violating
+the `fk-cached_path_signature-cached_path` foreign key and failing the whole
+batch. Array params keep each statement to two binds regardless of row count
+(no 65 535-param cap concern); the path list is chunked at `SIGNATURE_PATH_BATCH
+= 8000` only to bound statement size for large stores. Verified by E2E CI
+(MockDatabase cannot exercise the FK race).
 
 ## Cache GC - orphan files keep predicate
 
