@@ -92,6 +92,7 @@ id_newtype!(CacheId);
 id_newtype!(CacheDerivationId);
 id_newtype!(CacheMetricId);
 id_newtype!(CacheUpstreamId);
+id_newtype!(UpstreamMetricId);
 id_newtype!(CacheUserId);
 id_newtype!(CachedPathId);
 id_newtype!(CachedPathSignatureId);
