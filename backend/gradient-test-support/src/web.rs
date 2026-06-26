@@ -121,6 +121,7 @@ pub fn make_test_server_with(
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     });
     TestServer::new(gradient_web::create_router(state))
 }

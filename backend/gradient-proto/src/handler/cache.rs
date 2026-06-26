@@ -5,7 +5,6 @@
  */
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 use gradient_types::ids::{CacheId, CachedPathId, OrganizationId};
 use gradient_types::*;
@@ -398,50 +397,43 @@ async fn extend_with_upstream_results(
     uncached_pairs: Vec<(String, String)>,
     result: &mut Vec<gradient_types::proto::CachedPath>,
 ) {
-    use futures::stream::{FuturesUnordered, StreamExt as _};
+    const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
-    const UPSTREAM_LOOKUP_CONCURRENCY: usize = 16;
-
-    let upstream_urls =
-        match gradient_db::upstream_urls_for_org(&state.worker_db, org_id).await {
-            Ok(urls) => urls,
+    let endpoints =
+        match gradient_db::upstream_endpoints_for_org(&state.worker_db, org_id, UPSTREAM_WINDOW_MINUTES)
+            .await
+        {
+            Ok(eps) => eps,
             Err(e) => {
                 warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
                 return;
             }
         };
-    if upstream_urls.is_empty() {
+    if endpoints.is_empty() {
         return;
     }
 
-    let http = state.http.clone();
+    let (found, stats) = gradient_core::upstream::probe_batch(
+        state.http.clone(),
+        endpoints,
+        std::sync::Arc::clone(&state.upstream_query),
+        uncached_pairs,
+    )
+    .await;
 
-    let upstream_urls = Arc::new(upstream_urls);
-    let mut futs = FuturesUnordered::new();
-    let mut iter = uncached_pairs.into_iter();
-
-    for _ in 0..UPSTREAM_LOOKUP_CONCURRENCY {
-        if let Some((hash, store_path)) = iter.next() {
-            futs.push(gradient_core::upstream::lookup_upstream_narinfo(
-                http.clone(),
-                Arc::clone(&upstream_urls),
-                hash,
-                store_path,
-            ));
-        }
+    for (_hash, cp) in found {
+        result.push(cp);
     }
-    while let Some(found) = futs.next().await {
-        if let Some(cp) = found {
-            result.push(cp);
-        }
-        if let Some((hash, store_path)) = iter.next() {
-            futs.push(gradient_core::upstream::lookup_upstream_narinfo(
-                http.clone(),
-                Arc::clone(&upstream_urls),
-                hash,
-                store_path,
-            ));
-        }
+
+    let bucket = {
+        use chrono::Timelike as _;
+        let now = gradient_types::now();
+        now.with_second(0)
+            .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
+            .unwrap_or(now)
+    };
+    if let Err(e) = gradient_db::upsert_upstream_metrics(&state.worker_db, bucket, &stats).await {
+        warn!(error = %e, "failed to flush upstream metrics");
     }
 }
 
