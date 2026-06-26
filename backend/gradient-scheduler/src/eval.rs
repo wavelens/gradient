@@ -21,7 +21,7 @@ use gradient_sources::{get_hash_from_path, parse_drv_hash_name};
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use super::build::check_evaluation_done;
 use super::jobs::PendingEvalJob;
@@ -648,7 +648,7 @@ impl<'a> EvalResultProcessor<'a> {
                 .unwrap_or(now)
         };
         if let Err(e) = gradient_db::upsert_upstream_metrics(db, bucket, &stats).await {
-            error!(error = %e, "failed to flush upstream metrics");
+            warn!(error = %e, "failed to flush upstream metrics");
         }
 
         // Persist each hit onto every derivation_output row sharing that hash.

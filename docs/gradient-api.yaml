@@ -6252,7 +6252,7 @@ paths:
     get:
       tags: [board]
       summary: Per-upstream cache latency and narinfo hit-rate
-      description: Per-upstream trailing latency, narinfo hit-rate, and request counts with hourly series.
+      description: Per-upstream trailing latency, narinfo hit-rate, and request counts with hourly series. Org-scoped: superusers see all upstreams including url; members see their orgs plus public; url is blank for non-superusers.
       operationId: getBoardUpstreams
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
