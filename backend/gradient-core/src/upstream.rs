@@ -12,6 +12,9 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
+
+use tokio::sync::Semaphore;
 
 use gradient_db::{UpstreamAccum, UpstreamEndpoint};
 use gradient_types::ids::CacheUpstreamId;
@@ -72,33 +75,148 @@ pub fn fold_samples(samples: &[ProbeSample], into: &mut HashMap<CacheUpstreamId,
     }
 }
 
-/// Look up `<hash>.narinfo` across `upstream_urls`, returning the first hit as a
-/// [`CachedPath`] with an absolute NAR `url`. `None` when no upstream serves it.
+const PROBE_TIMEOUT_SECS: u64 = 5;
+const BATCH_WINDOW: usize = 256;
+
+pub struct ProbeResult {
+    pub best: Option<(CacheUpstreamId, CachedPath)>,
+    pub samples: Vec<ProbeSample>,
+}
+
+async fn probe_one(
+    http: &reqwest::Client,
+    pool: &Arc<Semaphore>,
+    ep: &UpstreamEndpoint,
+    hash: &str,
+    store_path: &str,
+) -> (f64, SampleKind, Option<CachedPath>) {
+    let _permit = pool.acquire().await;
+    let narinfo_url = format!("{}/{}.narinfo", ep.url.trim_end_matches('/'), hash);
+    let started = Instant::now();
+    let resp = http
+        .get(&narinfo_url)
+        .timeout(std::time::Duration::from_secs(PROBE_TIMEOUT_SECS))
+        .send()
+        .await;
+    let latency_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+    match resp {
+        Ok(r) if r.status().is_success() => match r.text().await {
+            Ok(body) => match parse_upstream_narinfo(&ep.url, store_path, &body) {
+                Some(cp) => (latency_ms, SampleKind::Hit, Some(cp)),
+                None => (latency_ms, SampleKind::Miss, None),
+            },
+            Err(_) => (latency_ms, SampleKind::Error, None),
+        },
+        Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => {
+            (latency_ms, SampleKind::Miss, None)
+        }
+        Ok(_) => (latency_ms, SampleKind::Error, None),
+        Err(_) => (latency_ms, SampleKind::Error, None),
+    }
+}
+
 pub async fn lookup_upstream_narinfo(
     http: reqwest::Client,
-    upstream_urls: Arc<Vec<String>>,
+    endpoints: Arc<Vec<UpstreamEndpoint>>,
+    pool: Arc<Semaphore>,
     hash: String,
     store_path: String,
-) -> Option<CachedPath> {
-    for base_url in upstream_urls.iter() {
-        let narinfo_url = format!("{}/{}.narinfo", base_url.trim_end_matches('/'), &hash);
-        let body = match http
-            .get(&narinfo_url)
-            .timeout(std::time::Duration::from_secs(5))
-            .send()
-            .await
-        {
-            Ok(r) if r.status().is_success() => match r.text().await {
-                Ok(b) => b,
-                Err(_) => continue,
-            },
-            _ => continue,
-        };
-        if let Some(cp) = parse_upstream_narinfo(base_url, &store_path, &body) {
-            return Some(cp);
+) -> ProbeResult {
+    let mut samples = Vec::new();
+
+    if should_race(endpoints.len()) {
+        use futures::stream::{FuturesUnordered, StreamExt as _};
+        let mut futs: FuturesUnordered<_> = endpoints
+            .iter()
+            .map(|ep| {
+                let http = http.clone();
+                let pool = Arc::clone(&pool);
+                let hash = hash.clone();
+                let path = store_path.clone();
+                async move {
+                    let (latency, kind, cp) = probe_one(&http, &pool, ep, &hash, &path).await;
+                    (ep.id, latency, kind, cp)
+                }
+            })
+            .collect();
+
+        let mut results = Vec::new();
+        while let Some((id, latency, kind, cp)) = futs.next().await {
+            samples.push(ProbeSample { upstream: id, latency_ms: latency, kind });
+            results.push((id, latency, cp));
+        }
+
+        let best = select_best_hit(results);
+        return ProbeResult { best, samples };
+    }
+
+    for ep in endpoints.iter() {
+        let (latency, kind, cp) = probe_one(&http, &pool, ep, &hash, &store_path).await;
+        let is_hit = matches!(kind, SampleKind::Hit);
+        samples.push(ProbeSample { upstream: ep.id, latency_ms: latency, kind });
+        if is_hit && let Some(cp) = cp {
+            return ProbeResult {
+                best: Some((ep.id, cp)),
+                samples,
+            };
         }
     }
-    None
+
+    ProbeResult { best: None, samples }
+}
+
+pub async fn probe_batch(
+    http: reqwest::Client,
+    mut endpoints: Vec<UpstreamEndpoint>,
+    pool: Arc<Semaphore>,
+    targets: Vec<(String, String)>,
+) -> (
+    HashMap<String, CachedPath>,
+    HashMap<CacheUpstreamId, UpstreamAccum>,
+) {
+    use futures::stream::{FuturesUnordered, StreamExt as _};
+
+    let mut found = HashMap::new();
+    let mut stats = HashMap::new();
+    if targets.is_empty() || endpoints.is_empty() {
+        return (found, stats);
+    }
+
+    order_endpoints(&mut endpoints);
+    let endpoints = Arc::new(endpoints);
+
+    let mut futs = FuturesUnordered::new();
+    let mut iter = targets.into_iter();
+    let push = |futs: &mut FuturesUnordered<_>, hash: String, path: String| {
+        let http = http.clone();
+        let eps = Arc::clone(&endpoints);
+        let pool = Arc::clone(&pool);
+        futs.push(async move {
+            let res = lookup_upstream_narinfo(http, eps, pool, hash.clone(), path).await;
+            (hash, res)
+        });
+    };
+
+    for _ in 0..BATCH_WINDOW {
+        match iter.next() {
+            Some((hash, path)) => push(&mut futs, hash, path),
+            None => break,
+        }
+    }
+
+    while let Some((hash, res)) = futs.next().await {
+        fold_samples(&res.samples, &mut stats);
+        if let Some((_, cp)) = res.best {
+            found.insert(hash, cp);
+        }
+
+        if let Some((hash, path)) = iter.next() {
+            push(&mut futs, hash, path);
+        }
+    }
+
+    (found, stats)
 }
 
 /// Parse a narinfo `body` into a [`CachedPath`]. The `URL:` field is resolved
