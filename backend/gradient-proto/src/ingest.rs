@@ -13,7 +13,7 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
 };
-use tracing::warn;
+use tracing::{debug, warn};
 
 /// NAR metadata required to record a cached path. Hashes are normalized on write.
 pub struct IngestInput<'a> {
@@ -59,8 +59,39 @@ pub async fn ingest_nar<C: ConnectionTrait>(
 ) -> anyhow::Result<IngestOutcome> {
     let sp = parse_store_path(input.store_path)?;
     // NAR written first; DB failure leaves an unreferenced blob - GC reclaims it.
-    nar_storage.put(sp.hash(), nar_bytes).await?;
+    put_nar_idempotent(db, nar_storage, sp.hash(), input.file_hash, nar_bytes).await?;
     upsert_and_sign(db, sp.hash(), sp.name(), input, targets).await
+}
+
+/// Store `nar_bytes` for store-path `hash`, skipping the object-store write when
+/// the identical NAR is already present: a `cached_path` row records the same
+/// compressed `file_hash` AND the object is physically there (`HEAD`). A re-push
+/// of unchanged content is then a metadata-only no-op instead of a fresh `PUT`,
+/// which on a versioning-enabled bucket would otherwise pile up retained
+/// versions that no S3-API GC can reclaim. `file_hash` is the incoming
+/// compressed-NAR hash (`sha256:<nix32>`); returns whether bytes were written.
+pub async fn put_nar_idempotent<C: ConnectionTrait>(
+    db: &C,
+    nar_storage: &NarStore,
+    hash: &str,
+    file_hash: &str,
+    nar_bytes: Vec<u8>,
+) -> anyhow::Result<bool> {
+    let incoming = normalize_nar_hash(file_hash);
+    let recorded_match = ECachedPath::find()
+        .filter(CCachedPath::Hash.eq(hash))
+        .one(db)
+        .await?
+        .and_then(|row| row.file_hash)
+        .is_some_and(|fh| fh == incoming);
+
+    if recorded_match && nar_storage.exists(hash).await? {
+        debug!(%hash, "NAR already stored with matching file_hash; skipping re-upload");
+        return Ok(false);
+    }
+
+    nar_storage.put(hash, nar_bytes).await?;
+    Ok(true)
 }
 
 pub async fn ingest_metadata_only<C: ConnectionTrait>(
@@ -266,6 +297,8 @@ mod tests {
         let sp = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";
         let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // `put_nar_idempotent` looks up the path first; no row ⇒ write.
+            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .append_query_results([vec![returned_cached_path(hash)]])
             .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
@@ -283,5 +316,78 @@ mod tests {
         assert!(out.created);
         let blob = store.get(hash).await.expect("get").expect("present");
         assert_eq!(blob, vec![1, 2, 3, 4, 5]);
+    }
+
+    const IDEM_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    fn row_with_file_hash(file_hash: &str) -> gradient_entity::cached_path::Model {
+        let mut row = returned_cached_path(IDEM_HASH);
+        row.file_hash = Some(normalize_nar_hash(file_hash));
+        row
+    }
+
+    /// Identical content already present (matching `file_hash` + object on
+    /// disk) ⇒ the write is skipped and the stored bytes are left untouched.
+    #[tokio::test]
+    async fn idempotent_skips_when_present_and_hash_matches() {
+        let store = temp_store();
+        store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row_with_file_hash("sha256:abc")]])
+            .into_connection();
+
+        let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
+            .await
+            .unwrap();
+        assert!(!wrote, "must skip when an identical NAR is already stored");
+        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"OLD");
+    }
+
+    /// No `cached_path` row ⇒ first write goes through.
+    #[tokio::test]
+    async fn idempotent_writes_when_no_row() {
+        let store = temp_store();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .into_connection();
+
+        let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
+            .await
+            .unwrap();
+        assert!(wrote);
+        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
+    }
+
+    /// A recorded but *different* `file_hash` means the content changed
+    /// (non-reproducible rebuild) ⇒ overwrite, never serve stale bytes.
+    #[tokio::test]
+    async fn idempotent_writes_when_hash_differs() {
+        let store = temp_store();
+        store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row_with_file_hash("sha256:different")]])
+            .into_connection();
+
+        let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
+            .await
+            .unwrap();
+        assert!(wrote);
+        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
+    }
+
+    /// Matching `file_hash` but the object is gone (zombie row) ⇒ re-write so
+    /// the row⟺object invariant is restored.
+    #[tokio::test]
+    async fn idempotent_writes_when_object_missing() {
+        let store = temp_store();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row_with_file_hash("sha256:abc")]])
+            .into_connection();
+
+        let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
+            .await
+            .unwrap();
+        assert!(wrote, "a zombie row whose object is gone must re-write");
+        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
     }
 }

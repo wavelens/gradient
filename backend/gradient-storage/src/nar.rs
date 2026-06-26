@@ -140,6 +140,18 @@ impl NarStore {
         Ok(())
     }
 
+    /// Whether a NAR object for `hash` is already present (a single `HEAD`).
+    /// Backs the idempotent-write guard so a re-push of identical content does
+    /// not rewrite the object - on a versioning-enabled bucket every rewrite is
+    /// a retained version that no S3-API GC can reclaim.
+    pub async fn exists(&self, hash: &str) -> Result<bool> {
+        match self.inner.head(&self.object_path(hash)).await {
+            Ok(_) => Ok(true),
+            Err(object_store::Error::NotFound { .. }) => Ok(false),
+            Err(e) => Err(e).context("Failed to head NAR"),
+        }
+    }
+
     /// Initiate a multipart upload for the NAR identified by `hash`.
     ///
     /// Returns a [`WriteMultipart`] configured with `chunk_size`-byte parts.
@@ -540,6 +552,14 @@ mod tests {
             assembled.extend_from_slice(&chunk.expect("chunk"));
         }
         assert_eq!(assembled, payload);
+    }
+
+    #[tokio::test]
+    async fn exists_reflects_presence() {
+        let (_d, store) = local_store();
+        assert!(!store.exists("ab12cd").await.expect("head"));
+        store.put("ab12cd", b"data".to_vec()).await.expect("put");
+        assert!(store.exists("ab12cd").await.expect("head"));
     }
 
     #[tokio::test]

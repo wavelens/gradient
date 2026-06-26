@@ -339,7 +339,13 @@ in {
       s3 = {
         enable = lib.mkEnableOption "S3 storage for NAR cache files";
         bucket = lib.mkOption {
-          description = "S3 bucket name for NAR cache storage";
+          description = ''
+            S3 bucket name for NAR cache storage. The bucket must NOT have
+            versioning enabled (nor object-lock / replication, which force
+            versioning on): gradient overwrites objects by key and never prunes
+            noncurrent versions, so a versioned bucket retains one dead copy per
+            re-upload that no garbage collection can reclaim.
+          '';
           type = lib.types.str;
           default = "";
         };

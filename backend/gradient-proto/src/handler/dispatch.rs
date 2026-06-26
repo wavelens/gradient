@@ -1009,7 +1009,15 @@ impl<'a> DispatchContext<'a> {
                     return;
                 }
             };
-            if let Err(e) = self.state.nar_storage.put(hash, buf).await {
+            if let Err(e) = crate::ingest::put_nar_idempotent(
+                &self.state.worker_db,
+                &self.state.nar_storage,
+                hash,
+                &file_hash,
+                buf,
+            )
+            .await
+            {
                 let reason = format!("failed to write NAR to storage: {e}");
                 error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "nar_storage.put failed");
                 self.fail_build_transient(&job_id, reason).await;

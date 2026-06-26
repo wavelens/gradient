@@ -100,7 +100,9 @@ The server updates `build` and `derivation_output` rows as `JobUpdate` messages 
 ## Binary Cache
 
 **Serving a NAR**
-NARs are served with ZSTD compression. They are stored in `${base_dir}/nars/[first 2 chars of hash]/[rest of the hash].nar.zst`.
+NARs are served with ZSTD compression. They are stored in `${base_dir}/nars/[first 2 chars of hash]/[rest of the hash].nar.zst`, keyed by the **store-path hash** (so a presigned upload URL can be issued before the worker has computed the content hash). The narinfo advertises `nar/<file_hash>.nar.zst`; `resolve_effective_hash_db` maps that file_hash back to the store-path key on each fetch.
+
+**Idempotent writes.** Server-side ingestion (`ingest_nar` for `nix copy` push, and the `NarPush` commit) goes through `put_nar_idempotent`, which skips the object-store write when a `cached_path` row already records the same `file_hash` and the object is present (`HEAD`). This keeps redundant re-pushes from rewriting an identical object. The NAR object store must **not** retain noncurrent versions: gradient assumes overwrite-on-PUT semantics, so a bucket with versioning (or object-lock / replication, which force it on) accumulates one retained copy per re-upload that no S3-API GC can reclaim. The worker→S3 presigned upload bypasses the server entirely, so the no-versioning requirement is the only guard on that path.
 
 **Signing**
 
