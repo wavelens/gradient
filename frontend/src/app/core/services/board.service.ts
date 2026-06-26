@@ -229,6 +229,21 @@ export interface BoardCacheStats {
   storage: SeriesPoint[];
 }
 
+export interface BoardUpstream {
+  upstream_id: string;
+  display_name: string;
+  url: string;
+  avg_latency_ms: number | null;
+  hit_rate: number | null;
+  requests_total: number;
+  latency: SeriesPoint[];
+  hit_rate_series: SeriesPoint[];
+}
+
+export interface BoardUpstreamStats {
+  upstreams: BoardUpstream[];
+}
+
 export interface HttpRouteStat {
   method: string;
   route: string;
@@ -371,6 +386,10 @@ export class BoardService {
 
   getCache(windowHours = 24): Observable<BoardCacheStats> {
     return this.api.get<BoardCacheStats>(`board/cache?window_hours=${windowHours}`);
+  }
+
+  getUpstreams(windowHours = 24): Observable<BoardUpstreamStats> {
+    return this.api.get<BoardUpstreamStats>(`board/cache/upstreams?window_hours=${windowHours}`);
   }
 
   getNetwork(windowHours = 24): Observable<BoardNetworkStats> {
