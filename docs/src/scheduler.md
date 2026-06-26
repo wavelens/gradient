@@ -123,6 +123,11 @@ own nix config). Existing build-once anchors a prior eval left not-yet-succeeded
 are flipped substitutable when an upstream is newly found, so a previously-failed
 fetcher substitutes instead of rebuilding.
 
+Upstreams are probed in hit-rate-then-latency order (most-likely cache first; never-probed
+upstreams are tried last) so the first hit wins cheaply. The lowest-latency holder's URL is
+persisted on `derivation_output.external_url`. Total outbound probe concurrency is bounded
+server-wide by `GRADIENT_UPSTREAM_QUERY_CONCURRENCY` (default 32).
+
 As the worker walks the graph it pushes each produced `.drv`'s runtime closure
 to the cache before reporting its batch, so a build dispatched mid-evaluation
 finds its inputs already present. A `.drv`'s build-time input sources

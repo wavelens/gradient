@@ -5171,3 +5171,16 @@ rather than the host freezing. Covered in the same file:
 - `pid_guard_deregisters_pid_on_drop` - the `PidGuard` RAII field removes a
   subprocess pid from the pool's live registry on drop, so the reaper never
   targets a worker that has already been discarded.
+
+## Upstream latency ordering (#464)
+
+- `gradient-db` `UpstreamAccum`: `accum_record_hit_counts_hit_and_latency`,
+  `accum_record_miss_counts_miss_and_latency`, `accum_record_error_counts_latency_only`.
+- `gradient-core` ordering/selection: `order_endpoints_hit_rate_desc_then_latency_asc`,
+  `order_endpoints_unknown_hit_rate_sorts_last`, `should_race_only_for_small_n`,
+  `select_best_hit_picks_lowest_latency_hit`, `select_best_hit_none_when_all_miss`,
+  `fold_samples_aggregates_per_upstream`.
+- `parse_upstream_narinfo` parser tests remain (unchanged).
+- Frontend: `cache.component.spec.ts` renders an upstream row from `getUpstreams`.
+- SQL coverage (window stats query, per-batch upsert, rollup inserts) is by
+  mirrored-query review plus CI E2E; no real-Postgres unit harness exists.
