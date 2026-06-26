@@ -97,6 +97,33 @@ immediately rather than waiting for a new evaluation - which matters when evals
 are being aborted and would otherwise never requeue it, leaving the dependent
 dead-ended on `InputsUnavailable`.
 
+The cache GC can break the invariant from the other direction: the zombie-purge
+(`cached_path` whose NAR vanished) and the TTL eviction delete `cached_path` rows
+without going through `demote_cached_output`, leaving the producer at
+`Completed`/`Substituted` + `closure_complete` with no fetchable output. The gate
+then trusts it, dependents fail `InputsUnavailable` permanently, and - being
+terminal-*success*, not terminal-failed - it is never re-queued, so it never
+rebuilds. `demote_unbacked_trusted_outputs` restores the invariant: it finds every
+gate-trusted producer (`status IN (3, 7) AND closure_complete`) whose output is
+neither in our cache (a `cached_path` with a NAR) nor on an upstream
+(`external_url`) and demotes it back to `Created`. It runs hourly in the cache loop
+(after the GC passes) and once at eval-resolve before promotion, so a producer the
+GC orphaned heals on the next evaluation without manual intervention.
+
+The deeper cause of those orphans is the derivation GC itself. `build_job` rows are
+per-evaluation and pruned with old evals (`keep_evaluations`), but the global
+`derivation_dependency` graph and the build-once anchors persist. The old orphan
+pass treated "no `build_job`" as "unreferenced" and deleted the derivation (its
+`.drv` + output NARs + `cached_path` rows), so a derivation still needed as a build
+input of a retained closure - its own evals long gone - got swept away, stranding
+dependents on `InputsUnavailable`. `gc_orphan_derivations` is now a mark-and-sweep:
+it reclaims a derivation only when it lies *outside the build-dependency closure of
+every live root* (`entry_point` ∪ `build_job` derivations, walked over
+`derivation_dependency`). The orphan-NAR keep-set (`active_hashes`) likewise pins
+the input sources and `.drv` hashes of live derivations, not just outputs - closing
+the window where a freshly-pushed source/`.drv` (no `derivation_output` yet) was
+deleted mid-push because GC ran concurrently with the build.
+
 #### Upstream substitutability
 
 A derivation is just another build that can be substituted when its output is

@@ -41,8 +41,8 @@ pub use self::cache_reach::*;
 pub use self::cache_storage::{
     MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, cache_used_bytes,
     clear_closure_complete_for_referrers, demote_cached_output,
-    demote_output_only_cached_deps, demote_referrers_of, diagnose_missing_input,
-    instance_used_bytes, org_caches_all_full, org_writable_caches,
+    demote_output_only_cached_deps, demote_referrers_of, demote_unbacked_trusted_outputs,
+    diagnose_missing_input, instance_used_bytes, org_caches_all_full, org_writable_caches,
 };
 pub use self::cache_upstream::{
     GradientProtoUpstream, UpstreamAccum, UpstreamEndpoint, gradient_proto_upstreams_for_org,

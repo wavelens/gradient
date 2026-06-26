@@ -919,6 +919,19 @@ pub async fn handle_eval_job_completed(
         error!(error = %e, %evaluation_id, "mark_edges_complete_for_eval failed");
     }
 
+    // Heal the cache-trust invariant before promoting: a producer the gate trusts
+    // (Completed/Substituted + closure_complete) whose output the cache GC purged
+    // (cached_path row gone, NAR missing) is unfetchable - dependents dispatched
+    // against it fail InputsUnavailable permanently and, being Completed, never
+    // rebuild. Reset such producers to Created so this eval reschedules them.
+    match gradient_db::demote_unbacked_trusted_outputs(&state.worker_db, &state.nar_storage).await {
+        Ok(n) if n > 0 => {
+            info!(%evaluation_id, reset = n, "demoted trusted producers with unfetchable outputs")
+        }
+        Ok(_) => {}
+        Err(e) => error!(error = %e, %evaluation_id, "demote_unbacked_trusted_outputs failed"),
+    }
+
     // Reconcile anchor state from cache state: a dep whose outputs are all cached
     // but whose anchor was reset by a prior requeue/cascade/demote sits Created and
     // blocks its dependents though its artifacts exist. Cache presence is the

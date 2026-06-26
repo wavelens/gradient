@@ -357,6 +357,11 @@ async fn purge_zombie_cached_paths(
 ///    is flipped.
 /// 2. it belongs to a `cached_path` row with `file_hash IS NOT NULL` -
 ///    typically `.drv` files that have no `derivation_output` of their own.
+/// 3. it is a build-time **input source** or the **`.drv`** of a live (non-
+///    terminal-failed) derivation. These have no `derivation_output`, so before
+///    their own `cached_path` row is recorded they would be invisible to (1)+(2)
+///    and deleted mid-push; protecting them by `derivation_input_source` /
+///    `derivation` hash closes that race without a timing window.
 ///
 /// Note: this is intentionally more permissive than the old `is_cached=true`
 /// check. `gc_orphan_derivations` and `cleanup_stale_cached_nars` are the
@@ -376,6 +381,16 @@ async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
             SELECT cp.hash AS hash
             FROM cached_path cp
             WHERE cp.file_hash IS NOT NULL
+            UNION
+            SELECT s.hash AS hash
+            FROM derivation_input_source s
+            JOIN derivation_build b ON b.derivation = s.derivation
+            WHERE b.status NOT IN ($1, $2, $3, $4)
+            UNION
+            SELECT d.hash AS hash
+            FROM derivation d
+            JOIN derivation_build b ON b.derivation = d.id
+            WHERE b.status NOT IN ($1, $2, $3, $4)
             "#,
             [
                 sea_orm::Value::Int(Some(BuildStatus::FailedPermanent as i32)),

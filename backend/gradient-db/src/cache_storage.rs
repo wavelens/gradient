@@ -346,6 +346,61 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
     Ok(producers)
 }
 
+/// Enforce the cache-trust invariant: a producer the dispatch gate trusts
+/// (`Completed`/`Substituted` + `closure_complete`) may only stay trusted while
+/// its output is actually fetchable - present in our cache (`cached_path` with a
+/// NAR) or on a configured upstream (`external_url`). The cache GC deletes a
+/// `cached_path` row when its NAR object is gone (zombie purge, TTL eviction)
+/// without clearing the producer's flags, leaving an anchor the gate trusts but
+/// whose artifact cannot be served; dependents dispatched against it fail
+/// `InputsUnavailable` permanently and, being `Completed`, never rebuild. Demote
+/// each such output - reset its producer to `Created`, drop the stale flags, and
+/// clear `closure_complete` up the referrer chain - so the next evaluation
+/// rebuilds it. Returns the number of producer anchors reset.
+///
+/// Gate parity: the `status IN (3, 7) AND closure_complete` predicate mirrors the
+/// `(dep.status IN (3, 7)) AND dep.closure_complete` arm of the promotion gate, so
+/// exactly the anchors the gate would trust are checked; `external_url IS NULL`
+/// excludes outputs fetched straight from an upstream (not from our cache).
+const UNBACKED_TRUSTED_OUTPUTS_SELECT: &str = r#"
+    SELECT DISTINCT o.hash
+    FROM derivation_output o
+    JOIN derivation_build db ON db.derivation = o.derivation
+    WHERE db.status IN (3, 7)
+      AND db.closure_complete
+      AND o.external_url IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM cached_path cp
+          WHERE cp.hash = o.hash AND cp.file_hash IS NOT NULL)
+"#;
+
+pub async fn demote_unbacked_trusted_outputs<C: ConnectionTrait>(
+    db: &C,
+    nar_storage: &gradient_storage::NarStore,
+) -> Result<u64, sea_orm::DbErr> {
+    use sea_orm::FromQueryResult;
+
+    #[derive(sea_orm::FromQueryResult)]
+    struct OutputHash {
+        hash: String,
+    }
+
+    let hashes = OutputHash::find_by_statement(Statement::from_string(
+        DatabaseBackend::Postgres,
+        UNBACKED_TRUSTED_OUTPUTS_SELECT.to_owned(),
+    ))
+    .all(db)
+    .await?;
+
+    let mut reset = 0u64;
+    for h in hashes {
+        reset += demote_cached_output(db, nar_storage, &h.hash).await?.len() as u64;
+        clear_closure_complete_for_referrers(db, &h.hash).await?;
+    }
+
+    Ok(reset)
+}
+
 /// Self-heal flag clear: a proven-missing path leaves every (transitive)
 /// referrer closure-incomplete, so drop `closure_complete` up the chain - on the
 /// cached NARs and the anchors that produced them - without deleting the healthy
@@ -480,6 +535,24 @@ mod tests {
             .to_string();
         assert!(sql.to_uppercase().contains("CAST"), "missing cast: {sql}");
         assert!(sql.to_lowercase().contains("bigint"), "missing bigint: {sql}");
+    }
+
+    /// The reconciler must select exactly the anchors the dispatch gate trusts
+    /// (`status IN (3, 7) AND closure_complete`), skip upstream-fetchable outputs
+    /// (`external_url IS NULL`), and require a missing backing NAR.
+    #[test]
+    fn unbacked_trusted_select_matches_the_gate() {
+        let sql = UNBACKED_TRUSTED_OUTPUTS_SELECT
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(sql.contains("db.status IN (3, 7)"), "must mirror the gate's success states: {sql}");
+        assert!(sql.contains("db.closure_complete"), "must require closure_complete: {sql}");
+        assert!(sql.contains("o.external_url IS NULL"), "must skip upstream-served outputs: {sql}");
+        assert!(
+            sql.contains("NOT EXISTS") && sql.contains("cp.file_hash IS NOT NULL"),
+            "must require a missing backing NAR: {sql}"
+        );
     }
 
     #[test]

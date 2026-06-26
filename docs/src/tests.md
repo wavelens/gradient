@@ -21,6 +21,25 @@ Queued/dependency-failed/aborted transitions run as bulk SQL updates that bypass
 (`backend/gradient-db/src/status/derivation_build_status.rs`) fires the reactor
 for the affected entry points so those events still reach the forge.
 
+## NAR writes are idempotent (no redundant re-uploads)
+
+`backend/gradient-proto/src/ingest.rs`: `put_nar_idempotent` skips the
+object-store write when an identical NAR is already stored, so re-pushing
+unchanged content is a metadata-only no-op instead of a fresh `PUT` (which on a
+versioning-enabled bucket would accumulate retained versions no S3-API GC can
+reclaim).
+- `idempotent_skips_when_present_and_hash_matches` - a recorded matching
+  `file_hash` plus the object on disk skips the write and leaves the bytes
+  untouched.
+- `idempotent_writes_when_no_row` / `idempotent_writes_when_hash_differs` - a
+  first write, or a changed `file_hash` (non-reproducible rebuild), always
+  writes so stale bytes are never served.
+- `idempotent_writes_when_object_missing` - a matching row whose object is gone
+  (zombie) re-writes, restoring the row⟺object invariant.
+- `backend/gradient-storage/src/nar.rs`: `exists_reflects_presence` covers the
+  `HEAD` guard. The guard is server-side only; worker→S3 presigned uploads
+  bypass it, so the NAR bucket must not retain noncurrent versions.
+
 ## S3 build logs are not cached on local disk
 
 `backend/gradient-storage/src/log.rs`: `s3_chunks_are_not_cached_on_local_disk`
@@ -1016,6 +1035,42 @@ orders dependents. A relayed output is therefore in our cache but not
 expects. Covered end-to-end in CI (the relay needs a real upstream + object store,
 so there is no local unit harness); `nar::upload_presigned`'s helpers keep their
 existing tests.
+
+## Cache GC keeps the dispatch-gate trust invariant
+
+The cache GC deletes `cached_path` rows whose NAR object is gone (zombie purge) or
+expired (TTL eviction) without clearing the producing anchor's flags, so a producer
+could sit at `Completed`/`Substituted` + `closure_complete` with no fetchable
+output - the dispatch gate trusts it and every dependent fails `InputsUnavailable`
+permanently, and being terminal-success it is never re-queued.
+`demote_unbacked_trusted_outputs` (gradient-db) selects exactly the gate-trusted
+producers whose output is neither in our cache nor on an upstream and demotes them
+to `Created`; it runs hourly in the cache loop and at eval-resolve. The behaviour
+needs a real Postgres (no local harness), so the SQL is pinned by a shape test:
+
+- `cache_storage::tests::unbacked_trusted_select_matches_the_gate` - asserts the
+  reconciler's select mirrors the promotion gate's success arm (`status IN (3, 7)
+  AND closure_complete`), skips upstream-served outputs (`external_url IS NULL`),
+  and requires a missing backing NAR (`NOT EXISTS … cp.file_hash IS NOT NULL`), so
+  it can never demote a still-fetchable or upstream-only producer.
+
+## Derivation GC is a mark-and-sweep over the live closure
+
+`build_job` rows are per-eval and pruned with old evals, but the global
+`derivation_dependency` graph and the build-once anchors persist. The old orphan
+pass deleted any derivation with no `build_job`, sweeping away build inputs of
+retained closures and stranding dependents on `InputsUnavailable`.
+`gc_orphan_derivations` now reclaims a derivation only when it lies outside the
+build-dependency closure of the live roots (`entry_point` ∪ `build_job`), and
+`active_hashes` additionally pins input-source and `.drv` hashes of live
+derivations so a concurrent GC cannot delete a freshly-pushed source/`.drv`
+mid-build. The graph traversal needs a real Postgres, so the keep-set is pinned by
+a shape test:
+
+- `gc::tests::reachable_cte_closes_over_roots_and_dependency_edges` - asserts the
+  keep-set seeds from `entry_point` and `build_job` and recurses
+  `derivation_dependency` toward each root's dependencies, so a transitive build
+  input whose own `build_job` was pruned still survives GC.
 
 Backend (`cargo test -p worker --tests`):
 - `nix::store::tests::scoped_guard_discards_inner_when_not_marked_ok` -

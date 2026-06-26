@@ -80,6 +80,16 @@ pub async fn cache_loop(state: Arc<ServerState>) {
         {
             error!(error = ?e, "NAR TTL GC failed");
         }
+        // The GC passes above delete `cached_path` rows whose NAR is gone without
+        // touching the producer's trust flags; demote any anchor the dispatch gate
+        // would trust whose output is no longer fetchable, so its dependents stop
+        // failing `InputsUnavailable` and the next eval rebuilds it.
+        match gradient_db::demote_unbacked_trusted_outputs(&state.worker_db, &state.nar_storage).await
+        {
+            Ok(n) if n > 0 => info!(reset = n, "Demoted trusted producers with unfetchable outputs"),
+            Ok(_) => {}
+            Err(e) => error!(error = ?e, "Cache-trust reconcile failed"),
+        }
         if let Err(e) = gradient_ci::unpark_storage_full_all(
             &state.worker_db,
             state.config.storage.max_storage_gb,

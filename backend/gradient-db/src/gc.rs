@@ -160,10 +160,16 @@ fn evaluations_to_gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
     (keep..statuses.len()).collect()
 }
 
-/// Derivation GC pass: deletes global `derivation` rows that no surviving
-/// evaluation needs - referenced by neither `build_job` nor `entry_point`, the
-/// only owners whose FK does not cascade - and whose grace period has expired.
-/// The grace lets rapid re-evaluations reuse recent derivations.
+/// Derivation GC pass (mark-and-sweep): deletes global `derivation` rows that lie
+/// *outside the build-dependency closure of every live root* - an `entry_point` or
+/// a derivation a retained eval's `build_job` references - and whose grace period
+/// has expired. The grace lets rapid re-evaluations reuse recent derivations.
+///
+/// Reachability matters because `build_job` rows are pruned with old evals while
+/// `derivation_dependency` edges and anchors persist: a derivation still needed as
+/// a build input of a retained closure (its own evals long gone) has no `build_job`
+/// yet must be kept. A naive "no `build_job`" test reclaimed those, deleting build
+/// inputs of live anchors and stranding dependents on `InputsUnavailable`.
 ///
 /// The rows are deleted first, re-checking the orphan predicate inside the
 /// statement: because derivations are global and content-addressed, a
@@ -175,22 +181,38 @@ fn evaluations_to_gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
 /// FK cascade cleans up `derivation_output`, `derivation_build`, dep/closure
 /// edges, features, metrics, and `cache_derivation`; `cached_path_signature`
 /// cascades from `cached_path`.
+/// Build-dependency closure of the live roots (`entry_point` ∪ `build_job`
+/// derivations). A derivation in this set is still needed to build/serve a
+/// retained closure and must never be reclaimed, even with no `build_job` of its
+/// own. Reused verbatim by the candidate scan and the delete re-check.
+const REACHABLE_DERIVATIONS_CTE: &str = r#"
+    WITH RECURSIVE reachable(id) AS (
+        SELECT derivation FROM entry_point
+        UNION
+        SELECT derivation FROM build_job
+        UNION
+        SELECT e.dependency
+        FROM derivation_dependency e
+        JOIN reachable r ON e.derivation = r.id
+    )
+"#;
+
 pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<()> {
     use std::collections::HashSet;
 
     let cutoff = gradient_types::now() - ChronoDuration::hours(grace_hours.max(0));
     let db = &ctx.worker_db;
 
+    let select_sql = format!(
+        "{REACHABLE_DERIVATIONS_CTE}
+         SELECT d.id, d.hash FROM derivation d
+         WHERE d.created_at < $1
+           AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.id = d.id)"
+    );
     let rows = db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"SELECT d.id, d.hash
-               FROM derivation d
-               LEFT JOIN build_job bj ON bj.derivation = d.id
-               LEFT JOIN entry_point ep ON ep.derivation = d.id
-               WHERE bj.id IS NULL
-                 AND ep.id IS NULL
-                 AND d.created_at < $1"#,
+            &select_sql,
             [sea_orm::Value::ChronoDateTime(Some(Box::new(cutoff)))],
         ))
         .await
@@ -226,17 +248,20 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     .await
     .context("GC: failed to query orphan derivation outputs")?;
 
+    let delete_sql = format!(
+        "{REACHABLE_DERIVATIONS_CTE}
+         DELETE FROM derivation d
+         WHERE d.id = ANY($1)
+           AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.id = d.id)
+         RETURNING d.id"
+    );
     let mut deleted: HashSet<DerivationId> = HashSet::new();
     for chunk in candidate_ids.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
         match db
             .query_all(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
-                r#"DELETE FROM derivation d
-                   WHERE d.id = ANY($1)
-                     AND NOT EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = d.id)
-                     AND NOT EXISTS (SELECT 1 FROM entry_point ep WHERE ep.derivation = d.id)
-                   RETURNING d.id"#,
+                &delete_sql,
                 [ids.into()],
             ))
             .await
@@ -379,6 +404,28 @@ mod tests {
 
     fn set(items: &[&str]) -> HashSet<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The orphan-GC keep-set must be the build-dependency closure of the live
+    /// roots (entry_points + build_jobs), not just the roots themselves - a dep
+    /// reached only through `derivation_dependency` (its own `build_job` pruned with
+    /// an old eval) must survive.
+    #[test]
+    fn reachable_cte_closes_over_roots_and_dependency_edges() {
+        let cte = REACHABLE_DERIVATIONS_CTE
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(cte.contains("FROM entry_point"), "entry points are roots: {cte}");
+        assert!(cte.contains("FROM build_job"), "build_job derivations are roots: {cte}");
+        assert!(
+            cte.contains("derivation_dependency e") && cte.contains("JOIN reachable r ON e.derivation = r.id"),
+            "must recurse build-dependency edges so transitive deps survive: {cte}"
+        );
+        assert!(
+            cte.contains("SELECT e.dependency"),
+            "recursion walks toward dependencies (the inputs a root needs): {cte}"
+        );
     }
 
     #[test]
