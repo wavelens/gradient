@@ -771,6 +771,7 @@ fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use gradient_types::proto::QueryMode;
 
     fn make_state() -> ServerState {

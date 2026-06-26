@@ -165,6 +165,7 @@ async fn narinfo_served_from_db_inner() {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_forge::ForgeRegistry::with_builtin(),
+        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
@@ -291,6 +292,7 @@ async fn narinfo_unsigned_inner() {
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         forge: gradient_forge::ForgeRegistry::with_builtin(),
+        upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
