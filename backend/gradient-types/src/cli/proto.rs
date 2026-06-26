@@ -120,6 +120,17 @@ pub struct ProtoArgs {
         default_value_t = 30
     )]
     pub worker_heartbeat_timeout_secs: u64,
+
+    /// Maximum simultaneous outbound upstream narinfo requests across the whole
+    /// server (eval-time substitutability probes and worker cache-query probes
+    /// share this pool), so a huge evaluation never fans out one request per
+    /// derivation times every upstream at once.
+    #[arg(
+        long,
+        env = "GRADIENT_UPSTREAM_QUERY_CONCURRENCY",
+        default_value_t = 32
+    )]
+    pub upstream_query_concurrency: usize,
 }
 
 impl Default for ProtoArgs {
@@ -140,6 +151,7 @@ impl Default for ProtoArgs {
             max_nar_buffer_bytes: 10 * 1024 * 1024 * 1024,
             nar_partial_ttl_secs: 86400,
             worker_heartbeat_timeout_secs: 30,
+            upstream_query_concurrency: 32,
         }
     }
 }
