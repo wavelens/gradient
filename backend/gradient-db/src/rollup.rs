@@ -138,6 +138,43 @@ const CACHE_STORAGE_SQL: &str = "INSERT INTO metric_rollup \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
     DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum";
 
+/// Upstream narinfo latency per minute per upstream (scope `{upstream}`):
+/// `count` = completed requests, `sum` = summed latency ms (avg = sum/count).
+const UPSTREAM_LATENCY_SQL: &str = "INSERT INTO metric_rollup \
+    (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+    SELECT uuidv7(), 'upstream.latency_ms', 0, um.bucket_time, \
+           jsonb_build_object('upstream', um.upstream::text), hashtextextended(um.upstream::text, 0), \
+           sum(um.request_count)::bigint, sum(um.latency_ms_sum), 0, 0, 0, NULL \
+    FROM upstream_metric um \
+    WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+    GROUP BY um.bucket_time, um.upstream \
+    ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum";
+
+/// Upstream narinfo hits per minute per upstream (scope `{upstream}`).
+const UPSTREAM_HITS_SQL: &str = "INSERT INTO metric_rollup \
+    (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+    SELECT uuidv7(), 'upstream.narinfo_hits', 0, um.bucket_time, \
+           jsonb_build_object('upstream', um.upstream::text), hashtextextended(um.upstream::text, 0), \
+           sum(um.request_count)::bigint, sum(um.narinfo_hits), 0, 0, 0, NULL \
+    FROM upstream_metric um \
+    WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+    GROUP BY um.bucket_time, um.upstream \
+    ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum";
+
+/// Upstream narinfo misses per minute per upstream (scope `{upstream}`).
+const UPSTREAM_MISSES_SQL: &str = "INSERT INTO metric_rollup \
+    (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+    SELECT uuidv7(), 'upstream.narinfo_misses', 0, um.bucket_time, \
+           jsonb_build_object('upstream', um.upstream::text), hashtextextended(um.upstream::text, 0), \
+           sum(um.request_count)::bigint, sum(um.narinfo_misses), 0, 0, 0, NULL \
+    FROM upstream_metric um \
+    WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
+    GROUP BY um.bucket_time, um.upstream \
+    ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum";
+
 pub fn start_rollup_loop(ctx: DbContext) {
     let shutdown = ctx.shutdown.clone();
     shutdown.spawn(async move { rollup_loop(ctx).await });
@@ -182,6 +219,16 @@ async fn run_rollup(ctx: &DbContext) {
 
     if let Err(e) = db.execute_unprepared(CACHE_STORAGE_SQL).await {
         warn!(error = %e, "rollup cache-storage failed");
+    }
+
+    for (sql, label) in [
+        (UPSTREAM_LATENCY_SQL, "upstream.latency_ms"),
+        (UPSTREAM_HITS_SQL, "upstream.narinfo_hits"),
+        (UPSTREAM_MISSES_SQL, "upstream.narinfo_misses"),
+    ] {
+        if let Err(e) = db.execute_unprepared(sql).await {
+            warn!(metric = label, error = %e, "rollup upstream metric failed");
+        }
     }
 
     for (target, source, unit, window) in CASCADES {
