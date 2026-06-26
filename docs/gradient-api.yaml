@@ -10250,6 +10250,7 @@ components:
         substitute: { type: boolean }
         outcome: { type: integer }
         reason: { type: integer, nullable: true }
+        failure_message: { type: string, nullable: true }
         created_at: { type: string, format: date-time }
 
     DispatchedJobSummary:

@@ -200,13 +200,14 @@ interface RuleRow {
         <section class="attempts">
           <h2>Previous Build Attempts</h2>
           <table class="rules">
-            <thead><tr><th>#</th><th>Mode</th><th>Outcome</th><th>When</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Mode</th><th>Outcome</th><th>Reason</th><th>When</th><th></th></tr></thead>
             <tbody>
               @for (a of j.previous_attempts; track a.dispatched_job_id; let i = $index) {
                 <tr class="clickable" [routerLink]="['/board/jobs', a.dispatched_job_id]">
                   <td>{{ i + 1 }}</td>
                   <td>{{ a.substitute ? 'substitute' : 'build' }}</td>
                   <td class="mono">{{ attemptOutcome(a.outcome) }}</td>
+                  <td class="mono reason" [title]="a.failure_message ?? ''">{{ a.failure_message ?? '-' }}</td>
                   <td>{{ a.created_at | date: 'medium' }}</td>
                   <td>&rsaquo;</td>
                 </tr>
@@ -293,6 +294,7 @@ interface RuleRow {
       .step { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 0.75rem; color: #abb0b4; font-size: 0.85rem; }
       .step .hl { color: #17a2b8; font-weight: 600; }
       .mono { font-family: monospace; color: #d6dade; font-size: 0.85rem; }
+      .reason { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .worker-link { text-decoration: none; cursor: pointer; }
       .worker-link:hover { color: #17a2b8; }
       .build-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }

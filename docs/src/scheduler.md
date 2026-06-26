@@ -224,6 +224,17 @@ left untouched, since a real upstream serves their closure whole. So an accident
 cache-row deletion recovers on the next evaluation rather than requiring a manual
 reset.
 
+A **circuit breaker** bounds this self-heal. Each `InputsUnavailable` failure
+reconciles the cache so the next eval rebuilds the input; a genuinely unrecoverable
+input turns that into a hot loop that re-purges and re-pushes the same closure
+forever. `inputs_unavailable_attempt_count` counts the anchor's prior
+`InputsUnavailable` attempts (a distinct `build_attempt.reason`), and once it
+reaches `GRADIENT_INPUTS_UNAVAILABLE_MAX_LOOPS` (default 3) the build fails fast
+without reconciling - the eval reports a clear permanent failure instead of
+churning the cache. Every failure also persists the worker's error on
+`build_attempt.failure_message` (capped, full text still in the log) so the cause
+is visible without opening the log.
+
 #### Access and GC
 
 Read-only build endpoints (`GET /builds/{id}`, `/log`, `/downloads`,

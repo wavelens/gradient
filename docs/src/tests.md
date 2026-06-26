@@ -1072,6 +1072,13 @@ Backend (`cargo test -p gradient-worker -p gradient-scheduler --tests`):
   `decide_failure_outcome(InputsUnavailable, ..)` is always `Permanent`: the
   build fails this evaluation rather than burning the retry budget against an
   input that will not appear until its producer is rebuilt.
+- `build::retry_tests::inputs_unavailable_circuit_opens_after_max_loops` -
+  `inputs_unavailable_circuit_open(prior, max_loops)` self-heals for the first
+  `max_loops` failures and opens afterward, so an unrecoverable input stops
+  churning the cache and fails fast instead of looping forever.
+- `build::retry_tests::truncate_failure_message_bounds_long_input_on_char_boundary` -
+  the worker error persisted on `build_attempt.failure_message` is capped on a
+  UTF-8 char boundary (full text still lands in the build log).
 - `build::retry_tests::store_path_hash_extracts_32_char_hash` - the helper that
   maps a missing `/nix/store/<hash>-<name>` path to the `derivation_output`
   hash used to purge its cache artifact.

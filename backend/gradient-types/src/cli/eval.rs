@@ -32,6 +32,10 @@ pub struct EvalArgs {
     pub build_max_attempts: u32,
     #[arg(long, env = "GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD", value_parser = greater_than_zero::<u32>, default_value = "2")]
     pub substitute_miss_escalation_threshold: u32,
+    /// Max `InputsUnavailable` self-heal loops per build before the circuit
+    /// breaker opens and the build fails fast instead of churning the cache.
+    #[arg(long, env = "GRADIENT_INPUTS_UNAVAILABLE_MAX_LOOPS", value_parser = greater_than_zero::<u32>, default_value = "3")]
+    pub inputs_unavailable_max_loops: u32,
     #[arg(long, env = "GRADIENT_BUILD_RETRY_BACKOFF_SECS", default_value = "30")]
     pub build_retry_backoff_secs: u64,
     #[arg(long, env = "GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS", default_value = "14400")]
@@ -54,6 +58,7 @@ impl Default for EvalArgs {
             max_evaluations_per_worker: 1,
             build_max_attempts: 3,
             substitute_miss_escalation_threshold: 2,
+            inputs_unavailable_max_loops: 3,
             build_retry_backoff_secs: 30,
             build_default_timeout_secs: 14400,
             build_default_max_silent_secs: 3600,

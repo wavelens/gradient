@@ -231,6 +231,7 @@ pub struct AttemptSummary {
     pub substitute: bool,
     pub outcome: i32,
     pub reason: Option<i32>,
+    pub failure_message: Option<String>,
     pub created_at: String,
 }
 
@@ -354,6 +355,7 @@ pub async fn get_dispatched_job(
                 substitute: a.substitute,
                 outcome: i32::from(a.outcome),
                 reason: a.reason.map(i32::from),
+                failure_message: a.failure_message,
                 created_at: a.created_at.and_utc().to_rfc3339(),
             })
             .collect(),

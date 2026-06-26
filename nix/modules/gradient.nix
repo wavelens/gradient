@@ -516,6 +516,12 @@ in {
           default = 2;
         };
 
+        inputsUnavailableMaxLoops = lib.mkOption {
+          description = "Max InputsUnavailable self-heal loops per build before the circuit breaker opens and it fails fast (must be ≥ 1).";
+          type = lib.types.ints.positive;
+          default = 3;
+        };
+
         buildRetryBackoffSecs = lib.mkOption {
           description = "Base backoff in seconds before retrying a transient build failure; doubled per prior attempt.";
           type = lib.types.ints.unsigned;
@@ -860,6 +866,7 @@ in {
         GRADIENT_INSTANCE_METRICS_INTERVAL = toString cfg.settings.instanceMetricsIntervalSecs;
         GRADIENT_BUILD_MAX_ATTEMPTS = toString cfg.settings.buildMaxAttempts;
         GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD = toString cfg.settings.substituteMissEscalationThreshold;
+        GRADIENT_INPUTS_UNAVAILABLE_MAX_LOOPS = toString cfg.settings.inputsUnavailableMaxLoops;
         GRADIENT_BUILD_RETRY_BACKOFF_SECS = toString cfg.settings.buildRetryBackoffSecs;
         GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS = toString cfg.settings.buildDefaultTimeoutSecs;
         GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS = toString cfg.settings.buildDefaultMaxSilentSecs;

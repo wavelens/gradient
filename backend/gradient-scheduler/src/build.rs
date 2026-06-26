@@ -85,13 +85,22 @@ pub(crate) fn terminal_success_status(outputs_already_valid: bool) -> BuildStatu
 /// `build_attempt.reason`. `Transient` has no single cause, so it stays `None`.
 fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
     match kind {
-        BuildFailureKind::SubstituteUnavailable | BuildFailureKind::InputsUnavailable => {
-            Some(AttemptFailureReason::SubstituteUnavailable)
-        }
+        BuildFailureKind::SubstituteUnavailable => Some(AttemptFailureReason::SubstituteUnavailable),
+        BuildFailureKind::InputsUnavailable => Some(AttemptFailureReason::InputsUnavailable),
         BuildFailureKind::Permanent => Some(AttemptFailureReason::BuilderNonzero),
         BuildFailureKind::Timeout => Some(AttemptFailureReason::WallClockTimeout),
         BuildFailureKind::Transient => None,
     }
+}
+
+/// Circuit breaker for the `InputsUnavailable` self-heal. Each failed eval
+/// reconciles the cache (purges the stale input) so the next eval rebuilds it; a
+/// genuinely unrecoverable input turns that into a hot loop that churns the cache
+/// forever. `prior_failures` is how many `InputsUnavailable` attempts this anchor
+/// already has, so the self-heal runs for the first `max_loops` and the circuit
+/// opens after - the build then fails fast without reconciling.
+fn inputs_unavailable_circuit_open(prior_failures: i64, max_loops: u32) -> bool {
+    prior_failures >= max_loops as i64
 }
 
 /// True when a `FailedTransient` build's exponential backoff window has elapsed
@@ -106,6 +115,19 @@ pub(crate) fn retry_backoff_elapsed(
     let shift = (attempt.max(1) - 1).min(16) as u32;
     let window = base_secs.saturating_mul(1u64 << shift);
     (now - failed_at).num_seconds() >= window as i64
+}
+
+/// Cap a worker failure string before persisting it on `build_attempt`. The full
+/// text already lands in the build log; the stored message is for quick surfacing,
+/// so bound it on a char boundary to keep the row lean.
+fn truncate_failure_message(error: &str) -> String {
+    const MAX: usize = 8 * 1024;
+    if error.len() <= MAX {
+        return error.to_string();
+    }
+
+    let end = (0..=MAX).rev().find(|&i| error.is_char_boundary(i)).unwrap_or(0);
+    format!("{} [truncated]", &error[..end])
 }
 
 /// Extract the 32-char hash from a `/nix/store/<hash>-<name>` store path.
@@ -389,11 +411,22 @@ impl<'a> BuildStateHandler<'a> {
         let attempt = anchor.attempt;
         let max_attempts = self.state.config.eval.build_max_attempts;
 
+        // Count past `InputsUnavailable` self-heal loops before recording this
+        // failure, so the breaker decision excludes the attempt we're about to mark.
+        let prior_inputs_unavailable = if matches!(kind, BuildFailureKind::InputsUnavailable) {
+            gradient_db::inputs_unavailable_attempt_count(&self.state.worker_db, derivation_build)
+                .await
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
         if let Err(e) = fail_latest_attempt(
             &self.state.worker_db,
             derivation_build,
             AttemptOutcome::Failed,
             attempt_reason(kind),
+            Some(truncate_failure_message(error)),
         )
         .await
         {
@@ -402,14 +435,24 @@ impl<'a> BuildStateHandler<'a> {
 
         // Self-heal: a required input was reported absent from the cache while
         // its producer was marked done/substituted. Purge those stale outputs so
-        // the next evaluation rebuilds them; this anchor stays terminal here.
-        if matches!(kind, BuildFailureKind::InputsUnavailable)
-            && !missing_paths.is_empty()
-            && let Err(e) = self
+        // the next evaluation rebuilds them; this anchor stays terminal here. The
+        // circuit breaker caps the self-heal at `inputs_unavailable_max_loops`: an
+        // unrecoverable input would otherwise churn the cache forever.
+        if matches!(kind, BuildFailureKind::InputsUnavailable) && !missing_paths.is_empty() {
+            let max_loops = self.state.config.eval.inputs_unavailable_max_loops;
+            if inputs_unavailable_circuit_open(prior_inputs_unavailable, max_loops) {
+                warn!(
+                    %derivation_build,
+                    prior_failures = prior_inputs_unavailable,
+                    max_loops,
+                    "InputsUnavailable self-heal circuit open; failing without reconcile to break the hot loop"
+                );
+            } else if let Err(e) = self
                 .reconcile_missing_inputs(derivation_id, missing_paths)
                 .await
-        {
-            warn!(%derivation_build, error = %e, "failed to reconcile missing inputs");
+            {
+                warn!(%derivation_build, error = %e, "failed to reconcile missing inputs");
+            }
         }
 
         match decide_failure_outcome(kind, attempt, max_attempts) {
@@ -1467,7 +1510,10 @@ impl BuildabilityChecker {
 
 #[cfg(test)]
 mod retry_tests {
-    use super::{FailureOutcome, decide_failure_outcome, retry_backoff_elapsed, store_path_hash};
+    use super::{
+        FailureOutcome, decide_failure_outcome, inputs_unavailable_circuit_open,
+        retry_backoff_elapsed, store_path_hash, truncate_failure_message,
+    };
     use gradient_types::proto::BuildFailureKind;
 
     #[test]
@@ -1532,6 +1578,24 @@ mod retry_tests {
                 FailureOutcome::Permanent
             );
         }
+    }
+    #[test]
+    fn inputs_unavailable_circuit_opens_after_max_loops() {
+        // First `max_loops` failures self-heal; the next opens the circuit.
+        assert!(!inputs_unavailable_circuit_open(0, 3));
+        assert!(!inputs_unavailable_circuit_open(1, 3));
+        assert!(!inputs_unavailable_circuit_open(2, 3));
+        assert!(inputs_unavailable_circuit_open(3, 3));
+        assert!(inputs_unavailable_circuit_open(7, 3));
+    }
+    #[test]
+    fn truncate_failure_message_bounds_long_input_on_char_boundary() {
+        assert_eq!(truncate_failure_message("short error"), "short error");
+        let long = "é".repeat(8 * 1024);
+        let out = truncate_failure_message(&long);
+        assert!(out.len() <= 8 * 1024 + " [truncated]".len());
+        assert!(out.ends_with(" [truncated]"));
+        assert!(std::str::from_utf8(out.as_bytes()).is_ok());
     }
     #[test]
     fn store_path_hash_extracts_32_char_hash() {

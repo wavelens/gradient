@@ -5,7 +5,7 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { ActivatedRoute, provideRouter, RouterLink } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, provideRouter, RouterLink } from '@angular/router';
 import { By } from '@angular/platform-browser';
 import { EMPTY, of, throwError } from 'rxjs';
 import { BoardJobDetailComponent } from './job-detail.component';
@@ -117,12 +117,19 @@ function setup(board: Partial<BoardService> = {}, id = 'job-1'): ComponentFixtur
     imports: [BoardJobDetailComponent],
     providers: [
       provideRouter([]),
-      { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => id } } } },
+      {
+        provide: ActivatedRoute,
+        useValue: {
+          snapshot: { paramMap: convertToParamMap({ id }) },
+          paramMap: of(convertToParamMap({ id })),
+        },
+      },
       {
         provide: BoardService,
         useValue: {
           getJob: () => of(DETAIL),
           getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
+          getScoringRules: () => of([]),
           ...board,
         },
       },
@@ -223,8 +230,8 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
   const WITH_ATTEMPTS: DispatchedJobDetail = {
     ...DETAIL,
     previous_attempts: [
-      { dispatched_job_id: 'dj-a1', substitute: false, outcome: 3, reason: 5, created_at: '2026-06-08T00:00:00Z' },
-      { dispatched_job_id: 'dj-a2', substitute: true,  outcome: 2, reason: null, created_at: '2026-06-08T00:01:00Z' },
+      { dispatched_job_id: 'dj-a1', substitute: false, outcome: 3, reason: 5, failure_message: 'builder for ... failed with exit code 1', created_at: '2026-06-08T00:00:00Z' },
+      { dispatched_job_id: 'dj-a2', substitute: true,  outcome: 2, reason: null, failure_message: null, created_at: '2026-06-08T00:01:00Z' },
     ],
   };
 
@@ -263,10 +270,16 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     const singleAttempt: DispatchedJobDetail = {
       ...DETAIL,
       previous_attempts: [
-        { dispatched_job_id: 'dj-a1', substitute: false, outcome: 1, reason: null, created_at: '2026-06-08T00:00:00Z' },
+        { dispatched_job_id: 'dj-a1', substitute: false, outcome: 1, reason: null, failure_message: null, created_at: '2026-06-08T00:00:00Z' },
       ],
     };
     const el = setup({ getJob: () => of(singleAttempt) }).nativeElement as HTMLElement;
     expect(el.textContent).not.toContain('Previous Build Attempts');
+  });
+
+  it('shows the failure message in the reason column', () => {
+    const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
+    const section = el.querySelector('section.attempts') as HTMLElement;
+    expect(section.textContent).toContain('builder for ... failed with exit code 1');
   });
 });

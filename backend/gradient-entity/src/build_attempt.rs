@@ -50,6 +50,8 @@ pub enum AttemptFailureReason {
     WallClockTimeout = 6,
     #[sea_orm(num_value = 7)]
     SilentTimeout = 7,
+    #[sea_orm(num_value = 8)]
+    InputsUnavailable = 8,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]

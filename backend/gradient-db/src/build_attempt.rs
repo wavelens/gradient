@@ -18,7 +18,7 @@ use gradient_entity::ids::{
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait,
-    IntoActiveModel, QueryFilter, QueryOrder, Statement,
+    IntoActiveModel, PaginatorTrait, QueryFilter, QueryOrder, Statement,
 };
 use uuid::Uuid;
 
@@ -175,17 +175,19 @@ pub async fn stamp_attempt_started<C: ConnectionTrait>(
 }
 
 /// Record a terminal failure on the anchor's latest attempt: set `outcome` +
-/// `reason`, stamping `build_finished_at` if not already set.
+/// `reason` + `failure_message`, stamping `build_finished_at` if not already set.
 pub async fn fail_latest_attempt<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
     outcome: AttemptOutcome,
     reason: Option<AttemptFailureReason>,
+    failure_message: Option<String>,
 ) -> Result<(), DbErr> {
     if let Some(att) = latest_attempt(db, derivation_build).await? {
         let mut a = att.clone().into_active_model();
         a.outcome = Set(outcome);
         a.reason = Set(reason);
+        a.failure_message = Set(failure_message);
         if att.build_finished_at.is_none() {
             a.build_finished_at = Set(Some(gradient_types::now()));
         }
@@ -194,6 +196,22 @@ pub async fn fail_latest_attempt<C: ConnectionTrait>(
     }
 
     Ok(())
+}
+
+/// Count `InputsUnavailable` attempts recorded against an anchor across its whole
+/// history (every driving evaluation). Feeds the self-heal circuit breaker: each
+/// failed eval reconciles the cache and the next one retries, so the count is the
+/// number of self-heal loops already spent on this build.
+pub async fn inputs_unavailable_attempt_count<C: ConnectionTrait>(
+    db: &C,
+    derivation_build: DerivationBuildId,
+) -> Result<i64, DbErr> {
+    Entity::find()
+        .filter(Column::DerivationBuild.eq(derivation_build))
+        .filter(Column::Reason.eq(AttemptFailureReason::InputsUnavailable))
+        .count(db)
+        .await
+        .map(|c| c as i64)
 }
 
 /// Stamp `build_finished_at` on the latest attempt for any terminal status incl. Substituted.

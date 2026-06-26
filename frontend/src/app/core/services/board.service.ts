@@ -139,6 +139,7 @@ export interface DispatchedJobDetail extends DispatchedJobSummary {
     substitute: boolean;
     outcome: number;
     reason: number | null;
+    failure_message: string | null;
     created_at: string;
   }[];
   passed_over: boolean;
