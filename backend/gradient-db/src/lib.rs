@@ -45,7 +45,8 @@ pub use self::cache_storage::{
     instance_used_bytes, org_caches_all_full, org_writable_caches,
 };
 pub use self::cache_upstream::{
-    GradientProtoUpstream, gradient_proto_upstreams_for_org, upstream_urls_for_org,
+    GradientProtoUpstream, UpstreamAccum, UpstreamEndpoint, gradient_proto_upstreams_for_org,
+    upstream_urls_for_org,
 };
 pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
 pub use self::closure::*;

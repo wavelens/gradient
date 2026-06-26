@@ -11,7 +11,42 @@ use gradient_entity::organization_cache::{
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
-use gradient_types::ids::{CacheId, OrganizationId};
+use gradient_types::ids::{CacheId, CacheUpstreamId, OrganizationId};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpstreamEndpoint {
+    pub id: CacheUpstreamId,
+    pub url: String,
+    pub avg_latency_ms: Option<f64>,
+    pub hit_rate: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UpstreamAccum {
+    pub latency_ms_sum: f64,
+    pub request_count: i64,
+    pub narinfo_hits: i64,
+    pub narinfo_misses: i64,
+}
+
+impl UpstreamAccum {
+    pub fn record_hit(&mut self, latency_ms: f64) {
+        self.latency_ms_sum += latency_ms;
+        self.request_count += 1;
+        self.narinfo_hits += 1;
+    }
+
+    pub fn record_miss(&mut self, latency_ms: f64) {
+        self.latency_ms_sum += latency_ms;
+        self.request_count += 1;
+        self.narinfo_misses += 1;
+    }
+
+    pub fn record_error(&mut self, latency_ms: f64) {
+        self.latency_ms_sum += latency_ms;
+        self.request_count += 1;
+    }
+}
 
 pub async fn upstream_urls_for_org<C: ConnectionTrait>(
     db: &C,
@@ -182,5 +217,36 @@ mod tests {
             .into_connection();
         let urls = upstream_urls_for_org(&db, org).await.expect("ok");
         assert_eq!(urls, vec!["https://http.example/".to_string()]);
+    }
+
+    #[test]
+    fn accum_record_hit_counts_hit_and_latency() {
+        let mut a = UpstreamAccum::default();
+        a.record_hit(12.0);
+        a.record_hit(8.0);
+        assert_eq!(a.request_count, 2);
+        assert_eq!(a.narinfo_hits, 2);
+        assert_eq!(a.narinfo_misses, 0);
+        assert_eq!(a.latency_ms_sum, 20.0);
+    }
+
+    #[test]
+    fn accum_record_miss_counts_miss_and_latency() {
+        let mut a = UpstreamAccum::default();
+        a.record_miss(5.0);
+        assert_eq!(a.request_count, 1);
+        assert_eq!(a.narinfo_hits, 0);
+        assert_eq!(a.narinfo_misses, 1);
+        assert_eq!(a.latency_ms_sum, 5.0);
+    }
+
+    #[test]
+    fn accum_record_error_counts_latency_only() {
+        let mut a = UpstreamAccum::default();
+        a.record_error(5000.0);
+        assert_eq!(a.request_count, 1);
+        assert_eq!(a.narinfo_hits, 0);
+        assert_eq!(a.narinfo_misses, 0);
+        assert_eq!(a.latency_ms_sum, 5000.0);
     }
 }
