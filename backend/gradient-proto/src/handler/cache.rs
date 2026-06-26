@@ -387,10 +387,8 @@ async fn extend_with_persisted_upstream(
 }
 
 /// Probe org-configured upstream caches for any `uncached_pairs` not found
-/// locally, extending `result` with any hits.
-///
-/// Concurrency-capped at 16 to bound worst-case latency. No-ops if the org
-/// has no upstream URLs configured.
+/// locally, extending `result` with any hits. Outbound probes are bounded by
+/// the shared upstream-query semaphore. No-ops if the org has no upstream URLs.
 async fn extend_with_upstream_results(
     state: &ServerState,
     org_id: OrganizationId,
