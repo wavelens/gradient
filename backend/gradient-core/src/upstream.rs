@@ -10,9 +10,67 @@
 //! `<hash>.narinfo` into a [`CachedPath`] carrying the absolute NAR URL plus the
 //! metadata needed to import the path.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use gradient_db::{UpstreamAccum, UpstreamEndpoint};
+use gradient_types::ids::CacheUpstreamId;
 use gradient_types::proto::CachedPath;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SampleKind {
+    Hit,
+    Miss,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProbeSample {
+    pub upstream: CacheUpstreamId,
+    pub latency_ms: f64,
+    pub kind: SampleKind,
+}
+
+pub const PARALLEL_THRESHOLD: usize = 4;
+
+pub fn should_race(n: usize) -> bool {
+    n <= PARALLEL_THRESHOLD
+}
+
+pub fn order_endpoints(eps: &mut [UpstreamEndpoint]) {
+    eps.sort_by(|a, b| {
+        let ha = a.hit_rate.unwrap_or(f64::NEG_INFINITY);
+        let hb = b.hit_rate.unwrap_or(f64::NEG_INFINITY);
+        hb.partial_cmp(&ha)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                let la = a.avg_latency_ms.unwrap_or(f64::INFINITY);
+                let lb = b.avg_latency_ms.unwrap_or(f64::INFINITY);
+                la.partial_cmp(&lb).unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+}
+
+pub fn select_best_hit(
+    results: Vec<(CacheUpstreamId, f64, Option<CachedPath>)>,
+) -> Option<(CacheUpstreamId, CachedPath)> {
+    results
+        .into_iter()
+        .filter_map(|(id, latency, cp)| cp.map(|c| (id, latency, c)))
+        .min_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(id, _, cp)| (id, cp))
+}
+
+pub fn fold_samples(samples: &[ProbeSample], into: &mut HashMap<CacheUpstreamId, UpstreamAccum>) {
+    for s in samples {
+        let acc = into.entry(s.upstream).or_default();
+        match s.kind {
+            SampleKind::Hit => acc.record_hit(s.latency_ms),
+            SampleKind::Miss => acc.record_miss(s.latency_ms),
+            SampleKind::Error => acc.record_error(s.latency_ms),
+        }
+    }
+}
 
 /// Look up `<hash>.narinfo` across `upstream_urls`, returning the first hit as a
 /// [`CachedPath`] with an absolute NAR `url`. `None` when no upstream serves it.
@@ -207,5 +265,92 @@ mod tests {
         let cp = parse_upstream_narinfo("https://up/", "/nix/store/aa-x", body).unwrap();
         assert!(cp.nar_size.is_none());
         assert!(cp.file_size.is_none());
+    }
+
+    fn ep(latency: Option<f64>, hit: Option<f64>) -> UpstreamEndpoint {
+        UpstreamEndpoint {
+            id: CacheUpstreamId::now_v7(),
+            url: "https://up.example/".into(),
+            avg_latency_ms: latency,
+            hit_rate: hit,
+        }
+    }
+
+    #[test]
+    fn order_endpoints_hit_rate_desc_then_latency_asc() {
+        let mut v = vec![
+            ep(Some(10.0), Some(0.5)),
+            ep(Some(50.0), Some(0.9)),
+            ep(Some(5.0), Some(0.9)),
+        ];
+        order_endpoints(&mut v);
+        assert_eq!(v[0].hit_rate, Some(0.9));
+        assert_eq!(v[0].avg_latency_ms, Some(5.0));
+        assert_eq!(v[1].hit_rate, Some(0.9));
+        assert_eq!(v[1].avg_latency_ms, Some(50.0));
+        assert_eq!(v[2].hit_rate, Some(0.5));
+    }
+
+    #[test]
+    fn order_endpoints_unknown_hit_rate_sorts_last() {
+        let mut v = vec![ep(Some(1.0), None), ep(Some(99.0), Some(0.1))];
+        order_endpoints(&mut v);
+        assert_eq!(v[0].hit_rate, Some(0.1));
+        assert_eq!(v[1].hit_rate, None);
+    }
+
+    #[test]
+    fn should_race_only_for_small_n() {
+        assert!(should_race(1));
+        assert!(should_race(4));
+        assert!(!should_race(5));
+    }
+
+    #[test]
+    fn select_best_hit_picks_lowest_latency_hit() {
+        let a = CacheUpstreamId::now_v7();
+        let b = CacheUpstreamId::now_v7();
+        let cp = |p: &str| CachedPath {
+            path: p.into(),
+            cached: true,
+            file_size: None,
+            nar_size: None,
+            url: Some("https://x/nar".into()),
+            nar_hash: None,
+            file_hash: None,
+            references: None,
+            signatures: None,
+            deriver: None,
+            ca: None,
+        };
+        let results = vec![
+            (a, 40.0, Some(cp("/nix/store/aa"))),
+            (b, 9.0, Some(cp("/nix/store/bb"))),
+        ];
+        let (winner, _) = select_best_hit(results).expect("a hit");
+        assert_eq!(winner, b);
+    }
+
+    #[test]
+    fn select_best_hit_none_when_all_miss() {
+        let a = CacheUpstreamId::now_v7();
+        assert!(select_best_hit(vec![(a, 10.0, None)]).is_none());
+    }
+
+    #[test]
+    fn fold_samples_aggregates_per_upstream() {
+        let a = CacheUpstreamId::now_v7();
+        let samples = vec![
+            ProbeSample { upstream: a, latency_ms: 10.0, kind: SampleKind::Hit },
+            ProbeSample { upstream: a, latency_ms: 20.0, kind: SampleKind::Miss },
+            ProbeSample { upstream: a, latency_ms: 5000.0, kind: SampleKind::Error },
+        ];
+        let mut map = HashMap::new();
+        fold_samples(&samples, &mut map);
+        let acc = &map[&a];
+        assert_eq!(acc.request_count, 3);
+        assert_eq!(acc.narinfo_hits, 1);
+        assert_eq!(acc.narinfo_misses, 1);
+        assert_eq!(acc.latency_ms_sum, 5030.0);
     }
 }
