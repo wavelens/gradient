@@ -603,10 +603,11 @@ impl<'a> EvalResultProcessor<'a> {
         else {
             return Ok(HashSet::new());
         };
-        let upstream_urls = gradient_db::upstream_urls_for_org(db, org_id)
+        const UPSTREAM_WINDOW_MINUTES: i64 = 60;
+        let endpoints = gradient_db::upstream_endpoints_for_org(db, org_id, UPSTREAM_WINDOW_MINUTES)
             .await
             .unwrap_or_default();
-        if upstream_urls.is_empty() {
+        if endpoints.is_empty() {
             return Ok(HashSet::new());
         }
 
@@ -631,7 +632,24 @@ impl<'a> EvalResultProcessor<'a> {
             .into_iter()
             .collect();
 
-        let found = self.probe_upstreams(&upstream_urls, to_probe).await;
+        let (found, stats) = gradient_core::upstream::probe_batch(
+            self.state.http.clone(),
+            endpoints,
+            std::sync::Arc::clone(&self.state.upstream_query),
+            to_probe,
+        )
+        .await;
+
+        let bucket = {
+            use chrono::Timelike as _;
+            let now = gradient_types::now();
+            now.with_second(0)
+                .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
+                .unwrap_or(now)
+        };
+        if let Err(e) = gradient_db::upsert_upstream_metrics(db, bucket, &stats).await {
+            error!(error = %e, "failed to flush upstream metrics");
+        }
 
         // Persist each hit onto every derivation_output row sharing that hash.
         for o in outputs.iter().filter(|o| !o.is_cached_anywhere()) {
@@ -672,53 +690,6 @@ impl<'a> EvalResultProcessor<'a> {
             .collect();
 
         Ok(derivations_all_outputs_available(&outputs, &available))
-    }
-
-    /// Probe `<hash>.narinfo` across `upstream_urls` for each `(hash, store_path)`
-    /// at bounded concurrency, returning the resolved narinfo per found hash.
-    async fn probe_upstreams(
-        &self,
-        upstream_urls: &[String],
-        targets: Vec<(String, String)>,
-    ) -> std::collections::HashMap<String, gradient_types::proto::CachedPath> {
-        use futures::stream::{FuturesUnordered, StreamExt as _};
-        const CONCURRENCY: usize = 16;
-
-        let mut found = std::collections::HashMap::new();
-        if targets.is_empty() {
-            return found;
-        }
-        let urls = Arc::new(upstream_urls.to_vec());
-        let http = self.state.http.clone();
-        let mut futs = FuturesUnordered::new();
-        let mut iter = targets.into_iter();
-        let push = |futs: &mut FuturesUnordered<_>, hash: String, path: String| {
-            let http = http.clone();
-            let urls = Arc::clone(&urls);
-            let key = hash.clone();
-            futs.push(async move {
-                (
-                    key,
-                    gradient_core::upstream::lookup_upstream_narinfo(http, urls, hash, path).await,
-                )
-            });
-        };
-
-        for _ in 0..CONCURRENCY {
-            match iter.next() {
-                Some((hash, path)) => push(&mut futs, hash, path),
-                None => break,
-            }
-        }
-        while let Some((hash, res)) = futs.next().await {
-            if let Some(cp) = res {
-                found.insert(hash, cp);
-            }
-            if let Some((hash, path)) = iter.next() {
-                push(&mut futs, hash, path);
-            }
-        }
-        found
     }
 
     /// Record per-derivation system-feature requirements in the DB.
