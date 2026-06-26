@@ -6248,6 +6248,18 @@ paths:
         '200':
           description: Cache statistics
 
+  /board/cache/upstreams:
+    get:
+      tags: [board]
+      summary: Per-upstream cache latency and narinfo hit-rate
+      description: Per-upstream trailing latency, narinfo hit-rate, and request counts with hourly series.
+      operationId: getBoardUpstreams
+      parameters:
+        - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
+      responses:
+        '200':
+          description: Per-upstream cache performance
+
   /board/live:
     get:
       tags: [board]
