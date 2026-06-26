@@ -224,6 +224,10 @@ pub async fn upstream_display_for_ids<C: ConnectionTrait>(
         .filter_map(|s| s.parse::<uuid::Uuid>().ok().map(CacheUpstreamId::new))
         .collect();
 
+    if parsed.is_empty() {
+        return Ok(out);
+    }
+
     let rows = ECacheUpstream::find()
         .filter(CCacheUpstream::Id.is_in(parsed))
         .all(db)
