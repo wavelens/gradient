@@ -179,6 +179,8 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     let reactor: Arc<dyn gradient_db::StatusReactor> =
         Arc::new(gradient_ci::CiStatusReactor::new(http.clone()));
 
+    let upstream_query_concurrency = config.proto.upstream_query_concurrency;
+
     Ok(Arc::new(ServerState {
         worker_db: WorkerDb::new(db),
         web_db: WebDb::new(web_db),
@@ -189,6 +191,9 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         http,
+        upstream_query: Arc::new(tokio::sync::Semaphore::new(
+            upstream_query_concurrency.max(1),
+        )),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         shutdown: Shutdown::new(),
         jwt_secret,

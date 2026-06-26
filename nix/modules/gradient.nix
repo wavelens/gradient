@@ -408,6 +408,12 @@ in {
           default = 256;
         };
 
+        upstreamQueryConcurrency = lib.mkOption {
+          description = "Maximum simultaneous outbound upstream narinfo requests across the whole server.";
+          type = lib.types.ints.positive;
+          default = 32;
+        };
+
         keepEvaluations = lib.mkOption {
           description = "Amount of evaluations to keep in the database and cache";
           type = lib.types.ints.positive;
@@ -874,6 +880,7 @@ in {
         GRADIENT_MAX_REQUEST_SIZE = toString cfg.settings.maxRequestSize;
         GRADIENT_MAX_NAR_UPLOAD_SIZE = toString cfg.settings.maxNarUploadSize;
         GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
+        GRADIENT_UPSTREAM_QUERY_CONCURRENCY = toString cfg.settings.upstreamQueryConcurrency;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
         GRADIENT_USE_TLS = lib.boolToString cfg.useTls;
         GRADIENT_QUIC = lib.boolToString cfg.enableQuic;

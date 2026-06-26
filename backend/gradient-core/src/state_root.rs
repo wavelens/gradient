@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use tokio::sync::broadcast;
+use tokio::sync::{Semaphore, broadcast};
 
 use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
@@ -42,6 +42,9 @@ pub struct AppState {
     /// Shared outbound HTTP client - reuse for any outbound request from a
     /// handler or background task; never construct a fresh `reqwest::Client`.
     pub http: reqwest::Client,
+    /// Global outbound-request pool for upstream narinfo probes, shared by the
+    /// scheduler eval probe and the proto cache-query probe.
+    pub upstream_query: Arc<Semaphore>,
     /// Resolved-once registry of forge providers (reporters, webhook parsing,
     /// signature verification) shared into every [`CiContext`].
     pub forge: ForgeRegistry,
