@@ -209,6 +209,33 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
     Ok(())
 }
 
+pub async fn upstream_display_for_ids<C: ConnectionTrait>(
+    db: &C,
+    ids: Vec<String>,
+) -> Result<std::collections::HashMap<String, (String, String)>> {
+    use std::collections::HashMap;
+    let mut out = HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+
+    let parsed: Vec<CacheUpstreamId> = ids
+        .iter()
+        .filter_map(|s| s.parse::<uuid::Uuid>().ok().map(CacheUpstreamId::new))
+        .collect();
+
+    let rows = ECacheUpstream::find()
+        .filter(CCacheUpstream::Id.is_in(parsed))
+        .all(db)
+        .await?;
+
+    for r in rows {
+        out.insert(r.id.to_string(), (r.display_name, r.url.unwrap_or_default()));
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

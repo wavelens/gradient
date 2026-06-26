@@ -90,6 +90,23 @@ pub struct BoardCacheStats {
     pub storage: Vec<SeriesPoint>,
 }
 
+#[derive(Serialize)]
+pub struct BoardUpstream {
+    pub upstream_id: String,
+    pub display_name: String,
+    pub url: String,
+    pub avg_latency_ms: Option<f64>,
+    pub hit_rate: Option<f64>,
+    pub requests_total: i64,
+    pub latency: Vec<SeriesPoint>,
+    pub hit_rate_series: Vec<SeriesPoint>,
+}
+
+#[derive(Serialize)]
+pub struct BoardUpstreamStats {
+    pub upstreams: Vec<BoardUpstream>,
+}
+
 pub async fn get_board_cache(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
@@ -110,6 +127,138 @@ pub async fn get_board_cache(
         traffic,
         storage,
     }))
+}
+
+pub async fn get_board_upstreams(
+    State(state): State<Arc<ServerState>>,
+    Query(params): Query<WindowParams>,
+) -> WebResult<Json<BaseResponse<BoardUpstreamStats>>> {
+    let window = window_clause(&params);
+
+    let sql = format!(
+        "SELECT mr.scope->>'upstream' AS upstream_id, mr.metric AS metric, \
+                mr.bucket_start AS bucket_start, mr.count AS c, mr.sum AS s \
+         FROM metric_rollup mr \
+         WHERE mr.metric IN ('upstream.latency_ms','upstream.narinfo_hits','upstream.narinfo_misses') \
+           AND mr.granularity = 1 \
+           AND mr.bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window} hours' \
+         ORDER BY mr.bucket_start"
+    );
+
+    let rows = state
+        .web_db
+        .query_all(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            sql,
+            [],
+        ))
+        .await?;
+
+    use std::collections::HashMap;
+    struct Agg {
+        latency: Vec<SeriesPoint>,
+        hits: HashMap<String, f64>,
+        misses: HashMap<String, f64>,
+        buckets: Vec<String>,
+        latency_sum: f64,
+        latency_count: i64,
+        hits_total: i64,
+        misses_total: i64,
+    }
+
+    let mut by_upstream: HashMap<String, Agg> = HashMap::new();
+    for r in rows {
+        let Ok(uid) = r.try_get::<String>("", "upstream_id") else {
+            continue;
+        };
+        let metric: String = r.try_get("", "metric").unwrap_or_default();
+        let bucket: chrono::NaiveDateTime = r.try_get("", "bucket_start").unwrap_or_default();
+        let bucket_s = bucket.and_utc().to_rfc3339();
+        let c: i64 = r.try_get("", "c").unwrap_or(0);
+        let s: f64 = r.try_get("", "s").unwrap_or(0.0);
+
+        let agg = by_upstream.entry(uid).or_insert_with(|| Agg {
+            latency: Vec::new(),
+            hits: HashMap::new(),
+            misses: HashMap::new(),
+            buckets: Vec::new(),
+            latency_sum: 0.0,
+            latency_count: 0,
+            hits_total: 0,
+            misses_total: 0,
+        });
+
+        match metric.as_str() {
+            "upstream.latency_ms" => {
+                let avg = if c > 0 { s / c as f64 } else { 0.0 };
+                agg.latency.push(SeriesPoint { bucket_start: bucket_s.clone(), count: c, sum: avg });
+                if !agg.buckets.contains(&bucket_s) {
+                    agg.buckets.push(bucket_s);
+                }
+
+                agg.latency_sum += s;
+                agg.latency_count += c;
+            }
+            "upstream.narinfo_hits" => {
+                agg.hits.insert(bucket_s, s);
+                agg.hits_total += s as i64;
+            }
+            "upstream.narinfo_misses" => {
+                agg.misses.insert(bucket_s, s);
+                agg.misses_total += s as i64;
+            }
+            _ => {}
+        }
+    }
+
+    let names = gradient_db::upstream_display_for_ids(
+        &state.web_db,
+        by_upstream.keys().cloned().collect(),
+    )
+    .await
+    .unwrap_or_default();
+
+    let mut upstreams = Vec::new();
+    for (uid, agg) in by_upstream {
+        let hit_rate_series = agg
+            .buckets
+            .iter()
+            .map(|b| {
+                let h = *agg.hits.get(b).unwrap_or(&0.0);
+                let m = *agg.misses.get(b).unwrap_or(&0.0);
+                let denom = h + m;
+                SeriesPoint {
+                    bucket_start: b.clone(),
+                    count: 0,
+                    sum: if denom > 0.0 { h / denom } else { 0.0 },
+                }
+            })
+            .collect();
+
+        let avg_latency_ms = if agg.latency_count > 0 {
+            Some(agg.latency_sum / agg.latency_count as f64)
+        } else {
+            None
+        };
+        let denom = (agg.hits_total + agg.misses_total) as f64;
+        let hit_rate = if denom > 0.0 { Some(agg.hits_total as f64 / denom) } else { None };
+        let (display_name, url) = names.get(&uid).cloned().unwrap_or_default();
+
+        upstreams.push(BoardUpstream {
+            upstream_id: uid,
+            display_name,
+            url,
+            avg_latency_ms,
+            hit_rate,
+            requests_total: agg.latency_count,
+            latency: agg.latency,
+            hit_rate_series,
+        });
+    }
+
+    upstreams.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+
+    Ok(ok_json(BoardUpstreamStats { upstreams }))
 }
 
 #[derive(Serialize)]
