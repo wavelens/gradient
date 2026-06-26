@@ -46,7 +46,7 @@ pub use self::cache_storage::{
 };
 pub use self::cache_upstream::{
     GradientProtoUpstream, UpstreamAccum, UpstreamEndpoint, gradient_proto_upstreams_for_org,
-    upstream_urls_for_org,
+    upstream_endpoints_for_org, upstream_urls_for_org, upsert_upstream_metrics,
 };
 pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
 pub use self::closure::*;

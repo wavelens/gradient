@@ -9,7 +9,7 @@ use gradient_entity::cache_upstream::{CacheUpstreamKind, Column as CCacheUpstrea
 use gradient_entity::organization_cache::{
     CacheSubscriptionMode, Column as COrganizationCache, Entity as EOrganizationCache,
 };
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, Statement};
 
 use gradient_types::ids::{CacheId, CacheUpstreamId, OrganizationId};
 
@@ -127,6 +127,86 @@ pub async fn gradient_proto_upstreams_for_org<C: ConnectionTrait>(
             })
         })
         .collect())
+}
+
+pub async fn upstream_endpoints_for_org<C: ConnectionTrait>(
+    db: &C,
+    org_id: OrganizationId,
+    window_minutes: i64,
+) -> Result<Vec<UpstreamEndpoint>> {
+    let sql = format!(
+        "SELECT cu.id AS id, cu.url AS url, \
+                SUM(um.latency_ms_sum) / NULLIF(SUM(um.request_count), 0) AS avg_latency_ms, \
+                SUM(um.narinfo_hits)::float8 \
+                  / NULLIF(SUM(um.narinfo_hits + um.narinfo_misses), 0) AS hit_rate \
+         FROM cache_upstream cu \
+         JOIN organization_cache oc ON oc.cache = cu.cache \
+         LEFT JOIN upstream_metric um ON um.upstream = cu.id \
+              AND um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '{window_minutes} minutes' \
+         WHERE oc.organization = $1 AND oc.mode <> 2 AND cu.kind = 2 \
+               AND cu.mode <> 2 AND cu.url IS NOT NULL \
+         GROUP BY cu.id, cu.url",
+        window_minutes = window_minutes
+    );
+
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            sql,
+            [org_id.into_inner().into()],
+        ))
+        .await?;
+
+    let endpoints = rows
+        .into_iter()
+        .filter_map(|r| {
+            let id: uuid::Uuid = r.try_get("", "id").ok()?;
+            let url: String = r.try_get("", "url").ok()?;
+            Some(UpstreamEndpoint {
+                id: CacheUpstreamId::new(id),
+                url,
+                avg_latency_ms: r.try_get("", "avg_latency_ms").ok(),
+                hit_rate: r.try_get("", "hit_rate").ok(),
+            })
+        })
+        .collect();
+
+    Ok(endpoints)
+}
+
+pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
+    db: &C,
+    bucket: chrono::NaiveDateTime,
+    accum: &std::collections::HashMap<CacheUpstreamId, UpstreamAccum>,
+) -> Result<()> {
+    for (upstream, a) in accum {
+        if a.request_count == 0 {
+            continue;
+        }
+
+        db.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "INSERT INTO upstream_metric \
+                 (id, upstream, bucket_time, latency_ms_sum, request_count, narinfo_hits, narinfo_misses) \
+             VALUES (uuidv7(), $1, $2, $3, $4, $5, $6) \
+             ON CONFLICT (upstream, bucket_time) DO UPDATE SET \
+                 latency_ms_sum = upstream_metric.latency_ms_sum + EXCLUDED.latency_ms_sum, \
+                 request_count  = upstream_metric.request_count  + EXCLUDED.request_count, \
+                 narinfo_hits   = upstream_metric.narinfo_hits   + EXCLUDED.narinfo_hits, \
+                 narinfo_misses = upstream_metric.narinfo_misses + EXCLUDED.narinfo_misses",
+            [
+                upstream.into_inner().into(),
+                bucket.into(),
+                a.latency_ms_sum.into(),
+                (a.request_count as i32).into(),
+                (a.narinfo_hits as i32).into(),
+                (a.narinfo_misses as i32).into(),
+            ],
+        ))
+        .await?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
