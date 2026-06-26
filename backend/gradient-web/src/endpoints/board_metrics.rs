@@ -131,8 +131,10 @@ pub async fn get_board_cache(
 
 pub async fn get_board_upstreams(
     State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Query(params): Query<WindowParams>,
 ) -> WebResult<Json<BaseResponse<BoardUpstreamStats>>> {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let window = window_clause(&params);
 
     let sql = format!(
@@ -211,6 +213,27 @@ pub async fn get_board_upstreams(
         }
     }
 
+    if let Some(list) = scope.org_in_list() {
+        if list.is_empty() {
+            return Ok(ok_json(BoardUpstreamStats { upstreams: vec![] }));
+        }
+
+        let allowed_sql = format!(
+            "SELECT DISTINCT cu.id::text AS id FROM cache_upstream cu \
+             JOIN organization_cache oc ON oc.cache = cu.cache \
+             WHERE oc.organization IN ({list})"
+        );
+        let allowed: std::collections::HashSet<String> = state
+            .web_db
+            .query_all(Statement::from_string(DatabaseBackend::Postgres, allowed_sql))
+            .await?
+            .into_iter()
+            .filter_map(|r| r.try_get::<String>("", "id").ok())
+            .collect();
+
+        by_upstream.retain(|id, _| allowed.contains(id));
+    }
+
     let names = gradient_db::upstream_display_for_ids(
         &state.web_db,
         by_upstream.keys().cloned().collect(),
@@ -243,6 +266,7 @@ pub async fn get_board_upstreams(
         let denom = (agg.hits_total + agg.misses_total) as f64;
         let hit_rate = if denom > 0.0 { Some(agg.hits_total as f64 / denom) } else { None };
         let (display_name, url) = names.get(&uid).cloned().unwrap_or_default();
+        let url = if scope.is_all() { url } else { String::new() };
 
         upstreams.push(BoardUpstream {
             upstream_id: uid,

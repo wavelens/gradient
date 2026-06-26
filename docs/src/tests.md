@@ -5191,3 +5191,4 @@ rather than the host freezing. Covered in the same file:
 - Frontend: `cache.component.spec.ts` renders an upstream row from `getUpstreams`.
 - SQL coverage (window stats query, per-batch upsert, rollup inserts) is by
   mirrored-query review plus CI E2E; no real-Postgres unit harness exists.
+- Org-scoping of `/board/cache/upstreams` mirrors `get_board_network` (MetricsScope) and is covered by CI E2E (no local real-Postgres harness).
