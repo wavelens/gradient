@@ -1072,6 +1072,14 @@ a shape test:
   `derivation_dependency` toward each root's dependencies, so a transitive build
   input whose own `build_job` was pruned still survives GC.
 
+Evaluation GC deletes old evals and relies on FK cascade for their per-eval rows
+(`evaluation -> build_job -> build_attempt -> build_log_chunk`). `build_log_chunk`
+held a bare `build_attempt` UUID with no FK, leaking its chunk-index rows once the
+eval was collected; migration `m20260626_000001_build_log_chunk_cascade` purges the
+existing orphans and adds the missing `ON DELETE CASCADE`. The cascade needs a real
+Postgres, so it is covered by the migration apply + the per-project eval-GC E2E path
+rather than a `MockDatabase` test.
+
 Backend (`cargo test -p worker --tests`):
 - `nix::store::tests::scoped_guard_discards_inner_when_not_marked_ok` -
   every daemon op in the worker runs against a `ScopedGuard`. If the guard
@@ -4508,10 +4516,10 @@ Per-instance (`GRADIENT_MAX_STORAGE_GB`) and per-cache (`max_storage_gb`, GB,
 
 Unit tests landed with the implementation:
 
-- **`entity::model_default_tests`** - default-row tests for the six new tables
+- **`entity::model_default_tests`** - default-row tests for the new tables
   (`phase_event`, `dispatched_job`, `worker_sample`, `worker_connection`,
-  `acknowledged_derivation`, `metric_rollup`) plus the new build/evaluation
-  phase-timestamp columns defaulting to `NULL`.
+  `metric_rollup`) plus the new build/evaluation phase-timestamp columns
+  defaulting to `NULL`.
 - **`entity::ids`** - `new_metrics_ids_round_trip` covers the new id newtypes.
 - **`score::policy::tests::score_detailed_sums_to_total_and_names_rules`** -
   the per-rule `ScoreBreakdown` sums to `score()` and names every rule.
@@ -4526,7 +4534,7 @@ Integration coverage to run in CI (DB-backed `axum_test` / `MockDatabase`):
 - Rollup aggregator fact→`metric_rollup` minute buckets + min→hour→day→week
   cascade; retention pruning by age/granularity.
 - `GET /metrics/query` and `/board/*` scope masking (superuser vs member vs
-  anonymous); `/board/live` event masking; superuser-only acknowledged-derivations.
+  anonymous); `/board/live` event masking.
 
 Frontend specs (vitest, run in isolation): `board.service`, `board-live.service`
 reconnect, `metric-chart`, and the live-jobs scoring-breakdown drawer.

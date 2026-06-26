@@ -69,7 +69,6 @@ pub mod upload_session;
 pub mod user;
 pub mod worker_registration;
 
-pub mod acknowledged_derivation;
 pub mod dispatched_job;
 pub mod metric_rollup;
 pub mod phase_event;
@@ -141,14 +140,6 @@ mod model_default_tests {
         let m = worker_connection::Model::default();
         assert!(m.disconnected_at.is_none());
         assert!(m.reason.is_none());
-    }
-
-    #[test]
-    fn acknowledged_derivation_default_blank() {
-        let m = acknowledged_derivation::Model::default();
-        assert!(m.derivation.is_none());
-        assert!(m.pname.is_none());
-        assert_eq!(m.note, "");
     }
 
     #[test]

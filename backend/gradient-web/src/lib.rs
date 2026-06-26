@@ -22,7 +22,7 @@ pub mod scim;
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, MatchedPath};
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{get, patch, post, put};
 use axum::{Router, middleware};
 use bytes::Bytes;
 use governor::middleware::NoOpMiddleware;
@@ -207,14 +207,6 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     let auth_api = Router::new()
         .route("/orgs", get(orgs::get).put(orgs::put))
         .route("/orgs/available", get(orgs::get_org_name_available))
-        .route(
-            "/board/acknowledged-derivations",
-            get(board::list_acknowledged).put(board::create_acknowledged),
-        )
-        .route(
-            "/board/acknowledged-derivations/{id}",
-            delete(board::delete_acknowledged),
-        )
         .route("/board/health", get(board_metrics::get_board_health))
         .route(
             "/board/expensive/top-orgs",

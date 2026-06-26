@@ -6120,11 +6120,10 @@ paths:
     get:
       tags: [board]
       summary: Most expensive builds
-      description: Top builds by wall-clock build time, optionally excluding acknowledged (muted) derivations.
+      description: Top builds by wall-clock build time.
       operationId: getBoardExpensiveJobs
       parameters:
         - { name: window_days, in: query, schema: { type: integer } }
-        - { name: exclude_acknowledged, in: query, schema: { type: boolean } }
       responses:
         '200':
           description: Top builds by build time
@@ -6138,7 +6137,6 @@ paths:
       parameters:
         - { name: metric, in: query, required: true, schema: { type: string, enum: [ram, cpu, disk, network] } }
         - { name: window_days, in: query, schema: { type: integer } }
-        - { name: exclude_acknowledged, in: query, schema: { type: boolean } }
       responses:
         '200':
           description: Top builds by resource
@@ -6396,39 +6394,6 @@ paths:
       responses:
         '200':
           description: System health
-        '403':
-          description: Superuser required
-
-  /board/acknowledged-derivations:
-    get:
-      tags: [board]
-      summary: List acknowledged (muted) derivations
-      operationId: listAcknowledgedDerivations
-      responses:
-        '200':
-          description: Acknowledged derivations
-        '403':
-          description: Superuser required
-    put:
-      tags: [board]
-      summary: Acknowledge (mute) a slow derivation
-      operationId: createAcknowledgedDerivation
-      responses:
-        '200':
-          description: Created acknowledgement id
-        '403':
-          description: Superuser required
-
-  /board/acknowledged-derivations/{id}:
-    delete:
-      tags: [board]
-      summary: Remove an acknowledged derivation
-      operationId: deleteAcknowledgedDerivation
-      parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      responses:
-        '200':
-          description: Deleted
         '403':
           description: Superuser required
 

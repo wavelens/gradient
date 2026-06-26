@@ -124,6 +124,15 @@ the input sources and `.drv` hashes of live derivations, not just outputs - clos
 the window where a freshly-pushed source/`.drv` (no `derivation_output` yet) was
 deleted mid-push because GC ran concurrently with the build.
 
+Evaluation GC (`gc_project_evaluations`) deletes old evaluations and relies on FK
+cascade to clear their per-eval rows: `evaluation -> build_job -> build_attempt`.
+`build_log_chunk` previously carried a bare `build_attempt` UUID with no FK, so its
+chunk-index rows leaked forever once the eval (and its attempts) were collected; it
+now cascades from `build_attempt`, completing the chain. The log blob itself is still
+removed explicitly (it is object storage, not FK-tracked). `dispatched_job` and the
+metrics firehose (`phase_event`, `worker_sample`, `metric_rollup`) are pruned by age
+in the separate retention loop instead.
+
 #### Upstream substitutability
 
 A derivation is just another build that can be substituted when its output is

@@ -136,7 +136,6 @@ id_newtype!(UploadSessionId);
 id_newtype!(AuditLogId);
 id_newtype!(WorkerRegistrationId);
 id_newtype!(CliDeviceAuthorizationId);
-id_newtype!(AcknowledgedDerivationId);
 id_newtype!(BuildAttemptId);
 id_newtype!(BuildJobId);
 id_newtype!(DispatchedJobId);
@@ -227,7 +226,6 @@ mod tests {
         assert_eq!(Uuid::from(DispatchedJobId::from(u)), u);
         assert_eq!(Uuid::from(WorkerSampleId::from(u)), u);
         assert_eq!(Uuid::from(WorkerConnectionId::from(u)), u);
-        assert_eq!(Uuid::from(AcknowledgedDerivationId::from(u)), u);
         assert_eq!(Uuid::from(MetricRollupId::from(u)), u);
     }
 

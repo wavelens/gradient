@@ -362,10 +362,8 @@ export class BoardService {
     return this.api.get<BoardWorker[]>('board/workers');
   }
 
-  getExpensive(windowDays = 30, excludeAcknowledged = true): Observable<ExpensiveBuild[]> {
-    return this.api.get<ExpensiveBuild[]>(
-      `board/jobs/expensive?window_days=${windowDays}&exclude_acknowledged=${excludeAcknowledged}`
-    );
+  getExpensive(windowDays = 30): Observable<ExpensiveBuild[]> {
+    return this.api.get<ExpensiveBuild[]>(`board/jobs/expensive?window_days=${windowDays}`);
   }
 
   getCatalog(): Observable<MetricMeta[]> {
@@ -414,11 +412,10 @@ export class BoardService {
 
   getExpensiveByResource(
     metric: 'ram' | 'cpu' | 'disk' | 'network',
-    windowDays = 30,
-    excludeAcknowledged = true
+    windowDays = 30
   ): Observable<ExpensiveResource[]> {
     return this.api.get<ExpensiveResource[]>(
-      `board/jobs/expensive-by-resource?metric=${metric}&window_days=${windowDays}&exclude_acknowledged=${excludeAcknowledged}`
+      `board/jobs/expensive-by-resource?metric=${metric}&window_days=${windowDays}`
     );
   }
 

@@ -18,13 +18,13 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::{Extension, Json};
-use gradient_types::ids::{AcknowledgedDerivationId, DispatchedJobId};
+use gradient_types::ids::DispatchedJobId;
 use gradient_types::*;
 use gradient_core::ServerState;
 use gradient_scheduler::{BoardEvent, Scheduler};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel, QueryFilter,
-    QueryOrder, QuerySelect, Statement,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, Statement,
 };
 use gradient_entity::{build_attempt, flake_output_node};
 use serde::{Deserialize, Serialize};
@@ -441,7 +441,6 @@ pub async fn get_board_workers(
 #[derive(Deserialize)]
 pub struct ExpensiveParams {
     pub window_days: Option<i64>,
-    pub exclude_acknowledged: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -476,14 +475,6 @@ pub async fn get_expensive_jobs(
     clauses.push(format!(
         "b.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days'"
     ));
-
-    if params.exclude_acknowledged.unwrap_or(true) {
-        clauses.push(
-            "NOT EXISTS (SELECT 1 FROM acknowledged_derivation a \
-             WHERE a.derivation = d.id OR (a.pname IS NOT NULL AND a.pname = d.pname))"
-                .to_string(),
-        );
-    }
 
     let sql = format!(
         "SELECT bj.id, pr.organization, d.name, \
@@ -735,7 +726,6 @@ pub async fn get_top_orgs_by_buildtime(
 pub struct ResourceParams {
     pub metric: String,
     pub window_days: Option<i64>,
-    pub exclude_acknowledged: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -779,14 +769,6 @@ pub async fn get_expensive_by_resource(
     clauses.push(format!(
         "dm.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days'"
     ));
-
-    if params.exclude_acknowledged.unwrap_or(true) {
-        clauses.push(
-            "NOT EXISTS (SELECT 1 FROM acknowledged_derivation a \
-             WHERE a.derivation = d.id OR (a.pname IS NOT NULL AND a.pname = d.pname))"
-                .to_string(),
-        );
-    }
 
     // Derivations are global, so attribute each metric row to one producing org
     // (an in-scope one when scoped) via the build -> evaluation -> project chain.
@@ -890,83 +872,6 @@ fn mask_event(ev: &BoardEvent, scope: &MetricsScope) -> Option<String> {
     };
 
     visible.then(|| serde_json::to_string(ev).ok()).flatten()
-}
-
-#[derive(Serialize)]
-pub struct AcknowledgedDerivationDto {
-    pub id: Uuid,
-    pub derivation: Option<Uuid>,
-    pub pname: Option<String>,
-    pub note: String,
-    pub created_at: String,
-}
-
-pub async fn list_acknowledged(
-    State(state): State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-) -> WebResult<Json<BaseResponse<Vec<AcknowledgedDerivationDto>>>> {
-    require_superuser(&user)?;
-    let rows = gradient_entity::acknowledged_derivation::Entity::find()
-        .order_by_desc(gradient_entity::acknowledged_derivation::Column::CreatedAt)
-        .all(&state.web_db)
-        .await?;
-
-    let out = rows
-        .into_iter()
-        .map(|a| AcknowledgedDerivationDto {
-            id: a.id.into(),
-            derivation: a.derivation.map(Into::into),
-            pname: a.pname,
-            note: a.note,
-            created_at: a.created_at.and_utc().to_rfc3339(),
-        })
-        .collect();
-
-    Ok(ok_json(out))
-}
-
-#[derive(Deserialize)]
-pub struct CreateAcknowledged {
-    pub derivation: Option<Uuid>,
-    pub pname: Option<String>,
-    pub note: String,
-}
-
-pub async fn create_acknowledged(
-    State(state): State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Json(body): Json<CreateAcknowledged>,
-) -> WebResult<Json<BaseResponse<Uuid>>> {
-    require_superuser(&user)?;
-    let id = AcknowledgedDerivationId::now_v7();
-    let am = gradient_entity::acknowledged_derivation::Model {
-        id,
-        derivation: body.derivation.map(Into::into),
-        pname: body.pname,
-        note: body.note,
-        created_by: user.id,
-        created_at: gradient_types::now(),
-    }
-    .into_active_model();
-
-    gradient_entity::acknowledged_derivation::Entity::insert(am)
-        .exec(&state.web_db)
-        .await?;
-
-    Ok(ok_json(id.into()))
-}
-
-pub async fn delete_acknowledged(
-    State(state): State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
-    Path(id): Path<Uuid>,
-) -> WebResult<Json<BaseResponse<bool>>> {
-    require_superuser(&user)?;
-    gradient_entity::acknowledged_derivation::Entity::delete_by_id(AcknowledgedDerivationId::from(id))
-        .exec(&state.web_db)
-        .await?;
-
-    Ok(ok_json(true))
 }
 
 #[derive(Deserialize)]

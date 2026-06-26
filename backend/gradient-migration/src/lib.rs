@@ -172,6 +172,8 @@ mod m20260624_000002_dispatch_indexes;
 mod m20260624_000003_cached_path_reference;
 mod m20260625_000001_derivation_output_file_hash;
 mod m20260626_000000_create_table_upstream_metric;
+mod m20260626_000001_build_log_chunk_cascade;
+mod m20260626_000002_drop_acknowledged_derivation;
 
 pub struct Migrator;
 
@@ -345,6 +347,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20260624_000003_cached_path_reference::Migration),
             Box::new(m20260625_000001_derivation_output_file_hash::Migration),
             Box::new(m20260626_000000_create_table_upstream_metric::Migration),
+            Box::new(m20260626_000001_build_log_chunk_cascade::Migration),
+            Box::new(m20260626_000002_drop_acknowledged_derivation::Migration),
         ]
     }
 }
