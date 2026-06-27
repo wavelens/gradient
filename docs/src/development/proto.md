@@ -643,7 +643,11 @@ CachedPath {
 
 **"Cached" requires fully-stored bytes.** A `cached_path` row only counts as `cached: true` when its `file_hash IS NOT NULL` (`is_fully_cached()`). Placeholder rows for in-flight or aborted uploads are excluded from `CacheStatus` so the worker never receives "yes, fetch via `NarRequest`" for a path the server can't actually serve.
 
-**Off-loop dispatch.** Both ends process a connection's frames serially, so a slow handler would head-of-line-block every other message on that connection. `CacheQuery` is a request/response RPC with a hard 120 s worker-side deadline (`CACHE_QUERY_TIMEOUT`), so the order-independent handlers run off the dispatch loop: the server spawns `CacheQuery` (whose `Pull` mode may probe upstream narinfo inline), `QueryKnownDerivations`, and `WorkerMetrics`; the worker spawns the presigned NAR upload (a slow object-store `PUT` previously blocked it). Replies travel the cloneable writer, so out-of-order completion is safe. Order-sensitive handlers (NAR push stream chunks, log appends) stay inline. Without this, an inline upstream probe or a slow upload starves a concurrent cache lookup into a 120 s timeout, which then escalates a substitutable build into a needless from-scratch build.
+**Off-loop dispatch.** Both ends process a connection's frames serially, so a slow handler would head-of-line-block every other message on that connection. `CacheQuery` is a request/response RPC with a worker-side deadline (`CACHE_QUERY_TIMEOUT`, 75 s), so the order-independent handlers run off the dispatch loop: the server spawns `CacheQuery` (whose `Pull` mode may probe upstream narinfo inline), `QueryKnownDerivations`, and `WorkerMetrics`; the worker spawns the presigned NAR upload (a slow object-store `PUT` previously blocked it). Replies travel the cloneable writer, so out-of-order completion is safe. Order-sensitive handlers (NAR push stream chunks, log appends) stay inline.
+
+**Indeterminate is not absent (`CacheError`).** A DB error while answering a `CacheQuery` must never be reported as `cached: false` - a fully-cached input would then be taken as a missing one and the build would fail terminally (`InputsUnavailable`), failing the whole eval. So the local-cache lookups propagate their error rather than swallowing it into an empty result, and the handler replies `CacheError { job_id, message }` instead of a `CacheStatus`. The worker resolves that as a transport failure and retries the prefetch transiently. The same `CacheError` is sent if the handler exceeds its server-side budget (`CACHE_QUERY_BUDGET`, 45 s): the reads are index-backed and the upstream probe is itself bounded, so no query of any size legitimately runs that long - exceeding it means the server is pathologically slow and a retry is the right answer, rather than letting the worker burn its full deadline.
+
+**Dedicated cache-query pool.** The `CacheQuery` read path runs on its own DB connection pool (`cache_db`, `GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS`), separate from the scheduler/worker pool. A large eval puts one `CacheQuery` per in-flight build through the server concurrently; on a shared pool that storm exhausted connections (8 s acquire timeout), which both surfaced as the swallowed-error false-miss above and stalled the scheduler's own dispatch queries. Isolating the pool keeps a cache-query flood from starving dispatch - a saturated cache pool then only slows cache queries, which degrade to retryable `CacheError`s.
 
 #### NAR transfer failure signals
 
@@ -856,6 +860,7 @@ enum ServerMessage {
 
     // Cache queries
     CacheStatus { job_id: String, cached: Vec<CachedPath> },   // response to CacheQuery
+    CacheError { job_id: String, message: String },            // CacheQuery indeterminate (DB error / over budget) -> worker retries
 
     // BFS pruning (EvaluateDerivations)
     /// Response to `QueryKnownDerivations`.  `known` is the subset of the

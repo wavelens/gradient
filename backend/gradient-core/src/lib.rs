@@ -9,7 +9,7 @@ pub mod upstream;
 
 pub use state_root::{AppState, ServerState};
 
-use gradient_db::{WebDb, WorkerDb, connect_db, connect_web_db};
+use gradient_db::{CacheDb, WebDb, WorkerDb, connect_cache_db, connect_db, connect_web_db};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
@@ -32,6 +32,8 @@ pub enum InitError {
     Database(#[source] anyhow::Error),
     #[error("web database pool failed: {0}")]
     WebDatabase(#[source] anyhow::Error),
+    #[error("cache database pool failed: {0}")]
+    CacheDatabase(#[source] anyhow::Error),
     #[error("failed to load state configuration: {0}")]
     StateLoad(String),
     #[error("log storage init failed: {0}")]
@@ -66,6 +68,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
 
     let db = connect_db(&cli).await.map_err(InitError::Database)?;
     let web_db = connect_web_db(&cli).await.map_err(InitError::WebDatabase)?;
+    let cache_db = connect_cache_db(&cli).await.map_err(InitError::CacheDatabase)?;
 
     let state_result = load_and_apply_state(
         &db,
@@ -184,6 +187,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     Ok(Arc::new(ServerState {
         worker_db: WorkerDb::new(db),
         web_db: WebDb::new(web_db),
+        cache_db: CacheDb::new(cache_db),
         config,
         log_storage,
         email,

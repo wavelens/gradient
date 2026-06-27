@@ -27,6 +27,7 @@ fn make_state() -> Arc<ServerState> {
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: std::sync::Arc::new(
             gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),

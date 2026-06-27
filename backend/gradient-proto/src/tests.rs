@@ -246,6 +246,17 @@ fn cache_status_roundtrip() {
 }
 
 #[test]
+fn cache_error_roundtrip() {
+    let original = ServerMessage::CacheError {
+        job_id: "job-5".into(),
+        message: "cache lookup failed: Connection pool timed out".into(),
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+#[test]
 fn cached_path_not_cached_no_url() {
     // Represents an uncached path in Push mode with local (non-S3) storage.
     let cp = CachedPath {

@@ -412,6 +412,9 @@ impl<'a> MessageHandler<'a> {
             ServerMessage::CacheStatus { job_id, cached } => {
                 self.on_cache_status(job_id, cached);
             }
+            ServerMessage::CacheError { job_id, message } => {
+                self.on_cache_error(job_id, message);
+            }
             ServerMessage::KnownDerivations { job_id, known } => {
                 self.on_known_derivations(job_id, known);
             }
@@ -693,9 +696,17 @@ impl<'a> MessageHandler<'a> {
 
     fn on_cache_status(self, job_id: String, cached: Vec<CachedPath>) {
         if let Some(tx) = self.cache_waiters.lock().unwrap().remove(&job_id) {
-            let _ = tx.send(cached);
+            let _ = tx.send(Ok(cached));
         } else {
             debug!(%job_id, count = cached.len(), "CacheStatus arrived after waiter cleared");
+        }
+    }
+
+    fn on_cache_error(self, job_id: String, message: String) {
+        if let Some(tx) = self.cache_waiters.lock().unwrap().remove(&job_id) {
+            let _ = tx.send(Err(message));
+        } else {
+            debug!(%job_id, %message, "CacheError arrived after waiter cleared");
         }
     }
 
@@ -766,6 +777,7 @@ pub(super) fn msg_kind(msg: &ServerMessage) -> &'static str {
         ServerMessage::AuthChallenge { .. } => "AuthChallenge",
         ServerMessage::AuthUpdate { .. } => "AuthUpdate",
         ServerMessage::CacheStatus { .. } => "CacheStatus",
+        ServerMessage::CacheError { .. } => "CacheError",
         ServerMessage::KnownDerivations { .. } => "KnownDerivations",
         ServerMessage::EvalCachePullResult { .. } => "EvalCachePullResult",
         ServerMessage::EvalCacheChunk { .. } => "EvalCacheChunk",

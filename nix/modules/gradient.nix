@@ -194,17 +194,34 @@ in {
 
       databaseMaxConnections = lib.mkOption {
         description = ''
-          Maximum connections the scheduler / worker / cache pool may open.
+          Maximum connections the scheduler / worker pool may open.
           Total Postgres connections per gradient-server process is
-          `databaseMaxConnections + databaseWebMaxConnections`. Raise only
-          if Postgres' max_connections has headroom for it.
+          `databaseMaxConnections + databaseWebMaxConnections +
+          databaseCacheMaxConnections`. Raise only if Postgres'
+          max_connections has headroom for it.
         '';
         type = lib.types.ints.positive;
         default = 32;
       };
 
       databaseMinConnections = lib.mkOption {
-        description = "Minimum connections kept warm in the scheduler / worker / cache pool.";
+        description = "Minimum connections kept warm in the scheduler / worker pool.";
+        type = lib.types.ints.unsigned;
+        default = 2;
+      };
+
+      databaseCacheMaxConnections = lib.mkOption {
+        description = ''
+          Maximum connections the dedicated cache-query pool may open. Isolated
+          from the scheduler/worker pool so a large eval's worker prefetch storm
+          cannot starve dispatch.
+        '';
+        type = lib.types.ints.positive;
+        default = 32;
+      };
+
+      databaseCacheMinConnections = lib.mkOption {
+        description = "Minimum connections kept warm in the cache-query pool.";
         type = lib.types.ints.unsigned;
         default = 2;
       };
@@ -853,6 +870,8 @@ in {
         GRADIENT_DATABASE_URL_FILE = "%d/gradient_database_url";
         GRADIENT_DATABASE_MAX_CONNECTIONS = toString cfg.databaseMaxConnections;
         GRADIENT_DATABASE_MIN_CONNECTIONS = toString cfg.databaseMinConnections;
+        GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS = toString cfg.databaseCacheMaxConnections;
+        GRADIENT_DATABASE_CACHE_MIN_CONNECTIONS = toString cfg.databaseCacheMinConnections;
         GRADIENT_DATABASE_WEB_MAX_CONNECTIONS = toString cfg.databaseWebMaxConnections;
         GRADIENT_DATABASE_WEB_MIN_CONNECTIONS = toString cfg.databaseWebMinConnections;
         GRADIENT_OIDC_ENABLED = lib.boolToString cfg.oidc.enable;

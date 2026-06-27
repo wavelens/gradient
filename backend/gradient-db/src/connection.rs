@@ -177,6 +177,18 @@ pub async fn connect_web_db(cli: &Cli) -> Result<DatabaseConnection> {
     .context("Failed to connect web database pool")
 }
 
+/// Open a dedicated connection pool for the cache-query read path so a large
+/// eval's worker prefetch storm cannot exhaust the scheduler/dispatch pool.
+pub async fn connect_cache_db(cli: &Cli) -> Result<DatabaseConnection> {
+    Database::connect(make_connect_options(
+        cli,
+        cli.database.database_cache_max_connections,
+        cli.database.database_cache_min_connections,
+    )?)
+    .await
+    .context("Failed to connect cache database pool")
+}
+
 /// Evaluations the scheduler re-dispatches on its own after a restart, so
 /// startup recovery must leave them alone: `Queued` is re-offered by the eval
 /// dispatcher, `Waiting` (evaluated, builds queued for a free worker) is

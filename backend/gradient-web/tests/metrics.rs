@@ -51,6 +51,7 @@ fn state_with_metrics(enabled: bool, db: DatabaseConnection) -> Arc<ServerState>
     let nar_storage = NarStore::local(&runtime.storage.base_path).expect("nar store");
     Arc::new(ServerState {
         web_db: WebDb::new(db),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: Arc::new(runtime),
         log_storage: Arc::new(NoopLogStorage),

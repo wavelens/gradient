@@ -63,6 +63,7 @@ fn build_server(cache: gradient_entity::cache::Model, peer: &str) -> TestServer 
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: Arc::new(
             gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),

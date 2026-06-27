@@ -1105,6 +1105,13 @@ pub(super) struct RpcContext {
     peer_id: String,
 }
 
+/// Hard ceiling on a single `CacheQuery` handler. The reads are index-backed
+/// and the upstream probe is itself bounded (~35s), so any query - whatever its
+/// path count - completes well inside this. Exceeding it means the server is
+/// pathologically slow (pool exhaustion); we then reply `CacheError` (retryable)
+/// rather than letting the worker burn its full `CacheStatus` deadline.
+const CACHE_QUERY_BUDGET: std::time::Duration = std::time::Duration::from_secs(45);
+
 impl RpcContext {
     async fn on_cache_query(
         &self,
@@ -1114,13 +1121,36 @@ impl RpcContext {
     ) {
         debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), ?mode, "CacheQuery");
         let org_id = self.scheduler.peer_id_for_job(&job_id).await;
-        let cached = handle_cache_query(&self.state, org_id, &paths, mode).await;
-        debug!(peer_id = %self.peer_id, %job_id, entries = cached.len(), "CacheStatus");
-        if send_server_msg(&self.writer, &ServerMessage::CacheStatus { job_id, cached })
-            .await
-            .is_err()
+
+        // A DB error or an over-budget handler is *indeterminate*, never
+        // "absent": reply `CacheError` so the worker retries transiently instead
+        // of taking a fully-cached input as a missing one (terminal
+        // `InputsUnavailable`, which fails the whole eval).
+        let reply = match tokio::time::timeout(
+            CACHE_QUERY_BUDGET,
+            handle_cache_query(&self.state, org_id, &paths, mode),
+        )
+        .await
         {
-            debug!(peer_id = %self.peer_id, "CacheStatus send failed; connection closing");
+            Ok(Ok(cached)) => {
+                debug!(peer_id = %self.peer_id, %job_id, entries = cached.len(), "CacheStatus");
+                ServerMessage::CacheStatus { job_id, cached }
+            }
+            Ok(Err(e)) => {
+                warn!(peer_id = %self.peer_id, %job_id, error = %e, "CacheQuery DB error; replying CacheError");
+                ServerMessage::CacheError { job_id, message: format!("cache lookup failed: {e}") }
+            }
+            Err(_) => {
+                warn!(peer_id = %self.peer_id, %job_id, budget_secs = CACHE_QUERY_BUDGET.as_secs(), "CacheQuery exceeded server budget; replying CacheError");
+                ServerMessage::CacheError {
+                    job_id,
+                    message: "cache query exceeded server budget".to_string(),
+                }
+            }
+        };
+
+        if send_server_msg(&self.writer, &reply).await.is_err() {
+            debug!(peer_id = %self.peer_id, "CacheStatus/CacheError send failed; connection closing");
         }
     }
 

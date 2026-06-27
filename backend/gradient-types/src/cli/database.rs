@@ -13,15 +13,34 @@ pub struct DatabaseArgs {
     #[arg(long, env = "GRADIENT_DATABASE_URL_FILE")]
     pub database_url_file: Option<String>,
 
-    /// Maximum connections the scheduler / worker / cache pool may open.
+    /// Maximum connections the scheduler / worker pool may open.
     /// Total Postgres connections per gradient-server process is
-    /// `database_max_connections + database_web_max_connections`.
+    /// `database_max_connections + database_web_max_connections +
+    /// database_cache_max_connections`.
     #[arg(long, env = "GRADIENT_DATABASE_MAX_CONNECTIONS", default_value_t = 32)]
     pub database_max_connections: u32,
 
-    /// Minimum connections kept warm in the scheduler / worker / cache pool.
+    /// Minimum connections kept warm in the scheduler / worker pool.
     #[arg(long, env = "GRADIENT_DATABASE_MIN_CONNECTIONS", default_value_t = 2)]
     pub database_min_connections: u32,
+
+    /// Maximum connections the cache-query pool may open. Dedicated so a large
+    /// eval's worker prefetch storm (one `CacheQuery` per in-flight build) cannot
+    /// starve the scheduler/worker pool and stall dispatch.
+    #[arg(
+        long,
+        env = "GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS",
+        default_value_t = 32
+    )]
+    pub database_cache_max_connections: u32,
+
+    /// Minimum connections kept warm in the cache-query pool.
+    #[arg(
+        long,
+        env = "GRADIENT_DATABASE_CACHE_MIN_CONNECTIONS",
+        default_value_t = 2
+    )]
+    pub database_cache_min_connections: u32,
 
     /// Maximum connections the axum HTTP pool may open.
     #[arg(
@@ -47,6 +66,8 @@ impl Default for DatabaseArgs {
             database_url_file: None,
             database_max_connections: 32,
             database_min_connections: 2,
+            database_cache_max_connections: 32,
+            database_cache_min_connections: 2,
             database_web_max_connections: 16,
             database_web_min_connections: 1,
         }

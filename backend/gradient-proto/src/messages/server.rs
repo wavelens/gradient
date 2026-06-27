@@ -207,4 +207,11 @@ pub enum ServerMessage {
     /// recorded in the server's derivation table for the owning org.
     /// The worker skips subtree traversal for these paths during BFS.
     KnownDerivations { job_id: String, known: Vec<String> },
+
+    /// The server could not *determine* cache state for a
+    /// [`super::client::ClientMessage::CacheQuery`] (a transient DB error or an
+    /// over-budget handler). Distinct from a `CacheStatus` listing paths as
+    /// uncached: the worker must treat this as a retryable transport failure,
+    /// never as "inputs missing", so a server-side hiccup cannot poison a build.
+    CacheError { job_id: String, message: String },
 }

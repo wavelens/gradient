@@ -17,7 +17,7 @@ use tokio::sync::{Semaphore, broadcast};
 
 use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
-use gradient_db::{DbContext, StatusReactor, WebDb, WorkerDb};
+use gradient_db::{CacheDb, DbContext, StatusReactor, WebDb, WorkerDb};
 use gradient_forge::ForgeRegistry;
 use gradient_util::shutdown::Shutdown;
 use gradient_state::{OidcGroupRoles, PendingOrgMemberships, ScimGroupRoles};
@@ -33,6 +33,9 @@ pub struct AppState {
     /// Dedicated DB pool used by the axum/web layer so HTTP requests are
     /// not starved by the busy proto/scheduler pool under heavy NarPush load.
     pub web_db: WebDb,
+    /// Dedicated DB pool for the cache-query read path so a large eval's worker
+    /// prefetch storm cannot exhaust [`Self::worker_db`] and stall the scheduler.
+    pub cache_db: CacheDb,
     /// Resolved runtime configuration, built once at startup from the parsed
     /// [`gradient_types::Cli`].
     pub config: Arc<RuntimeConfig>,

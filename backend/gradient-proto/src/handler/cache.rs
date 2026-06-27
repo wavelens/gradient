@@ -9,44 +9,37 @@ use std::collections::{HashMap, HashSet};
 use gradient_types::ids::{CacheId, CachedPathId, OrganizationId};
 use gradient_types::*;
 use gradient_core::ServerState;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::{error, warn};
 
+/// Look up the locally-cached `(file_size, nar_size)` for `hashes`.
+///
+/// A DB error is propagated, never swallowed into an empty map: a failed lookup
+/// means cache state is *unknown*, and treating "unknown" as "absent" would make
+/// a `CacheQuery` report a fully-cached input as missing - which the worker takes
+/// as a terminal `InputsUnavailable` and fails the eval. The caller turns the
+/// error into a `CacheError` so the worker retries transiently instead.
 async fn build_local_cache_map(
     state: &ServerState,
     hashes: &[&str],
-) -> HashMap<String, (Option<i64>, Option<i64>)> {
+) -> Result<HashMap<String, (Option<i64>, Option<i64>)>, DbErr> {
     // Source the (file_size, nar_size) pair straight from `cached_path` -
     // the worker writes both columns there during NarUploaded, so it's the
     // single authoritative copy.  We still scope the result to outputs the
     // server marks `is_cached`, so an in-flight upload doesn't leak.
-    let derivation_outputs = match EDerivationOutput::find()
+    let derivation_outputs = EDerivationOutput::find()
         .filter(
             sea_orm::Condition::all()
                 .add(CDerivationOutput::IsCached.eq(true))
                 .add(CDerivationOutput::Hash.is_in(hashes.to_vec())),
         )
-        .all(&state.worker_db)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(error = %e, "CacheQuery local DB lookup failed");
-            return HashMap::new();
-        }
-    };
+        .all(&state.cache_db)
+        .await?;
 
-    let cached_paths = match ECachedPath::find()
+    let cached_paths = ECachedPath::find()
         .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-        .all(&state.worker_db)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(error = %e, "CacheQuery cached_path lookup failed");
-            return HashMap::new();
-        }
-    };
+        .all(&state.cache_db)
+        .await?;
 
     // Only paths whose NAR upload actually completed count as cached.
     // `is_fully_cached()` requires `file_hash IS NOT NULL`; rows without
@@ -58,27 +51,20 @@ async fn build_local_cache_map(
         .map(|cp| (cp.hash, (cp.file_size, cp.nar_size)))
         .collect();
 
-    derivation_outputs
+    Ok(derivation_outputs
         .into_iter()
         .filter_map(|row| sizes.get(&row.hash).map(|sizes| (row.hash, *sizes)))
-        .collect()
+        .collect())
 }
 
 async fn load_cached_path_rows(
     state: &ServerState,
     hashes: &[&str],
-) -> Vec<gradient_entity::cached_path::Model> {
-    match ECachedPath::find()
+) -> Result<Vec<gradient_entity::cached_path::Model>, DbErr> {
+    ECachedPath::find()
         .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-        .all(&state.worker_db)
+        .all(&state.cache_db)
         .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(error = %e, "CacheQuery cached_path lookup failed");
-            vec![]
-        }
-    }
 }
 
 /// For Push mode: ensure a `cached_path_signature` row exists for each
@@ -95,7 +81,7 @@ async fn ensure_push_signatures(
 
     let org_caches = EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(org_id))
-        .all(&state.worker_db)
+        .all(&state.cache_db)
         .await
         .unwrap_or_default();
     if org_caches.is_empty() {
@@ -114,7 +100,7 @@ async fn ensure_push_signatures(
 
     for chunk in path_ids.chunks(SIGNATURE_PATH_BATCH) {
         let result = state
-            .worker_db
+            .cache_db
             .execute(sea_orm::Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
                 r#"
@@ -145,7 +131,7 @@ async fn load_cached_path_signatures(
 ) -> Option<Vec<String>> {
     let rows = match ECachedPathSignature::find()
         .filter(CCachedPathSignature::CachedPath.eq(cached_path_id))
-        .all(&state.worker_db)
+        .all(&state.cache_db)
         .await
     {
         Ok(rows) => rows,
@@ -161,7 +147,7 @@ async fn load_cached_path_signatures(
     } else {
         ECache::find()
             .filter(CCache::Id.is_in(cache_ids))
-            .all(&state.worker_db)
+            .all(&state.cache_db)
             .await
             .unwrap_or_default()
             .into_iter()
@@ -200,7 +186,7 @@ async fn fetch_pull_metadata(
 ) {
     let cached_row = match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
-        .one(&state.worker_db)
+        .one(&state.cache_db)
         .await
     {
         Ok(Some(row)) => row,
@@ -211,7 +197,7 @@ async fn fetch_pull_metadata(
         }
     };
 
-    let reference_tokens = gradient_db::references_for_hash(&state.worker_db, hash)
+    let reference_tokens = gradient_db::references_for_hash(&state.cache_db, hash)
         .await
         .unwrap_or_default();
     let references = (!reference_tokens.is_empty())
@@ -346,7 +332,7 @@ async fn extend_with_persisted_upstream(
     let rows = match EDerivationOutput::find()
         .filter(CDerivationOutput::Hash.is_in(hashes))
         .filter(CDerivationOutput::ExternalUrl.is_not_null())
-        .all(&state.worker_db)
+        .all(&state.cache_db)
         .await
     {
         Ok(r) => r,
@@ -398,7 +384,7 @@ async fn extend_with_upstream_results(
     const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
     let endpoints =
-        match gradient_db::upstream_endpoints_for_org(&state.worker_db, org_id, UPSTREAM_WINDOW_MINUTES)
+        match gradient_db::upstream_endpoints_for_org(&state.cache_db, org_id, UPSTREAM_WINDOW_MINUTES)
             .await
         {
             Ok(eps) => eps,
@@ -430,7 +416,7 @@ async fn extend_with_upstream_results(
             .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
             .unwrap_or(now)
     };
-    if let Err(e) = gradient_db::upsert_upstream_metrics(&state.worker_db, bucket, &stats).await {
+    if let Err(e) = gradient_db::upsert_upstream_metrics(&state.cache_db, bucket, &stats).await {
         warn!(error = %e, "failed to flush upstream metrics");
     }
 }
@@ -444,7 +430,7 @@ async fn extend_with_gradient_proto_results(
     result: &mut Vec<gradient_types::proto::CachedPath>,
 ) {
     let upstreams =
-        match gradient_db::gradient_proto_upstreams_for_org(&state.worker_db, org_id).await {
+        match gradient_db::gradient_proto_upstreams_for_org(&state.cache_db, org_id).await {
             Ok(u) => u,
             Err(e) => {
                 warn!(%org_id, error = %e, "gradient_proto upstream lookup failed");
@@ -492,7 +478,7 @@ async fn query(
     org_id: Option<OrganizationId>,
     paths: &[String],
     mode: gradient_types::proto::QueryMode,
-) -> Vec<gradient_types::proto::CachedPath> {
+) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
     use gradient_types::proto::QueryMode;
 
     let hash_path_pairs: Vec<(&str, &str)> = paths
@@ -509,13 +495,13 @@ async fn query(
         .collect();
 
     if hash_path_pairs.is_empty() {
-        return vec![];
+        return Ok(vec![]);
     }
 
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
 
-    let cached_map = build_local_cache_map(state, &hashes).await;
-    let cached_path_rows = load_cached_path_rows(state, &hashes).await;
+    let cached_map = build_local_cache_map(state, &hashes).await?;
+    let cached_path_rows = load_cached_path_rows(state, &hashes).await?;
 
     // Merge source-path cache hits into the map (keyed by hash string).
     let mut cached_map = cached_map;
@@ -548,7 +534,7 @@ async fn query(
     }
 
     if matches!(mode, QueryMode::Push) {
-        return result;
+        return Ok(result);
     }
 
     let locally_cached_hashes: std::collections::HashSet<&str> =
@@ -586,7 +572,7 @@ async fn query(
         result.extend(missing);
     }
 
-    result
+    Ok(result)
 }
 
 /// Pull-mode response for a path the server cannot serve (neither in the
@@ -624,7 +610,7 @@ async fn hashes_in_cache(
 
     let cached_paths = match ECachedPath::find()
         .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-        .all(&state.worker_db)
+        .all(&state.cache_db)
         .await
     {
         Ok(rows) => rows,
@@ -647,7 +633,7 @@ async fn hashes_in_cache(
                 .add(CCachedPathSignature::Cache.eq(cache_id))
                 .add(CCachedPathSignature::CachedPath.is_in(ids)),
         )
-        .all(&state.worker_db)
+        .all(&state.cache_db)
         .await
     {
         Ok(rows) => rows,
@@ -698,7 +684,15 @@ pub(super) async fn query_for_cache(
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
 
     let in_cache = hashes_in_cache(state, cache_id, &hashes).await;
-    let cached_map = build_local_cache_map(state, &hashes).await;
+    // Cache-serve endpoint: a DB error degrades to a miss (the consumer falls
+    // back to its other sources), matching `hashes_in_cache`'s fail-closed
+    // behaviour. Only the build-prefetch `query` path propagates the error.
+    let cached_map = build_local_cache_map(state, &hashes)
+        .await
+        .unwrap_or_else(|e| {
+            warn!(error = %e, "cache-serve local lookup failed; treating as miss");
+            HashMap::new()
+        });
 
     let expire = std::time::Duration::from_secs(3600);
     let mut result: Vec<gradient_types::proto::CachedPath> = Vec::new();
@@ -750,7 +744,7 @@ pub(super) async fn handle_cache_query(
     org_id: Option<OrganizationId>,
     paths: &[String],
     mode: gradient_types::proto::QueryMode,
-) -> Vec<gradient_types::proto::CachedPath> {
+) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
     query(state, org_id, paths, mode).await
 }
 
@@ -776,16 +770,38 @@ mod tests {
 
     fn make_state() -> ServerState {
         let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
-        Arc::try_unwrap(gradient_test_support::prelude::test_state(db)).unwrap()
+        // The CacheQuery handler reads `cache_db`, so drive lookups from there.
+        Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn cache_query_propagates_db_error_as_err() {
+        // A DB error (e.g. pool exhaustion) must surface as Err so the handler
+        // replies CacheError and the worker retries transiently - never be
+        // swallowed into an empty/uncached list, which the worker would take as a
+        // terminal InputsUnavailable on a fully-cached input.
+        use sea_orm::{DbErr, RuntimeErr};
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_errors(vec![DbErr::Conn(RuntimeErr::Internal(
+                "Connection pool timed out".to_string(),
+            ))])
+            .into_connection();
+        let state =
+            Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap();
+        let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
+        assert!(
+            query(&state, None, &paths, QueryMode::Pull).await.is_err(),
+            "DB error must propagate as Err, not a confident uncached result"
+        );
     }
 
     #[tokio::test]
     async fn cache_query_empty_paths_returns_empty() {
         let state = make_state();
 
-        assert!(query(&state, None, &[], QueryMode::Normal).await.is_empty());
-        assert!(query(&state, None, &[], QueryMode::Push).await.is_empty());
-        assert!(query(&state, None, &[], QueryMode::Pull).await.is_empty());
+        assert!(query(&state, None, &[], QueryMode::Normal).await.unwrap().is_empty());
+        assert!(query(&state, None, &[], QueryMode::Push).await.unwrap().is_empty());
+        assert!(query(&state, None, &[], QueryMode::Pull).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -799,16 +815,19 @@ mod tests {
         assert!(
             query(&state, None, &paths, QueryMode::Normal)
                 .await
+                .unwrap()
                 .is_empty()
         );
         assert!(
             query(&state, None, &paths, QueryMode::Push)
                 .await
+                .unwrap()
                 .is_empty()
         );
         assert!(
             query(&state, None, &paths, QueryMode::Pull)
                 .await
+                .unwrap()
                 .is_empty()
         );
     }
@@ -817,7 +836,7 @@ mod tests {
     async fn cache_query_normal_uncached_returns_empty() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
-        let result = query(&state, None, &paths, QueryMode::Normal).await;
+        let result = query(&state, None, &paths, QueryMode::Normal).await.unwrap();
         assert!(
             result.is_empty(),
             "Normal mode should not return uncached paths"
@@ -839,7 +858,7 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
-        let result = query(&state, None, &paths, QueryMode::Pull).await;
+        let result = query(&state, None, &paths, QueryMode::Pull).await.unwrap();
         assert_eq!(result.len(), 2, "Pull must return all queried paths");
         for cp in &result {
             assert!(!cp.cached, "uncached path: {}", cp.path);
@@ -870,7 +889,7 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-bar".to_string(),
         ];
-        let result = query(&state, None, &paths, QueryMode::Push).await;
+        let result = query(&state, None, &paths, QueryMode::Push).await.unwrap();
         assert_eq!(result.len(), 2, "Push should return all queried paths");
         for cp in &result {
             assert!(!cp.cached, "all should be uncached (empty DB): {}", cp.path);
@@ -899,7 +918,7 @@ mod tests {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         for mode in [QueryMode::Normal, QueryMode::Pull, QueryMode::Push] {
-            let result = query(&state, None, &paths, mode).await;
+            let result = query(&state, None, &paths, mode).await.unwrap();
             assert!(result.is_empty(), "33-char hash must be filtered out");
         }
     }
@@ -911,7 +930,7 @@ mod tests {
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
             "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string(),
         ];
-        let result = query(&state, None, &paths, QueryMode::Push).await;
+        let result = query(&state, None, &paths, QueryMode::Push).await.unwrap();
         for cp in &result {
             assert!(!cp.cached);
         }

@@ -459,6 +459,7 @@ mod tests {
             .into_connection();
         Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
             config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
             log_storage: Arc::new(NoopLogStorage),
@@ -579,6 +580,7 @@ mod tests {
         let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
         let state = Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
             config,
             log_storage: Arc::new(NoopLogStorage),
@@ -672,6 +674,7 @@ mod tests {
 
         let state = Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
             config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
             log_storage: Arc::new(NoopLogStorage),
@@ -709,6 +712,7 @@ mod tests {
         cli.storage.nar_ttl_hours = 24;
         Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
             config: Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config")),
             log_storage: Arc::new(NoopLogStorage),
@@ -788,6 +792,7 @@ mod tests {
         cli.storage.nar_ttl_hours = 0;
         let state = Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(
                 MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
             ),

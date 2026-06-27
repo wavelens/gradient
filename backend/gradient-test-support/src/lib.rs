@@ -38,5 +38,5 @@ pub mod prelude {
     pub use crate::fakes::worker_store::FakeWorkerStore;
     pub use crate::fixtures::*;
     pub use crate::log_storage::{NoopLogStorage, RecordingLogStorage};
-    pub use crate::state::{test_state, test_state_with_log_storage};
+    pub use crate::state::{test_state, test_state_cache, test_state_with_log_storage};
 }

@@ -32,6 +32,14 @@ pub struct WebDb(Arc<DatabaseConnection>);
 #[derive(Debug, Clone)]
 pub struct WorkerDb(Arc<DatabaseConnection>);
 
+/// The pool dedicated to the cache-query read path (`CacheQuery` prefetch
+/// lookups). Isolated from [`WorkerDb`] so a large eval's prefetch storm cannot
+/// exhaust the scheduler/dispatch pool - a saturated cache pool then only slows
+/// cache queries (which degrade to a retryable [`crate`] miss) instead of
+/// stalling the whole scheduler.
+#[derive(Debug, Clone)]
+pub struct CacheDb(Arc<DatabaseConnection>);
+
 impl WebDb {
     pub fn new(conn: DatabaseConnection) -> Self {
         Self(Arc::new(conn))
@@ -46,6 +54,16 @@ impl WebDb {
 }
 
 impl WorkerDb {
+    pub fn new(conn: DatabaseConnection) -> Self {
+        Self(Arc::new(conn))
+    }
+
+    pub fn inner(&self) -> &DatabaseConnection {
+        self.0.as_ref()
+    }
+}
+
+impl CacheDb {
     pub fn new(conn: DatabaseConnection) -> Self {
         Self(Arc::new(conn))
     }
@@ -92,6 +110,7 @@ macro_rules! impl_connection_trait {
 
 impl_connection_trait!(WebDb);
 impl_connection_trait!(WorkerDb);
+impl_connection_trait!(CacheDb);
 
 #[cfg(test)]
 mod tests {

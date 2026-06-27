@@ -662,6 +662,7 @@ mod tests {
         let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
         Arc::new(ServerState {
             web_db: WebDb::new(db),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(
                 MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
             ),

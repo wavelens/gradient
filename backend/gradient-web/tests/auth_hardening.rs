@@ -74,6 +74,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
     let db = web_db_setup(MockDatabase::new(DatabaseBackend::Postgres));
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db.into_connection()),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),

@@ -71,7 +71,7 @@ pub use self::reachability::{
     evals_referencing_derivation,
 };
 pub use self::org_workers::org_has_eval_capable_worker_registration;
-pub use self::pool::{WebDb, WorkerDb};
+pub use self::pool::{CacheDb, WebDb, WorkerDb};
 pub use self::project_board::*;
 pub use self::recovery::recover_interrupted_work;
 pub use self::runtime_closure::*;

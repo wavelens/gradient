@@ -24,7 +24,7 @@ use gradient_entity::session;
 use gradient_storage::{EmailSender, NarStore};
 use gradient_types::{RuntimeConfig, SecretString};
 use gradient_core::ServerState;
-use gradient_db::{WebDb, WorkerDb};
+use gradient_db::{CacheDb, WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
 use serde::Serialize;
@@ -104,6 +104,7 @@ pub fn make_test_server_with(
     let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
+        cache_db: CacheDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),

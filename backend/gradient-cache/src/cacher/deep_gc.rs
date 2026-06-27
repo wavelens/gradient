@@ -204,6 +204,7 @@ mod tests {
     ) -> Arc<ServerState> {
         Arc::new(ServerState {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
             config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
             log_storage: log,

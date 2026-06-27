@@ -32,20 +32,22 @@ use gradient_proto::traits::JobReporter;
 /// Chunk size for an inline eval-cache push (mirrors the NAR push chunk size).
 const EVAL_CACHE_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
-/// Shared map from job-id to a oneshot sender that delivers `CacheStatus` responses
-/// back to the waiting job task.
-pub(crate) type CacheWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<Vec<CachedPath>>>>>;
+/// Shared map from job-id to a oneshot sender that delivers a `CacheQuery`
+/// outcome back to the waiting job task: `Ok` for a `CacheStatus`, `Err(message)`
+/// for a server-side `CacheError` (indeterminate - retry, never "inputs absent").
+pub(crate) type CacheWaiters =
+    Arc<Mutex<HashMap<String, oneshot::Sender<Result<Vec<CachedPath>, String>>>>>;
 
 /// Shared map from job-id to a oneshot sender that delivers `KnownDerivations`
 /// responses back to the waiting job task.
 pub(crate) type KnownDerivationWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<Vec<String>>>>>;
 
-/// Upper bound for how long a single `CacheQuery` may wait for its `CacheStatus`
-/// response. The worker dispatch loop processes server messages serially, so a
-/// slow `JobOffer` scoring pass can delay routing a `CacheStatus` to the waiter.
-/// Without a timeout the eval task would hang forever in pathological cases -
-/// surface the stall instead so the eval fails loudly and the operator can act.
-const CACHE_QUERY_TIMEOUT: Duration = Duration::from_secs(120);
+/// Backstop for how long a single `CacheQuery` waits for its reply. The server
+/// bounds its own handler well under this (see `CACHE_QUERY_BUDGET`) and replies
+/// `CacheError` rather than stalling, so this only fires on a genuinely lost
+/// message - kept well above the server budget + network margin, far below the
+/// old 120s so a dropped reply recovers (transient retry) quickly.
+const CACHE_QUERY_TIMEOUT: Duration = Duration::from_secs(75);
 
 /// Typed sender for reporting job progress back to the server.
 ///
@@ -398,16 +400,21 @@ async fn cache_query_with_timeout(
         mode,
     })?;
     match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
-        Ok(Ok(cached)) => Ok(cached),
+        // Server could determine cache state: authoritative cached/uncached list.
+        Ok(Ok(Ok(cached))) => Ok(cached),
+        // Server-side `CacheError`: indeterminate, not "absent". Propagate as a
+        // plain error so prefetch classifies it transient (retry) rather than a
+        // terminal `InputsUnavailable`.
+        Ok(Ok(Err(message))) => Err(anyhow::anyhow!("CacheQuery failed server-side: {message}")),
         Ok(Err(_)) => Err(anyhow::anyhow!(
             "cache waiter dropped - connection closed or superseded?"
         )),
         Err(_) => {
-            // Drop the waiter so a late CacheStatus doesn't deliver to a
-            // closed channel and log a spurious warning later.
+            // Drop the waiter so a late reply doesn't deliver to a closed
+            // channel and log a spurious warning later.
             cache_waiters.lock().unwrap().remove(job_id);
             Err(anyhow::anyhow!(
-                "CacheQuery for {} paths timed out after {}s waiting for CacheStatus (job_id={})",
+                "CacheQuery for {} paths timed out after {}s waiting for reply (job_id={})",
                 path_count,
                 CACHE_QUERY_TIMEOUT.as_secs(),
                 job_id,

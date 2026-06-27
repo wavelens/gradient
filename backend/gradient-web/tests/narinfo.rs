@@ -147,6 +147,7 @@ async fn narinfo_served_from_db_inner() {
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: std::sync::Arc::new(
             gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
@@ -274,6 +275,7 @@ async fn narinfo_unsigned_inner() {
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
+        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: std::sync::Arc::new(
             gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
