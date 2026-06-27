@@ -167,6 +167,29 @@ async fn drv_input_sources(drv_paths: &[String]) -> std::collections::HashSet<St
         .collect()
 }
 
+/// Classify a failed `external_cached` relay. Only a genuine "not on any
+/// upstream" miss ([`SubstituteNotOnUpstream`]) is reported as
+/// `SubstituteUnavailable` (which counts toward the scheduler's miss-escalation
+/// threshold). A transient timeout/transport failure (Pull RPC, NAR download, or
+/// the presigned PUT into our own store) is `Transient` so it retries as a
+/// substitute instead of escalating an otherwise-substitutable build into a
+/// from-scratch one whose `.drv` may never have been pushed.
+fn classify_substitute_failure(
+    build_id: &str,
+    e: anyhow::Error,
+) -> crate::executor::build::BuildError {
+    use crate::executor::build::BuildError;
+    use crate::proto::nar_import::SubstituteNotOnUpstream;
+
+    if e.chain().any(|c| c.is::<SubstituteNotOnUpstream>()) {
+        tracing::warn!(%build_id, error = %e, "external_cached relay: output on no upstream; SubstituteUnavailable");
+        BuildError::substitute_unavailable(e)
+    } else {
+        tracing::warn!(%build_id, error = %e, "external_cached relay failed transiently; retrying without escalating");
+        BuildError::transient(e)
+    }
+}
+
 /// Upload one path's NAR using the method the server advertised in its
 /// `CacheQuery {Push}` response: a presigned S3 PUT straight to object storage
 /// when available, else the chunked WS `NarPush` fallback (local stores).
@@ -378,14 +401,7 @@ impl JobExecutor {
                     updater,
                 )
                 .await
-                .map_err(|e| {
-                    tracing::warn!(
-                        build_id = %build_task.build_id,
-                        error = %e,
-                        "external_cached relay missed; reporting SubstituteUnavailable"
-                    );
-                    crate::executor::build::BuildError::substitute_unavailable(e)
-                })?;
+                .map_err(|e| classify_substitute_failure(&build_task.build_id, e))?;
 
                 let reported: Vec<gradient_proto::messages::BuildOutput> = outputs
                     .iter()
@@ -489,6 +505,32 @@ pub(crate) fn check_abort(abort: &mut watch::Receiver<bool>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only a genuine "not on any upstream" miss escalates; a transient relay
+    /// timeout (Pull RPC / NAR download / presigned PUT) retries as a substitute
+    /// instead of counting toward miss-escalation - two transient timeouts must
+    /// not turn a substitutable build into a from-scratch one.
+    #[test]
+    fn substitute_failure_classification() {
+        use crate::proto::nar_import::SubstituteNotOnUpstream;
+        use gradient_proto::messages::BuildFailureKind;
+
+        let genuine = classify_substitute_failure(
+            "b",
+            anyhow::Error::new(SubstituteNotOnUpstream("/nix/store/p".into())),
+        );
+        assert!(matches!(genuine.kind, BuildFailureKind::SubstituteUnavailable));
+
+        // wrapped in context is still recognized via the error chain
+        let wrapped = classify_substitute_failure(
+            "b",
+            anyhow::Error::new(SubstituteNotOnUpstream("/nix/store/p".into())).context("relay"),
+        );
+        assert!(matches!(wrapped.kind, BuildFailureKind::SubstituteUnavailable));
+
+        let timeout = classify_substitute_failure("b", anyhow::anyhow!("operation timed out"));
+        assert!(matches!(timeout.kind, BuildFailureKind::Transient));
+    }
 
     /// Regression: a `.drv`'s `inputSrcs` (e.g. `builtins.toFile` configs like
     /// `grub-config.xml`) must be discovered by parsing the `.drv`, not via the

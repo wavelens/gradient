@@ -86,6 +86,22 @@ impl std::fmt::Display for MissingInputs {
 
 impl std::error::Error for MissingInputs {}
 
+/// A substitute output is *genuinely* absent from every upstream cache (the
+/// CacheQuery Pull reported it uncached everywhere), as opposed to a transient
+/// timeout/transport failure during the relay. Only this case makes escalating
+/// the anchor to a real build sound; transient relay failures must retry as a
+/// substitute instead of counting toward the miss-escalation threshold.
+#[derive(Debug)]
+pub struct SubstituteNotOnUpstream(pub String);
+
+impl std::fmt::Display for SubstituteNotOnUpstream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "substitute {}: not available on any upstream cache", self.0)
+    }
+}
+
+impl std::error::Error for SubstituteNotOnUpstream {}
+
 /// True when a presigned download's HTTP status means the object is genuinely
 /// absent (treat as a missing input, self-heal) rather than a retryable
 /// transport error: 404 Not Found / 410 Gone.
@@ -817,7 +833,7 @@ pub async fn relay_external_cached_outputs(
         let upstream = pull
             .get(path)
             .filter(|c| c.cached && c.url.is_some())
-            .ok_or_else(|| anyhow::anyhow!("substitute {path}: not available on any upstream cache"))?;
+            .ok_or_else(|| anyhow::Error::new(SubstituteNotOnUpstream(path.clone())))?;
 
         let (_, fetched) = download_one_presigned(http, upstream.clone())
             .await

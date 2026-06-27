@@ -78,6 +78,16 @@ permanent failure (or an exhausted substitute budget) therefore does not poison
 every later evaluation that needs the derivation - the world (upstream cache,
 network) may have changed since it failed.
 
+Only a *genuine* miss counts toward the substitute-miss budget. The worker reports
+`SubstituteUnavailable` (escalation-eligible) only when an output is on no upstream;
+a transient relay failure - the Pull RPC timing out, the NAR download, or the
+presigned PUT into our own store - is reported as a retryable `Transient` instead.
+So a couple of unlucky infra timeouts can no longer escalate a substitutable build
+into a from-scratch one (whose `.drv` may never have been pushed). The probe pool
+also bounds how long a single narinfo probe waits for a permit, so a large eval
+flooding the shared query semaphore can't make a build's cache lookup block past
+its 120s deadline.
+
 A terminal-*success* anchor (`Completed`/`Substituted`) encodes the invariant
 "this output's NAR is fetchable". When that artifact is removed -
 `demote_cached_output` (purging a stale/zombie `cached_path`, or self-healing a

@@ -77,6 +77,11 @@ pub fn fold_samples(samples: &[ProbeSample], into: &mut HashMap<CacheUpstreamId,
 
 const PROBE_TIMEOUT_SECS: u64 = 5;
 const BATCH_WINDOW: usize = 256;
+/// Cap on how long a probe waits for a query-pool permit before giving up. Keeps
+/// a saturated pool (a large eval flooding the shared semaphore) from making a
+/// single probe block past the caller's own deadline (the worker's 120s
+/// `CacheStatus` budget); a timed-out acquire is recorded as an error, not a hit.
+const PERMIT_ACQUIRE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub struct ProbeResult {
     pub best: Option<(CacheUpstreamId, CachedPath)>,
@@ -90,7 +95,13 @@ async fn probe_one(
     hash: &str,
     store_path: &str,
 ) -> (f64, SampleKind, Option<CachedPath>) {
-    let _permit = pool.acquire().await;
+    let permit_wait = Instant::now();
+    let _permit = match tokio::time::timeout(PERMIT_ACQUIRE_TIMEOUT, pool.acquire()).await {
+        Ok(Ok(permit)) => permit,
+        Ok(Err(_)) | Err(_) => {
+            return (permit_wait.elapsed().as_secs_f64() * 1000.0, SampleKind::Error, None);
+        }
+    };
     let narinfo_url = format!("{}/{}.narinfo", ep.url.trim_end_matches('/'), hash);
     let started = Instant::now();
     let resp = http

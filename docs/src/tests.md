@@ -464,6 +464,10 @@ Both the server's per-connection loop (`gradient-proto/src/handler/session.rs`) 
 
 This is a concurrency property of the connection loops, not a pure-function behavior, so it is covered by the existing proto round-trip tests (handler logic is unchanged) plus E2E CI rather than a new MockDatabase unit test, which cannot observe loop scheduling. `decide_dispatch_mode` (the escalation that this prevents from firing on transient timeouts) keeps its unit tests in `gradient-scheduler/src/dispatch_mode.rs`.
 
+## Transient substitute failures must not escalate
+
+A substitutable build whose relay fails on a transient timeout (the CacheQuery Pull RPC, the upstream NAR download, or the presigned PUT into our own store) was reported as `SubstituteUnavailable`, which counts toward the miss-escalation threshold - so two unlucky timeouts escalated the build into a from-scratch one. The worker now reserves `SubstituteUnavailable` for a genuine "not on any upstream" miss (typed `SubstituteNotOnUpstream`) and reports everything else as retryable `Transient` (which carries no `attempt_reason`, so it doesn't count). `backend/gradient-worker/src/executor/mod.rs`: `substitute_failure_classification` asserts a `SubstituteNotOnUpstream` error (raw and `.context()`-wrapped) maps to `SubstituteUnavailable`, while a timeout error maps to `Transient`. The probe-permit acquire in `gradient-core/src/upstream.rs` is also bounded (`PERMIT_ACQUIRE_TIMEOUT`) so a saturated query pool can't make a probe block past the worker's 120s `CacheStatus` budget.
+
 ## Demote and keep-set must agree with the prune predicate
 
 Two latent bugs let a real build be dispatched for a derivation whose `.drv` wasn't in the cache, surfacing as `input prefetch failed … required input path(s) are missing` on the build's own `.drv`.
