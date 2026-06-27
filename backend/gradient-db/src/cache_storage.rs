@@ -215,6 +215,30 @@ pub async fn diagnose_missing_input<C: ConnectionTrait>(
     })
 }
 
+/// Reset a `derivation_output` to "present on no cache": clears the our-cache
+/// link (`is_cached`/`cached_path`) **and** the upstream-availability record
+/// (`external_url` + narinfo metadata). Clearing `external_url` is what makes
+/// `is_cached_anywhere()` false, so the next eval re-walks the node
+/// (`prunable_known_derivations` keys on `external_url`, not `is_cached`) and
+/// re-pushes its `.drv`; leaving it set would keep the node pruned yet reset to a
+/// real build - an unbuildable `InputsUnavailable` dead-end.
+fn demoted_output(
+    o: gradient_entity::derivation_output::Model,
+) -> gradient_entity::derivation_output::ActiveModel {
+    use sea_orm::{ActiveValue::Set, IntoActiveModel};
+
+    let mut active = o.into_active_model();
+    active.is_cached = Set(false);
+    active.cached_path = Set(None);
+    active.external_url = Set(None);
+    active.nar_hash = Set(None);
+    active.file_hash = Set(None);
+    active.file_size = Set(None);
+    active.references = Set(None);
+    active.deriver = Set(None);
+    active
+}
+
 /// Purge a cached output proven unfetchable, so the next evaluation rebuilds it
 /// from scratch as if it had never been cached. Clears `is_cached` /
 /// `cached_path` on every `derivation_output` with this store-path `hash`,
@@ -230,19 +254,14 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
     use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
-    use gradient_entity::derivation_output::{
-        ActiveModel as ADerivationOutput, Column as CDO, Entity as EDO,
-    };
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set, IntoActiveModel};
+    use gradient_entity::derivation_output::{Column as CDO, Entity as EDO};
+    use sea_orm::ActiveModelTrait;
 
     let outputs = EDO::find().filter(CDO::Hash.eq(hash)).all(db).await?;
     let mut producers = Vec::with_capacity(outputs.len());
     for o in outputs {
         producers.push(o.derivation);
-        let mut active: ADerivationOutput = o.into_active_model();
-        active.is_cached = Set(false);
-        active.cached_path = Set(None);
-        active.update(db).await?;
+        demoted_output(o).update(db).await?;
     }
 
     // The artifact is gone, so a producer the graph trusts as build-once success
@@ -252,9 +271,9 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     // indefinitely. Reset it to a fresh build intent (Created, real build - not a
     // re-substitute of the deleted artifact); the next eval re-marks it
     // substitutable if it is genuinely still on an upstream. `edges_complete` is
-    // left intact: we delete the `cached_path` below, so the output is uncached and
-    // the next eval re-walks the derivation anyway (an uncached node is never
-    // pruned) - clearing the flag would only block promotion of a complete-edge
+    // left intact: `demoted_output` cleared `external_url` (not just `is_cached`),
+    // so the node is on no cache and the next eval re-walks it (pruning keys on
+    // `external_url`) - clearing the flag would only block promotion of a complete-edge
     // node until that re-walk, stranding innocent demote victims (e.g. a shared dep
     // swept up by the absent-orphan recovery) behind the closure gate.
     if !producers.is_empty() {
@@ -522,6 +541,32 @@ mod tests {
 
         assert!(producers.is_empty(), "a .drv has no producing derivation");
         assert!(!file.exists(), "demote must delete the NAR object from storage");
+    }
+
+    /// Demote must clear `external_url` too, not just `is_cached` - otherwise the
+    /// node stays prune-eligible, never gets re-walked, and its reset-to-build
+    /// anchor dead-ends on a `.drv` the eval never re-pushes.
+    #[test]
+    fn demote_clears_upstream_availability() {
+        use sea_orm::ActiveValue::Set;
+
+        let o = gradient_entity::derivation_output::Model {
+            is_cached: true,
+            cached_path: Some(gradient_types::ids::CachedPathId::now_v7()),
+            external_url: Some("https://cache.example/x.narinfo".to_string()),
+            nar_hash: Some("sha256:aaa".to_string()),
+            file_hash: Some("sha256:bbb".to_string()),
+            file_size: Some(42),
+            ..Default::default()
+        };
+
+        let am = demoted_output(o);
+        assert_eq!(am.is_cached, Set(false));
+        assert_eq!(am.cached_path, Set(None));
+        assert_eq!(am.external_url, Set(None), "external_url must be cleared so the node is no longer prune-eligible");
+        assert_eq!(am.nar_hash, Set(None));
+        assert_eq!(am.file_hash, Set(None));
+        assert_eq!(am.file_size, Set(None));
     }
 
     #[test]

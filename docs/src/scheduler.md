@@ -87,7 +87,11 @@ also resets the producing anchor back to `Created` (a real build, not a
 re-substitute of the deleted artifact). Without this the producer would stay
 "succeeded" forever and every dependent fail `InputsUnavailable` indefinitely; the
 reset lets it rebuild and the next eval re-marks it substitutable if it is
-genuinely still on an upstream.
+genuinely still on an upstream. The reset clears the output's whole availability
+record - `is_cached` **and** `external_url` - not just the our-cache half: leaving
+`external_url` set keeps the node prune-eligible (pruning keys on `external_url`,
+not `is_cached`), so the next eval skips re-walking it, never re-pushes its `.drv`,
+and the reset-to-build anchor dead-ends on a missing `.drv`.
 
 When the demanded output's producer is instead terminal-*failed*
 (`FailedPermanent`/`Aborted`/`FailedTimeout`), `reconcile_missing_inputs`
@@ -120,9 +124,13 @@ dependents on `InputsUnavailable`. `gc_orphan_derivations` is now a mark-and-swe
 it reclaims a derivation only when it lies *outside the build-dependency closure of
 every live root* (`entry_point` ∪ `build_job` derivations, walked over
 `derivation_dependency`). The orphan-NAR keep-set (`active_hashes`) likewise pins
-the input sources and `.drv` hashes of live derivations, not just outputs - closing
-the window where a freshly-pushed source/`.drv` (no `derivation_output` yet) was
-deleted mid-push because GC ran concurrently with the build.
+the input sources and `.drv` hashes of every derivation with a build anchor - not
+just outputs, and *regardless of build status*. These are producerless (only an eval
+re-pushes them), so a terminal-failed anchor a later eval requeues must still find
+its `.drv`; gating that clause on status purged the `.drv` of a failed-but-requeueable
+build and dead-ended its retry on `InputsUnavailable`. Outputs stay status-gated (they
+are rebuildable, TTL-evicted), and `gc_orphan_derivations` reclaims a derivation's
+`.drv`/sources once it leaves the live closure.
 
 Evaluation GC (`gc_project_evaluations`) deletes old evaluations and relies on FK
 cascade to clear their per-eval rows: `evaluation -> build_job -> build_attempt`.

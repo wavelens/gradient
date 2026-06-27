@@ -464,6 +464,15 @@ Both the server's per-connection loop (`gradient-proto/src/handler/session.rs`) 
 
 This is a concurrency property of the connection loops, not a pure-function behavior, so it is covered by the existing proto round-trip tests (handler logic is unchanged) plus E2E CI rather than a new MockDatabase unit test, which cannot observe loop scheduling. `decide_dispatch_mode` (the escalation that this prevents from firing on transient timeouts) keeps its unit tests in `gradient-scheduler/src/dispatch_mode.rs`.
 
+## Demote and keep-set must agree with the prune predicate
+
+Two latent bugs let a real build be dispatched for a derivation whose `.drv` wasn't in the cache, surfacing as `input prefetch failed … required input path(s) are missing` on the build's own `.drv`.
+
+- `demote_cached_output` cleared `is_cached` but left `external_url`, while resetting the producer to a real build. Pruning (`prunable_known_derivations`) keys on `external_url`, so the node stayed pruned, was never re-walked, its `.drv` never re-pushed, and the reset-to-build anchor dead-ended. `backend/gradient-db/src/cache_storage.rs`: `demote_clears_upstream_availability` asserts `demoted_output` sets `external_url`/`nar_hash`/`file_hash`/`file_size` to `None` alongside `is_cached`/`cached_path`, so `is_cached_anywhere()` is false and the next eval re-walks the node.
+- The orphan-files keep-set (`active_hashes`) gated the `.drv` and input-source clauses on build status, so a terminal-failed-but-requeueable anchor lost its (producerless) `.drv`. `backend/gradient-cache/src/cacher/cleanup.rs`: `keep_set_protects_drv_and_sources_for_any_anchor` asserts only the outputs clause carries `b.status NOT IN (...)` (outputs are rebuildable / TTL-evicted) while the `.drv` and input-source UNIONs keep the closure for any anchor.
+
+Both are shape/pure-function tests (no SQL execution): MockDatabase can't run the queries, so coverage mirrors the proven SQL + the `ActiveModel` field-clearing, with E2E CI exercising the live path.
+
 ## Frontend - workers page no-cache banner
 
 When the active organization has no subscribed cache, the workers page shows
