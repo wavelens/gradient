@@ -769,7 +769,16 @@ mod tests {
     use gradient_types::proto::QueryMode;
 
     fn make_state() -> ServerState {
-        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection();
+        // Seed empty (not errored) result sets: an unseeded MockDatabase errors
+        // with "query_results buffer is empty" once a query runs, which `query`
+        // now correctly propagates as a CacheError instead of swallowing it into
+        // an empty cache map. Eight covers the deepest uncached path's lookups.
+        let db = sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres)
+            .append_query_results(vec![
+                Vec::<gradient_entity::derivation_output::Model>::new();
+                8
+            ])
+            .into_connection();
         // The CacheQuery handler reads `cache_db`, so drive lookups from there.
         Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap()
     }
