@@ -303,8 +303,11 @@ impl<'a> DispatchContext<'a> {
                 disk_speed_mbps,
                 network_speed_mbps,
             } => {
-                self.on_worker_metrics(cpu_usage_pct, ram_free_mb, disk_speed_mbps, network_speed_mbps)
-                    .await;
+                let rpc = self.rpc();
+                tokio::spawn(async move {
+                    rpc.on_worker_metrics(cpu_usage_pct, ram_free_mb, disk_speed_mbps, network_speed_mbps)
+                        .await;
+                });
                 true
             }
             ClientMessage::RequestJobList => self.on_request_job_list().await,
@@ -452,9 +455,15 @@ impl<'a> DispatchContext<'a> {
                 job_id,
                 paths,
                 mode,
-            } => self.on_cache_query(job_id, paths, mode).await,
+            } => {
+                let rpc = self.rpc();
+                tokio::spawn(async move { rpc.on_cache_query(job_id, paths, mode).await });
+                true
+            }
             ClientMessage::QueryKnownDerivations { job_id, drv_paths } => {
-                self.on_query_known_derivations(job_id, drv_paths).await
+                let rpc = self.rpc();
+                tokio::spawn(async move { rpc.on_query_known_derivations(job_id, drv_paths).await });
+                true
             }
             ClientMessage::EvalMessage {
                 job_id,
@@ -465,6 +474,17 @@ impl<'a> DispatchContext<'a> {
                 self.on_eval_message(job_id, level, source, message).await;
                 true
             }
+        }
+    }
+
+    /// Snapshot the owned handles needed to run an order-independent RPC off the
+    /// dispatch loop, so a slow handler can't head-of-line-block cache lookups.
+    fn rpc(&self) -> RpcContext {
+        RpcContext {
+            state: Arc::clone(self.state),
+            scheduler: Arc::clone(self.scheduler),
+            writer: self.writer.clone(),
+            peer_id: self.peer_id.to_owned(),
         }
     }
 
@@ -572,19 +592,6 @@ impl<'a> DispatchContext<'a> {
                 ram_total_mb,
                 cpu_core_score,
             )
-            .await;
-    }
-
-    async fn on_worker_metrics(
-        &mut self,
-        cpu_usage_pct: f32,
-        ram_free_mb: u64,
-        disk_speed_mbps: Option<f32>,
-        network_speed_mbps: Option<f32>,
-    ) {
-        debug!(peer_id = %self.peer_id, cpu_usage_pct, ram_free_mb, ?disk_speed_mbps, ?network_speed_mbps, "WorkerMetrics");
-        self.scheduler
-            .update_worker_metrics(self.peer_id, cpu_usage_pct, ram_free_mb, disk_speed_mbps, network_speed_mbps)
             .await;
     }
 
@@ -1084,36 +1091,47 @@ impl<'a> DispatchContext<'a> {
         }
     }
 
-    // ── Cache queries ─────────────────────────────────────────────────────────
+}
 
+/// Owned handles for the order-independent request/response RPCs, spawned off
+/// the per-connection dispatch loop so a slow upstream probe or NAR transfer
+/// can't head-of-line-block a worker's `CacheQuery` (its 120s `CacheStatus`
+/// deadline). Replies travel the cloneable writer, so out-of-order completion
+/// is safe.
+pub(super) struct RpcContext {
+    state: Arc<ServerState>,
+    scheduler: Arc<Scheduler>,
+    writer: ProtoWriter,
+    peer_id: String,
+}
+
+impl RpcContext {
     async fn on_cache_query(
-        &mut self,
+        &self,
         job_id: String,
         paths: Vec<String>,
         mode: gradient_types::proto::QueryMode,
-    ) -> bool {
+    ) {
         debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), ?mode, "CacheQuery");
         let org_id = self.scheduler.peer_id_for_job(&job_id).await;
-        let cached = handle_cache_query(self.state, org_id, &paths, mode).await;
+        let cached = handle_cache_query(&self.state, org_id, &paths, mode).await;
         debug!(peer_id = %self.peer_id, %job_id, entries = cached.len(), "CacheStatus");
-        send_server_msg(self.writer, &ServerMessage::CacheStatus { job_id, cached })
+        if send_server_msg(&self.writer, &ServerMessage::CacheStatus { job_id, cached })
             .await
-            .is_ok()
+            .is_err()
+        {
+            debug!(peer_id = %self.peer_id, "CacheStatus send failed; connection closing");
+        }
     }
 
-    async fn on_query_known_derivations(&mut self, job_id: String, drv_paths: Vec<String>) -> bool {
+    async fn on_query_known_derivations(&self, job_id: String, drv_paths: Vec<String>) {
         debug!(peer_id = %self.peer_id, %job_id, count = drv_paths.len(), "QueryKnownDerivations");
-        let stripped: Vec<String> = drv_paths
+        // Our own cache is output-only, so only `external_url` upstreams (which
+        // serve a complete closure) gate pruning - see `prunable_known_derivations`.
+        let hashes: Vec<String> = drv_paths
             .iter()
             .map(|p| strip_nix_store_prefix(p))
-            .collect();
-        let hashes: Vec<String> = stripped
-            .iter()
-            .filter_map(|p| {
-                gradient_sources::parse_drv_hash_name(p)
-                    .ok()
-                    .map(|(h, _)| h)
-            })
+            .filter_map(|p| gradient_sources::parse_drv_hash_name(&p).ok().map(|(h, _)| h))
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
@@ -1121,7 +1139,6 @@ impl<'a> DispatchContext<'a> {
             Some(_) => {
                 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-                // First: find derivations that exist globally by hash.
                 let candidates = EDerivation::find()
                     .filter(CDerivation::Hash.is_in(hashes))
                     .all(&self.state.worker_db)
@@ -1131,12 +1148,6 @@ impl<'a> DispatchContext<'a> {
                 if candidates.is_empty() {
                     vec![]
                 } else {
-                    // Prune a subtree only when every output is on a real upstream
-                    // (`external_url`), which serves a complete closure. Our own
-                    // cache is output-only and may be missing a node's subtree, so
-                    // it is not accepted for pruning - otherwise a config-specific
-                    // node off-upstream is pruned, never recorded/built, and dead-ends
-                    // its dependents on `InputsUnavailable`.
                     let drv_ids: Vec<DerivationId> = candidates.iter().map(|d| d.id).collect();
                     let outputs = EDerivationOutput::find()
                         .filter(CDerivationOutput::Derivation.is_in(drv_ids))
@@ -1155,12 +1166,25 @@ impl<'a> DispatchContext<'a> {
             }
         };
         debug!(peer_id = %self.peer_id, %job_id, known = known.len(), "KnownDerivations");
-        send_server_msg(
-            self.writer,
-            &ServerMessage::KnownDerivations { job_id, known },
-        )
-        .await
-        .is_ok()
+        if send_server_msg(&self.writer, &ServerMessage::KnownDerivations { job_id, known })
+            .await
+            .is_err()
+        {
+            debug!(peer_id = %self.peer_id, "KnownDerivations send failed; connection closing");
+        }
+    }
+
+    async fn on_worker_metrics(
+        &self,
+        cpu_usage_pct: f32,
+        ram_free_mb: u64,
+        disk_speed_mbps: Option<f32>,
+        network_speed_mbps: Option<f32>,
+    ) {
+        debug!(peer_id = %self.peer_id, cpu_usage_pct, ram_free_mb, ?disk_speed_mbps, ?network_speed_mbps, "WorkerMetrics");
+        self.scheduler
+            .update_worker_metrics(&self.peer_id, cpu_usage_pct, ram_free_mb, disk_speed_mbps, network_speed_mbps)
+            .await;
     }
 }
 

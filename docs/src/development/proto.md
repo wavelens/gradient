@@ -643,6 +643,8 @@ CachedPath {
 
 **"Cached" requires fully-stored bytes.** A `cached_path` row only counts as `cached: true` when its `file_hash IS NOT NULL` (`is_fully_cached()`). Placeholder rows for in-flight or aborted uploads are excluded from `CacheStatus` so the worker never receives "yes, fetch via `NarRequest`" for a path the server can't actually serve.
 
+**Off-loop dispatch.** Both ends process a connection's frames serially, so a slow handler would head-of-line-block every other message on that connection. `CacheQuery` is a request/response RPC with a hard 120 s worker-side deadline (`CACHE_QUERY_TIMEOUT`), so the order-independent handlers run off the dispatch loop: the server spawns `CacheQuery` (whose `Pull` mode may probe upstream narinfo inline), `QueryKnownDerivations`, and `WorkerMetrics`; the worker spawns the presigned NAR upload (a slow object-store `PUT` previously blocked it). Replies travel the cloneable writer, so out-of-order completion is safe. Order-sensitive handlers (NAR push stream chunks, log appends) stay inline. Without this, an inline upstream probe or a slow upload starves a concurrent cache lookup into a 120 s timeout, which then escalates a substitutable build into a needless from-scratch build.
+
 #### NAR transfer failure signals
 
 `NarRequest` is a request the server may not be able to satisfy. To prevent workers from waiting on the 10-minute receive timeout the server emits one of:

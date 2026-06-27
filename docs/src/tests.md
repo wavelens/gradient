@@ -458,6 +458,12 @@ Auth-decision tests (in `backend/proto/src/handler/session.rs`):
 - `auth_decision_tests::registered_but_no_valid_token`
 - `auth_decision_tests::registered_emptied_by_missing_cache`
 
+## Off-loop RPC dispatch (CacheQuery head-of-line blocking)
+
+Both the server's per-connection loop (`gradient-proto/src/handler/session.rs`) and the worker's dispatch loop (`gradient-worker/src/worker/dispatch.rs`) process frames serially, so a slow handler (an inline `Pull` upstream narinfo probe, a slow object-store `PUT`) head-of-line-blocked every other message and starved concurrent `CacheQuery`s into their 120 s `CacheStatus` deadline; a substitute that missed the deadline then escalated into a needless from-scratch build. The fix spawns the order-independent handlers off both loops (`CacheQuery`, `QueryKnownDerivations`, `WorkerMetrics` on the server via `RpcContext`; the presigned NAR upload on the worker), keeping order-sensitive handlers (NAR push chunks, log appends) inline.
+
+This is a concurrency property of the connection loops, not a pure-function behavior, so it is covered by the existing proto round-trip tests (handler logic is unchanged) plus E2E CI rather than a new MockDatabase unit test, which cannot observe loop scheduling. `decide_dispatch_mode` (the escalation that this prevents from firing on transient timeouts) keeps its unit tests in `gradient-scheduler/src/dispatch_mode.rs`.
+
 ## Frontend - workers page no-cache banner
 
 When the active organization has no subscribed cache, the workers page shows

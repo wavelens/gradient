@@ -669,20 +669,26 @@ impl<'a> MessageHandler<'a> {
         headers: Vec<(String, String)>,
     ) {
         debug!(%job_id, %store_path, %method, "received presigned upload URL");
+        // Spawn so a large/slow upload can't block the dispatch loop from routing
+        // a CacheStatus to a waiting CacheQuery (its 120s deadline). Uploads go
+        // straight to object storage and are independent per store path.
         let store = std::sync::Arc::clone(&self.executor.store);
-        if let Err(e) = crate::proto::nar::upload_presigned(
-            &job_id,
-            &store_path,
-            &url,
-            &method,
-            &headers,
-            self.writer,
-            Some(&store),
-        )
-        .await
-        {
-            error!(%job_id, %store_path, error = %e, "presigned NAR upload failed");
-        }
+        let writer = self.writer.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::proto::nar::upload_presigned(
+                &job_id,
+                &store_path,
+                &url,
+                &method,
+                &headers,
+                &writer,
+                Some(&store),
+            )
+            .await
+            {
+                error!(%job_id, %store_path, error = %e, "presigned NAR upload failed");
+            }
+        });
     }
 
     fn on_cache_status(self, job_id: String, cached: Vec<CachedPath>) {
