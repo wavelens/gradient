@@ -174,6 +174,7 @@ mod m20260625_000001_derivation_output_file_hash;
 mod m20260626_000000_create_table_upstream_metric;
 mod m20260626_000001_build_log_chunk_cascade;
 mod m20260626_000002_drop_acknowledged_derivation;
+mod m20260627_000000_derivation_build_edges_unresolved;
 
 pub struct Migrator;
 
@@ -349,6 +350,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260626_000000_create_table_upstream_metric::Migration),
             Box::new(m20260626_000001_build_log_chunk_cascade::Migration),
             Box::new(m20260626_000002_drop_acknowledged_derivation::Migration),
+            Box::new(m20260627_000000_derivation_build_edges_unresolved::Migration),
         ]
     }
 }

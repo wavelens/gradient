@@ -49,6 +49,18 @@ edges never change once written, so a later requeue keeps the anchor promotable
 without re-evaluation. `promote_ready`, `promote_dependents`, and the dispatch
 readiness query all require it.
 
+A `build_job` anchor is marked complete even with zero edges, since a genuine leaf
+legitimately has none - which left a hole: if `flush_deferred_deps` could not
+resolve a *declared* dependency edge (the dependency derivation was never recorded,
+e.g. an interrupted or overlapping eval), the edge was silently dropped yet the
+source was still marked `edges_complete` and dispatched as dependency-free, failing
+`InputsUnavailable` on an input the server never had. `flush_deferred_deps` now sets
+`edges_unresolved` on any source whose declared edge it could not resolve, and
+`mark_edges_complete_for_eval` (both the completion and graph-unstick callers)
+refuses to mark those - so a 0-edge anchor that *declared* a dependency is held
+until a later eval records it, while a genuine leaf still promotes. The flag is
+cleared when a complete eval resolves the source's edges.
+
 Promotion is otherwise event-driven (`promote_ready` at eval completion,
 `promote_dependents` at build completion), so a ready anchor whose triggering
 event never fired - a failed eval after its edges were flushed, a dependency that

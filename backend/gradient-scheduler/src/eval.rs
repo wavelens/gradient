@@ -1026,25 +1026,20 @@ pub async fn flush_deferred_deps(
         .map(|d| (d.drv_path(), d.id))
         .collect();
 
-    let mut edges: Vec<ADerivationDependency> = Vec::new();
-    let mut unresolved = 0usize;
-    for (src, deps) in &deferred {
-        let Some(&src_id) = drv_path_to_id.get(src) else {
-            unresolved += 1;
-            continue;
-        };
-        for dep in deps {
-            if let Some(&dep_id) = drv_path_to_id.get(dep) {
-                edges.push(MDerivationDependency {
-                    id: DerivationDependencyId::now_v7(),
-                    derivation: src_id,
-                    dependency: dep_id,
-                }.into_active_model());
-            } else {
-                unresolved += 1;
+    let (edge_pairs, resolved_sources, unresolved_sources) =
+        resolve_deferred_edges(&deferred, &drv_path_to_id);
+
+    let edges: Vec<ADerivationDependency> = edge_pairs
+        .iter()
+        .map(|(src, dep)| {
+            MDerivationDependency {
+                id: DerivationDependencyId::now_v7(),
+                derivation: *src,
+                dependency: *dep,
             }
-        }
-    }
+            .into_active_model()
+        })
+        .collect();
 
     if !edges.is_empty() {
         for chunk in edges.chunks(BATCH_SIZE) {
@@ -1066,13 +1061,77 @@ pub async fn flush_deferred_deps(
         }
     }
 
+    // Persist per-source resolution so `mark_edges_complete_for_eval` refuses to
+    // promote an anchor whose declared edge set is incomplete (a dependency this
+    // eval never recorded), and clears the flag once a later eval resolves them.
+    set_edges_unresolved(&state.worker_db, &unresolved_sources, true).await;
+    set_edges_unresolved(&state.worker_db, &resolved_sources, false).await;
+
     info!(
         %evaluation_id,
         inserted = edges.len(),
-        unresolved,
+        unresolved = unresolved_sources.len(),
         "flushed deferred dependency edges"
     );
     Ok(())
+}
+
+/// Resolve deferred `(src, [dep])` drv-path pairs against the recorded
+/// derivations. Returns the resolvable edges, the sources whose every dep
+/// resolved, and the sources with at least one unresolved dep (a dependency the
+/// eval never recorded - its edge is dropped, so the source must be held off
+/// promotion rather than dispatched as dependency-free).
+fn resolve_deferred_edges(
+    deferred: &[(String, Vec<String>)],
+    drv_path_to_id: &HashMap<String, DerivationId>,
+) -> (
+    Vec<(DerivationId, DerivationId)>,
+    std::collections::HashSet<DerivationId>,
+    std::collections::HashSet<DerivationId>,
+) {
+    let mut edges = Vec::new();
+    let mut all_sources = std::collections::HashSet::new();
+    let mut unresolved = std::collections::HashSet::new();
+    for (src, deps) in deferred {
+        let Some(&src_id) = drv_path_to_id.get(src) else {
+            continue;
+        };
+        all_sources.insert(src_id);
+        for dep in deps {
+            match drv_path_to_id.get(dep) {
+                Some(&dep_id) => edges.push((src_id, dep_id)),
+                None => {
+                    unresolved.insert(src_id);
+                }
+            }
+        }
+    }
+
+    let resolved = all_sources.difference(&unresolved).copied().collect();
+    (edges, resolved, unresolved)
+}
+
+async fn set_edges_unresolved(
+    db: &gradient_db::WorkerDb,
+    ids: &std::collections::HashSet<DerivationId>,
+    value: bool,
+) {
+    if ids.is_empty() {
+        return;
+    }
+
+    let ids: Vec<DerivationId> = ids.iter().copied().collect();
+    if let Err(e) = gradient_db::for_each_chunk(&ids, |chunk| async move {
+        EDerivationBuild::update_many()
+            .col_expr(CDerivationBuild::EdgesUnresolved, sea_orm::sea_query::Expr::value(value))
+            .filter(CDerivationBuild::Derivation.is_in(chunk))
+            .exec(db)
+            .await
+    })
+    .await
+    {
+        error!(error = %e, "flush_deferred_deps: failed to update edges_unresolved");
+    }
 }
 
 pub async fn handle_eval_job_failed(
@@ -1123,6 +1182,33 @@ fn derivations_all_outputs_available(
 mod upstream_substitutable_tests {
     use super::*;
     use std::collections::HashSet;
+
+    /// A source with an unrecorded dependency is flagged unresolved (so it's held
+    /// off promotion) and excluded from the resolved set; a fully-resolved source
+    /// is the opposite. This is what keeps a 0-edge build_job whose edge was
+    /// dropped from being marked `edges_complete` and dispatched dependency-free.
+    #[test]
+    fn deferred_edges_flag_sources_with_unrecorded_deps() {
+        let src = DerivationId::now_v7();
+        let dep = DerivationId::now_v7();
+        let mut map = HashMap::new();
+        map.insert("src.drv".to_string(), src);
+        map.insert("dep.drv".to_string(), dep);
+
+        let deferred = vec![(
+            "src.drv".to_string(),
+            vec!["dep.drv".to_string(), "missing.drv".to_string()],
+        )];
+        let (edges, resolved, unresolved) = resolve_deferred_edges(&deferred, &map);
+        assert_eq!(edges, vec![(src, dep)]);
+        assert!(unresolved.contains(&src), "unrecorded dep flags the source");
+        assert!(!resolved.contains(&src), "and excludes it from resolved");
+
+        let ok = vec![("src.drv".to_string(), vec!["dep.drv".to_string()])];
+        let (_, resolved, unresolved) = resolve_deferred_edges(&ok, &map);
+        assert!(resolved.contains(&src));
+        assert!(unresolved.is_empty());
+    }
 
     fn output(drv: DerivationId, hash: &str) -> MDerivationOutput {
         MDerivationOutput {

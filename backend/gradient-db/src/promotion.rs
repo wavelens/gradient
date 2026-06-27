@@ -293,7 +293,9 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationI
 /// though its edge set is complete and satisfied. A closure node is marked when it
 /// has recorded build edges (its edge set is known) or is one of this eval's own
 /// `build_job` leaves (0-dep); ambiguous 0-edge transitive nodes stay gated.
-/// Idempotent and never clears the flag.
+/// Anchors flagged `edges_unresolved` (a declared dependency `flush_deferred_deps`
+/// could not record) are never marked, so a build_job whose edges were dropped is
+/// held instead of dispatched as dependency-free. Idempotent and never clears it.
 pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
@@ -311,6 +313,7 @@ pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
             UPDATE derivation_build db
             SET edges_complete = true
             WHERE db.edges_complete = false
+              AND NOT db.edges_unresolved
               AND db.derivation IN (SELECT derivation FROM closure)
               AND (
                 EXISTS (SELECT 1 FROM derivation_dependency e WHERE e.derivation = db.derivation)
