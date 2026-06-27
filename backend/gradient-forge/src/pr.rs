@@ -297,64 +297,6 @@ pub(crate) mod gitea {
         req.header("Authorization", format!("token {token}")).header("Content-Type", "application/json")
     }
 
-    pub async fn upsert_branch(
-        client: &reqwest::Client,
-        base_url: &str,
-        token: &str,
-        owner: &str,
-        repo: &str,
-        branch: &str,
-        base: &str,
-        commit: &super::BranchCommit,
-    ) -> Result<String> {
-        let create_branch = auth(
-            client.post(format!("{base_url}/api/v1/repos/{owner}/{repo}/branches")),
-            token,
-        )
-        .json(&NewBranch { new_branch_name: branch, old_branch_name: base })
-        .send()
-        .await
-        .context("gitea create branch")?;
-        let st = create_branch.status();
-        if !st.is_success() && st != reqwest::StatusCode::CONFLICT {
-            let body = create_branch.text().await.unwrap_or_default();
-            bail!("gitea create branch: {st}: {body}");
-        }
-
-        let mut head = String::new();
-        for file in &commit.files {
-            let existing = auth(
-                client.get(format!("{base_url}/api/v1/repos/{owner}/{repo}/contents/{}?ref={branch}", file.path)),
-                token,
-            )
-            .send()
-            .await
-            .context("gitea get contents")?;
-            let sha = if existing.status().is_success() {
-                existing.json::<Contents>().await.ok().map(|c| c.sha)
-            } else {
-                None
-            };
-
-            let resp: ContentsResponse = send_json(
-                auth(client.put(format!("{base_url}/api/v1/repos/{owner}/{repo}/contents/{}", file.path)), token)
-                    .json(&PutContents {
-                        content: b64(&file.contents),
-                        message: &commit.message,
-                        branch,
-                        sha,
-                        author: GiteaIdent { name: &commit.author_name, email: &commit.author_email },
-                        committer: GiteaIdent { name: &commit.author_name, email: &commit.author_email },
-                    }),
-                "gitea put contents",
-            )
-            .await?;
-            head = resp.commit.sha;
-        }
-
-        Ok(head)
-    }
-
     pub async fn open_or_update_pr(
         client: &reqwest::Client,
         base_url: &str,
@@ -413,38 +355,6 @@ pub(crate) mod gitea {
     struct RepoInfo {
         default_branch: String,
     }
-    #[derive(Serialize)]
-    struct NewBranch<'a> {
-        new_branch_name: &'a str,
-        old_branch_name: &'a str,
-    }
-    #[derive(Deserialize)]
-    struct Contents {
-        sha: String,
-    }
-    #[derive(Serialize)]
-    struct GiteaIdent<'a> {
-        name: &'a str,
-        email: &'a str,
-    }
-    #[derive(Serialize)]
-    struct PutContents<'a> {
-        content: String,
-        message: &'a str,
-        branch: &'a str,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        sha: Option<String>,
-        author: GiteaIdent<'a>,
-        committer: GiteaIdent<'a>,
-    }
-    #[derive(Deserialize)]
-    struct ContentsResponse {
-        commit: CommitSha,
-    }
-    #[derive(Deserialize)]
-    struct CommitSha {
-        sha: String,
-    }
     #[derive(Deserialize)]
     struct Pull {
         number: i64,
@@ -480,55 +390,6 @@ pub(crate) mod gitlab {
 
     fn auth(req: reqwest::RequestBuilder, token: &str) -> reqwest::RequestBuilder {
         req.header("PRIVATE-TOKEN", token).header("Content-Type", "application/json")
-    }
-
-    pub async fn upsert_branch(
-        client: &reqwest::Client,
-        base_url: &str,
-        token: &str,
-        owner: &str,
-        repo: &str,
-        branch: &str,
-        base: &str,
-        commit: &super::BranchCommit,
-    ) -> Result<String> {
-        let id = project_id(owner, repo);
-        let branch_exists = auth(
-            client.get(format!("{base_url}/api/v4/projects/{id}/repository/branches/{branch}")),
-            token,
-        )
-        .send()
-        .await
-        .context("gitlab get branch")?
-        .status()
-        .is_success();
-
-        let actions: Vec<CommitAction> = commit
-            .files
-            .iter()
-            .map(|f| CommitAction {
-                action: "update",
-                file_path: f.path.clone(),
-                content: String::from_utf8_lossy(&f.contents).into_owned(),
-            })
-            .collect();
-
-        let created: CommitResp = send_json(
-            auth(client.post(format!("{base_url}/api/v4/projects/{id}/repository/commits")), token).json(
-                &CommitReq {
-                    branch,
-                    start_branch: if branch_exists { None } else { Some(base) },
-                    commit_message: &commit.message,
-                    author_name: &commit.author_name,
-                    author_email: &commit.author_email,
-                    actions,
-                },
-            ),
-            "gitlab create commit",
-        )
-        .await?;
-
-        Ok(created.id)
     }
 
     pub async fn open_or_update_pr(
@@ -596,26 +457,6 @@ pub(crate) mod gitlab {
     #[derive(Deserialize)]
     struct ProjectInfo {
         default_branch: String,
-    }
-    #[derive(Serialize)]
-    struct CommitAction {
-        action: &'static str,
-        file_path: String,
-        content: String,
-    }
-    #[derive(Serialize)]
-    struct CommitReq<'a> {
-        branch: &'a str,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        start_branch: Option<&'a str>,
-        commit_message: &'a str,
-        author_name: &'a str,
-        author_email: &'a str,
-        actions: Vec<CommitAction>,
-    }
-    #[derive(Deserialize)]
-    struct CommitResp {
-        id: String,
     }
     #[derive(Deserialize)]
     struct Mr {

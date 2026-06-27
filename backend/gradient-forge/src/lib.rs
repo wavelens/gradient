@@ -9,6 +9,7 @@
 //! trait + [`ForgeRegistry`]. Adding a forge is a single `providers/*` impl plus
 //! one [`ForgeRegistry::with_builtin`] registration.
 
+pub mod git_push;
 pub mod github_app;
 pub mod pr;
 pub mod provider;

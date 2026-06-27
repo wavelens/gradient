@@ -391,6 +391,21 @@ pub async fn fire_now(
             .await
             .map_err(|e| WebError::internal(e.to_string()))?;
 
+    // A manual fire also bumps tracked flake inputs (OpenPr action). Self-gated:
+    // no-ops unless the project qualifies.
+    if let Err(e) = gradient_ci::trigger::maybe_trigger_input_update(
+        &state.web_db,
+        &proj,
+        commit_hash.clone(),
+        Some(commit_message.clone()),
+        Some(author_name.clone()),
+        Some(row.id),
+    )
+    .await
+    {
+        tracing::warn!(error = %e, trigger_id = %row.id, "manual input_update trigger failed");
+    }
+
     let input = ApplyInput {
         trigger_id: row.id,
         trigger_type,

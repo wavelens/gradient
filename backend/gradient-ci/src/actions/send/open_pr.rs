@@ -15,8 +15,9 @@ use anyhow::{Context, Result, anyhow};
 use gradient_forge::reporter::parse_owner_repo;
 use gradient_forge::{BranchCommit, CommitFile};
 use gradient_types::{
-    AOpenPrState, COpenPrState, CEvaluationInputUpdate, EEvaluationInputUpdate, EOpenPrState,
-    EProject, EvaluationId, IntegrationId, OpenPrStateId, ProjectActionId, ProjectId,
+    AOpenPrState, COpenPrState, CEvaluationInputUpdate, ECommit, EEvaluation,
+    EEvaluationInputUpdate, EOpenPrState, EProject, EvaluationId, IntegrationId, OpenPrStateId,
+    ProjectActionId, ProjectId,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
@@ -123,6 +124,7 @@ pub(crate) async fn execute_open_pr(
         .context("opening pull request")?;
 
     upsert_open_pr_state(ctx, project_id, action_id, &branch, pr.number, &head_commit).await?;
+    point_eval_at_pushed_commit(ctx, evaluation_id, &head_commit, &title).await?;
 
     Ok(ExecutorOk {
         status_code: Some(200),
@@ -176,6 +178,43 @@ async fn upsert_open_pr_state(
         .await
         .context("inserting open_pr_state")?;
     }
+
+    Ok(())
+}
+
+/// Repoint the `input_update` evaluation at the flake.lock-update commit pushed
+/// to the PR branch, so the project shows the generated commit instead of the
+/// unrelated base commit it was seeded from.
+async fn point_eval_at_pushed_commit(
+    ctx: &CiContext,
+    evaluation_id: EvaluationId,
+    head_commit: &str,
+    message: &str,
+) -> Result<()> {
+    let Ok(hash) = hex::decode(head_commit) else {
+        return Ok(());
+    };
+
+    let Some(eval) = EEvaluation::find_by_id(evaluation_id)
+        .one(&ctx.db.worker_db)
+        .await
+        .context("loading evaluation")?
+    else {
+        return Ok(());
+    };
+    let Some(commit) = ECommit::find_by_id(eval.commit)
+        .one(&ctx.db.worker_db)
+        .await
+        .context("loading evaluation commit")?
+    else {
+        return Ok(());
+    };
+
+    let mut am = commit.into_active_model();
+    am.hash = Set(hash);
+    am.message = Set(message.to_owned());
+    am.author_name = Set(ctx.db.config.server.pr_commit_name.clone());
+    am.update(&ctx.db.worker_db).await.context("updating evaluation commit")?;
 
     Ok(())
 }

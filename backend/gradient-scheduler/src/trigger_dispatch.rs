@@ -190,18 +190,13 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             continue;
         }
 
-        // Resolve target commit. Polling skips when there's no new commit;
-        // time triggers always fire with whatever HEAD currently is.
-        let commit_hash =
+        // Resolve current HEAD. Polling reports whether it advanced; time
+        // triggers fire on whatever HEAD currently is.
+        let (has_update, commit_hash) =
             match check_project_updates(&state.db(), project, branch_for_check.as_deref())
                 .await
             {
-                Ok((true, hash)) => hash,
-                Ok((false, hash)) if is_time => hash,
-                Ok((false, _)) => {
-                    update_last_fired(state, &trig, now).await;
-                    continue;
-                }
+                Ok(v) => v,
                 Err(e) => {
                     warn!(error = %e, project = %project.name, "trigger commit resolution failed");
                     // Update on error too, otherwise transient failures retry every 5s.
@@ -214,9 +209,10 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             .await
             .unwrap_or_else(|_| (String::new(), None, String::new()));
 
-        // Bump tracked flake inputs (OpenPr action) on the periodic trigger
-        // fire. Self-gated: no-ops unless the project qualifies. Runs alongside
-        // the normal CI evaluation below, not in place of it.
+        // Bump tracked flake inputs (OpenPr action) on every due trigger fire,
+        // independent of whether HEAD advanced - upstream input updates never
+        // move the repo, so gating this on a new commit would never run it.
+        // Self-gated: no-ops unless the project qualifies.
         if let Err(e) = maybe_trigger_input_update(
             state.worker_db.inner(),
             project,
@@ -230,46 +226,51 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             warn!(error = %e, trigger_id = %trig.id, "input_update trigger failed");
         }
 
-        let trigger_type = cfg.trigger_type();
-        match apply_trigger(
-            state.worker_db.inner(),
-            project,
-            ApplyInput {
-                trigger_id: trig.id,
-                trigger_type,
-                commit_hash,
-                commit_message: Some(msg),
-                author_name: Some(author),
-                manual: false,
-                gate_approval: None,
-                repository_override: None,
-                wildcard_override: None,
-                source_comment: None,
-                instance_max_storage_gb: state.config.storage.max_storage_gb,
-            },
-        )
-        .await
-        {
-            Ok(ApplyOutcome::Created {
-                evaluation: eval,
-                aborted_evaluation,
-                aborted_anchors,
-            }) => {
-                if let Some(aborted_id) = aborted_evaluation {
-                    scheduler
-                        .cancel_evaluation_jobs(aborted_id, &aborted_anchors)
-                        .await;
+        // A normal CI evaluation only when there is something new to evaluate;
+        // time triggers always re-run against current HEAD.
+        if has_update || is_time {
+            let trigger_type = cfg.trigger_type();
+            match apply_trigger(
+                state.worker_db.inner(),
+                project,
+                ApplyInput {
+                    trigger_id: trig.id,
+                    trigger_type,
+                    commit_hash,
+                    commit_message: Some(msg),
+                    author_name: Some(author),
+                    manual: false,
+                    gate_approval: None,
+                    repository_override: None,
+                    wildcard_override: None,
+                    source_comment: None,
+                    instance_max_storage_gb: state.config.storage.max_storage_gb,
+                },
+            )
+            .await
+            {
+                Ok(ApplyOutcome::Created {
+                    evaluation: eval,
+                    aborted_evaluation,
+                    aborted_anchors,
+                }) => {
+                    if let Some(aborted_id) = aborted_evaluation {
+                        scheduler
+                            .cancel_evaluation_jobs(aborted_id, &aborted_anchors)
+                            .await;
+                    }
+                    info!(project = %project.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
+                    gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
                 }
-                info!(project = %project.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
-                gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
-            }
-            Ok(other) => {
-                debug!(project = %project.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");
-            }
-            Err(e) => {
-                error!(error = %e, trigger_id = %trig.id, "trigger application failed");
+                Ok(other) => {
+                    debug!(project = %project.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");
+                }
+                Err(e) => {
+                    error!(error = %e, trigger_id = %trig.id, "trigger application failed");
+                }
             }
         }
+
         update_last_fired(state, &trig, now).await;
     }
     Ok(())

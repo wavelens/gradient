@@ -10,10 +10,8 @@
 //! anything to bump and short-circuits empty runs.
 
 use super::TriggerError;
-use gradient_types::consts::NULL_TIME;
 use gradient_types::*;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
-use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter};
 
 /// When the condition holds, create one `input_update` evaluation per the
@@ -124,11 +122,6 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
 
         created.push(evaluation.id);
     }
-
-    let mut aproject: AProject = project.clone().into();
-    aproject.last_check_at = Set(*NULL_TIME);
-    aproject.force_evaluation = Set(true);
-    aproject.update(db).await?;
 
     Ok(created)
 }

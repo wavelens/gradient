@@ -603,15 +603,15 @@ impl CiReporter for GiteaReporter {
         base: &str,
         commit: &BranchCommit,
     ) -> Result<String> {
-        crate::pr::gitea::upsert_branch(
-            &self.client,
-            &self.base_url,
-            &self.token,
-            owner,
-            repo,
-            branch,
-            base,
-            commit,
+        // Force-push: the Gitea/Forgejo REST API cannot force-update a ref, so
+        // the contents API would stack commits on a never-rebased branch.
+        crate::git_push::force_push_lock_commit(
+            format!("{}/{}/{}.git", self.base_url, owner, repo),
+            self.token.clone(),
+            String::new(),
+            branch.to_owned(),
+            base.to_owned(),
+            commit.clone(),
         )
         .await
     }
@@ -943,15 +943,15 @@ impl CiReporter for GitlabReporter {
         base: &str,
         commit: &BranchCommit,
     ) -> Result<String> {
-        crate::pr::gitlab::upsert_branch(
-            &self.client,
-            &self.base_url,
-            &self.token,
-            owner,
-            repo,
-            branch,
-            base,
-            commit,
+        // Force-push: the GitLab commits API stacks onto a never-rebased branch,
+        // so push a single clean commit on the current base instead.
+        crate::git_push::force_push_lock_commit(
+            format!("{}/{}/{}.git", self.base_url, owner, repo),
+            "oauth2".to_owned(),
+            self.token.clone(),
+            branch.to_owned(),
+            base.to_owned(),
+            commit.clone(),
         )
         .await
     }

@@ -4980,6 +4980,24 @@ Backend (`cargo test -p gradient-ci --lib actions::open_pr`):
   collected from `url`-unset override rows, while the presence of any `url`-set
   override blocks the `input_update` run.
 
+Backend (`cargo test -p gradient-ci --lib trigger`):
+- `input_update_noop_without_open_pr_action` / `input_update_noop_without_tracked_inputs`
+  - `maybe_trigger_input_update` self-gates: it creates no evaluation unless the
+  project has an active `open_pr` action and at least one tracked input, so the
+  shared call from the periodic dispatch and the manual *Run trigger* /
+  *Start Evaluation* paths is a no-op on projects that do not qualify.
+- `input_update_pinned_override_blocks_run` - a `url`-pinned override anywhere on
+  the project blocks the run.
+- `input_update_creates_eval_for_tracked_input` - a tracked input with no pin
+  creates one `input_update` evaluation plus its sidecar.
+
+Backend (`cargo test -p gradient-forge --lib git_push`):
+- `upsert_replaces_file_and_preserves_subtree` - the force-push tree builder
+  replaces `flake.lock` while preserving sibling files and nested subtrees, so a
+  bump rewrites only the lock. Forges without a force-update-ref REST endpoint
+  (Gitea/Forgejo, GitLab) push a single clean commit on the current base this
+  way; GitHub keeps its native git-refs force-update.
+
 Backend (`cargo test -p gradient-forge --lib reporter::pull_request`):
 - `open_pr_creates_branch_and_pr` / `open_pr_updates_existing_in_place` - the
   reporter's PR methods open a fresh PR and, with `update_existing`, update an

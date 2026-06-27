@@ -310,3 +310,120 @@ async fn restart_with_one_failed_inserts_building_eval() {
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(result.unwrap().status, EvaluationStatus::Building);
 }
+
+fn open_pr_action(project_id: ProjectId) -> MProjectAction {
+    MProjectAction {
+        id: ProjectActionId::now_v7(),
+        project: project_id,
+        name: "updater".into(),
+        action_type: ActionType::OpenPr.to_i16(),
+        config: serde_json::to_value(ActionConfig::OpenPr {
+            integration_id: IntegrationId::now_v7(),
+            generator: PatchGeneratorKind::FlakeLock,
+            granularity: PrGranularity::PerRun,
+            verify_gate: VerifyGate::Build,
+            branch_pattern: "gradient/flake-lock-update".into(),
+            title_template: None,
+            body_template: None,
+            update_existing: true,
+        })
+        .unwrap(),
+        events: serde_json::json!([]),
+        active: true,
+        ..Default::default()
+    }
+}
+
+fn tracked_override(
+    project_id: ProjectId,
+    name: &str,
+    url: Option<String>,
+) -> MProjectFlakeInputOverride {
+    MProjectFlakeInputOverride {
+        id: FlakeInputOverrideId::now_v7(),
+        project: project_id,
+        input_name: name.into(),
+        url,
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn input_update_noop_without_open_pr_action() {
+    let project = make_project();
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([Vec::<gradient_entity::project_action::Model>::new()])
+        .into_connection();
+
+    let created = maybe_trigger_input_update(&db, &project, vec![0u8; 20], None, None, None)
+        .await
+        .unwrap();
+    assert!(created.is_empty());
+}
+
+#[tokio::test]
+async fn input_update_noop_without_tracked_inputs() {
+    let project = make_project();
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![open_pr_action(project.id)]])
+        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
+        .into_connection();
+
+    let created = maybe_trigger_input_update(&db, &project, vec![0u8; 20], None, None, None)
+        .await
+        .unwrap();
+    assert!(created.is_empty());
+}
+
+#[tokio::test]
+async fn input_update_pinned_override_blocks_run() {
+    let project = make_project();
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![open_pr_action(project.id)]])
+        .append_query_results([vec![tracked_override(
+            project.id,
+            "nixpkgs",
+            Some("github:NixOS/nixpkgs".into()),
+        )]])
+        .into_connection();
+
+    let created = maybe_trigger_input_update(&db, &project, vec![0u8; 20], None, None, None)
+        .await
+        .unwrap();
+    assert!(created.is_empty());
+}
+
+#[tokio::test]
+async fn input_update_creates_eval_for_tracked_input() {
+    let project = make_project();
+    let eval_id = EvaluationId::now_v7();
+    let commit_id = CommitId::now_v7();
+    let db = MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![open_pr_action(project.id)]])
+        .append_query_results([vec![tracked_override(project.id, "nixpkgs", None)]])
+        .append_query_results([Vec::<evaluation::Model>::new()])
+        .append_query_results([vec![gradient_entity::commit::Model {
+            id: commit_id,
+            hash: vec![0u8; 20],
+            ..Default::default()
+        }]])
+        .append_query_results([vec![make_eval(eval_id, EvaluationStatus::Queued)]])
+        .append_query_results([vec![MEvaluationInputUpdate {
+            id: EvaluationInputUpdateId::now_v7(),
+            evaluation: eval_id,
+            ..Default::default()
+        }]])
+        .into_connection();
+
+    let created = maybe_trigger_input_update(
+        &db,
+        &project,
+        vec![0u8; 20],
+        Some("msg".into()),
+        Some("author".into()),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(created, vec![eval_id]);
+}

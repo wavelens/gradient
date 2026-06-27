@@ -120,7 +120,11 @@ Opens (or updates) a pull request that bumps the project's flake inputs, driven 
 
 **Tracked inputs.** The set of inputs to bump is declared with flake-input override rows on the project. An override whose `url` is unset marks that input as *tracked*, and it will be bumped to its newest revision. As a safety gate, the presence of *any* override with a `url` set (a pinned input) blocks the run, so a project cannot accidentally open a PR while an input is being held at a fixed revision. v1 supports `github`, `gitlab`, and `git` flake inputs.
 
-**PR lifecycle.** A trigger fires; if the project has an `open_pr` action and at least one tracked input, Gradient creates an `input_update` evaluation. The worker bumps each tracked input to its newest revision with a natively recomputed `narHash`, and the candidate lock is verified by a normal eval/build per `verify_gate`. Once the verify gate passes, the PR is opened or, when `update_existing` is true, updated in place. An empty or no-change patch opens no PR.
+**When it runs.** An `input_update` evaluation is created whenever a project trigger fires - the periodic polling/time schedule (on every due tick, independent of whether the repository has a new commit, since upstream input bumps never move `HEAD`), a manual *Run trigger*, or a *Start Evaluation* - provided the project has an `open_pr` action and at least one tracked input. It is self-gated, so triggers on projects without the action are unaffected.
+
+**PR lifecycle.** Gradient creates the `input_update` evaluation; the worker bumps each tracked input to its newest revision with a natively recomputed `narHash`, and the candidate lock is verified by a normal eval/build per `verify_gate`. Once the verify gate passes, the PR is opened or, when `update_existing` is true, updated in place. An empty or no-change patch opens no PR.
+
+The branch is **force-pushed** to a single clean commit on the current base every run, so re-runs never stack commits or leave the branch behind a moved base (the branch is replaced, not appended). The evaluation is then repointed at that generated `flake.lock` commit, so the project shows the actual update commit rather than the base commit it was seeded from.
 
 ## Declarative configuration via Nix
 
