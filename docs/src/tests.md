@@ -4000,21 +4000,29 @@ Run with: `cargo test -p gradient-web --test ip_allowlist`
 - `cargo test -p proto --lib handler::limiter` - per-IP connection cap.
 - `cargo test -p proto --lib handler::cache_consumer` - ws URL building.
 
-## Fetch-capability gating for flake jobs (#252)
+## Fetch- and eval-capability gating for flake jobs (#252)
 
 A `FlakeJob` carrying a `FetchFlake` task clones its source repository (over
 SSH for private repos), and the server only sends SSH credentials to
-fetch-capable workers. Assigning such a job to a worker without the `fetch`
-capability left it cloning with no credentials callback, failing with
-`authentication required but no callback set`. The scheduler now gates these
-jobs on the worker's `fetch` capability.
+fetch-capable workers. A task carrying `EvaluateFlake`/`EvaluateDerivations`
+spawns the Nix eval subprocess, which a non-eval worker is not provisioned for:
+a fetch+build worker handed a bundled job ran the eval anyway and got
+SIGKILL-ed (OOM). The scheduler (`WorkerCaps::can_eval`) now gates flake jobs
+on `fetch` for the fetch task and `eval` for any evaluation task, so a bundled
+job requires both.
 
 Run with: `cargo test -p scheduler --lib jobs`
 
-- `fetch_flake_job_requires_fetch_capability` - a `FetchFlake` flake job is not
-  assigned to a worker lacking `fetch`, but is assigned to a fetch-capable one.
-- `cached_eval_job_runs_without_fetch_capability` - an eval-only follow-up job
-  (cached source, no `FetchFlake`) still runs on a worker without `fetch`.
+- `can_eval_requires_eval_for_evaluation_tasks` - the pure capability check:
+  bundled jobs need both `fetch` and `eval`, cached-eval jobs need `eval`,
+  fetch-only jobs need `fetch`.
+- `fetch_flake_job_requires_fetch_capability` - a bundled flake job is assigned
+  only to a fetch- and eval-capable worker, not one lacking `fetch`.
+- `bundled_eval_job_skips_worker_without_eval` - a fetch+build worker (no
+  `eval`) is not offered a bundled `FetchFlake`+evaluate job.
+- `cached_eval_job_requires_eval_not_fetch` - an eval-only follow-up job
+  (cached source, no `FetchFlake`) runs on an eval-capable worker without
+  `fetch`.
 
 ## Adaptive fetch/eval split
 
@@ -5017,6 +5025,23 @@ NixOS VM (`nix/tests/gradient/open-pr`):
   and one tracked input, the worker bumps the input and verifies the candidate
   lock, and a PR is opened on the (test) forge; a re-run with no upstream change
   produces an empty patch and opens no second PR.
+
+## Input-update PR fires despite the concurrency policy and cached closures
+
+The `input_update` evaluation is created `concurrent`, so it must not be aborted
+by the normal CI run for the same trigger. `apply_trigger` now scopes its
+in-flight lookup to non-concurrent evals (mirroring the
+`uq_evaluation_one_active_per_project` partial index, which excludes `concurrent`
+rows), so the concurrency policy and same-commit dedup ignore the bump run. Both
+evaluations run to completion and the bump's `build.completed` fires `OpenPr`.
+
+`backend/gradient-ci/src/actions/tests/mod.rs`:
+`matches_event_open_pr_fires_only_on_gate_event` now asserts the `build` verify
+gate fires on `build.substituted` as well as `build.completed` (an upstream-cached
+bump output verifies the candidate lock just like a freshly built one), and that
+the `eval` gate matches neither build event. The concurrency-scoping itself is a
+WHERE-clause property covered by the partial-index parallel and E2E CI rather than
+a MockDatabase test, which cannot observe a filter.
 
 ## Gradient build end-to-end + nix fast paths (#422)
 

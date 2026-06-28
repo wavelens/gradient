@@ -127,6 +127,19 @@ impl WorkerCaps {
             .all(|f| self.system_features.iter().any(|sf| sf == f));
         arch_ok && features_ok
     }
+
+    /// Returns true when this worker can run flake `job`: a `FetchFlake` task
+    /// needs `fetch` (the server only sends fetch credentials to fetch workers)
+    /// and any `EvaluateFlake`/`EvaluateDerivations` task needs `eval`.
+    pub fn can_eval(&self, job: &FlakeJob) -> bool {
+        let needs_fetch = job.tasks.contains(&FlakeTask::FetchFlake);
+        let needs_eval = job
+            .tasks
+            .iter()
+            .any(|t| matches!(t, FlakeTask::EvaluateFlake | FlakeTask::EvaluateDerivations));
+
+        (!needs_fetch || self.fetch) && (!needs_eval || self.capabilities.eval)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -270,18 +283,16 @@ struct ScoredCandidate {
     job_context: serde_json::Value,
 }
 
-/// Returns true when the worker can execute `job`: a flake job that fetches
-/// from a repository (carries `FetchFlake`) needs the `fetch` capability; a
-/// build job needs matching architecture/features. If `caps` is `None`,
-/// capability checks are skipped (used for tests / open mode).
+/// Returns true when the worker can execute `job`: a flake job needs `fetch`
+/// for a `FetchFlake` task and `eval` for any evaluation task; a build job
+/// needs matching architecture/features. If `caps` is `None`, capability checks
+/// are skipped (used for tests / open mode).
 fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     match (job, caps) {
-        // No capability info known → don't block (legacy behaviour for callers
+        // No capability info known: don't block (legacy behaviour for callers
         // that don't supply caps, e.g. unit tests for unrelated logic).
         (_, None) => true,
-        // A repository-source flake job clones over the network and so requires
-        // `fetch`; eval-only follow-up jobs (cached source) run on any worker.
-        (PendingJob::Eval(j), Some(c)) => c.fetch || !j.job.tasks.contains(&FlakeTask::FetchFlake),
+        (PendingJob::Eval(j), Some(c)) => c.can_eval(&j.job),
         (PendingJob::Build(j), Some(c)) => c.can_build(&j.architecture, &j.required_features),
     }
 }
@@ -907,7 +918,9 @@ impl JobTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_types::proto::{BuildJob, BuildTask, FlakeJob, FlakeSource, FlakeTask};
+    use gradient_types::proto::{
+        BuildJob, BuildTask, FlakeJob, FlakeSource, FlakeTask, GradientCapabilities,
+    };
 
     fn eval_job(peer: OrganizationId) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
@@ -1038,6 +1051,52 @@ mod tests {
         assert!(!caps.can_build("x86_64-linux", &["kvm".into(), "big-parallel".into()],));
     }
 
+    fn flake_job(tasks: Vec<FlakeTask>) -> FlakeJob {
+        FlakeJob {
+            tasks,
+            source: FlakeSource::Cached { store_path: "/nix/store/abc-source".into() },
+            wildcards: vec!["*".into()],
+            timeout_secs: None,
+            input_overrides: vec![],
+            input_update: None,
+        }
+    }
+
+    #[test]
+    fn can_eval_requires_eval_for_evaluation_tasks() {
+        // A FetchFlake task needs `fetch`; any evaluation task needs `eval`.
+        let fetch_only = WorkerCaps {
+            fetch: true,
+            capabilities: GradientCapabilities { fetch: true, ..Default::default() },
+            ..Default::default()
+        };
+        let eval_only = WorkerCaps {
+            fetch: false,
+            capabilities: GradientCapabilities { eval: true, ..Default::default() },
+            ..Default::default()
+        };
+        let both = WorkerCaps {
+            fetch: true,
+            capabilities: GradientCapabilities { fetch: true, eval: true, ..Default::default() },
+            ..Default::default()
+        };
+        let bundled = flake_job(vec![
+            FlakeTask::FetchFlake,
+            FlakeTask::EvaluateFlake,
+            FlakeTask::EvaluateDerivations,
+        ]);
+        let cached_eval = flake_job(vec![FlakeTask::EvaluateDerivations]);
+        let fetch = flake_job(vec![FlakeTask::FetchFlake]);
+
+        assert!(!fetch_only.can_eval(&bundled), "fetch-only lacks eval");
+        assert!(!eval_only.can_eval(&bundled), "eval-only lacks fetch");
+        assert!(both.can_eval(&bundled));
+        assert!(eval_only.can_eval(&cached_eval));
+        assert!(!fetch_only.can_eval(&cached_eval), "cached eval needs eval");
+        assert!(fetch_only.can_eval(&fetch));
+        assert!(!eval_only.can_eval(&fetch), "fetch task needs fetch");
+    }
+
     #[test]
     fn add_pending_does_not_requeue_active_job() {
         // Regression: two concurrent dispatch passes can both pass the
@@ -1152,38 +1211,72 @@ mod tests {
             fetch: true,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
+            capabilities: GradientCapabilities { fetch: true, eval: true, ..Default::default() },
             ..Default::default()
         };
         assert!(
             tracker
                 .take_best_of_kind("w2", None, Some(&with_fetch), &JobKind::Flake, &*p, &inst)
                 .is_some(),
-            "fetch-capable worker must receive the fetch flake job"
+            "fetch- and eval-capable worker must receive the bundled flake job"
         );
     }
 
     #[test]
-    fn cached_eval_job_runs_without_fetch_capability() {
+    fn cached_eval_job_requires_eval_not_fetch() {
         // Eval-only follow-up jobs (no FetchFlake task) read an already-cached
-        // source and must remain servable by workers that lack `fetch`.
+        // source: they need `eval` but not `fetch`. An eval-capable worker
+        // without fetch must still receive them.
         let mut tracker = JobTracker::new();
         let peer = OrganizationId::now_v7();
         tracker.add_pending("j1".into(), eval_job(peer));
 
-        let no_fetch = WorkerCaps {
+        let eval_no_fetch = WorkerCaps {
             fetch: false,
             architectures: vec![],
             system_features: vec![],
+            capabilities: GradientCapabilities { eval: true, ..Default::default() },
             ..Default::default()
         };
         let p = gradient_score::policy_by_name("simple");
         let inst = gradient_score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&no_fetch), &JobKind::Flake, &*p, &inst)
+                .take_best_of_kind("w1", None, Some(&eval_no_fetch), &JobKind::Flake, &*p, &inst)
                 .is_some(),
-            "cached eval job must run on a worker without fetch"
+            "cached eval job must run on an eval-capable worker without fetch"
         );
+    }
+
+    #[test]
+    fn bundled_eval_job_skips_worker_without_eval() {
+        // Regression: a fetch+build worker (no `eval`) must NOT receive a bundled
+        // FetchFlake+Evaluate job - it would run the eval subprocess anyway and
+        // OOM-kill it. Such jobs require both `fetch` and `eval`.
+        let mut tracker = JobTracker::new();
+        let peer = OrganizationId::now_v7();
+        tracker.add_pending("j1".into(), fetch_eval_job(peer));
+
+        let fetch_build = WorkerCaps {
+            fetch: true,
+            architectures: vec!["x86_64-linux".into()],
+            system_features: vec![],
+            capabilities: GradientCapabilities {
+                fetch: true,
+                build: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let p = gradient_score::policy_by_name("simple");
+        let inst = gradient_score::InstanceContext::default();
+        assert!(
+            tracker
+                .take_best_of_kind("w1", None, Some(&fetch_build), &JobKind::Flake, &*p, &inst)
+                .is_none(),
+            "worker without eval must not receive a bundled eval job"
+        );
+        assert_eq!(tracker.pending_count(), 1);
     }
 
     #[test]
