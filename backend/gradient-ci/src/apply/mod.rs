@@ -94,7 +94,11 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     input: ApplyInput,
 ) -> Result<ApplyOutcome, ApplyError> {
     // Find any in-flight evaluation up-front; we use it for dedup against the
-    // currently-running commit AND for the concurrency policy below.
+    // currently-running commit AND for the concurrency policy below. Scoped to
+    // non-concurrent evals: a concurrent run (e.g. an `input_update` flake bump)
+    // is orthogonal to normal CI and must not be aborted by, or dedup-block, a
+    // normal trigger. Mirrors the `uq_evaluation_one_active_per_project` partial
+    // index, which likewise excludes `concurrent` rows.
     let active_codes: Vec<i32> = EvaluationStatus::ACTIVE
         .iter()
         .copied()
@@ -103,6 +107,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
     let in_flight = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project.id))
         .filter(CEvaluation::Status.is_in(active_codes))
+        .filter(CEvaluation::Concurrent.eq(false))
         .one(db)
         .await?;
 

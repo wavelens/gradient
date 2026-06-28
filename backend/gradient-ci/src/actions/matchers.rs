@@ -28,7 +28,7 @@ pub fn matches_event(action: &MProjectAction, event: &str) -> bool {
         return FORGE_STATUS_EVENTS.contains(&event);
     }
     if action.action_type == ActionType::OpenPr.to_i16() {
-        return open_pr_gate_event(action) == Some(event);
+        return open_pr_gate_events(action).is_some_and(|evs| evs.contains(&event));
     }
     action
         .events
@@ -36,17 +36,24 @@ pub fn matches_event(action: &MProjectAction, event: &str) -> bool {
         .is_some_and(|list| list.iter().any(|v| v.as_str() == Some(event)))
 }
 
-/// The single verify-gate event an `OpenPr` action fires on. The dispatcher
-/// additionally restricts firing to `input_update` evaluations.
-pub fn open_pr_gate_event(action: &MProjectAction) -> Option<&'static str> {
+/// The verify-gate events an `OpenPr` action fires on. The dispatcher
+/// additionally restricts firing to `input_update` evaluations. A `Build` gate
+/// accepts a substituted output as readily as a built one: both prove the
+/// candidate lock realises, and the forge-status path already greens on
+/// `build.substituted` (a flake.lock bump whose outputs are upstream-cached
+/// would otherwise never open a PR).
+pub fn open_pr_gate_events(action: &MProjectAction) -> Option<&'static [&'static str]> {
+    const BUILD_GATE: &[&str] = &["build.completed", "build.substituted"];
+    const EVAL_GATE: &[&str] = &["evaluation.completed"];
+
     let cfg: ActionConfig = serde_json::from_value(action.config.clone()).ok()?;
     let ActionConfig::OpenPr { verify_gate, .. } = cfg else {
         return None;
     };
 
     Some(match verify_gate {
-        VerifyGate::Build => "build.completed",
-        VerifyGate::Eval | VerifyGate::None => "evaluation.completed",
+        VerifyGate::Build => BUILD_GATE,
+        VerifyGate::Eval | VerifyGate::None => EVAL_GATE,
     })
 }
 

@@ -81,12 +81,15 @@ fn matches_event_open_pr_fires_only_on_gate_event() {
 
     let build_gate = open_pr(VerifyGate::Build);
     assert!(matches_event(&build_gate, "build.completed"));
+    // A substituted (upstream-cached) output verifies the candidate lock too.
+    assert!(matches_event(&build_gate, "build.substituted"));
     assert!(!matches_event(&build_gate, "build.failed"));
     assert!(!matches_event(&build_gate, "evaluation.completed"));
 
     let eval_gate = open_pr(VerifyGate::Eval);
     assert!(matches_event(&eval_gate, "evaluation.completed"));
     assert!(!matches_event(&eval_gate, "build.completed"));
+    assert!(!matches_event(&eval_gate, "build.substituted"));
 }
 
 #[test]
