@@ -55,10 +55,12 @@ fn eval_job(peer: OrganizationId) -> PendingEvalJob {
     }
 }
 
-/// A fully-capable worker for scheduling-mechanics tests that aren't about
-/// capability gating - it must be able to run the eval jobs they enqueue.
-fn full_caps() -> GradientCapabilities {
-    GradientCapabilities { fetch: true, eval: true, build: true, ..GradientCapabilities::default() }
+/// A dedicated eval worker for scheduling-mechanics tests that aren't about
+/// capability gating: `eval` makes it eligible for the eval jobs they enqueue,
+/// and the absence of `fetch` keeps the reserve-fetch-workers rule from
+/// penalizing it into a negative score on the unscored request_job path.
+fn eval_worker_caps() -> GradientCapabilities {
+    GradientCapabilities { eval: true, ..GradientCapabilities::default() }
 }
 
 #[tokio::test]
@@ -67,7 +69,7 @@ async fn test_enqueue_and_get_candidates() {
     let peer = OrganizationId::now_v7();
 
     scheduler
-        .register_worker("w1", full_caps(), HashSet::new())
+        .register_worker("w1", eval_worker_caps(), HashSet::new())
         .await;
 
     scheduler
@@ -130,7 +132,7 @@ async fn test_candidates_filtered_by_authorized_peers() {
     scheduler
         .register_worker(
             "w1",
-            full_caps(),
+            eval_worker_caps(),
             HashSet::from([peer_a]),
         )
         .await;
@@ -153,7 +155,7 @@ async fn test_score_assignment_flow() {
     let peer = OrganizationId::now_v7();
 
     scheduler
-        .register_worker("w1", full_caps(), HashSet::new())
+        .register_worker("w1", eval_worker_caps(), HashSet::new())
         .await;
 
     scheduler
@@ -184,7 +186,7 @@ async fn test_job_rejected_requeues() {
     let peer = OrganizationId::now_v7();
 
     scheduler
-        .register_worker("w1", full_caps(), HashSet::new())
+        .register_worker("w1", eval_worker_caps(), HashSet::new())
         .await;
 
     scheduler
@@ -206,7 +208,7 @@ async fn test_worker_disconnect_requeues_jobs() {
     let peer = OrganizationId::now_v7();
 
     scheduler
-        .register_worker("w1", full_caps(), HashSet::new())
+        .register_worker("w1", eval_worker_caps(), HashSet::new())
         .await;
 
     scheduler
@@ -229,7 +231,7 @@ async fn test_worker_disconnect_requeues_jobs() {
 
     // Another worker can pick them up.
     scheduler
-        .register_worker("w2", full_caps(), HashSet::new())
+        .register_worker("w2", eval_worker_caps(), HashSet::new())
         .await;
     let candidates = scheduler.get_job_candidates("w2").await;
     assert_eq!(candidates.len(), 2);
@@ -245,7 +247,7 @@ async fn test_update_authorized_peers_expands_access() {
     scheduler
         .register_worker(
             "w1",
-            full_caps(),
+            eval_worker_caps(),
             HashSet::from([peer_a]),
         )
         .await;
@@ -273,7 +275,7 @@ async fn test_draining_worker_still_has_assigned_jobs() {
     let peer = OrganizationId::now_v7();
 
     scheduler
-        .register_worker("w1", full_caps(), HashSet::new())
+        .register_worker("w1", eval_worker_caps(), HashSet::new())
         .await;
 
     scheduler
@@ -295,7 +297,7 @@ async fn test_request_reauth_signals_connected_worker() {
     let scheduler = test_scheduler();
 
     let (notify, _abort_rx) = scheduler
-        .register_worker("w1", full_caps(), HashSet::new())
+        .register_worker("w1", eval_worker_caps(), HashSet::new())
         .await;
 
     scheduler.request_reauth("w1").await;
@@ -387,7 +389,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
     // Move to assigned so active_job() finds it. A zero-missing score clears the
     // negative-total dispatch gate.
     scheduler
-        .register_worker("w1", full_caps(), HashSet::new())
+        .register_worker("w1", eval_worker_caps(), HashSet::new())
         .await;
     scheduler
         .record_scores(
