@@ -37,14 +37,16 @@ pub fn matches_event(action: &MProjectAction, event: &str) -> bool {
 }
 
 /// The verify-gate events an `OpenPr` action fires on. The dispatcher
-/// additionally restricts firing to `input_update` evaluations. A `Build` gate
-/// accepts a substituted output as readily as a built one: both prove the
-/// candidate lock realises, and the forge-status path already greens on
-/// `build.substituted` (a flake.lock bump whose outputs are upstream-cached
-/// would otherwise never open a PR).
+/// additionally restricts firing to `input_update` evaluations. The gate keys
+/// off the evaluation's own terminal transition, not a per-build event: an
+/// `input_update` candidate whose closure is already built or substitutable runs
+/// no fresh build, so no `build.completed` ever fires, yet the eval still reaches
+/// `Building`/`Completed`. `Build` waits for `evaluation.completed` (every build
+/// succeeded, else the eval is `Failed` and emits nothing); `Eval`/`None` open at
+/// `evaluation.building` (the flake evaluated, builds not awaited).
 pub fn open_pr_gate_events(action: &MProjectAction) -> Option<&'static [&'static str]> {
-    const BUILD_GATE: &[&str] = &["build.completed", "build.substituted"];
-    const EVAL_GATE: &[&str] = &["evaluation.completed"];
+    const BUILD_GATE: &[&str] = &["evaluation.completed"];
+    const EVAL_GATE: &[&str] = &["evaluation.building"];
 
     let cfg: ActionConfig = serde_json::from_value(action.config.clone()).ok()?;
     let ActionConfig::OpenPr { verify_gate, .. } = cfg else {

@@ -117,6 +117,13 @@ export class ActionFormComponent implements OnChanges {
     this.type() === 'forge_status_report' ? FORGE_STATUS_EVENTS : this.events(),
   );
 
+  // `forge_status_report` and `open_pr` fire on an internal gate, not
+  // user-selected events: the status reporter tracks the whole lifecycle, and
+  // Open PR fires when an input_update evaluation passes its verify gate.
+  readonly eventsHardwired = computed(
+    () => this.type() === 'forge_status_report' || this.type() === 'open_pr',
+  );
+
   readonly typeRadioDisabled = computed(() => this.mode() === 'edit');
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -247,8 +254,7 @@ export class ActionFormComponent implements OnChanges {
 
   onSubmit(): void {
     const config = this.buildConfig();
-    const events =
-      this.type() === 'forge_status_report' ? [] : this.events();
+    const events = this.eventsHardwired() ? [] : this.events();
     if (this.mode() === 'create') {
       const req: CreateActionRequest = {
         name: this.name().trim(),

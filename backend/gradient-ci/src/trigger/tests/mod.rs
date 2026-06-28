@@ -355,7 +355,7 @@ async fn input_update_noop_without_open_pr_action() {
         .append_query_results([Vec::<gradient_entity::project_action::Model>::new()])
         .into_connection();
 
-    let created = maybe_trigger_input_update(&db, &project, vec![0u8; 20], None, None, None)
+    let created = maybe_trigger_input_update(&db, &project, vec![0u8; 20], None)
         .await
         .unwrap();
     assert!(created.is_empty());
@@ -369,7 +369,7 @@ async fn input_update_noop_without_tracked_inputs() {
         .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
         .into_connection();
 
-    let created = maybe_trigger_input_update(&db, &project, vec![0u8; 20], None, None, None)
+    let created = maybe_trigger_input_update(&db, &project, vec![0u8; 20], None)
         .await
         .unwrap();
     assert!(created.is_empty());
@@ -387,7 +387,7 @@ async fn input_update_pinned_override_blocks_run() {
         )]])
         .into_connection();
 
-    let created = maybe_trigger_input_update(&db, &project, vec![0u8; 20], None, None, None)
+    let created = maybe_trigger_input_update(&db, &project, vec![0u8; 20], None)
         .await
         .unwrap();
     assert!(created.is_empty());
@@ -415,15 +415,8 @@ async fn input_update_creates_eval_for_tracked_input() {
         }]])
         .into_connection();
 
-    let created = maybe_trigger_input_update(
-        &db,
-        &project,
-        vec![0u8; 20],
-        Some("msg".into()),
-        Some("author".into()),
-        None,
-    )
-    .await
-    .unwrap();
+    let created = maybe_trigger_input_update(&db, &project, vec![0u8; 20], None)
+        .await
+        .unwrap();
     assert_eq!(created, vec![eval_id]);
 }

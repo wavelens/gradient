@@ -98,6 +98,21 @@ describe('ActionFormComponent', () => {
     expect(emitted.events).toEqual([]);
   });
 
+  it('hard-wires events to empty for open_pr (fires on the verify gate, not events)', () => {
+    const fixture = createFixture(true);
+    fixture.detectChanges();
+    const c = fixture.componentInstance;
+    c.onTypeChange('open_pr');
+    c.integrationId.set('int-1');
+    c.name.set('updater');
+    c.events.set(['build.completed']);
+    expect(c.eventsHardwired()).toBe(true);
+    let emitted: any;
+    c.saved.subscribe((r) => (emitted = r));
+    c.onSubmit();
+    expect(emitted.events).toEqual([]);
+  });
+
   it('renders the submit error inside the dialog', () => {
     const fixture = createFixture(true);
     fixture.componentRef.setInput('open', true);

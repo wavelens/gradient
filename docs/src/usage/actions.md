@@ -29,7 +29,7 @@ Actions are per-project. Four types ship in v1:
 | `build.failed` | Build failed |
 | `build.substituted` | Build output came from an upstream cache substitution |
 
-An action with an empty `events` list never fires. `forge_status_report` ignores the `events` list - it is hard-wired to the full evaluation and build lifecycle (every `evaluation.*` and `build.*` event above), so the per-build check tracks live progress, not just the terminal result.
+An action with an empty `events` list never fires. `forge_status_report` and `open_pr` ignore the `events` list and expose no event selection in the UI: `forge_status_report` is hard-wired to the full evaluation and build lifecycle (every `evaluation.*` and `build.*` event above), so the per-build check tracks live progress, not just the terminal result; `open_pr` fires on the `input_update` evaluation's verify-gate transition (see below).
 
 ## Send Mail
 
@@ -103,7 +103,7 @@ The **Test** button does not post a synthetic status (a forge rejects a status a
 
 ## Open PR
 
-Opens (or updates) a pull request that bumps the project's flake inputs, driven by a native `flake.lock` updater. Unlike the other actions it does not react to a project's ordinary runs: it fires on a verify-gate event (default `build.completed`) but only for `input_update` evaluations.
+Opens (or updates) a pull request that bumps the project's flake inputs, driven by a native `flake.lock` updater. Unlike the other actions it does not react to a project's ordinary runs and has no user-selectable event triggers: it fires only for `input_update` evaluations, at the point fixed by `verify_gate`.
 
 **Config fields:**
 
@@ -112,7 +112,7 @@ Opens (or updates) a pull request that bumps the project's flake inputs, driven 
 | `integration_id` | yes | (none) | UUID of an outbound integration in the same org |
 | `generator` | no | `flake_lock` | Update generator; only the native flake.lock updater exists in v1 |
 | `granularity` | no | `per_run` | `per_run` opens one PR for the whole run; `per_input` opens one PR per tracked input |
-| `verify_gate` | no | `build` | How far the candidate lock is verified before the PR opens: `none`, `eval`, or `build` |
+| `verify_gate` | no | `build` | How far the candidate lock is verified before the PR opens. `eval`/`none` open once the flake evaluates (`evaluation.building`); `build` waits until the whole evaluation completes, i.e. every build succeeded (`evaluation.completed`) |
 | `branch_pattern` | no | `gradient/flake-lock-update` | Branch name for the PR; for `per_input` it must contain the `{input}` placeholder |
 | `title_template` | no | (none) | PR title with placeholders |
 | `body_template` | no | (none) | PR body with placeholders |
@@ -122,9 +122,9 @@ Opens (or updates) a pull request that bumps the project's flake inputs, driven 
 
 **When it runs.** An `input_update` evaluation is created whenever a project trigger fires - the periodic polling/time schedule (on every due tick, independent of whether the repository has a new commit, since upstream input bumps never move `HEAD`), a manual *Run trigger*, or a *Start Evaluation* - provided the project has an `open_pr` action and at least one tracked input. It is self-gated, so triggers on projects without the action are unaffected. The update run is concurrent: it runs alongside the project's normal CI evaluation for the same trigger, and neither aborts the other regardless of the project's concurrency policy.
 
-**PR lifecycle.** Gradient creates the `input_update` evaluation; the worker bumps each tracked input to its newest revision with a natively recomputed `narHash`, and the candidate lock is verified by a normal eval/build per `verify_gate`. Once the verify gate passes, the PR is opened or, when `update_existing` is true, updated in place. An empty or no-change patch opens no PR. Under the default `build` gate an output that is substituted from an upstream cache satisfies the gate exactly like a freshly built one, so a bump whose closure is already cached still opens its PR.
+**PR lifecycle.** Gradient creates the `input_update` evaluation; the worker bumps each tracked input to its newest revision with a natively recomputed `narHash`, and the candidate lock is verified by a normal eval/build per `verify_gate`. The gate keys off the evaluation's own terminal transition, not a per-build event: `build` opens the PR at `evaluation.completed` (which is reached only if every build succeeded), `eval`/`none` at `evaluation.building`. This is robust to a candidate whose closure is already built or substitutable from cache - that fires no fresh build event, yet the evaluation still completes. An empty or no-change patch opens no PR.
 
-The branch is **force-pushed** to a single clean commit on the current base every run, so re-runs never stack commits or leave the branch behind a moved base (the branch is replaced, not appended). The evaluation is then repointed at that generated `flake.lock` commit, so the project shows the actual update commit rather than the base commit it was seeded from.
+The branch is **force-pushed** to a single clean commit on the current base every run, so re-runs never stack commits or leave the branch behind a moved base (the branch is replaced, not appended). The evaluation's own commit stays blank until that push, then is repointed at the generated `flake.lock` commit - so the project shows the actual update commit and never the unrelated base commit it was seeded from.
 
 ## Declarative configuration via Nix
 

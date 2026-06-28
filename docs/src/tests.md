@@ -4986,8 +4986,8 @@ Backend (`cargo test -p gradient-flake-lock --lib`):
 
 Backend (`cargo test -p gradient-ci --lib actions::open_pr`):
 - `matcher_fires_only_on_input_update` - the action's verify-gate matcher
-  (default `build.completed`) fires for an `input_update` evaluation and is a
-  no-op for a `normal` evaluation, so ordinary runs never open a PR.
+  (default gate `evaluation.completed`) fires for an `input_update` evaluation and
+  is a no-op for a `normal` evaluation, so ordinary runs never open a PR.
 - `tracked_inputs_collected_and_pinned_override_blocks` - tracked inputs are
   collected from `url`-unset override rows, while the presence of any `url`-set
   override blocks the `input_update` run.
@@ -5026,22 +5026,37 @@ NixOS VM (`nix/tests/gradient/open-pr`):
   lock, and a PR is opened on the (test) forge; a re-run with no upstream change
   produces an empty patch and opens no second PR.
 
-## Input-update PR fires despite the concurrency policy and cached closures
+## Input-update PR fires for already-built closures, despite the concurrency policy
 
-The `input_update` evaluation is created `concurrent`, so it must not be aborted
-by the normal CI run for the same trigger. `apply_trigger` now scopes its
-in-flight lookup to non-concurrent evals (mirroring the
-`uq_evaluation_one_active_per_project` partial index, which excludes `concurrent`
-rows), so the concurrency policy and same-commit dedup ignore the bump run. Both
-evaluations run to completion and the bump's `build.completed` fires `OpenPr`.
+Three independent fixes let a `flake.lock` bump actually open its PR:
 
-`backend/gradient-ci/src/actions/tests/mod.rs`:
-`matches_event_open_pr_fires_only_on_gate_event` now asserts the `build` verify
-gate fires on `build.substituted` as well as `build.completed` (an upstream-cached
-bump output verifies the candidate lock just like a freshly built one), and that
-the `eval` gate matches neither build event. The concurrency-scoping itself is a
-WHERE-clause property covered by the partial-index parallel and E2E CI rather than
-a MockDatabase test, which cannot observe a filter.
+1. **Gate keys off the eval transition, not a per-build event.** A bump whose
+   candidate closure is already built (a reused global `derivation_build` anchor)
+   or substitutable runs no fresh build, so no `build.completed` ever fires - yet
+   the eval still reaches `Building`/`Completed`. The `OpenPr` gate now fires on
+   `evaluation.completed` (`build` gate) / `evaluation.building` (`eval`/`none`).
+   `backend/gradient-ci/src/actions/tests/mod.rs`:
+   `matches_event_open_pr_fires_only_on_gate_event` asserts the `build` gate
+   matches `evaluation.completed` (not `evaluation.building`, `build.completed`,
+   or `evaluation.failed`) and the `eval` gate matches `evaluation.building`.
+
+2. **The concurrent bump run is not aborted by the normal CI run.** The
+   `input_update` eval is created `concurrent`; `apply_trigger` now scopes its
+   in-flight lookup to non-concurrent evals (mirroring the
+   `uq_evaluation_one_active_per_project` partial index, which excludes
+   `concurrent` rows), so the concurrency policy and same-commit dedup ignore it.
+   Covered by the partial-index parallel and E2E CI rather than a MockDatabase
+   test, which cannot observe a WHERE clause.
+
+3. **The eval's commit is blank until the PR is pushed.** `maybe_trigger_input_update`
+   seeds the eval with an empty commit; the worker fetches from the sidecar's
+   `base_commit`, and `point_eval_at_pushed_commit` fills the commit with the
+   generated `flake.lock` commit once the branch is force-pushed.
+
+Frontend (`**/action-form.component.spec.ts`):
+- `hard-wires events to empty for open_pr` - selecting the `open_pr` type marks
+  `eventsHardwired()` and submits `events: []`; the UI shows no event selector
+  (the action fires on the verify gate, not user-chosen events).
 
 ## Gradient build end-to-end + nix fast paths (#422)
 

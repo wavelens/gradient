@@ -210,18 +210,27 @@
     </div>
   }
 
-  <div class="form-group">
-    <label>Events</label>
-    @if (type() === 'forge_status_report') {
-      <app-action-events [selected]="displayedEvents()" [disabled]="true" />
-      <small class="text-secondary">Events are fixed for forge status reports.</small>
-    } @else {
-      <app-action-events
-        [selected]="events()"
-        (selectedChange)="events.set($event)"
-      />
-    }
-  </div>
+  @if (type() !== 'open_pr') {
+    <div class="form-group">
+      <label>Events</label>
+      @if (type() === 'forge_status_report') {
+        <app-action-events [selected]="displayedEvents()" [disabled]="true" />
+        <small class="text-secondary">Events are fixed for forge status reports.</small>
+      } @else {
+        <app-action-events
+          [selected]="events()"
+          (selectedChange)="events.set($event)"
+        />
+      }
+    </div>
+  } @else {
+    <div class="form-group">
+      <label>Events</label>
+      <small class="text-secondary">
+        Open PR runs automatically when an input_update evaluation passes its verify gate; it has no event triggers.
+      </small>
+    </div>
+  }
 
   <div class="form-group checkbox-group">
     <p-checkbox inputId="action-active" [ngModel]="active()" (ngModelChange)="active.set($event)" [binary]="true" />

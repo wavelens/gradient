@@ -20,9 +20,7 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoA
 pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
     db: &C,
     project: &MProject,
-    commit_hash: Vec<u8>,
-    commit_message: Option<String>,
-    author_name: Option<String>,
+    base_commit_hash: Vec<u8>,
     trigger: Option<ProjectTriggerId>,
 ) -> Result<Vec<EvaluationId>, TriggerError> {
     let Some(action) = EProjectAction::find()
@@ -71,16 +69,17 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         PrGranularity::PerInput => tracked.into_iter().map(|n| vec![n]).collect(),
     };
 
-    let base_commit: String = commit_hash.iter().map(|b| format!("{b:02x}")).collect();
+    let base_commit: String = base_commit_hash.iter().map(|b| format!("{b:02x}")).collect();
     let now = gradient_types::now();
     let mut created = Vec::with_capacity(target_sets.len());
 
     for target in target_sets {
+        // The eval's own commit is the generated flake.lock-update commit, which
+        // does not exist until the PR branch is force-pushed
+        // (`point_eval_at_pushed_commit`). It stays blank so the UI shows no
+        // commit until then; the base to fetch lives in the sidecar's `base_commit`.
         let commit = MCommit {
             id: CommitId::now_v7(),
-            message: commit_message.clone().unwrap_or_default(),
-            hash: commit_hash.clone(),
-            author_name: author_name.clone().unwrap_or_default(),
             ..Default::default()
         }
         .into_active_model()

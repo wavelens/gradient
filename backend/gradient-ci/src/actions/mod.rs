@@ -155,11 +155,18 @@ async fn dispatch_event(ctx: &CiContext, project_id: ProjectId, event: &str, pay
         if !matches_event(&action, event) {
             continue;
         }
+        let is_input_update =
+            payload.get("evaluation_kind").and_then(|v| v.as_str()) == Some("input_update");
+
         // `OpenPr` fires on a normal gate event (build/eval completed) but must
         // only act on `input_update` evaluations, never regular CI runs.
-        if action.action_type == ActionType::OpenPr.to_i16()
-            && payload.get("evaluation_kind").and_then(|v| v.as_str()) != Some("input_update")
-        {
+        if action.action_type == ActionType::OpenPr.to_i16() && !is_input_update {
+            continue;
+        }
+        // `forge_status_report` posts a CI status against a real commit/PR; an
+        // `input_update` eval is an internal bump whose own commit is blank until
+        // its PR is pushed, so skip it - the PR's own CI run reports normally.
+        if action.action_type == ActionType::ForgeStatusReport.to_i16() && is_input_update {
             continue;
         }
 

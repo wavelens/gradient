@@ -199,7 +199,23 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             }
         };
 
-        let commit_sha = vec_to_hex(&commit.hash);
+        let sidecar = if eval.kind == gradient_entity::evaluation::EvaluationKind::InputUpdate {
+            use gradient_entity::evaluation_input_update as eiu;
+            eiu::Entity::find()
+                .filter(eiu::Column::Evaluation.eq(eval.id))
+                .one(&state.worker_db)
+                .await?
+        } else {
+            None
+        };
+
+        // An `input_update` eval's own commit is blank (the generated flake.lock
+        // commit is unknown until the PR is pushed); fetch from the base recorded
+        // in the sidecar instead.
+        let commit_sha = match &sidecar {
+            Some(s) => s.base_commit.clone(),
+            None => vec_to_hex(&commit.hash),
+        };
 
         let input_overrides = {
             use gradient_entity::evaluation_flake_input_override as efio;
@@ -217,24 +233,14 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
                 .collect::<Vec<_>>()
         };
 
-        let input_update = if eval.kind == gradient_entity::evaluation::EvaluationKind::InputUpdate
-        {
-            use gradient_entity::evaluation_input_update as eiu;
-            eiu::Entity::find()
-                .filter(eiu::Column::Evaluation.eq(eval.id))
-                .one(&state.worker_db)
-                .await?
-                .map(|s| gradient_types::proto::InputUpdateSpec {
-                    generator: s.generator,
-                    inputs: s
-                        .target_inputs
-                        .as_array()
-                        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-                        .unwrap_or_default(),
-                })
-        } else {
-            None
-        };
+        let input_update = sidecar.map(|s| gradient_types::proto::InputUpdateSpec {
+            generator: s.generator,
+            inputs: s
+                .target_inputs
+                .as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default(),
+        });
 
         let split_fetch = scheduler.worker_pool.read().await.has_idle_eval_only_worker();
         let wildcards = eval

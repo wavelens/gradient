@@ -397,8 +397,6 @@ pub async fn fire_now(
         &state.web_db,
         &proj,
         commit_hash.clone(),
-        Some(commit_message.clone()),
-        Some(author_name.clone()),
         Some(row.id),
     )
     .await

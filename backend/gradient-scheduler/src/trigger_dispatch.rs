@@ -217,8 +217,6 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             state.worker_db.inner(),
             project,
             commit_hash.clone(),
-            Some(msg.clone()),
-            Some(author.clone()),
             Some(trig.id),
         )
         .await

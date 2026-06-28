@@ -79,17 +79,19 @@ fn matches_event_open_pr_fires_only_on_gate_event() {
         a
     };
 
+    // The gate keys off the eval's own terminal transition, not a per-build
+    // event: a candidate whose closure is already built/substitutable fires no
+    // `build.completed`, but the eval still reaches Building/Completed.
     let build_gate = open_pr(VerifyGate::Build);
-    assert!(matches_event(&build_gate, "build.completed"));
-    // A substituted (upstream-cached) output verifies the candidate lock too.
-    assert!(matches_event(&build_gate, "build.substituted"));
-    assert!(!matches_event(&build_gate, "build.failed"));
-    assert!(!matches_event(&build_gate, "evaluation.completed"));
+    assert!(matches_event(&build_gate, "evaluation.completed"));
+    assert!(!matches_event(&build_gate, "evaluation.building"));
+    assert!(!matches_event(&build_gate, "build.completed"));
+    assert!(!matches_event(&build_gate, "evaluation.failed"));
 
     let eval_gate = open_pr(VerifyGate::Eval);
-    assert!(matches_event(&eval_gate, "evaluation.completed"));
+    assert!(matches_event(&eval_gate, "evaluation.building"));
+    assert!(!matches_event(&eval_gate, "evaluation.completed"));
     assert!(!matches_event(&eval_gate, "build.completed"));
-    assert!(!matches_event(&eval_gate, "build.substituted"));
 }
 
 #[test]

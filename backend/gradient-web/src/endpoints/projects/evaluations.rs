@@ -225,8 +225,6 @@ pub async fn post_project_evaluate(
         &state.web_db,
         &project,
         commit_hash.clone(),
-        Some(commit_message.clone()),
-        Some(author_name.clone()),
         None,
     )
     .await
