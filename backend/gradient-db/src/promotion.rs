@@ -181,15 +181,43 @@ pub async fn propagate_closure_complete<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Global self-heal fixpoint over `closure_complete`. `propagate_closure_complete`
-/// only fires on a fresh completion event, so anchors that completed under older
-/// code (e.g. before output-only substitution) sit at `closure_complete = false`
-/// forever and strand their dependents in `Created` with no error to trigger a
-/// reactive heal. Run at eval completion before promotion: each pass marks a
-/// layer of satisfied anchors, a freshly marked dep unblocks its dependents next
-/// pass, converging in O(longest unmarked chain). Converged graphs cost one
-/// zero-row statement.
+/// Bidirectional self-heal fixpoint over `closure_complete`.
+///
+/// `propagate_closure_complete` only fires on a fresh completion event, so
+/// anchors that completed under older code (e.g. before output-only
+/// substitution) sit at `closure_complete = false` forever and strand their
+/// dependents in `Created` with no error to trigger a reactive heal - the SET
+/// pass below heals those.
+///
+/// The flag is otherwise monotonic, which is itself unsound: once true it
+/// survives a closure member being demoted/evicted, or a dependency edge being
+/// recorded after the fact (a dependent instantiated before its dependency).
+/// The dispatch gate trusts `closure_complete` for direct deps, so a stale-true
+/// flag dispatches a build whose transitive closure is not actually cached -
+/// terminal `InputsUnavailable` on a tiny transitive output (e.g.
+/// `unit-*.service`). The CLEAR pass restores soundness: any anchor whose gate
+/// no longer holds (its output is uncached, a dependency regressed, or a newly
+/// recorded dependency is not itself complete) is reset to false. Clearing
+/// ripples up - a cleared dep fails its dependents' gate, cleared the next pass.
+///
+/// Run CLEAR to a fixpoint first (remove stale-true), then SET (mark genuinely
+/// satisfied), each converging in O(longest affected chain). A converged graph
+/// costs two zero-row statements.
 pub async fn reconcile_closure_complete<C: ConnectionTrait>(db: &C) -> Result<(), DbErr> {
+    let clear = format!(
+        "UPDATE derivation_build db SET closure_complete = false \
+         WHERE db.closure_complete AND NOT ({CLOSURE_COMPLETE_GATE})"
+    );
+    loop {
+        let changed = db
+            .execute(Statement::from_string(DatabaseBackend::Postgres, &clear))
+            .await?
+            .rows_affected();
+        if changed == 0 {
+            break;
+        }
+    }
+
     let update = format!(
         "UPDATE derivation_build db SET closure_complete = true \
          WHERE NOT db.closure_complete AND {CLOSURE_COMPLETE_GATE}"

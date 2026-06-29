@@ -266,6 +266,22 @@ A **substituted** anchor is deliberately *not* marked complete (we hold only its
 output NAR, not its build closure); dependents reach it through the `substitutable`
 arm instead.
 
+`propagate_closure_complete` only ever *sets* the flag, which is unsound on its
+own: the flag would then survive a closure member being demoted/evicted, or a
+dependency edge recorded after the anchor was already marked complete (a dependent
+instantiated before its dependency). A stale-true flag dispatches a build whose
+transitive closure is not actually cached - terminal `InputsUnavailable` on a tiny
+transitive output (e.g. `unit-*.service` reached through a direct dep). The
+**bidirectional** `reconcile_closure_complete` keeps the flag honest: a CLEAR
+fixpoint resets any anchor whose gate no longer holds (output uncached, a
+dependency regressed, or a newly recorded dependency not itself complete) before a
+SET fixpoint re-marks the genuinely satisfied. Both ripple over
+`derivation_dependency` and converge in O(longest affected chain); it runs at eval
+completion, graph-unstick, and the 5s dispatch tick so the gate below never reads a
+stale flag. The reactive `clear_closure_complete_for_referrers` (below) still fires
+on demote, but the periodic reconcile is the backstop that does not depend on the
+demote walk finding a not-yet-recorded edge.
+
 `promote_ready`, `promote_dependents`, and `dispatch_ready_builds` therefore gate
 each dependency on `(status IN (Completed, Substituted) AND closure_complete)`
 **or** `substitutable`. A `substitutable` anchor skips the dependency gate

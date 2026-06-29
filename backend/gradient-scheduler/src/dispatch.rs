@@ -379,6 +379,17 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
                 error!(error = %e, "periodic reconcile_drv_closure_cached failed");
             }
 
+            // `closure_complete` is monotonic per completion event, so a flag set
+            // before a transitive output landed (or kept after one was evicted)
+            // goes stale-true and the gate below dispatches a build whose closure
+            // is not really cached. Reconcile bidirectionally so the gate reads a
+            // sound flag this pass.
+            if let Err(e) =
+                gradient_db::reconcile_closure_complete(&scheduler.state.worker_db).await
+            {
+                error!(error = %e, "periodic reconcile_closure_complete failed");
+            }
+
             // Promotion is otherwise event-driven (promote_ready at eval
             // completion, promote_dependents at build completion), so a ready
             // anchor whose triggering event never fired - failed eval after its
