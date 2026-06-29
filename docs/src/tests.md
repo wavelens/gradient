@@ -489,6 +489,10 @@ Two latent bugs let a real build be dispatched for a derivation whose `.drv` was
 
 Both are shape/pure-function tests (no SQL execution): MockDatabase can't run the queries, so coverage mirrors the proven SQL + the `ActiveModel` field-clearing, with E2E CI exercising the live path.
 
+## Corrupt cached NAR self-heals instead of failing terminally
+
+A `cached_path` whose stored object bytes don't match its recorded `nar_hash` (object and metadata written by different producers - e.g. a non-reproducible local build desynced from upstream-substitute metadata, observed on `ruby3.4-delayed_job` whose embedded `.git/index` ctimes differed from cache.nixos.org's) made every consumer fail `prefetch import failed`, classified `transient`, retrying against the poison forever. The worker's NAR integrity check (`NarImporter::verify_hash`/`verify_size`) now raises a typed `CorruptCachedNar(path)`; the executor classifies it as `InputsUnavailable` with that path so `reconcile_missing_inputs` demotes the corrupt object and rebuilds the producer with consistent metadata. `backend/gradient-worker/src/proto/nar_import.rs`: `corrupt_cached_nar_survives_context_wrapping` asserts the typed error is recoverable from the anyhow chain after the loop's `.context(...)` wrapping, which is what the executor's `chain().find_map(downcast_ref)` relies on. The end-to-end demote+rebuild is exercised by E2E CI.
+
 ## Frontend - workers page no-cache banner
 
 When the active organization has no subscribed cache, the workers page shows

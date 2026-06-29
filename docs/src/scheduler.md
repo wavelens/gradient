@@ -286,6 +286,20 @@ demotes its direct **referrers** (`demote_referrers_of`) so a referrer rebuild
 re-pushes it. The migration backfills the flag to a fixpoint over the existing
 cache and resets any closure-incomplete terminal anchor so it rebuilds.
 
+A **corrupt cached NAR** feeds the same self-heal. The worker verifies every
+fetched input NAR against its recorded `nar_hash`/`nar_size` before importing it.
+A mismatch means the bytes in our object store do not match the metadata we sign
+and serve - the object and its `cached_path` row were written by different
+producers and desynced. This happens with non-reproducible builds: a path built
+locally (its NAR differs from upstream, e.g. an embedded `.git/index` ctime) can
+end up hosted under a `cached_path` whose hashes were recorded from an
+upstream-substitute relay, because object writes (presigned PUT) and metadata
+writes (`NarUploaded`) are independent. The worker reports the failing path as a
+`CorruptCachedNar`, which the executor classifies as `InputsUnavailable` (not a
+transient retry against poison), so `reconcile_missing_inputs` purges the bad
+object and rebuilds the producer with consistent metadata. Verify-on-read makes
+the cache self-correcting regardless of how a desync arose.
+
 An **orphan producer** is the third case: the missing leaf has a producing
 derivation, but that producer has no `build_job` (it was pruned out of the build
 graph because a referrer's output was cached without its closure under output-only

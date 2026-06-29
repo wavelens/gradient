@@ -447,14 +447,24 @@ impl JobExecutor {
                     );
                     // A "required inputs not in cache" miss is terminal and
                     // self-healing server-side: forward the paths so the server
-                    // demotes them and re-queues their producers. Every other
-                    // prefetch error is infrastructure-transient.
-                    match e.downcast_ref::<crate::proto::nar_import::MissingInputs>() {
-                        Some(mi) => crate::executor::build::BuildError::inputs_unavailable(
-                            mi.0.clone(),
+                    // demotes them and re-queues their producers. A cached NAR
+                    // that fails integrity (its bytes don't match the recorded
+                    // nar_hash, e.g. a non-reproducible local build desynced from
+                    // upstream-substitute metadata) is the same class: report the
+                    // path so the server demotes the corrupt object and rebuilds
+                    // it. Every other prefetch error is infrastructure-transient.
+                    if let Some(mi) = e.downcast_ref::<crate::proto::nar_import::MissingInputs>() {
+                        crate::executor::build::BuildError::inputs_unavailable(mi.0.clone(), e)
+                    } else if let Some(corrupt) = e
+                        .chain()
+                        .find_map(|s| s.downcast_ref::<crate::proto::nar_import::CorruptCachedNar>())
+                    {
+                        crate::executor::build::BuildError::inputs_unavailable(
+                            vec![corrupt.0.clone()],
                             e,
-                        ),
-                        None => crate::executor::build::BuildError::transient(e),
+                        )
+                    } else {
+                        crate::executor::build::BuildError::transient(e)
                     }
                 })?;
             let outputs = build::build_derivation(

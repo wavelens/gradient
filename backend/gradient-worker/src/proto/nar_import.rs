@@ -86,6 +86,28 @@ impl std::fmt::Display for MissingInputs {
 
 impl std::error::Error for MissingInputs {}
 
+/// A cached NAR we fetched fails its own recorded integrity (`nar_hash` /
+/// `nar_size`): the object bytes in our store do not match the metadata the
+/// server signs and serves. This happens when object and `cached_path` metadata
+/// are written by different producers (e.g. a non-reproducible local build vs an
+/// upstream substitute relay) and desync. The path is treated as a missing input
+/// so the server demotes the corrupt object and rebuilds it with consistent
+/// metadata, rather than retrying forever against poison.
+#[derive(Debug)]
+pub struct CorruptCachedNar(pub String);
+
+impl std::fmt::Display for CorruptCachedNar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "cached NAR for {} failed integrity verification (stored bytes do not match recorded nar_hash/nar_size)",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for CorruptCachedNar {}
+
 /// A substitute output is *genuinely* absent from every upstream cache (the
 /// CacheQuery Pull reported it uncached everywhere), as opposed to a transient
 /// timeout/transport failure during the relay. Only this case makes escalating
@@ -962,13 +984,16 @@ impl<'a> NarImporter<'a> {
         if let Some(expected) = self.meta.nar_size
             && decompressed.len() as u64 != expected
         {
-            anyhow::bail!(
-                "NAR size mismatch for {}: expected {}, got {}",
-                self.store_path,
-                expected,
-                decompressed.len()
-            );
+            return Err(anyhow::Error::new(CorruptCachedNar(self.store_path.to_owned())).context(
+                format!(
+                    "NAR size mismatch for {}: expected {}, got {}",
+                    self.store_path,
+                    expected,
+                    decompressed.len()
+                ),
+            ));
         }
+
         Ok(())
     }
 
@@ -979,13 +1004,14 @@ impl<'a> NarImporter<'a> {
                 .with_context(|| format!("invalid nar_hash for {}", self.store_path))?;
 
             if actual_nar_hash != claimed {
-                anyhow::bail!(
-                    "NAR hash mismatch for {}: server said {}, computed sha256:<...>",
-                    self.store_path,
-                    claimed_nar_hash
-                );
+                return Err(anyhow::Error::new(CorruptCachedNar(self.store_path.to_owned()))
+                    .context(format!(
+                        "NAR hash mismatch for {}: server said {}, computed sha256:<...>",
+                        self.store_path, claimed_nar_hash
+                    )));
             }
         }
+
         Ok(())
     }
 
@@ -1765,6 +1791,20 @@ mod tests {
             .downcast_ref::<MissingInputs>()
             .expect("MissingInputs survives anyhow boxing");
         assert_eq!(recovered.0, paths);
+    }
+
+    #[test]
+    fn corrupt_cached_nar_survives_context_wrapping() {
+        let path = "/nix/store/97v143jdvzv5rlvdi5jcjvy88czayn43-ruby3.4-delayed_job".to_string();
+        let err = anyhow::Error::new(CorruptCachedNar(path.clone()))
+            .context("import into local store")
+            .context("prefetch import failed");
+
+        let recovered = err
+            .chain()
+            .find_map(|s| s.downcast_ref::<CorruptCachedNar>())
+            .expect("CorruptCachedNar survives anyhow context wrapping");
+        assert_eq!(recovered.0, path);
     }
 
     #[test]
