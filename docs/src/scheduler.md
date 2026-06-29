@@ -83,6 +83,21 @@ sources, and fail `InputsUnavailable`; with the gate it waits for the walk to
 push them. A substitutable anchor needs no sources, since it fetches its outputs
 directly, so the gate skips it.
 
+Non-substitutable anchors are finally gated on `derivation_build.drv_closure_cached`,
+the `.drv`-closure analogue of `closure_complete`. A build worker cannot import a
+build target's `.drv` until the `.drv`'s full reference closure (every transitive
+input `.drv` plus its input sources) is in the cache - the daemon's
+`add_to_store_nar` rejects a NAR with absent references. The eval pushes those
+`.drv`s progressively, so without this gate a build dispatched mid-push fails
+terminal `InputsUnavailable` on a missing `.drv` (its own or a dependency's) - the
+dominant failure of large NixOS system-closure derivations. `reconcile_drv_closure_cached`
+(run in the dispatch tick, at eval completion, and during graph-unstick) marks an
+anchor once its own `.drv` is cached and every build dependency is itself
+`drv_closure_cached`; the recursion is independent of build/substitute status,
+since a substitutable dependency's `.drv` is still a structural reference of any
+dependent's `.drv`. A substitutable anchor itself substitutes its output and never
+imports its `.drv`, so the gate skips it.
+
 Because the anchor is global and build-once, a new evaluation is treated as a
 fresh build intent: `resolve_anchors` re-queues anchors a previous eval left
 terminal-failed, and the substitute-miss budget is scoped per evaluation. A

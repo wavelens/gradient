@@ -1028,6 +1028,10 @@ impl<'a> BuildStateHandler<'a> {
             error!(error = %e, %evaluation_id, "reconcile_closure_complete during graph-unstick failed");
         }
 
+        if let Err(e) = gradient_db::reconcile_drv_closure_cached(db).await {
+            error!(error = %e, %evaluation_id, "reconcile_drv_closure_cached during graph-unstick failed");
+        }
+
         match gradient_db::promote_ready(db).await {
             Ok(queued) => {
                 gradient_db::notify_build_status_for_derivations(&self.state.db(), &queued).await

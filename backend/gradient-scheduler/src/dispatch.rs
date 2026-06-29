@@ -370,6 +370,15 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
         if timer_tick {
             scheduler.job_tracker.write().await.bump_rescore_counts();
 
+            // The eval pushes `.drv`s progressively, so mark anchors whose full
+            // input-`.drv` closure has now landed before the promote/dispatch
+            // sweep gates on it. Bounded to the 5s timer (not reactive kicks).
+            if let Err(e) =
+                gradient_db::reconcile_drv_closure_cached(&scheduler.state.worker_db).await
+            {
+                error!(error = %e, "periodic reconcile_drv_closure_cached failed");
+            }
+
             // Promotion is otherwise event-driven (promote_ready at eval
             // completion, promote_dependents at build completion), so a ready
             // anchor whose triggering event never fired - failed eval after its
@@ -950,12 +959,14 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
     // Ready anchors: a global `derivation_build` is Queued, some `build_job`
     // still references its derivation (reachable from a surviving evaluation),
     // and either it is `substitutable` (its NAR is on an upstream cache, so it
-    // dispatches out of order with no dependency wait at all - #456) or every
-    // dependency is ready: terminal-success AND `closure_complete`, or itself
-    // `substitutable` (the worker fetches it from upstream on demand). The
-    // reachability check skips anchors left Queued after their last referencing
-    // eval was torn down, which have no driving evaluation to attribute the build
-    // to. Ordered by dependency count desc (integration builds first), then age.
+    // dispatches out of order with no dependency wait at all - #456) or all of:
+    // `drv_closure_cached` (the worker can import this `.drv` - its full input-
+    // `.drv` closure has been pushed, no longer racing the eval), every
+    // dependency ready (terminal-success AND `closure_complete`, or itself
+    // `substitutable`), and all input sources cached. The reachability check
+    // skips anchors left Queued after their last referencing eval was torn down,
+    // which have no driving evaluation to attribute the build to. Ordered by
+    // dependency count desc (integration builds first), then age.
     let anchors_sql = sea_orm::Statement::from_string(
         sea_orm::DbBackend::Postgres,
         format!(
@@ -970,7 +981,8 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
               AND (
                 db.substitutable
                 OR (
-                  NOT EXISTS (
+                  db.drv_closure_cached
+                  AND NOT EXISTS (
                       SELECT 1
                       FROM public.derivation_dependency dep_edge
                       WHERE dep_edge.derivation = db.derivation

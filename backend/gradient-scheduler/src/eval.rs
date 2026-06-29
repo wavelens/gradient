@@ -952,6 +952,12 @@ pub async fn handle_eval_job_completed(
         error!(error = %e, %evaluation_id, "reconcile_closure_complete failed");
     }
 
+    // Same self-heal for the input-`.drv` closure: mark anchors whose `.drv`s
+    // this eval just finished pushing so dispatch can release them.
+    if let Err(e) = gradient_db::reconcile_drv_closure_cached(&state.worker_db).await {
+        error!(error = %e, %evaluation_id, "reconcile_drv_closure_cached failed");
+    }
+
     // Seed the graph-driven promotion from its ready frontier: leaves and
     // anchors whose deps were already cached/substituted. Each subsequent
     // completion cascades upward.

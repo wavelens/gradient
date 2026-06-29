@@ -207,6 +207,52 @@ pub async fn reconcile_closure_complete<C: ConnectionTrait>(db: &C) -> Result<()
     Ok(())
 }
 
+/// `.drv`-closure gate for anchor `db`: its own `.drv` is cached (a `.drv`'s
+/// store-path hash is the derivation hash) and every build dependency is itself
+/// `drv_closure_cached`. The recursion mirrors `CLOSURE_COMPLETE_GATE` but tracks
+/// the build-INPUT `.drv` closure instead of the OUTPUT closure, and is
+/// independent of build/substitute status: a substitutable dependency's `.drv`
+/// is still a structural reference of any dependent's `.drv` and so must be
+/// cached for the dependent's import to succeed.
+const DRV_CLOSURE_CACHED_GATE: &str = r#"
+    db.edges_complete
+    AND EXISTS (
+        SELECT 1 FROM derivation d
+        JOIN cached_path cp ON cp.hash = d.hash
+        WHERE d.id = db.derivation AND cp.file_hash IS NOT NULL)
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation_dependency e
+        LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
+        WHERE e.derivation = db.derivation
+          AND (dep.derivation IS NULL OR NOT dep.drv_closure_cached))
+"#;
+
+/// Global self-heal fixpoint over `drv_closure_cached`. The eval pushes `.drv`s
+/// progressively as it resolves the graph, so this runs in the dispatch loop (and
+/// at eval completion / graph-unstick) to mark anchors whose full input-`.drv`
+/// closure has landed: each pass marks a layer (`.drv` cached + deps already
+/// marked), a freshly marked dep unblocks its dependents next pass, converging in
+/// O(longest unmarked chain). A converged graph costs one zero-row statement.
+/// Never cleared here - a `.drv` GC'd out from under a marked anchor is healed
+/// reactively by the worker's missing-input report, as with `closure_complete`.
+pub async fn reconcile_drv_closure_cached<C: ConnectionTrait>(db: &C) -> Result<(), DbErr> {
+    let update = format!(
+        "UPDATE derivation_build db SET drv_closure_cached = true \
+         WHERE NOT db.drv_closure_cached AND {DRV_CLOSURE_CACHED_GATE}"
+    );
+    loop {
+        let changed = db
+            .execute(Statement::from_string(DatabaseBackend::Postgres, &update))
+            .await?
+            .rows_affected();
+        if changed == 0 {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
 /// Recursively mark every dependent of `failed_derivation` `DependencyFailed`.
 /// Walks the global `derivation_dependency` graph upward: any non-terminal
 /// anchor (`Created`/`Queued`/`FailedTransient`) reachable from the failure can
