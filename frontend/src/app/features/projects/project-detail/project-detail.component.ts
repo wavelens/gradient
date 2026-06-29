@@ -24,7 +24,7 @@ import { EvalStatusBadgeComponent } from '@shared/components/eval-status-badge/e
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectProjectAccess } from '@core/resolvers/inject-access';
 import { ProjectDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, BuildStatusCounts } from '@core/models';
-import { formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
+import { commitLabel, evaluationTitle, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
 
 @Component({
@@ -286,8 +286,10 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     return formatEvaluationDuration(ms);
   }
 
+  readonly commitLabel = commitLabel;
+
   evalTitle(e: EvaluationSummary): string {
-    return e.commit_message ?? e.commit.substring(0, 8);
+    return evaluationTitle(e);
   }
 
   triggerLabel(e: EvaluationSummary): string {

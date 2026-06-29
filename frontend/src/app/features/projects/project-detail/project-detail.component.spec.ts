@@ -168,13 +168,13 @@ describe('ProjectDetailComponent - in-progress state (#452)', () => {
 
   it('shows the eval status badge in the title while in progress', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Building' });
-    const badge = fixture.nativeElement.querySelector('.title-row app-eval-status-badge');
+    const badge = fixture.nativeElement.querySelector('.title-line app-eval-status-badge');
     expect(badge).toBeTruthy();
   });
 
   it('hides the title badge when the latest evaluation is terminal', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, { primaryStatus: 'Completed' });
-    expect(fixture.nativeElement.querySelector('.title-row app-eval-status-badge')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.title-line app-eval-status-badge')).toBeNull();
   });
 });
 

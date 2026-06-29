@@ -176,7 +176,7 @@
           </div>
           <div class="info-metric">
             <span class="metric-label">Commit</span>
-            <code class="commit-hash" [title]="ev.commit || ''">{{ (ev.commit || '').slice(0, 8) }}</code>
+            <code class="commit-hash" [title]="ev.commit || ''">{{ commitLabel(ev.commit) }}</code>
           </div>
           <div class="info-metric nav-btns">
             <button pButton icon="pi pi-arrow-left" severity="secondary" size="small"

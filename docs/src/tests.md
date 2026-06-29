@@ -5066,6 +5066,12 @@ Frontend (`**/action-form.component.spec.ts`):
   `eventsHardwired()` and submits `events: []`; the UI shows no event selector
   (the action fires on the verify gate, not user-chosen events).
 
+Frontend (`src/app/shared/evaluation/commit.spec.ts`):
+- `commitLabel` / `evaluationTitle` - a blank commit (an `input_update` eval before
+  its generated `flake.lock` is pushed) renders the `[unknown]` placeholder instead
+  of empty space in the project-detail strip and evaluation-log header, and falls
+  back to the short hash or commit message when those are present.
+
 ## Gradient build end-to-end + nix fast paths (#422)
 
 Fixes two blocking bugs in `gradient build` (the CLI decoded a successful blob

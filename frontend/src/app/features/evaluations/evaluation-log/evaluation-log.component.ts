@@ -37,7 +37,7 @@ import { OrganizationsService } from '@core/services/organizations.service';
 import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
+import { commitLabel, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { ButtonModule } from 'primeng/button';
 import { environment } from '@environments/environment';
 
@@ -1312,6 +1312,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   isWorkersWaiting(reason: WaitingReason | undefined): boolean {
     return reason?.kind === 'workers';
   }
+
+  readonly commitLabel = commitLabel;
 
   getTriggerLabel(type: TriggerType | null): string {
     switch (type) {

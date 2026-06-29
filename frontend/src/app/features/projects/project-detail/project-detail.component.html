@@ -94,7 +94,7 @@
                     }
                   </div>
                   <div class="sub">
-                    <span class="mono" [title]="sel.commit">{{ sel.commit.substring(0, 8) }}</span> ·
+                    <span class="mono" [title]="sel.commit">{{ commitLabel(sel.commit) }}</span> ·
                     {{ triggerLabel(sel) }} · started {{ sel.created_at + 'Z' | date: 'MMM d, HH:mm' }}
                   </div>
                 </div>
