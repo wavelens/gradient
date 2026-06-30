@@ -865,10 +865,6 @@ pub async fn relay_external_cached_outputs(
 
         let kind = meta.url.as_deref().map(detect_compression).unwrap_or(Compression::Zstd);
 
-        let put_url = push
-            .get(path)
-            .and_then(|c| c.url.clone())
-            .ok_or_else(|| anyhow::anyhow!("no presigned PUT url for {path}"))?;
         // Upstream references arrive as full /nix/store paths; NarUploaded wants
         // hash-name tokens.
         let references: Vec<String> = meta
@@ -887,17 +883,37 @@ pub async fn relay_external_cached_outputs(
             .then(|| Some((meta.file_hash.clone()?, meta.nar_hash.clone()?, meta.nar_size?)))
             .flatten();
 
-        if let Some((file_hash, nar_hash, nar_size)) = verbatim {
-            crate::proto::nar::upload_presigned_compressed(
+        let (bytes, cmeta) = if let Some((file_hash, nar_hash, nar_size)) = verbatim {
+            let file_size = compressed.len() as u64;
+            (
+                compressed,
+                crate::proto::nar::CompressedNarMeta { file_hash, file_size, nar_hash, nar_size },
+            )
+        } else {
+            // Weaker/absent upstream compression: decompress (verifying against
+            // the upstream nar_hash) and recompress at our level-6 threshold.
+            let raw = decompress(&compressed, kind)
+                .with_context(|| format!("{kind:?} decompress for {path}"))?;
+            if let Some(claimed) = meta.nar_hash.as_deref() {
+                let actual: [u8; 32] = Sha256::digest(&raw).into();
+                let want = parse_nar_hash_to_bytes(claimed)
+                    .with_context(|| format!("invalid upstream nar_hash for {path}"))?;
+                if actual != want {
+                    anyhow::bail!("upstream NAR hash mismatch for {path}");
+                }
+            }
+            crate::proto::nar::compress_nar(&raw)
+                .with_context(|| format!("recompress relay NAR for {path}"))?
+        };
+
+        // Transport: S3-backed caches expose a presigned PUT URL; local-disk
+        // caches return none and accept the bytes via direct NarPush frames.
+        match push.get(path).and_then(|c| c.url.clone()) {
+            Some(put_url) => crate::proto::nar::upload_presigned_compressed(
                 &updater.job_id,
                 path,
-                &compressed,
-                crate::proto::nar::CompressedNarMeta {
-                    file_hash,
-                    file_size: compressed.len() as u64,
-                    nar_hash,
-                    nar_size,
-                },
+                &bytes,
+                cmeta,
                 references,
                 meta.deriver.clone(),
                 &put_url,
@@ -905,38 +921,19 @@ pub async fn relay_external_cached_outputs(
                 &[],
                 &updater.writer,
             )
-            .await
-            .with_context(|| format!("relay-push {path} into our cache"))?;
-
-            debug!(%path, "relayed substitute NAR verbatim into our cache");
-            continue;
+            .await,
+            None => crate::proto::nar::push_compressed_direct(
+                &updater.job_id,
+                path,
+                &bytes,
+                cmeta,
+                references,
+                meta.deriver.clone(),
+                &updater.writer,
+                &updater.nar_recv,
+            )
+            .await,
         }
-
-        // Weaker/absent upstream compression: decompress (verifying against the
-        // upstream nar_hash) and let upload_presigned_bytes recompress at level 6.
-        let raw = decompress(&compressed, kind)
-            .with_context(|| format!("{kind:?} decompress for {path}"))?;
-        if let Some(claimed) = meta.nar_hash.as_deref() {
-            let actual: [u8; 32] = Sha256::digest(&raw).into();
-            let want = parse_nar_hash_to_bytes(claimed)
-                .with_context(|| format!("invalid upstream nar_hash for {path}"))?;
-            if actual != want {
-                anyhow::bail!("upstream NAR hash mismatch for {path}");
-            }
-        }
-
-        crate::proto::nar::upload_presigned_bytes(
-            &updater.job_id,
-            path,
-            &raw,
-            references,
-            meta.deriver.clone(),
-            &put_url,
-            "PUT",
-            &[],
-            &updater.writer,
-        )
-        .await
         .with_context(|| format!("relay-push {path} into our cache"))?;
 
         debug!(%path, "relayed substitute NAR into our cache");

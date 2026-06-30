@@ -787,6 +787,27 @@ Backend (`cargo test -p worker --bins proto::nar::tests`):
 - `upload_presigned_fails_when_path_meta_unavailable` - same contract for
   the S3 / presigned-PUT branch.
 
+## Substitute relay - direct fallback for local-disk caches
+
+A substitutable build (`external_cached`) relays its outputs into our cache by
+downloading each NAR from upstream and pushing it back. The push asked the
+server for a presigned PUT URL (`CacheQuery {Push}`) and hard-failed `no
+presigned PUT url for <path>` when none came back - but `presigned_put_url`
+returns `None` by design for local-disk stores (they accept direct `NarPush`
+frames), so on a non-S3 cache every substitutable output (e.g. a `-source`
+patch like `CVE-2023-39810.patch`) broke. The relay now mirrors `upload_one_nar`:
+it branches on `push.url`, using a presigned PUT when present and the new
+`nar::push_compressed_direct` (streaming the already-compressed bytes over the
+WebSocket, same resume handshake as `push_direct`) when absent. Shared
+`nar::compress_nar` produces the compressed bytes + metadata for either
+transport, replacing `upload_presigned_bytes`.
+
+Backend (`cargo test -p worker --bins proto::nar::tests`):
+- `push_compressed_direct_streams_bytes_and_confirms` - an in-memory compressed
+  NAR with no presigned URL reaches the server as `NarPush` chunks that
+  reconstruct the bytes verbatim, followed by a `NarUploaded` carrying the
+  supplied compressed/uncompressed metadata and references.
+
 ## Resumable NAR transfers (#225)
 
 Interrupted NAR transfers resume from a byte offset instead of restarting
