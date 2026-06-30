@@ -309,23 +309,11 @@ pub struct CompressedNarMeta {
     pub nar_size: u64,
 }
 
-/// Upload an already-in-memory raw NAR (e.g. relayed from an upstream
-/// substituter) to the presigned `url`: zstd-compress it at level 6, then hand
-/// off to [`upload_presigned_compressed`]. Used when the upstream payload's
-/// compression is weaker than our level-6 window (or absent) and must be
-/// re-encoded before storing.
-#[allow(clippy::too_many_arguments)]
-pub async fn upload_presigned_bytes(
-    job_id: &str,
-    store_path: &str,
-    raw_nar: &[u8],
-    references: Vec<String>,
-    deriver: Option<String>,
-    url: &str,
-    method: &str,
-    headers: &[(String, String)],
-    writer: &ProtoWriter,
-) -> Result<()> {
+/// Zstd-compress a raw in-memory NAR at level 6 and return the compressed bytes
+/// plus their [`CompressedNarMeta`] (`file_*` describe the compressed object,
+/// `nar_*` the uncompressed NAR). Shared by the presigned and direct relay
+/// paths so a substituted output is stored identically over either transport.
+pub fn compress_nar(raw_nar: &[u8]) -> Result<(Vec<u8>, CompressedNarMeta)> {
     let nar_size = raw_nar.len() as u64;
     let nar_hash = format!("sha256:{}", nix32_encode(&Sha256::digest(raw_nar)));
 
@@ -333,27 +321,18 @@ pub async fn upload_presigned_bytes(
         .context("failed to create zstd encoder")?;
     encoder.write_all(raw_nar).context("zstd compression failed")?;
     let compressed = encoder.finish().context("failed to finish zstd encoder")?;
+
     let file_size = compressed.len() as u64;
     let file_hash = format!("sha256:{}", nix32_encode(&Sha256::digest(&compressed)));
-
-    upload_presigned_compressed(
-        job_id,
-        store_path,
-        &compressed,
+    Ok((
+        compressed,
         CompressedNarMeta {
             file_hash,
             file_size,
             nar_hash,
             nar_size,
         },
-        references,
-        deriver,
-        url,
-        method,
-        headers,
-        writer,
-    )
-    .await
+    ))
 }
 
 /// PUT an already-compressed NAR to the presigned `url` verbatim and confirm
@@ -414,6 +393,80 @@ pub async fn upload_presigned_compressed(
         file_size = meta.file_size,
         nar_size = meta.nar_size,
         "relayed NAR upload complete"
+    );
+    Ok(())
+}
+
+/// Stream an already-compressed in-memory NAR to the server via chunked
+/// [`ClientMessage::NarPush`] frames and confirm with [`ClientMessage::NarUploaded`].
+///
+/// The WebSocket counterpart of [`upload_presigned_compressed`]: used by the
+/// substitute relay when the cache is local-disk and the server returns no
+/// presigned PUT URL, so a substituted output is still mirrored into our cache
+/// without a nix-store import. Uses the same resume handshake as [`push_direct`].
+#[allow(clippy::too_many_arguments)]
+pub async fn push_compressed_direct(
+    job_id: &str,
+    store_path: &str,
+    compressed: &[u8],
+    meta: CompressedNarMeta,
+    references: Vec<String>,
+    deriver: Option<String>,
+    writer: &ProtoWriter,
+    nar_recv: &NarReceiver,
+) -> Result<()> {
+    let store_path = ensure_full_store_path(store_path);
+    let store_path = store_path.as_str();
+    debug!(store_path, bytes = compressed.len(), "compressed NAR direct push");
+
+    let token = push_stream_token(6);
+    let gate = nar_recv.register_push(job_id, store_path);
+    writer.send(ClientMessage::NarStreamHeader {
+        job_id: job_id.to_owned(),
+        store_path: store_path.to_owned(),
+        total_bytes: Some(compressed.len() as u64),
+        stream_token: token,
+    })?;
+    let resume_from = gate.await_resume().await;
+
+    let mut produced: u64 = 0;
+    for part in compressed.chunks(NAR_CHUNK_SIZE) {
+        if let Some((offset, range)) = trim_for_resume(part.len(), produced, resume_from) {
+            writer.send(ClientMessage::NarPush {
+                job_id: job_id.to_owned(),
+                store_path: store_path.to_owned(),
+                data: part[range].to_vec(),
+                offset,
+                is_final: false,
+            })?;
+        }
+        produced += part.len() as u64;
+    }
+
+    writer.send(ClientMessage::NarPush {
+        job_id: job_id.to_owned(),
+        store_path: store_path.to_owned(),
+        data: vec![],
+        offset: produced,
+        is_final: true,
+    })?;
+
+    writer.send(ClientMessage::NarUploaded {
+        job_id: job_id.to_owned(),
+        store_path: store_path.to_owned(),
+        file_hash: meta.file_hash,
+        file_size: meta.file_size,
+        nar_size: meta.nar_size,
+        nar_hash: meta.nar_hash,
+        references,
+        deriver,
+    })?;
+
+    debug!(
+        store_path,
+        compressed_bytes = produced,
+        resumed_from = resume_from,
+        "compressed NAR direct push complete"
     );
     Ok(())
 }
@@ -854,5 +907,80 @@ mod tests {
             "error should explain the abort reason, got: {err}"
         );
         let _ = std::fs::remove_dir_all(&store_path);
+    }
+
+    /// Relay fallback for local-disk caches (no presigned PUT URL): an
+    /// already-compressed in-memory NAR must reach the server as `NarPush`
+    /// chunks that reconstruct the bytes verbatim, followed by a `NarUploaded`
+    /// carrying the supplied compressed/uncompressed metadata.
+    #[tokio::test]
+    async fn push_compressed_direct_streams_bytes_and_confirms() {
+        let raw = b"relayed substitute nar payload";
+        let mut encoder = zstd::stream::Encoder::new(Vec::new(), 6).unwrap();
+        encoder.write_all(raw).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let meta = CompressedNarMeta {
+            file_hash: format!("sha256:{}", nix32_encode(&Sha256::digest(&compressed))),
+            file_size: compressed.len() as u64,
+            nar_hash: format!("sha256:{}", nix32_encode(&Sha256::digest(raw))),
+            nar_size: raw.len() as u64,
+        };
+
+        let store_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-relay";
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+
+        let expected_bytes = compressed.clone();
+        let expected_file_hash = meta.file_hash.clone();
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            let mut data: Vec<u8> = Vec::new();
+            loop {
+                match sc.recv().await.unwrap() {
+                    ClientMessage::NarStreamHeader { .. } => continue,
+                    ClientMessage::NarPush { data: chunk, .. } => data.extend_from_slice(&chunk),
+                    ClientMessage::NarUploaded {
+                        store_path: sp,
+                        file_hash,
+                        file_size,
+                        nar_size,
+                        references,
+                        ..
+                    } => {
+                        assert_eq!(data, expected_bytes, "streamed bytes must reconstruct the compressed NAR");
+                        assert_eq!(sp, store_path);
+                        assert_eq!(file_hash, expected_file_hash);
+                        assert_eq!(file_size, expected_bytes.len() as u64);
+                        assert_eq!(nar_size, raw.len() as u64);
+                        assert_eq!(references, vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()]);
+                        break;
+                    }
+                    msg => panic!("unexpected {msg:?}"),
+                }
+            }
+        });
+
+        let conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        let (writer, _reader) = conn.split();
+        let recv = NarReceiver::new();
+        let recv2 = recv.clone();
+        let push = tokio::spawn(async move {
+            push_compressed_direct(
+                "job-relay",
+                store_path,
+                &compressed,
+                meta,
+                vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()],
+                None,
+                &writer,
+                &recv2,
+            )
+            .await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        recv.resolve_push("job-relay", store_path, 0);
+        push.await.unwrap().unwrap();
+        server_task.await.unwrap();
     }
 }
