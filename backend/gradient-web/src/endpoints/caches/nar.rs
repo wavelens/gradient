@@ -9,7 +9,7 @@ use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_sources::get_hash_from_url;
@@ -55,6 +55,7 @@ pub async fn upstream_nar(
     OptionalPeer(peer): OptionalPeer,
     headers: HeaderMap,
     Path((cache_name, upstream_id, path)): Path<(String, Uuid, String)>,
+    RawQuery(query): RawQuery,
 ) -> WebResult<Response> {
     let client_ip = cache_client_ip(&state, &headers, peer);
     let ctx = CacheContext::load(&state, &headers, client_ip, cache_name).await?;
@@ -69,7 +70,7 @@ pub async fn upstream_nar(
         .url
         .ok_or_else(|| WebError::bad_request("Not an external upstream"))?;
 
-    let bytes = fetch_upstream_nar(&state.http, &base_url, &path).await?;
+    let bytes = fetch_upstream_nar(&state.http, &base_url, &path, query.as_deref()).await?;
 
     Response::builder()
         .header(
@@ -146,12 +147,25 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheI
     });
 }
 
+/// Reconstruct the upstream NAR URL. The narinfo we re-served kept the upstream's
+/// own URL query (e.g. hash-routed caches like `cache.nixos-cuda.org` require
+/// `?hash=<storehash>` to resolve the out-hash), but axum's `{*path}` capture
+/// drops the query - so a missing forward made the upstream 404 a NAR it has.
+fn build_upstream_nar_url(base_url: &str, path: &str, query: Option<&str>) -> String {
+    let url = format!("{}/{}", base_url.trim_end_matches('/'), path);
+    match query {
+        Some(q) if !q.is_empty() => format!("{url}?{q}"),
+        _ => url,
+    }
+}
+
 async fn fetch_upstream_nar(
     http: &reqwest::Client,
     base_url: &str,
     path: &str,
+    query: Option<&str>,
 ) -> WebResult<bytes::Bytes> {
-    let nar_url = format!("{}/{}", base_url.trim_end_matches('/'), path);
+    let nar_url = build_upstream_nar_url(base_url, path, query);
     let resp = http
         .get(&nar_url)
         .send()
@@ -224,6 +238,25 @@ mod tests {
             .block_on(resolve_effective_hash_db(&db, FILE_HASH_NIX32))
             .expect("resolve should succeed");
         assert_eq!(effective, FILE_HASH_NIX32);
+    }
+
+    /// A hash-routed upstream (e.g. `cache.nixos-cuda.org`) needs the
+    /// `?hash=<storehash>` query the re-served narinfo carried; dropping it 404s a
+    /// NAR the upstream has.
+    #[test]
+    fn upstream_nar_url_forwards_query_string() {
+        assert_eq!(
+            build_upstream_nar_url("https://cache.nixos-cuda.org", "nar/0njia.nar", Some("hash=6713ipl")),
+            "https://cache.nixos-cuda.org/nar/0njia.nar?hash=6713ipl"
+        );
+        assert_eq!(
+            build_upstream_nar_url("https://up/", "nar/x.nar", None),
+            "https://up/nar/x.nar"
+        );
+        assert_eq!(
+            build_upstream_nar_url("https://up", "nar/x.nar", Some("")),
+            "https://up/nar/x.nar"
+        );
     }
 
     /// Rows uploaded while issue #132's BLAKE3 default was active carry
