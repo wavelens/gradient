@@ -115,3 +115,28 @@ fn cache_tier_does_not_throttle_moderate_burst() {
         }
     });
 }
+
+/// The cache-scoped proto WS upgrade shares the generous NAR-download tier
+/// (burst 3000), so 250 rapid upgrade attempts against `/cache/{cache}/proto`
+/// are never rejected with 429. The handler rejects the non-upgrade GET
+/// downstream, but reaching it proves the per-IP limiter let the request pass.
+#[test]
+fn cache_proto_tier_does_not_throttle_burst() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let server = TestServer::new(create_router(make_state()));
+
+        for i in 1..=250 {
+            let resp = server.get("/cache/missing-cache/proto").await;
+            assert_ne!(
+                resp.status_code(),
+                429,
+                "cache proto request {} unexpectedly throttled",
+                i
+            );
+        }
+    });
+}

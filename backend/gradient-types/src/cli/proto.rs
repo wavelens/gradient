@@ -53,14 +53,6 @@ pub struct ProtoArgs {
     )]
     pub anon_max_connections_per_ip: usize,
 
-    /// Sustained request rate (per second) allowed for an anonymous session.
-    #[arg(long, env = "GRADIENT_PROTO_ANON_RATE_PER_SECOND", default_value_t = 20)]
-    pub anon_rate_per_second: u32,
-
-    /// Burst capacity for the anonymous session token bucket.
-    #[arg(long, env = "GRADIENT_PROTO_ANON_RATE_BURST", default_value_t = 200)]
-    pub anon_rate_burst: u32,
-
     /// Maximum time the server will wait to open a NAR object stream
     /// (e.g. S3 GET) before giving up and emitting `NarUnavailable`. A stalled
     /// backend used to silently block the dispatch loop until the worker's
@@ -143,8 +135,6 @@ impl Default for ProtoArgs {
             global_stats_public: false,
             allow_anonymous_cache: true,
             anon_max_connections_per_ip: 32,
-            anon_rate_per_second: 20,
-            anon_rate_burst: 200,
             nar_storage_open_timeout_secs: 60,
             nar_send_chunk_timeout_secs: 30,
             max_concurrent_nar_serves: 8,

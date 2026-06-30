@@ -760,18 +760,6 @@ in {
           default = 32;
         };
 
-        anonRatePerSecond = lib.mkOption {
-          description = "Sustained request rate (per second) allowed for an anonymous proto session";
-          type = lib.types.ints.positive;
-          default = 20;
-        };
-
-        anonRateBurst = lib.mkOption {
-          description = "Burst capacity for the anonymous proto session token bucket";
-          type = lib.types.ints.positive;
-          default = 200;
-        };
-
         prCommitName = lib.mkOption {
           description = "Git author and committer name used for the bot commits Gradient creates when opening pull requests via an `open_pr` action.";
           type = lib.types.str;
@@ -921,8 +909,6 @@ in {
         GRADIENT_WORKER_HEARTBEAT_TIMEOUT_SECS = toString cfg.settings.workerHeartbeatTimeoutSecs;
         GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE = lib.boolToString cfg.settings.allowAnonymousCache;
         GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP = toString cfg.settings.anonMaxConnectionsPerIp;
-        GRADIENT_PROTO_ANON_RATE_PER_SECOND = toString cfg.settings.anonRatePerSecond;
-        GRADIENT_PROTO_ANON_RATE_BURST = toString cfg.settings.anonRateBurst;
         GRADIENT_PR_COMMIT_NAME = cfg.settings.prCommitName;
         GRADIENT_PR_COMMIT_EMAIL = cfg.settings.prCommitEmail;
         GRADIENT_LOCAL_IPS = builtins.concatStringsSep "," cfg.settings.localIps;

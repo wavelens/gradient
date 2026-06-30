@@ -1855,8 +1855,12 @@ fixed tiers (no CLI knobs):
 |---|---|---|---|
 | `auth` | `/api/v1/auth/{basic/login,basic/register,check-username,verify-email,resend-verification,oauth/authorize,oidc/login,oidc/callback}` | 1 req / 6 s | 5 |
 | `webhook` | `/api/v1/hooks/...` | 1 req / s | 30 |
-| `cache` | `/cache/{cache}/...` (public NAR surface) | 1 req / 60 ms | 1000 |
+| `cache` | `/cache/{cache}/...` (public NAR surface) and `/cache/{cache}/proto` (WS upgrade) | 1 req / 20 ms | 3000 |
+| `cache-inspect` | `/cache/{cache}/{ls,serve}/...` | 1 req / 333 ms | 180 |
+| `cache-log` | `/cache/{cache}/log/{drv}` | 1 req / 333 ms | 900 |
 | `default` | everything else under `/api/v1` and `/proto` | 1 req / 200 ms | 150 |
+
+The limiter keys solely on client IP: authenticated and anonymous cache requests share the same per-IP tier. The cache proto WS upgrade is pinned to the NAR-download tier; its concurrent fan-out is separately capped by `GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP`.
 
 Client IP is extracted from `X-Forwarded-For` / `X-Real-IP` (deployments
 are expected behind a reverse proxy), falling back to `ConnectInfo`,
@@ -1869,6 +1873,9 @@ Tests (`cargo test -p web --test rate_limit`):
   requests succeed, 6th returns `429`.
 - `cache_tier_does_not_throttle_moderate_burst` - 50 successive GETs to
   `/cache/{cache}/nix-cache-info` never return `429`.
+- `cache_proto_tier_does_not_throttle_burst` - 250 successive GETs to
+  `/cache/{cache}/proto` never return `429`, proving the upgrade shares the
+  generous NAR-download tier (burst 3000).
 
 ## Outgoing webhook URL - SSRF validation
 

@@ -1500,9 +1500,7 @@ To prevent abuse from unauthenticated callers, anonymous sessions on public cach
 | Env var | Default | Description |
 |---|---|---|
 | `GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP` | `32` | Maximum simultaneous open WebSocket connections per source IP |
-| `GRADIENT_PROTO_ANON_RATE_PER_SECOND` | `20` | Token-bucket refill rate (messages per second) |
-| `GRADIENT_PROTO_ANON_RATE_BURST` | `200` | Token-bucket burst capacity |
 
-Connections that exceed `GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP` receive `503 Service Unavailable` on the HTTP upgrade. Messages that exceed the rate limit are dropped and the connection is closed.
+Connections that exceed `GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP` receive `503 Service Unavailable` on the HTTP upgrade. The upgrade request itself is per-IP rate-limited on the same generous token-bucket tier as the NAR-download cache surface (~50 req/s, burst 3000).
 
 Authenticated sessions (PRIVATE caches with a valid API key) are not subject to the per-IP anonymous caps. **Every** cache-proto session - anonymous or authenticated - additionally counts against the global `/proto` connection semaphore (`GRADIENT_MAX_PROTO_CONNECTIONS`); once it is exhausted the upgrade is rejected with `503`. A session with no NAR transfer in flight is closed after 120 s of inactivity so a silent peer cannot pin a connection slot.

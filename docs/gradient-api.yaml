@@ -35,15 +35,18 @@ info:
 
     ## Rate limiting
 
-    All HTTP endpoints enforce a per-client-IP token-bucket rate limit. Clients
-    that exceed their bucket receive HTTP `429 Too Many Requests`. The tier
-    depends on the route:
+    All HTTP endpoints enforce a per-client-IP token-bucket rate limit. The
+    limiter keys solely on client IP, so authenticated and anonymous requests
+    share the same tier. Clients that exceed their bucket receive HTTP
+    `429 Too Many Requests`. The tier depends on the route:
 
     | Tier | Routes | Refill | Burst |
     |---|---|---|---|
     | auth | `/auth/basic/login`, `/auth/basic/register`, `/auth/check-username`, `/auth/verify-email`, `/auth/resend-verification`, `/auth/oauth/*`, `/auth/oidc/*` | 1 req / 6 s | 5 |
     | webhook | `/hooks/*` | 1 req / s | 30 |
-    | cache | `/cache/{cache}/*` (public NAR surface) | 1 req / 60 ms | 1000 |
+    | cache | `/cache/{cache}/*` (public NAR surface) and `/cache/{cache}/proto` | 1 req / 20 ms | 3000 |
+    | cache-inspect | `/cache/{cache}/{ls,serve}/*` | 1 req / 333 ms | 180 |
+    | cache-log | `/cache/{cache}/log/*` | 1 req / 333 ms | 900 |
     | default | everything else | 1 req / 200 ms | 150 |
 
     Client IP is taken from `X-Forwarded-For` / `X-Real-IP` (deployments are
@@ -5982,7 +5985,7 @@ paths:
 
       | Endpoint | Description |
       |---|---|
-      | `GET /cache/{cache}/proto` | WebSocket upgrade carrying rkyv-encoded binary frames (same wire format as `/proto`). Read-only, cache-scoped. PUBLIC caches allow anonymous connections (governed by `GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE`, default `true`); PRIVATE caches require `Authorization: GRAD<key>`. Anonymous sessions are subject to per-IP connection and rate caps (`GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP`, `GRADIENT_PROTO_ANON_RATE_PER_SECOND`, `GRADIENT_PROTO_ANON_RATE_BURST`). Only `CacheQuery` (Normal/Pull modes) and `NarRequest` messages are accepted; Push, job RPCs, and worker registration are rejected. |
+      | `GET /cache/{cache}/proto` | WebSocket upgrade carrying rkyv-encoded binary frames (same wire format as `/proto`). Read-only, cache-scoped. PUBLIC caches allow anonymous connections (governed by `GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE`, default `true`); PRIVATE caches require `Authorization: GRAD<key>`. Anonymous sessions are capped per IP by `GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP`; the upgrade request shares the NAR-download cache rate-limit tier. Only `CacheQuery` (Normal/Pull modes) and `NarRequest` messages are accepted; Push, job RPCs, and worker registration are rejected. |
 
       ### Inspection surface
 

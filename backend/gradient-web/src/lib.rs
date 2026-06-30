@@ -678,7 +678,9 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     }
 
     // Public NAR cache surface - substituters issue many requests per build,
-    // so the burst is generous (1000 / 1000).
+    // so the limit is generous: ~50 req/s sustained, burst 3000. The
+    // cache-scoped proto WS upgrade shares this same tier.
+    let nar_cache_limit = || rl_per_ms(20, 3000);
     let cache_routes = Router::new()
         .route(
             "/cache/{cache}/gradient-cache-info",
@@ -691,20 +693,21 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(caches::upstream_nar),
         )
         .route("/cache/{cache}/nar/{path}", get(caches::nar))
-        .route_layer(GovernorLayer::new(rl_per_ms(60, 1000)));
+        .route_layer(GovernorLayer::new(nar_cache_limit()));
 
     let cache_inspect = Router::new()
         .route("/cache/{cache}/ls/{hash}", get(caches::ls))
         .route("/cache/{cache}/serve/{hash}/{*path}", get(caches::serve))
-        .route_layer(GovernorLayer::new(rl_per_second(1, 60)));
+        .route_layer(GovernorLayer::new(rl_per_ms(333, 180)));
 
     let cache_log = Router::new()
         .route("/cache/{cache}/log/{drv}", get(caches::log))
-        .route_layer(GovernorLayer::new(rl_per_second(1, 300)));
+        .route_layer(GovernorLayer::new(rl_per_ms(333, 900)));
 
     // Cache-scoped read-only proto WebSocket. `authorize_optional` populates
     // MaybeUser/MaybeApiKey/ClientIp so the handler can authorize anon→public
-    // and key→private (respecting cache_pin) and cap anonymous fan-out per IP.
+    // and key→private (respecting cache_pin). Per-IP fan-out is bounded by the
+    // concurrent-connection cap below; the upgrade shares the NAR-download tier.
     let cache_per_ip = Arc::new(PerIpLimiter::new(
         state.config.proto.anon_max_connections_per_ip,
     ));
@@ -714,10 +717,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             Arc::clone(&state),
             authorization::authorize_optional,
         ))
-        .route_layer(GovernorLayer::new(rl_per_second(
-            state.config.proto.anon_rate_per_second as u64,
-            state.config.proto.anon_rate_burst,
-        )))
+        .route_layer(GovernorLayer::new(nar_cache_limit()))
         .layer(axum::Extension(cache_per_ip))
         .layer(axum::Extension(Arc::clone(&proto_limiter)));
 
