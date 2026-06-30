@@ -313,6 +313,54 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
     Ok(returned_derivations(rows))
 }
 
+/// Global proactive mirror of [`cascade_dependency_failed`]. The reactive cascade
+/// fires only on a fresh terminal-failure *transition*, so it cannot reach an
+/// anchor that becomes non-terminal **after** its dependency already failed:
+/// `requeue_failed_anchors` / `requeue_failed_closure_for_eval` thaw a dependent
+/// back to `Created` without re-checking its (still-failed) dependency, and a
+/// concurrent eval can re-fail a dependency after the dependent was thawed. Such a
+/// dependent can never build, yet sits `Created`/`Queued`/`FailedTransient`
+/// forever - the dispatch gate holds it (its dep is not terminal-success) and
+/// `check_evaluation_done` never finalizes its evaluation. This sweep walks
+/// `derivation_dependency` upward from every terminal-failed anchor and fails each
+/// reachable non-terminal anchor in one statement (the recursive term traverses
+/// the graph structurally, so a whole poisoned subtree converges per pass). It is
+/// the failure-side counterpart of the [`promote_ready`] success-side backstop.
+/// Returns the derivations it failed so the caller can fan out the CI status and
+/// finalize the now-settled evaluations.
+pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
+    db: &C,
+) -> Result<Vec<DerivationId>, DbErr> {
+    let rows = db
+        .query_all(Statement::from_string(
+            DatabaseBackend::Postgres,
+            DEPENDENCY_FAILED_RECONCILE_SQL.to_string(),
+        ))
+        .await?;
+
+    Ok(returned_derivations(rows))
+}
+
+/// Recursive upward walk from every terminal-failed anchor (`FailedPermanent=4`/
+/// `DependencyFailed=6`/`FailedTimeout=9`) that fails each reachable non-terminal
+/// anchor (`Created=0`/`Queued=1`/`FailedTransient=8`). Mirrors the reactive
+/// [`cascade_dependency_failed`] terminal-failed set (it excludes `Aborted=5`,
+/// which is retried, not permanent). The failed roots are excluded from the UPDATE
+/// by the `status IN (0, 1, 8)` predicate, so the sweep is idempotent.
+const DEPENDENCY_FAILED_RECONCILE_SQL: &str = r#"
+    WITH RECURSIVE dependents AS (
+        SELECT derivation FROM derivation_build WHERE status IN (4, 6, 9)
+        UNION
+        SELECT dd.derivation FROM derivation_dependency dd
+        JOIN dependents dt ON dd.dependency = dt.derivation
+    )
+    UPDATE derivation_build AS db
+    SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
+    WHERE db.status IN (0, 1, 8)
+      AND db.derivation IN (SELECT derivation FROM dependents)
+    RETURNING db.derivation
+"#;
+
 /// Promote every `Created` anchor whose dependency anchors are all terminal-
 /// success (`Completed`/`Substituted`) to `Queued`. Run once an evaluation's
 /// full dependency graph is written (edges are deferred to stream completion):
@@ -517,4 +565,44 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
         .rows_affected();
 
     Ok(affected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The proactive dependency-failed sweep must mirror the reactive cascade: seed
+    /// the recursive walk from the terminal-failed set the cascade reacts to
+    /// (`FailedPermanent=4`/`DependencyFailed=6`/`FailedTimeout=9`, NOT `Aborted=5`),
+    /// fail only non-terminal anchors (`Created=0`/`Queued=1`/`FailedTransient=8`)
+    /// to `DependencyFailed=6`, and walk dependents upward via the dependency edge.
+    /// Getting the seed or target set wrong either misses the dead zone or clobbers
+    /// terminal-success anchors, so pin the SQL shape (no live DB in unit tests).
+    #[test]
+    fn dependency_failed_reconcile_sql_mirrors_the_cascade() {
+        let sql = DEPENDENCY_FAILED_RECONCILE_SQL
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            sql.contains("FROM derivation_build WHERE status IN (4, 6, 9)"),
+            "must seed from the terminal-failed set (excluding Aborted=5): {sql}"
+        );
+        assert!(
+            sql.contains("SET status = 6"),
+            "must fail dependents to DependencyFailed: {sql}"
+        );
+        assert!(
+            sql.contains("WHERE db.status IN (0, 1, 8)"),
+            "must only touch non-terminal anchors (never terminal-success): {sql}"
+        );
+        assert!(
+            sql.contains("JOIN dependents dt ON dd.dependency = dt.derivation"),
+            "must walk dependents upward via the dependency edge: {sql}"
+        );
+        assert!(
+            sql.contains("RETURNING db.derivation"),
+            "must return failed derivations so the caller can finalize their evals: {sql}"
+        );
+    }
 }

@@ -687,6 +687,29 @@ impl<'a> BuildStateHandler<'a> {
         Ok(())
     }
 
+    /// Finalize every evaluation referencing any of `derivations`, deduped. The
+    /// bulk graph sweeps (`reconcile_dependency_failed`) move anchors with raw SQL
+    /// that bypasses the single-row status hook's reactive `check_evaluation_done`,
+    /// so an eval whose last active anchor the sweep just settled would otherwise
+    /// hang `Building`; drive finalization here instead.
+    pub(crate) async fn finalize_evals_for_derivations(
+        &self,
+        derivations: &[DerivationId],
+    ) -> Result<()> {
+        let mut seen = std::collections::HashSet::new();
+        for &derivation in derivations {
+            for evaluation_id in
+                gradient_db::evals_referencing_derivation(&self.state.worker_db, derivation).await?
+            {
+                if seen.insert(evaluation_id) {
+                    self.check_evaluation_done(evaluation_id).await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Transitions the evaluation to its final state if all its anchors are done.
     ///
     /// Graph-derived via `eval_anchor_statuses`: returns early while any anchor is
@@ -1284,6 +1307,15 @@ pub(crate) async fn check_evaluation_done(
 ) -> Result<()> {
     BuildStateHandler::new(state)
         .check_evaluation_done(evaluation_id)
+        .await
+}
+
+pub(crate) async fn finalize_evals_for_derivations(
+    state: &Arc<ServerState>,
+    derivations: &[DerivationId],
+) -> Result<()> {
+    BuildStateHandler::new(state)
+        .finalize_evals_for_derivations(derivations)
         .await
 }
 

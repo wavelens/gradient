@@ -501,9 +501,9 @@ On a local-storage (non-S3) server, NARs stream to the worker as chunked `NarPus
 
 A first-run eval (`019f15bf`) failed `MissingInputs` on `.drv`s with `drv_closure_cached=true` while the `.drv`s were absent from the cache (47% of the eval's anchors were stale this way). Root cause: the worker presigned-PUT a `.drv` NAR, and the hourly orphan-files pass (`cleanup_orphaned_cache_files`) listed it on disk *before* the eval committed the `derivation`/`cached_path` rows — so the keep-set didn't reference it yet — and reclaimed it. The later `NarUploaded` then created a zombie `cached_path` (row present, object gone) that CacheQuery reported as cached, so `push_drv_closure` skipped re-pushing and dependents failed `InputsUnavailable`. Fix: the pass now skips any NAR younger than the orphan grace (`keep_orphan_derivations_hours`, default 24h, `<= 0` disables it), via the new `NarStore::list_hashes_with_modified`. `backend/gradient-cache/src/cacher/cleanup.rs`: `fresh_orphan_nar_spared_within_grace` writes an orphan NAR with the 24h grace active and asserts it survives; `keeps_active_drops_orphan` / `drops_everything_when_no_keep` disable the grace (`make_state` sets it to 0) so their immediate-reclamation assertions still hold.
 
-## Unbacked-output sweep keys on is_cached, not closure_complete
+## Unbacked-output sweep keys on the backing NAR, not is_cached/closure_complete
 
-An eval (`019f15a5`) sat `Waiting` with builds that should have been possible: 15 producers were `status=Completed`, `is_cached=true`, `external_url=NULL`, but had no backing NAR object (a GC'd `cached_path` or an old global cache hit marked Completed without ever building - 0 build attempts). Their `closure_complete` was (correctly) false, so dependents were blocked at promotion and never dispatched - so no build reported the path missing and the reactive `reconcile_missing_inputs` never fired. The proactive `demote_unbacked_trusted_outputs` sweep that should rescue them gated on `db.closure_complete`, so it skipped exactly these anchors: a permanent dead zone. `UNBACKED_TRUSTED_OUTPUTS_SELECT` now keys on `o.is_cached` (the row-vs-object invariant) instead of `db.closure_complete`. `backend/gradient-db/src/cache_storage.rs`: `unbacked_trusted_select_matches_the_gate` asserts the predicate requires `o.is_cached`, requires a missing backing NAR, skips `external_url` outputs, and does NOT contain `db.closure_complete`. The demote+rebuild convergence is E2E-CI-covered (MockDatabase can't run the recursive demote).
+An eval (`019f15a5`) sat `Waiting` with builds that should have been possible: 15 producers were `status=Completed`, `is_cached=true`, `external_url=NULL`, but had no backing NAR object (a GC'd `cached_path` or an old global cache hit marked Completed without ever building - 0 build attempts). Their `closure_complete` was (correctly) false, so dependents were blocked at promotion and never dispatched - so no build reported the path missing and the reactive `reconcile_missing_inputs` never fired. The proactive `demote_unbacked_trusted_outputs` sweep first gated on `db.closure_complete` (skipped them), then on `o.is_cached` - but eval `019f1a38` surfaced the complementary dead zone: `cuda12.9-libcurand` was `status=Completed` with its `out` output `is_cached=false`, no `cached_path`, no `external_url`, and 0 build attempts (a partial cache-hit marked the anchor done without ever caching every output), so an `is_cached`-gated predicate skipped it and the whole CUDA/ML subtree (`torch`, `transformers`, ...) stranded for over a day. `UNBACKED_TRUSTED_OUTPUTS_SELECT` now keys on the **ground truth** - any output of a `status IN (3,7)` anchor with no backing `cached_path` NAR and no `external_url` - independent of both derived flags, and runs on the dispatch tick too so a stuck eval heals without waiting for a new one. The completion path records each output's `cached_path` before flipping the anchor terminal (#303/#399), so a genuinely-complete anchor is never demoted mid-completion. `backend/gradient-db/src/cache_storage.rs`: `unbacked_trusted_select_matches_the_gate` asserts the predicate requires a missing backing NAR, skips `external_url` outputs, and does NOT contain `o.is_cached` or `db.closure_complete`. The demote+rebuild convergence is E2E-CI-covered (MockDatabase can't run the recursive demote).
 
 ## closure_complete is bidirectional (no stale-true dispatch)
 
@@ -516,6 +516,10 @@ A `cached_path` whose stored object bytes don't match its recorded `nar_hash` (o
 ## InputsUnavailable retries in-eval instead of failing permanently
 
 A build that failed `InputsUnavailable` was marked `FailedPermanent`, so its retry was deferred to a *new* evaluation. Because the `derivation_build` anchor is global/build-once, that permanent verdict leaked onto sibling evaluations: eval `019f1747` inherited a victorialogs anchor that eval `019f15a5` had failed at `06:59:20` (its input `initrd-linux` was momentarily uncached - a dispatch race), even though the input was re-cached 14s later, so `019f1747` hung in `Building` with the build never retried. The fix routes `InputsUnavailable` through the existing transient-retry gate: `decide_failure_outcome` now treats it like `Transient` (retry to the attempt budget), the self-heal resets the missing input's producer to `Created`, and the build is marked `FailedTransient`; the backoff re-queue plus `dispatch_ready_builds`' dependency re-check hold it in `Queued` until the input is rebuilt, then it dispatches and succeeds in-eval. The self-heal circuit breaker still forces `Permanent` once `inputs_unavailable_max_loops` trips (unrecoverable input). `backend/gradient-scheduler/src/build.rs`: `inputs_unavailable_retries_like_transient_then_permanent` asserts the gate returns `Retry` while the budget remains and `Permanent` when spent; `inputs_unavailable_circuit_opens_after_max_loops` (unchanged) covers the breaker. The in-eval re-queue + gate-hold sequence is exercised by E2E CI.
+
+## Dependency-failure dead zone reconciled proactively
+
+The reactive `cascade_dependency_failed` fails an anchor's dependents only on a fresh terminal-failure *transition*, so it cannot reach a dependent that becomes non-terminal **after** its dependency already failed: `requeue_failed_anchors` / `requeue_failed_closure_for_eval` thaw a dependent back to `Created` without re-checking its still-failed dependency, and a concurrent evaluation can re-fail a dependency after the dependent was thawed. Eval `019f1a38` hung in `Building` with ~35 anchors (`activate`, `man-paths`, `system-path-dbus`, `unit-fast-nix-*`, `nixos-system-*`) stuck `Created` behind already-`FailedPermanent`/`DependencyFailed` dependencies (`etc`, `system-path`, `fast-nix-gc`): no transition to cascade, the dispatch gate holds them (dependency not terminal-success), so `check_evaluation_done` never finalizes. `reconcile_dependency_failed` is the timer-tick, failure-side counterpart of the `promote_ready` backstop: a single recursive statement walks `derivation_dependency` upward from every terminal-failed anchor (`FailedPermanent=4`/`DependencyFailed=6`/`FailedTimeout=9`, mirroring the reactive cascade's set, excluding `Aborted=5`) and marks each reachable non-terminal anchor (`Created=0`/`Queued=1`/`FailedTransient=8`) `DependencyFailed`; the dispatch loop then finalizes the evaluations it settled (the bulk UPDATE bypasses the single-row status hook). `backend/gradient-db/src/promotion.rs`: `dependency_failed_reconcile_sql_mirrors_the_cascade` pins the SQL shape - seed set, target status, non-terminal-only UPDATE, and upward edge walk (no live DB in unit tests). The recursive convergence and per-tick finalization are covered by E2E CI.
 
 ## Frontend - workers page no-cache banner
 
@@ -1102,16 +1106,19 @@ expired (TTL eviction) without clearing the producing anchor's flags, so a produ
 could sit at `Completed`/`Substituted` + `closure_complete` with no fetchable
 output - the dispatch gate trusts it and every dependent fails `InputsUnavailable`
 permanently, and being terminal-success it is never re-queued.
-`demote_unbacked_trusted_outputs` (gradient-db) selects exactly the gate-trusted
-producers whose output is neither in our cache nor on an upstream and demotes them
-to `Created`; it runs hourly in the cache loop and at eval-resolve. The behaviour
-needs a real Postgres (no local harness), so the SQL is pinned by a shape test:
+`demote_unbacked_trusted_outputs` (gradient-db) selects every terminal-success
+producer with any output that is neither in our cache nor on an upstream and demotes
+it to `Created`; it runs hourly in the cache loop, at eval-resolve, and on the
+dispatch tick. The behaviour needs a real Postgres (no local harness), so the SQL is
+pinned by a shape test:
 
 - `cache_storage::tests::unbacked_trusted_select_matches_the_gate` - asserts the
-  reconciler's select mirrors the promotion gate's success arm (`status IN (3, 7)
-  AND closure_complete`), skips upstream-served outputs (`external_url IS NULL`),
-  and requires a missing backing NAR (`NOT EXISTS … cp.file_hash IS NOT NULL`), so
-  it can never demote a still-fetchable or upstream-only producer.
+  reconciler's select targets terminal-success anchors (`status IN (3, 7)`), skips
+  upstream-served outputs (`external_url IS NULL`), and requires a missing backing
+  NAR (`NOT EXISTS … cp.file_hash IS NOT NULL`) - keyed on that ground truth, not on
+  `o.is_cached` or `db.closure_complete` (both false for the dead-zone anchors), so
+  it rescues a never-cached output yet never demotes a still-fetchable or
+  upstream-only producer.
 
 ## Derivation GC is a mark-and-sweep over the live closure
 

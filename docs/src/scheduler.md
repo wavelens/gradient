@@ -70,6 +70,20 @@ backstop. The `edges_complete` gate is what makes this periodic sweep safe: it
 can only ever promote fully-flushed anchors, so it can never dispatch a 0-edge
 anchor without its inputs.
 
+`reconcile_dependency_failed` is the failure-side counterpart of that backstop.
+The reactive `cascade_dependency_failed` fires only on a fresh terminal-failure
+*transition*, so it cannot reach an anchor that becomes non-terminal **after** its
+dependency already failed: `requeue_failed_anchors` / `requeue_failed_closure_for_eval`
+thaw a dependent back to `Created` without re-checking its still-failed dependency,
+and a concurrent evaluation can re-fail a dependency after the dependent was thawed.
+Such a dependent can never build, yet the dispatch gate holds it (its dependency is
+not terminal-success) and `check_evaluation_done` never finalizes its evaluation - a
+permanent dead zone that strands the eval in `Building`. The timer-tick sweep walks
+`derivation_dependency` upward from every terminal-failed anchor and marks each
+reachable non-terminal anchor `DependencyFailed` in one statement, then finalizes
+the evaluations it just settled (the bulk UPDATE bypasses the single-row status
+hook, so finalization is driven explicitly).
+
 Promotion and dispatch are finally gated on a derivation's `inputSrcs` being in
 the cache. A `.drv`'s build-time source paths (`inputSrcs`, e.g.
 `builtins.toFile` configs) have no producing derivation, so the dependency-anchor
@@ -158,19 +172,24 @@ without going through `demote_cached_output`, leaving the producer at
 then trusts it, dependents fail `InputsUnavailable` permanently, and - being
 terminal-*success*, not terminal-failed - it is never re-queued, so it never
 rebuilds. `demote_unbacked_trusted_outputs` restores the row-vs-object invariant:
-it finds every terminal-success producer (`status IN (3, 7)`) whose output is
-marked cached (`is_cached`) but is neither in our cache (a `cached_path` with a
-NAR) nor on an upstream (`external_url`) and demotes it back to `Created`. It keys
-on `is_cached`, **not** `closure_complete`: once the object vanishes the
-bidirectional `reconcile_closure_complete` correctly clears `closure_complete`,
-and such an anchor's dependents are then blocked at promotion - they never
-dispatch, so no build reports the path missing and the reactive
-`reconcile_missing_inputs` never fires. Gating this sweep on `closure_complete`
-would skip exactly those unreachable dead-zone anchors (a stale `is_cached` from a
-GC'd object or an old global cache hit marked `Completed` without a build). It runs
-hourly in the cache loop (after the GC passes) and once at eval-resolve before
-promotion, so a producer the GC orphaned heals on the next evaluation without
-manual intervention.
+it finds every terminal-success producer (`status IN (3, 7)`) with **any** output
+that is neither in our cache (a `cached_path` with a NAR) nor on an upstream
+(`external_url`) and demotes it back to `Created`. It keys on the **ground truth**
+(a missing backing NAR), **not** the derived `is_cached` flag nor
+`closure_complete`. Both derived flags are `false` for exactly the dead-zone
+anchors this sweep must rescue: `closure_complete` is cleared by the bidirectional
+`reconcile_closure_complete` once an object vanishes, and `is_cached` is `false`
+whenever an anchor was marked `Completed` with an output that was *never* cached -
+a partial cache-hit or substitution that set the anchor done without backing every
+output (observed on multi-output CUDA derivations whose `out` was never pushed, no
+build attempt). An `is_cached`-gated predicate skipped that case, stranding the
+producer and its whole dependent subtree. The completion path records each output's
+`cached_path` before flipping the anchor terminal (#303/#399), so a
+genuinely-complete anchor is never demoted mid-completion. It runs hourly in the
+cache loop (after the GC passes), once at eval-resolve before promotion, and once
+per dispatch timer tick, so an orphaned or partially-cached producer heals
+promptly - even while the evaluation that needs it is itself stuck `Building` -
+without manual intervention.
 
 The deeper cause of those orphans is the derivation GC itself. `build_job` rows are
 per-evaluation and pruned with old evals (`keep_evaluations`), but the global

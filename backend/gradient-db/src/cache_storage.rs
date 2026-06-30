@@ -365,31 +365,35 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
     Ok(producers)
 }
 
-/// Enforce the row-vs-object invariant: an output marked cached (`is_cached`) on
-/// a terminal-success producer (`Completed`/`Substituted`) must have a backing
-/// artifact - present in our cache (`cached_path` with a NAR) or on a configured
-/// upstream (`external_url`). The cache GC deletes a `cached_path` row when its
-/// NAR object is gone (zombie purge, TTL eviction), and an old global cache hit
-/// can mark an anchor `Completed` + `is_cached` without ever building it; either
-/// way the flags outlive the artifact. Such an anchor's dependents are blocked at
-/// promotion (its `closure_complete` is - correctly - false once the object is
-/// gone), so they never dispatch, so no build ever reports the path missing and
-/// the reactive `reconcile_missing_inputs` heal never fires: a permanent dead
-/// zone. Demote each such output - reset its producer to `Created`, drop the
-/// stale flags, and clear `closure_complete` up the referrer chain - so the next
-/// evaluation rebuilds it. Returns the number of producer anchors reset.
+/// Enforce the row-vs-object invariant: **every** output of a terminal-success
+/// producer (`Completed`/`Substituted`) must have a backing artifact - present in
+/// our cache (`cached_path` with a NAR) or on a configured upstream
+/// (`external_url`). Three ways the invariant breaks, all the same dead zone: the
+/// cache GC deletes a `cached_path` row when its NAR object is gone (zombie purge,
+/// TTL eviction); an old global cache hit marks an anchor `Completed` + `is_cached`
+/// without ever building it; or a partial cache-hit / substitution marks an anchor
+/// `Completed` with an output that was never cached at all (`is_cached = false`, no
+/// build attempt - observed on multi-output CUDA derivations whose `out` was never
+/// pushed). Such an anchor's dependents are blocked at promotion (its
+/// `closure_complete` is - correctly - false), so they never dispatch, so no build
+/// ever reports the path missing and the reactive `reconcile_missing_inputs` heal
+/// never fires: a permanent dead zone. Demote each unbacked output - reset its
+/// producer to `Created`, drop the stale flags, and clear `closure_complete` up the
+/// referrer chain - so the next build rebuilds it. Returns the producers reset.
 ///
-/// Keyed on `is_cached`, NOT `closure_complete`: the flag clears the moment the
-/// object vanishes (the bidirectional `reconcile_closure_complete`), so a
-/// `closure_complete`-parity predicate would skip exactly the unreachable
-/// anchors this sweep exists to rescue. `external_url IS NULL` excludes outputs
-/// fetched straight from an upstream (not from our cache).
+/// Keyed on the **ground truth** (a backing `cached_path` NAR), NOT the derived
+/// `is_cached` flag: that flag is `false` for exactly the never-cached-output dead
+/// zone above, so an `is_cached`-gated predicate would skip the anchors this sweep
+/// exists to rescue. Nor `closure_complete`, which is - correctly - already false
+/// for every dead-zone anchor. `external_url IS NULL` excludes outputs fetched
+/// straight from an upstream (not from our cache). The completion path records each
+/// output's `cached_path` before flipping the anchor terminal (#303/#399), so a
+/// genuinely-complete anchor is never selected mid-completion.
 const UNBACKED_TRUSTED_OUTPUTS_SELECT: &str = r#"
     SELECT DISTINCT o.hash
     FROM derivation_output o
     JOIN derivation_build db ON db.derivation = o.derivation
     WHERE db.status IN (3, 7)
-      AND o.is_cached
       AND o.external_url IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM cached_path cp
@@ -586,10 +590,11 @@ mod tests {
     }
 
     /// The reconciler enforces the row-vs-object invariant on terminal-success
-    /// anchors (`status IN (3, 7)`): an output trusted as cached (`is_cached`) but
-    /// with no backing NAR is demoted. It must NOT gate on `closure_complete` -
-    /// that flag is false exactly for the unreachable dead-zone anchors this sweep
-    /// rescues - and must skip upstream-fetchable outputs (`external_url IS NULL`).
+    /// anchors (`status IN (3, 7)`): any output with no backing NAR is demoted. It
+    /// must key on the **ground truth** (a missing `cached_path` NAR), NOT the
+    /// derived `is_cached` flag - that flag is `false` for the never-cached-output
+    /// dead zone this sweep must rescue - nor `closure_complete` (false for every
+    /// dead-zone anchor), and must skip upstream-fetchable outputs (`external_url`).
     #[test]
     fn unbacked_trusted_select_matches_the_gate() {
         let sql = UNBACKED_TRUSTED_OUTPUTS_SELECT
@@ -597,7 +602,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         assert!(sql.contains("db.status IN (3, 7)"), "must mirror the gate's success states: {sql}");
-        assert!(sql.contains("o.is_cached"), "must key on the is_cached trust flag: {sql}");
+        assert!(
+            !sql.contains("o.is_cached"),
+            "must NOT gate on is_cached (it is false for the never-cached-output dead zone): {sql}"
+        );
         assert!(
             !sql.contains("db.closure_complete"),
             "must NOT gate on closure_complete (it is false for the dead-zone anchors): {sql}"

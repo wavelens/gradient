@@ -390,6 +390,52 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
                 error!(error = %e, "periodic reconcile_closure_complete failed");
             }
 
+            // Rescue the Completed-but-unbacked dead zone: a terminal-success
+            // anchor with an output that has no backing NAR (GC'd, or marked done
+            // by a partial cache-hit that never cached every output) can never
+            // satisfy closure_complete, so its dependents never dispatch and no
+            // worker ever reports the path missing - the reactive heal never fires.
+            // Demote each such producer to Created so it rebuilds. Self-bounding: a
+            // demoted anchor is no longer status 3/7, so it is not re-selected.
+            match gradient_db::demote_unbacked_trusted_outputs(
+                &scheduler.state.worker_db,
+                &scheduler.state.nar_storage,
+            )
+            .await
+            {
+                Ok(n) if n > 0 => {
+                    info!(reset = n, "demote_unbacked_trusted_outputs swept dead-zone producers")
+                }
+                Ok(_) => {}
+                Err(e) => error!(error = %e, "periodic demote_unbacked_trusted_outputs failed"),
+            }
+
+            // Failure-side counterpart of the promote_ready backstop. The reactive
+            // dependency-failed cascade fires only on a fresh failure transition,
+            // so an anchor thawed back to Created/Queued (requeue_failed_*) while a
+            // dependency is already terminal-failed is never re-cascaded: it blocks
+            // the dispatch gate and keeps its eval Building forever. Sweep it
+            // proactively, fan the CI status out, then finalize the evals it
+            // settled (the bulk UPDATE bypasses the reactive finalize hook).
+            match gradient_db::reconcile_dependency_failed(&scheduler.state.worker_db).await {
+                Ok(failed) if !failed.is_empty() => {
+                    info!(failed = failed.len(), "reconcile_dependency_failed swept dead-zone anchors");
+                    gradient_db::notify_build_status_for_derivations(
+                        &scheduler.state.db(),
+                        &failed,
+                    )
+                    .await;
+
+                    if let Err(e) =
+                        crate::build::finalize_evals_for_derivations(&scheduler.state, &failed).await
+                    {
+                        error!(error = %e, "finalize after reconcile_dependency_failed failed");
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => error!(error = %e, "periodic reconcile_dependency_failed failed"),
+            }
+
             // Promotion is otherwise event-driven (promote_ready at eval
             // completion, promote_dependents at build completion), so a ready
             // anchor whose triggering event never fired - failed eval after its
