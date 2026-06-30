@@ -14,9 +14,5 @@ mod tui;
 use commands::base;
 
 fn main() -> std::io::Result<()> {
-    base::complete_env();
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?
-        .block_on(base::run_cli())
+    base::run()
 }

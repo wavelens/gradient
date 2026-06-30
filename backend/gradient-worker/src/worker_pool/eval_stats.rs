@@ -4,17 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Whether per-eval metrics collection is enabled (default on). Disabling skips
-/// the worker's `ev.stats()` reads and the subprocess's `NIX_SHOW_STATS`
-/// counters so eval pays zero stats overhead.
-pub fn metrics_enabled() -> bool {
-    std::env::var("GRADIENT_EVAL_METRICS_ENABLED")
-        .map(|v| v != "false" && v != "0")
-        .unwrap_or(true)
-}
+// The wire-level delta and the metrics toggle live in the shared evaluator crate.
+pub use gradient_eval::stats::{StatsDelta, metrics_enabled};
 
 /// Environment the eval-worker subprocess needs for thunk/function-call counts.
 /// libnixexpr's `Counter`s are no-ops unless `NIX_SHOW_STATS` is set (otherwise
@@ -25,28 +18,6 @@ pub(crate) fn eval_worker_stats_env(metrics_enabled: bool) -> &'static [(&'stati
         &[("NIX_SHOW_STATS", "1"), ("NIX_SHOW_STATS_PATH", "/dev/null")]
     } else {
         &[]
-    }
-}
-
-/// Per-request counter delta a worker reports after serving List/Resolve.
-/// Counters are diffs since the worker's prior request; gc_heap_size is the
-/// current gauge at report time. Canonical delta type, shared internally and
-/// on the eval-worker wire protocol.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
-pub struct StatsDelta {
-    pub nr_thunks: u64,
-    pub nr_function_calls: u64,
-    pub nr_primop_calls: u64,
-    pub nr_lookups: u64,
-    pub alloc_bytes: u64,
-    pub gc_heap_size: u64,
-}
-
-impl StatsDelta {
-    #[cfg(test)]
-    fn with_heap(mut self, h: u64) -> Self {
-        self.gc_heap_size = h;
-        self
     }
 }
 
@@ -153,8 +124,8 @@ mod tests {
     #[test]
     fn heap_peak_is_max_gauge_not_sum() {
         let mut acc = EvalStatsAccumulator::default();
-        acc.observe("a", d(0, 0, 0).with_heap(900), 0);
-        acc.observe("a", d(0, 0, 0).with_heap(300), 0);
+        acc.observe("a", StatsDelta { gc_heap_size: 900, ..d(0, 0, 0) }, 0);
+        acc.observe("a", StatsDelta { gc_heap_size: 300, ..d(0, 0, 0) }, 0);
         assert_eq!(acc.finish().peak_heap_bytes, 900);
     }
 

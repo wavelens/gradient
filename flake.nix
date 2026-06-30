@@ -46,6 +46,10 @@
         inherit craneLib;
         cargoFeatures = [ "nix" ];
       };
+      gradient-cli-full = pkgs.callPackage ./nix/packages/gradient-cli.nix {
+        inherit craneLib;
+        cargoFeatures = [ "nix" "eval" ];
+      };
 
       default = gradient;
     };
@@ -110,8 +114,8 @@
       nix = final: prev: { gradient-nix = nix.packages.${final.stdenv.hostPlatform.system}.nix; };
       gradient = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient; };
       gradient-frontend = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-frontend; };
-      gradient-cli = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-cli; };
-      default = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient gradient-frontend gradient-cli gradient-nix; };
+      gradient-cli = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-cli gradient-cli-full; };
+      default = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient gradient-frontend gradient-cli gradient-cli-full gradient-nix; };
     };
 
     nixosModules = rec {

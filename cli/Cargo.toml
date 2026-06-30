@@ -39,6 +39,13 @@ ratatui = "0.30"
 [features]
 default = []
 nix = ["dep:harmonia-file-nar", "dep:harmonia-store-path", "dep:harmonia-store-remote", "dep:harmonia-utils-hash", "dep:tempfile"]
+# `gradient eval` (nix-eval-jobs-like). Pulls the shared evaluator crate and
+# thus libnix; off by default so the lean CLI builds without Nix dev libraries.
+eval = ["dep:gradient-eval"]
+
+[dependencies.gradient-eval]
+path = "../backend/gradient-eval"
+optional = true
 
 [dependencies.tempfile]
 version = "3"
