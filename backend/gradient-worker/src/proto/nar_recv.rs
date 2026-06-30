@@ -115,6 +115,15 @@ fn store_hash(store_path: &str) -> Option<&str> {
     (hash.len() == 32 && hash.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(hash)
 }
 
+/// Partial-store key for a pull, namespaced by `job_id` so two concurrent jobs
+/// on one worker transferring the *same* store path never share a `.partial`
+/// file. Mirrors the server-push `{peer_id}/{hash}` namespacing; without it the
+/// interleaved appends to a shared hash-keyed partial fail "non-contiguous" and
+/// corrupt the staged NAR (only on the WS pull path - S3 pulls bypass staging).
+fn partial_key(job_id: &str, store_path: &str) -> Option<String> {
+    store_hash(store_path).map(|hash| format!("{job_id}/{hash}"))
+}
+
 impl NarReceiver {
     pub fn new() -> Self {
         Self::default()
@@ -132,14 +141,14 @@ impl NarReceiver {
     /// received under, if any. Returns `(0, None)` in memory-only mode or when
     /// nothing is staged - used by the requester to decide between
     /// `NarRequest` and `NarRequestResume`.
-    pub fn resumable(&self, store_path: &str) -> (u64, Option<String>) {
+    pub fn resumable(&self, job_id: &str, store_path: &str) -> (u64, Option<String>) {
         let Some(store) = self.partial.as_ref() else {
             return (0, None);
         };
-        let Some(hash) = store_hash(store_path) else {
+        let Some(key) = partial_key(job_id, store_path) else {
             return (0, None);
         };
-        (store.staged_len(hash), store.token(hash))
+        (store.staged_len(&key), store.token(&key))
     }
 
     /// Synchronously install a waiter for `(job_id, store_path)`.
@@ -234,17 +243,16 @@ impl NarReceiver {
         };
 
         if !data.is_empty() {
-            match (self.partial.clone(), store_hash(store_path)) {
-                (Some(store), Some(hash)) => {
+            match (self.partial.clone(), partial_key(job_id, store_path)) {
+                (Some(store), Some(pkey)) => {
                     // Disk staging is blocking `std::fs`; run it on the blocking
                     // pool so the dispatch task is never stalled mid-pull.
-                    let hash = hash.to_owned();
                     let outcome = tokio::task::spawn_blocking(move || {
-                        match store.append(&hash, &token, offset, &data) {
+                        match store.append(&pkey, &token, offset, &data) {
                             Ok(()) => Ok(()),
                             // Non-fatal: drop the partial so a retry restarts cleanly.
                             Err(e) => {
-                                let _ = store.discard(&hash);
+                                let _ = store.discard(&pkey);
                                 Err(format!("partial append failed: {e}"))
                             }
                         }
@@ -278,8 +286,8 @@ impl NarReceiver {
             let mut g = self.inner.lock().unwrap();
             let expected = g.headers.remove(&key).map(|h| h.total_bytes);
             let started = g.started.remove(&key);
-            let disk = match (self.partial.clone(), store_hash(store_path)) {
-                (Some(store), Some(hash)) => Some((store, hash.to_owned())),
+            let disk = match (self.partial.clone(), partial_key(job_id, store_path)) {
+                (Some(store), Some(pkey)) => Some((store, pkey)),
                 _ => None,
             };
             let mem_buf = match disk {
@@ -291,9 +299,9 @@ impl NarReceiver {
 
         let buf = match (mem_buf, disk) {
             (Some(b), _) => b,
-            (None, Some((store, hash))) => tokio::task::spawn_blocking(move || {
-                let b = store.read_all(&hash).unwrap_or_default();
-                let _ = store.discard(&hash);
+            (None, Some((store, pkey))) => tokio::task::spawn_blocking(move || {
+                let b = store.read_all(&pkey).unwrap_or_default();
+                let _ = store.discard(&pkey);
                 b
             })
             .await
@@ -486,7 +494,7 @@ mod tests {
         // Connection drops mid-transfer.
         r1.fail("j", &path, "NarAbort".into());
 
-        let (staged, token) = r1.resumable(&path);
+        let (staged, token) = r1.resumable("j", &path);
         assert_eq!(staged, 6);
         assert_eq!(token.as_deref(), Some("len-9"));
 
@@ -499,6 +507,36 @@ mod tests {
         r2.note_header("j", &path, 9, "len-9");
         r2.accept_chunk("j", &path, b"ghi".to_vec(), 6, true).await;
         assert_eq!(task.await.unwrap().unwrap(), b"abcdefghi");
+    }
+
+    /// Two jobs transferring the SAME store path concurrently must not share a
+    /// partial file. With a bare-hash key their interleaved appends corrupted
+    /// the partial and failed "non-contiguous"; per-`{job_id}/{hash}` keys keep
+    /// them isolated so both assemble correctly.
+    #[tokio::test]
+    async fn concurrent_jobs_same_path_do_not_collide() {
+        let dir = TempDir::new().unwrap();
+        let store =
+            gradient_storage::PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let path = format!("/nix/store/{hash}-pkg");
+
+        let r = NarReceiver::with_partial_store(store);
+        r.note_header("j1", &path, 6, "t1");
+        r.note_header("j2", &path, 6, "t2");
+        let p1 = r.register("j1", &path);
+        let p2 = r.register("j2", &path);
+
+        // Interleave both jobs' chunks for the same hash: under a shared key
+        // j2's offset-0 chunk would truncate j1's bytes and the offset-3 chunks
+        // would then fail the contiguity check.
+        r.accept_chunk("j1", &path, b"aaa".to_vec(), 0, false).await;
+        r.accept_chunk("j2", &path, b"bbb".to_vec(), 0, false).await;
+        r.accept_chunk("j1", &path, b"AAA".to_vec(), 3, true).await;
+        r.accept_chunk("j2", &path, b"BBB".to_vec(), 3, true).await;
+
+        assert_eq!(r.await_pending(p1).await.unwrap(), b"aaaAAA");
+        assert_eq!(r.await_pending(p2).await.unwrap(), b"bbbBBB");
     }
 
     #[tokio::test]
