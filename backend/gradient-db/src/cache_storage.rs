@@ -365,28 +365,31 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
     Ok(producers)
 }
 
-/// Enforce the cache-trust invariant: a producer the dispatch gate trusts
-/// (`Completed`/`Substituted` + `closure_complete`) may only stay trusted while
-/// its output is actually fetchable - present in our cache (`cached_path` with a
-/// NAR) or on a configured upstream (`external_url`). The cache GC deletes a
-/// `cached_path` row when its NAR object is gone (zombie purge, TTL eviction)
-/// without clearing the producer's flags, leaving an anchor the gate trusts but
-/// whose artifact cannot be served; dependents dispatched against it fail
-/// `InputsUnavailable` permanently and, being `Completed`, never rebuild. Demote
-/// each such output - reset its producer to `Created`, drop the stale flags, and
-/// clear `closure_complete` up the referrer chain - so the next evaluation
-/// rebuilds it. Returns the number of producer anchors reset.
+/// Enforce the row-vs-object invariant: an output marked cached (`is_cached`) on
+/// a terminal-success producer (`Completed`/`Substituted`) must have a backing
+/// artifact - present in our cache (`cached_path` with a NAR) or on a configured
+/// upstream (`external_url`). The cache GC deletes a `cached_path` row when its
+/// NAR object is gone (zombie purge, TTL eviction), and an old global cache hit
+/// can mark an anchor `Completed` + `is_cached` without ever building it; either
+/// way the flags outlive the artifact. Such an anchor's dependents are blocked at
+/// promotion (its `closure_complete` is - correctly - false once the object is
+/// gone), so they never dispatch, so no build ever reports the path missing and
+/// the reactive `reconcile_missing_inputs` heal never fires: a permanent dead
+/// zone. Demote each such output - reset its producer to `Created`, drop the
+/// stale flags, and clear `closure_complete` up the referrer chain - so the next
+/// evaluation rebuilds it. Returns the number of producer anchors reset.
 ///
-/// Gate parity: the `status IN (3, 7) AND closure_complete` predicate mirrors the
-/// `(dep.status IN (3, 7)) AND dep.closure_complete` arm of the promotion gate, so
-/// exactly the anchors the gate would trust are checked; `external_url IS NULL`
-/// excludes outputs fetched straight from an upstream (not from our cache).
+/// Keyed on `is_cached`, NOT `closure_complete`: the flag clears the moment the
+/// object vanishes (the bidirectional `reconcile_closure_complete`), so a
+/// `closure_complete`-parity predicate would skip exactly the unreachable
+/// anchors this sweep exists to rescue. `external_url IS NULL` excludes outputs
+/// fetched straight from an upstream (not from our cache).
 const UNBACKED_TRUSTED_OUTPUTS_SELECT: &str = r#"
     SELECT DISTINCT o.hash
     FROM derivation_output o
     JOIN derivation_build db ON db.derivation = o.derivation
     WHERE db.status IN (3, 7)
-      AND db.closure_complete
+      AND o.is_cached
       AND o.external_url IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM cached_path cp
@@ -582,9 +585,11 @@ mod tests {
         assert!(sql.to_lowercase().contains("bigint"), "missing bigint: {sql}");
     }
 
-    /// The reconciler must select exactly the anchors the dispatch gate trusts
-    /// (`status IN (3, 7) AND closure_complete`), skip upstream-fetchable outputs
-    /// (`external_url IS NULL`), and require a missing backing NAR.
+    /// The reconciler enforces the row-vs-object invariant on terminal-success
+    /// anchors (`status IN (3, 7)`): an output trusted as cached (`is_cached`) but
+    /// with no backing NAR is demoted. It must NOT gate on `closure_complete` -
+    /// that flag is false exactly for the unreachable dead-zone anchors this sweep
+    /// rescues - and must skip upstream-fetchable outputs (`external_url IS NULL`).
     #[test]
     fn unbacked_trusted_select_matches_the_gate() {
         let sql = UNBACKED_TRUSTED_OUTPUTS_SELECT
@@ -592,7 +597,11 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
         assert!(sql.contains("db.status IN (3, 7)"), "must mirror the gate's success states: {sql}");
-        assert!(sql.contains("db.closure_complete"), "must require closure_complete: {sql}");
+        assert!(sql.contains("o.is_cached"), "must key on the is_cached trust flag: {sql}");
+        assert!(
+            !sql.contains("db.closure_complete"),
+            "must NOT gate on closure_complete (it is false for the dead-zone anchors): {sql}"
+        );
         assert!(sql.contains("o.external_url IS NULL"), "must skip upstream-served outputs: {sql}");
         assert!(
             sql.contains("NOT EXISTS") && sql.contains("cp.file_hash IS NOT NULL"),
