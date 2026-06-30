@@ -53,10 +53,11 @@ pub(crate) fn decide_failure_outcome(
         BuildFailureKind::Timeout => FailureOutcome::Timeout,
         BuildFailureKind::Permanent => FailureOutcome::Permanent,
         BuildFailureKind::SubstituteUnavailable => FailureOutcome::Requeue,
-        // The build itself is terminal for this eval; the self-heal that
-        // re-queues the missing inputs' producers runs separately.
-        BuildFailureKind::InputsUnavailable => FailureOutcome::Permanent,
-        BuildFailureKind::Transient => {
+        // A missing input self-heals: its producer is re-queued and rebuilds, so
+        // the build retries in-eval like a transient failure and succeeds once
+        // the input is back. The caller forces `Permanent` when the self-heal
+        // circuit trips (the input is unrecoverable).
+        BuildFailureKind::InputsUnavailable | BuildFailureKind::Transient => {
             if (attempt + 1) < max_attempts as i32 {
                 FailureOutcome::Retry
             } else {
@@ -435,12 +436,14 @@ impl<'a> BuildStateHandler<'a> {
 
         // Self-heal: a required input was reported absent from the cache while
         // its producer was marked done/substituted. Purge those stale outputs so
-        // the next evaluation rebuilds them; this anchor stays terminal here. The
-        // circuit breaker caps the self-heal at `inputs_unavailable_max_loops`: an
+        // the producer rebuilds and this build retries in-eval. The circuit
+        // breaker caps the self-heal at `inputs_unavailable_max_loops`: an
         // unrecoverable input would otherwise churn the cache forever.
+        let max_loops = self.state.config.eval.inputs_unavailable_max_loops;
+        let inputs_circuit_open = matches!(kind, BuildFailureKind::InputsUnavailable)
+            && inputs_unavailable_circuit_open(prior_inputs_unavailable, max_loops);
         if matches!(kind, BuildFailureKind::InputsUnavailable) && !missing_paths.is_empty() {
-            let max_loops = self.state.config.eval.inputs_unavailable_max_loops;
-            if inputs_unavailable_circuit_open(prior_inputs_unavailable, max_loops) {
+            if inputs_circuit_open {
                 warn!(
                     %derivation_build,
                     prior_failures = prior_inputs_unavailable,
@@ -455,7 +458,13 @@ impl<'a> BuildStateHandler<'a> {
             }
         }
 
-        match decide_failure_outcome(kind, attempt, max_attempts) {
+        // `InputsUnavailable` retries in-eval (the self-heal re-queues its input),
+        // but once the breaker trips the input is unrecoverable - stop retrying.
+        let outcome = match decide_failure_outcome(kind, attempt, max_attempts) {
+            FailureOutcome::Retry if inputs_circuit_open => FailureOutcome::Permanent,
+            other => other,
+        };
+        match outcome {
             FailureOutcome::Retry => {
                 let mut active: ADerivationBuild = anchor.clone().into_active_model();
                 active.attempt = Set(attempt + 1);
@@ -500,11 +509,10 @@ impl<'a> BuildStateHandler<'a> {
     /// Self-heal for `BuildFailureKind::InputsUnavailable`. A build attempt
     /// proved these input paths are unfetchable from the cache, so purge each
     /// one's stale cache artifact (delete the `cached_path` row + the NAR object,
-    /// clear the output's `is_cached` / `cached_path`) while leaving the
-    /// derivation graph intact. The next evaluation then sees the path as never
-    /// cached and rebuilds or re-fetches it. This build is already terminal for
-    /// this eval (`InputsUnavailable` is permanent), so we don't re-queue
-    /// anything here - the rebuild belongs to the next evaluation.
+    /// clear the output's `is_cached` / `cached_path`) and reset its producer to
+    /// `Created`, leaving the derivation graph intact. The producer then rebuilds
+    /// in-eval and the failed build - marked `FailedTransient`, not permanent -
+    /// retries once the input is back (the dispatch gate holds it until then).
     ///
     /// A missing input with no producing derivation (a `.drv` file or a source
     /// path) has its stale row + object purged just the same; the next eval
@@ -1575,13 +1583,22 @@ mod retry_tests {
         assert!(matches!(decide_failure_outcome(BuildFailureKind::Transient, 2, 3), FailureOutcome::Permanent));
     }
     #[test]
-    fn inputs_unavailable_is_terminal_no_retry() {
-        for attempt in [0, 1, 99] {
-            assert_eq!(
-                decide_failure_outcome(BuildFailureKind::InputsUnavailable, attempt, 3),
-                FailureOutcome::Permanent
-            );
-        }
+    fn inputs_unavailable_retries_like_transient_then_permanent() {
+        // A missing input is self-healed (its producer is re-queued) and the
+        // build retries in-eval, so it behaves like a transient failure up to the
+        // attempt budget rather than failing permanently on the first miss.
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::InputsUnavailable, 0, 3),
+            FailureOutcome::Retry
+        );
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::InputsUnavailable, 1, 3),
+            FailureOutcome::Retry
+        );
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::InputsUnavailable, 2, 3),
+            FailureOutcome::Permanent
+        );
     }
     #[test]
     fn inputs_unavailable_circuit_opens_after_max_loops() {

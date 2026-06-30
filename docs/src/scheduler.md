@@ -138,6 +138,19 @@ immediately rather than waiting for a new evaluation - which matters when evals
 are being aborted and would otherwise never requeue it, leaving the dependent
 dead-ended on `InputsUnavailable`.
 
+The build that reported `InputsUnavailable` retries **in-eval** rather than
+failing permanently. The self-heal above resets its missing input's producer to
+`Created`, so the build itself is marked `FailedTransient` (not `FailedPermanent`)
+and re-queued through the normal transient backoff (`decide_failure_outcome`
+treats `InputsUnavailable` like a transient failure). `dispatch_ready_builds`
+re-checks every dependency at dispatch, so the re-queued build waits in `Queued`
+until the rebuilt input is `Completed`/`closure_complete`, then dispatches and
+succeeds - without the failure leaking onto a sibling evaluation that shares the
+global anchor. The self-heal circuit breaker (`inputs_unavailable_max_loops`)
+still caps the loop: once it trips, the input is deemed unrecoverable and the
+build fails `Permanent` (then cascades), so a genuinely missing input can't retry
+forever.
+
 The cache GC can break the invariant from the other direction: the zombie-purge
 (`cached_path` whose NAR vanished) and the TTL eviction delete `cached_path` rows
 without going through `demote_cached_output`, leaving the producer at
