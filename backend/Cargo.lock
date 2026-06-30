@@ -2164,6 +2164,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-eval"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "nix-bindings",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "gradient-exec"
 version = "1.2.0"
 dependencies = [
@@ -2585,6 +2597,7 @@ dependencies = [
  "gradient-core",
  "gradient-db",
  "gradient-entity",
+ "gradient-eval",
  "gradient-exec",
  "gradient-flake-lock",
  "gradient-nix",

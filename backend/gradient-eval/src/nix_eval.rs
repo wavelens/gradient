@@ -7,7 +7,7 @@
 //! Nix flake evaluator backed by the high-level `nix-bindings` wrappers.
 //!
 //! Holds one `EvalState` (built with flake support + a warm on-disk eval cache)
-//! and hands out a [`FlakeWalker`](crate::nix::flake_walk::FlakeWalker) per
+//! and hands out a [`FlakeWalker`](crate::flake_walk::FlakeWalker) per
 //! flake reference that drives a cursor walk over its output attribute tree.
 //!
 //! `nix_bindings` embeds Boehm GC into the process. Boehm GC cannot coexist
@@ -77,11 +77,8 @@ impl NixEvaluator {
 
     /// Lock `flake_ref` and open its eval cache, returning a walker that reuses
     /// the one locked flake + warm cursor for all discover/resolve calls.
-    pub(crate) fn walker(
-        &self,
-        flake_ref: &str,
-    ) -> Result<crate::nix::flake_walk::FlakeWalker<'_>> {
-        crate::nix::flake_walk::FlakeWalker::open(
+    pub fn walker(&self, flake_ref: &str) -> Result<crate::flake_walk::FlakeWalker<'_>> {
+        crate::flake_walk::FlakeWalker::open(
             &self.ctx,
             &self.fetch_settings,
             &self.flake_settings,
@@ -92,8 +89,8 @@ impl NixEvaluator {
 
     /// Lock `flake_ref` and return its eval-cache fingerprint without
     /// evaluating or creating the on-disk eval cache. `None` for mutable flakes.
-    pub(crate) fn fingerprint(&self, flake_ref: &str) -> Result<Option<String>> {
-        crate::nix::flake_walk::fingerprint(
+    pub fn fingerprint(&self, flake_ref: &str) -> Result<Option<String>> {
+        crate::flake_walk::fingerprint(
             &self.ctx,
             &self.fetch_settings,
             &self.flake_settings,

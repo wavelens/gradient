@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Self-contained manifest (no workspace inheritance) so this crate is usable as a
+# lone path dependency from the separate gradient-cli workspace.
+[package]
+name = "gradient-eval"
+description = "Standalone Nix flake evaluator shared by the gradient worker and CLI"
+version = "1.2.0"
+edition = "2024"
+license = "AGPL-3.0"
+authors = ["Wavelens GmbH <info@wavelens.io>"]
+repository = "https://github.com/wavelens/gradient"
+publish = false
+
+[lib]
+name = "gradient_eval"
+path = "src/lib.rs"
+doctest = false
+
+[dependencies]
+anyhow       = { version = "1.0", default-features = false, features = ["std"] }
+libc         = { version = "0.2", default-features = false }
+nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats", default-features = false, features = ["flake"] }
+serde        = { version = "1", default-features = false, features = ["std", "derive"] }
+serde_json   = { version = "1.0", default-features = false, features = ["std"] }
+tracing      = { version = "0.1", default-features = false, features = ["std", "attributes"] }

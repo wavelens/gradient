@@ -5413,3 +5413,21 @@ rather than the host freezing. Covered in the same file:
 - SQL coverage (window stats query, per-batch upsert, rollup inserts) is by
   mirrored-query review plus CI E2E; no real-Postgres unit harness exists.
 - Org-scoping of `/board/cache/upstreams` mirrors `get_board_network` (MetricsScope) and is covered by CI E2E (no local real-Postgres harness).
+
+## Standalone evaluator crate + `gradient eval` (#472)
+
+The worker's flake evaluator (`wildcard_walk`, `flake_walk`, `nix_eval`,
+`eval_worker`, stats) moved into a self-contained `backend/gradient-eval` crate
+so the CLI can reuse it. Their existing unit tests moved with them
+(`wildcard_walk::tests::*` discovery/sharding, `eval_worker::tests::*` serde
+round-trips); the worker keeps the pool-internal `eval_stats` accumulator tests.
+
+- `gradient-eval` `jobs::tests::success_job_serializes_like_nix_eval_jobs` - a
+  resolved `Job` serializes to `{attr, attrPath, drvPath}` with the full
+  `/nix/store` path and omits empty `references`.
+- `jobs::tests::failed_job_serializes_error_without_drv_path` - a failed `Job`
+  serializes `{attr, error}` and no `drvPath`, matching nix-eval-jobs' per-attr
+  error lines.
+- `cli` `tests/eval.rs` (feature-gated on `eval`):
+  `eval_help_describes_nix_eval_jobs_like_output` and `eval_requires_a_pattern`
+  cover the subcommand surface.

@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]

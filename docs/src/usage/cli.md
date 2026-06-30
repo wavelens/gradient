@@ -241,6 +241,28 @@ gradient download '#a,#b,#c'
 
 The positional attribute argument matches the evaluation's artefact tree by exact `entry_points[].attr` equality. It cannot be combined with `--products`.
 
+### Local evaluation (`gradient eval`)
+
+Evaluate a flake's outputs to derivations locally, like
+[`nix-eval-jobs`](https://github.com/nix-community/nix-eval-jobs), using the
+same evaluator the Gradient worker runs. It streams one JSON line per resolved
+attribute (`attr`, `attrPath`, `drvPath`); a per-attribute failure is reported
+in its own line (`{"attr": ..., "error": ...}`) and does not abort the run.
+
+```sh
+gradient eval 'packages.x86_64-linux.*'                # current flake (.)
+gradient eval --flake github:NixOS/patchelf 'hydraJobs.*'
+gradient eval --flake . 'checks.*.*' 'packages.*.*'    # multiple wildcard patterns
+```
+
+This subcommand is gated behind the `nix` and `eval` cargo features (it pulls in
+libnix) and is therefore only shipped by the `gradient-cli-full` package, not the
+default lean `gradient-cli`:
+
+```sh
+nix run github:wavelens/gradient#gradient-cli-full -- eval 'packages.x86_64-linux.*'
+```
+
 ### Utilities
 
 ```sh

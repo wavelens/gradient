@@ -136,6 +136,9 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: generate::Commands,
     },
+    /// Evaluate a flake's outputs to derivations, like nix-eval-jobs
+    #[cfg(feature = "eval")]
+    Eval(eval::EvalArgs),
     /// Hash a password as an argon2id PHC string for use in
     /// `services.gradient.state.users.<name>.password_file`.
     Hash,
@@ -147,8 +150,28 @@ pub fn complete_env() {
     CompleteEnv::with_factory(Cli::command).complete();
 }
 
-pub async fn run_cli() -> std::io::Result<()> {
+/// Entry point: parse, then dispatch. `eval` runs synchronously before any
+/// runtime starts (the embedded Nix evaluator uses Boehm GC, which must run
+/// isolated from Tokio's thread pool); everything else runs on the runtime.
+pub fn run() -> std::io::Result<()> {
+    complete_env();
     let cli = Cli::parse();
+
+    #[cfg(feature = "eval")]
+    if matches!(cli.cmd, MainCommands::Eval(_)) {
+        let MainCommands::Eval(args) = cli.cmd else {
+            unreachable!()
+        };
+        return crate::commands::eval::run(args);
+    }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run_cli(cli))
+}
+
+async fn run_cli(cli: Cli) -> std::io::Result<()> {
     let out = Output::new(cli.json);
 
     match cli.cmd {
@@ -321,6 +344,8 @@ pub async fn run_cli() -> std::io::Result<()> {
         MainCommands::Cache { cmd } => cache::handle(cmd, out).await,
         MainCommands::Builds { cmd } => builds::handle(cmd, out).await,
         MainCommands::Generate { cmd } => generate::handle(cmd, out).await,
+        #[cfg(feature = "eval")]
+        MainCommands::Eval(_) => unreachable!("eval is dispatched before the runtime starts"),
         MainCommands::Hash => {
             let password = ask_for_password();
             let confirm = ask_for_password();

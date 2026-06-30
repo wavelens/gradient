@@ -20,8 +20,8 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
 use tracing::{error, trace};
 
-use crate::nix::nix_eval::NixEvaluator;
-use crate::worker_pool::eval_stats::StatsDelta;
+use crate::nix_eval::NixEvaluator;
+use crate::stats::StatsDelta;
 
 /// Request from parent → worker. One JSON object per line on the worker's stdin.
 #[derive(Debug, Serialize, Deserialize)]
@@ -67,14 +67,14 @@ pub enum EvalResponse {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<String>,
         #[serde(default)]
-        stats: Option<crate::worker_pool::eval_stats::StatsDelta>,
+        stats: Option<crate::stats::StatsDelta>,
     },
     ResolveOk {
         items: Vec<ResolvedItem>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         warnings: Vec<String>,
         #[serde(default)]
-        stats: Option<crate::worker_pool::eval_stats::StatsDelta>,
+        stats: Option<crate::stats::StatsDelta>,
     },
     FingerprintOk {
         fingerprint: Option<String>,
@@ -128,7 +128,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
 
     // Per-request delta collection is on by default; disabling it skips every
     // `ev.stats()` call so the subprocess pays zero overhead.
-    let collect_stats = crate::worker_pool::eval_stats::metrics_enabled();
+    let collect_stats = crate::stats::metrics_enabled();
     let mut last = if collect_stats {
         evaluator
             .as_ref()

@@ -16,7 +16,7 @@
 use anyhow::Result;
 
 /// A node in the flake-output attr tree (a real impl wraps an eval-cache AttrCursor).
-pub(crate) trait WalkNode: Sized {
+pub trait WalkNode: Sized {
     /// Child attribute names (sorted).
     fn child_names(&self) -> Result<Vec<String>>;
     /// Child node by name, or `None` if absent.
@@ -29,7 +29,7 @@ pub(crate) trait WalkNode: Sized {
 }
 
 /// Drop a `*` segment immediately following another `*` (`packages.*.*` == `packages.*`).
-pub(crate) fn collapse_stars(segs: &[String]) -> Vec<String> {
+pub fn collapse_stars(segs: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for s in segs {
         if s == "*" && out.last().map(|p| p == "*").unwrap_or(false) {
@@ -46,7 +46,7 @@ pub(crate) fn collapse_stars(segs: &[String]) -> Vec<String> {
 /// pattern format: `.`-separated segments, optional leading `!` = exclude.
 /// Double-quoted spans keep an inner `.` within one segment (the quotes are
 /// stripped), e.g. `pkgs."python3.12".*` → `["pkgs", "python3.12", "*"]`.
-pub(crate) fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
+pub fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
     let (exclude, body) = match pat.strip_prefix('!') {
         Some(rest) => (true, rest),
         None => (false, pat),
@@ -72,7 +72,12 @@ pub(crate) fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
 
 /// Walk `node` matching `segs`, pushing full dotted attr paths of matched
 /// derivations into `out`. `path` is the accumulated path to `node`.
-fn walk<N: WalkNode>(node: &N, path: &[String], segs: &[String], out: &mut Vec<String>) -> Result<()> {
+fn walk<N: WalkNode>(
+    node: &N,
+    path: &[String],
+    segs: &[String],
+    out: &mut Vec<String>,
+) -> Result<()> {
     match segs.split_first() {
         None => {
             if node.is_derivation()? {
@@ -143,7 +148,7 @@ fn walk<N: WalkNode>(node: &N, path: &[String], segs: &[String], out: &mut Vec<S
 
 /// Discover all derivation attr paths matching `includes`, minus `excludes`
 /// (exact-path matches). `includes`/`excludes` are pre-parsed segment lists.
-pub(crate) fn discover<N: WalkNode>(
+pub fn discover<N: WalkNode>(
     root: &N,
     includes: &[Vec<String>],
     excludes: &[Vec<String>],
@@ -168,7 +173,7 @@ pub(crate) fn discover<N: WalkNode>(
 
 /// Discover from raw wildcard strings: parse each into include/exclude segment
 /// lists, then run [`discover`].
-pub(crate) fn discover_patterns<N: WalkNode>(root: &N, wildcards: &[String]) -> Result<Vec<String>> {
+pub fn discover_patterns<N: WalkNode>(root: &N, wildcards: &[String]) -> Result<Vec<String>> {
     let mut includes = Vec::new();
     let mut excludes = Vec::new();
     for w in wildcards {
@@ -191,7 +196,7 @@ pub(crate) fn discover_patterns<N: WalkNode>(root: &N, wildcards: &[String]) -> 
 /// wildcard is left to each shard's worker, so a `system`-level wildcard yields
 /// one shard per system, each sized to a single eval-worker's RAM budget. A
 /// wildcard-free pattern yields itself unchanged.
-pub(crate) fn plan_shards<N: WalkNode>(root: &N, includes: &[Vec<String>]) -> Result<Vec<Vec<String>>> {
+pub fn plan_shards<N: WalkNode>(root: &N, includes: &[Vec<String>]) -> Result<Vec<Vec<String>>> {
     let mut shards = Vec::new();
     for inc in includes {
         let segs = collapse_stars(inc);
@@ -269,7 +274,7 @@ fn plan_one<N: WalkNode>(
 /// Render shard segments back to a pattern string for the wire: `*`/`#` stay
 /// bare; a literal segment with a `.` or `"` is double-quoted so [`parse_pattern`]
 /// rebuilds the same segments.
-pub(crate) fn segments_to_pattern(segs: &[String]) -> String {
+pub fn segments_to_pattern(segs: &[String]) -> String {
     segs.iter()
         .map(|s| {
             if s == "*" || s == "#" || !(s.contains('.') || s.contains('"')) {
@@ -306,7 +311,10 @@ mod tests {
             StubNode {
                 derivation: false,
                 opaque: false,
-                children: children.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+                children: children
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect(),
             }
         }
 
@@ -379,14 +387,20 @@ mod tests {
 
     #[test]
     fn parse_pattern_include_wildcard() {
-        assert_eq!(parse_pattern("packages.*"), (false, segs(&["packages", "*"])));
+        assert_eq!(
+            parse_pattern("packages.*"),
+            (false, segs(&["packages", "*"]))
+        );
     }
 
     #[test]
     fn parse_pattern_quoted_segment() {
         assert_eq!(
             parse_pattern(r#"packages.x86_64-linux."python3.12".*"#),
-            (false, segs(&["packages", "x86_64-linux", "python3.12", "*"]))
+            (
+                false,
+                segs(&["packages", "x86_64-linux", "python3.12", "*"])
+            )
         );
         assert_eq!(parse_pattern(r#"!a."b.c""#), (true, segs(&["a", "b.c"])));
     }
@@ -419,7 +433,10 @@ mod tests {
         let got = discover(&&root, &[segs(&["packages", "x86_64-linux", "#"])], &[]).unwrap();
         assert_eq!(
             got,
-            vec!["packages.x86_64-linux.cowsay", "packages.x86_64-linux.hello"]
+            vec![
+                "packages.x86_64-linux.cowsay",
+                "packages.x86_64-linux.hello"
+            ]
         );
     }
 
@@ -441,7 +458,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             got,
-            vec!["packages.x86_64-linux.cowsay", "packages.x86_64-linux.hello"]
+            vec![
+                "packages.x86_64-linux.cowsay",
+                "packages.x86_64-linux.hello"
+            ]
         );
     }
 
@@ -531,45 +551,58 @@ mod tests {
         union.sort();
         union.dedup();
 
-        assert_eq!(union, original, "split of {pattern:?} must match one-pass discover");
+        assert_eq!(
+            union, original,
+            "split of {pattern:?} must match one-pass discover"
+        );
     }
 
     #[test]
     fn plan_trailing_star_splits_per_child_with_recover_shard() {
         let root = tree();
-        assert_eq!(shards(&root, &["packages", "*", "*"]), vec![
-            segs(&["packages", "aarch64-linux", "#"]),
-            segs(&["packages", "x86_64-linux", "#"]),
-        ]);
+        assert_eq!(
+            shards(&root, &["packages", "*", "*"]),
+            vec![
+                segs(&["packages", "aarch64-linux", "#"]),
+                segs(&["packages", "x86_64-linux", "#"]),
+            ]
+        );
         assert_split_equivalent(&root, &["packages", "*", "*"]);
     }
 
     #[test]
     fn plan_non_trailing_wildcard_keeps_residual() {
         let root = tree();
-        assert_eq!(shards(&root, &["packages", "*", "hello"]), vec![
-            segs(&["packages", "aarch64-linux", "hello"]),
-            segs(&["packages", "x86_64-linux", "hello"]),
-        ]);
+        assert_eq!(
+            shards(&root, &["packages", "*", "hello"]),
+            vec![
+                segs(&["packages", "aarch64-linux", "hello"]),
+                segs(&["packages", "x86_64-linux", "hello"]),
+            ]
+        );
         assert_split_equivalent(&root, &["packages", "*", "hello"]);
     }
 
     #[test]
     fn plan_hash_terminal_splits_only_derivation_children() {
         let root = tree();
-        assert_eq!(shards(&root, &["packages", "x86_64-linux", "#"]), vec![
-            segs(&["packages", "x86_64-linux", "cowsay"]),
-            segs(&["packages", "x86_64-linux", "hello"]),
-        ]);
+        assert_eq!(
+            shards(&root, &["packages", "x86_64-linux", "#"]),
+            vec![
+                segs(&["packages", "x86_64-linux", "cowsay"]),
+                segs(&["packages", "x86_64-linux", "hello"]),
+            ]
+        );
         assert_split_equivalent(&root, &["packages", "x86_64-linux", "#"]);
     }
 
     #[test]
     fn plan_literal_pattern_passes_through() {
         let root = tree();
-        assert_eq!(shards(&root, &["packages", "x86_64-linux", "hello"]), vec![segs(
-            &["packages", "x86_64-linux", "hello"]
-        )]);
+        assert_eq!(
+            shards(&root, &["packages", "x86_64-linux", "hello"]),
+            vec![segs(&["packages", "x86_64-linux", "hello"])]
+        );
     }
 
     #[test]
@@ -587,9 +620,10 @@ mod tests {
                 ("sysB", StubNode::set(vec![("hello", StubNode::drv())])),
             ]),
         )]);
-        assert_eq!(shards(&root, &["packages", "*", "hello"]), vec![segs(&[
-            "packages", "sysB", "hello"
-        ])]);
+        assert_eq!(
+            shards(&root, &["packages", "*", "hello"]),
+            vec![segs(&["packages", "sysB", "hello"])]
+        );
         assert_split_equivalent(&root, &["packages", "*", "hello"]);
         assert_split_equivalent(&root, &["packages", "*", "*"]);
     }
@@ -603,18 +637,27 @@ mod tests {
     #[test]
     fn plan_multiple_includes_concatenate() {
         let root = tree();
-        let got = plan_shards(&&root, &[segs(&["packages", "*", "*"]), segs(&["checks", "*", "*"])])
-            .unwrap();
-        assert_eq!(got, vec![
-            segs(&["packages", "aarch64-linux", "#"]),
-            segs(&["packages", "x86_64-linux", "#"]),
-            segs(&["checks", "x86_64-linux", "#"]),
-        ]);
+        let got = plan_shards(
+            &&root,
+            &[segs(&["packages", "*", "*"]), segs(&["checks", "*", "*"])],
+        )
+        .unwrap();
+        assert_eq!(
+            got,
+            vec![
+                segs(&["packages", "aarch64-linux", "#"]),
+                segs(&["packages", "x86_64-linux", "#"]),
+                segs(&["checks", "x86_64-linux", "#"]),
+            ]
+        );
     }
 
     #[test]
     fn segments_to_pattern_quotes_dotted_segments_only() {
-        assert_eq!(segments_to_pattern(&segs(&["packages", "x86_64-linux", "#"])), "packages.x86_64-linux.#");
+        assert_eq!(
+            segments_to_pattern(&segs(&["packages", "x86_64-linux", "#"])),
+            "packages.x86_64-linux.#"
+        );
         assert_eq!(segments_to_pattern(&segs(&["packages", "*"])), "packages.*");
         let dotted = segs(&["packages", "x86_64-linux", "python3.12"]);
         let rendered = segments_to_pattern(&dotted);

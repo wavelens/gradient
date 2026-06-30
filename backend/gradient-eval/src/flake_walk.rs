@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow};
-use gradient_exec::strip_nix_store_prefix;
 use nix_bindings::eval_cache::{AttrCursor, EvalCache};
 use nix_bindings::flake::{
     FetchersSettings, FlakeReference, FlakeReferenceParseFlags, FlakeSettings, LockFlags,
@@ -23,17 +22,18 @@ use nix_bindings::flake::{
 };
 use nix_bindings::{Context, EvalState, Store};
 
-use crate::nix::wildcard_walk::{self, WalkNode};
+use crate::strip_nix_store_prefix;
+use crate::wildcard_walk::{self, WalkNode};
 
 /// A locked flake with an open eval cache, walked via a borrowed `EvalState`.
-pub(crate) struct FlakeWalker<'a> {
+pub struct FlakeWalker<'a> {
     cache: EvalCache,
     _locked: LockedFlake,
     state: &'a EvalState,
 }
 
 impl<'a> FlakeWalker<'a> {
-    pub(crate) fn open(
+    pub fn open(
         ctx: &Arc<Context>,
         fetch: &FetchersSettings,
         flake: &FlakeSettings,
@@ -57,7 +57,7 @@ impl<'a> FlakeWalker<'a> {
         })
     }
 
-    pub(crate) fn discover(&self, wildcards: &[String]) -> Result<Vec<String>> {
+    pub fn discover(&self, wildcards: &[String]) -> Result<Vec<String>> {
         let root = self.root()?;
 
         wildcard_walk::discover_patterns(&root, wildcards)
@@ -67,7 +67,7 @@ impl<'a> FlakeWalker<'a> {
     /// parallel discovery (one shard per first-wildcard child). Exclusions are
     /// dropped here; the caller re-attaches them to every shard so each worker's
     /// `discover` applies them.
-    pub(crate) fn plan_shards(&self, wildcards: &[String]) -> Result<Vec<String>> {
+    pub fn plan_shards(&self, wildcards: &[String]) -> Result<Vec<String>> {
         let root = self.root()?;
         let includes: Vec<Vec<String>> = wildcards
             .iter()
@@ -82,7 +82,7 @@ impl<'a> FlakeWalker<'a> {
             .collect())
     }
 
-    pub(crate) fn resolve(&self, attr_path: &str) -> Result<(String, Vec<String>)> {
+    pub fn resolve(&self, attr_path: &str) -> Result<(String, Vec<String>)> {
         let (_, segs) = wildcard_walk::parse_pattern(attr_path);
         let mut cursor = self.cache.root()?;
         for seg in &segs {
@@ -102,14 +102,14 @@ impl<'a> FlakeWalker<'a> {
     /// checkpoint), so concurrent shard workers don't deadlock on the WAL
     /// read-slot locks. The writes are durable; [`Self::checkpoint_cache`]
     /// folds them into the main `.sqlite` once at end-of-eval.
-    pub(crate) fn commit_cache(&self) -> Result<()> {
+    pub fn commit_cache(&self) -> Result<()> {
         self.cache.commit().context("committing eval cache")
     }
 
     /// Fold the WAL into the main `.sqlite` (PASSIVE checkpoint) so the
     /// fleet-share push sees the shards' writes. Never blocks: safe to call even
     /// while another evaluator of the same flake is reading the cache.
-    pub(crate) fn checkpoint_cache(&self) -> Result<()> {
+    pub fn checkpoint_cache(&self) -> Result<()> {
         self.cache.checkpoint().context("checkpointing eval cache")
     }
 }
@@ -134,7 +134,7 @@ fn lock_flake(
 
 /// Lock `flake_ref` and return its eval-cache fingerprint without opening (and
 /// thus creating) the on-disk eval cache. `None` for mutable/dirty flakes.
-pub(crate) fn fingerprint(
+pub fn fingerprint(
     ctx: &Arc<Context>,
     fetch: &FetchersSettings,
     flake: &FlakeSettings,

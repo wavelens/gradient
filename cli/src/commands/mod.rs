@@ -18,6 +18,8 @@ pub mod cache_nar;
 pub mod cache_upload;
 pub mod completion;
 pub mod download;
+#[cfg(feature = "eval")]
+pub mod eval;
 pub mod generate;
 pub mod organization;
 pub mod project;

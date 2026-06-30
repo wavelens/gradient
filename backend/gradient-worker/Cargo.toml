@@ -20,6 +20,7 @@ workspace = true
 
 [dependencies]
 gradient-core = { workspace = true }
+gradient-eval = { path = "../gradient-eval" }
 gradient-exec = { workspace = true }
 gradient-flake-lock = { workspace = true }
 gradient-sources = { workspace = true }
