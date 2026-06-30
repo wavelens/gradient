@@ -447,6 +447,21 @@ impl NarStore {
     /// Lists all NAR hashes currently present in the store (both local and S3).
     /// Returns the full hash strings as stored (e.g. `"ab12cd34..."`).
     pub async fn list_hashes(&self) -> Result<Vec<String>> {
+        Ok(self
+            .list_hashes_with_modified()
+            .await?
+            .into_iter()
+            .map(|(hash, _)| hash)
+            .collect())
+    }
+
+    /// Like [`Self::list_hashes`] but pairs each hash with its object's
+    /// last-modified time as a unix timestamp (seconds). The orphan-file sweep
+    /// uses this to spare freshly-written NARs: an upload lands on disk before
+    /// the eval commits its `derivation`/`cached_path` rows, so for a brief
+    /// window the keep-set does not yet reference it - reclaiming it then strands
+    /// a zombie `cached_path` the dispatch gate trusts.
+    pub async fn list_hashes_with_modified(&self) -> Result<Vec<(String, i64)>> {
         let prefix = Path::from(format!("{}nars", self.prefix));
         let mut stream = self.inner.list(Some(&prefix));
         let mut hashes = Vec::new();
@@ -461,7 +476,7 @@ impl NarStore {
                 let parts: Vec<&str> = p.split('/').collect();
                 if parts.len() >= 2 {
                     let dir = parts[parts.len() - 2];
-                    hashes.push(format!("{}{}", dir, stem));
+                    hashes.push((format!("{}{}", dir, stem), meta.last_modified.timestamp()));
                 }
             }
         }

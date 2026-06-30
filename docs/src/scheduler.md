@@ -144,12 +144,20 @@ without going through `demote_cached_output`, leaving the producer at
 `Completed`/`Substituted` + `closure_complete` with no fetchable output. The gate
 then trusts it, dependents fail `InputsUnavailable` permanently, and - being
 terminal-*success*, not terminal-failed - it is never re-queued, so it never
-rebuilds. `demote_unbacked_trusted_outputs` restores the invariant: it finds every
-gate-trusted producer (`status IN (3, 7) AND closure_complete`) whose output is
-neither in our cache (a `cached_path` with a NAR) nor on an upstream
-(`external_url`) and demotes it back to `Created`. It runs hourly in the cache loop
-(after the GC passes) and once at eval-resolve before promotion, so a producer the
-GC orphaned heals on the next evaluation without manual intervention.
+rebuilds. `demote_unbacked_trusted_outputs` restores the row-vs-object invariant:
+it finds every terminal-success producer (`status IN (3, 7)`) whose output is
+marked cached (`is_cached`) but is neither in our cache (a `cached_path` with a
+NAR) nor on an upstream (`external_url`) and demotes it back to `Created`. It keys
+on `is_cached`, **not** `closure_complete`: once the object vanishes the
+bidirectional `reconcile_closure_complete` correctly clears `closure_complete`,
+and such an anchor's dependents are then blocked at promotion - they never
+dispatch, so no build reports the path missing and the reactive
+`reconcile_missing_inputs` never fires. Gating this sweep on `closure_complete`
+would skip exactly those unreachable dead-zone anchors (a stale `is_cached` from a
+GC'd object or an old global cache hit marked `Completed` without a build). It runs
+hourly in the cache loop (after the GC passes) and once at eval-resolve before
+promotion, so a producer the GC orphaned heals on the next evaluation without
+manual intervention.
 
 The deeper cause of those orphans is the derivation GC itself. `build_job` rows are
 per-evaluation and pruned with old evals (`keep_evaluations`), but the global
@@ -168,6 +176,19 @@ its `.drv`; gating that clause on status purged the `.drv` of a failed-but-reque
 build and dead-ended its retry on `InputsUnavailable`. Outputs stay status-gated (they
 are rebuildable, TTL-evicted), and `gc_orphan_derivations` reclaims a derivation's
 `.drv`/sources once it leaves the live closure.
+
+The keep-set is built from committed DB rows, so it cannot reference a NAR that is
+already on disk but whose `derivation`/`cached_path` rows have not been written yet
+- the in-eval window between the worker's presigned `.drv` PUT and the server
+processing its `NarUploaded`. The orphan-files pass therefore **spares any NAR
+younger than the orphan grace** (`keep_orphan_derivations_hours`, reusing
+`gc_orphan_derivations`' window): reclaiming a just-pushed `.drv` in that window
+left a *zombie* `cached_path` (row committed moments later, object already gone)
+that the dispatch gate trusts as the cached `.drv`, so `push_drv_closure` skipped
+re-pushing it (CacheQuery reported it cached) and dependent builds failed
+`InputsUnavailable` on a `.drv` that was never re-uploaded. The grace closes the
+upload-vs-GC race; a NAR that is still unreferenced after the window is a genuine
+orphan and reclaimed.
 
 Evaluation GC (`gc_project_evaluations`) deletes old evaluations and relies on FK
 cascade to clear their per-eval rows: `evaluation -> build_job -> build_attempt`.

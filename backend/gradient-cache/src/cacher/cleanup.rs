@@ -262,17 +262,31 @@ pub async fn cleanup_orphaned_cache_files(state: Arc<ServerState>) -> Result<Cle
 
     let on_disk = state
         .nar_storage
-        .list_hashes()
+        .list_hashes_with_modified()
         .await
         .context("Failed to list NAR store")?;
-    let on_disk_set: HashSet<String> = on_disk.iter().cloned().collect();
+    let on_disk_set: HashSet<String> = on_disk.iter().map(|(h, _)| h.clone()).collect();
+
+    // Spare NARs younger than the orphan grace window. A freshly-uploaded NAR is
+    // on disk before the eval has committed its `derivation`/`cached_path` rows,
+    // so the keep-set does not yet reference it; reclaiming it here strands a
+    // zombie `cached_path` (row created moments later, object gone) that the
+    // dispatch gate trusts as the cached `.drv` - the in-eval `.drv` push race
+    // that fails dependents `InputsUnavailable`. Mirrors `gc_orphan_derivations`'
+    // grace. `<= 0` disables it (used by tests).
+    let grace_secs = state.config.storage.keep_orphan_derivations_hours.max(0) * 3600;
+    let cutoff = if grace_secs > 0 {
+        now().and_utc().timestamp() - grace_secs
+    } else {
+        i64::MAX
+    };
 
     let mut report = CleanupReport {
         orphan_nars_scanned: on_disk.len() as u64,
         ..Default::default()
     };
-    for hash in &on_disk {
-        if keep.contains(hash) {
+    for (hash, modified) in &on_disk {
+        if keep.contains(hash) || *modified >= cutoff {
             continue;
         }
         if let Err(e) = state.nar_storage.delete(hash).await {
@@ -461,7 +475,13 @@ mod tests {
             web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
             worker_db: WorkerDb::new(db),
-            config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
+            config: {
+                // Disable the orphan-file grace window so these tests' freshly
+                // written NARs are eligible for reclamation immediately.
+                let mut config = RuntimeConfig::from_cli(&test_cli()).expect("valid test config");
+                config.storage.keep_orphan_derivations_hours = 0;
+                Arc::new(config)
+            },
             log_storage: Arc::new(NoopLogStorage),
             email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
             nar_storage,
@@ -632,6 +652,29 @@ mod tests {
 
         assert!(!nar_file_exists(tmp.path(), h1));
         assert!(!nar_file_exists(tmp.path(), h2));
+    }
+
+    /// A NAR younger than the orphan grace window is spared even with an empty
+    /// keep set: it may be a just-uploaded `.drv` whose `derivation`/`cached_path`
+    /// rows have not committed yet, so the keep-set does not reference it. Without
+    /// the grace it would be reclaimed and strand a zombie `cached_path`.
+    #[tokio::test]
+    async fn fresh_orphan_nar_spared_within_grace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let orphan = "ddccbbaa99999999999999999999999999";
+        write_nar_file(tmp.path(), orphan);
+
+        // make_state disables the grace; re-enable the default 24h window.
+        let mut state = make_state(tmp.path(), vec![]);
+        Arc::make_mut(&mut Arc::get_mut(&mut state).unwrap().config)
+            .storage
+            .keep_orphan_derivations_hours = 24;
+
+        cleanup_orphaned_cache_files(state).await.unwrap();
+        assert!(
+            nar_file_exists(tmp.path(), orphan),
+            "freshly written orphan NAR must be spared within the grace window"
+        );
     }
 
     /// `cached_path` rows whose NAR is gone from storage are zombies left
