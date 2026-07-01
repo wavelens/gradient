@@ -9,6 +9,8 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { environment } from '@environments/environment';
 
+export type CreatePermission = 'none' | 'superusers' | 'everyone';
+
 interface ServerConfig {
   version: string;
   oidc_enabled: boolean;
@@ -16,6 +18,8 @@ interface ServerConfig {
   registration_enabled: boolean;
   email_verification_enabled: boolean;
   smtp_enabled: boolean;
+  create_org: CreatePermission;
+  create_cache: CreatePermission;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -29,6 +33,19 @@ export class ConfigService {
   registrationDisabled = false;
   emailVerificationEnabled = false;
   smtpEnabled = false;
+  createOrg: CreatePermission = 'everyone';
+  createCache: CreatePermission = 'everyone';
+
+  canCreate(permission: CreatePermission, isSuperuser: boolean): boolean {
+    switch (permission) {
+      case 'everyone':
+        return true;
+      case 'superusers':
+        return isSuperuser;
+      default:
+        return false;
+    }
+  }
 
   load(): Promise<void> {
     return firstValueFrom(
@@ -44,6 +61,8 @@ export class ConfigService {
           this.registrationDisabled = !res.message.registration_enabled;
           this.emailVerificationEnabled = res.message.email_verification_enabled;
           this.smtpEnabled = res.message.smtp_enabled;
+          this.createOrg = res.message.create_org ?? 'everyone';
+          this.createCache = res.message.create_cache ?? 'everyone';
         }
       })
       .catch(() => {

@@ -5443,3 +5443,19 @@ the same "no custom events" rule as `forge_status_report`.
 - `state_action_validate_accepts_open_pr` - an `open_pr` action validates.
 - `state_action_validate_rejects_events_on_open_pr` - an `open_pr` action with a
   non-empty `events` list is rejected on the `.events` field.
+
+## Organization/cache creation permission gate (#470)
+
+`create_org` / `create_cache` (`CreatePermission`: `none` | `superusers` |
+`everyone`, default `everyone`) gate `PUT /orgs` and `PUT /caches`. The server
+enforces the gate; the frontend additionally hides the create buttons and
+`GET /config` exposes both values.
+
+- `backend/gradient-web/tests/create_permissions.rs` -
+  `create_{org,cache}_superusers_rejects_regular_user` (403 `superuser_required`),
+  `create_{org,cache}_none_rejects_superuser` (403 `creation_disabled`), and the
+  allow-path cases that reach the name-taken pre-check (409) once the gate is
+  satisfied.
+- `backend/gradient-web/tests/config_endpoint.rs` -
+  `config_defaults_to_everyone` and `config_reflects_configured_permissions`
+  cover the `/config` surface.

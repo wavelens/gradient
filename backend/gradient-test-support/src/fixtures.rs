@@ -66,6 +66,13 @@ pub fn user() -> user::Model {
     }
 }
 
+pub fn superuser_user() -> user::Model {
+    user::Model {
+        superuser: true,
+        ..user()
+    }
+}
+
 pub fn org_with_id(id: OrganizationId, slug: &str) -> organization::Model {
     organization::Model {
         id,

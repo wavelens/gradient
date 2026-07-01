@@ -60,6 +60,7 @@ impl ErrorCode {
     // 403 Forbidden
     pub const FORBIDDEN: Self = Self("forbidden");
     pub const SUPERUSER_REQUIRED: Self = Self("superuser_required");
+    pub const CREATION_DISABLED: Self = Self("creation_disabled");
     pub const FORBIDDEN_SOURCE_IP: Self = Self("forbidden_source_ip");
 
     // Validation-specific bad-request codes
@@ -426,6 +427,22 @@ pub fn require_superuser(user: &gradient_types::MUser) -> Result<(), WebError> {
             ErrorCode::SUPERUSER_REQUIRED,
             "superuser required".into(),
         ))
+    }
+}
+
+/// Enforces a [`CreatePermission`] gate on organization/cache creation.
+pub fn require_create_permission(
+    permission: gradient_types::CreatePermission,
+    user: &gradient_types::MUser,
+) -> Result<(), WebError> {
+    use gradient_types::CreatePermission;
+    match permission {
+        CreatePermission::Everyone => Ok(()),
+        CreatePermission::Superusers => require_superuser(user),
+        CreatePermission::None => Err(WebError::Forbidden(
+            ErrorCode::CREATION_DISABLED,
+            "creation is managed by the declarative state".into(),
+        )),
     }
 }
 

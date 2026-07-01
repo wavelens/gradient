@@ -13,7 +13,7 @@ import { AuthService } from '@core/services/auth.service';
  * Route guard that redirects unauthenticated users to the login page.
  * Waits for the initial auth check to complete before deciding.
  */
-export const authGuard: CanActivateFn = () => {
+export const authGuard: CanActivateFn = (_route, state) => {
   const authService = inject(AuthService);
   const router = inject(Router);
 
@@ -22,7 +22,7 @@ export const authGuard: CanActivateFn = () => {
       if (authService.isAuthenticated()) {
         return true;
       }
-      router.navigate(['/account/login']);
+      router.navigate(['/account/login'], { queryParams: { next: state.url } });
       return false;
     })
   );

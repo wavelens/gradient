@@ -10,7 +10,7 @@
       <h1>Caches</h1>
       <p class="text-secondary">Manage your build caches</p>
     </div>
-    @if (authService.isAuthenticated()) {
+    @if (canCreateCache) {
       <button pButton label="Create Cache" icon="pi pi-plus" (click)="openCreateDialog()"></button>
     }
   </div>

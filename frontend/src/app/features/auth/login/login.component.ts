@@ -80,6 +80,10 @@ export class LoginComponent {
   }
 
   loginWithOIDC(): void {
+    const next = this.route.snapshot.queryParamMap.get('next');
+    if (next && next.startsWith('/')) {
+      sessionStorage.setItem('oidc_next', next);
+    }
     window.location.href = `${environment.apiUrl}/auth/oidc/login`;
   }
 }

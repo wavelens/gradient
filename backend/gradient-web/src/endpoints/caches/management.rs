@@ -7,7 +7,7 @@
 use crate::access::{CacheAccess, Caller, load_cache};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::{WebError, WebResult};
+use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
 use crate::permissions::CachePermission;
 use axum::Extension;
@@ -143,6 +143,8 @@ pub async fn put(
     Extension(user): Extension<MUser>,
     Json(body): Json<MakeCacheRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    require_create_permission(state.config.server.create_cache, &user)?;
+
     if check_index_name(body.name.clone().as_str()).is_err() {
         return Err(WebError::invalid_name("Cache Name"));
     }

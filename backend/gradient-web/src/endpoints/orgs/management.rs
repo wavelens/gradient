@@ -7,7 +7,7 @@
 use crate::access::{Caller, OrgAccess, load_org};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::{WebError, WebResult};
+use crate::error::{WebError, WebResult, require_create_permission};
 use crate::helpers::ok_json;
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
@@ -217,6 +217,8 @@ pub async fn put(
     Extension(user): Extension<MUser>,
     Json(body): Json<MakeOrganizationRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
+    require_create_permission(state.config.server.create_org, &user)?;
+
     if check_index_name(body.name.clone().as_str()).is_err() {
         return Err(WebError::invalid_name("Organization Name"));
     }
