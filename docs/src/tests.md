@@ -5459,3 +5459,15 @@ enforces the gate; the frontend additionally hides the create buttons and
 - `backend/gradient-web/tests/config_endpoint.rs` -
   `config_defaults_to_everyone` and `config_reflects_configured_permissions`
   cover the `/config` surface.
+
+## Eval-worker pool discards dead idle subprocesses on checkout
+
+`EvalWorkerPool::acquire` handed out pooled workers without checking the
+subprocess was alive. An idle worker killed while pooled - by the memory reaper,
+the kernel OOM-killer (eval workers set `oom_score_adj=600`), or a crash -
+lingered in the idle vec and the next `acquire` returned the corpse, so the eval
+failed on the first stdin write with `Broken pipe (os error 32)`. `acquire` now
+test-on-borrows via `Child::try_wait`, skipping dead workers and spawning fresh.
+
+- `worker_pool::pool::tests::acquire_skips_dead_idle_worker` - a killed idle
+  worker pushed ahead of a live one is skipped; `acquire` returns the live pid.

@@ -148,6 +148,19 @@ impl EvalWorker {
         })
     }
 
+    pub(super) fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+
+    /// Whether the subprocess is still running, reaping its exit status if it
+    /// has already exited. The pool calls this on checkout to discard an idle
+    /// worker whose subprocess died while pooled (memory reaper, kernel OOM via
+    /// the elevated `oom_score_adj`, or crash) instead of handing out a corpse
+    /// that fails the next write with a broken pipe.
+    fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
     /// Send one request and read one response. Errors here mean the worker is
     /// no longer usable (the caller marks it dead so it gets discarded
     /// instead of being returned to the pool).
@@ -547,12 +560,27 @@ impl EvalWorkerPool {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
 
-        let worker = self.idle.lock().unwrap().pop();
-        let worker = match worker {
-            Some(w) => w,
-            None => EvalWorker::spawn(&self.eval_cache_dir, Arc::clone(&self.live))
-                .await
-                .context("spawning fresh eval worker")?,
+        // Test-on-borrow: an idle subprocess can die while pooled (memory
+        // reaper SIGKILL, kernel OOM via the elevated oom_score_adj, or crash).
+        // Skip such corpses so we never hand out a worker whose first stdin
+        // write fails with a broken pipe; spawn fresh once the idle vec drains.
+        let worker = loop {
+            let candidate = self.idle.lock().unwrap().pop();
+            match candidate {
+                Some(mut w) => {
+                    let pid = w.pid();
+                    if w.is_alive() {
+                        break w;
+                    }
+                    debug!(?pid, "discarding dead idle eval worker on checkout");
+                    drop(w);
+                }
+                None => {
+                    break EvalWorker::spawn(&self.eval_cache_dir, Arc::clone(&self.live))
+                        .await
+                        .context("spawning fresh eval worker")?;
+                }
+            }
         };
 
         Ok(PooledEvalWorker {
@@ -720,7 +748,37 @@ mod tests {
         EvalWorker::from_command(Command::new("cat")).expect("spawn cat")
     }
 
+    /// A worker whose subprocess has already been killed and reaped - stands in
+    /// for an idle worker the memory reaper or kernel OOM-killer took out while
+    /// it sat in the pool.
+    async fn dead_worker() -> EvalWorker {
+        let mut w = fake_worker();
+        w.child.start_kill().expect("kill cat");
+        w.child.wait().await.expect("reap cat");
+        w
+    }
+
     const GIB: u64 = 1024 * 1024 * 1024;
+
+    #[tokio::test]
+    async fn acquire_skips_dead_idle_worker() {
+        let pool = EvalWorkerPool::new(4, 2 * GIB, String::new());
+        let live = fake_worker();
+        let live_pid = live.pid();
+        assert!(live_pid.is_some());
+
+        // idle is a stack: push the live worker first so the dead corpse (pushed
+        // last) is popped first and must be skipped.
+        pool.push_for_test(live);
+        pool.push_for_test(dead_worker().await);
+
+        let worker = pool.acquire().await.expect("acquire a live worker");
+        assert_eq!(
+            worker.pid(),
+            live_pid,
+            "acquire must skip the dead idle corpse and return the live worker"
+        );
+    }
 
     #[test]
     fn budgeted_pool_size_caps_by_memory() {
