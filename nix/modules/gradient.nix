@@ -771,6 +771,18 @@ in {
           type = lib.types.str;
           default = "gradient@localhost";
         };
+
+        createOrg = lib.mkOption {
+          description = "Who may create organizations through the API. `none` disables API creation (organizations are then managed only by the declarative state), `superusers` restricts it to superusers, `everyone` allows any authenticated user.";
+          type = lib.types.enum [ "none" "superusers" "everyone" ];
+          default = "everyone";
+        };
+
+        createCache = lib.mkOption {
+          description = "Who may create caches through the API. `none` disables API creation (caches are then managed only by the declarative state), `superusers` restricts it to superusers, `everyone` allows any authenticated user.";
+          type = lib.types.enum [ "none" "superusers" "everyone" ];
+          default = "everyone";
+        };
       };
     };
   };
@@ -911,6 +923,8 @@ in {
         GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP = toString cfg.settings.anonMaxConnectionsPerIp;
         GRADIENT_PR_COMMIT_NAME = cfg.settings.prCommitName;
         GRADIENT_PR_COMMIT_EMAIL = cfg.settings.prCommitEmail;
+        GRADIENT_CREATE_ORG = cfg.settings.createOrg;
+        GRADIENT_CREATE_CACHE = cfg.settings.createCache;
         GRADIENT_LOCAL_IPS = builtins.concatStringsSep "," cfg.settings.localIps;
         GRADIENT_TRUSTED_PROXIES = builtins.concatStringsSep "," cfg.settings.trustedProxies;
         GRADIENT_STATE_FILE = "%d/gradient_state";

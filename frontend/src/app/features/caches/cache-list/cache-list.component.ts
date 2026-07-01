@@ -16,6 +16,7 @@ import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
+import { ConfigService } from '@core/services/config.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { slugify } from '@shared/text';
@@ -41,7 +42,13 @@ import { Cache } from '@core/models';
 export class CacheListComponent implements OnInit, OnDestroy {
   private cachesService = inject(CachesService);
   protected authService = inject(AuthService);
+  private config = inject(ConfigService);
   private nameCheck$ = new Subject<string>();
+
+  get canCreateCache(): boolean {
+    if (!this.authService.isAuthenticated()) return false;
+    return this.config.canCreate(this.config.createCache, this.authService.user()?.superuser === true);
+  }
 
   loading = signal(true);
   caches = signal<Cache[]>([]);

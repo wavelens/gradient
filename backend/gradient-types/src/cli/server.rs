@@ -5,7 +5,22 @@
  */
 
 use crate::input::port_in_range;
-use clap::Args;
+use clap::{Args, ValueEnum};
+use serde::{Deserialize, Serialize};
+
+/// Who may create organizations / caches through the API.
+#[derive(ValueEnum, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+#[value(rename_all = "lowercase")]
+pub enum CreatePermission {
+    /// Nobody via the API; only the declarative state import may create them.
+    None,
+    /// Superusers only.
+    Superusers,
+    /// Any authenticated user.
+    #[default]
+    Everyone,
+}
 
 #[derive(Args, Debug, Clone)]
 pub struct ServerArgs {
@@ -37,6 +52,12 @@ pub struct ServerArgs {
     /// Author/committer email for commits the `OpenPr` action pushes.
     #[arg(long, env = "GRADIENT_PR_COMMIT_EMAIL", default_value = "gradient@localhost")]
     pub pr_commit_email: String,
+    /// Who may create organizations through the API.
+    #[arg(long, value_enum, env = "GRADIENT_CREATE_ORG", default_value_t = CreatePermission::Everyone)]
+    pub create_org: CreatePermission,
+    /// Who may create caches through the API.
+    #[arg(long, value_enum, env = "GRADIENT_CREATE_CACHE", default_value_t = CreatePermission::Everyone)]
+    pub create_cache: CreatePermission,
 }
 
 impl Default for ServerArgs {
@@ -49,6 +70,8 @@ impl Default for ServerArgs {
             use_tls: true,
             pr_commit_name: "Gradient".into(),
             pr_commit_email: "gradient@localhost".into(),
+            create_org: CreatePermission::default(),
+            create_cache: CreatePermission::default(),
         }
     }
 }

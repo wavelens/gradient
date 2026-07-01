@@ -10,7 +10,7 @@
       <h1>Organizations</h1>
       <p class="text-secondary">Manage your organizations</p>
     </div>
-    @if (authService.isAuthenticated()) {
+    @if (canCreateOrganization) {
       <button pButton label="Create Organization" icon="pi pi-plus" (click)="openCreateDialog()"></button>
     }
   </div>

@@ -42,5 +42,5 @@ pub use registration::{DEFAULT_SENTRY_DSN, RegistrationArgs, effective_sentry_ds
 pub use s3::S3Args;
 pub use scim::ScimArgs;
 pub use secrets::SecretsArgs;
-pub use server::ServerArgs;
+pub use server::{CreatePermission, ServerArgs};
 pub use storage::StorageArgs;

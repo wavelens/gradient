@@ -26,7 +26,7 @@ pub mod workers;
 
 use crate::error::WebResult;
 use axum::extract::{Json, State};
-use gradient_types::{BaseResponse};
+use gradient_types::{BaseResponse, CreatePermission};
 use gradient_core::ServerState;
 use serde::Serialize;
 use std::sync::Arc;
@@ -69,6 +69,8 @@ pub struct ServerConfig {
     pub email_verification_enabled: bool,
     pub smtp_enabled: bool,
     pub quic: bool,
+    pub create_org: CreatePermission,
+    pub create_cache: CreatePermission,
 }
 
 pub async fn get_config(
@@ -90,6 +92,8 @@ pub async fn get_config(
                     .is_some_and(|e| e.require_verification),
             smtp_enabled: state.email.is_enabled(),
             quic: state.config.proto.quic,
+            create_org: state.config.server.create_org,
+            create_cache: state.config.server.create_cache,
         },
     };
 

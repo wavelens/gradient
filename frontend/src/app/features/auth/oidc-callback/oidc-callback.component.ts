@@ -19,7 +19,15 @@ export class OidcCallbackComponent implements OnInit {
 
   ngOnInit(): void {
     this.authService.loginWithCookie().subscribe({
-      next: () => this.router.navigate(['/']),
+      next: () => {
+        const next = sessionStorage.getItem('oidc_next');
+        sessionStorage.removeItem('oidc_next');
+        if (next && next.startsWith('/')) {
+          this.router.navigateByUrl(next);
+        } else {
+          this.router.navigate(['/']);
+        }
+      },
       error: () => this.router.navigate(['/account/login']),
     });
   }

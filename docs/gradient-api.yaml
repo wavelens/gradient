@@ -219,6 +219,8 @@ paths:
                   registration_enabled: false
                   email_verification_enabled: false
                   quic: false
+                  create_org: everyone
+                  create_cache: everyone
 
   /proto:
     get:
@@ -7205,7 +7207,7 @@ components:
 
     ServerConfig:
       type: object
-      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled]
+      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_org, create_cache]
       properties:
         oidc_enabled:
           type: boolean
@@ -7225,6 +7227,14 @@ components:
         smtp_enabled:
           type: boolean
           description: Whether the server has SMTP configured (required for send_mail actions)
+        create_org:
+          type: string
+          enum: [none, superusers, everyone]
+          description: Who may create organizations via the API (`none` = only the declarative state).
+        create_cache:
+          type: string
+          enum: [none, superusers, everyone]
+          description: Who may create caches via the API (`none` = only the declarative state).
     # ── Auth ─────────────────────────────────────────────────────────────────
 
     MakeLoginRequest:

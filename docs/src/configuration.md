@@ -69,6 +69,8 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.logLevel.proto` | null | `gradient_proto` log level override (null inherits default) |
 | `settings.logLevel.scheduler` | null | `gradient_scheduler` log level override (null inherits default) |
 | `settings.enableRegistration` | `true` | Allow new user self-registration |
+| `settings.createOrg` | `everyone` | Who may create organizations via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Organization" button accordingly. (`GRADIENT_CREATE_ORG`) |
+| `settings.createCache` | `everyone` | Who may create caches via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Cache" button accordingly. (`GRADIENT_CREATE_CACHE`) |
 | `settings.deleteState` | `true` | Remove entities no longer in `state` (see below) |
 | `settings.cacheTtlHours` | `336` | TTL in hours for cached NARs not fetched recently (0 = disabled) |
 | `settings.narStorageOpenTimeoutSecs` | `60` | Max seconds the server will wait to open a NAR object stream (e.g. an S3 GET) before emitting `NarUnavailable`. Caps how long a stalled storage backend can block a `NarRequest`. |

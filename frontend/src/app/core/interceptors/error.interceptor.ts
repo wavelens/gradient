@@ -32,11 +32,14 @@ export const errorInterceptor: HttpInterceptorFn = (req, next) => {
   return next(req).pipe(
     catchError((error: HttpErrorResponse) => {
       switch (error.status) {
-        case 401:
+        case 401: {
           localStorage.removeItem('jwt_token');
           sessionStorage.removeItem('jwt_token');
-          router.navigate(['/account/login']);
+          const next = router.url;
+          const carry = next && !next.startsWith('/account/');
+          router.navigate(['/account/login'], carry ? { queryParams: { next } } : {});
           break;
+        }
 
         case 0:
           // Network error or server completely unreachable - treat as 503

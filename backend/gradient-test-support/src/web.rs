@@ -100,6 +100,22 @@ pub fn make_test_server_with(
         Some(path) => test_cli_with_crypt(path),
         None => test_cli(),
     };
+    server_from_cli(db, cli)
+}
+
+/// Variant of [`make_test_server`] that lets callers tweak the parsed `Cli`
+/// (e.g. tighten `create_org` / `create_cache`) before the `RuntimeConfig` is
+/// resolved.
+pub fn make_test_server_configured(
+    db: DatabaseConnection,
+    configure: impl FnOnce(&mut gradient_types::Cli),
+) -> TestServer {
+    let mut cli = test_cli();
+    configure(&mut cli);
+    server_from_cli(db, cli)
+}
+
+fn server_from_cli(db: DatabaseConnection, cli: gradient_types::Cli) -> TestServer {
     let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
     let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
     let state = Arc::new(ServerState {
