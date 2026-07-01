@@ -255,26 +255,46 @@ const DRV_CLOSURE_CACHED_GATE: &str = r#"
           AND (dep.derivation IS NULL OR NOT dep.drv_closure_cached))
 "#;
 
-/// Global self-heal fixpoint over `drv_closure_cached`. The eval pushes `.drv`s
-/// progressively as it resolves the graph, so this runs in the dispatch loop (and
-/// at eval completion / graph-unstick) to mark anchors whose full input-`.drv`
-/// closure has landed: each pass marks a layer (`.drv` cached + deps already
-/// marked), a freshly marked dep unblocks its dependents next pass, converging in
-/// O(longest unmarked chain). A converged graph costs one zero-row statement.
-/// Never cleared here - a `.drv` GC'd out from under a marked anchor is healed
-/// reactively by the worker's missing-input report, as with `closure_complete`.
-pub async fn reconcile_drv_closure_cached<C: ConnectionTrait>(db: &C) -> Result<(), DbErr> {
-    let update = format!(
+/// CLEAR + SET statements for the `drv_closure_cached` fixpoint, sharing
+/// `DRV_CLOSURE_CACHED_GATE` so both passes key on the same `.drv`-cached ground
+/// truth and can never drift from each other (or from the test that pins them).
+fn drv_closure_cached_statements() -> (String, String) {
+    let clear = format!(
+        "UPDATE derivation_build db SET drv_closure_cached = false \
+         WHERE db.drv_closure_cached AND NOT ({DRV_CLOSURE_CACHED_GATE})"
+    );
+    let set = format!(
         "UPDATE derivation_build db SET drv_closure_cached = true \
          WHERE NOT db.drv_closure_cached AND {DRV_CLOSURE_CACHED_GATE}"
     );
-    loop {
-        let changed = db
-            .execute(Statement::from_string(DatabaseBackend::Postgres, &update))
-            .await?
-            .rows_affected();
-        if changed == 0 {
-            break;
+    (clear, set)
+}
+
+/// Bidirectional self-heal fixpoint over `drv_closure_cached`, the dispatch gate's
+/// ".drv closure is importable" trust flag. The eval pushes `.drv`s progressively,
+/// so the SET pass marks anchors whose full input-`.drv` closure has landed - a
+/// layer per pass, a freshly marked dep unblocking its dependents next pass.
+///
+/// The flag is not monotonic-safe: GC deletes a `.drv`'s `cached_path` row once
+/// its NAR object is gone (`purge_zombie_cached_paths`), and the post-GC
+/// `demote_unbacked_trusted_outputs` backstop only heals OUTPUT trust, never this
+/// INPUT flag. A stale-true `drv_closure_cached` then dispatches a build whose
+/// `.drv` is not actually cached - terminal `InputsUnavailable` on the build's own
+/// `.drv`, poisoning the whole dependent closure. The CLEAR pass restores
+/// soundness: any anchor whose `.drv` is no longer backed (or whose dependency
+/// regressed) is reset, rippling up to dependents. Run CLEAR to a fixpoint first,
+/// then SET; a converged graph costs two zero-row statements.
+pub async fn reconcile_drv_closure_cached<C: ConnectionTrait>(db: &C) -> Result<(), DbErr> {
+    let (clear, set) = drv_closure_cached_statements();
+    for stmt in [clear, set] {
+        loop {
+            let changed = db
+                .execute(Statement::from_string(DatabaseBackend::Postgres, &stmt))
+                .await?
+                .rows_affected();
+            if changed == 0 {
+                break;
+            }
         }
     }
 
@@ -603,6 +623,34 @@ mod tests {
         assert!(
             sql.contains("RETURNING db.derivation"),
             "must return failed derivations so the caller can finalize their evals: {sql}"
+        );
+    }
+
+    /// `drv_closure_cached` is the dispatch gate's ".drv closure is importable"
+    /// trust flag. GC deletes a `.drv`'s `cached_path` row once its NAR object
+    /// goes missing (`purge_zombie_cached_paths`), so the flag must be
+    /// BIDIRECTIONAL like `closure_complete`: CLEAR a stale-true flag whose `.drv`
+    /// is no longer backed before SETting genuinely satisfied anchors. A set-only
+    /// reconcile leaves the gate trusting a vanished `.drv`, stranding the build in
+    /// a terminal `InputsUnavailable` dead zone. Pin the SQL shape (no live DB).
+    #[test]
+    fn drv_closure_cached_reconcile_is_bidirectional() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let (clear, set) = drv_closure_cached_statements();
+        let (clear, set) = (norm(clear), norm(set));
+        assert!(
+            clear.contains("SET drv_closure_cached = false")
+                && clear.contains("WHERE db.drv_closure_cached AND NOT ("),
+            "CLEAR pass must reset anchors whose .drv is no longer backed: {clear}"
+        );
+        assert!(
+            set.contains("SET drv_closure_cached = true")
+                && set.contains("WHERE NOT db.drv_closure_cached AND"),
+            "SET pass must mark anchors whose .drv closure has landed: {set}"
+        );
+        assert!(
+            clear.contains("JOIN cached_path cp") && set.contains("JOIN cached_path cp"),
+            "both passes must key on real .drv NAR backing (ground truth): {clear} | {set}"
         );
     }
 }

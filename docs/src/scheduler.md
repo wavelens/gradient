@@ -105,12 +105,18 @@ input `.drv` plus its input sources) is in the cache - the daemon's
 `.drv`s progressively, so without this gate a build dispatched mid-push fails
 terminal `InputsUnavailable` on a missing `.drv` (its own or a dependency's) - the
 dominant failure of large NixOS system-closure derivations. `reconcile_drv_closure_cached`
-(run in the dispatch tick, at eval completion, and during graph-unstick) marks an
-anchor once its own `.drv` is cached and every build dependency is itself
-`drv_closure_cached`; the recursion is independent of build/substitute status,
-since a substitutable dependency's `.drv` is still a structural reference of any
-dependent's `.drv`. A substitutable anchor itself substitutes its output and never
-imports its `.drv`, so the gate skips it.
+(run in the dispatch tick, at eval completion, and during graph-unstick) is a
+bidirectional fixpoint like `reconcile_closure_complete`: a CLEAR pass first resets
+any anchor whose `.drv` is no longer backed, then a SET pass marks an anchor once
+its own `.drv` is cached and every build dependency is itself `drv_closure_cached`.
+The CLEAR pass is load-bearing because the flag is not monotonic-safe: GC deletes a
+`.drv`'s `cached_path` row once its NAR object is gone (`purge_zombie_cached_paths`),
+and the post-GC `demote_unbacked_trusted_outputs` backstop only heals OUTPUT trust,
+so a stale-true flag would otherwise dispatch a build whose `.drv` has vanished and
+strand its whole closure in terminal `InputsUnavailable`. The recursion is
+independent of build/substitute status, since a substitutable dependency's `.drv` is
+still a structural reference of any dependent's `.drv`. A substitutable anchor itself
+substitutes its output and never imports its `.drv`, so the gate skips it.
 
 Because the anchor is global and build-once, a new evaluation is treated as a
 fresh build intent: `resolve_anchors` re-queues anchors a previous eval left
