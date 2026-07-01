@@ -43,20 +43,24 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
         for action in &project.actions {
             if !matches!(
                 action.action_type.as_str(),
-                "send_mail" | "send_web_request" | "forge_status_report"
+                "send_mail" | "send_web_request" | "forge_status_report" | "open_pr"
             ) {
                 errors.push(
                     format!("projects.{}.actions.{}.type", project.name, action.name),
                     format!(
-                        "Invalid action type '{}': expected send_mail/send_web_request/forge_status_report",
+                        "Invalid action type '{}': expected send_mail/send_web_request/forge_status_report/open_pr",
                         action.action_type
                     ),
                 );
             }
-            if action.action_type == "forge_status_report" && !action.events.is_empty() {
+            if matches!(
+                action.action_type.as_str(),
+                "forge_status_report" | "open_pr"
+            ) && !action.events.is_empty()
+            {
                 errors.push(
                     format!("projects.{}.actions.{}.events", project.name, action.name),
-                    "forge_status_report actions cannot carry custom events",
+                    format!("{} actions cannot carry custom events", action.action_type),
                 );
             }
             if !action_names.insert(action.name.as_str()) {

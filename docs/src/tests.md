@@ -5431,3 +5431,15 @@ round-trips); the worker keeps the pool-internal `eval_stats` accumulator tests.
 - `cli` `tests/eval.rs` (feature-gated on `eval`):
   `eval_help_describes_nix_eval_jobs_like_output` and `eval_requires_a_pattern`
   cover the subcommand surface.
+
+## State import accepts `open_pr` actions
+
+`backend/gradient-state/src/validation/projects.rs` validated the declarative
+action `type` against a stale list (`send_mail`/`send_web_request`/
+`forge_status_report`), so re-importing a state that `export.rs` had emitted with
+an `open_pr` action failed. The validator now also accepts `open_pr` and applies
+the same "no custom events" rule as `forge_status_report`.
+
+- `state_action_validate_accepts_open_pr` - an `open_pr` action validates.
+- `state_action_validate_rejects_events_on_open_pr` - an `open_pr` action with a
+  non-empty `events` list is rejected on the `.events` field.

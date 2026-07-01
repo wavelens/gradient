@@ -108,6 +108,7 @@ pub struct StateProject {
 ///   - `send_mail`           `{ recipients: [..], subject_template?: str }`
 ///   - `send_web_request`    `{ url: str, token_file?: str }`
 ///   - `forge_status_report` `{ integration: <outbound integration name> }`
+///   - `open_pr`             `{ integration: <name>, generator?, granularity?, verify_gate?, branch_pattern?, ... }`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct StateAction {

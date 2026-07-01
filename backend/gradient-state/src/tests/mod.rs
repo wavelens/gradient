@@ -446,6 +446,77 @@ fn state_action_validate_rejects_events_on_forge_status_report() {
 }
 
 #[test]
+fn state_action_validate_accepts_open_pr() {
+    let json = r#"{
+        "users": {
+            "alice": {
+                "username": "alice", "name": "Alice", "email": "a@x.io",
+                "password_file": "/dev/null"
+            }
+        },
+        "organizations": {
+            "acme": {
+                "name": "acme", "display_name": "ACME",
+                "private_key_file": "/dev/null", "public": false, "created_by": "alice"
+            }
+        },
+        "projects": {
+            "web": {
+                "name": "web", "organization": "acme", "display_name": "Web",
+                "repository": "https://example.com/acme/web.git", "created_by": "alice",
+                "actions": [
+                    { "name": "flake-update", "type": "open_pr", "config": { "integration": "gh" } }
+                ]
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let v = cfg.validate();
+    assert!(
+        v.is_valid,
+        "open_pr must be a valid action type, got: {:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn state_action_validate_rejects_events_on_open_pr() {
+    let json = r#"{
+        "users": {
+            "alice": {
+                "username": "alice", "name": "Alice", "email": "a@x.io",
+                "password_file": "/dev/null"
+            }
+        },
+        "organizations": {
+            "acme": {
+                "name": "acme", "display_name": "ACME",
+                "private_key_file": "/dev/null", "public": false, "created_by": "alice"
+            }
+        },
+        "projects": {
+            "web": {
+                "name": "web", "organization": "acme", "display_name": "Web",
+                "repository": "https://example.com/acme/web.git", "created_by": "alice",
+                "actions": [
+                    { "name": "x", "type": "open_pr", "events": ["build.completed"], "config": { "integration": "gh" } }
+                ]
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let v = cfg.validate();
+    assert!(!v.is_valid);
+    assert!(
+        v.errors
+            .iter()
+            .any(|e| e.field == "projects.web.actions.x.events"),
+        "expected open_pr-events error, got: {:?}",
+        v.errors
+    );
+}
+
+#[test]
 fn state_project_silently_ignores_legacy_force_evaluation_field() {
     // Old state files may still set `force_evaluation` - serde drops
     // unknown fields by default, so parsing must keep working.
