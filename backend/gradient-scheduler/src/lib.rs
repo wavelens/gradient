@@ -11,6 +11,7 @@
 //! The `Scheduler` impl is split across submodules by concern:
 //! - [`worker_lifecycle`] - connect / disconnect / capability updates
 //! - [`job_handlers`] - queue, assignment, status, completion, log, abort
+//! - [`dispatch`] - background loops that poll the DB and enqueue jobs
 
 pub mod build;
 pub mod dispatch;
