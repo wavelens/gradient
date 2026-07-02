@@ -15,6 +15,30 @@
 //! `derivation_build` rows are seeded for every derivation, so without this
 //! gate promotion would queue derivations no surviving evaluation needs, which
 //! the dispatcher then cannot attribute to a driving evaluation.
+//!
+//! # Derived-flag maintenance contract
+//!
+//! The gates in this module trust derived flags on `derivation_build`; each has
+//! an explicit discipline, and mixing them up re-opens a dead-zone class:
+//!
+//! | flag                 | discipline                | heal                              |
+//! |----------------------|---------------------------|-----------------------------------|
+//! | `closure_complete`   | bidirectional (CLEAR+SET) | [`reconcile_closure_complete`]    |
+//! | `drv_closure_cached` | bidirectional (CLEAR+SET) | [`reconcile_drv_closure_cached`]  |
+//! | `edges_complete`     | monotonic (set-only)      | none needed - see below           |
+//!
+//! The two closure flags cache ground truth that can REGRESS (GC deletes a NAR,
+//! an output is evicted, an edge is recorded late), so they must be cleared as
+//! well as set - a stale-true flag dispatches a build whose inputs are gone,
+//! the terminal-`InputsUnavailable` poison class.
+//!
+//! `edges_complete` is different: it records that the anchor's dependency EDGE
+//! SET has been fully flushed by some evaluation, and that knowledge never
+//! regresses - edges are only ever added, anchors die only by `derivation`
+//! cascade, and nothing anywhere writes `edges_complete = false`. The one case
+//! where a flushed edge set is UNTRUSTWORTHY (a declared dependency
+//! `flush_deferred_deps` could not record) is held off promotion by the
+//! separate `edges_unresolved` flag instead of a clear.
 
 use crate::graph_sql::{ClosureDirection, dependency_closure_cte, eval_closure_cte};
 use gradient_types::DerivationId;
@@ -451,9 +475,10 @@ fn find_ready_anchors_sql() -> String {
 /// just its directly-reported `build_job` rows. Called once the eval's dependency
 /// edges are flushed. A transitive dep reached only via global edges (pruned or
 /// substituted in this eval, so it has no `build_job` here) would otherwise never
-/// get its flag maintained, so a prior demote that cleared it leaves the dep
-/// `edges_complete = false` forever - unpromotable behind the dispatch gate even
-/// though its edge set is complete and satisfied. A closure node is marked when it
+/// get its flag maintained: if the eval that owned it never completed its edge
+/// flush (failed, interrupted, superseded), the dep sits `edges_complete = false`
+/// forever - unpromotable behind the dispatch gate even though its edge set is by
+/// now complete and satisfied. A closure node is marked when it
 /// has recorded build edges (its edge set is known) or is one of this eval's own
 /// `build_job` leaves (0-dep); ambiguous 0-edge transitive nodes stay gated.
 /// Anchors flagged `edges_unresolved` (a declared dependency `flush_deferred_deps`
