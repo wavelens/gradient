@@ -107,9 +107,9 @@ interface RuleRow {
             <tr><td class="label">Capabilities</td><td class="mono">{{ capabilityList(j.worker_context.capabilities) || '-' }}</td></tr>
             <tr><td class="label">CPU count</td><td class="mono">{{ j.worker_context.cpu_count }}</td></tr>
             <tr><td class="label">CPU core score</td><td class="mono">{{ j.worker_context.cpu_core_score | number: '1.0-2' }}</td></tr>
-            <tr><td class="label">CPU usage</td><td class="mono">{{ j.worker_context.cpu_usage_pct | number: '1.0-1' }} %</td></tr>
+            <tr><td class="label">CPU usage</td><td class="mono">{{ j.worker_context.cpu_usage_pct != null ? (j.worker_context.cpu_usage_pct | number: '1.0-1') + ' %' : '-' }}</td></tr>
             <tr><td class="label">RAM total</td><td class="mono">{{ j.worker_context.ram_total_mb | number }} MB</td></tr>
-            <tr><td class="label">RAM free</td><td class="mono">{{ j.worker_context.ram_free_mb | number }} MB</td></tr>
+            <tr><td class="label">RAM free</td><td class="mono">{{ j.worker_context.ram_free_mb != null ? (j.worker_context.ram_free_mb | number) + ' MB' : '-' }}</td></tr>
             <tr><td class="label">Disk speed</td><td class="mono">{{ j.worker_context.disk_speed_mbps != null ? (j.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
             <tr><td class="label">Network speed</td><td class="mono">{{ j.worker_context.network_speed_mbps != null ? (j.worker_context.network_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
           </tbody>

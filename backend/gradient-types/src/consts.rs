@@ -12,6 +12,10 @@ use uuid::uuid;
 
 pub const PORT_RANGE: RangeInclusive<usize> = 1..=65535;
 
+/// Pseudo-architecture of `builtin:*` derivations (`builtin:fetchurl` etc.):
+/// they fetch rather than build, so any worker can run them.
+pub const BUILTIN_ARCH: &str = "builtin";
+
 pub static NULL_TIME: LazyLock<NaiveDateTime> = LazyLock::new(|| {
     DateTime::from_timestamp(0, 0)
         .unwrap_or(DateTime::UNIX_EPOCH)

@@ -72,6 +72,21 @@ cannot silently ignore a dimension.
   (`None`) falls back to the rule constant, while a MEASURED zero is honored;
   the old `0.0 == absent` heuristic silently swapped in the fallback.
 
+`backend/gradient-score/src/rules/resource.rs`:
+- `pre_heartbeat_absent_samples_never_penalize` - a worker with static caps
+  but no live heartbeat yet (`cpu_usage_pct`/`ram_free_mb` are `None`) scores
+  neutral on both resource rules; the old zero defaults read as "0 MB free"
+  and penalized every build on a freshly connected worker. A MEASURED zero
+  free RAM still draws the bounded overshoot penalty.
+
+`backend/gradient-scheduler/src/worker_pool.rs`:
+- `test_update_metrics_updates_view` - live metric fields are absent (`None`)
+  before the first heartbeat and carry the measured values afterwards.
+- `worker_caps_snapshot_is_coherent` - `WorkerPool::worker_caps` returns one
+  coherent `WorkerCaps` snapshot (gradient capabilities, architectures,
+  features, live metrics) under a single pool read, replacing the three-getter
+  stitch in `worker_auth_and_caps`.
+
 ## Per-build forge check tracks the whole lifecycle
 
 `backend/gradient-ci/src/reporting.rs`: `build_event_for_status` maps a build

@@ -18,7 +18,7 @@ pub(crate) enum BuildDispatchMode {
 /// - substitutable, budget spent, a worker for its arch IS connected → `RealArch` (escalate)
 /// - substitutable, budget spent, NO worker for its arch → `SubstituteStalled`
 pub(crate) fn arch_available(connected: &std::collections::HashSet<String>, arch: &str) -> bool {
-    arch == "builtin" || connected.contains(arch)
+    arch == gradient_types::BUILTIN_ARCH || connected.contains(arch)
 }
 
 pub(crate) fn decide_dispatch_mode(

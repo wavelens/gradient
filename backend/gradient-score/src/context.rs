@@ -55,13 +55,16 @@ pub struct HistoryPrediction {
     pub samples: u32,
 }
 
+/// Static caps plus the latest live heartbeat of one worker. The live fields
+/// (`ram_free_mb`, `cpu_usage_pct`) are `None` until the first heartbeat -
+/// rules skip their clauses rather than scoring a fake zero.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WorkerMetricsView {
     pub cpu_count: u32,
     pub cpu_core_score: u32,
     pub ram_total_mb: u64,
-    pub ram_free_mb: u64,
-    pub cpu_usage_pct: f32,
+    pub ram_free_mb: Option<u64>,
+    pub cpu_usage_pct: Option<f32>,
     pub disk_speed_mbps: Option<f32>,
     pub network_speed_mbps: Option<f32>,
 }

@@ -125,7 +125,7 @@ impl ScoreRule for BuiltinDeprioritizeRule {
         // A builtin yields its slot (0) on a real-build-capable worker, but an
         // arch-less worker can only run builtins/fetches, so lift it strongly to
         // keep it from sitting idle. Real compilation jobs earn the default bonus.
-        if b.architecture == "builtin" {
+        if b.architecture == gradient_types::BUILTIN_ARCH {
             return if worker.architectures.is_empty() { self.archless_bonus } else { 0.0 };
         }
 

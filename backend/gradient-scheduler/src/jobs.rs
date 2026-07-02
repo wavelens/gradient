@@ -121,7 +121,7 @@ impl WorkerCaps {
     /// (`builtin:fetchurl` etc.) run on any architecture.
     pub fn can_build(&self, architecture: &str, required_features: &[String]) -> bool {
         let arch_ok =
-            architecture == "builtin" || self.architectures.iter().any(|a| a == architecture);
+            architecture == gradient_types::BUILTIN_ARCH || self.architectures.iter().any(|a| a == architecture);
         let features_ok = required_features
             .iter()
             .all(|f| self.system_features.iter().any(|sf| sf == f));
@@ -299,6 +299,40 @@ fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
     }
 }
 
+/// A vetoed candidate never wins (a rule said "not yet"); below the floor,
+/// dispatching now is worse than idling this round.
+fn wins(sc: &ScoredCandidate) -> bool {
+    !sc.vetoed && sc.total >= gradient_score::weights::DISPATCH_FLOOR
+}
+
+/// Scoring view of the worker; a caps-less caller (open mode / tests) scores
+/// against an empty context.
+fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
+    match caps {
+        Some(c) => WorkerContext {
+            architectures: &c.architectures,
+            system_features: &c.system_features,
+            fetch: c.fetch,
+            metrics: c.metrics,
+        },
+        None => WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None },
+    }
+}
+
+/// In-flight build work per org, weighted by predicted build time; feeds the
+/// fair-share scoring rule.
+struct OrgWorkShare {
+    by_org: HashMap<OrganizationId, f64>,
+    total: f64,
+}
+
+impl OrgWorkShare {
+    fn share(&self, org: OrganizationId) -> Option<f32> {
+        (self.total > 0.0)
+            .then(|| (self.by_org.get(&org).copied().unwrap_or(0.0) / self.total) as f32)
+    }
+}
+
 /// True when a flake job's only task is `FetchFlake` - a split-mode fetch-only
 /// job whose completion enqueues a cached eval follow-up rather than finalizing.
 pub fn is_fetch_only(job: &FlakeJob) -> bool {
@@ -432,14 +466,22 @@ impl JobTracker {
         authorized: Option<&HashSet<OrganizationId>>,
         caps: Option<&WorkerCaps>,
     ) -> Vec<JobCandidate> {
-        self.pending
-            .iter()
-            .filter(|(_, job)| {
-                authorized.is_none_or(|peers| peers.contains(&job.org_id()))
-                    && job_eligible_for_caps(job, caps)
-            })
+        self.eligible_for_worker(authorized, caps)
             .map(|(id, job)| job.as_candidate(id))
             .collect()
+    }
+
+    /// Pending jobs this worker is authorized for and capable of executing -
+    /// the one eligibility filter shared by candidate offers and assignment.
+    fn eligible_for_worker<'s>(
+        &'s self,
+        authorized: Option<&'s HashSet<OrganizationId>>,
+        caps: Option<&'s WorkerCaps>,
+    ) -> impl Iterator<Item = (&'s String, &'s PendingJob)> {
+        self.pending.iter().filter(move |(_, job)| {
+            authorized.is_none_or(|peers| peers.contains(&job.org_id()))
+                && job_eligible_for_caps(job, caps)
+        })
     }
 
     /// Record scores from a worker without assigning anything. The server only
@@ -517,108 +559,108 @@ impl JobTracker {
         policy: &dyn ScoringPolicy,
         instance: &gradient_score::InstanceContext,
     ) -> Option<Assignment> {
-        // Borrowed for point lookups only; the borrow ends before the `&mut self`
-        // decision push, so no per-dispatch clone of the worker's score map.
+        let worker_ctx = worker_context_of(caps);
+        let scored =
+            self.score_candidates(worker_id, authorized, caps, kind, policy, instance, &worker_ctx);
+        let winner_id = scored.first().filter(|(_, sc)| wins(sc)).map(|(id, _)| id.clone());
+
+        // Worker and instance context are identical for every candidate, so they
+        // are computed once and shared across the decision and the winner record.
+        let worker_context = serde_json::to_value(crate::views::WorkerContextView::new(
+            &worker_ctx,
+            caps.map(|c| c.capabilities.clone()).unwrap_or_default(),
+        ))
+        .unwrap_or(serde_json::Value::Null);
+        let instance_context = serde_json::to_value(instance).unwrap_or(serde_json::Value::Null);
+
+        self.record_decision(
+            worker_id,
+            kind,
+            winner_id.as_deref(),
+            &scored,
+            &worker_context,
+            &instance_context,
+        );
+
+        let job_id = winner_id?;
+        let (_, winner_sc) =
+            scored.into_iter().next().expect("a winner implies a first candidate");
+        let dispatch_record =
+            self.dispatch_record_for(&job_id, &winner_sc, worker_context, instance_context);
+        let mut assignment = self.assign_pending(worker_id, &job_id)?;
+        assignment.dispatch_record = dispatch_record;
+        Some(assignment)
+    }
+
+    /// Score every eligible pending job of `kind` for this worker, best first;
+    /// ties break on the smaller job id for determinism. `score_detailed` is
+    /// the same rule loop as `score` plus a small per-rule map, so capturing
+    /// every candidate's breakdown is essentially free.
+    #[allow(clippy::too_many_arguments)]
+    fn score_candidates(
+        &self,
+        worker_id: &str,
+        authorized: Option<&HashSet<OrganizationId>>,
+        caps: Option<&WorkerCaps>,
+        kind: &JobKind,
+        policy: &dyn ScoringPolicy,
+        instance: &gradient_score::InstanceContext,
+        worker_ctx: &WorkerContext<'_>,
+    ) -> Vec<(String, ScoredCandidate)> {
         let worker_scores = self.scores.get(worker_id);
-
-        let worker_ctx = caps.map(|c| WorkerContext {
-            architectures: &c.architectures,
-            system_features: &c.system_features,
-            fetch: c.fetch,
-            metrics: c.metrics,
-        });
-        let empty_archs: Vec<String> = vec![];
-        let empty_feats: Vec<String> = vec![];
-        let fallback_ctx = WorkerContext {
-            architectures: &empty_archs,
-            system_features: &empty_feats,
-            fetch: false,
-            metrics: None,
-        };
-        let worker_ctx = worker_ctx.as_ref().unwrap_or(&fallback_ctx);
-
-        // O(active builds) per request, so computed only when an enabled rule
-        // actually consumes the share (none do while FairShareRule is disabled).
-        let mut org_work: HashMap<OrganizationId, f64> = HashMap::new();
-        let mut total_work: f64 = 0.0;
-        if policy.uses_org_work_share() {
-            for (_, job) in self.active.values() {
-                if let PendingJob::Build(b) = job {
-                    let w = if b.history.build_time_ms > 0 {
-                        b.history.build_time_ms as f64
-                    } else {
-                        // no per-build history: weight by instance avg, half for prefer-local (cheaper) builds
-                        (if b.prefer_local_build { 0.5 } else { 1.0 }) * instance.build_time_ms.w1h.unwrap_or(0.0)
-                    };
-                    *org_work.entry(b.org_id).or_default() += w;
-                    total_work += w;
-                }
-            }
-        }
-        let org_work_share = |peer: OrganizationId| -> Option<f32> {
-            (total_work > 0.0).then(|| (org_work.get(&peer).copied().unwrap_or(0.0) / total_work) as f32)
-        };
+        let shares = self.org_work_shares(policy, instance);
         let now = gradient_types::now();
 
-        // Per-candidate detailed score, computed once and reused for both the
-        // decision ring and the winner's persisted record. `score_detailed` is
-        // the same rule loop as `score` plus a small per-rule map, so capturing
-        // every candidate's breakdown is essentially free.
-        let score_of = |id: &str, job: &PendingJob| -> ScoredCandidate {
-            let s = worker_scores.as_ref().and_then(|ws| ws.get(id));
-            let scored = match job {
-                PendingJob::Eval(e) => ScoredJob::new_eval(
-                    id,
-                    job.org_id(),
-                    e.job.tasks.contains(&FlakeTask::FetchFlake),
-                    e.history,
-                ),
-                PendingJob::Build(b) => ScoredJob::new_build(
-                    id,
-                    job.org_id(),
-                    b.architecture.as_str(),
-                    b.prefer_local_build,
-                    b.is_fixed_output,
-                    b.pname.as_deref(),
-                    b.closure_size,
-                    b.history,
-                ),
-            };
-            let ctx = JobContext {
-                job: &scored,
-                missing_count: s.map(|s| s.missing_count),
-                missing_nar_size: s.map(|s| s.missing_nar_size),
-                dependency_count: job.dependency_count(),
-                queued_at: job.queued_at(),
-                ready_at: job.ready_at(),
-                org_work_share: org_work_share(job.org_id()),
-                rescore_count: job.rescore_count(),
-                now,
-            };
-            let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
-            ScoredCandidate {
-                total: breakdown.total,
-                vetoed: !breakdown.vetoes.is_empty(),
-                score_breakdown: serde_json::to_value(&breakdown)
-                    .unwrap_or(serde_json::Value::Null),
-                job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
-                    .unwrap_or(serde_json::Value::Null),
-            }
-        };
-
-        let mut scored: Vec<(&String, ScoredCandidate)> = self
-            .pending
-            .iter()
+        let mut scored: Vec<(String, ScoredCandidate)> = self
+            .eligible_for_worker(authorized, caps)
             .filter(|(_, j)| {
-                authorized.is_none_or(|peers| peers.contains(&j.org_id()))
-                    && matches!(
-                        (kind, j),
-                        (JobKind::Flake, PendingJob::Eval(_))
-                            | (JobKind::Build, PendingJob::Build(_))
-                    )
-                    && job_eligible_for_caps(j, caps)
+                matches!(
+                    (kind, j),
+                    (JobKind::Flake, PendingJob::Eval(_)) | (JobKind::Build, PendingJob::Build(_))
+                )
             })
-            .map(|(id, job)| (id, score_of(id, job)))
+            .map(|(id, job)| {
+                let s = worker_scores.and_then(|ws| ws.get(id));
+                let scored_job = match job {
+                    PendingJob::Eval(e) => ScoredJob::new_eval(
+                        id,
+                        job.org_id(),
+                        e.job.tasks.contains(&FlakeTask::FetchFlake),
+                        e.history,
+                    ),
+                    PendingJob::Build(b) => ScoredJob::new_build(
+                        id,
+                        job.org_id(),
+                        b.architecture.as_str(),
+                        b.prefer_local_build,
+                        b.is_fixed_output,
+                        b.pname.as_deref(),
+                        b.closure_size,
+                        b.history,
+                    ),
+                };
+                let ctx = JobContext {
+                    job: &scored_job,
+                    missing_count: s.map(|s| s.missing_count),
+                    missing_nar_size: s.map(|s| s.missing_nar_size),
+                    dependency_count: job.dependency_count(),
+                    queued_at: job.queued_at(),
+                    ready_at: job.ready_at(),
+                    org_work_share: shares.share(job.org_id()),
+                    rescore_count: job.rescore_count(),
+                    now,
+                };
+                let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
+                let candidate = ScoredCandidate {
+                    total: breakdown.total,
+                    vetoed: !breakdown.vetoes.is_empty(),
+                    score_breakdown: serde_json::to_value(&breakdown)
+                        .unwrap_or(serde_json::Value::Null),
+                    job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
+                        .unwrap_or(serde_json::Value::Null),
+                };
+                (id.clone(), candidate)
+            })
             .collect();
         // Highest score first; tie-break on the smaller job_id for determinism.
         scored.sort_by(|(id_a, a), (id_b, b)| {
@@ -627,112 +669,128 @@ impl JobTracker {
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| id_a.cmp(id_b))
         });
+        scored
+    }
 
-        // A vetoed candidate never wins (a rule said "not yet"); below the floor,
-        // dispatching now is worse than idling this round. Both gates share one
-        // predicate with the winner-detail extraction below.
-        let wins = |sc: &ScoredCandidate| !sc.vetoed && sc.total >= gradient_score::weights::DISPATCH_FLOOR;
-        let winner = scored.first().filter(|(_, sc)| wins(sc)).map(|(id, _)| (*id).clone());
+    /// Per-org share of in-flight build work, weighted by predicted build time.
+    /// O(active builds) per request, so computed only when an enabled rule
+    /// actually consumes the share (none do while FairShareRule is disabled).
+    fn org_work_shares(
+        &self,
+        policy: &dyn ScoringPolicy,
+        instance: &gradient_score::InstanceContext,
+    ) -> OrgWorkShare {
+        let mut by_org: HashMap<OrganizationId, f64> = HashMap::new();
+        let mut total: f64 = 0.0;
+        if policy.uses_org_work_share() {
+            for (_, job) in self.active.values() {
+                if let PendingJob::Build(b) = job {
+                    let w = if b.history.build_time_ms > 0 {
+                        b.history.build_time_ms as f64
+                    } else {
+                        // no per-build history: weight by instance avg, half for prefer-local (cheaper) builds
+                        (if b.prefer_local_build { 0.5 } else { 1.0 })
+                            * instance.build_time_ms.w1h.unwrap_or(0.0)
+                    };
+                    *by_org.entry(b.org_id).or_default() += w;
+                    total += w;
+                }
+            }
+        }
+        OrgWorkShare { by_org, total }
+    }
 
-        // Worker and instance context are identical for every candidate, so they
-        // are computed once and shared across the decision and the winner record.
-        let worker_context = serde_json::to_value(crate::views::WorkerContextView::new(
-            worker_ctx,
-            caps.map(|c| c.capabilities.clone()).unwrap_or_default(),
-        ))
-        .unwrap_or(serde_json::Value::Null);
-        let instance_context =
-            serde_json::to_value(instance).unwrap_or(serde_json::Value::Null);
-
-        // Snapshot the decision (incl. rejected/negative candidates) for the Live
-        // Jobs "all scores" view before the immutable borrow of `pending` ends.
+    /// Snapshot a dispatch decision (incl. rejected/negative candidates) into
+    /// the bounded ring for the Live Jobs "all scores" view (#419).
+    fn record_decision(
+        &mut self,
+        worker_id: &str,
+        kind: &JobKind,
+        winner: Option<&str>,
+        scored: &[(String, ScoredCandidate)],
+        worker_context: &serde_json::Value,
+        instance_context: &serde_json::Value,
+    ) {
         let candidates: Vec<DecisionCandidate> = scored
             .iter()
             .take(CANDIDATES_PER_DECISION)
             .filter_map(|(id, sc)| {
-                self.pending.get(*id).map(|job| DecisionCandidate {
+                self.pending.get(id).map(|job| DecisionCandidate {
                     id: DispatchedJobId::now_v7(),
-                    job_id: (*id).clone(),
+                    job_id: id.clone(),
                     kind: job.kind_disc(),
                     organization: job.org_id(),
                     derivation_build: job.derivation_build(),
                     evaluation_id: job.evaluation_id(),
                     pname: job.pname(),
                     score: sc.total,
-                    won: winner.as_deref() == Some(id.as_str()),
+                    won: winner == Some(id.as_str()),
                     queued_at: job.queued_at(),
                     score_breakdown: sc.score_breakdown.clone(),
                     job_context: sc.job_context.clone(),
                 })
             })
             .collect();
-
-        // The winner's detailed snapshot, cloned out before the `scored`/`pending`
-        // borrows end so the owned record can outlive them.
-        let winner_detail = scored
-            .first()
-            .filter(|(_, sc)| wins(sc))
-            .map(|(_, sc)| (sc.total, sc.score_breakdown.clone(), sc.job_context.clone()));
-        drop(scored);
-
-        if !candidates.is_empty() {
-            self.push_decision(DispatchDecision {
-                at: gradient_types::now(),
-                worker_id: worker_id.to_owned(),
-                kind: match kind {
-                    JobKind::Flake => 0,
-                    JobKind::Build => 1,
-                },
-                winner: winner.clone(),
-                worker_context: worker_context.clone(),
-                instance_context: instance_context.clone(),
-                candidates,
-            });
+        if candidates.is_empty() {
+            return;
         }
 
-        let job_id = winner?;
-        let (winner_score, winner_breakdown, winner_job_context) =
-            winner_detail.expect("a winner implies its scored detail exists");
-
-        // Reuse the winner's already-computed breakdown/context for the
-        // `dispatched_job` record; only build-specific fields are derived here.
-        let dispatch_record = self.pending.get(&job_id).map(|job| {
-            let (kind_disc, derivation_build, project) = match job {
-                PendingJob::Build(b) => (1i16, Some(b.derivation_build), None),
-                PendingJob::Eval(e) => (0i16, None, e.project_id),
-            };
-            DispatchRecord {
-                kind: kind_disc,
-                derivation_build,
-                evaluation_id: job.evaluation_id(),
-                organization: job.org_id(),
-                project,
-                score: winner_score,
-                queued_at: job.queued_at(),
-                ready_at: job.ready_at(),
-                score_breakdown: winner_breakdown,
-                worker_context,
-                job_context: winner_job_context,
-                instance_context,
-                substitute: matches!(job, PendingJob::Build(b) if b.substitute),
-                build_context: match job {
-                    PendingJob::Build(b) => serde_json::json!({
-                        "architecture": b.architecture,
-                        "required_features": b.required_features,
-                        "dependency_count": b.dependency_count,
-                        "closure_size": b.closure_size,
-                        "prefer_local_build": b.prefer_local_build,
-                        "is_fixed_output": b.is_fixed_output,
-                        "substitute": b.substitute,
-                    }),
-                    PendingJob::Eval(_) => serde_json::json!({}),
-                },
-            }
+        self.push_decision(DispatchDecision {
+            at: gradient_types::now(),
+            worker_id: worker_id.to_owned(),
+            kind: match kind {
+                JobKind::Flake => 0,
+                JobKind::Build => 1,
+            },
+            winner: winner.map(str::to_owned),
+            worker_context: worker_context.clone(),
+            instance_context: instance_context.clone(),
+            candidates,
         });
+    }
 
-        let mut assignment = self.assign_pending(worker_id, &job_id)?;
-        assignment.dispatch_record = dispatch_record;
-        Some(assignment)
+    /// The winner's persisted `dispatched_job` snapshot, reusing its already-
+    /// computed breakdown and job context; only build-specific fields are
+    /// derived here.
+    fn dispatch_record_for(
+        &self,
+        job_id: &str,
+        sc: &ScoredCandidate,
+        worker_context: serde_json::Value,
+        instance_context: serde_json::Value,
+    ) -> Option<DispatchRecord> {
+        let job = self.pending.get(job_id)?;
+        let (kind_disc, derivation_build, project) = match job {
+            PendingJob::Build(b) => (1i16, Some(b.derivation_build), None),
+            PendingJob::Eval(e) => (0i16, None, e.project_id),
+        };
+        Some(DispatchRecord {
+            kind: kind_disc,
+            derivation_build,
+            evaluation_id: job.evaluation_id(),
+            organization: job.org_id(),
+            project,
+            score: sc.total,
+            queued_at: job.queued_at(),
+            ready_at: job.ready_at(),
+            score_breakdown: sc.score_breakdown.clone(),
+            worker_context,
+            job_context: sc.job_context.clone(),
+            instance_context,
+            substitute: matches!(job, PendingJob::Build(b) if b.substitute),
+            build_context: match job {
+                PendingJob::Build(b) => serde_json::json!({
+                    "architecture": b.architecture,
+                    "required_features": b.required_features,
+                    "dependency_count": b.dependency_count,
+                    "closure_size": b.closure_size,
+                    "prefer_local_build": b.prefer_local_build,
+                    "is_fixed_output": b.is_fixed_output,
+                    "substitute": b.substitute,
+                }),
+                PendingJob::Eval(_) => serde_json::json!({}),
+            },
+        })
     }
 
     fn assign_pending(&mut self, worker_id: &str, job_id: &str) -> Option<Assignment> {

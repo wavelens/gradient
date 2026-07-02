@@ -114,23 +114,7 @@ impl Scheduler {
             .peer_auth_for(worker_id)
             .and_then(|a| a.as_filter())
             .cloned();
-        let caps = match (
-            pool.gradient_caps_for(worker_id),
-            pool.build_caps_for(worker_id),
-        ) {
-            (Some(g), Some((architectures, system_features))) => {
-                let metrics = pool.metrics_for(worker_id);
-                Some(WorkerCaps {
-                    fetch: g.fetch,
-                    architectures,
-                    system_features,
-                    capabilities: g,
-                    metrics,
-                })
-            }
-            _ => None,
-        };
-        (authorized, caps)
+        (authorized, pool.worker_caps(worker_id))
     }
 
     /// Atomically take the best matching job from the tracker and record the

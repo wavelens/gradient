@@ -168,21 +168,27 @@ impl WorkerPool {
         self.workers.get(id).map(|slot| &slot.shared().peer_auth)
     }
 
-    /// Returns `(architectures, system_features)` for a connected worker.
-    /// Returns `None` if the worker is not connected.
-    pub fn build_caps_for(&self, id: &str) -> Option<(Vec<String>, Vec<String>)> {
-        self.workers.get(id).map(|slot| {
-            let s = slot.shared();
-            (s.architectures.clone(), s.system_features.clone())
-        })
-    }
-
     /// Returns the negotiated `GradientCapabilities` for a connected worker,
     /// or `None` if the worker is not connected.
     pub fn gradient_caps_for(&self, id: &str) -> Option<GradientCapabilities> {
         self.workers
             .get(id)
             .map(|slot| slot.shared().capabilities.clone())
+    }
+
+    /// One coherent [`WorkerCaps`] snapshot (capabilities, architectures,
+    /// features, live metrics) for a connected worker, or `None` if unknown.
+    pub fn worker_caps(&self, id: &str) -> Option<crate::jobs::WorkerCaps> {
+        self.workers.get(id).map(|slot| {
+            let s = slot.shared();
+            crate::jobs::WorkerCaps {
+                fetch: s.capabilities.fetch,
+                architectures: s.architectures.clone(),
+                system_features: s.system_features.clone(),
+                capabilities: s.capabilities.clone(),
+                metrics: self.metrics_for(id),
+            }
+        })
     }
 
     #[allow(clippy::too_many_arguments)] // mirrors the WorkerCapabilities wire fields
@@ -218,8 +224,8 @@ impl WorkerPool {
     ) {
         if let Some(slot) = self.workers.get_mut(id) {
             let s = slot.shared_mut();
-            s.cpu_usage_pct = cpu_usage_pct;
-            s.ram_free_mb = ram_free_mb;
+            s.cpu_usage_pct = Some(cpu_usage_pct);
+            s.ram_free_mb = Some(ram_free_mb);
             s.disk_speed_mbps = disk_speed_mbps;
             s.network_speed_mbps = network_speed_mbps;
         }
@@ -423,9 +429,9 @@ pub struct WorkerInfo {
     #[serde(skip)]
     pub organization: Option<OrganizationId>,
     #[serde(skip)]
-    pub cpu_usage_pct: f32,
+    pub cpu_usage_pct: Option<f32>,
     #[serde(skip)]
-    pub ram_free_mb: u64,
+    pub ram_free_mb: Option<u64>,
     #[serde(skip)]
     pub ram_total_mb: u64,
     #[serde(skip)]
@@ -542,17 +548,17 @@ mod tests {
         pool.register("w1".into(), caps(), HashSet::new());
         pool.update_capabilities("w1", vec![], vec![], 1, 4, 8192, 1000);
 
-        // Before any heartbeat the dynamic fields default to zero / None.
+        // Before any heartbeat the dynamic fields are absent, not zero.
         let view = pool.metrics_for("w1").unwrap();
-        assert_eq!(view.cpu_usage_pct, 0.0);
-        assert_eq!(view.ram_free_mb, 0);
+        assert_eq!(view.cpu_usage_pct, None);
+        assert_eq!(view.ram_free_mb, None);
         assert_eq!(view.disk_speed_mbps, None);
         assert_eq!(view.network_speed_mbps, None);
 
         pool.update_metrics("w1", 42.5, 3000, Some(550.0), Some(120.0));
         let view = pool.metrics_for("w1").unwrap();
-        assert_eq!(view.cpu_usage_pct, 42.5);
-        assert_eq!(view.ram_free_mb, 3000);
+        assert_eq!(view.cpu_usage_pct, Some(42.5));
+        assert_eq!(view.ram_free_mb, Some(3000));
         assert_eq!(view.disk_speed_mbps, Some(550.0));
         assert_eq!(view.network_speed_mbps, Some(120.0));
         // Static caps survive a metrics update.
@@ -560,6 +566,27 @@ mod tests {
         assert_eq!(view.ram_total_mb, 8192);
 
         assert!(pool.metrics_for("unknown").is_none());
+    }
+
+    #[test]
+    fn worker_caps_snapshot_is_coherent() {
+        let mut pool = WorkerPool::new();
+        pool.register(
+            "w1".into(),
+            GradientCapabilities { fetch: true, eval: true, ..Default::default() },
+            HashSet::new(),
+        );
+        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec!["kvm".into()], 4, 8, 16384, 1200);
+        pool.update_metrics("w1", 12.5, 9000, None, None);
+
+        let caps = pool.worker_caps("w1").unwrap();
+        assert!(caps.fetch);
+        assert!(caps.capabilities.eval);
+        assert_eq!(caps.architectures, vec!["x86_64-linux"]);
+        assert_eq!(caps.system_features, vec!["kvm"]);
+        assert_eq!(caps.metrics.unwrap().ram_free_mb, Some(9000));
+
+        assert!(pool.worker_caps("unknown").is_none());
     }
 
     #[test]

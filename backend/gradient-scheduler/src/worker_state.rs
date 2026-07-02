@@ -70,9 +70,10 @@ pub struct WorkerShared {
     pub cpu_count: u32,
     pub ram_total_mb: u64,
     pub cpu_core_score: u32,
-    /// Latest live-metrics heartbeat; all zero / `None` until the first report.
-    pub cpu_usage_pct: f32,
-    pub ram_free_mb: u64,
+    /// Latest live-metrics heartbeat; `None` until the first report so scoring
+    /// can tell "no sample yet" apart from a measured zero.
+    pub cpu_usage_pct: Option<f32>,
+    pub ram_free_mb: Option<u64>,
     pub disk_speed_mbps: Option<f32>,
     pub network_speed_mbps: Option<f32>,
     pub assigned_jobs: HashSet<String>,
@@ -134,8 +135,8 @@ impl TypedWorker<Active> {
                 cpu_count: 0,
                 ram_total_mb: 0,
                 cpu_core_score: 0,
-                cpu_usage_pct: 0.0,
-                ram_free_mb: 0,
+                cpu_usage_pct: None,
+                ram_free_mb: None,
                 disk_speed_mbps: None,
                 network_speed_mbps: None,
                 assigned_jobs: HashSet::new(),
