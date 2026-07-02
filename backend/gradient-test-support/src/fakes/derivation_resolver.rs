@@ -125,6 +125,6 @@ impl DerivationResolver for FakeDerivationResolver {
             .unwrap()
             .get(&drv_path)
             .cloned()
-            .unwrap_or(("builtin".to_string(), vec![])))
+            .unwrap_or((gradient_types::BUILTIN_ARCH.to_string(), vec![])))
     }
 }

@@ -428,8 +428,8 @@ pub async fn get_board_workers(
                 fetch: w.capabilities.fetch,
                 build: w.capabilities.build,
                 architectures: if accessible { w.architectures } else { vec![] },
-                cpu_usage_pct: accessible.then_some(w.cpu_usage_pct),
-                ram_free_mb: accessible.then_some(w.ram_free_mb as i64),
+                cpu_usage_pct: accessible.then_some(w.cpu_usage_pct).flatten(),
+                ram_free_mb: accessible.then_some(w.ram_free_mb.map(|v| v as i64)).flatten(),
                 ram_total_mb: accessible.then_some(w.ram_total_mb as i64),
             }
         })

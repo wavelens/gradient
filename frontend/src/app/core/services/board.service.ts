@@ -73,8 +73,8 @@ export interface WorkerContextView {
   cpu_count: number;
   cpu_core_score: number;
   ram_total_mb: number;
-  ram_free_mb: number;
-  cpu_usage_pct: number;
+  ram_free_mb: number | null;
+  cpu_usage_pct: number | null;
   disk_speed_mbps: number | null;
   network_speed_mbps: number | null;
 }

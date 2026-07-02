@@ -21,8 +21,9 @@ pub struct WorkerContextView {
     pub cpu_count: u32,
     pub cpu_core_score: u32,
     pub ram_total_mb: u64,
-    pub ram_free_mb: u64,
-    pub cpu_usage_pct: f32,
+    /// `None` until the worker's first live-metrics heartbeat.
+    pub ram_free_mb: Option<u64>,
+    pub cpu_usage_pct: Option<f32>,
     pub disk_speed_mbps: Option<f32>,
     pub network_speed_mbps: Option<f32>,
 }

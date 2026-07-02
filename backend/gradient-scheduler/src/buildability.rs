@@ -138,7 +138,7 @@ impl BuildabilityChecker {
                 BuildDispatchMode::RealArch => {
                     let required: Vec<&str> = self.required_features_for(&a.derivation);
                     worker_caps.iter().any(|(arch, feats)| {
-                        let arch_ok = drv.architecture == "builtin"
+                        let arch_ok = drv.architecture == gradient_types::BUILTIN_ARCH
                             || arch.iter().any(|a| a == &drv.architecture);
                         let feats_ok = required.iter().all(|f| feats.iter().any(|sf| sf == f));
                         arch_ok && feats_ok
@@ -196,7 +196,7 @@ impl BuildabilityChecker {
                 .collect();
             let satisfied = worker_caps.iter().any(|(arch, feats)| {
                 let arch_ok =
-                    drv.architecture == "builtin" || arch.iter().any(|a| a == &drv.architecture);
+                    drv.architecture == gradient_types::BUILTIN_ARCH || arch.iter().any(|a| a == &drv.architecture);
                 let feats_ok = required_owned
                     .iter()
                     .all(|f| feats.iter().any(|sf| sf == f));

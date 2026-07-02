@@ -515,7 +515,7 @@ impl DerivationResolver for WorkerPoolResolver {
 
     async fn get_features(&self, drv_path: String) -> Result<(String, Vec<String>)> {
         if !drv_path.ends_with(".drv") {
-            return Ok(("builtin".to_string(), vec![]));
+            return Ok((gradient_types::BUILTIN_ARCH.to_string(), vec![]));
         }
         let drv = self.get_derivation(drv_path).await?;
         let features = drv.required_system_features();

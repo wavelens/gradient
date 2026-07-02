@@ -522,7 +522,7 @@ impl BuildDispatchMaps {
             }],
         };
         let (architecture, required_features) = if substitute {
-            ("builtin".to_string(), Vec::new())
+            (gradient_types::BUILTIN_ARCH.to_string(), Vec::new())
         } else {
             (derivation.architecture.clone(), self.required_features(anchor.derivation))
         };
