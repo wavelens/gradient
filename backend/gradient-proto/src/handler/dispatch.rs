@@ -1180,14 +1180,27 @@ impl RpcContext {
                 } else {
                     let drv_ids: Vec<DerivationId> = candidates.iter().map(|d| d.id).collect();
                     let outputs = EDerivationOutput::find()
-                        .filter(CDerivationOutput::Derivation.is_in(drv_ids))
+                        .filter(CDerivationOutput::Derivation.is_in(drv_ids.clone()))
                         .all(&self.state.worker_db)
                         .await
                         .unwrap_or_default();
 
+                    // Anchors carrying a dropped dependency edge (`edges_unresolved`)
+                    // must be re-walked, not pruned, so the eval rediscovers the edge
+                    // and clears the flag - otherwise they stay stranded off promotion.
+                    let unresolved: HashSet<DerivationId> = EDerivationBuild::find()
+                        .filter(CDerivationBuild::Derivation.is_in(drv_ids))
+                        .filter(CDerivationBuild::EdgesUnresolved.eq(true))
+                        .all(&self.state.worker_db)
+                        .await
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|b| b.derivation)
+                        .collect();
+
                     let candidates: Vec<(DerivationId, String)> =
                         candidates.into_iter().map(|d| (d.id, d.store_path())).collect();
-                    prunable_known_derivations(candidates, &outputs)
+                    prunable_known_derivations(candidates, &outputs, &unresolved)
                 }
             }
             None => {
@@ -1236,6 +1249,7 @@ impl RpcContext {
 fn prunable_known_derivations(
     candidates: Vec<(DerivationId, String)>,
     outputs: &[MDerivationOutput],
+    unresolved: &HashSet<DerivationId>,
 ) -> Vec<String> {
     let mut counts: HashMap<DerivationId, (usize, usize)> = HashMap::new();
     for o in outputs {
@@ -1246,11 +1260,15 @@ fn prunable_known_derivations(
         }
     }
 
+    // A stale `edges_unresolved` anchor must be re-walked, never pruned: pruning
+    // skips the walk that would rediscover its dropped dependency edge (e.g. a dep
+    // GC'd out from under it) and clear the flag, leaving it and its dependents
+    // stranded off promotion forever.
     candidates
         .into_iter()
         .filter(|(id, _)| {
             let (total, off_upstream) = counts.get(id).copied().unwrap_or((0, 0));
-            total > 0 && off_upstream == 0
+            total > 0 && off_upstream == 0 && !unresolved.contains(id)
         })
         .map(|(_, store_path)| store_path)
         .collect()
@@ -1261,6 +1279,7 @@ mod prunable_known_derivations_tests {
     use super::prunable_known_derivations;
     use gradient_types::MDerivationOutput;
     use gradient_types::ids::{DerivationId, DerivationOutputId};
+    use std::collections::HashSet;
 
     fn output(drv: DerivationId, hash: &str) -> MDerivationOutput {
         MDerivationOutput {
@@ -1301,8 +1320,27 @@ mod prunable_known_derivations_tests {
             (unknown, "/nix/store/ggg-unknown".to_string()),
         ];
 
-        let prunable = prunable_known_derivations(candidates, &outputs);
+        let prunable = prunable_known_derivations(candidates, &outputs, &HashSet::new());
         assert_eq!(prunable, vec!["/nix/store/bbb-upstream".to_string()]);
+    }
+
+    /// A derivation flagged `edges_unresolved` (a build-dep edge a prior eval could
+    /// not record - e.g. the dep was GC'd out from under a shared closure) must NOT
+    /// be pruned even when every output is on an upstream: pruning skips the re-walk
+    /// that rediscovers the dropped edge and clears the flag, so the anchor and its
+    /// dependents stay stranded off promotion forever.
+    #[test]
+    fn edges_unresolved_anchor_is_never_prunable() {
+        let upstream = DerivationId::now_v7();
+        let mut o = output(upstream, "bbb");
+        o.external_url = Some("https://cache.example/bbb.narinfo".to_string());
+        let candidates = vec![(upstream, "/nix/store/bbb-upstream".to_string())];
+        let unresolved = HashSet::from([upstream]);
+
+        assert!(
+            prunable_known_derivations(candidates, &[o], &unresolved).is_empty(),
+            "an edges_unresolved anchor must be re-walked, not pruned"
+        );
     }
 }
 

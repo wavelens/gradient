@@ -291,6 +291,13 @@ unfetchable, a permanent `InputsUnavailable` dead-end (e.g. `unit-*.service` ->
 persisted `external_url`; the worker re-walking our own (unreliable) cached
 closures is the correctness price of an output-only cache.
 
+An anchor flagged `edges_unresolved` is never pruned either, even with all outputs
+on an upstream: its edge set is known-incomplete (a dependency a prior eval could
+not record - e.g. GC'd from a shared closure), and pruning it would skip the walk
+that rediscovers the dropped edge and clears the flag, stranding it and its
+dependents off promotion forever. Forcing the re-walk is what makes the flag's
+"a later eval resolves it" contract actually hold.
+
 #### Closure-complete cache
 
 The cache holds a binary-cache invariant: *if an output is in our cache, its
