@@ -1462,8 +1462,8 @@ mod tests {
         let p = gradient_score::policy_by_name("simple");
         let inst = gradient_score::InstanceContext::default();
 
-        // No cached score → negative total → the worker idles, but the rejected
-        // candidate and its negative score are still recorded (#419).
+        // No cached score: the rescore hold vetoes the build so the worker
+        // idles, but the rejected candidate and its veto are still recorded (#419).
         assert!(
             tracker
                 .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
@@ -1473,10 +1473,15 @@ mod tests {
         assert_eq!(decisions.len(), 1);
         assert!(decisions[0].winner.is_none());
         assert_eq!(decisions[0].candidates.len(), 1);
-        assert_eq!(decisions[0].candidates[0].job_id, "j1");
+        let candidate = &decisions[0].candidates[0];
+        assert_eq!(candidate.job_id, "j1");
+        assert!(!candidate.won);
+        let vetoes = candidate.score_breakdown["vetoes"]
+            .as_array()
+            .expect("a vetoed candidate records its vetoes");
         assert!(
-            decisions[0].candidates[0].score < 0.0,
-            "a rejected candidate's negative score must be visible"
+            vetoes.iter().any(|v| v == "RescoreWaitRule"),
+            "the rescore hold must be visible on the rejected candidate"
         );
 
         // Caching a score lets it dispatch; the newer decision records the winner.
