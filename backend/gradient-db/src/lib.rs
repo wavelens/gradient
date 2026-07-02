@@ -20,6 +20,7 @@ pub mod derivation;
 pub mod draining;
 pub mod drv_output_spec;
 pub mod gc;
+pub mod graph_sql;
 pub mod org_cache;
 pub mod org_derivations;
 pub mod org_workers;
@@ -59,6 +60,9 @@ pub use self::derivation::*;
 pub use self::drv_output_spec::DrvOutputSpec;
 pub use self::draining::{park_active_evals, unpark_draining_evals};
 pub use self::gc::*;
+pub use self::graph_sql::{
+    ClosureDirection, dependency_closure_cte, eval_closure_cte, reachable_derivations_cte,
+};
 pub use self::org_cache::org_has_writable_cache;
 pub use self::org_derivations::derivation_ids_for_org;
 pub use self::promotion::{
