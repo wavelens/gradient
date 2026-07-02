@@ -33,7 +33,7 @@ fn eval_job(peer: OrganizationId) -> PendingEvalJob {
     PendingEvalJob {
         evaluation_id: EvaluationId::now_v7(),
         project_id: None,
-        peer_id: peer,
+        org_id: peer,
         commit_id: CommitId::now_v7(),
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
@@ -358,7 +358,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
             PendingBuildJob {
                 derivation_build: build_id,
                 evaluation_id: eval_id,
-                peer_id: peer,
+                org_id: peer,
                 job: BuildJob {
                     builds: vec![BuildTask {
                         build_id: build_id.to_string(),
@@ -495,7 +495,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
             PendingEvalJob {
                 evaluation_id: eval_id,
                 project_id: None,
-                peer_id: peer,
+                org_id: peer,
                 commit_id: CommitId::now_v7(),
                 repository: "https://example.com/repo".into(),
                 job: gradient_types::proto::FlakeJob {
@@ -528,7 +528,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                 PendingBuildJob {
                     derivation_build: build_id,
                     evaluation_id: eval_id,
-                    peer_id: peer,
+                    org_id: peer,
                     job: BuildJob {
                         builds: vec![BuildTask {
                             build_id: build_id.to_string(),

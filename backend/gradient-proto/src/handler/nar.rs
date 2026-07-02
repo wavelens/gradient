@@ -32,7 +32,7 @@ pub(super) async fn record_nar_push_metric(
     bytes: i64,
 ) -> anyhow::Result<()> {
     let org_id = scheduler
-        .peer_id_for_job(job_id)
+        .org_for_job(job_id)
         .await
         .ok_or_else(|| anyhow::anyhow!("no peer for job {}", job_id))?;
 
@@ -101,7 +101,7 @@ pub(super) async fn mark_nar_stored(
         return Ok(());
     }
 
-    let targets = match scheduler.peer_id_for_job(job_id).await {
+    let targets = match scheduler.org_for_job(job_id).await {
         Some(org_id) => SignTargets::OrgCaches(org_id),
         None => SignTargets::None,
     };

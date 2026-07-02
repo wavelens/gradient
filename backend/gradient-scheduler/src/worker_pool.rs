@@ -390,7 +390,7 @@ impl WorkerPool {
 
     /// Peers whose last inbound frame is older than `timeout_ms` relative to
     /// `now_ms` - i.e. silent past the heartbeat deadline, so presumed dead.
-    pub fn stale_peers(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
+    pub fn stale_worker_ids(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
         self.workers
             .iter()
             .filter(|(_, slot)| {
@@ -767,7 +767,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_peers_flags_only_silent_workers() {
+    fn stale_worker_ids_flags_only_silent_workers() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new());
         let handle = pool
@@ -779,20 +779,20 @@ mod tests {
 
         // Just heard from it: not stale.
         handle.store(now_ms, Ordering::Relaxed);
-        assert!(pool.stale_peers(now_ms, timeout_ms).is_empty());
+        assert!(pool.stale_worker_ids(now_ms, timeout_ms).is_empty());
 
         // Exactly at the deadline: still not stale (strict `>`).
         handle.store(now_ms - timeout_ms, Ordering::Relaxed);
-        assert!(pool.stale_peers(now_ms, timeout_ms).is_empty());
+        assert!(pool.stale_worker_ids(now_ms, timeout_ms).is_empty());
 
         // One millisecond past the deadline: stale.
         handle.store(now_ms - timeout_ms - 1, Ordering::Relaxed);
-        assert_eq!(pool.stale_peers(now_ms, timeout_ms), vec!["w1".to_string()]);
+        assert_eq!(pool.stale_worker_ids(now_ms, timeout_ms), vec!["w1".to_string()]);
 
         // A freshly registered worker is stamped with `now`, so it is never
         // immediately stale against the real clock.
         pool.register("w2".into(), caps(), HashSet::new());
         let real_now = gradient_types::now().and_utc().timestamp_millis();
-        assert!(!pool.stale_peers(real_now, timeout_ms).contains(&"w2".to_string()));
+        assert!(!pool.stale_worker_ids(real_now, timeout_ms).contains(&"w2".to_string()));
     }
 }

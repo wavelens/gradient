@@ -655,7 +655,7 @@ impl<'a> DispatchContext<'a> {
                 self.scheduler,
                 self.peer_id,
                 &assignment.job,
-                assignment.peer_id,
+                assignment.org_id,
             )
             .await;
             if send_server_msg(
@@ -1120,7 +1120,7 @@ impl RpcContext {
         mode: gradient_types::proto::QueryMode,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), ?mode, "CacheQuery");
-        let org_id = self.scheduler.peer_id_for_job(&job_id).await;
+        let org_id = self.scheduler.org_for_job(&job_id).await;
 
         // A DB error or an over-budget handler is *indeterminate*, never
         // "absent": reply `CacheError` so the worker retries transiently instead
@@ -1165,7 +1165,7 @@ impl RpcContext {
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-        let known = match self.scheduler.peer_id_for_job(&job_id).await {
+        let known = match self.scheduler.org_for_job(&job_id).await {
             Some(_) => {
                 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 

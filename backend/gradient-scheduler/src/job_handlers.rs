@@ -125,29 +125,29 @@ impl Scheduler {
 
     // ── Scoring / assignment ──────────────────────────────────────────────────
 
-    /// Try to directly assign a job of `kind` to `peer_id` without scoring.
+    /// Try to directly assign a job of `kind` to `worker_id` without scoring.
     ///
     /// Called when the worker sends `RequestJob { kind }` to signal it has a
     /// free slot.  Returns `Some(Assignment)` if a matching pending job was
     /// found and claimed; `None` if no such job exists yet.
-    pub async fn request_job(&self, peer_id: &str, kind: JobKind) -> Option<Assignment> {
+    pub async fn request_job(&self, worker_id: &str, kind: JobKind) -> Option<Assignment> {
         // ── Server-side capacity guard ──────────────────────────────────────
         {
             let pool = self.worker_pool.read().await;
-            if !pool.has_capacity(peer_id, &kind) {
-                debug!(%peer_id, ?kind, "RequestJob ignored - worker at capacity");
+            if !pool.has_capacity(worker_id, &kind) {
+                debug!(%worker_id, ?kind, "RequestJob ignored - worker at capacity");
                 return None;
             }
         }
 
-        let (authorized, caps) = self.worker_auth_and_caps(peer_id).await;
+        let (authorized, caps) = self.worker_auth_and_caps(worker_id).await;
 
         // ── First try: pick from what's already in the tracker ──────────────
         if let Some(a) = self
-            .try_assign(peer_id, authorized.as_ref(), caps.as_ref(), &kind)
+            .try_assign(worker_id, authorized.as_ref(), caps.as_ref(), &kind)
             .await
         {
-            info!(%peer_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob");
+            info!(%worker_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob");
             return Some(a);
         }
 
@@ -168,10 +168,10 @@ impl Scheduler {
 
         // ── Second try after refresh ────────────────────────────────────────
         if let Some(a) = self
-            .try_assign(peer_id, authorized.as_ref(), caps.as_ref(), &kind)
+            .try_assign(worker_id, authorized.as_ref(), caps.as_ref(), &kind)
             .await
         {
-            info!(%peer_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob (after DB refresh)");
+            info!(%worker_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob (after DB refresh)");
             return Some(a);
         }
 
@@ -181,19 +181,19 @@ impl Scheduler {
     /// Record candidate scores from a worker. Does NOT assign - the worker
     /// explicitly signals capacity via `RequestJob`. Scores are used later
     /// by `request_job` to pick the best candidate.
-    pub async fn record_scores(&self, peer_id: &str, scores: Vec<CandidateScore>) {
+    pub async fn record_scores(&self, worker_id: &str, scores: Vec<CandidateScore>) {
         self.job_tracker
             .write()
             .await
-            .record_scores(peer_id, scores);
+            .record_scores(worker_id, scores);
     }
 
-    pub async fn job_rejected(&self, peer_id: &str, job_id: &str) {
-        self.worker_pool.write().await.release_job(peer_id, job_id);
+    pub async fn job_rejected(&self, worker_id: &str, job_id: &str) {
+        self.worker_pool.write().await.release_job(worker_id, job_id);
         self.job_tracker.write().await.release_to_pending(job_id);
         // Clear the sent-candidate flag so the job shows up in the next delta push.
         self.worker_pool.write().await.remove_sent_candidate(job_id);
-        info!(%peer_id, %job_id, "job rejected; re-queued");
+        info!(%worker_id, %job_id, "job rejected; re-queued");
     }
 
     // ── Eval status transitions ───────────────────────────────────────────────
@@ -429,8 +429,8 @@ impl Scheduler {
 
     // ── Job completion ────────────────────────────────────────────────────────
 
-    pub async fn handle_job_completed(&self, peer_id: &str, job_id: &str) -> Result<()> {
-        let worker_idle = self.worker_pool.write().await.release_job(peer_id, job_id);
+    pub async fn handle_job_completed(&self, worker_id: &str, job_id: &str) -> Result<()> {
+        let worker_idle = self.worker_pool.write().await.release_job(worker_id, job_id);
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
             Some(PendingJob::Eval(j)) => {
@@ -500,13 +500,13 @@ impl Scheduler {
 
     pub async fn handle_job_failed(
         &self,
-        peer_id: &str,
+        worker_id: &str,
         job_id: &str,
         error: &str,
         kind: BuildFailureKind,
         missing_paths: &[String],
     ) -> Result<()> {
-        self.worker_pool.write().await.release_job(peer_id, job_id);
+        self.worker_pool.write().await.release_job(worker_id, job_id);
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
             Some(PendingJob::Eval(j)) => {
@@ -663,13 +663,13 @@ impl Scheduler {
         .map_err(Into::into)
     }
 
-    /// Return the peer (org) UUID that owns the active job, if found.
-    pub async fn peer_id_for_job(&self, job_id: &str) -> Option<OrganizationId> {
+    /// Return the org UUID that owns the active job, if found.
+    pub async fn org_for_job(&self, job_id: &str) -> Option<OrganizationId> {
         self.job_tracker
             .read()
             .await
             .active_job(job_id)
-            .map(|j| j.peer_id())
+            .map(|j| j.org_id())
     }
 
     /// Returns the connected worker's negotiated `GradientCapabilities`,
@@ -730,7 +730,7 @@ impl Scheduler {
     /// assignment on the worker pool. Returns `None` if no suitable job exists.
     async fn try_assign(
         &self,
-        peer_id: &str,
+        worker_id: &str,
         authorized: Option<&HashSet<OrganizationId>>,
         caps: Option<&WorkerCaps>,
         kind: &JobKind,
@@ -741,23 +741,23 @@ impl Scheduler {
             .job_tracker
             .write()
             .await
-            .take_best_of_kind(peer_id, authorized, caps, kind, &*policy, &instance);
+            .take_best_of_kind(worker_id, authorized, caps, kind, &*policy, &instance);
         if let Some(a) = assignment.as_mut() {
             self.worker_pool
                 .write()
                 .await
-                .assign_job(peer_id, &a.job_id);
+                .assign_job(worker_id, &a.job_id);
             if let Some(record) = a.dispatch_record.take() {
                 let _ = self.state.board_events.send(crate::BoardEvent::JobDispatched {
                     organization: record.organization.into(),
-                    worker_id: peer_id.to_owned(),
+                    worker_id: worker_id.to_owned(),
                     kind: record.kind,
                     score: record.score,
                     build_id: record.derivation_build.map(Into::into),
                     evaluation_id: record.evaluation_id.into(),
                 });
                 let state = Arc::clone(&self.state);
-                let worker = peer_id.to_owned();
+                let worker = worker_id.to_owned();
                 self.state.shutdown.spawn(async move {
                     persist_dispatched_job(&state, &worker, record).await;
                 });

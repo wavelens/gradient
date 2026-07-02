@@ -52,22 +52,22 @@ pub(crate) async fn record_worker_sample(
 }
 
 impl Scheduler {
-    pub async fn is_worker_connected(&self, peer_id: &str) -> bool {
-        self.worker_pool.read().await.is_connected(peer_id)
+    pub async fn is_worker_connected(&self, worker_id: &str) -> bool {
+        self.worker_pool.read().await.is_connected(worker_id)
     }
 
     /// Clone a connected worker's `last_seen` handle so the session loop can
     /// stamp it lock-free on every inbound frame.
     pub async fn worker_last_seen(
         &self,
-        peer_id: &str,
+        worker_id: &str,
     ) -> Option<std::sync::Arc<std::sync::atomic::AtomicI64>> {
-        self.worker_pool.read().await.last_seen_handle(peer_id)
+        self.worker_pool.read().await.last_seen_handle(worker_id)
     }
 
     /// Connected peers silent longer than `timeout_ms` as of `now_ms`.
     pub async fn stale_workers(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
-        self.worker_pool.read().await.stale_peers(now_ms, timeout_ms)
+        self.worker_pool.read().await.stale_worker_ids(now_ms, timeout_ms)
     }
 
     pub async fn worker_authorized_for_org(&self, worker_id: &str, org: OrganizationId) -> bool {
@@ -81,7 +81,7 @@ impl Scheduler {
 
     pub async fn register_worker(
         &self,
-        peer_id: &str,
+        worker_id: &str,
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<OrganizationId>,
     ) -> (
@@ -90,20 +90,20 @@ impl Scheduler {
     ) {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
         let (notify, abort_rx) = self.worker_pool.write().await.register(
-            peer_id.to_owned(),
+            worker_id.to_owned(),
             capabilities,
             authorized_peers,
         );
-        info!(%peer_id, "worker registered");
-        self.record_worker_connection(peer_id, caps_json).await;
+        info!(%worker_id, "worker registered");
+        self.record_worker_connection(worker_id, caps_json).await;
         (notify, abort_rx)
     }
 
     /// Resolve the worker's owning org from `worker_registration`, cache it on
     /// the pool for sample attribution, and open a `worker_connection` row.
-    async fn record_worker_connection(&self, peer_id: &str, capabilities: serde_json::Value) {
+    async fn record_worker_connection(&self, worker_id: &str, capabilities: serde_json::Value) {
         let reg = gradient_entity::worker_registration::Entity::find()
-            .filter(gradient_entity::worker_registration::Column::WorkerId.eq(peer_id))
+            .filter(gradient_entity::worker_registration::Column::WorkerId.eq(worker_id))
             .order_by_asc(gradient_entity::worker_registration::Column::CreatedAt)
             .one(&self.state.worker_db)
             .await;
@@ -113,10 +113,10 @@ impl Scheduler {
         self.worker_pool
             .write()
             .await
-            .set_worker_org(peer_id, reg.peer_id);
+            .set_worker_org(worker_id, reg.peer_id);
         let conn = gradient_entity::worker_connection::Model {
             id: gradient_entity::ids::WorkerConnectionId::now_v7(),
-            worker_id: peer_id.to_string(),
+            worker_id: worker_id.to_string(),
             organization: reg.peer_id,
             display_name: reg.display_name,
             connected_at: gradient_types::now(),
@@ -129,21 +129,21 @@ impl Scheduler {
             .exec(&self.state.worker_db)
             .await
         {
-            warn!(error = %e, %peer_id, "failed to insert worker_connection");
+            warn!(error = %e, %worker_id, "failed to insert worker_connection");
         }
         let _ = self
             .state
             .board_events
             .send(crate::BoardEvent::WorkerConnected {
                 organization: reg.peer_id.into(),
-                worker_id: peer_id.to_owned(),
+                worker_id: worker_id.to_owned(),
             });
     }
 
     /// Stamp `disconnected_at` on the worker's latest open `worker_connection`.
-    async fn close_worker_connection(&self, peer_id: &str) {
+    async fn close_worker_connection(&self, worker_id: &str) {
         let conn = gradient_entity::worker_connection::Entity::find()
-            .filter(gradient_entity::worker_connection::Column::WorkerId.eq(peer_id))
+            .filter(gradient_entity::worker_connection::Column::WorkerId.eq(worker_id))
             .filter(gradient_entity::worker_connection::Column::DisconnectedAt.is_null())
             .order_by_desc(gradient_entity::worker_connection::Column::ConnectedAt)
             .one(&self.state.worker_db)
@@ -152,21 +152,21 @@ impl Scheduler {
             let mut am = conn.into_active_model();
             am.disconnected_at = Set(Some(gradient_types::now()));
             if let Err(e) = am.update(&self.state.worker_db).await {
-                warn!(error = %e, %peer_id, "failed to close worker_connection");
+                warn!(error = %e, %worker_id, "failed to close worker_connection");
             }
         }
     }
 
     pub async fn update_authorized_peers(
         &self,
-        peer_id: &str,
+        worker_id: &str,
         authorized_peers: HashSet<OrganizationId>,
     ) {
         self.worker_pool
             .write()
             .await
-            .update_authorized_peers(peer_id, authorized_peers);
-        debug!(%peer_id, "authorized peers updated");
+            .update_authorized_peers(worker_id, authorized_peers);
+        debug!(%worker_id, "authorized peers updated");
     }
 
     /// Abort all active jobs on `worker_id` that belong to any of `revoked_peers`.
@@ -213,7 +213,7 @@ impl Scheduler {
     #[allow(clippy::too_many_arguments)] // mirrors the WorkerCapabilities wire fields
     pub async fn update_worker_capabilities(
         &self,
-        peer_id: &str,
+        worker_id: &str,
         architectures: Vec<String>,
         system_features: Vec<String>,
         max_concurrent_builds: u32,
@@ -222,7 +222,7 @@ impl Scheduler {
         cpu_core_score: u32,
     ) {
         self.worker_pool.write().await.update_capabilities(
-            peer_id,
+            worker_id,
             architectures,
             system_features,
             max_concurrent_builds,
@@ -230,7 +230,7 @@ impl Scheduler {
             ram_total_mb,
             cpu_core_score,
         );
-        debug!(%peer_id, "worker capabilities updated");
+        debug!(%worker_id, "worker capabilities updated");
         // Capabilities just changed - a build that was previously "no worker
         // can do this" might now be servable, or vice-versa. Re-evaluate
         // every in-flight evaluation's Waiting/Building gate immediately
@@ -242,29 +242,29 @@ impl Scheduler {
 
     pub async fn update_worker_metrics(
         &self,
-        peer_id: &str,
+        worker_id: &str,
         cpu_usage_pct: f32,
         ram_free_mb: u64,
         disk_speed_mbps: Option<f32>,
         network_speed_mbps: Option<f32>,
     ) {
         self.worker_pool.write().await.update_metrics(
-            peer_id,
+            worker_id,
             cpu_usage_pct,
             ram_free_mb,
             disk_speed_mbps,
             network_speed_mbps,
         );
-        debug!(%peer_id, cpu_usage_pct, ram_free_mb, "worker metrics updated");
+        debug!(%worker_id, cpu_usage_pct, ram_free_mb, "worker metrics updated");
     }
 
-    pub async fn unregister_worker(&self, peer_id: &str) {
-        self.close_worker_connection(peer_id).await;
-        let orphaned = self.worker_pool.write().await.unregister(peer_id);
-        let requeued = self.job_tracker.write().await.worker_disconnected(peer_id);
+    pub async fn unregister_worker(&self, worker_id: &str) {
+        self.close_worker_connection(worker_id).await;
+        let orphaned = self.worker_pool.write().await.unregister(worker_id);
+        let requeued = self.job_tracker.write().await.worker_disconnected(worker_id);
         let total = orphaned.len() + requeued.len();
         if total > 0 {
-            info!(%peer_id, orphaned_jobs = total, "worker disconnected; jobs re-queued");
+            info!(%worker_id, orphaned_jobs = total, "worker disconnected; jobs re-queued");
         }
 
         // The in-memory requeue above leaves the DB rows in a non-terminal
@@ -275,7 +275,7 @@ impl Scheduler {
         let _ = self
             .state
             .board_events
-            .send(crate::BoardEvent::WorkerDisconnected { worker_id: peer_id.to_owned() });
+            .send(crate::BoardEvent::WorkerDisconnected { worker_id: worker_id.to_owned() });
         // A worker leaving may strand evaluations whose remaining builds
         // only it could service.
         if let Err(e) = self.reconcile_waiting_state().await {
@@ -305,8 +305,8 @@ impl Scheduler {
         self.worker_pool.read().await.all_workers()
     }
 
-    pub async fn mark_worker_draining(&self, peer_id: &str) {
-        self.worker_pool.write().await.mark_draining(peer_id);
-        info!(%peer_id, "worker marked draining");
+    pub async fn mark_worker_draining(&self, worker_id: &str) {
+        self.worker_pool.write().await.mark_draining(worker_id);
+        info!(%worker_id, "worker marked draining");
     }
 }
