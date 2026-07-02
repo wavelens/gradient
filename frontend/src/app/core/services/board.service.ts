@@ -64,7 +64,7 @@ export interface GradientCapabilities {
   core: boolean; federate: boolean; fetch: boolean; eval: boolean; build: boolean; cache: boolean;
 }
 
-export interface Windowed { w5m: number; w1h: number; w24h: number; }
+export interface Windowed { w5m: number | null; w1h: number | null; w24h: number | null; }
 
 export interface WorkerContextView {
   architectures: string[];

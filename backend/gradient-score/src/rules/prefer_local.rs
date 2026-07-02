@@ -35,7 +35,7 @@ impl ScoreRule for PreferLocalBuildRule {
             return 0.0;
         }
 
-        let knee = 2.0 * instance.missing_paths.w1h;
+        let knee = 2.0 * instance.missing_paths.w1h.unwrap_or(0.0);
         let slope = if knee > 0.0 { self.local_bonus / knee } else { self.miss_penalty };
         match job.missing_count {
             Some(0) => self.local_bonus,
@@ -52,7 +52,7 @@ impl ScoreRule for PreferLocalBuildRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
+    use crate::context::{HistoryPrediction, ScoredJob};
     use gradient_types::ids::OrganizationId;
 
     fn job(prefer_local_build: bool) -> ScoredJob<'static> {
@@ -63,12 +63,13 @@ mod tests {
             prefer_local_build,
             false,
             None,
-            LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
+            None,
+            HistoryPrediction::default(),
         )
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>, missing_count: Option<u32>) -> JobContext<'a> {
-        JobContext { job, missing_count, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now }
+        JobContext { job, missing_count, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now: gradient_types::now() }
     }
 
     fn worker() -> WorkerContext<'static> {
@@ -114,7 +115,7 @@ mod tests {
         let rule = PreferLocalBuildRule::default();
         let j = job(true);
         let mut inst = InstanceContext::default();
-        inst.missing_paths.w1h = 5.0;
+        inst.missing_paths.w1h = Some(5.0);
 
         assert_eq!(rule.score(&ctx(&j, Some(10)), &worker(), &inst), 0.0);
 

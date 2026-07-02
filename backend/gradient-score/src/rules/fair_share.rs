@@ -58,7 +58,7 @@ impl ScoreRule for FairShareRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
+    use crate::context::{HistoryPrediction, ScoredJob};
     use crate::rules::builtin::WaitTimeRule;
     use gradient_types::ids::OrganizationId;
     use gradient_types::now;
@@ -71,7 +71,8 @@ mod tests {
             false,
             false,
             None,
-            LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
+            None,
+            HistoryPrediction::default(),
         )
     }
 
@@ -85,6 +86,7 @@ mod tests {
             ready_at: now(),
             org_work_share,
             rescore_count: 0,
+            now: gradient_types::now(),
         }
     }
 

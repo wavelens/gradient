@@ -4,22 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use std::cell::{Cell, OnceCell};
-
+/// One fleet metric aggregated over three trailing windows. `None` means the
+/// window had no samples - distinct from a measured zero, which is honored
+/// instead of silently swapping in a rule's fallback constant.
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Windowed {
-    pub w5m: f64,
-    pub w1h: f64,
-    pub w24h: f64,
+    pub w5m: Option<f64>,
+    pub w1h: Option<f64>,
+    pub w24h: Option<f64>,
 }
 
 impl Windowed {
     pub fn w1h_or(self, fallback: f64) -> f64 {
-        if self.w1h > 0.0 { self.w1h } else { fallback }
+        self.w1h.unwrap_or(fallback)
     }
 
     pub fn w24h_or(self, fallback: f64) -> f64 {
-        if self.w24h > 0.0 { self.w24h } else { fallback }
+        self.w24h.unwrap_or(fallback)
     }
 }
 
@@ -112,47 +113,37 @@ impl BuildContext {
     }
 }
 
-pub struct LazyProviders<'a> {
-    pub closure_size: &'a dyn Fn() -> Option<i64>,
-    pub history: &'a dyn Fn() -> HistoryPrediction,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EvalContext {
     pub fetch_flake: bool,
     pub history: HistoryPrediction,
 }
 
-pub struct BuildContextLazy<'a> {
+/// The build-side scoring view of one candidate. Values are owned - the
+/// dispatch path always has closure size and history materialized on the
+/// pending job, so there is nothing to compute lazily.
+pub struct ScoredBuild<'a> {
     pub architecture: &'a str,
     pub prefer_local_build: bool,
     pub is_fixed_output: bool,
     pub pname: Option<&'a str>,
-    providers: LazyProviders<'a>,
-    closure_size: OnceCell<Option<i64>>,
-    history: OnceCell<HistoryPrediction>,
-    history_touched: Cell<bool>,
+    closure_size: Option<i64>,
+    history: HistoryPrediction,
 }
 
-impl BuildContextLazy<'_> {
+impl ScoredBuild<'_> {
     pub fn closure_size(&self) -> Option<i64> {
-        *self.closure_size.get_or_init(|| (self.providers.closure_size)())
+        self.closure_size
     }
 
     pub fn history(&self) -> HistoryPrediction {
-        self.history_touched.set(true);
-        *self.history.get_or_init(|| (self.providers.history)())
-    }
-
-    #[cfg(test)]
-    fn history_was_touched(&self) -> bool {
-        self.history_touched.get()
+        self.history
     }
 }
 
 pub enum JobKindContext<'a> {
     Eval(EvalContext),
-    Build(BuildContextLazy<'a>),
+    Build(ScoredBuild<'a>),
 }
 
 pub struct ScoredJob<'a> {
@@ -179,20 +170,19 @@ impl<'a> ScoredJob<'a> {
         prefer_local_build: bool,
         is_fixed_output: bool,
         pname: Option<&'a str>,
-        providers: LazyProviders<'a>,
+        closure_size: Option<i64>,
+        history: HistoryPrediction,
     ) -> Self {
         Self {
             job_id,
             org_id,
-            kind: JobKindContext::Build(BuildContextLazy {
+            kind: JobKindContext::Build(ScoredBuild {
                 architecture,
                 prefer_local_build,
                 is_fixed_output,
                 pname,
-                providers,
-                closure_size: OnceCell::new(),
-                history: OnceCell::new(),
-                history_touched: Cell::new(false),
+                closure_size,
+                history,
             }),
         }
     }
@@ -201,7 +191,7 @@ impl<'a> ScoredJob<'a> {
         &self.kind
     }
 
-    pub fn build(&self) -> Option<&BuildContextLazy<'_>> {
+    pub fn build(&self) -> Option<&ScoredBuild<'_>> {
         match &self.kind {
             JobKindContext::Build(b) => Some(b),
             _ => None,
@@ -229,39 +219,17 @@ mod tests {
             false,
             false,
             None,
-            LazyProviders {
-                closure_size: &|| Some(99),
-                history: &|| HistoryPrediction::default(),
-            },
+            Some(99),
+            HistoryPrediction::default(),
         )
     }
 
-    fn build_ctx<'a>(job: &'a ScoredJob<'a>) -> &'a BuildContextLazy<'a> {
-        match job.kind() {
-            JobKindContext::Build(b) => b,
-            _ => panic!("expected build"),
-        }
-    }
-
     #[test]
-    fn closure_size_computed_at_most_once() {
+    fn build_carries_owned_closure_size_and_history() {
         let job = make_job();
-        let b = build_ctx(&job);
-        let a = b.closure_size();
-        let c = b.closure_size();
-        assert_eq!(a, Some(99));
-        assert_eq!(a, c);
-    }
-
-    #[test]
-    fn history_not_computed_unless_read() {
-        let job = make_job();
-        let b = build_ctx(&job);
-        assert!(!b.history_was_touched());
-        let _ = b.closure_size();
-        assert!(!b.history_was_touched(), "closure_size must not touch history");
-        let _ = b.history();
-        assert!(b.history_was_touched());
+        let b = job.build().expect("build");
+        assert_eq!(b.closure_size(), Some(99));
+        assert_eq!(b.history(), HistoryPrediction::default());
     }
 
     #[test]
@@ -277,24 +245,28 @@ mod tests {
     }
 
     #[test]
-    fn windowed_default_is_zero_and_avg_picks_window() {
-        let w = Windowed { w5m: 1.0, w1h: 2.0, w24h: 3.0 };
-        assert_eq!(Windowed::default(), Windowed { w5m: 0.0, w1h: 0.0, w24h: 0.0 });
-        assert_eq!(w.w1h, 2.0);
+    fn windowed_default_is_absent_and_fields_read_back() {
+        let w = Windowed { w5m: Some(1.0), w1h: Some(2.0), w24h: Some(3.0) };
+        assert_eq!(Windowed::default(), Windowed { w5m: None, w1h: None, w24h: None });
+        assert_eq!(w.w1h, Some(2.0));
     }
 
+    /// A window with no samples falls back; a MEASURED zero is honored - the
+    /// old `0.0 == absent` heuristic silently swapped in the fallback.
     #[test]
-    fn windowed_or_uses_value_when_positive_else_fallback() {
-        assert_eq!(Windowed { w1h: 5.0, ..Default::default() }.w1h_or(9.0), 5.0);
+    fn windowed_or_falls_back_only_when_absent() {
+        assert_eq!(Windowed { w1h: Some(5.0), ..Default::default() }.w1h_or(9.0), 5.0);
+        assert_eq!(Windowed { w1h: Some(0.0), ..Default::default() }.w1h_or(9.0), 0.0);
         assert_eq!(Windowed::default().w1h_or(9.0), 9.0);
-        assert_eq!(Windowed { w24h: 7.0, ..Default::default() }.w24h_or(9.0), 7.0);
+        assert_eq!(Windowed { w24h: Some(7.0), ..Default::default() }.w24h_or(9.0), 7.0);
+        assert_eq!(Windowed { w24h: Some(0.0), ..Default::default() }.w24h_or(9.0), 0.0);
         assert_eq!(Windowed::default().w24h_or(9.0), 9.0);
     }
 
     #[test]
-    fn instance_context_default_is_zeroed() {
+    fn instance_context_default_is_absent() {
         let ic = InstanceContext::default();
-        assert_eq!(ic.wait_secs.w1h, 0.0);
+        assert_eq!(ic.wait_secs.w1h, None);
         assert_eq!(ic.active_builds, 0);
         assert_eq!(ic.total_workers, 0);
     }
