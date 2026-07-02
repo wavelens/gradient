@@ -36,20 +36,20 @@ pub fn dependency_closure_cte(
 }
 
 /// Dependency-readiness of anchor `{alias}`: every build dependency is
-/// terminal-success (`Completed=3`/`Substituted=7`) AND `closure_complete`, or
-/// itself `substitutable`; and every recorded input source is fully cached.
-/// This is THE readiness definition - shared verbatim by promotion
-/// (`promote_ready`/`promote_dependents`) and the dispatch gate
-/// (`find_ready_anchors`) so a drift between them (a latent dead zone) is
-/// impossible by construction.
+/// terminal-success AND `closure_complete`, or itself `substitutable`; and
+/// every recorded input source is fully cached. This is THE readiness
+/// definition - shared verbatim by promotion (`promote_ready`/
+/// `promote_dependents`) and the dispatch gate (`find_ready_anchors`) so a
+/// drift between them (a latent dead zone) is impossible by construction.
 pub fn deps_ready_predicate(alias: &str) -> String {
+    let terminal_success = crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS);
     format!(
         r#"NOT EXISTS (
         SELECT 1 FROM derivation_dependency e
         LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
         WHERE e.derivation = {alias}.derivation
           AND (dep.status IS NULL
-               OR NOT (((dep.status IN (3, 7)) AND dep.closure_complete)
+               OR NOT (((dep.status IN ({terminal_success})) AND dep.closure_complete)
                        OR dep.substitutable)))
       AND NOT EXISTS (
         SELECT 1 FROM derivation_input_source s
@@ -127,8 +127,12 @@ mod tests {
     #[test]
     fn readiness_predicate_gates_deps_and_input_sources() {
         let p = norm(&deps_ready_predicate("db"));
+        let terminal_success =
+            crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS);
         assert!(
-            p.contains("(((dep.status IN (3, 7)) AND dep.closure_complete) OR dep.substitutable)"),
+            p.contains(&format!(
+                "(((dep.status IN ({terminal_success})) AND dep.closure_complete) OR dep.substitutable)"
+            )),
             "deps must be terminal-success + closure_complete or substitutable: {p}"
         );
         assert!(

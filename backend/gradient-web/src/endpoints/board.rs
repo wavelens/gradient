@@ -460,7 +460,10 @@ pub async fn get_expensive_jobs(
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let mut clauses = vec![
         "ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL".to_string(),
-        "b.status = 3".to_string(),
+        format!(
+            "b.status = {}",
+            gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed)
+        ),
     ];
 
     if let Some(list) = scope.org_in_list() {
@@ -699,10 +702,11 @@ pub async fn get_top_orgs_by_buildtime(
            FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
            ORDER BY ba2.created_at DESC LIMIT 1 \
          ) ba ON true \
-         WHERE b.status = 3 \
+         WHERE b.status = {completed} \
            AND ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL \
            AND ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days' \
-         GROUP BY pr.organization ORDER BY total DESC LIMIT 15"
+         GROUP BY pr.organization ORDER BY total DESC LIMIT 15",
+        completed = gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed),
     );
 
     let rows = state

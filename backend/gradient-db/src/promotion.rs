@@ -42,12 +42,20 @@
 
 use crate::graph_sql::{ClosureDirection, dependency_closure_cte, eval_closure_cte};
 use crate::status::TransitionChange;
+use crate::status_sql;
 use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, QueryResult, Statement, Value};
 
-// derivation_build.status numeric values: Created=0, Queued=1, Completed=3,
-// FailedPermanent=4, DependencyFailed=6, Substituted=7, FailedTimeout=9.
+/// Statuses the dependency-failed transitions overwrite. Never `Building` (a
+/// running build settles on its own) and never a terminal state; the recursive
+/// sweep additionally covers pending-retry anchors.
+const PENDING: [BuildStatus; 2] = [BuildStatus::Created, BuildStatus::Queued];
+const CASCADE_TARGET: [BuildStatus; 3] = [
+    BuildStatus::Created,
+    BuildStatus::Queued,
+    BuildStatus::FailedTransient,
+];
 
 /// Collect the `derivation` column of a `RETURNING derivation` result set. The
 /// bulk transitions return the anchors they actually moved so the caller can fan
@@ -75,7 +83,7 @@ fn returned_transitions(rows: Vec<QueryResult>) -> Vec<TransitionChange> {
 }
 
 /// Changes for rows a statement moved from a statically-known status (e.g. a
-/// `WHERE status = 0` promote): no self-join needed, the predicate is the proof.
+/// `WHERE status = Created` promote): no self-join needed, the predicate is the proof.
 fn transitions_from(
     derivations: Vec<DerivationId>,
     from: BuildStatus,
@@ -101,20 +109,25 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     let mut affected = returned_transitions(
         db.query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"
+            format!(
+                r#"
             UPDATE derivation_build AS db
-            SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
+            SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
             FROM derivation_build old
             WHERE old.id = db.id
-              AND db.status IN (0, 1)
+              AND db.status IN ({pending})
               AND db.derivation IN (
                 SELECT dd.derivation FROM derivation_dependency dd WHERE dd.dependency = $1)
               AND EXISTS (
                 SELECT 1 FROM derivation_dependency e
                 JOIN derivation_build dep ON dep.derivation = e.dependency
-                WHERE e.derivation = db.derivation AND dep.status IN (4, 6, 9))
+                WHERE e.derivation = db.derivation AND dep.status IN ({terminal_failure}))
             RETURNING db.derivation, old.status AS from_status, db.status AS to_status
             "#,
+                dependency_failed = status_sql::build(BuildStatus::DependencyFailed),
+                pending = status_sql::build_in(&PENDING),
+                terminal_failure = status_sql::build_in(&BuildStatus::TERMINAL_FAILURE),
+            ),
             [id()],
         ))
         .await?,
@@ -128,9 +141,9 @@ pub async fn promote_dependents<C: ConnectionTrait>(
                 format!(
                     r#"
             UPDATE derivation_build AS db
-            SET status = 1, queued_at = (now() AT TIME ZONE 'UTC'),
+            SET status = {queued}, queued_at = (now() AT TIME ZONE 'UTC'),
                 updated_at = (now() AT TIME ZONE 'UTC')
-            WHERE db.status = 0
+            WHERE db.status = {created}
               AND db.edges_complete
               AND db.derivation IN (
                 SELECT dd.derivation FROM derivation_dependency dd WHERE dd.dependency = $1)
@@ -138,7 +151,9 @@ pub async fn promote_dependents<C: ConnectionTrait>(
                 SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
               AND (db.substitutable OR ({deps_ready}))
             RETURNING db.derivation
-            "#
+            "#,
+                    queued = status_sql::build(BuildStatus::Queued),
+                    created = status_sql::build(BuildStatus::Created),
                 ),
                 [id()],
             ))
@@ -155,8 +170,10 @@ pub async fn promote_dependents<C: ConnectionTrait>(
 /// and every build dependency itself `closure_complete` **or** `substitutable`.
 /// Shared verbatim by the targeted up-ripple (`propagate_closure_complete`) and
 /// the global self-heal fixpoint (`reconcile_closure_complete`).
-pub(crate) const CLOSURE_COMPLETE_GATE: &str = r#"
-    db.status = 3
+pub(crate) fn closure_complete_gate() -> String {
+    format!(
+        r#"
+    db.status = {completed}
     AND db.edges_complete
     AND NOT EXISTS (
         SELECT 1 FROM derivation_output o
@@ -167,7 +184,10 @@ pub(crate) const CLOSURE_COMPLETE_GATE: &str = r#"
         LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
         WHERE e.derivation = db.derivation
           AND (dep.derivation IS NULL OR NOT (dep.closure_complete OR dep.substitutable)))
-"#;
+"#,
+        completed = status_sql::build(BuildStatus::Completed),
+    )
+}
 
 /// Recompute closure-completeness up the build-dependency graph from a just-
 /// finished `completed` derivation. A built (`Completed`) anchor becomes
@@ -197,9 +217,10 @@ pub async fn propagate_closure_complete<C: ConnectionTrait>(
         .await?,
     );
     frontier.push(completed);
+    let gate = closure_complete_gate();
     let update = format!(
         "UPDATE derivation_build db SET closure_complete = true \
-         WHERE db.derivation = ANY($1) AND NOT db.closure_complete AND {CLOSURE_COMPLETE_GATE} \
+         WHERE db.derivation = ANY($1) AND NOT db.closure_complete AND {gate} \
          RETURNING db.derivation"
     );
     while !frontier.is_empty() {
@@ -252,9 +273,10 @@ pub async fn propagate_closure_complete<C: ConnectionTrait>(
 /// satisfied), each converging in O(longest affected chain). A converged graph
 /// costs two zero-row statements.
 pub async fn reconcile_closure_complete<C: ConnectionTrait>(db: &C) -> Result<(), DbErr> {
+    let gate = closure_complete_gate();
     let clear = format!(
         "UPDATE derivation_build db SET closure_complete = false \
-         WHERE db.closure_complete AND NOT ({CLOSURE_COMPLETE_GATE})"
+         WHERE db.closure_complete AND NOT ({gate})"
     );
     loop {
         let changed = db
@@ -268,7 +290,7 @@ pub async fn reconcile_closure_complete<C: ConnectionTrait>(db: &C) -> Result<()
 
     let update = format!(
         "UPDATE derivation_build db SET closure_complete = true \
-         WHERE NOT db.closure_complete AND {CLOSURE_COMPLETE_GATE}"
+         WHERE NOT db.closure_complete AND {gate}"
     );
     loop {
         let changed = db
@@ -366,13 +388,15 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
                 r#"
             {cte}
             UPDATE derivation_build AS db
-            SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
+            SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
             FROM derivation_build old
             WHERE old.id = db.id
-              AND db.status IN (0, 1, 8)
+              AND db.status IN ({cascade_target})
               AND db.derivation IN (SELECT derivation FROM dependents WHERE derivation <> $1)
             RETURNING db.derivation, old.status AS from_status, db.status AS to_status
-            "#
+            "#,
+                dependency_failed = status_sql::build(BuildStatus::DependencyFailed),
+                cascade_target = status_sql::build_in(&CASCADE_TARGET),
             ),
             [Value::Uuid(Some(Box::new(failed_derivation.into_inner())))],
         ))
@@ -409,29 +433,33 @@ pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
     Ok(returned_transitions(rows))
 }
 
-/// Recursive upward walk from every terminal-failed anchor (`FailedPermanent=4`/
-/// `DependencyFailed=6`/`FailedTimeout=9`) that fails each reachable non-terminal
-/// anchor (`Created=0`/`Queued=1`/`FailedTransient=8`). Mirrors the reactive
-/// [`cascade_dependency_failed`] terminal-failed set (it excludes `Aborted=5`,
-/// which is retried, not permanent). The failed roots are excluded from the UPDATE
-/// by the `status IN (0, 1, 8)` predicate, so the sweep is idempotent.
+/// Recursive upward walk from every terminal-failed anchor that fails each
+/// reachable non-terminal anchor. Mirrors the reactive
+/// [`cascade_dependency_failed`] terminal-failed set (it excludes `Aborted`,
+/// which is retried, not permanent). The failed roots are excluded from the
+/// UPDATE by the cascade-target predicate, so the sweep is idempotent.
 fn dependency_failed_reconcile_sql() -> String {
     let cte = dependency_closure_cte(
         "dependents",
-        "SELECT derivation FROM derivation_build WHERE status IN (4, 6, 9)",
+        &format!(
+            "SELECT derivation FROM derivation_build WHERE status IN ({})",
+            status_sql::build_in(&BuildStatus::TERMINAL_FAILURE)
+        ),
         ClosureDirection::Dependents,
     );
     format!(
         r#"
     {cte}
     UPDATE derivation_build AS db
-    SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
+    SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
     FROM derivation_build old
     WHERE old.id = db.id
-      AND db.status IN (0, 1, 8)
+      AND db.status IN ({cascade_target})
       AND db.derivation IN (SELECT derivation FROM dependents)
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
-    "#
+    "#,
+        dependency_failed = status_sql::build(BuildStatus::DependencyFailed),
+        cascade_target = status_sql::build_in(&CASCADE_TARGET),
     )
 }
 
@@ -462,15 +490,17 @@ fn promote_ready_sql() -> String {
     format!(
         r#"
         UPDATE derivation_build AS db
-        SET status = 1, queued_at = (now() AT TIME ZONE 'UTC'),
+        SET status = {queued}, queued_at = (now() AT TIME ZONE 'UTC'),
             updated_at = (now() AT TIME ZONE 'UTC')
-        WHERE db.status = 0
+        WHERE db.status = {created}
           AND db.edges_complete
           AND EXISTS (
             SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
           AND (db.substitutable OR ({deps_ready}))
         RETURNING db.derivation
-        "#
+        "#,
+        queued = status_sql::build(BuildStatus::Queued),
+        created = status_sql::build(BuildStatus::Created),
     )
 }
 
@@ -501,7 +531,7 @@ fn find_ready_anchors_sql() -> String {
         r#"
         SELECT db.*
         FROM derivation_build db
-        WHERE db.status = 1
+        WHERE db.status = {queued}
           AND db.edges_complete
           AND EXISTS (
             SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
@@ -511,7 +541,8 @@ fn find_ready_anchors_sql() -> String {
                FROM derivation_dependency dd
               WHERE dd.derivation = db.derivation) DESC,
             db.updated_at ASC
-        "#
+        "#,
+        queued = status_sql::build(BuildStatus::Queued),
     )
 }
 
@@ -576,12 +607,16 @@ pub async fn requeue_failed_anchors<C: ConnectionTrait>(
         total += db
             .execute(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
-                r#"
+                format!(
+                    r#"
                 UPDATE derivation_build
-                SET status = 0, attempt = 0, closure_complete = false,
+                SET status = {created}, attempt = 0, closure_complete = false,
                     updated_at = (now() AT TIME ZONE 'UTC')
-                WHERE derivation = ANY($1) AND status IN (4, 5, 6, 9)
+                WHERE derivation = ANY($1) AND status IN ({requeueable})
                 "#,
+                    created = status_sql::build(BuildStatus::Created),
+                    requeueable = status_sql::build_in(&BuildStatus::REQUEUEABLE),
+                ),
                 [ids.into()],
             ))
             .await?
@@ -613,11 +648,13 @@ pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
                 r#"
             {cte}
             UPDATE derivation_build db
-            SET status = 0, attempt = 0, closure_complete = false,
+            SET status = {created}, attempt = 0, closure_complete = false,
                 updated_at = (now() AT TIME ZONE 'UTC')
             WHERE db.derivation IN (SELECT derivation FROM closure)
-              AND db.status IN (4, 5, 6, 9)
-            "#
+              AND db.status IN ({requeueable})
+            "#,
+                created = status_sql::build(BuildStatus::Created),
+                requeueable = status_sql::build_in(&BuildStatus::REQUEUEABLE),
             ),
             [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
         ))
@@ -651,21 +688,23 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
                 r#"
             {cte}
             UPDATE derivation_build db
-            SET status = CASE WHEN db.status IN (3, 7) THEN db.status ELSE 3 END,
+            SET status = CASE WHEN db.status IN ({terminal_success}) THEN db.status ELSE {completed} END,
                 closure_complete = true,
                 edges_complete = true,
                 updated_at = (now() AT TIME ZONE 'UTC')
             FROM derivation_build old
             WHERE old.id = db.id
               AND db.derivation IN (SELECT derivation FROM closure)
-              AND (db.status NOT IN (3, 7) OR NOT db.closure_complete)
+              AND (db.status NOT IN ({terminal_success}) OR NOT db.closure_complete)
               AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
               AND NOT EXISTS (
                 SELECT 1 FROM derivation_output o
                 LEFT JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
                 WHERE o.derivation = db.derivation AND cp.hash IS NULL)
             RETURNING db.derivation, old.status AS from_status, db.status AS to_status
-            "#
+            "#,
+                terminal_success = status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+                completed = status_sql::build(BuildStatus::Completed),
             ),
             [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
         ))
@@ -678,29 +717,40 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
-    /// The proactive dependency-failed sweep must mirror the reactive cascade: seed
-    /// the recursive walk from the terminal-failed set the cascade reacts to
-    /// (`FailedPermanent=4`/`DependencyFailed=6`/`FailedTimeout=9`, NOT `Aborted=5`),
-    /// fail only non-terminal anchors (`Created=0`/`Queued=1`/`FailedTransient=8`)
-    /// to `DependencyFailed=6`, and walk dependents upward via the dependency edge.
-    /// Getting the seed or target set wrong either misses the dead zone or clobbers
-    /// terminal-success anchors, so pin the SQL shape (no live DB in unit tests).
+    /// The proactive dependency-failed sweep must mirror the reactive cascade:
+    /// seed the recursive walk from the terminal-failed set the cascade reacts
+    /// to (NOT `Aborted`), fail only non-terminal anchors to `DependencyFailed`,
+    /// and walk dependents upward via the dependency edge. Getting the seed or
+    /// target set wrong either misses the dead zone or clobbers terminal-success
+    /// anchors, so pin the SQL shape (no live DB in unit tests).
     #[test]
     fn dependency_failed_reconcile_sql_mirrors_the_cascade() {
         let sql = dependency_failed_reconcile_sql()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
+        let terminal_failure = status_sql::build_in(&BuildStatus::TERMINAL_FAILURE);
+        let cascade_target = status_sql::build_in(&CASCADE_TARGET);
         assert!(
-            sql.contains("FROM derivation_build WHERE status IN (4, 6, 9)"),
-            "must seed from the terminal-failed set (excluding Aborted=5): {sql}"
+            !BuildStatus::TERMINAL_FAILURE.contains(&BuildStatus::Aborted)
+                && !CASCADE_TARGET.contains(&BuildStatus::Building),
+            "seed excludes Aborted (retried, not permanent); target excludes Building"
         );
         assert!(
-            sql.contains("SET status = 6"),
+            sql.contains(&format!(
+                "FROM derivation_build WHERE status IN ({terminal_failure})"
+            )),
+            "must seed from the terminal-failed set: {sql}"
+        );
+        assert!(
+            sql.contains(&format!(
+                "SET status = {}",
+                status_sql::build(BuildStatus::DependencyFailed)
+            )),
             "must fail dependents to DependencyFailed: {sql}"
         );
         assert!(
-            sql.contains("db.status IN (0, 1, 8)"),
+            sql.contains(&format!("db.status IN ({cascade_target})")),
             "must only touch non-terminal anchors (never terminal-success): {sql}"
         );
         assert!(

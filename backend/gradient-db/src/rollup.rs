@@ -24,40 +24,43 @@ use super::DbContext;
 struct BuildCount {
     name: &'static str,
     time_col: &'static str,
-    filter: &'static str,
+    filter: String,
 }
 
-const BUILD_COUNTS: &[BuildCount] = &[
-    BuildCount {
-        name: "builds.created",
-        time_col: "created_at",
-        filter: "TRUE",
-    },
-    BuildCount {
-        name: "builds.dispatched",
-        time_col: "dispatched_at",
-        filter: "TRUE",
-    },
-    // The Build/BuildAttempt split moved per-attempt finish times to
-    // `build_attempt`; `build.updated_at` is set on every status transition, so
-    // it is the terminal-state timestamp here and also covers builds with no
-    // attempt row (substituted at eval, dependency-failed).
-    BuildCount {
-        name: "builds.completed",
-        time_col: "updated_at",
-        filter: "b.status = 3",
-    },
-    BuildCount {
-        name: "builds.substituted",
-        time_col: "updated_at",
-        filter: "b.status = 7",
-    },
-    BuildCount {
-        name: "builds.failed",
-        time_col: "updated_at",
-        filter: "b.status IN (4, 6, 8, 9)",
-    },
-];
+fn build_counts() -> Vec<BuildCount> {
+    use gradient_entity::build::BuildStatus;
+    vec![
+        BuildCount {
+            name: "builds.created",
+            time_col: "created_at",
+            filter: "TRUE".into(),
+        },
+        BuildCount {
+            name: "builds.dispatched",
+            time_col: "dispatched_at",
+            filter: "TRUE".into(),
+        },
+        // The Build/BuildAttempt split moved per-attempt finish times to
+        // `build_attempt`; `build.updated_at` is set on every status transition, so
+        // it is the terminal-state timestamp here and also covers builds with no
+        // attempt row (substituted at eval, dependency-failed).
+        BuildCount {
+            name: "builds.completed",
+            time_col: "updated_at",
+            filter: format!("b.status = {}", crate::status_sql::build(BuildStatus::Completed)),
+        },
+        BuildCount {
+            name: "builds.substituted",
+            time_col: "updated_at",
+            filter: format!("b.status = {}", crate::status_sql::build(BuildStatus::Substituted)),
+        },
+        BuildCount {
+            name: "builds.failed",
+            time_col: "updated_at",
+            filter: format!("b.status IN ({})", crate::status_sql::build_in(&BuildStatus::FAILURE)),
+        },
+    ]
+}
 
 /// A duration metric over the `build` table: milliseconds between two columns.
 struct BuildDuration {
@@ -87,19 +90,25 @@ const BUILD_DURATIONS: &[BuildDuration] = &[
 /// A count metric over `evaluation`, attributed to the org via the project join.
 struct EvalCount {
     name: &'static str,
-    filter: &'static str,
+    filter: String,
 }
 
-const EVAL_COUNTS: &[EvalCount] = &[
-    EvalCount {
-        name: "evals.completed",
-        filter: "e.status = 5",
-    },
-    EvalCount {
-        name: "evals.failed",
-        filter: "e.status IN (6, 7)",
-    },
-];
+fn eval_counts() -> Vec<EvalCount> {
+    use gradient_entity::evaluation::EvaluationStatus;
+    vec![
+        EvalCount {
+            name: "evals.completed",
+            filter: format!("e.status = {}", crate::status_sql::eval(EvaluationStatus::Completed)),
+        },
+        EvalCount {
+            name: "evals.failed",
+            filter: format!(
+                "e.status IN ({})",
+                crate::status_sql::eval_in(&[EvaluationStatus::Failed, EvaluationStatus::Aborted])
+            ),
+        },
+    ]
+}
 
 /// (target_granularity, source_granularity, date_trunc unit, trailing window).
 const CASCADES: &[(i16, i16, &str, &str)] = &[
@@ -191,8 +200,8 @@ async fn rollup_loop(ctx: DbContext) {
 
 async fn run_rollup(ctx: &DbContext) {
     let db = &ctx.worker_db;
-    for m in BUILD_COUNTS {
-        if let Err(e) = db.execute_unprepared(&build_count_sql(m)).await {
+    for m in build_counts() {
+        if let Err(e) = db.execute_unprepared(&build_count_sql(&m)).await {
             warn!(metric = m.name, error = %e, "rollup build-count failed");
         }
     }
@@ -207,8 +216,8 @@ async fn run_rollup(ctx: &DbContext) {
         warn!(metric = "builds.duration_ms", error = %e, "rollup build-duration failed");
     }
 
-    for m in EVAL_COUNTS {
-        if let Err(e) = db.execute_unprepared(&eval_count_sql(m)).await {
+    for m in eval_counts() {
+        if let Err(e) = db.execute_unprepared(&eval_count_sql(&m)).await {
             warn!(metric = m.name, error = %e, "rollup eval-count failed");
         }
     }
@@ -323,13 +332,14 @@ fn build_duration_attempt_sql() -> String {
          ) ba ON TRUE \
          WHERE ba.build_finished_at IS NOT NULL AND ba.build_started_at IS NOT NULL \
            AND ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
-           AND b.status = 3 \
+           AND b.status = {completed} \
          GROUP BY date_trunc('minute', ba.build_finished_at), pr.organization \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
          DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum, \
                        min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
         ms = ms,
         window = MINUTE_WINDOW,
+        completed = crate::status_sql::build(gradient_entity::build::BuildStatus::Completed),
     )
 }
 
@@ -379,7 +389,8 @@ mod tests {
     /// to `build_attempt`; rollups over `build b` must not reference them.
     #[test]
     fn build_table_rollups_avoid_moved_columns() {
-        let sqls = BUILD_COUNTS
+        let counts = build_counts();
+        let sqls = counts
             .iter()
             .map(build_count_sql)
             .chain(BUILD_DURATIONS.iter().map(build_duration_sql));
@@ -400,7 +411,8 @@ mod tests {
     /// build's evaluation -> project, never a (now column-less) derivation join.
     #[test]
     fn build_rollups_attribute_org_via_project() {
-        let sqls = BUILD_COUNTS
+        let counts = build_counts();
+        let sqls = counts
             .iter()
             .map(build_count_sql)
             .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
