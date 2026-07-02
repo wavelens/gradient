@@ -533,6 +533,12 @@ in {
           default = 30;
         };
 
+        graphConsistencyIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between read-only build-graph consistency sweeps (0 disables).";
+          type = lib.types.ints.unsigned;
+          default = 300;
+        };
+
         buildMaxAttempts = lib.mkOption {
           description = "Maximum number of build attempts before a transient failure becomes permanent (must be ≥ 1).";
           type = lib.types.ints.positive;
@@ -895,6 +901,7 @@ in {
         GRADIENT_OTLP_PUSH_INTERVAL = toString cfg.settings.otlpPushIntervalSecs;
         GRADIENT_DISPATCH_RECORD_CANDIDATES = lib.boolToString cfg.settings.dispatchRecordCandidates;
         GRADIENT_INSTANCE_METRICS_INTERVAL = toString cfg.settings.instanceMetricsIntervalSecs;
+        GRADIENT_GRAPH_CONSISTENCY_INTERVAL = toString cfg.settings.graphConsistencyIntervalSecs;
         GRADIENT_BUILD_MAX_ATTEMPTS = toString cfg.settings.buildMaxAttempts;
         GRADIENT_SUBSTITUTE_MISS_ESCALATION_THRESHOLD = toString cfg.settings.substituteMissEscalationThreshold;
         GRADIENT_INPUTS_UNAVAILABLE_MAX_LOOPS = toString cfg.settings.inputsUnavailableMaxLoops;
