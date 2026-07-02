@@ -202,6 +202,7 @@ mod tests {
             ready_at: now,
             org_work_share: None,
             rescore_count: 0,
+            now,
         };
         let view = JobContextView::new(&ctx, &job);
         assert_eq!(view.kind, "Build");

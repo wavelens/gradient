@@ -14,4 +14,9 @@ use serde::{Deserialize, Serialize};
 pub struct ScoreBreakdown {
     pub rules: BTreeMap<String, f64>,
     pub total: f64,
+    /// Rules that vetoed dispatch this round: the job must not dispatch to
+    /// this worker regardless of `total`. Absent (empty) in rows recorded
+    /// before vetoes existed, and omitted from the JSON when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vetoes: Vec<String>,
 }

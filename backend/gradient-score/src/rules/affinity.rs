@@ -17,11 +17,15 @@ pub struct NetworkAffinityRule {
 
 impl Default for NetworkAffinityRule {
     fn default() -> Self {
-        Self { bonus: 80.0, reference_mbps: 100.0 }
+        Self { bonus: crate::weights::NETWORK_AFFINITY_BONUS, reference_mbps: crate::weights::NETWORK_REFERENCE_MBPS }
     }
 }
 
 impl ScoreRule for NetworkAffinityRule {
+    fn name(&self) -> &'static str {
+        "NetworkAffinityRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -57,11 +61,19 @@ pub struct DiskAffinityRule {
 
 impl Default for DiskAffinityRule {
     fn default() -> Self {
-        Self { bonus: 60.0, heavy_threshold_bytes: 100 * 1_048_576, reference_mbps: 500.0 }
+        Self {
+            bonus: crate::weights::DISK_AFFINITY_BONUS,
+            heavy_threshold_bytes: crate::weights::DISK_HEAVY_THRESHOLD_BYTES,
+            reference_mbps: crate::weights::DISK_REFERENCE_MBPS,
+        }
     }
 }
 
 impl ScoreRule for DiskAffinityRule {
+    fn name(&self) -> &'static str {
+        "DiskAffinityRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -106,7 +118,7 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
-        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0 }
+        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now }
     }
 
     fn worker_with(metrics: WorkerMetricsView) -> WorkerContext<'static> {

@@ -16,11 +16,19 @@ pub struct MissingPathsRule {
 
 impl Default for MissingPathsRule {
     fn default() -> Self {
-        Self { cap: 200.0, k: 2.0, fallback_avg: 20.0 }
+        Self {
+            cap: crate::weights::MISSING_PATHS_CAP,
+            k: crate::weights::MISSING_PATHS_BASELINE_K,
+            fallback_avg: crate::weights::MISSING_PATHS_FALLBACK_AVG,
+        }
     }
 }
 
 impl ScoreRule for MissingPathsRule {
+    fn name(&self) -> &'static str {
+        "MissingPathsRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -50,11 +58,15 @@ pub struct MissingNarSizeRule {
 
 impl Default for MissingNarSizeRule {
     fn default() -> Self {
-        Self { cap: 500.0, k: 2.0 }
+        Self { cap: crate::weights::MISSING_NAR_SIZE_CAP, k: crate::weights::MISSING_NAR_SIZE_BASELINE_K }
     }
 }
 
 impl ScoreRule for MissingNarSizeRule {
+    fn name(&self) -> &'static str {
+        "MissingNarSizeRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -86,11 +98,15 @@ pub struct BuiltinDeprioritizeRule {
 
 impl Default for BuiltinDeprioritizeRule {
     fn default() -> Self {
-        Self { bonus: 50.0, archless_bonus: 100.0 }
+        Self { bonus: crate::weights::REAL_BUILD_BONUS, archless_bonus: crate::weights::ARCHLESS_BUILTIN_BONUS }
     }
 }
 
 impl ScoreRule for BuiltinDeprioritizeRule {
+    fn name(&self) -> &'static str {
+        "BuiltinDeprioritizeRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -125,11 +141,19 @@ pub struct DependencyCountRule {
 
 impl Default for DependencyCountRule {
     fn default() -> Self {
-        Self { cap: 50.0, k: 2.0, fallback_avg: 10.0 }
+        Self {
+            cap: crate::weights::DEPENDENCY_COUNT_CAP,
+            k: crate::weights::DEPENDENCY_COUNT_BASELINE_K,
+            fallback_avg: crate::weights::DEPENDENCY_COUNT_FALLBACK_AVG,
+        }
     }
 }
 
 impl ScoreRule for DependencyCountRule {
+    fn name(&self) -> &'static str {
+        "DependencyCountRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -159,19 +183,26 @@ pub struct WaitTimeRule {
 
 impl Default for WaitTimeRule {
     fn default() -> Self {
-        Self { gain: 60.0, fallback_avg_secs: 60.0, cap: 4000.0 }
+        Self {
+            gain: crate::weights::WAIT_TIME_GAIN,
+            fallback_avg_secs: crate::weights::WAIT_TIME_FALLBACK_AVG_SECS,
+            cap: crate::weights::WAIT_TIME_CAP,
+        }
     }
 }
 
 impl ScoreRule for WaitTimeRule {
+    fn name(&self) -> &'static str {
+        "WaitTimeRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
         _worker: &WorkerContext<'_>,
         instance: &InstanceContext,
     ) -> f64 {
-        let now = gradient_types::now();
-        let waited = (now - job.ready_at).num_seconds().max(0) as f64;
+        let waited = (job.now - job.ready_at).num_seconds().max(0) as f64;
         let avg = instance.wait_secs.w1h_or(self.fallback_avg_secs);
 
         (self.gain * (waited / avg)).min(self.cap)
@@ -189,11 +220,15 @@ pub struct ReserveFetchWorkersRule {
 
 impl Default for ReserveFetchWorkersRule {
     fn default() -> Self {
-        Self { penalty: 300.0 }
+        Self { penalty: crate::weights::RESERVE_FETCH_PENALTY }
     }
 }
 
 impl ScoreRule for ReserveFetchWorkersRule {
+    fn name(&self) -> &'static str {
+        "ReserveFetchWorkersRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -221,32 +256,41 @@ impl ScoreRule for ReserveFetchWorkersRule {
 
 #[derive(Debug)]
 pub struct RescoreWaitRule {
-    pub penalty: f64,
     pub max_rounds: u32,
 }
 
 impl Default for RescoreWaitRule {
     fn default() -> Self {
-        Self { penalty: 1000.0, max_rounds: 4 }
+        Self { max_rounds: crate::weights::RESCORE_MAX_ROUNDS }
     }
 }
 
 impl ScoreRule for RescoreWaitRule {
+    fn name(&self) -> &'static str {
+        "RescoreWaitRule"
+    }
+
     fn score(
+        &self,
+        _job: &JobContext<'_>,
+        _worker: &WorkerContext<'_>,
+        _instance: &InstanceContext,
+    ) -> f64 {
+        0.0
+    }
+
+    /// A build whose substitution cost has not been measured yet is held via
+    /// the veto sentinel (not a summed penalty a large unrelated bonus could
+    /// out-vote) until it is scored or `max_rounds` rescore ticks pass.
+    fn veto(
         &self,
         job: &JobContext<'_>,
         _worker: &WorkerContext<'_>,
         _instance: &InstanceContext,
-    ) -> f64 {
-        if job.job.build().is_none() {
-            return 0.0;
-        }
-
-        if job.missing_nar_size.is_none() && job.rescore_count < self.max_rounds {
-            -self.penalty
-        } else {
-            0.0
-        }
+    ) -> bool {
+        job.job.build().is_some()
+            && job.missing_nar_size.is_none()
+            && job.rescore_count < self.max_rounds
     }
 
     fn description(&self) -> &'static str {
@@ -295,8 +339,8 @@ mod tests {
             ..Default::default()
         };
 
-        let scored = JobContext { job: &job, missing_count: Some(0), missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let unscored = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let scored = JobContext { job: &job, missing_count: Some(0), missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let unscored = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
 
         assert!((rule.score(&scored, &w, &inst) - 200.0).abs() < 1e-9);
         assert_eq!(rule.score(&unscored, &w, &inst), 0.0);
@@ -315,8 +359,8 @@ mod tests {
             ..Default::default()
         };
 
-        let c1 = JobContext { job: &job, missing_count: Some(2), missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let c2 = JobContext { job: &job, missing_count: Some(10), missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let c1 = JobContext { job: &job, missing_count: Some(2), missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let c2 = JobContext { job: &job, missing_count: Some(10), missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
 
         assert!(rule.score(&c1, &w, &inst) > rule.score(&c2, &w, &inst));
         assert!(rule.score(&c1, &w, &inst) >= 0.0);
@@ -335,9 +379,9 @@ mod tests {
             ..Default::default()
         };
 
-        let c_none = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let c_zero = JobContext { job: &job, missing_count: None, missing_nar_size: Some(0), dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let c_huge = JobContext { job: &job, missing_count: None, missing_nar_size: Some(100_000_000_000), dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let c_none = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let c_zero = JobContext { job: &job, missing_count: None, missing_nar_size: Some(0), dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let c_huge = JobContext { job: &job, missing_count: None, missing_nar_size: Some(100_000_000_000), dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
 
         assert_eq!(rule.score(&c_none, &w, &inst), 0.0);
         assert!((rule.score(&c_zero, &w, &inst) - 500.0).abs() < 1e-9);
@@ -357,8 +401,8 @@ mod tests {
         let inst = InstanceContext::default();
         let now = gradient_types::now();
 
-        let c_real = JobContext { job: &real, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let c_builtin = JobContext { job: &builtin, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let c_real = JobContext { job: &real, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let c_builtin = JobContext { job: &builtin, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
 
         assert_eq!(rule.score(&c_real, &w, &inst), 50.0, "a real build gets the default bonus");
         assert_eq!(rule.score(&c_real, &archless, &inst), 50.0, "the arch-less lift is builtin-only");
@@ -374,7 +418,7 @@ mod tests {
         let archless = worker(&no_archs, false);
         let now = gradient_types::now();
 
-        let c_eval = JobContext { job: &eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let c_eval = JobContext { job: &eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
 
         assert_eq!(rule.score(&c_eval, &archless, &InstanceContext::default()), 0.0);
     }
@@ -392,8 +436,8 @@ mod tests {
             ..Default::default()
         };
 
-        let c_few = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 1, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let c_many = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 15, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let c_few = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 1, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let c_many = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 15, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
 
         assert!(rule.score(&c_many, &w, &inst) > rule.score(&c_few, &w, &inst));
         assert!(rule.score(&c_few, &w, &inst) > 0.0);
@@ -412,8 +456,8 @@ mod tests {
             ..Default::default()
         };
 
-        let ctx_zero = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let ctx_eval = JobContext { job: &eval, missing_count: None, missing_nar_size: None, dependency_count: 5, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let ctx_zero = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let ctx_eval = JobContext { job: &eval, missing_count: None, missing_nar_size: None, dependency_count: 5, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
 
         assert_eq!(rule.score(&ctx_zero, &w, &inst), 0.0);
         assert_eq!(rule.score(&ctx_eval, &w, &inst), 0.0);
@@ -431,7 +475,7 @@ mod tests {
             ..Default::default()
         };
 
-        let ctx_huge = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 100_000, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let ctx_huge = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 100_000, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
 
         assert!(rule.score(&ctx_huge, &w, &inst) <= 50.0);
     }
@@ -444,9 +488,9 @@ mod tests {
         let w = worker(&archs, false);
         let now = gradient_types::now();
 
-        let ctx_fresh = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let ctx_mid = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(60), ready_at: now - chrono::Duration::seconds(60), org_work_share: None, rescore_count: 0 };
-        let ctx_ancient = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(10_000), ready_at: now - chrono::Duration::seconds(10_000), org_work_share: None, rescore_count: 0 };
+        let ctx_fresh = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let ctx_mid = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(60), ready_at: now - chrono::Duration::seconds(60), org_work_share: None, rescore_count: 0, now };
+        let ctx_ancient = JobContext { job: &job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now - chrono::Duration::seconds(10_000), ready_at: now - chrono::Duration::seconds(10_000), org_work_share: None, rescore_count: 0, now };
 
         let fresh = rule.score(&ctx_fresh, &w, &InstanceContext::default());
         let mid = rule.score(&ctx_mid, &w, &InstanceContext::default());
@@ -459,24 +503,25 @@ mod tests {
     }
 
     #[test]
-    fn rescore_wait_blocks_build_until_threshold_but_never_eval() {
+    fn rescore_wait_vetoes_build_until_threshold_but_never_eval() {
         let rule = RescoreWaitRule::default();
         let archs: Vec<String> = vec![];
         let w = worker(&archs, false);
         let inst = crate::context::InstanceContext::default();
-        let n = gradient_types::now();
+        let now = gradient_types::now();
         let build = build_job("x86_64-linux");
         let eval = eval_job(false);
 
-        let c_build_none_0 = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: n, ready_at: n, org_work_share: None, rescore_count: 0 };
-        let c_build_none_4 = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: n, ready_at: n, org_work_share: None, rescore_count: 4 };
-        let c_build_some_0 = JobContext { job: &build, missing_count: None, missing_nar_size: Some(10), dependency_count: 0, queued_at: n, ready_at: n, org_work_share: None, rescore_count: 0 };
-        let c_eval_none_0 = JobContext { job: &eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: n, ready_at: n, org_work_share: None, rescore_count: 0 };
+        let c_build_none_0 = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let c_build_none_4 = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 4, now };
+        let c_build_some_0 = JobContext { job: &build, missing_count: None, missing_nar_size: Some(10), dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let c_eval_none_0 = JobContext { job: &eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
 
-        assert_eq!(rule.score(&c_build_none_0, &w, &inst), -1000.0);
-        assert_eq!(rule.score(&c_build_none_4, &w, &inst), 0.0);
-        assert_eq!(rule.score(&c_build_some_0, &w, &inst), 0.0);
-        assert_eq!(rule.score(&c_eval_none_0, &w, &inst), 0.0);
+        assert!(rule.veto(&c_build_none_0, &w, &inst), "unmeasured build within rounds is held");
+        assert!(!rule.veto(&c_build_none_4, &w, &inst), "released after max_rounds");
+        assert!(!rule.veto(&c_build_some_0, &w, &inst), "measured build dispatches");
+        assert!(!rule.veto(&c_eval_none_0, &w, &inst), "evals are never held");
+        assert_eq!(rule.score(&c_build_none_0, &w, &inst), 0.0, "the hold is a veto, not a penalty");
     }
 
     #[test]
@@ -494,9 +539,9 @@ mod tests {
         let inst_full = crate::context::InstanceContext { total_workers: 4, idle_workers: 0, ..Default::default() };
         let inst_idle = crate::context::InstanceContext { total_workers: 4, idle_workers: 4, ..Default::default() };
 
-        let ctx_cached = JobContext { job: &cached_eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let ctx_fetch = JobContext { job: &fetch_eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
-        let ctx_build = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0 };
+        let ctx_cached = JobContext { job: &cached_eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let ctx_fetch = JobContext { job: &fetch_eval, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
+        let ctx_build = JobContext { job: &build, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: now, ready_at: now, org_work_share: None, rescore_count: 0, now };
 
         assert!((rule.score(&ctx_cached, &fetch_w, &inst_full) - (-300.0)).abs() < 1e-9, "full penalty when no idle workers");
         assert_eq!(rule.score(&ctx_cached, &fetch_w, &inst_idle), 0.0, "fully relaxed when all workers idle");

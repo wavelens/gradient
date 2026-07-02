@@ -15,11 +15,15 @@ pub struct PreferLocalBuildRule {
 
 impl Default for PreferLocalBuildRule {
     fn default() -> Self {
-        Self { local_bonus: 150.0, miss_penalty: 20.0 }
+        Self { local_bonus: crate::weights::PREFER_LOCAL_BONUS, miss_penalty: crate::weights::PREFER_LOCAL_MISS_PENALTY }
     }
 }
 
 impl ScoreRule for PreferLocalBuildRule {
+    fn name(&self) -> &'static str {
+        "PreferLocalBuildRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -64,7 +68,7 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>, missing_count: Option<u32>) -> JobContext<'a> {
-        JobContext { job, missing_count, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0 }
+        JobContext { job, missing_count, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now }
     }
 
     fn worker() -> WorkerContext<'static> {

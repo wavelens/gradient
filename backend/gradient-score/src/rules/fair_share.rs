@@ -18,11 +18,15 @@ pub struct FairShareRule {
 
 impl Default for FairShareRule {
     fn default() -> Self {
-        Self { weight: 500.0 }
+        Self { weight: crate::weights::FAIR_SHARE_WEIGHT }
     }
 }
 
 impl ScoreRule for FairShareRule {
+    fn name(&self) -> &'static str {
+        "FairShareRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -40,6 +44,10 @@ impl ScoreRule for FairShareRule {
             Some(share) => -self.weight * share as f64,
             None => 0.0,
         }
+    }
+
+    fn uses_org_work_share(&self) -> bool {
+        true
     }
 
     fn description(&self) -> &'static str {

@@ -18,11 +18,21 @@ pub struct ResourceFitRule {
 
 impl Default for ResourceFitRule {
     fn default() -> Self {
-        Self { ram_overshoot_penalty: 400.0, max_overshoot: 2.0, cpu_affinity_bonus: 50.0, cpu_heavy_threshold_ms: 60_000, cpu_bonus_cap: 2.0 }
+        Self {
+            ram_overshoot_penalty: crate::weights::RESOURCE_FIT_RAM_PENALTY,
+            max_overshoot: crate::weights::RESOURCE_FIT_MAX_OVERSHOOT,
+            cpu_affinity_bonus: crate::weights::CPU_AFFINITY_BONUS,
+            cpu_heavy_threshold_ms: crate::weights::CPU_HEAVY_THRESHOLD_MS,
+            cpu_bonus_cap: crate::weights::CPU_AFFINITY_BONUS_CAP,
+        }
     }
 }
 
 impl ScoreRule for ResourceFitRule {
+    fn name(&self) -> &'static str {
+        "ResourceFitRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -70,16 +80,20 @@ pub struct ResourceSaturationRule {
 impl Default for ResourceSaturationRule {
     fn default() -> Self {
         Self {
-            penalty: 1000.0,
-            cpu_saturated_pct: 80.0,
-            cpu_saturated_pct_builtin: 90.0,
-            ram_saturated_free_frac: 0.10,
-            ram_fit_headroom: 1.1,
+            penalty: crate::weights::RESOURCE_SATURATION_PENALTY,
+            cpu_saturated_pct: crate::weights::CPU_SATURATED_PCT as f32,
+            cpu_saturated_pct_builtin: crate::weights::CPU_SATURATED_PCT_BUILTIN as f32,
+            ram_saturated_free_frac: crate::weights::RAM_SATURATED_FREE_FRAC,
+            ram_fit_headroom: crate::weights::RAM_FIT_HEADROOM,
         }
     }
 }
 
 impl ScoreRule for ResourceSaturationRule {
+    fn name(&self) -> &'static str {
+        "ResourceSaturationRule"
+    }
+
     fn score(
         &self,
         job: &JobContext<'_>,
@@ -149,7 +163,7 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
-        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0 }
+        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now }
     }
 
     fn worker_with(metrics: WorkerMetricsView) -> WorkerContext<'static> {
