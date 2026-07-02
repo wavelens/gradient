@@ -22,9 +22,9 @@ use gradient_score::{JobContext, LazyProviders, ScoredJob, ScoringPolicy, Worker
 pub struct PendingEvalJob {
     pub evaluation_id: EvaluationId,
     pub project_id: Option<ProjectId>,
-    /// Peer (org/cache/proxy) that owns this job. Workers must be authorized
-    /// for this peer to receive the job offer.
-    pub peer_id: OrganizationId,
+    /// Org (cache/proxy) that owns this job. Workers must be authorized
+    /// for this org to receive the job offer.
+    pub org_id: OrganizationId,
     pub commit_id: CommitId,
     pub repository: String,
     pub job: FlakeJob,
@@ -58,8 +58,8 @@ pub struct PendingBuildJob {
     /// through the worker as the opaque `BuildTask.build_id` string.
     pub derivation_build: DerivationBuildId,
     pub evaluation_id: EvaluationId,
-    /// Peer (org/cache/proxy) that owns this job.
-    pub peer_id: OrganizationId,
+    /// Org (cache/proxy) that owns this job.
+    pub org_id: OrganizationId,
     pub job: BuildJob,
     pub required_paths: Vec<RequiredPath>,
     /// Nix system string the build's target derivation must run on
@@ -156,10 +156,10 @@ impl PendingJob {
         }
     }
 
-    pub fn peer_id(&self) -> OrganizationId {
+    pub fn org_id(&self) -> OrganizationId {
         match self {
-            PendingJob::Eval(j) => j.peer_id,
-            PendingJob::Build(j) => j.peer_id,
+            PendingJob::Eval(j) => j.org_id,
+            PendingJob::Build(j) => j.org_id,
         }
     }
 
@@ -251,7 +251,7 @@ pub struct Assignment {
     pub job_id: String,
     pub job: Job,
     /// Organization UUID that owns this job - used for credential lookup.
-    pub peer_id: OrganizationId,
+    pub org_id: OrganizationId,
     /// Scoring/context snapshot for the winning job, persisted best-effort by
     /// the caller into `dispatched_job`. `None` outside the scored path.
     pub dispatch_record: Option<DispatchRecord>,
@@ -433,7 +433,7 @@ impl JobTracker {
         self.pending
             .iter()
             .filter(|(_, job)| {
-                authorized.is_none_or(|peers| peers.contains(&job.peer_id()))
+                authorized.is_none_or(|peers| peers.contains(&job.org_id()))
                     && job_eligible_for_caps(job, caps)
             })
             .map(|(id, job)| job.as_candidate(id))
@@ -443,8 +443,8 @@ impl JobTracker {
     /// Record scores from a worker without assigning anything. The server only
     /// assigns jobs in response to an explicit `RequestJob` - scores just
     /// inform which candidate to pick at that point.
-    pub fn record_scores(&mut self, peer_id: &str, scores: Vec<CandidateScore>) {
-        let worker_scores = self.scores.entry(peer_id.to_owned()).or_default();
+    pub fn record_scores(&mut self, worker_id: &str, scores: Vec<CandidateScore>) {
+        let worker_scores = self.scores.entry(worker_id.to_owned()).or_default();
         for score in scores {
             worker_scores.insert(
                 score.job_id.clone(),
@@ -498,7 +498,7 @@ impl JobTracker {
         None
     }
 
-    /// Assign the best pending job matching `kind` for `peer_id`.
+    /// Assign the best pending job matching `kind` for `worker_id`.
     ///
     /// Each eligible candidate is scored by `policy`.  The job with the
     /// highest total score is assigned.  When multiple jobs tie, the one with
@@ -508,7 +508,7 @@ impl JobTracker {
     /// an explicit `RequestJob` from the worker.
     pub fn take_best_of_kind(
         &mut self,
-        peer_id: &str,
+        worker_id: &str,
         authorized: Option<&HashSet<OrganizationId>>,
         caps: Option<&WorkerCaps>,
         kind: &JobKind,
@@ -517,7 +517,7 @@ impl JobTracker {
     ) -> Option<Assignment> {
         // Borrowed for point lookups only; the borrow ends before the `&mut self`
         // decision push, so no per-dispatch clone of the worker's score map.
-        let worker_scores = self.scores.get(peer_id);
+        let worker_scores = self.scores.get(worker_id);
 
         let worker_ctx = caps.map(|c| WorkerContext {
             architectures: &c.architectures,
@@ -545,7 +545,7 @@ impl JobTracker {
                     // no per-build history: weight by instance avg, half for prefer-local (cheaper) builds
                     (if b.prefer_local_build { 0.5 } else { 1.0 }) * instance.build_time_ms.w1h
                 };
-                *org_work.entry(b.peer_id).or_default() += w;
+                *org_work.entry(b.org_id).or_default() += w;
                 total_work += w;
             }
         }
@@ -572,13 +572,13 @@ impl JobTracker {
             let scored = match job {
                 PendingJob::Eval(e) => ScoredJob::new_eval(
                     id,
-                    job.peer_id(),
+                    job.org_id(),
                     e.job.tasks.contains(&FlakeTask::FetchFlake),
                     e.history,
                 ),
                 PendingJob::Build(b) => ScoredJob::new_build(
                     id,
-                    job.peer_id(),
+                    job.org_id(),
                     b.architecture.as_str(),
                     b.prefer_local_build,
                     b.is_fixed_output,
@@ -593,7 +593,7 @@ impl JobTracker {
                 dependency_count: job.dependency_count(),
                 queued_at: job.queued_at(),
                 ready_at: job.ready_at(),
-                org_work_share: org_work_share(job.peer_id()),
+                org_work_share: org_work_share(job.org_id()),
                 rescore_count: job.rescore_count(),
             };
             let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
@@ -610,7 +610,7 @@ impl JobTracker {
             .pending
             .iter()
             .filter(|(_, j)| {
-                authorized.is_none_or(|peers| peers.contains(&j.peer_id()))
+                authorized.is_none_or(|peers| peers.contains(&j.org_id()))
                     && matches!(
                         (kind, j),
                         (JobKind::Flake, PendingJob::Eval(_))
@@ -652,7 +652,7 @@ impl JobTracker {
                     id: DispatchedJobId::now_v7(),
                     job_id: (*id).clone(),
                     kind: job.kind_disc(),
-                    organization: job.peer_id(),
+                    organization: job.org_id(),
                     derivation_build: job.derivation_build(),
                     evaluation_id: job.evaluation_id(),
                     pname: job.pname(),
@@ -676,7 +676,7 @@ impl JobTracker {
         if !candidates.is_empty() {
             self.push_decision(DispatchDecision {
                 at: gradient_types::now(),
-                worker_id: peer_id.to_owned(),
+                worker_id: worker_id.to_owned(),
                 kind: match kind {
                     JobKind::Flake => 0,
                     JobKind::Build => 1,
@@ -703,7 +703,7 @@ impl JobTracker {
                 kind: kind_disc,
                 derivation_build,
                 evaluation_id: job.evaluation_id(),
-                organization: job.peer_id(),
+                organization: job.org_id(),
                 project,
                 score: winner_score,
                 queued_at: job.queued_at(),
@@ -728,24 +728,24 @@ impl JobTracker {
             }
         });
 
-        let mut assignment = self.assign_pending(peer_id, &job_id)?;
+        let mut assignment = self.assign_pending(worker_id, &job_id)?;
         assignment.dispatch_record = dispatch_record;
         Some(assignment)
     }
 
-    fn assign_pending(&mut self, peer_id: &str, job_id: &str) -> Option<Assignment> {
+    fn assign_pending(&mut self, worker_id: &str, job_id: &str) -> Option<Assignment> {
         let job = self.pending.remove(job_id)?;
-        if let Some(ws) = self.scores.get_mut(peer_id) {
+        if let Some(ws) = self.scores.get_mut(worker_id) {
             ws.remove(job_id);
         }
         let assignment = Assignment {
             job_id: job_id.to_owned(),
             job: job.clone().into_job(),
-            peer_id: job.peer_id(),
+            org_id: job.org_id(),
             dispatch_record: None,
         };
         self.active
-            .insert(job_id.to_owned(), (peer_id.to_owned(), job));
+            .insert(job_id.to_owned(), (worker_id.to_owned(), job));
         Some(assignment)
     }
 
@@ -788,7 +788,7 @@ impl JobTracker {
         let to_requeue: Vec<String> = self
             .active
             .iter()
-            .filter(|(_, (w, job))| w == worker_id && revoked_peers.contains(&job.peer_id()))
+            .filter(|(_, (w, job))| w == worker_id && revoked_peers.contains(&job.org_id()))
             .map(|(id, _)| id.clone())
             .collect();
         for job_id in &to_requeue {
@@ -799,14 +799,14 @@ impl JobTracker {
         to_requeue
     }
 
-    /// Move all of `peer_id`'s active jobs back to pending and return the
+    /// Move all of `worker_id`'s active jobs back to pending and return the
     /// requeued jobs so the caller can reset their DB rows for re-dispatch.
-    pub fn worker_disconnected(&mut self, peer_id: &str) -> Vec<PendingJob> {
-        self.scores.remove(peer_id);
+    pub fn worker_disconnected(&mut self, worker_id: &str) -> Vec<PendingJob> {
+        self.scores.remove(worker_id);
         let orphaned: Vec<String> = self
             .active
             .iter()
-            .filter(|(_, (w, _))| w == peer_id)
+            .filter(|(_, (w, _))| w == worker_id)
             .map(|(id, _)| id.clone())
             .collect();
         let mut requeued = Vec::with_capacity(orphaned.len());
@@ -867,7 +867,7 @@ impl JobTracker {
                     kind,
                     evaluation_id: job.evaluation_id(),
                     derivation_build,
-                    organization: job.peer_id(),
+                    organization: job.org_id(),
                     queued_at: job.queued_at(),
                     dependency_count: job.dependency_count(),
                     pname,
@@ -926,7 +926,7 @@ mod tests {
         PendingJob::Eval(PendingEvalJob {
             evaluation_id: EvaluationId::now_v7(),
             project_id: None,
-            peer_id: peer,
+            org_id: peer,
             commit_id: CommitId::now_v7(),
             repository: "https://example.com/repo".into(),
             job: FlakeJob {
@@ -952,7 +952,7 @@ mod tests {
         PendingJob::Eval(PendingEvalJob {
             evaluation_id: EvaluationId::now_v7(),
             project_id: None,
-            peer_id: peer,
+            org_id: peer,
             commit_id: CommitId::now_v7(),
             repository: "git+ssh://git@example.com/repo".into(),
             job: FlakeJob {
@@ -992,7 +992,7 @@ mod tests {
         PendingJob::Build(PendingBuildJob {
             derivation_build,
             evaluation_id: EvaluationId::now_v7(),
-            peer_id: peer,
+            org_id: peer,
             job: BuildJob {
                 builds: vec![BuildTask {
                     build_id: derivation_build.to_string(),
@@ -1852,7 +1852,7 @@ mod tests {
             other => panic!("expected Cached, got {other:?}"),
         }
         assert_eq!(follow.evaluation_id, original.evaluation_id);
-        assert_eq!(follow.peer_id, original.peer_id);
+        assert_eq!(follow.org_id, original.org_id);
         assert_eq!(follow.repository, original.repository);
         assert_eq!(follow.required_paths.len(), 1);
         assert!(follow.required_paths.iter().any(|p| p.path == "/nix/store/abc-source"));

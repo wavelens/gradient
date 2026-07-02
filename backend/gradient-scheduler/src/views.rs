@@ -160,7 +160,7 @@ mod tests {
         PendingJob::Build(crate::jobs::PendingBuildJob {
             derivation_build: DerivationBuildId::now_v7(),
             evaluation_id: EvaluationId::now_v7(),
-            peer_id: OrganizationId::now_v7(),
+            org_id: OrganizationId::now_v7(),
             job: BuildJob {
                 builds: vec![BuildTask {
                     build_id: "b1".into(),
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn build_job_context_view_carries_derivations_and_history() {
         let job = build_pending();
-        let scored = ScoredJob::new_eval("build:x", job.peer_id(), false, Default::default());
+        let scored = ScoredJob::new_eval("build:x", job.org_id(), false, Default::default());
         let now = gradient_types::now();
         let ctx = JobContext {
             job: &scored,

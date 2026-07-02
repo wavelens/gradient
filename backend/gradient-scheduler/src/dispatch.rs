@@ -116,14 +116,14 @@ async fn worker_liveness_loop(scheduler: Arc<Scheduler>) {
     loop {
         interval.tick().await;
         let now_ms = gradient_types::now().and_utc().timestamp_millis();
-        for peer_id in scheduler.stale_workers(now_ms, timeout_ms).await {
+        for worker_id in scheduler.stale_workers(now_ms, timeout_ms).await {
             warn!(
-                %peer_id,
+                %worker_id,
                 timeout_secs,
                 "worker silent past heartbeat deadline - presumed dead (OOM-kill / frozen \
                  host / network partition); unregistering and re-queuing its jobs"
             );
-            scheduler.unregister_worker(&peer_id).await;
+            scheduler.unregister_worker(&worker_id).await;
         }
     }
 }
@@ -313,7 +313,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
         let pending = PendingEvalJob {
             evaluation_id: eval.id,
             project_id: eval.project,
-            peer_id: org_id,
+            org_id,
             commit_id: eval.commit,
             repository: eval.repository.clone(),
             job: flake_job,
@@ -582,7 +582,7 @@ impl BuildDispatchMaps {
             }
         }
 
-        // peer_id resolution: every evaluation must belong to a project.
+        // org_id resolution: every evaluation must belong to a project.
         let project_ids: Vec<ProjectId> = evaluations
             .values()
             .filter_map(|e| e.project)
@@ -824,9 +824,9 @@ impl BuildDispatchMaps {
         })
     }
 
-    /// Resolve the organization that owns this evaluation (used as `peer_id`
+    /// Resolve the organization that owns this evaluation (used as `org_id`
     /// to route the job only to workers registered by that org).
-    fn resolve_peer_id(&self, eval: &MEvaluation) -> Option<OrganizationId> {
+    fn resolve_org_id(&self, eval: &MEvaluation) -> Option<OrganizationId> {
         eval.project
             .and_then(|pid| self.projects.get(&pid).copied())
     }
@@ -858,8 +858,8 @@ impl BuildDispatchMaps {
             error!(derivation_build = %anchor.id, "driving evaluation row not found");
             None
         })?;
-        let peer_id = self.resolve_peer_id(eval).or_else(|| {
-            error!(derivation_build = %anchor.id, "could not resolve peer_id for anchor");
+        let org_id = self.resolve_org_id(eval).or_else(|| {
+            error!(derivation_build = %anchor.id, "could not resolve org_id for anchor");
             None
         })?;
 
@@ -932,7 +932,7 @@ impl BuildDispatchMaps {
         let pending = PendingBuildJob {
             derivation_build: anchor.id,
             evaluation_id: eval_id,
-            peer_id,
+            org_id,
             job: build_job,
             required_paths,
             architecture,
