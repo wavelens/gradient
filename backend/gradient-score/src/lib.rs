@@ -9,6 +9,7 @@ pub mod context;
 pub mod policy;
 pub mod rule;
 pub mod rules;
+pub mod weights;
 
 pub use breakdown::ScoreBreakdown;
 pub use context::{

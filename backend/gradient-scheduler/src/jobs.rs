@@ -279,6 +279,8 @@ pub struct DispatchRecord {
 /// ring and (for the winner) the persisted `dispatched_job` record.
 struct ScoredCandidate {
     total: f64,
+    /// Some rule vetoed dispatch this round; the job never wins regardless of total.
+    vetoed: bool,
     score_breakdown: serde_json::Value,
     job_context: serde_json::Value,
 }
@@ -535,23 +537,28 @@ impl JobTracker {
         };
         let worker_ctx = worker_ctx.as_ref().unwrap_or(&fallback_ctx);
 
+        // O(active builds) per request, so computed only when an enabled rule
+        // actually consumes the share (none do while FairShareRule is disabled).
         let mut org_work: HashMap<OrganizationId, f64> = HashMap::new();
         let mut total_work: f64 = 0.0;
-        for (_, job) in self.active.values() {
-            if let PendingJob::Build(b) = job {
-                let w = if b.history.build_time_ms > 0 {
-                    b.history.build_time_ms as f64
-                } else {
-                    // no per-build history: weight by instance avg, half for prefer-local (cheaper) builds
-                    (if b.prefer_local_build { 0.5 } else { 1.0 }) * instance.build_time_ms.w1h
-                };
-                *org_work.entry(b.org_id).or_default() += w;
-                total_work += w;
+        if policy.uses_org_work_share() {
+            for (_, job) in self.active.values() {
+                if let PendingJob::Build(b) = job {
+                    let w = if b.history.build_time_ms > 0 {
+                        b.history.build_time_ms as f64
+                    } else {
+                        // no per-build history: weight by instance avg, half for prefer-local (cheaper) builds
+                        (if b.prefer_local_build { 0.5 } else { 1.0 }) * instance.build_time_ms.w1h
+                    };
+                    *org_work.entry(b.org_id).or_default() += w;
+                    total_work += w;
+                }
             }
         }
         let org_work_share = |peer: OrganizationId| -> Option<f32> {
             (total_work > 0.0).then(|| (org_work.get(&peer).copied().unwrap_or(0.0) / total_work) as f32)
         };
+        let now = gradient_types::now();
 
         // Per-candidate detailed score, computed once and reused for both the
         // decision ring and the winner's persisted record. `score_detailed` is
@@ -595,10 +602,12 @@ impl JobTracker {
                 ready_at: job.ready_at(),
                 org_work_share: org_work_share(job.org_id()),
                 rescore_count: job.rescore_count(),
+                now,
             };
             let breakdown = policy.score_detailed(&ctx, worker_ctx, instance);
             ScoredCandidate {
                 total: breakdown.total,
+                vetoed: !breakdown.vetoes.is_empty(),
                 score_breakdown: serde_json::to_value(&breakdown)
                     .unwrap_or(serde_json::Value::Null),
                 job_context: serde_json::to_value(crate::views::JobContextView::new(&ctx, job))
@@ -628,9 +637,11 @@ impl JobTracker {
                 .then_with(|| id_a.cmp(id_b))
         });
 
-        // A negative best total means dispatching now is worse than idling this
-        // round (e.g. a build still awaiting candidate scores); the worker waits.
-        let winner = scored.first().filter(|(_, sc)| sc.total >= 0.0).map(|(id, _)| (*id).clone());
+        // A vetoed candidate never wins (a rule said "not yet"); below the floor,
+        // dispatching now is worse than idling this round. Both gates share one
+        // predicate with the winner-detail extraction below.
+        let wins = |sc: &ScoredCandidate| !sc.vetoed && sc.total >= gradient_score::weights::DISPATCH_FLOOR;
+        let winner = scored.first().filter(|(_, sc)| wins(sc)).map(|(id, _)| (*id).clone());
 
         // Worker and instance context are identical for every candidate, so they
         // are computed once and shared across the decision and the winner record.
@@ -669,7 +680,7 @@ impl JobTracker {
         // borrows end so the owned record can outlive them.
         let winner_detail = scored
             .first()
-            .filter(|(_, sc)| sc.total >= 0.0)
+            .filter(|(_, sc)| wins(sc))
             .map(|(_, sc)| (sc.total, sc.score_breakdown.clone(), sc.job_context.clone()));
         drop(scored);
 

@@ -11,7 +11,7 @@ use crate::rules::builtin::{
     ReserveFetchWorkersRule, RescoreWaitRule, WaitTimeRule,
 };
 use crate::rules::{
-    DiskAffinityRule, NetworkAffinityRule, PreferLocalBuildRule, ResourceFitRule,
+    DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule, ResourceFitRule,
     ResourceSaturationRule,
 };
 
@@ -32,9 +32,15 @@ pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
         crate::ScoreBreakdown {
             rules: std::collections::BTreeMap::new(),
             total: self.score(job, worker, instance),
+            vetoes: Vec::new(),
         }
     }
     fn uses_history(&self) -> bool {
+        false
+    }
+    /// Whether any enabled rule consumes `JobContext::org_work_share`, so the
+    /// scheduler skips computing the share otherwise.
+    fn uses_org_work_share(&self) -> bool {
         false
     }
 }
@@ -44,11 +50,13 @@ pub struct RulePolicy {
     name: &'static str,
     rules: Vec<Box<dyn ScoreRule>>,
     uses_history: bool,
+    uses_org_work_share: bool,
 }
 
 impl RulePolicy {
     pub fn new(name: &'static str, rules: Vec<Box<dyn ScoreRule>>, uses_history: bool) -> Self {
-        Self { name, rules, uses_history }
+        let uses_org_work_share = rules.iter().any(|r| r.uses_org_work_share());
+        Self { name, rules, uses_history, uses_org_work_share }
     }
 }
 
@@ -73,42 +81,76 @@ impl ScoringPolicy for RulePolicy {
         instance: &InstanceContext,
     ) -> crate::ScoreBreakdown {
         let mut rules = std::collections::BTreeMap::new();
+        let mut vetoes = Vec::new();
         let mut total = 0.0;
         for r in &self.rules {
             let s = r.score(job, worker, instance);
             total += s;
             rules.insert(r.name().to_string(), s);
+            if r.veto(job, worker, instance) {
+                vetoes.push(r.name().to_string());
+            }
         }
-        crate::ScoreBreakdown { rules, total }
+        crate::ScoreBreakdown { rules, total, vetoes }
     }
 
     fn uses_history(&self) -> bool {
         self.uses_history
     }
+
+    fn uses_org_work_share(&self) -> bool {
+        self.uses_org_work_share
+    }
 }
 
-pub fn simple_rules() -> Vec<Box<dyn ScoreRule>> {
+/// One row of the declarative policy table: the rule and whether the policy
+/// ships it enabled. Disabled rules stay compiled, tested, and visible here so
+/// their status is an explicit decision instead of a commented-out line.
+struct RuleSpec {
+    enabled: bool,
+    rule: Box<dyn ScoreRule>,
+}
+
+fn spec(enabled: bool, rule: Box<dyn ScoreRule>) -> RuleSpec {
+    RuleSpec { enabled, rule }
+}
+
+fn simple_table() -> Vec<RuleSpec> {
     vec![
-        Box::new(MissingPathsRule::default()),
-        Box::new(MissingNarSizeRule::default()),
-        Box::new(RescoreWaitRule::default()),
-        Box::new(DependencyCountRule::default()),
-        Box::new(WaitTimeRule::default()),
-        Box::new(BuiltinDeprioritizeRule::default()),
-        Box::new(ReserveFetchWorkersRule::default()),
+        spec(true, Box::new(MissingPathsRule::default())),
+        spec(true, Box::new(MissingNarSizeRule::default())),
+        spec(true, Box::new(RescoreWaitRule::default())),
+        spec(true, Box::new(DependencyCountRule::default())),
+        spec(true, Box::new(WaitTimeRule::default())),
+        spec(true, Box::new(BuiltinDeprioritizeRule::default())),
+        spec(true, Box::new(ReserveFetchWorkersRule::default())),
     ]
 }
 
-pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
-    let mut rules = simple_rules();
-    rules.push(Box::new(ResourceFitRule::default()));
-    rules.push(Box::new(ResourceSaturationRule::default()));
-    rules.push(Box::new(PreferLocalBuildRule::default()));
-    // FairShareRule disabled: idle gate counts zero-occupancy not spare capacity, over-penalizing.
-    // rules.push(Box::new(FairShareRule::default()));
-    rules.push(Box::new(NetworkAffinityRule::default()));
-    rules.push(Box::new(DiskAffinityRule::default()));
+fn resource_aware_table() -> Vec<RuleSpec> {
+    let mut rules = simple_table();
+    rules.push(spec(true, Box::new(ResourceFitRule::default())));
+    rules.push(spec(true, Box::new(ResourceSaturationRule::default())));
+    rules.push(spec(true, Box::new(PreferLocalBuildRule::default())));
+    // Disabled: its idle gate counts zero-occupancy rather than spare capacity,
+    // over-penalizing busy-but-fair orgs. Re-enabling is a scheduling-policy
+    // decision (#476), made here by flipping the flag.
+    rules.push(spec(false, Box::new(FairShareRule::default())));
+    rules.push(spec(true, Box::new(NetworkAffinityRule::default())));
+    rules.push(spec(true, Box::new(DiskAffinityRule::default())));
     rules
+}
+
+fn enabled(table: Vec<RuleSpec>) -> Vec<Box<dyn ScoreRule>> {
+    table.into_iter().filter(|s| s.enabled).map(|s| s.rule).collect()
+}
+
+pub fn simple_rules() -> Vec<Box<dyn ScoreRule>> {
+    enabled(simple_table())
+}
+
+pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
+    enabled(resource_aware_table())
 }
 
 /// `(name, description)` for every known scoring rule, so the board UI can show
@@ -204,6 +246,7 @@ mod tests {
             ready_at: now(),
             org_work_share: None,
             rescore_count: 0,
+            now: now(),
         };
 
         let j_old = scored_job("x86_64-linux");
@@ -216,6 +259,7 @@ mod tests {
             ready_at: now() - chrono::Duration::seconds(3600),
             org_work_share: None,
             rescore_count: 0,
+            now: now(),
         };
 
         let s_old = policy.score(&c_old, &w, &InstanceContext::default());
@@ -251,6 +295,7 @@ mod tests {
             ready_at: now(),
             org_work_share: None,
             rescore_count: 0,
+            now: now(),
         };
         let fast = WorkerContext {
             architectures: &archs,
@@ -288,6 +333,7 @@ mod tests {
             ready_at: n,
             org_work_share: None,
             rescore_count: 0,
+            now: now(),
         };
 
         let j_costly = scored_job("builtin");
@@ -300,6 +346,7 @@ mod tests {
             ready_at: n,
             org_work_share: None,
             rescore_count: 0,
+            now: now(),
         };
 
         assert!(
@@ -324,6 +371,7 @@ mod tests {
             ready_at: now(),
             org_work_share: None,
             rescore_count: 0,
+            now: now(),
         };
 
         let breakdown = policy.score_detailed(&c, &w, &InstanceContext::default());
@@ -335,5 +383,65 @@ mod tests {
         assert!(breakdown.rules.contains_key("WaitTimeRule"));
         let sum: f64 = breakdown.rules.values().sum();
         assert!((sum - total).abs() < 1e-9, "rule contributions must sum to total");
+    }
+
+    /// Rule names are persisted in `dispatched_job.score_breakdown` and served
+    /// by the rule-catalog API: they are a recorded contract. Renaming a rule
+    /// struct must not change these strings.
+    #[test]
+    fn rule_names_are_pinned() {
+        let expected = [
+            "BuiltinDeprioritizeRule",
+            "DependencyCountRule",
+            "DiskAffinityRule",
+            "MissingNarSizeRule",
+            "MissingPathsRule",
+            "NetworkAffinityRule",
+            "PreferLocalBuildRule",
+            "RescoreWaitRule",
+            "ReserveFetchWorkersRule",
+            "ResourceFitRule",
+            "ResourceSaturationRule",
+            "WaitTimeRule",
+        ];
+        let mut got: Vec<&str> = resource_aware_rules().iter().map(|r| r.name()).collect();
+        got.sort_unstable();
+        assert_eq!(got, expected);
+        assert_eq!(FairShareRule::default().name(), "FairShareRule");
+    }
+
+    /// An unmeasured build is held by an explicit veto, not by a penalty a
+    /// large unrelated bonus could out-vote; the breakdown records who held it.
+    #[test]
+    fn unmeasured_build_is_vetoed_not_penalized() {
+        let policy = policy_by_name("simple");
+        let archs = vec!["x86_64-linux".to_string()];
+        let feats: Vec<String> = vec![];
+        let w = worker_ctx(&archs, &feats);
+        let j = scored_job("x86_64-linux");
+        let held = JobContext {
+            job: &j,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: now(),
+            ready_at: now(),
+            org_work_share: None,
+            rescore_count: 0,
+            now: now(),
+        };
+
+        let breakdown = policy.score_detailed(&held, &w, &InstanceContext::default());
+        assert_eq!(breakdown.vetoes, vec!["RescoreWaitRule".to_string()]);
+        assert_eq!(breakdown.rules["RescoreWaitRule"], 0.0);
+    }
+
+    /// Only FairShareRule consumes org_work_share, and it ships disabled, so
+    /// the live policies must not ask the scheduler to compute the share.
+    #[test]
+    fn org_work_share_is_unconsumed_while_fair_share_is_disabled() {
+        assert!(!policy_by_name("simple").uses_org_work_share());
+        assert!(!policy_by_name("resource-aware").uses_org_work_share());
+        assert!(FairShareRule::default().uses_org_work_share());
     }
 }
