@@ -16,6 +16,7 @@
 //! gate promotion would queue derivations no surviving evaluation needs, which
 //! the dispatcher then cannot attribute to a driving evaluation.
 
+use crate::graph_sql::{ClosureDirection, dependency_closure_cte, eval_closure_cte};
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, QueryResult, Statement, Value};
 
@@ -310,22 +311,20 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
     db: &C,
     failed_derivation: DerivationId,
 ) -> Result<Vec<DerivationId>, DbErr> {
+    let cte = dependency_closure_cte("dependents", "SELECT $1::uuid", ClosureDirection::Dependents);
     let rows = db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"
-            WITH RECURSIVE dependents AS (
-                SELECT $1::uuid AS derivation
-                UNION
-                SELECT dd.derivation FROM derivation_dependency dd
-                JOIN dependents dt ON dd.dependency = dt.derivation
-            )
+            format!(
+                r#"
+            {cte}
             UPDATE derivation_build AS db
             SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
             WHERE db.status IN (0, 1, 8)
               AND db.derivation IN (SELECT derivation FROM dependents WHERE derivation <> $1)
             RETURNING db.derivation
-            "#,
+            "#
+            ),
             [Value::Uuid(Some(Box::new(failed_derivation.into_inner())))],
         ))
         .await?;
@@ -354,7 +353,7 @@ pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
     let rows = db
         .query_all(Statement::from_string(
             DatabaseBackend::Postgres,
-            DEPENDENCY_FAILED_RECONCILE_SQL.to_string(),
+            dependency_failed_reconcile_sql(),
         ))
         .await?;
 
@@ -367,19 +366,23 @@ pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
 /// [`cascade_dependency_failed`] terminal-failed set (it excludes `Aborted=5`,
 /// which is retried, not permanent). The failed roots are excluded from the UPDATE
 /// by the `status IN (0, 1, 8)` predicate, so the sweep is idempotent.
-const DEPENDENCY_FAILED_RECONCILE_SQL: &str = r#"
-    WITH RECURSIVE dependents AS (
-        SELECT derivation FROM derivation_build WHERE status IN (4, 6, 9)
-        UNION
-        SELECT dd.derivation FROM derivation_dependency dd
-        JOIN dependents dt ON dd.dependency = dt.derivation
-    )
+fn dependency_failed_reconcile_sql() -> String {
+    let cte = dependency_closure_cte(
+        "dependents",
+        "SELECT derivation FROM derivation_build WHERE status IN (4, 6, 9)",
+        ClosureDirection::Dependents,
+    );
+    format!(
+        r#"
+    {cte}
     UPDATE derivation_build AS db
     SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
     WHERE db.status IN (0, 1, 8)
       AND db.derivation IN (SELECT derivation FROM dependents)
     RETURNING db.derivation
-"#;
+    "#
+    )
+}
 
 /// Promote every `Created` anchor whose dependency anchors are all terminal-
 /// success (`Completed`/`Substituted`) to `Queued`. Run once an evaluation's
@@ -442,16 +445,13 @@ pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
 ) -> Result<u64, DbErr> {
+    let cte = eval_closure_cte();
     let affected = db
         .execute(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"
-            WITH RECURSIVE closure AS (
-                SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1
-                UNION
-                SELECT e.dependency FROM derivation_dependency e
-                JOIN closure c ON c.derivation = e.derivation
-            )
+            format!(
+                r#"
+            {cte}
             UPDATE derivation_build db
             SET edges_complete = true
             WHERE db.edges_complete = false
@@ -462,7 +462,8 @@ pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
                 OR EXISTS (SELECT 1 FROM build_job bj
                            WHERE bj.derivation = db.derivation AND bj.evaluation = $1)
               )
-            "#,
+            "#
+            ),
             [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
         ))
         .await?
@@ -517,22 +518,20 @@ pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
 ) -> Result<u64, DbErr> {
+    let cte = eval_closure_cte();
     let affected = db
         .execute(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"
-            WITH RECURSIVE closure AS (
-                SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1
-                UNION
-                SELECT e.dependency FROM derivation_dependency e
-                JOIN closure c ON c.derivation = e.derivation
-            )
+            format!(
+                r#"
+            {cte}
             UPDATE derivation_build db
             SET status = 0, attempt = 0, closure_complete = false,
                 updated_at = (now() AT TIME ZONE 'UTC')
             WHERE db.derivation IN (SELECT derivation FROM closure)
               AND db.status IN (4, 5, 6, 9)
-            "#,
+            "#
+            ),
             [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
         ))
         .await?
@@ -556,16 +555,13 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
 ) -> Result<u64, DbErr> {
+    let cte = eval_closure_cte();
     let affected = db
         .execute(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"
-            WITH RECURSIVE closure AS (
-                SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1
-                UNION
-                SELECT e.dependency FROM derivation_dependency e
-                JOIN closure c ON c.derivation = e.derivation
-            )
+            format!(
+                r#"
+            {cte}
             UPDATE derivation_build db
             SET status = CASE WHEN db.status IN (3, 7) THEN db.status ELSE 3 END,
                 closure_complete = true,
@@ -578,7 +574,8 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
                 SELECT 1 FROM derivation_output o
                 LEFT JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
                 WHERE o.derivation = db.derivation AND cp.hash IS NULL)
-            "#,
+            "#
+            ),
             [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
         ))
         .await?
@@ -600,7 +597,7 @@ mod tests {
     /// terminal-success anchors, so pin the SQL shape (no live DB in unit tests).
     #[test]
     fn dependency_failed_reconcile_sql_mirrors_the_cascade() {
-        let sql = DEPENDENCY_FAILED_RECONCILE_SQL
+        let sql = dependency_failed_reconcile_sql()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -617,7 +614,7 @@ mod tests {
             "must only touch non-terminal anchors (never terminal-success): {sql}"
         );
         assert!(
-            sql.contains("JOIN dependents dt ON dd.dependency = dt.derivation"),
+            sql.contains("JOIN dependents c ON e.dependency = c.derivation"),
             "must walk dependents upward via the dependency edge: {sql}"
         );
         assert!(
