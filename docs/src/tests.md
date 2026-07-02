@@ -5560,3 +5560,48 @@ test-on-borrows via `Child::try_wait`, skipping dead workers and spawning fresh.
 
 - `worker_pool::pool::tests::acquire_skips_dead_idle_worker` - a killed idle
   worker pushed ahead of a live one is skipped; `acquire` returns the live pid.
+
+## Eval-worker consolidation: rkyv IPC, streamed resolve, module split (#481)
+
+The eval subsystem's four-concern `worker_pool/pool.rs` was split into
+`transport.rs` (subprocess handle + wire + typed requests), `pool.rs`
+(checkout/return lifecycle), `memory.rs` (budget math + free-RAM reaper) and
+`resolver.rs` (pooled fan-out); the dead recycle-by-count machinery
+(`recycle_after`/`evaluations_served`) was deleted. The subprocess IPC moved
+from line-delimited JSON to `u32` LE length-prefixed rkyv frames
+(`gradient-eval/src/ipc.rs`) with a one-byte version handshake, and `Resolve`
+now streams one `ResolveItem` frame per attr plus a terminal `ResolveEnd`
+(reimplements the PR #465 idea), so a subprocess crash keeps the streamed
+prefix and retries exactly the in-flight attr instead of bisecting. The
+`walk`/`plan_one` twins in `wildcard_walk.rs` collapsed into one
+visitor-parameterized `traverse`, making split-then-union structural. The
+subprocess reuses one walker (locked flake + open eval cache) across
+consecutive same-repo requests. A hidden `--eval-driver` JSONL harness drives
+the real transport for the VM test.
+
+- `gradient-eval` `ipc::tests` - `requests_roundtrip_through_rkyv` /
+  `responses_roundtrip_through_rkyv` (every variant), frame codec
+  (`frames_roundtrip_and_eof_between_frames_is_clean`,
+  `truncated_frame_is_an_error_not_eof`, `oversized_length_prefix_is_rejected`)
+  and `decode_survives_misaligned_input` (the AlignedVec realign rule).
+- `worker_pool::resolver::tests` - the crash policy over the streamed protocol:
+  `crash_salvages_streamed_prefix_and_isolates_suspect` (exactly 3 worker calls
+  for one crasher among four attrs: no bisection rework),
+  `crash_after_last_item_keeps_all_results`,
+  `streamed_attr_mismatch_is_a_protocol_error`, plus the retained
+  `no_crash_resolves_all_in_one_call` / `two_crashers_isolate_independently` /
+  `transient_crash_succeeds_on_retry`; and
+  `pooled_fan_out_drains_all_items_and_propagates_errors` for the shared
+  fan-out primitive.
+- `worker_pool::pool::tests` - `disposition_covers_all_states` (the one-shot
+  Drop decision), with the existing lifecycle tests
+  (`acquire_skips_dead_idle_worker`, shutdown drain/idempotence) carried over;
+  `worker_pool::memory::tests` keeps `budgeted_pool_size_caps_by_memory` and
+  `memory_guard_bytes_configured_and_adaptive` in their new home.
+- `wildcard_walk::tests` - all discovery/planning semantics tests pass
+  unchanged against the unified traversal; the split-equivalence helper stays
+  as one behavioural guard instead of policing two hand-synced twins.
+- `nix/tests/gradient/eval` (VM) - drives list/resolve/fingerprint through
+  `--eval-driver`, covering spawn, handshake, framing and the streamed resolve
+  on both sides of the wire, and asserts the eval-cache lands under the
+  configured `GRADIENT_EVAL_CACHE_DIR`.

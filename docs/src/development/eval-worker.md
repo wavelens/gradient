@@ -2,6 +2,12 @@
 
 Gradient evaluates flakes with a pool of `--eval-worker` subprocesses that drive the embedded Nix C API. A single evaluation is split into one shard per system and fanned across the pool, with the pool sized to fit the host's memory. Results are written to a persistent, fleet-shared eval-cache, so a repeat evaluation of the same locked flake is mostly cache hits.
 
+## Subprocess IPC
+
+Parent and subprocess speak rkyv over the subprocess's stdin/stdout: each message is a `u32` little-endian length prefix plus an rkyv payload (`gradient-eval/src/ipc.rs`), mirroring the main `/proto` protocol's serialization conventions. The subprocess announces a one-byte IPC version before its first frame so a binary swapped mid-run fails the handshake instead of producing undecodable frames. `Resolve` is streamed: the subprocess emits one `ResolveItem` frame per attribute the moment it resolves, terminated by `ResolveEnd` with the batch's warnings and stats delta. Every other request is strictly one request, one response. A subprocess keeps one walker (locked flake + open eval cache) warm across consecutive requests for the same repository, so a Plan/List/Resolve sequence pays the flake lock and cache open once.
+
+The parent side lives in `gradient-worker/src/worker_pool/`, split along its seams: `transport.rs` (subprocess handle + frame wire + typed requests), `pool.rs` (checkout/return lifecycle with test-on-borrow), `memory.rs` (pool-size budget, free-RAM guard, reaper), and `resolver.rs` (the pooled fan-out and crash isolation). The hidden `--eval-driver <file>` flag runs JSONL requests through the real transport against a real subprocess and prints JSON responses; the NixOS VM test uses it to exercise both sides of the binary wire from Python.
+
 ## Compared to nix-eval-jobs
 
 | Dimension | Gradient | nix-eval-jobs |
@@ -12,8 +18,8 @@ Gradient evaluates flakes with a pool of `--eval-worker` subprocesses that drive
 | Concurrent shared cache | Concurrent shards write one eval-cache without deadlock (WAL-append commits plus a single end-of-eval checkpoint) | Not applicable, as there is no shared cache |
 | Memory safety | Automatic pool sizing so `pool_size * maxEvalRss` stays within a host-RAM share; a many-system flake completes even on a small host (degrading to one shard) and never OOMs | Manual `--workers` and `--max-memory-size` |
 | Pipeline integration | Native: discovery feeds DB rows and build dispatch starts mid-eval (incremental flush); the closure walk prunes server-known derivations and marks cache-status substitution | Emits a JSON job stream that the consumer (Hydra and similar) integrates |
-| Per-attribute failure isolation | A bad attribute becomes a per-attribute error and the eval continues; a crash triggers chunk bisection that isolates the crasher | Per-job error reporting via the fork boundary |
-| Crash isolation | Subprocess boundary with retry and bisection | Fork boundary with re-fork |
+| Per-attribute failure isolation | A bad attribute becomes a per-attribute error and the eval continues; resolve results stream per attribute, so a crash keeps everything already streamed and retries exactly the in-flight attribute | Per-job error reporting via the fork boundary |
+| Crash isolation | Subprocess boundary; the streamed protocol pinpoints the crashing attribute in one step (no bisection rework) | Fork boundary with re-fork |
 | Cross-machine eval compute | Roadmap; today it is a single-host pool | Single-host |
 
 Gradient's main advantage is treating the eval-cache as a first-class, persistent, fleet-shared artifact, so repeat and CI evaluations of the same locked flake are near-instant across the whole worker fleet, together with automatic memory-budgeted sizing that guarantees an evaluation completes instead of relying on manual worker and memory tuning.
