@@ -26,8 +26,10 @@ use gradient_proto::messages::ClientMessage;
 use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
+use gradient_exec::path_utils::{nix_store_path, strip_store_prefix};
+
 use crate::connection::ProtoWriter;
-use crate::nix::store::{LocalNixStore, strip_store_prefix};
+use crate::nix::store::LocalNixStore;
 use crate::proto::nar_recv::NarReceiver;
 
 /// Chunk size for direct NAR streaming (4 MiB). Sized to amortise per-message
@@ -59,20 +61,6 @@ fn trim_for_resume(
     } else {
         let skip = (resume_from - produced) as usize;
         Some((resume_from, skip..part_len))
-    }
-}
-
-/// Normalise a store path so it always carries the `/nix/store/` prefix.
-///
-/// Some upstream sources (e.g. eval-worker `FlakeWalker::resolve`) return drv
-/// paths as bare hash-name strings. NarByteStream needs the absolute filesystem
-/// path, and the server stores `cached_path.store_path` verbatim - both must
-/// see the canonical `/nix/store/<hash>-<name>` form.
-fn ensure_full_store_path(path: &str) -> String {
-    if path.starts_with('/') {
-        path.to_owned()
-    } else {
-        format!("/nix/store/{}", path)
     }
 }
 
@@ -189,7 +177,7 @@ pub async fn push_direct(
     nar_recv: &NarReceiver,
     store: Option<&LocalNixStore>,
 ) -> Result<()> {
-    let store_path = ensure_full_store_path(store_path);
+    let store_path = nix_store_path(store_path);
     let store_path = store_path.as_str();
     debug!(store_path, "NAR direct push");
 
@@ -354,7 +342,7 @@ pub async fn upload_presigned_compressed(
     headers: &[(String, String)],
     writer: &ProtoWriter,
 ) -> Result<()> {
-    let store_path = ensure_full_store_path(store_path);
+    let store_path = nix_store_path(store_path);
     let store_path = store_path.as_str();
 
     let client = crate::http::client();
@@ -415,7 +403,7 @@ pub async fn push_compressed_direct(
     writer: &ProtoWriter,
     nar_recv: &NarReceiver,
 ) -> Result<()> {
-    let store_path = ensure_full_store_path(store_path);
+    let store_path = nix_store_path(store_path);
     let store_path = store_path.as_str();
     debug!(store_path, bytes = compressed.len(), "compressed NAR direct push");
 
@@ -488,7 +476,7 @@ pub async fn upload_presigned(
     writer: &ProtoWriter,
     store: Option<&LocalNixStore>,
 ) -> Result<()> {
-    let store_path = ensure_full_store_path(store_path);
+    let store_path = nix_store_path(store_path);
     let store_path = store_path.as_str();
     debug!(store_path, method, "presigned NAR upload");
 
@@ -570,26 +558,6 @@ pub async fn upload_presigned(
 mod tests {
     use super::*;
     use gradient_test_support::prelude::MockProtoServer;
-
-    #[test]
-    fn ensure_full_store_path_prefixes_bare_hash_name() {
-        assert_eq!(
-            ensure_full_store_path("25sx4kmwawf8kixj5a6mvpbjwyh8hm7m-gradient-1.1.1.drv"),
-            "/nix/store/25sx4kmwawf8kixj5a6mvpbjwyh8hm7m-gradient-1.1.1.drv",
-        );
-    }
-
-    #[test]
-    fn ensure_full_store_path_preserves_absolute() {
-        let p = "/nix/store/aaaa-foo";
-        assert_eq!(ensure_full_store_path(p), p);
-    }
-
-    #[test]
-    fn ensure_full_store_path_preserves_other_absolute_paths() {
-        let p = "/tmp/some/test/dir";
-        assert_eq!(ensure_full_store_path(p), p);
-    }
 
     /// Create a temporary directory with a single file and return its path.
     ///
