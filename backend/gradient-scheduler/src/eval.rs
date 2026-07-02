@@ -908,63 +908,15 @@ pub async fn handle_eval_job_completed(
         error!(error = %e, %evaluation_id, "seed_entry_point_dep_counts failed (non-fatal)");
     }
 
-    // The dependency graph is now complete (edges flushed). Mark this eval's
-    // anchors edges_complete so promotion and dispatch may consider them: an
-    // anchor stays gated until the eval that owns it flushes a full edge set, so
-    // a still-running, failed, or interrupted eval can never get its 0-edge
-    // anchors promoted as if they were dependency-free.
-    if let Err(e) = gradient_db::mark_edges_complete_for_eval(&state.worker_db, evaluation_id).await
-    {
-        error!(error = %e, %evaluation_id, "mark_edges_complete_for_eval failed");
-    }
-
-    // Heal the cache-trust invariant before promoting: a producer the gate trusts
-    // (Completed/Substituted + closure_complete) whose output the cache GC purged
-    // (cached_path row gone, NAR missing) is unfetchable - dependents dispatched
-    // against it fail InputsUnavailable permanently and, being Completed, never
-    // rebuild. Reset such producers to Created so this eval reschedules them.
-    match gradient_db::demote_unbacked_trusted_outputs(&state.worker_db, &state.nar_storage).await {
-        Ok(n) if n > 0 => {
-            info!(%evaluation_id, reset = n, "demoted trusted producers with unfetchable outputs")
-        }
-        Ok(_) => {}
-        Err(e) => error!(error = %e, %evaluation_id, "demote_unbacked_trusted_outputs failed"),
-    }
-
-    // Reconcile anchor state from cache state: a dep whose outputs are all cached
-    // but whose anchor was reset by a prior requeue/cascade/demote sits Created and
-    // blocks its dependents though its artifacts exist. Cache presence is the
-    // ground truth for "is this built", so mark such anchors Completed +
-    // closure_complete before promoting.
-    match gradient_db::reconcile_cached_anchors_for_eval(&state.worker_db, evaluation_id).await {
-        Ok(changes) => gradient_db::emit_transition_effects(&state.db(), &changes).await,
-        Err(e) => error!(error = %e, %evaluation_id, "reconcile_cached_anchors_for_eval failed"),
-    }
-
-    // Self-heal stale `closure_complete` before promoting: anchors that
-    // completed under older code (pre output-only substitution) never got the
-    // build-edge flag set, so without this their dependents would sit in
-    // `Created` forever - no completion event ever re-runs `propagate` for an
-    // already-finished anchor. Idempotent and cheap once converged.
-    if let Err(e) = gradient_db::reconcile_closure_complete(&state.worker_db).await {
-        error!(error = %e, %evaluation_id, "reconcile_closure_complete failed");
-    }
-
-    // Same self-heal for the input-`.drv` closure: mark anchors whose `.drv`s
-    // this eval just finished pushing so dispatch can release them.
-    if let Err(e) = gradient_db::reconcile_drv_closure_cached(&state.worker_db).await {
-        error!(error = %e, %evaluation_id, "reconcile_drv_closure_cached failed");
-    }
-
-    // Seed the graph-driven promotion from its ready frontier: leaves and
-    // anchors whose deps were already cached/substituted. Each subsequent
-    // completion cascades upward.
-    match gradient_db::promote_ready(&state.worker_db).await {
-        Ok(queued) => {
-            gradient_db::emit_transition_effects(&state.db(), &queued).await
-        }
-        Err(e) => error!(error = %e, %evaluation_id, "promote_ready failed"),
-    }
+    // The dependency graph is now complete (edges flushed): run the canonical
+    // healing pipeline scoped to this eval - mark its anchors edges_complete,
+    // heal cache trust across its closure, reconcile the gate flags, and
+    // promote the ready frontier (see `gradient_db::reconcile`).
+    gradient_db::reconcile_build_graph(
+        &state.db(),
+        gradient_db::ReconcileScope::Eval(evaluation_id),
+    )
+    .await;
 
     // Promotion is graph-driven (gradient_db::promotion), independent of eval
     // completion, so finishing the stream just advances the eval to Building.

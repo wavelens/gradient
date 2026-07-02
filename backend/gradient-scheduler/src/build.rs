@@ -913,55 +913,16 @@ impl<'a> BuildStateHandler<'a> {
         evaluation_id: EvaluationId,
         worker_caps: &[(Vec<String>, Vec<String>)],
     ) -> Result<(EvaluationStatus, Option<WaitingReason>)> {
-        let db = &self.state.worker_db;
-        info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing closure_complete");
+        info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing");
 
-        // Restore edges_complete across the eval's closure: a transitive dep whose
-        // owning eval never finished its edge flush sits unpromotable behind the
-        // gate even with a complete, satisfied edge set (observed: tzdata-2026b,
-        // edges_complete=f, 0 unmet deps, blocking the etc chain). This eval has
-        // completed walking, so its closure edges are flushed and this is safe.
-        if let Err(e) = gradient_db::mark_edges_complete_for_eval(db, evaluation_id).await {
-            error!(error = %e, %evaluation_id, "mark_edges_complete_for_eval during graph-unstick failed");
-        }
-
-        // Thaw terminal-failed anchors anywhere in this eval's dependency closure -
-        // a transitive dep a prior eval left failed (and this eval pruned, so it has
-        // no build_job here) blocks its dependents with no dispatch to fail and
-        // trigger a reactive heal. Reset to Created so promotion can rebuild it.
-        match gradient_db::requeue_failed_closure_for_eval(db, evaluation_id).await {
-            Ok(n) if n > 0 => info!(%evaluation_id, requeued = n, "graph-unstick: re-queued terminal-failed closure anchors"),
-            Ok(_) => {}
-            Err(e) => error!(error = %e, %evaluation_id, "requeue_failed_closure_for_eval during graph-unstick failed"),
-        }
-
-        // Reconcile anchor state from cache state: an anchor whose outputs are all
-        // cached but whose build-graph state was reset (requeue/cascade/demote)
-        // sits Created and blocks its dependents though its artifacts exist. Mark
-        // it Completed + closure_complete so the gate sees the cached truth.
-        match gradient_db::reconcile_cached_anchors_for_eval(db, evaluation_id).await {
-            Ok(changes) if !changes.is_empty() => {
-                info!(%evaluation_id, reconciled = changes.len(), "graph-unstick: reconciled fully-cached anchors to Completed");
-                gradient_db::emit_transition_effects(&self.state.db(), &changes).await;
-            }
-            Ok(_) => {}
-            Err(e) => error!(error = %e, %evaluation_id, "reconcile_cached_anchors_for_eval during graph-unstick failed"),
-        }
-
-        if let Err(e) = gradient_db::reconcile_closure_complete(db).await {
-            error!(error = %e, %evaluation_id, "reconcile_closure_complete during graph-unstick failed");
-        }
-
-        if let Err(e) = gradient_db::reconcile_drv_closure_cached(db).await {
-            error!(error = %e, %evaluation_id, "reconcile_drv_closure_cached during graph-unstick failed");
-        }
-
-        match gradient_db::promote_ready(db).await {
-            Ok(queued) => {
-                gradient_db::emit_transition_effects(&self.state.db(), &queued).await
-            }
-            Err(e) => error!(error = %e, %evaluation_id, "promote_ready during graph-unstick failed"),
-        }
+        // The canonical healing pipeline in Unstick scope: edges_complete
+        // restore, terminal-failed thaw, cache-trust reconcile, flag fixpoints,
+        // promotion (see `gradient_db::reconcile`).
+        gradient_db::reconcile_build_graph(
+            &self.state.db(),
+            gradient_db::ReconcileScope::Unstick(evaluation_id),
+        )
+        .await;
 
         if let Some((EvaluationStatus::Building, reason)) =
             self.assess_buildability(evaluation_id, worker_caps).await?
@@ -1192,14 +1153,6 @@ pub async fn handle_build_job_failed(
     BuildStateHandler::new(state)
         .handle_build_job_failed(derivation_build, error, kind, missing_paths)
         .await
-}
-
-pub(crate) async fn finalize_evals_for_derivations(
-    state: &Arc<ServerState>,
-    derivations: &[DerivationId],
-) -> Result<()> {
-    gradient_db::finalize_evals_for_derivations(&state.db(), derivations).await?;
-    Ok(())
 }
 
 pub async fn reconcile_waiting_state(

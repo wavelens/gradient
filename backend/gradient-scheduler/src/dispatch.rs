@@ -370,88 +370,14 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
         if timer_tick {
             scheduler.job_tracker.write().await.bump_rescore_counts();
 
-            // The eval pushes `.drv`s progressively, so mark anchors whose full
-            // input-`.drv` closure has now landed before the promote/dispatch
-            // sweep gates on it. Bounded to the 5s timer (not reactive kicks).
-            if let Err(e) =
-                gradient_db::reconcile_drv_closure_cached(&scheduler.state.worker_db).await
-            {
-                error!(error = %e, "periodic reconcile_drv_closure_cached failed");
-            }
-
-            // `closure_complete` is monotonic per completion event, so a flag set
-            // before a transitive output landed (or kept after one was evicted)
-            // goes stale-true and the gate below dispatches a build whose closure
-            // is not really cached. Reconcile bidirectionally so the gate reads a
-            // sound flag this pass.
-            if let Err(e) =
-                gradient_db::reconcile_closure_complete(&scheduler.state.worker_db).await
-            {
-                error!(error = %e, "periodic reconcile_closure_complete failed");
-            }
-
-            // Rescue the Completed-but-unbacked dead zone: a terminal-success
-            // anchor with an output that has no backing NAR (GC'd, or marked done
-            // by a partial cache-hit that never cached every output) can never
-            // satisfy closure_complete, so its dependents never dispatch and no
-            // worker ever reports the path missing - the reactive heal never fires.
-            // Demote each such producer to Created so it rebuilds. Self-bounding: a
-            // demoted anchor is no longer status 3/7, so it is not re-selected.
-            match gradient_db::demote_unbacked_trusted_outputs(
-                &scheduler.state.worker_db,
-                &scheduler.state.nar_storage,
+            // The periodic self-heal backstop: flag fixpoints, unbacked-output
+            // demote, failure sweep, promotion - one canonical pipeline (see
+            // `gradient_db::reconcile`), bounded to the 5s timer (not kicks).
+            gradient_db::reconcile_build_graph(
+                &scheduler.state.db(),
+                gradient_db::ReconcileScope::Global,
             )
-            .await
-            {
-                Ok(n) if n > 0 => {
-                    info!(reset = n, "demote_unbacked_trusted_outputs swept dead-zone producers")
-                }
-                Ok(_) => {}
-                Err(e) => error!(error = %e, "periodic demote_unbacked_trusted_outputs failed"),
-            }
-
-            // Failure-side counterpart of the promote_ready backstop. The reactive
-            // dependency-failed cascade fires only on a fresh failure transition,
-            // so an anchor thawed back to Created/Queued (requeue_failed_*) while a
-            // dependency is already terminal-failed is never re-cascaded: it blocks
-            // the dispatch gate and keeps its eval Building forever. Sweep it
-            // proactively, fan the CI status out, then finalize the evals it
-            // settled (the bulk UPDATE bypasses the reactive finalize hook).
-            match gradient_db::reconcile_dependency_failed(&scheduler.state.worker_db).await {
-                Ok(failed) if !failed.is_empty() => {
-                    info!(failed = failed.len(), "reconcile_dependency_failed swept dead-zone anchors");
-                    gradient_db::emit_transition_effects(&scheduler.state.db(), &failed).await;
-
-                    let derivations: Vec<_> = failed.iter().map(|c| c.derivation).collect();
-                    if let Err(e) =
-                        crate::build::finalize_evals_for_derivations(&scheduler.state, &derivations)
-                            .await
-                    {
-                        error!(error = %e, "finalize after reconcile_dependency_failed failed");
-                    }
-                }
-                Ok(_) => {}
-                Err(e) => error!(error = %e, "periodic reconcile_dependency_failed failed"),
-            }
-
-            // Promotion is otherwise event-driven (promote_ready at eval
-            // completion, promote_dependents at build completion), so a ready
-            // anchor whose triggering event never fired - failed eval after its
-            // edges were flushed, a dep that completed in a missed window, a
-            // restart - sits in Created forever. This periodic sweep is the
-            // backstop. It is safe because promote_ready now gates on
-            // edges_complete: only fully-flushed anchors are promotable, so the
-            // sweep can never dispatch a 0-edge anchor without its inputs.
-            match gradient_db::promote_ready(&scheduler.state.worker_db).await {
-                Ok(queued) => {
-                    if !queued.is_empty() {
-                        info!(promoted = queued.len(), "promote_ready swept ready anchors");
-                    }
-
-                    gradient_db::emit_transition_effects(&scheduler.state.db(), &queued).await;
-                }
-                Err(e) => error!(error = %e, "periodic promote_ready failed"),
-            }
+            .await;
         }
 
         if let Err(e) = requeue_transient_failures(&scheduler).await {
