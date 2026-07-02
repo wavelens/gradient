@@ -452,14 +452,11 @@ async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_db::{WebDb, WorkerDb};
-    use gradient_storage::{EmailSender, NarStore};
+    use crate::cacher::test_support::test_server_state;
+    use gradient_storage::NarStore;
     use sea_orm::{MockDatabase, Value};
     use std::collections::BTreeMap;
     use std::path::Path;
-    use gradient_test_support::fakes::email::InMemoryEmailSender;
-    use gradient_test_support::log_storage::NoopLogStorage;
-    use gradient_test_support::prelude::test_cli;
 
     fn write_nar_file(base: &Path, hash: &str) {
         let dir = base.join("nars").join(&hash[..2]);
@@ -489,33 +486,10 @@ mod tests {
             // so feed it an empty result set.
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .into_connection();
-        Arc::new(ServerState {
-            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
-            worker_db: WorkerDb::new(db),
-            config: {
-                // Disable the orphan-file grace window so these tests' freshly
-                // written NARs are eligible for reclamation immediately.
-                let mut config = RuntimeConfig::from_cli(&test_cli()).expect("valid test config");
-                config.storage.nar_upload_grace_hours = 0;
-                Arc::new(config)
-            },
-            log_storage: Arc::new(NoopLogStorage),
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-            nar_storage,
-            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            http: gradient_util::http::build_client().expect("http client"),
-            shutdown: gradient_util::shutdown::Shutdown::new(),
-            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-            started_at: chrono::Utc::now(),
-            pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
-            scim_group_roles: std::sync::Arc::new(Default::default()),
-            board_events: tokio::sync::broadcast::channel(256).0,
-            forge: gradient_forge::ForgeRegistry::with_builtin(),
-            upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-            reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        test_server_state(nar_storage, db, |config| {
+            // Disable the orphan-file grace window so these tests' freshly
+            // written NARs are eligible for reclamation immediately.
+            config.storage.nar_upload_grace_hours = 0;
         })
     }
 
@@ -613,30 +587,8 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results::<BTreeMap<String, Value>, _, _>([vec![]])
             .into_connection();
-        let mut cli = test_cli();
-        cli.storage.nar_ttl_hours = 24;
-        let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config"));
-        let state = Arc::new(ServerState {
-            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
-            worker_db: WorkerDb::new(db),
-            config,
-            log_storage: Arc::new(NoopLogStorage),
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-            nar_storage,
-            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            http: gradient_util::http::build_client().expect("http client"),
-            shutdown: gradient_util::shutdown::Shutdown::new(),
-            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-            started_at: chrono::Utc::now(),
-            pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
-            scim_group_roles: std::sync::Arc::new(Default::default()),
-            board_events: tokio::sync::broadcast::channel(256).0,
-            forge: gradient_forge::ForgeRegistry::with_builtin(),
-            upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-            reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        let state = test_server_state(nar_storage, db, |config| {
+            config.storage.nar_ttl_hours = 24;
         });
 
         cleanup_stale_cached_nars(state).await.unwrap();
@@ -733,28 +685,7 @@ mod tests {
             }])
             .into_connection();
 
-        let state = Arc::new(ServerState {
-            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
-            worker_db: WorkerDb::new(db),
-            config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
-            log_storage: Arc::new(NoopLogStorage),
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-            nar_storage,
-            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            http: gradient_util::http::build_client().expect("http client"),
-            shutdown: gradient_util::shutdown::Shutdown::new(),
-            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-            started_at: chrono::Utc::now(),
-            pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
-            scim_group_roles: std::sync::Arc::new(Default::default()),
-            board_events: tokio::sync::broadcast::channel(256).0,
-            forge: gradient_forge::ForgeRegistry::with_builtin(),
-            upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-            reactor: std::sync::Arc::new(gradient_db::NoReactor),
-        });
+        let state = test_server_state(nar_storage, db, |_| {});
 
         cleanup_orphaned_cache_files(Arc::clone(&state))
             .await
@@ -769,29 +700,8 @@ mod tests {
 
     fn state_with_worker_db(base: &Path, db: sea_orm::DatabaseConnection) -> Arc<ServerState> {
         let nar_storage = NarStore::local(base.to_str().unwrap()).unwrap();
-        let mut cli = test_cli();
-        cli.storage.nar_ttl_hours = 24;
-        Arc::new(ServerState {
-            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
-            worker_db: WorkerDb::new(db),
-            config: Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config")),
-            log_storage: Arc::new(NoopLogStorage),
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-            nar_storage,
-            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            http: gradient_util::http::build_client().expect("http client"),
-            shutdown: gradient_util::shutdown::Shutdown::new(),
-            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-            started_at: chrono::Utc::now(),
-            pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
-            scim_group_roles: std::sync::Arc::new(Default::default()),
-            board_events: tokio::sync::broadcast::channel(256).0,
-            forge: gradient_forge::ForgeRegistry::with_builtin(),
-            upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-            reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        test_server_state(nar_storage, db, |config| {
+            config.storage.nar_ttl_hours = 24;
         })
     }
 
@@ -849,31 +759,9 @@ mod tests {
     async fn build_request_blob_sweep_disabled_when_ttl_zero() {
         let tmp = tempfile::tempdir().unwrap();
         let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
-        let mut cli = test_cli();
-        cli.storage.nar_ttl_hours = 0;
-        let state = Arc::new(ServerState {
-            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
-            worker_db: WorkerDb::new(
-                MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
-            ),
-            config: Arc::new(RuntimeConfig::from_cli(&cli).expect("valid test config")),
-            log_storage: Arc::new(NoopLogStorage),
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-            nar_storage,
-            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            http: gradient_util::http::build_client().expect("http client"),
-            shutdown: gradient_util::shutdown::Shutdown::new(),
-            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-            started_at: chrono::Utc::now(),
-            pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
-            scim_group_roles: std::sync::Arc::new(Default::default()),
-            board_events: tokio::sync::broadcast::channel(256).0,
-            forge: gradient_forge::ForgeRegistry::with_builtin(),
-            upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-            reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let state = test_server_state(nar_storage, db, |config| {
+            config.storage.nar_ttl_hours = 0;
         });
 
         cleanup_stale_build_request_blobs(state).await.unwrap();

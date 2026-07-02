@@ -679,6 +679,18 @@ in {
           default = 336;
         };
 
+        cacheMaintenanceIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between cache maintenance GC passes.";
+          type = lib.types.ints.positive;
+          default = 3600;
+        };
+
+        signSweepIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between NAR signature backfill sweeps.";
+          type = lib.types.ints.positive;
+          default = 60;
+        };
+
         narUploadGraceHours = lib.mkOption {
           description = "Grace period in hours before the orphan-files GC reclaims a NAR object no database row references (covers the upload commit window).";
           type = lib.types.ints.unsigned;
@@ -932,6 +944,8 @@ in {
         GRADIENT_FEDERATE_PROTO = lib.boolToString cfg.proto.federate;
         GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
         GRADIENT_NAR_TTL_HOURS = toString cfg.settings.cacheTtlHours;
+        GRADIENT_CACHE_MAINTENANCE_INTERVAL_SECS = toString cfg.settings.cacheMaintenanceIntervalSecs;
+        GRADIENT_SIGN_SWEEP_INTERVAL_SECS = toString cfg.settings.signSweepIntervalSecs;
         GRADIENT_NAR_UPLOAD_GRACE_HOURS = toString cfg.settings.narUploadGraceHours;
         GRADIENT_GC_WEDGED_EVAL_HOURS = toString cfg.settings.gcWedgedEvalHours;
         GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS = toString cfg.settings.narStorageOpenTimeoutSecs;

@@ -82,6 +82,16 @@ pub struct StorageArgs {
         default_value_t = 3600
     )]
     pub eval_cache_sweep_interval_secs: u64,
+    /// Interval in seconds between cache maintenance GC passes. Defaults to 3600.
+    #[arg(
+        long,
+        env = "GRADIENT_CACHE_MAINTENANCE_INTERVAL_SECS",
+        default_value_t = 3600
+    )]
+    pub cache_maintenance_interval_secs: u64,
+    /// Interval in seconds between NAR signature backfill sweeps. Defaults to 60.
+    #[arg(long, env = "GRADIENT_SIGN_SWEEP_INTERVAL_SECS", default_value_t = 60)]
+    pub sign_sweep_interval_secs: u64,
 }
 
 impl Default for StorageArgs {
@@ -102,6 +112,8 @@ impl Default for StorageArgs {
             eval_cache_max_total_bytes: 10 * 1024 * 1024 * 1024,
             eval_cache_max_age_days: 30,
             eval_cache_sweep_interval_secs: 3600,
+            cache_maintenance_interval_secs: 3600,
+            sign_sweep_interval_secs: 60,
         }
     }
 }
