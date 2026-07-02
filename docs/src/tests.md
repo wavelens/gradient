@@ -2,6 +2,76 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## One graph walk, one readiness predicate (#476)
+
+`backend/gradient-db/src/graph_sql.rs`:
+- `dependents_walk_upward` / `dependencies_walk_downward` - the single
+  recursive-CTE builder generates the correct traversal direction for failure
+  cascades (dependents) and keep-sets/per-eval sweeps (dependencies).
+- `readiness_predicate_gates_deps_and_input_sources` - the shared readiness
+  predicate requires terminal-success + `closure_complete` (or substitutable)
+  deps AND every input source cached.
+- `reachable_cte_closes_over_roots_and_dependency_edges` - the GC keep-set is
+  the closure of `entry_point` and `build_job` roots, not just the roots.
+
+`backend/gradient-db/src/promotion.rs`:
+- `promotion_and_dispatch_share_the_readiness_predicate` - `promote_ready` and
+  the dispatch gate `find_ready_anchors` embed the identical predicate text;
+  only the dispatch gate adds the `drv_closure_cached` arm. A drift between
+  the two is a latent dead zone.
+- `dependency_failed_reconcile_sql_mirrors_the_cascade` now also pins the
+  `FROM derivation_build old` self-join that captures the pre-update status
+  for the effects emitter.
+
+## Transition effects fan out from one emitter (#476)
+
+`backend/gradient-db/src/status/effects.rs`:
+- `ci_reports_matches_the_forge_check_lifecycle` - CI checks fire for Queued,
+  Building, and terminals; internal states (Created, FailedTransient) never
+  post to forges.
+- `unchanged_marks_from_equal_to` - the re-announce constructor used by
+  `notify_build_status_for_derivations` reports `from == to`, so dep-count
+  deltas are not double-applied.
+
+## Graph-consistency assertion sweep (#476)
+
+`backend/gradient-db/src/consistency.rs`: `total_sums_every_dimension` - the
+report totals every violation class (stale gate flags, unpromoted-ready,
+unbacked trusted outputs, wedged Building evals) so the sweep's warn gate
+cannot silently ignore a dimension.
+
+## Wedged evaluations stop freezing GC (#476)
+
+`backend/gradient-db/src/gc.rs`:
+- `wedged_active_evaluation_stops_blocking_but_is_never_deleted` - an eval
+  "active" past `gc_wedged_eval_hours` no longer blocks the per-project GC,
+  is itself never deleted, and `0` restores the unconditional block.
+- The existing selection tests now run through the (status, updated_at)
+  signature with a fresh-eval default.
+
+## Scoring weight model, veto sentinel, stable names (#476)
+
+`backend/gradient-score/src/policy.rs`:
+- `rule_names_are_pinned` - every rule's `name()` is a declared constant
+  (persisted in `score_breakdown` and the rule-catalog API); renaming a rule
+  struct cannot silently change the recorded key.
+- `unmeasured_build_is_vetoed_not_penalized` - the rescore hold is an explicit
+  veto recorded in `ScoreBreakdown.vetoes`, not a -1000 penalty a large
+  unrelated bonus could out-vote.
+- `org_work_share_is_unconsumed_while_fair_share_is_disabled` - the live
+  policies do not ask the scheduler to compute the O(active builds) org share
+  while `FairShareRule` ships disabled in the declarative rule table.
+
+`backend/gradient-score/src/rules/builtin.rs`:
+- `rescore_wait_vetoes_build_until_threshold_but_never_eval` - unmeasured
+  builds are held via `veto()` until scored or `max_rounds` ticks pass; evals
+  are never held.
+
+`backend/gradient-score/src/context.rs`:
+- `windowed_or_falls_back_only_when_absent` - a window with no samples
+  (`None`) falls back to the rule constant, while a MEASURED zero is honored;
+  the old `0.0 == absent` heuristic silently swapped in the fallback.
+
 ## Per-build forge check tracks the whole lifecycle
 
 `backend/gradient-ci/src/reporting.rs`: `build_event_for_status` maps a build
