@@ -75,8 +75,8 @@ pub use self::promotion::{
     reconcile_drv_closure_cached, requeue_failed_anchors, requeue_failed_closure_for_eval,
 };
 pub use self::reachability::{
-    build_jobs_for_derivation, derivation_is_reachable, eval_anchor_statuses,
-    evals_referencing_derivation,
+    build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
+    eval_anchor_statuses, evals_referencing_derivation,
 };
 pub use self::org_workers::org_has_eval_capable_worker_registration;
 pub use self::pool::{CacheDb, WebDb, WorkerDb};

@@ -71,6 +71,26 @@ pub async fn build_jobs_for_derivation<C: ConnectionTrait>(
         .await
 }
 
+/// Bulk variant of [`build_jobs_for_derivation`]: one IN-list query for the
+/// whole batch instead of a round-trip per derivation.
+pub async fn build_jobs_for_derivations<C: ConnectionTrait>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<std::collections::HashMap<DerivationId, Vec<MBuildJob>>, DbErr> {
+    Ok(crate::fetch_in_chunks(derivations, |chunk| async move {
+        EBuildJob::find()
+            .filter(CBuildJob::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await?
+    .into_iter()
+    .fold(std::collections::HashMap::new(), |mut m, j| {
+        m.entry(j.derivation).or_default().push(j);
+        m
+    }))
+}
+
 /// Whether any surviving evaluation needs `derivation` (a `build_job` exists).
 /// The refcount source for derivation GC.
 pub async fn derivation_is_reachable<C: ConnectionTrait>(

@@ -1166,43 +1166,17 @@ impl RpcContext {
             .into_iter()
             .collect();
         let known = match self.scheduler.org_for_job(&job_id).await {
-            Some(_) => {
-                use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-
-                let candidates = EDerivation::find()
-                    .filter(CDerivation::Hash.is_in(hashes))
-                    .all(&self.state.worker_db)
-                    .await
-                    .unwrap_or_default();
-
-                if candidates.is_empty() {
+            // A degraded DB read must prune NOTHING (the worker re-walks, which
+            // is always safe), never masquerade as "no rows": an empty
+            // `edges_unresolved` set from a failed query would re-prune an
+            // anchor whose dropped edge only a re-walk can restore.
+            Some(_) => match self.load_prunable(hashes).await {
+                Ok(known) => known,
+                Err(e) => {
+                    warn!(peer_id = %self.peer_id, %job_id, error = %e, "QueryKnownDerivations degraded; pruning nothing");
                     vec![]
-                } else {
-                    let drv_ids: Vec<DerivationId> = candidates.iter().map(|d| d.id).collect();
-                    let outputs = EDerivationOutput::find()
-                        .filter(CDerivationOutput::Derivation.is_in(drv_ids.clone()))
-                        .all(&self.state.worker_db)
-                        .await
-                        .unwrap_or_default();
-
-                    // Anchors carrying a dropped dependency edge (`edges_unresolved`)
-                    // must be re-walked, not pruned, so the eval rediscovers the edge
-                    // and clears the flag - otherwise they stay stranded off promotion.
-                    let unresolved: HashSet<DerivationId> = EDerivationBuild::find()
-                        .filter(CDerivationBuild::Derivation.is_in(drv_ids))
-                        .filter(CDerivationBuild::EdgesUnresolved.eq(true))
-                        .all(&self.state.worker_db)
-                        .await
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|b| b.derivation)
-                        .collect();
-
-                    let candidates: Vec<(DerivationId, String)> =
-                        candidates.into_iter().map(|d| (d.id, d.store_path())).collect();
-                    prunable_known_derivations(candidates, &outputs, &unresolved)
                 }
-            }
+            },
             None => {
                 warn!(peer_id = %self.peer_id, %job_id, "QueryKnownDerivations: no org for job");
                 vec![]
@@ -1215,6 +1189,44 @@ impl RpcContext {
         {
             debug!(peer_id = %self.peer_id, "KnownDerivations send failed; connection closing");
         }
+    }
+
+    /// The prunable-derivations lookup, on the isolated cache-query pool so an
+    /// eval's prefetch storm cannot exhaust the scheduler pool through this
+    /// probe. Any error propagates - the caller prunes nothing.
+    async fn load_prunable(&self, hashes: Vec<String>) -> Result<Vec<String>, sea_orm::DbErr> {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+        let db = &self.state.cache_db;
+        let candidates = EDerivation::find()
+            .filter(CDerivation::Hash.is_in(hashes))
+            .all(db)
+            .await?;
+        if candidates.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let drv_ids: Vec<DerivationId> = candidates.iter().map(|d| d.id).collect();
+        let outputs = EDerivationOutput::find()
+            .filter(CDerivationOutput::Derivation.is_in(drv_ids.clone()))
+            .all(db)
+            .await?;
+
+        // Anchors carrying a dropped dependency edge (`edges_unresolved`)
+        // must be re-walked, not pruned, so the eval rediscovers the edge
+        // and clears the flag - otherwise they stay stranded off promotion.
+        let unresolved: HashSet<DerivationId> = EDerivationBuild::find()
+            .filter(CDerivationBuild::Derivation.is_in(drv_ids))
+            .filter(CDerivationBuild::EdgesUnresolved.eq(true))
+            .all(db)
+            .await?
+            .into_iter()
+            .map(|b| b.derivation)
+            .collect();
+
+        let candidates: Vec<(DerivationId, String)> =
+            candidates.into_iter().map(|d| (d.id, d.store_path())).collect();
+        Ok(prunable_known_derivations(candidates, &outputs, &unresolved))
     }
 
     async fn on_worker_metrics(
