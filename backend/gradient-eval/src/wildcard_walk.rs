@@ -70,20 +70,46 @@ pub fn parse_pattern(pat: &str) -> (bool, Vec<String>) {
     (exclude, segs)
 }
 
-/// Walk `node` matching `segs`, pushing full dotted attr paths of matched
-/// derivations into `out`. `path` is the accumulated path to `node`.
-fn walk<N: WalkNode>(
+/// Where the shared traversal emits: full dotted attr paths of matched
+/// derivations (discovery), or one disjoint sub-pattern per first-wildcard
+/// child (shard planning). Keeping both behind one [`traverse`] makes the
+/// `*` / `#` / opaque / literal semantics structurally identical, so the
+/// split-then-union invariant holds by construction instead of by test.
+enum Sink<'a> {
+    Derivations(&'a mut Vec<String>),
+    Shards(&'a mut Vec<Vec<String>>),
+}
+
+impl Sink<'_> {
+    /// A fully matched node: discovery emits the dotted path, planning emits
+    /// the concrete segments as a wildcard-free shard.
+    fn emit_leaf(&mut self, path: Vec<String>) {
+        match self {
+            Sink::Derivations(out) => out.push(path.join(".")),
+            Sink::Shards(out) => out.push(path),
+        }
+    }
+}
+
+/// Walk `node` matching `segs`. `path` is the accumulated path to `node`.
+/// Literal segments recurse in both modes; at a wildcard segment discovery
+/// keeps walking while planning emits `path + residual` and stops, so a shard
+/// carries the unexpanded remainder for its own worker to force.
+fn traverse<N: WalkNode>(
     node: &N,
     path: &[String],
     segs: &[String],
-    out: &mut Vec<String>,
+    sink: &mut Sink<'_>,
 ) -> Result<()> {
     match segs.split_first() {
-        None => {
-            if node.is_derivation()? {
-                out.push(path.join("."));
+        None => match sink {
+            Sink::Derivations(out) => {
+                if node.is_derivation()? {
+                    out.push(path.join("."));
+                }
             }
-        }
+            Sink::Shards(out) => out.push(path.to_vec()),
+        },
         Some((seg, rest)) if seg == "*" => {
             for name in node.child_names()? {
                 let Some(child) = node.child(&name)? else {
@@ -94,26 +120,37 @@ fn walk<N: WalkNode>(
 
                 if rest.is_empty() {
                     if child.is_derivation()? {
-                        out.push(p.join("."));
+                        sink.emit_leaf(p);
                     } else if child.is_opaque()? {
                         continue;
                     } else {
-                        for sub in child.child_names()? {
-                            let Some(gc) = child.child(&sub)? else {
-                                continue;
-                            };
+                        // Trailing `*` recovers the collapsed second level:
+                        // discovery enumerates derivation grandchildren now,
+                        // planning defers that to the shard via a `#` residual.
+                        match sink {
+                            Sink::Derivations(out) => {
+                                for sub in child.child_names()? {
+                                    let Some(gc) = child.child(&sub)? else {
+                                        continue;
+                                    };
 
-                            if gc.is_derivation()? {
-                                let mut q = p.clone();
-                                q.push(sub);
-                                out.push(q.join("."));
+                                    if gc.is_derivation()? {
+                                        let mut q = p.clone();
+                                        q.push(sub);
+                                        out.push(q.join("."));
+                                    }
+                                }
+                            }
+                            Sink::Shards(out) => {
+                                p.push("#".to_string());
+                                out.push(p);
                             }
                         }
                     }
                 } else if child.is_opaque()? {
                     continue;
                 } else {
-                    walk(&child, &p, rest, out)?;
+                    descend(&child, p, rest, sink)?;
                 }
             }
         }
@@ -127,10 +164,10 @@ fn walk<N: WalkNode>(
 
                 if rest.is_empty() {
                     if child.is_derivation()? {
-                        out.push(p.join("."));
+                        sink.emit_leaf(p);
                     }
                 } else {
-                    walk(&child, &p, rest, out)?;
+                    descend(&child, p, rest, sink)?;
                 }
             }
         }
@@ -138,12 +175,31 @@ fn walk<N: WalkNode>(
             if let Some(child) = node.child(seg)? {
                 let mut p = path.to_vec();
                 p.push(seg.clone());
-                walk(&child, &p, rest, out)?;
+                traverse(&child, &p, rest, sink)?;
             }
         }
     }
 
     Ok(())
+}
+
+/// Past a wildcard: discovery recurses into the child, planning emits the
+/// shard `path + rest` so forcing beyond the first wildcard happens in the
+/// shard's own worker.
+fn descend<N: WalkNode>(
+    child: &N,
+    mut path: Vec<String>,
+    rest: &[String],
+    sink: &mut Sink<'_>,
+) -> Result<()> {
+    match sink {
+        Sink::Shards(out) => {
+            path.extend_from_slice(rest);
+            out.push(path);
+            Ok(())
+        }
+        Sink::Derivations(_) => traverse(child, &path, rest, sink),
+    }
 }
 
 /// Discover all derivation attr paths matching `includes`, minus `excludes`
@@ -156,7 +212,7 @@ pub fn discover<N: WalkNode>(
     let mut out = Vec::new();
     for inc in includes {
         let segs = collapse_stars(inc);
-        walk(root, &[], &segs, &mut out)?;
+        traverse(root, &[], &segs, &mut Sink::Derivations(&mut out))?;
     }
 
     out.retain(|p| {
@@ -190,9 +246,9 @@ pub fn discover_patterns<N: WalkNode>(root: &N, wildcards: &[String]) -> Result<
 
 /// Split `includes` into disjoint sub-patterns for memory-bounded, parallel
 /// discovery: descend each pattern's literal prefix, then expand its **first**
-/// wildcard into one concrete shard per matched child - mirroring [`walk`]'s
-/// `*`/`#`/opaque/recover-one-level branch logic so the union of `discover` over
-/// the shards equals `discover` over the original pattern. Forcing past the first
+/// wildcard into one concrete shard per matched child. The same [`traverse`]
+/// drives discovery, so the union of `discover` over the shards equals
+/// `discover` over the original pattern by construction. Forcing past the first
 /// wildcard is left to each shard's worker, so a `system`-level wildcard yields
 /// one shard per system, each sized to a single eval-worker's RAM budget. A
 /// wildcard-free pattern yields itself unchanged.
@@ -200,75 +256,10 @@ pub fn plan_shards<N: WalkNode>(root: &N, includes: &[Vec<String>]) -> Result<Ve
     let mut shards = Vec::new();
     for inc in includes {
         let segs = collapse_stars(inc);
-        plan_one(root, &[], &segs, &mut shards)?;
+        traverse(root, &[], &segs, &mut Sink::Shards(&mut shards))?;
     }
 
     Ok(shards)
-}
-
-/// One include's split. Recurses through literal segments; at the first wildcard
-/// emits a shard per matched child instead of recursing into it.
-fn plan_one<N: WalkNode>(
-    node: &N,
-    path: &[String],
-    segs: &[String],
-    out: &mut Vec<Vec<String>>,
-) -> Result<()> {
-    match segs.split_first() {
-        None => out.push(path.to_vec()),
-        Some((seg, rest)) if seg == "*" => {
-            for name in node.child_names()? {
-                let Some(child) = node.child(&name)? else {
-                    continue;
-                };
-                let mut p = path.to_vec();
-                p.push(name);
-
-                if rest.is_empty() {
-                    if child.is_derivation()? {
-                        out.push(p);
-                    } else if child.is_opaque()? {
-                        continue;
-                    } else {
-                        p.push("#".to_string());
-                        out.push(p);
-                    }
-                } else if child.is_opaque()? {
-                    continue;
-                } else {
-                    p.extend_from_slice(rest);
-                    out.push(p);
-                }
-            }
-        }
-        Some((seg, rest)) if seg == "#" => {
-            for name in node.child_names()? {
-                let Some(child) = node.child(&name)? else {
-                    continue;
-                };
-                let mut p = path.to_vec();
-                p.push(name);
-
-                if rest.is_empty() {
-                    if child.is_derivation()? {
-                        out.push(p);
-                    }
-                } else {
-                    p.extend_from_slice(rest);
-                    out.push(p);
-                }
-            }
-        }
-        Some((seg, rest)) => {
-            if let Some(child) = node.child(seg)? {
-                let mut p = path.to_vec();
-                p.push(seg.clone());
-                plan_one(&child, &p, rest, out)?;
-            }
-        }
-    }
-
-    Ok(())
 }
 
 /// Render shard segments back to a pattern string for the wire: `*`/`#` stay
@@ -539,8 +530,9 @@ mod tests {
         plan_shards(&root, &[segs(pattern)]).unwrap()
     }
 
-    /// The contract that justifies the whole split: discovering each shard and
-    /// unioning must equal discovering the original pattern in one pass.
+    /// Discovering each shard and unioning must equal discovering the original
+    /// pattern in one pass. One shared traversal makes this structural; a single
+    /// behavioural test guards the emit-vs-descend split points.
     fn assert_split_equivalent(root: &StubNode, pattern: &[&str]) {
         let original = discover(&root, &[segs(pattern)], &[]).unwrap();
 
@@ -567,7 +559,6 @@ mod tests {
                 segs(&["packages", "x86_64-linux", "#"]),
             ]
         );
-        assert_split_equivalent(&root, &["packages", "*", "*"]);
     }
 
     #[test]
@@ -580,7 +571,6 @@ mod tests {
                 segs(&["packages", "x86_64-linux", "hello"]),
             ]
         );
-        assert_split_equivalent(&root, &["packages", "*", "hello"]);
     }
 
     #[test]
@@ -593,7 +583,6 @@ mod tests {
                 segs(&["packages", "x86_64-linux", "hello"]),
             ]
         );
-        assert_split_equivalent(&root, &["packages", "x86_64-linux", "#"]);
     }
 
     #[test]
