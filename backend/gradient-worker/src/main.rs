@@ -38,9 +38,9 @@ const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 fn main() -> Result<()> {
     let config = WorkerConfig::parse();
 
-    // stderr, not stdout: eval-worker subprocesses use stdout for line-delimited
-    // JSON to the parent (see worker_pool::pool), so any tracing line on stdout
-    // would be parsed as a protocol response and crash the eval.
+    // stderr, not stdout: eval-worker subprocesses use stdout for rkyv frames
+    // to the parent (see worker_pool::transport), so any tracing line on stdout
+    // would corrupt the frame stream and crash the eval.
     tracing_subscriber::fmt()
         .with_env_filter(build_env_filter(&config))
         .with_writer(std::io::stderr)
@@ -50,6 +50,16 @@ fn main() -> Result<()> {
     // The Nix C API (Boehm GC) must run single-threaded, isolated from Tokio.
     if config.eval_worker {
         return nix::eval_worker::run_eval_worker().map_err(anyhow::Error::from);
+    }
+
+    // Internal JSONL harness over the eval-worker transport (VM test seam).
+    if let Some(requests_path) = config.eval_driver.clone() {
+        let rt = tokio::runtime::Runtime::new()?;
+        let code = rt.block_on(worker_pool::driver::run_eval_driver(
+            &requests_path,
+            &config.eval_cache_dir(),
+        ))?;
+        std::process::exit(code);
     }
 
     // Must precede the first TLS handshake - `connect_async` for `wss://` is

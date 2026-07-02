@@ -9,29 +9,25 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_db::{Derivation, parse_drv};
+use gradient_eval::ipc::ResolvedItem;
+use gradient_exec::path_utils::nix_store_path;
 use gradient_nix::{DerivationResolver, ResolvedDerivation};
+use std::collections::VecDeque;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
+use tracing::debug;
 
-use super::pool::EvalWorkerPool;
-use crate::nix::eval_worker::ResolvedItem;
-use crate::worker_pool::eval_stats::{EvalStatsAccumulator, EvalStatsTotals, StatsDelta};
-
-/// Strips `/nix/store/` and returns just the hash-name component (mirrors the
-/// helper in [`super::resolver`]).
-fn nix_store_path(hash_name: &str) -> String {
-    if hash_name.starts_with('/') {
-        hash_name.to_string()
-    } else {
-        format!("/nix/store/{}", hash_name)
-    }
-}
+use super::eval_stats::{EvalStatsAccumulator, EvalStatsTotals, StatsDelta};
+use super::pool::{EvalWorkerPool, PooledEvalWorker};
 
 /// `DerivationResolver` impl that drives an [`EvalWorkerPool`].
 ///
-/// `list_flake_derivations` is dispatched to a single worker (the wildcard
-/// `*` is recursive in the cursor walk, so one call discovers all depths).
-/// `resolve_derivation_paths` splits attrs across the pool for parallelism and
-/// bisects on subprocess crash so one bad attr never fails the whole eval.
+/// `list_flake_derivations` plans per-system shards on one worker and fans
+/// them across the pool; `resolve_derivation_paths` splits attrs into batches
+/// the same way. Both fan-outs run through [`pooled_fan_out`] and recover from
+/// subprocess crashes with the same [`MAX_CRASH_ATTEMPTS`] tolerance: a shard
+/// retries whole (its response is atomic), a resolve batch salvages its
+/// streamed prefix and isolates the exact in-flight attr.
 /// `get_derivation` and `get_features` parse `.drv` files directly from disk.
 #[derive(Debug)]
 pub struct WorkerPoolResolver {
@@ -43,10 +39,23 @@ pub struct WorkerPoolResolver {
     /// The eval's user entry-point patterns, set by `list_flake_derivations` so
     /// the later resolve pass can bucket each delta under its owning pattern.
     patterns: Arc<Mutex<Vec<String>>>,
+    /// Warning sink for the resolve pass: batches funnel their `ResolveEnd`
+    /// warnings here, drained once per `resolve_derivation_paths` call.
+    resolve_warnings: Arc<Mutex<Vec<String>>>,
 }
 
 /// One resolved attr keyed by its index in the original request.
 type IndexedDerivation = (usize, ResolvedDerivation);
+
+/// Crashes tolerated for a single work item (a shard, or one attr) before it
+/// becomes an error. Shared by listing and resolving so both recover from a
+/// subprocess death with the same tolerance.
+const MAX_CRASH_ATTEMPTS: u32 = 2;
+
+/// Upper bound on attrs resolved in a single worker call, so one batch's
+/// eval-heap growth stays small relative to `max_eval_rss` (the worker's heap
+/// persists across batches and is recycled once it crosses the cap).
+const MAX_RESOLVE_BATCH: usize = 64;
 
 /// Pick `attr`'s owning entry-point: the longest wildcard `pattern` whose
 /// segments all match `attr`'s leading segments (a `*` segment matches any one
@@ -86,7 +95,8 @@ fn item_to_resolved(item: ResolvedItem) -> ResolvedDerivation {
     (item.attr, result)
 }
 
-/// Per-attr error recorded when a subprocess crashes twice on the same attr.
+/// Per-attr error recorded when a subprocess crashes on the same attr
+/// [`MAX_CRASH_ATTEMPTS`] times.
 fn crashed_derivation(attr: String) -> ResolvedDerivation {
     (
         attr,
@@ -96,26 +106,61 @@ fn crashed_derivation(attr: String) -> ResolvedDerivation {
     )
 }
 
-/// Resolves one batch of attrs on a single fresh worker. `Ok` means the
-/// subprocess lived (per-attr eval errors ride inside the items); `Err` means
-/// it crashed mid-batch. Injected so the crash-isolation policy is testable
-/// without real subprocesses.
-type ResolveOnce<'a> = dyn Fn(Vec<String>) -> BoxFuture<'a, Result<Vec<ResolvedItem>>> + Sync + 'a;
+/// Dynamic work queue over the pool: `workers` loops each pull the next item
+/// as soon as they are free, so one slow item never leaves the rest of the
+/// pool idle. The first hard error drains the fan-out and propagates.
+async fn pooled_fan_out<T, Fut>(
+    workers: usize,
+    items: Vec<T>,
+    run: impl Fn(T) -> Fut + Sync,
+) -> Result<()>
+where
+    T: Send,
+    Fut: Future<Output = Result<()>>,
+{
+    let queue = Mutex::new(VecDeque::from(items));
+    let (queue, run) = (&queue, &run);
+    let mut tasks: FuturesUnordered<_> = (0..workers.max(1))
+        .map(|_| async move {
+            loop {
+                // Scope the pop so the guard drops before the await; holding
+                // it across `.await` would deadlock the executor.
+                let item = queue.lock().unwrap().pop_front();
+                let Some(item) = item else { break };
+                run(item).await?;
+            }
 
-/// Crashes tolerated for a single attr before it becomes a per-attr error.
-const MAX_CRASH_ATTEMPTS: u32 = 2;
+            Ok::<(), anyhow::Error>(())
+        })
+        .collect();
 
-/// Upper bound on attrs resolved in a single worker call, so one batch's
-/// eval-heap growth stays small relative to `max_eval_rss` (the worker's heap
-/// persists across batches and is recycled once it crosses the cap).
-const MAX_RESOLVE_BATCH: usize = 64;
+    while let Some(drained) = tasks.next().await {
+        drained?;
+    }
 
-/// Pure crash-isolation policy. Resolves `chunk` via `resolve_once`; an `Err`
-/// (subprocess crash, never a per-attr eval failure) is recovered by bisection:
-/// split a multi-attr chunk in half so the crasher is isolated in `O(log n)`
-/// while the rest resolve, and retry a single attr once before recording a
-/// per-attr error. `attempt` counts crashes for a single-attr chunk, capped at
-/// [`MAX_CRASH_ATTEMPTS`].
+    Ok(())
+}
+
+/// Outcome of resolving one batch on one worker. `Complete` means the
+/// subprocess lived through `ResolveEnd` (per-attr eval errors ride inside
+/// the items); `Crashed` means it died mid-stream, keeping the item frames
+/// that made it out.
+enum BatchCall {
+    Complete(Vec<ResolvedItem>),
+    Crashed { streamed: Vec<ResolvedItem> },
+}
+
+/// Resolves one batch of attrs on a single pooled worker. Injected so the
+/// crash-isolation policy is testable without real subprocesses.
+type ResolveOnce<'a> = dyn Fn(Vec<String>) -> BoxFuture<'a, Result<BatchCall>> + Sync + 'a;
+
+/// Pure crash-isolation policy over the streamed `Resolve` protocol.
+///
+/// A crash keeps every item streamed before the subprocess died; the first
+/// unstreamed attr is the one that was in flight, so it is retried alone on a
+/// fresh worker (up to [`MAX_CRASH_ATTEMPTS`] attempts total, then a per-attr
+/// error) while the untouched remainder resolves independently. No bisection:
+/// streaming pinpoints the suspect in one step.
 fn resolve_chunk<'a>(
     resolve_once: &'a ResolveOnce<'a>,
     mut chunk: Vec<(usize, String)>,
@@ -127,15 +172,14 @@ fn resolve_chunk<'a>(
         }
 
         let attrs: Vec<String> = chunk.iter().map(|(_, a)| a.clone()).collect();
-        match resolve_once(attrs).await {
-            Ok(items) => {
-                if items.len() != chunk.len() {
-                    anyhow::bail!(
-                        "eval worker returned {} items for {} attrs",
-                        items.len(),
-                        chunk.len()
-                    );
-                }
+        match resolve_once(attrs).await? {
+            BatchCall::Complete(items) => {
+                anyhow::ensure!(
+                    items.len() == chunk.len(),
+                    "eval worker returned {} items for {} attrs",
+                    items.len(),
+                    chunk.len()
+                );
 
                 Ok(chunk
                     .into_iter()
@@ -143,23 +187,50 @@ fn resolve_chunk<'a>(
                     .map(|((idx, _attr), item)| (idx, item_to_resolved(item)))
                     .collect())
             }
-            Err(_crash) if chunk.len() == 1 => {
-                let (idx, attr) = chunk.into_iter().next().expect("len == 1");
+            BatchCall::Crashed { streamed } => {
+                anyhow::ensure!(
+                    streamed.len() <= chunk.len(),
+                    "eval worker streamed {} items for {} attrs",
+                    streamed.len(),
+                    chunk.len()
+                );
+
+                let rest = chunk.split_off(streamed.len());
+                for ((_, want), got) in chunk.iter().zip(&streamed) {
+                    anyhow::ensure!(
+                        &got.attr == want,
+                        "eval worker streamed item for '{}' where '{want}' was expected",
+                        got.attr
+                    );
+                }
+                let mut done: Vec<IndexedDerivation> = chunk
+                    .into_iter()
+                    .zip(streamed)
+                    .map(|((idx, _attr), item)| (idx, item_to_resolved(item)))
+                    .collect();
+
+                let mut rest = rest.into_iter();
+                let Some((idx, suspect)) = rest.next() else {
+                    // Died between the last item and ResolveEnd: every attr
+                    // resolved; only the batch's warnings/stats are lost.
+                    return Ok(done);
+                };
+                let remainder: Vec<_> = rest.collect();
+
                 if attempt + 1 >= MAX_CRASH_ATTEMPTS {
-                    return Ok(vec![(idx, crashed_derivation(attr))]);
+                    done.push((idx, crashed_derivation(suspect)));
+                    done.extend(resolve_chunk(resolve_once, remainder, 0).await?);
+                    return Ok(done);
                 }
 
-                resolve_chunk(resolve_once, vec![(idx, attr)], attempt + 1).await
-            }
-            Err(_crash) => {
-                let right = chunk.split_off(chunk.len() / 2);
-                let (mut a, b) = futures::future::try_join(
-                    resolve_chunk(resolve_once, chunk, 0),
-                    resolve_chunk(resolve_once, right, 0),
+                let (retried, resolved) = futures::future::try_join(
+                    resolve_chunk(resolve_once, vec![(idx, suspect)], attempt + 1),
+                    resolve_chunk(resolve_once, remainder, 0),
                 )
                 .await?;
-                a.extend(b);
-                Ok(a)
+                done.extend(retried);
+                done.extend(resolved);
+                Ok(done)
             }
         }
     })
@@ -176,6 +247,7 @@ impl WorkerPoolResolver {
             eval_cache_dir,
             stats: Arc::new(Mutex::new(EvalStatsAccumulator::default())),
             patterns: Arc::new(Mutex::new(Vec::new())),
+            resolve_warnings: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -190,12 +262,35 @@ impl WorkerPoolResolver {
         }
 
         let weak = Arc::downgrade(&self.pool);
-        tokio::spawn(super::pool::memory_reaper_loop(weak, min_free_bytes));
+        tokio::spawn(super::memory::memory_reaper_loop(weak, min_free_bytes));
     }
 
     /// Bucket one worker delta under `entry_point`, folding peak RSS in too.
     fn observe_stats(&self, entry_point: &str, delta: StatsDelta, rss: u64) {
         self.stats.lock().unwrap().observe(entry_point, delta, rss);
+    }
+
+    /// Post-call bookkeeping shared by every successful worker call: record
+    /// the stats delta and discard an over-RSS worker so its eval heap is
+    /// reclaimed before the next call (progress is durable in the eval cache).
+    fn finish_call(&self, worker: &mut PooledEvalWorker, bucket: &str, stats: Option<StatsDelta>) {
+        let rss = worker.rss_bytes();
+        if let Some(delta) = stats {
+            self.observe_stats(bucket, delta, rss);
+        }
+        if rss > self.pool.max_eval_rss() {
+            worker.mark_dead();
+        }
+    }
+
+    /// The entry-point bucket a call's stats delta is attributed to: the batch
+    /// delta is one number, so it goes whole to the first attr's entry-point;
+    /// the dynamic queue keeps batches small and same-prefix, so cross-bucket
+    /// bleed is minor.
+    fn bucket_of(&self, first_attr: Option<&String>) -> String {
+        first_attr
+            .map(|a| entry_point_of(a, &self.patterns.lock().unwrap()))
+            .unwrap_or_default()
     }
 
     /// Drain the accumulated per-eval stats, resetting the accumulator so the
@@ -219,8 +314,8 @@ impl WorkerPoolResolver {
     }
 
     /// Return `repository`'s eval-cache fingerprint without evaluating it.
-    /// `None` for mutable/dirty flakes. Mirrors [`Self::list_flake_derivations`]:
-    /// a dead worker is marked so it gets discarded instead of reused.
+    /// `None` for mutable/dirty flakes. A dead worker is marked so it gets
+    /// discarded instead of reused.
     pub async fn fingerprint(&self, repository: String) -> Result<Option<String>> {
         let mut worker = self.pool.acquire().await?;
         match worker.fingerprint(repository).await {
@@ -247,45 +342,42 @@ impl WorkerPoolResolver {
         }
     }
 
-    /// Discover one shard on a pooled worker, retrying once on a fresh worker
-    /// if the subprocess crashes (a transient stack/OOM death). A shard that
-    /// crashes twice propagates the error, failing the whole listing - matching
-    /// the single-worker behaviour this replaces.
+    /// Discover one shard, retrying on a fresh worker after a subprocess crash
+    /// up to [`MAX_CRASH_ATTEMPTS`] total attempts (the resolve-side tolerance).
+    /// A shard's response is atomic, so recovery is a whole-shard retry; a
+    /// shard that keeps crashing fails the whole listing, matching the
+    /// single-worker behaviour this replaces.
     async fn list_shard(
         &self,
         repository: &str,
         wildcards: Vec<String>,
     ) -> Result<(Vec<String>, Vec<String>)> {
-        match self.list_once(repository, wildcards.clone()).await {
-            Ok(v) => Ok(v),
-            Err(_crash) => self.list_once(repository, wildcards).await,
+        let mut attempt = 0;
+        loop {
+            match self.list_once(repository, wildcards.clone()).await {
+                Ok(v) => return Ok(v),
+                Err(crash) => {
+                    attempt += 1;
+                    if attempt >= MAX_CRASH_ATTEMPTS {
+                        return Err(crash);
+                    }
+                }
+            }
         }
     }
 
-    /// Discover one shard on a single worker. An over-RSS worker is discarded
-    /// after a successful call so its eval heap is reclaimed before the next
-    /// shard (progress is already durable in the eval cache); a crash marks the
-    /// worker dead. Mirrors [`Self::resolve_once`].
+    /// Discover one shard on a single pooled worker; a crash marks the worker
+    /// dead and surfaces as `Err` for [`Self::list_shard`] to retry.
     async fn list_once(
         &self,
         repository: &str,
         wildcards: Vec<String>,
     ) -> Result<(Vec<String>, Vec<String>)> {
-        let bucket = wildcards
-            .first()
-            .map(|w| entry_point_of(w, &self.patterns.lock().unwrap()))
-            .unwrap_or_default();
+        let bucket = self.bucket_of(wildcards.first());
         let mut worker = self.pool.acquire().await?;
         match worker.list(repository.to_string(), wildcards).await {
             Ok((attrs, warnings, stats)) => {
-                let rss = worker.rss_bytes();
-                if let Some(delta) = stats {
-                    self.observe_stats(&bucket, delta, rss);
-                }
-                if rss > self.pool.max_eval_rss() {
-                    worker.mark_dead();
-                }
-
+                self.finish_call(&mut worker, &bucket, stats);
                 Ok((attrs, warnings))
             }
             Err(e) => {
@@ -295,39 +387,34 @@ impl WorkerPoolResolver {
         }
     }
 
-    /// Resolve `attrs` on one fresh worker. `Ok` means the subprocess lived
-    /// (per-attr eval errors ride inside the items); `Err` means it crashed.
-    /// An over-RSS worker is discarded after a successful call so the next
-    /// `acquire` spawns a fresh subprocess.
-    async fn resolve_once(
-        &self,
-        repository: &str,
-        attrs: Vec<String>,
-    ) -> Result<(Vec<ResolvedItem>, Vec<String>)> {
-        // A batch's delta is one number, so it is attributed whole to the
-        // entry-point of its first attr; the dynamic queue keeps batches small
-        // and same-prefix, so cross-bucket bleed is minor.
-        let bucket = attrs
-            .first()
-            .map(|a| entry_point_of(a, &self.patterns.lock().unwrap()))
-            .unwrap_or_default();
+    /// Resolve one batch on a single pooled worker. A subprocess death becomes
+    /// [`BatchCall::Crashed`] carrying the streamed prefix; only pool failures
+    /// (e.g. shutdown) are `Err`.
+    async fn resolve_once(&self, repository: &str, attrs: Vec<String>) -> Result<BatchCall> {
+        let bucket = self.bucket_of(attrs.first());
         let mut worker = self.pool.acquire().await?;
-        match worker.resolve(repository.to_string(), attrs).await {
-            Ok((items, warnings, stats)) => {
-                let rss = worker.rss_bytes();
-                if let Some(delta) = stats {
-                    self.observe_stats(&bucket, delta, rss);
-                }
-                if rss > self.pool.max_eval_rss() {
-                    worker.mark_dead();
-                }
-
-                Ok((items, warnings))
+        let (items, end) = worker.resolve(repository.to_string(), attrs).await;
+        match end {
+            Ok((warnings, stats)) => {
+                self.finish_call(&mut worker, &bucket, stats);
+                self.record_warnings(warnings);
+                Ok(BatchCall::Complete(items))
             }
             Err(e) => {
                 worker.mark_dead();
-                Err(e)
+                debug!(
+                    error = format!("{e:#}"),
+                    streamed = items.len(),
+                    "eval worker died mid-resolve; salvaging streamed prefix"
+                );
+                Ok(BatchCall::Crashed { streamed: items })
             }
+        }
+    }
+
+    fn record_warnings(&self, warnings: Vec<String>) {
+        if !warnings.is_empty() {
+            self.resolve_warnings.lock().unwrap().extend(warnings);
         }
     }
 }
@@ -381,35 +468,22 @@ impl DerivationResolver for WorkerPoolResolver {
             .cloned()
             .collect();
 
-        let queue: std::sync::Mutex<std::collections::VecDeque<String>> =
-            std::sync::Mutex::new(shards.into_iter().collect());
-        let attrs = std::sync::Mutex::new(Vec::<String>::new());
-        let warnings = std::sync::Mutex::new(Vec::<String>::new());
+        let attrs = Mutex::new(Vec::<String>::new());
+        let warnings = Mutex::new(Vec::<String>::new());
         {
             let repo = repository.as_str();
-            let (queue, attrs, warnings, excludes) = (&queue, &attrs, &warnings, &excludes);
-            let mut tasks: FuturesUnordered<_> = (0..self.pool.max())
-                .map(|_| async move {
-                    loop {
-                        let shard = queue.lock().unwrap().pop_front();
-                        let Some(shard) = shard else { break };
+            let (attrs, warnings, excludes) = (&attrs, &warnings, &excludes);
+            pooled_fan_out(self.pool.max(), shards, |shard| async move {
+                let mut pattern = Vec::with_capacity(1 + excludes.len());
+                pattern.push(shard);
+                pattern.extend_from_slice(excludes);
 
-                        let mut pattern = Vec::with_capacity(1 + excludes.len());
-                        pattern.push(shard);
-                        pattern.extend_from_slice(excludes);
-
-                        let (a, w) = self.list_shard(repo, pattern).await?;
-                        attrs.lock().unwrap().extend(a);
-                        warnings.lock().unwrap().extend(w);
-                    }
-
-                    Ok::<(), anyhow::Error>(())
-                })
-                .collect();
-
-            while let Some(drained) = tasks.next().await {
-                drained?;
-            }
+                let (a, w) = self.list_shard(repo, pattern).await?;
+                attrs.lock().unwrap().extend(a);
+                warnings.lock().unwrap().extend(w);
+                Ok(())
+            })
+            .await?;
         }
 
         let mut attrs = attrs.into_inner().unwrap();
@@ -432,73 +506,46 @@ impl DerivationResolver for WorkerPoolResolver {
         }
 
         // Dynamic work queue: split into many small index-tagged batches and let
-        // each pooled worker pull the next as soon as it is free. A slow attr on
-        // one worker no longer leaves the others idle the way the old static
-        // round-robin partition did. ~4 batches per worker leaves enough slack to
-        // steal without paying a walker rebuild per attr, but the size is capped
-        // so one batch's eval-heap growth cannot blow a worker far past
-        // `max_eval_rss` before the post-call recycle check sees it (the heap is
-        // persistent across batches, so the cap bounds the per-call overshoot,
-        // not the base cost).
+        // each pooled worker pull the next as soon as it is free. ~4 batches per
+        // worker leaves enough slack to steal without paying a walker rebuild
+        // per attr; the size cap bounds one batch's eval-heap overshoot past
+        // `max_eval_rss` (the heap persists across batches, so the cap bounds
+        // the per-call overshoot, not the base cost).
         let n_workers = self.pool.max().min(attrs.len());
         let batch_size = attrs
             .len()
             .div_ceil(n_workers * 4)
             .clamp(1, MAX_RESOLVE_BATCH);
-        let queue: std::sync::Mutex<std::collections::VecDeque<Vec<(usize, String)>>> =
-            std::sync::Mutex::new(
-                attrs
-                    .into_iter()
-                    .enumerate()
-                    .collect::<Vec<_>>()
-                    .chunks(batch_size)
-                    .map(|c| c.to_vec())
-                    .collect(),
-            );
+        let batches: Vec<Vec<(usize, String)>> = attrs
+            .into_iter()
+            .enumerate()
+            .collect::<Vec<_>>()
+            .chunks(batch_size)
+            .map(|c| c.to_vec())
+            .collect();
 
-        // Shared warning sink: the pure core's `Ok` payload is items only, so
-        // warnings are funnelled here instead of through `resolve_chunk`.
-        let warnings = std::sync::Mutex::new(Vec::<String>::new());
-        let indexed = std::sync::Mutex::new(Vec::<IndexedDerivation>::new());
+        let indexed = Mutex::new(Vec::<IndexedDerivation>::new());
         {
             let repo = repository.as_str();
-            let sink = &warnings;
             let resolve_batch =
-                move |attrs: Vec<String>| -> BoxFuture<'_, Result<Vec<ResolvedItem>>> {
-                    Box::pin(async move {
-                        let (items, w) = self.resolve_once(repo, attrs).await?;
-                        sink.lock().unwrap().extend(w);
-                        Ok(items)
-                    })
+                move |attrs: Vec<String>| -> BoxFuture<'_, Result<BatchCall>> {
+                    Box::pin(self.resolve_once(repo, attrs))
                 };
 
-            let (queue, indexed, resolve_batch) = (&queue, &indexed, &resolve_batch);
-            let mut tasks: FuturesUnordered<_> = (0..n_workers)
-                .map(|_| async move {
-                    loop {
-                        // Scope the pop so the guard drops before the await;
-                        // holding it across `.await` would deadlock the executor.
-                        let batch = queue.lock().unwrap().pop_front();
-                        let Some(batch) = batch else { break };
-
-                        // A crash became per-attr errors in the core; only a
-                        // protocol violation (item-count mismatch) is a hard fail.
-                        let resolved = resolve_chunk(resolve_batch, batch, 0).await?;
-                        indexed.lock().unwrap().extend(resolved);
-                    }
-
-                    Ok::<(), anyhow::Error>(())
-                })
-                .collect();
-
-            while let Some(drained) = tasks.next().await {
-                drained?;
-            }
+            let (indexed, resolve_batch) = (&indexed, &resolve_batch);
+            pooled_fan_out(n_workers, batches, |batch| async move {
+                // A crash became per-attr errors in the pure core; only a
+                // protocol violation or pool failure is a hard error.
+                let resolved = resolve_chunk(resolve_batch, batch, 0).await?;
+                indexed.lock().unwrap().extend(resolved);
+                Ok(())
+            })
+            .await?;
         }
 
         let mut indexed = indexed.into_inner().unwrap();
         indexed.sort_by_key(|(idx, _)| *idx);
-        let mut all_warnings = warnings.into_inner().unwrap();
+        let mut all_warnings = std::mem::take(&mut *self.resolve_warnings.lock().unwrap());
         all_warnings.sort_unstable();
         all_warnings.dedup();
 
@@ -526,19 +573,8 @@ impl DerivationResolver for WorkerPoolResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::sync::Mutex;
-
-    #[test]
-    fn nix_store_path_absolute_unchanged() {
-        let path = "/nix/store/hash-name";
-        assert_eq!(nix_store_path(path), path);
-    }
-
-    #[test]
-    fn nix_store_path_bare_prefixed() {
-        assert_eq!(nix_store_path("hash-name"), "/nix/store/hash-name");
-    }
 
     #[test]
     fn entry_point_longest_prefix_match() {
@@ -573,22 +609,21 @@ mod tests {
         }
     }
 
-    /// Scripts a `resolve_once` stub: counts calls and decides per batch whether
-    /// the worker crashes. `crash_if` returns true when the batch should die.
-    /// `calls` is borrowed by the returned futures, tying their lifetime to the
-    /// stub so it coerces to `&ResolveOnce<'_>` cleanly.
-    type CrashIf = Box<dyn Fn(&[String], usize) -> bool + Sync>;
+    /// Scripts a `resolve_once` stub: counts calls and decides per batch where
+    /// the worker crashes. `crash_at` returns the index of the attr the worker
+    /// dies on (items before it stream out), or `None` for a complete batch.
+    type CrashAt = Box<dyn Fn(&[String], usize) -> Option<usize> + Sync>;
 
     struct Stub {
         calls: Mutex<usize>,
-        crash_if: CrashIf,
+        crash_at: CrashAt,
     }
 
     impl Stub {
-        fn new(crash_if: impl Fn(&[String], usize) -> bool + Sync + 'static) -> Self {
+        fn new(crash_at: impl Fn(&[String], usize) -> Option<usize> + Sync + 'static) -> Self {
             Self {
                 calls: Mutex::new(0),
-                crash_if: Box::new(crash_if),
+                crash_at: Box::new(crash_at),
             }
         }
 
@@ -597,15 +632,15 @@ mod tests {
         }
     }
 
-    /// Crash any batch that contains one of `crashers`.
+    /// Crash while resolving any attr in `crashers`, streaming everything
+    /// before it (mirrors the real subprocess: items flush per attr).
     fn crashes_on(crashers: &'static [&'static str]) -> Stub {
         let set: HashSet<&str> = crashers.iter().copied().collect();
-        Stub::new(move |attrs, _call| attrs.iter().any(|a| set.contains(a.as_str())))
+        Stub::new(move |attrs, _call| attrs.iter().position(|a| set.contains(a.as_str())))
     }
 
     /// Drive the pure core over a chunk built from `attrs` (index = position).
-    /// Owns the stub so the closure and its futures share one scope (mirroring
-    /// the production block); returns the result plus the stub's call count.
+    /// Returns `(attr, resolved_ok)` in index order plus the stub's call count.
     async fn run(stub: Stub, attrs: &[&str]) -> (Vec<(String, bool)>, usize) {
         let chunk: Vec<(usize, String)> = attrs
             .iter()
@@ -615,22 +650,24 @@ mod tests {
 
         let mut out = {
             let stub = &stub;
-            let resolve_once =
-                move |attrs: Vec<String>| -> BoxFuture<'_, Result<Vec<ResolvedItem>>> {
-                    Box::pin(async move {
-                        let prior = {
-                            let mut n = stub.calls.lock().unwrap();
-                            let prior = *n;
-                            *n += 1;
-                            prior
-                        };
-                        if (stub.crash_if)(&attrs, prior) {
-                            anyhow::bail!("worker crashed");
-                        }
-
-                        Ok(attrs.iter().map(|a| ok_item(a)).collect())
-                    })
-                };
+            let resolve_once = move |attrs: Vec<String>| -> BoxFuture<'_, Result<BatchCall>> {
+                Box::pin(async move {
+                    let prior = {
+                        let mut n = stub.calls.lock().unwrap();
+                        let prior = *n;
+                        *n += 1;
+                        prior
+                    };
+                    match (stub.crash_at)(&attrs, prior) {
+                        Some(at) => Ok(BatchCall::Crashed {
+                            streamed: attrs[..at].iter().map(|a| ok_item(a)).collect(),
+                        }),
+                        None => Ok(BatchCall::Complete(
+                            attrs.iter().map(|a| ok_item(a)).collect(),
+                        )),
+                    }
+                })
+            };
             resolve_chunk(&resolve_once, chunk, 0).await.unwrap()
         };
         out.sort_by_key(|(idx, _)| *idx);
@@ -648,33 +685,93 @@ mod tests {
         let (out, calls) = run(crashes_on(&[]), &["a", "b", "c"]).await;
         assert_eq!(
             out,
-            vec![("a".into(), true), ("b".into(), true), ("c".into(), true),]
+            vec![("a".into(), true), ("b".into(), true), ("c".into(), true)]
         );
-        assert_eq!(calls, 1, "no crash → single batch call");
+        assert_eq!(calls, 1, "no crash means a single batch call");
     }
 
     #[tokio::test]
-    async fn single_crasher_among_healthy_isolates_one_error() {
-        let (out, _) = run(crashes_on(&["b"]), &["a", "b", "c", "d"]).await;
-        let map: std::collections::HashMap<_, _> = out.into_iter().collect();
+    async fn crash_salvages_streamed_prefix_and_isolates_suspect() {
+        // b always crashes the worker: the streamed prefix (a) survives the
+        // first call, b is retried alone and errors, c+d resolve untouched.
+        let (out, calls) = run(crashes_on(&["b"]), &["a", "b", "c", "d"]).await;
+        let map: HashMap<_, _> = out.into_iter().collect();
         assert!(!map["b"], "the crasher resolves to an error");
         assert!(map["a"] && map["c"] && map["d"], "the rest still resolve");
+        // 1 initial + 1 lone retry of b + 1 for the remainder [c, d]: streaming
+        // pinpoints the suspect, no bisection rework of the streamed prefix.
+        assert_eq!(calls, 3);
     }
 
     #[tokio::test]
     async fn two_crashers_isolate_independently() {
         let (out, _) = run(crashes_on(&["b", "d"]), &["a", "b", "c", "d", "e"]).await;
-        let map: std::collections::HashMap<_, _> = out.into_iter().collect();
+        let map: HashMap<_, _> = out.into_iter().collect();
         assert!(!map["b"] && !map["d"], "both crashers error");
         assert!(map["a"] && map["c"] && map["e"], "the rest resolve");
     }
 
     #[tokio::test]
     async fn transient_crash_succeeds_on_retry() {
-        // A single-attr chunk crashes on the first call (attempt 0) and resolves
-        // on the one retry (attempt 1) - no per-attr error is recorded.
-        let (out, calls) = run(Stub::new(|_attrs, call| call == 0), &["a"]).await;
+        // The single-attr chunk crashes on the first call (attempt 0) and
+        // resolves on the one retry (attempt 1) - no per-attr error recorded.
+        let (out, calls) = run(
+            Stub::new(|_attrs, call| (call == 0).then_some(0)),
+            &["a"],
+        )
+        .await;
         assert_eq!(out, vec![("a".into(), true)]);
         assert_eq!(calls, 2, "one crash + one successful retry");
+    }
+
+    #[tokio::test]
+    async fn crash_after_last_item_keeps_all_results() {
+        // Worker streams every item, then dies before ResolveEnd: nothing to
+        // retry, all results are kept.
+        let (out, calls) = run(
+            Stub::new(|attrs, call| (call == 0).then_some(attrs.len())),
+            &["a", "b"],
+        )
+        .await;
+        assert_eq!(out, vec![("a".into(), true), ("b".into(), true)]);
+        assert_eq!(calls, 1);
+    }
+
+    #[tokio::test]
+    async fn streamed_attr_mismatch_is_a_protocol_error() {
+        fn resolve_once(_attrs: Vec<String>) -> BoxFuture<'static, Result<BatchCall>> {
+            Box::pin(async move {
+                Ok(BatchCall::Crashed {
+                    streamed: vec![ok_item("unrelated")],
+                })
+            })
+        }
+        let err = resolve_chunk(&resolve_once, vec![(0, "a".into()), (1, "b".into())], 0)
+            .await
+            .expect_err("mismatched stream must fail");
+        assert!(err.to_string().contains("streamed item"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn pooled_fan_out_drains_all_items_and_propagates_errors() {
+        let seen = Mutex::new(Vec::new());
+        let seen_ref = &seen;
+        pooled_fan_out(3, (0..10).collect(), |n| async move {
+            seen_ref.lock().unwrap().push(n);
+            Ok(())
+        })
+        .await
+        .expect("no errors");
+        let mut got = seen.into_inner().unwrap();
+        got.sort_unstable();
+        assert_eq!(got, (0..10).collect::<Vec<_>>());
+
+        let err = pooled_fan_out(2, vec![1, 2, 3], |n| async move {
+            anyhow::ensure!(n != 2, "boom on {n}");
+            Ok(())
+        })
+        .await
+        .expect_err("error must propagate");
+        assert!(err.to_string().contains("boom on 2"));
     }
 }

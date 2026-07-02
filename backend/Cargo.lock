@@ -2170,6 +2170,7 @@ dependencies = [
  "anyhow",
  "libc",
  "nix-bindings",
+ "rkyv",
  "serde",
  "serde_json",
  "tracing",

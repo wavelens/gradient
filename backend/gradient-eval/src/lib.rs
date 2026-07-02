@@ -9,6 +9,7 @@
 
 pub mod eval_worker;
 pub mod flake_walk;
+pub mod ipc;
 pub mod jobs;
 pub mod nix_eval;
 pub mod stats;
