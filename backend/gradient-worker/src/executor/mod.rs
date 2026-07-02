@@ -138,14 +138,14 @@ pub(crate) async fn push_drv_closure(
 /// cannot be read or parsed is skipped (logged), not fatal - the daemon closure
 /// still covers it.
 async fn drv_input_sources(drv_paths: &[String]) -> std::collections::HashSet<String> {
-    use crate::nix::store::canonicalize_store_path;
     use futures::stream::{self, StreamExt as _};
+    use gradient_exec::path_utils::nix_store_path;
 
     const DRV_READ_CONCURRENCY: usize = 64;
 
     stream::iter(drv_paths.iter().cloned())
         .map(|drv_path| async move {
-            let full = canonicalize_store_path(&drv_path);
+            let full = nix_store_path(&drv_path);
             match tokio::fs::read(&full).await {
                 Ok(bytes) => match gradient_db::parse_drv(&bytes) {
                     Ok(drv) => drv.input_sources,

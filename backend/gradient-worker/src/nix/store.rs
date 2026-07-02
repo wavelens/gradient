@@ -30,6 +30,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use gradient_exec::path_utils::{nix_store_path, strip_store_prefix};
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
 use harmonia_store_remote::{DaemonClient, DaemonStore as _};
@@ -175,18 +176,10 @@ impl LocalNixStore {
         Ok(info
             .references
             .iter()
-            .map(|r| canonicalize_store_path(&r.to_string()))
+            .map(|r| nix_store_path(&r.to_string()))
             .collect())
     }
 
-    /// BFS the runtime reference closure of `seeds` via `query_path_info`.
-    ///
-    /// Returns every reachable store path including the seeds themselves,
-    /// each canonicalised to `/nix/store/<hash>-<name>` form so consumers
-    /// (e.g. NAR push) see a single, well-defined string per path.
-    /// Paths that fail individual `query_references` calls (e.g. removed
-    /// between calls) are logged and skipped - the walk continues so the
-    /// caller still gets a best-effort closure for the remaining paths.
     /// Register `gcroot_symlink` as an indirect GC root with the daemon.
     ///
     /// The caller must have already created the symlink on disk; the daemon
@@ -208,11 +201,19 @@ impl LocalNixStore {
         }
     }
 
+    /// BFS the runtime reference closure of `seeds` via `query_path_info`.
+    ///
+    /// Returns every reachable store path including the seeds themselves,
+    /// each canonicalised to `/nix/store/<hash>-<name>` form so consumers
+    /// (e.g. NAR push) see a single, well-defined string per path.
+    /// Paths that fail individual `query_references` calls (e.g. removed
+    /// between calls) are logged and skipped - the walk continues so the
+    /// caller still gets a best-effort closure for the remaining paths.
     pub async fn collect_runtime_closure(&self, seeds: &[String]) -> HashSet<String> {
         let mut visited: HashSet<String> = HashSet::new();
         let mut queue: VecDeque<String> = VecDeque::new();
         for s in seeds {
-            queue.push_back(canonicalize_store_path(s));
+            queue.push_back(nix_store_path(s));
         }
         while let Some(path) = queue.pop_front() {
             if !visited.insert(path.clone()) {
@@ -296,26 +297,11 @@ impl<G: DiscardOnDrop> Drop for ScopedGuard<G> {
     }
 }
 
-/// Normalise to absolute `/nix/store/<hash>-<name>`. Bare hash-name input is
-/// prefixed; already-absolute input is left as-is.
-pub(crate) fn canonicalize_store_path(path: &str) -> String {
-    if path.starts_with('/') {
-        path.to_owned()
-    } else {
-        format!("/nix/store/{}", path)
-    }
-}
-
 #[async_trait]
 impl WorkerStore for LocalNixStore {
     async fn has_path(&self, store_path: &str) -> Result<bool> {
         self.has_path(store_path).await
     }
-}
-
-/// Strips `/nix/store/` prefix, returning just the hash-name component.
-pub(crate) fn strip_store_prefix(path: &str) -> &str {
-    path.strip_prefix("/nix/store/").unwrap_or(path)
 }
 
 #[cfg(test)]
@@ -355,22 +341,6 @@ mod tests {
             "connection_timeout must tolerate a saturated daemon's handshake; \
              the 10 s harmonia default fails prefetch imports under load; got {:?}",
             cfg.connection_timeout
-        );
-    }
-
-    #[test]
-    fn canonicalize_store_path_prefixes_bare_hash_name() {
-        assert_eq!(
-            canonicalize_store_path("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"
-        );
-    }
-
-    #[test]
-    fn canonicalize_store_path_preserves_absolute() {
-        assert_eq!(
-            canonicalize_store_path("/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"),
-            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo"
         );
     }
 

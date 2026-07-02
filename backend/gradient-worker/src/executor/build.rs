@@ -24,7 +24,7 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::StreamExt as _;
 use gradient_db::{DrvOutputSpec, parse_drv};
-use gradient_exec::path_utils::{nix_store_path, strip_nix_store_prefix};
+use gradient_exec::path_utils::{nix_store_path, strip_nix_store_prefix, strip_store_prefix};
 use gradient_util::hydra::parse_hydra_product_line;
 use gradient_sources::get_hash_from_path;
 use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResultInner, Microseconds};
@@ -43,7 +43,7 @@ use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 use crate::metrics::cgroup::{BuildMetricsRaw, read_build_cgroup};
-use crate::nix::store::{LocalNixStore, strip_store_prefix};
+use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
 
 const BYTES_PER_MB: u64 = 1_048_576;

@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use gradient_exec::path_utils::strip_store_prefix;
 use tokio::fs;
 use tracing::{debug, warn};
 
@@ -90,7 +91,7 @@ impl GcRootKeeper {
         let Some(dir) = self.inner.dir.as_ref() else {
             return GcRootHandle::inert();
         };
-        let hash_name = store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
+        let hash_name = strip_store_prefix(store_path);
         let symlink = dir.join(hash_name);
 
         if let Err(e) = create_symlink_idempotent(&symlink, store_path).await {
