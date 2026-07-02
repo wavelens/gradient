@@ -29,6 +29,7 @@ pub mod permissions;
 pub mod pool;
 pub mod project_board;
 pub mod reachability;
+pub mod reconcile;
 pub mod recovery;
 pub mod retention;
 pub mod rollup;
@@ -78,6 +79,7 @@ pub use self::reachability::{
 pub use self::org_workers::org_has_eval_capable_worker_registration;
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
 pub use self::project_board::*;
+pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};
 pub use self::recovery::recover_interrupted_work;
 pub use self::runtime_closure::*;
 pub use self::status::*;
