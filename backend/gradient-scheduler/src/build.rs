@@ -1027,10 +1027,10 @@ impl<'a> BuildStateHandler<'a> {
         info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing closure_complete");
 
         // Restore edges_complete across the eval's closure: a transitive dep whose
-        // flag a prior demote cleared sits unpromotable behind the gate even with a
-        // complete, satisfied edge set (observed: tzdata-2026b, edges_complete=f,
-        // 0 unmet deps, blocking the etc chain). The eval has completed walking, so
-        // its closure edges are flushed and this is safe.
+        // owning eval never finished its edge flush sits unpromotable behind the
+        // gate even with a complete, satisfied edge set (observed: tzdata-2026b,
+        // edges_complete=f, 0 unmet deps, blocking the etc chain). This eval has
+        // completed walking, so its closure edges are flushed and this is safe.
         if let Err(e) = gradient_db::mark_edges_complete_for_eval(db, evaluation_id).await {
             error!(error = %e, %evaluation_id, "mark_edges_complete_for_eval during graph-unstick failed");
         }
