@@ -120,10 +120,17 @@ async fn abort_eval_anchors(
     })
     .await?;
 
-    // This bulk transition bypasses `update_derivation_build_status`, so post the
-    // failed check for each aborted entry point itself.
-    let aborted_derivations: Vec<DerivationId> = to_abort.iter().map(|a| a.derivation).collect();
-    super::notify_build_status_for_derivations(ctx, &aborted_derivations).await;
+    // This bulk transition bypasses `update_derivation_build_status`; feed the
+    // exact changes (pre-status was selected above) through the one emitter.
+    let changes: Vec<super::TransitionChange> = to_abort
+        .iter()
+        .map(|a| super::TransitionChange {
+            derivation: a.derivation,
+            from: a.status,
+            to: BuildStatus::Aborted,
+        })
+        .collect();
+    super::emit_transition_effects(ctx, &changes).await;
 
     if !building_ids.is_empty() {
         for_each_chunk(&building_ids, |chunk| async move {
