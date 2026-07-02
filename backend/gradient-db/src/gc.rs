@@ -329,12 +329,19 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
         }
     }
 
+    // Delete the rows and clear the gate flags they backed in one transaction:
+    // a `drv_closure_cached`/`closure_complete` anchor must never trust a
+    // `cached_path` this pass just removed, not even until the next reconcile.
     if !to_delete.is_empty()
         && let Err(e) = crate::for_each_chunk(&to_delete, |chunk| async move {
+            use sea_orm::TransactionTrait;
+            let txn = db.inner().begin().await?;
             ECachedPath::delete_many()
-                .filter(CCachedPath::Hash.is_in(chunk))
-                .exec(db)
-                .await
+                .filter(CCachedPath::Hash.is_in(chunk.clone()))
+                .exec(&txn)
+                .await?;
+            crate::cache_storage::clear_gate_flags_for_hashes(&txn, &chunk).await?;
+            txn.commit().await
         })
         .await
     {

@@ -182,73 +182,80 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             Err(_) => continue,
         };
 
-        // Find the outputs of the derivation; remove their NAR files (if no other
-        // cache_derivation row keeps them alive).
-        let outputs = EDerivationOutput::find()
+        // Every reference check below propagates its error: a row whose check
+        // failed is skipped this pass (retried next hour), never treated as
+        // unreferenced and reclaimed.
+        let output_hashes: Vec<String> = EDerivationOutput::find()
             .filter(CDerivationOutput::Derivation.eq(drv_id))
             .all(&state.worker_db)
             .await
-            .unwrap_or_default();
+            .context("TTL GC: failed to load derivation outputs")?
+            .into_iter()
+            .map(|o| o.hash)
+            .collect();
 
         // Drop the cache_derivation row first; revocation of dependents follows.
-        if let Some(cd) = ECacheDerivation::find_by_id(cd_id)
-            .one(&state.worker_db)
+        ECacheDerivation::delete_many()
+            .filter(CCacheDerivation::Id.eq(cd_id))
+            .exec(&state.worker_db)
             .await
-            .ok()
-            .flatten()
-        {
-            let _ = cd.into_active_model().delete(&state.worker_db).await;
-        }
+            .context("TTL GC: failed to delete cache_derivation row")?;
 
-        // Drop the cached_path_signature rows that tied each output to THIS
-        // cache, and (if no other cache still references the path) the
-        // cached_path row itself. Without this, the "compressed stored"
-        // metric - a SUM(file_size) joined via cached_path_signature - would
-        // stay inflated after TTL eviction even though the NAR file is gone.
-        for o in &outputs {
-            let cached_paths = ECachedPath::find()
-                .filter(CCachedPath::Hash.eq(&o.hash))
-                .all(&state.worker_db)
+        // Drop THIS cache's signatures on the outputs' cached paths, then any
+        // cached_path no cache signs anymore - clearing the gate flags it backed
+        // in the same transaction. Without the signature cleanup the "compressed
+        // stored" metric (SUM(file_size) via cached_path_signature) would stay
+        // inflated after TTL eviction even though the NAR file is gone.
+        if !output_hashes.is_empty() {
+            use sea_orm::TransactionTrait;
+            let txn = state.worker_db.inner().begin().await?;
+            txn.execute(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                r#"
+                DELETE FROM cached_path_signature s
+                USING cached_path cp
+                WHERE s.cached_path = cp.id AND s.cache = $1 AND cp.hash = ANY($2)
+                "#,
+                [cache_id.into(), output_hashes.clone().into()],
+            ))
+            .await
+            .context("TTL GC: failed to delete cached_path_signature rows")?;
+
+            let dropped = txn
+                .query_all(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    r#"
+                    DELETE FROM cached_path cp
+                    WHERE cp.hash = ANY($1)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)
+                    RETURNING cp.hash
+                    "#,
+                    [output_hashes.clone().into()],
+                ))
                 .await
-                .unwrap_or_default();
-
-            for cp in cached_paths {
-                let sigs_for_cache = ECachedPathSignature::find()
-                    .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-                    .filter(CCachedPathSignature::Cache.eq(cache_id))
-                    .all(&state.worker_db)
-                    .await
-                    .unwrap_or_default();
-                for sig in sigs_for_cache {
-                    let _ = sig.into_active_model().delete(&state.worker_db).await;
-                }
-
-                let still_signed = ECachedPathSignature::find()
-                    .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-                    .one(&state.worker_db)
-                    .await
-                    .ok()
-                    .flatten()
-                    .is_some();
-                if !still_signed {
-                    let _ = cp.into_active_model().delete(&state.worker_db).await;
-                }
-            }
+                .context("TTL GC: failed to delete unsigned cached_path rows")?
+                .into_iter()
+                .filter_map(|r| r.try_get::<String>("", "hash").ok())
+                .collect::<Vec<_>>();
+            gradient_db::clear_gate_flags_for_hashes(&txn, &dropped)
+                .await
+                .context("TTL GC: failed to clear gate flags")?;
+            txn.commit().await?;
         }
 
-        // Best-effort: NAR file is shared by every cache for this output, so only
-        // delete when no cache_derivation row remains for the derivation.
+        // NAR file is shared by every cache for this output, so only delete when
+        // no cache_derivation row remains for the derivation.
         let still_held = ECacheDerivation::find()
             .filter(CCacheDerivation::Derivation.eq(drv_id))
             .one(&state.worker_db)
             .await
-            .ok()
-            .flatten()
+            .context("TTL GC: failed to check surviving cache_derivation rows")?
             .is_some();
         if !still_held {
-            for o in &outputs {
-                if let Err(e) = state.nar_storage.delete(&o.hash).await {
-                    warn!(error = %e, hash = %o.hash, "Failed to remove stale compressed NAR");
+            for hash in &output_hashes {
+                if let Err(e) = state.nar_storage.delete(hash).await {
+                    warn!(error = %e, %hash, "Failed to remove stale compressed NAR");
                 }
             }
         }
@@ -325,27 +332,39 @@ async fn purge_zombie_cached_paths(
         .await
         .context("Failed to load cached_path rows for zombie purge")?;
 
-    let zombie_ids: Vec<_> = rows
+    let zombies: Vec<(gradient_types::ids::CachedPathId, String)> = rows
         .into_iter()
         .filter(|row| !on_disk.contains(&row.hash))
-        .map(|row| row.id)
+        .map(|row| (row.id, row.hash))
         .collect();
-    if zombie_ids.is_empty() {
+    if zombies.is_empty() {
         return Ok(0);
     }
 
     // Batch the deletes: a full fleet eval leaves hundreds of thousands of
     // `cached_path` rows, and per-row round-trips made the hourly pass never
     // finish (and never log). `cached_path_signature` cascades from `cached_path`.
+    // Each batch deletes the rows AND clears the gate flags they backed in one
+    // transaction, so the dispatch gate never trusts a just-purged zombie.
     const ZOMBIE_DELETE_BATCH: usize = 8000;
     let mut purged = 0u64;
-    for chunk in zombie_ids.chunks(ZOMBIE_DELETE_BATCH) {
-        match ECachedPath::delete_many()
-            .filter(CCachedPath::Id.is_in(chunk.to_vec()))
-            .exec(&state.worker_db)
-            .await
-        {
-            Ok(res) => purged += res.rows_affected,
+    for chunk in zombies.chunks(ZOMBIE_DELETE_BATCH) {
+        let ids: Vec<_> = chunk.iter().map(|(id, _)| *id).collect();
+        let hashes: Vec<String> = chunk.iter().map(|(_, h)| h.clone()).collect();
+        let deleted = async {
+            use sea_orm::TransactionTrait;
+            let txn = state.worker_db.inner().begin().await?;
+            let res = ECachedPath::delete_many()
+                .filter(CCachedPath::Id.is_in(ids))
+                .exec(&txn)
+                .await?;
+            gradient_db::clear_gate_flags_for_hashes(&txn, &hashes).await?;
+            txn.commit().await?;
+            Ok::<u64, sea_orm::DbErr>(res.rows_affected)
+        }
+        .await;
+        match deleted {
+            Ok(n) => purged += n,
             Err(e) => warn!(error = %e, batch = chunk.len(), "failed to purge zombie cached_path batch"),
         }
     }
