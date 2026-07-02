@@ -679,6 +679,18 @@ in {
           default = 336;
         };
 
+        narUploadGraceHours = lib.mkOption {
+          description = "Grace period in hours before the orphan-files GC reclaims a NAR object no database row references (covers the upload commit window).";
+          type = lib.types.ints.unsigned;
+          default = 24;
+        };
+
+        gcWedgedEvalHours = lib.mkOption {
+          description = "Hours after which an untouched active evaluation is presumed wedged and stops blocking the per-project evaluation GC. 0 = block forever.";
+          type = lib.types.ints.unsigned;
+          default = 24;
+        };
+
         narStorageOpenTimeoutSecs = lib.mkOption {
           description = ''
             Maximum time the server will wait to open a NAR object stream
@@ -920,6 +932,8 @@ in {
         GRADIENT_FEDERATE_PROTO = lib.boolToString cfg.proto.federate;
         GRADIENT_DELETE_STATE = lib.boolToString cfg.settings.deleteState;
         GRADIENT_NAR_TTL_HOURS = toString cfg.settings.cacheTtlHours;
+        GRADIENT_NAR_UPLOAD_GRACE_HOURS = toString cfg.settings.narUploadGraceHours;
+        GRADIENT_GC_WEDGED_EVAL_HOURS = toString cfg.settings.gcWedgedEvalHours;
         GRADIENT_NAR_STORAGE_OPEN_TIMEOUT_SECS = toString cfg.settings.narStorageOpenTimeoutSecs;
         GRADIENT_NAR_SEND_CHUNK_TIMEOUT_SECS = toString cfg.settings.narSendChunkTimeoutSecs;
         GRADIENT_MAX_CONCURRENT_NAR_SERVES = toString cfg.settings.maxConcurrentNarServes;

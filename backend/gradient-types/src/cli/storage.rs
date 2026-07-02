@@ -39,6 +39,18 @@ pub struct StorageArgs {
         default_value_t = 24
     )]
     pub keep_orphan_derivations_hours: i64,
+    /// Grace period in hours before the orphan-files pass reclaims a NAR object
+    /// no database row references. Covers the upload window where a NAR is on
+    /// disk before its `derivation`/`cached_path` rows commit. Set to 0 to
+    /// reclaim immediately (tests only).
+    #[arg(long, env = "GRADIENT_NAR_UPLOAD_GRACE_HOURS", default_value_t = 24)]
+    pub nar_upload_grace_hours: i64,
+    /// Hours after which an "active" evaluation that has not been touched is
+    /// presumed wedged and stops blocking the per-project evaluation GC (the
+    /// wedged evaluation itself is never deleted). 0 = a wedged evaluation
+    /// blocks GC forever.
+    #[arg(long, env = "GRADIENT_GC_WEDGED_EVAL_HOURS", default_value_t = 24)]
+    pub gc_wedged_eval_hours: i64,
     /// Target uncompressed size in bytes for each zstd log chunk written when a
     /// build finalizes. Chunks split on line boundaries, so an over-long line
     /// may exceed this. Defaults to 262144 (256 KiB).
@@ -83,6 +95,8 @@ impl Default for StorageArgs {
             keep_evaluations: 30,
             nar_ttl_hours: 336,
             keep_orphan_derivations_hours: 24,
+            nar_upload_grace_hours: 24,
+            gc_wedged_eval_hours: 24,
             log_chunk_bytes: 262144,
             max_storage_gb: 0,
             eval_cache_max_total_bytes: 10 * 1024 * 1024 * 1024,

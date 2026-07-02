@@ -41,8 +41,14 @@ pub async fn gc_project_evaluations(
         .await
         .context("GC: failed to query evaluations")?;
 
-    let statuses: Vec<EvaluationStatus> = all_evals.iter().map(|e| e.status).collect();
-    let delete_indices = evaluations_to_gc(&statuses, keep);
+    let evals: Vec<(EvaluationStatus, chrono::NaiveDateTime)> =
+        all_evals.iter().map(|e| (e.status, e.updated_at)).collect();
+    let delete_indices = evaluations_to_gc(
+        &evals,
+        keep,
+        ctx.config.storage.gc_wedged_eval_hours,
+        gradient_types::now(),
+    );
     if delete_indices.is_empty() {
         return Ok(());
     }
@@ -145,19 +151,49 @@ pub async fn gc_project_evaluations(
 /// Selects, by index into a newest-first evaluation list, which evaluations the
 /// per-project GC should delete for a given `keep` count.
 ///
-/// Returns nothing while any evaluation is active (Queued/Fetching/Evaluating*/
-/// Building/Waiting): an in-flight run may reuse NARs from older evaluations
-/// before it records its own build rows, so GC waits until the project is
-/// quiescent. Otherwise the `keep` most recent terminal evaluations are retained
-/// regardless of outcome - `Failed` and `Aborted` runs can still hold
-/// successfully-built NARs, so they are not sacrificed ahead of newer
+/// Returns nothing while any evaluation is genuinely active (Queued/Fetching/
+/// Evaluating*/Building/Waiting): an in-flight run may reuse NARs from older
+/// evaluations before it records its own build rows, so GC waits until the
+/// project is quiescent. An "active" evaluation untouched for more than
+/// `wedged_hours` is presumed wedged and stops blocking - otherwise one stuck
+/// run silently turns a scheduler bug into unbounded storage growth
+/// (`wedged_hours = 0` restores the unconditional block). Wedged evaluations
+/// are never deleted themselves; the `keep` most recent terminal evaluations
+/// are retained regardless of outcome - `Failed` and `Aborted` runs can still
+/// hold successfully-built NARs, so they are not sacrificed ahead of newer
 /// `Completed` ones.
-fn evaluations_to_gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
-    if keep == 0 || statuses.iter().any(|s| s.is_active()) {
+fn evaluations_to_gc(
+    evals: &[(EvaluationStatus, chrono::NaiveDateTime)],
+    keep: usize,
+    wedged_hours: i64,
+    now: chrono::NaiveDateTime,
+) -> Vec<usize> {
+    if keep == 0 {
         return Vec::new();
     }
 
-    (keep..statuses.len()).collect()
+    let blocking_active = evals.iter().any(|(status, updated_at)| {
+        status.is_active()
+            && (wedged_hours <= 0 || now - *updated_at < ChronoDuration::hours(wedged_hours))
+    });
+    if blocking_active {
+        return Vec::new();
+    }
+
+    let mut kept = 0usize;
+    let mut delete = Vec::new();
+    for (i, (status, _)) in evals.iter().enumerate() {
+        if status.is_active() {
+            continue;
+        }
+        if kept < keep {
+            kept += 1;
+        } else {
+            delete.push(i);
+        }
+    }
+
+    delete
 }
 
 /// Derivation GC pass (mark-and-sweep): deletes global `derivation` rows that lie
@@ -436,39 +472,61 @@ mod tests {
         assert_eq!(got, vec!["a".to_string(), "b".to_string()]);
     }
 
+    const WEDGED_HOURS: i64 = 24;
+
+    fn at(statuses: &[EvaluationStatus], age_hours: i64) -> Vec<(EvaluationStatus, chrono::NaiveDateTime)> {
+        let updated = gradient_types::now() - ChronoDuration::hours(age_hours);
+        statuses.iter().map(|s| (*s, updated)).collect()
+    }
+
+    fn gc(statuses: &[EvaluationStatus], keep: usize) -> Vec<usize> {
+        evaluations_to_gc(&at(statuses, 1), keep, WEDGED_HOURS, gradient_types::now())
+    }
+
     #[test]
     fn skips_gc_while_an_evaluation_is_active() {
         // An in-flight run may still reuse older NARs, so nothing is deleted -
         // even completed evaluations far beyond `keep` are retained this pass.
-        assert!(evaluations_to_gc(&[Building, Completed], 1).is_empty());
-        assert!(evaluations_to_gc(&[Queued, Building, Waiting, Fetching], 1).is_empty());
-        assert!(evaluations_to_gc(&[Building, Completed, Aborted, Completed], 1).is_empty());
+        assert!(gc(&[Building, Completed], 1).is_empty());
+        assert!(gc(&[Queued, Building, Waiting, Fetching], 1).is_empty());
+        assert!(gc(&[Building, Completed, Aborted, Completed], 1).is_empty());
+    }
+
+    #[test]
+    fn wedged_active_evaluation_stops_blocking_but_is_never_deleted() {
+        // An eval "active" for longer than the wedged threshold no longer
+        // freezes the project's GC; terminal evals beyond keep are reclaimed,
+        // the wedged eval itself is skipped.
+        let evals = at(&[Building, Completed, Failed, Completed], 48);
+        assert_eq!(
+            evaluations_to_gc(&evals, 1, WEDGED_HOURS, gradient_types::now()),
+            vec![2, 3]
+        );
+        // wedged_hours = 0 restores the unconditional block.
+        assert!(evaluations_to_gc(&evals, 1, 0, gradient_types::now()).is_empty());
     }
 
     #[test]
     fn retains_keep_most_recent_terminal_regardless_of_outcome() {
         // A newer Aborted/Failed run is kept ahead of an older Completed one;
         // its successfully-built NARs are not sacrificed.
-        assert_eq!(evaluations_to_gc(&[Aborted, Completed], 1), vec![1]);
-        assert_eq!(evaluations_to_gc(&[Completed, Aborted, Failed], 2), vec![2]);
+        assert_eq!(gc(&[Aborted, Completed], 1), vec![1]);
+        assert_eq!(gc(&[Completed, Aborted, Failed], 2), vec![2]);
     }
 
     #[test]
     fn keeps_single_terminal_within_keep() {
-        assert!(evaluations_to_gc(&[Aborted], 1).is_empty());
-        assert!(evaluations_to_gc(&[Failed], 1).is_empty());
+        assert!(gc(&[Aborted], 1).is_empty());
+        assert!(gc(&[Failed], 1).is_empty());
     }
 
     #[test]
     fn deletes_terminal_evaluations_beyond_keep() {
-        assert_eq!(
-            evaluations_to_gc(&[Completed, Failed, Completed], 1),
-            vec![1, 2]
-        );
+        assert_eq!(gc(&[Completed, Failed, Completed], 1), vec![1, 2]);
     }
 
     #[test]
     fn keep_zero_deletes_nothing() {
-        assert!(evaluations_to_gc(&[Completed, Aborted], 0).is_empty());
+        assert!(gc(&[Completed, Aborted], 0).is_empty());
     }
 }
