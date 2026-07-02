@@ -52,6 +52,45 @@ pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     shutdown.spawn(async move { instance_metrics_loop(s5).await });
     let s6 = Arc::clone(&scheduler);
     shutdown.spawn(async move { worker_liveness_loop(s6).await });
+    let s7 = Arc::clone(&scheduler);
+    shutdown.spawn(async move { consistency_sweep_loop(s7).await });
+}
+
+/// Periodic read-only invariant check: counts stale gate flags, unpromoted-ready
+/// anchors, unbacked trusted outputs, and wedged Building evals so a dead zone
+/// becomes a warning long before a user reports a stuck evaluation. Transient
+/// non-zero counts right after a transition are normal; persistent ones are not.
+async fn consistency_sweep_loop(scheduler: Arc<Scheduler>) {
+    let secs = scheduler
+        .state
+        .config
+        .metrics_args
+        .graph_consistency_interval_secs;
+    if secs == 0 {
+        info!("graph consistency sweep disabled (graph_consistency_interval_secs = 0)");
+        return;
+    }
+
+    let mut interval = tokio::time::interval(Duration::from_secs(secs.max(1)));
+    let cancel = scheduler.state.shutdown.token();
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = interval.tick() => {}
+        }
+        match gradient_db::graph_consistency_report(&scheduler.state.worker_db).await {
+            Ok(report) if report.total() > 0 => warn!(
+                stale_closure_complete = report.stale_closure_complete,
+                stale_drv_closure_cached = report.stale_drv_closure_cached,
+                unpromoted_ready = report.unpromoted_ready,
+                unbacked_trusted_outputs = report.unbacked_trusted_outputs,
+                wedged_building_evals = report.wedged_building_evals,
+                "graph consistency sweep found invariant violations"
+            ),
+            Ok(_) => debug!("graph consistency sweep clean"),
+            Err(e) => error!(error = %e, "graph consistency sweep failed"),
+        }
+    }
 }
 
 /// Unregister workers that have gone silent past the heartbeat deadline.

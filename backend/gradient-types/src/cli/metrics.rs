@@ -53,6 +53,12 @@ pub struct MetricsArgs {
     /// Interval in seconds between InstanceContext window recomputations.
     #[arg(long, env = "GRADIENT_INSTANCE_METRICS_INTERVAL", default_value_t = 30)]
     pub instance_metrics_interval_secs: u64,
+
+    /// Interval in seconds between read-only build-graph consistency sweeps
+    /// (stale gate flags, unpromoted-ready anchors, unbacked trusted outputs,
+    /// wedged Building evaluations are logged as warnings). 0 disables.
+    #[arg(long, env = "GRADIENT_GRAPH_CONSISTENCY_INTERVAL", default_value_t = 300)]
+    pub graph_consistency_interval_secs: u64,
 }
 
 impl Default for MetricsArgs {
@@ -69,6 +75,7 @@ impl Default for MetricsArgs {
             otlp_push_interval_secs: 30,
             dispatch_record_candidates: false,
             instance_metrics_interval_secs: 30,
+            graph_consistency_interval_secs: 300,
         }
     }
 }

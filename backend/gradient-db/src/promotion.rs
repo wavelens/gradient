@@ -155,7 +155,7 @@ pub async fn promote_dependents<C: ConnectionTrait>(
 /// and every build dependency itself `closure_complete` **or** `substitutable`.
 /// Shared verbatim by the targeted up-ripple (`propagate_closure_complete`) and
 /// the global self-heal fixpoint (`reconcile_closure_complete`).
-const CLOSURE_COMPLETE_GATE: &str = r#"
+pub(crate) const CLOSURE_COMPLETE_GATE: &str = r#"
     db.status = 3
     AND db.edges_complete
     AND NOT EXISTS (
@@ -290,7 +290,7 @@ pub async fn reconcile_closure_complete<C: ConnectionTrait>(db: &C) -> Result<()
 /// independent of build/substitute status: a substitutable dependency's `.drv`
 /// is still a structural reference of any dependent's `.drv` and so must be
 /// cached for the dependent's import to succeed.
-const DRV_CLOSURE_CACHED_GATE: &str = r#"
+pub(crate) const DRV_CLOSURE_CACHED_GATE: &str = r#"
     db.edges_complete
     AND EXISTS (
         SELECT 1 FROM derivation d

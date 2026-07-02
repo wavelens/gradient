@@ -389,7 +389,7 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
 /// straight from an upstream (not from our cache). The completion path records each
 /// output's `cached_path` before flipping the anchor terminal (#303/#399), so a
 /// genuinely-complete anchor is never selected mid-completion.
-const UNBACKED_TRUSTED_OUTPUTS_SELECT: &str = r#"
+pub(crate) const UNBACKED_TRUSTED_OUTPUTS_SELECT: &str = r#"
     SELECT DISTINCT o.hash
     FROM derivation_output o
     JOIN derivation_build db ON db.derivation = o.derivation
