@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -53,61 +54,43 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
         .all(&state.worker_db)
         .await?;
 
+    // One tracker snapshot instead of a read lock per eval; `add_pending` is
+    // idempotent under the write lock, so the snapshot race is harmless.
+    let evals: Vec<MEvaluation> = {
+        let tracker = scheduler.job_tracker.read().await;
+        evals
+            .into_iter()
+            .filter(|e| !tracker.contains_job(&format!("eval:{}", e.id)))
+            .collect()
+    };
+    if evals.is_empty() {
+        return Ok(());
+    }
+
+    let maps = EvalDispatchMaps::load(state, &evals).await?;
+    let split_fetch = scheduler.worker_pool.read().await.has_idle_eval_only_worker();
+    let eval_history = scheduler.eval_history.load();
+
     for eval in evals {
         let job_id = format!("eval:{}", eval.id);
 
-        // Skip if already in the scheduler (pending or active).
-        if scheduler.job_tracker.read().await.contains_job(&job_id) {
+        let Some(commit) = maps.commits.get(&eval.commit) else {
+            error!(evaluation_id = %eval.id, "commit not found for evaluation");
             continue;
-        }
-
-        let commit = match ECommit::find_by_id(eval.commit)
-            .one(&state.worker_db)
-            .await?
-        {
-            Some(c) => c,
-            None => {
-                error!(evaluation_id = %eval.id, "commit not found for evaluation");
-                continue;
-            }
-        };
-
-        let sidecar = if eval.kind == gradient_entity::evaluation::EvaluationKind::InputUpdate {
-            use gradient_entity::evaluation_input_update as eiu;
-            eiu::Entity::find()
-                .filter(eiu::Column::Evaluation.eq(eval.id))
-                .one(&state.worker_db)
-                .await?
-        } else {
-            None
         };
 
         // An `input_update` eval's own commit is blank (the generated flake.lock
         // commit is unknown until the PR is pushed); fetch from the base recorded
         // in the sidecar instead.
-        let commit_sha = match &sidecar {
+        let sidecar = maps.sidecars.get(&eval.id);
+        let commit_sha = match sidecar {
             Some(s) => s.base_commit.clone(),
             None => vec_to_hex(&commit.hash),
         };
 
-        let input_overrides = {
-            use gradient_entity::evaluation_flake_input_override as efio;
-            use sea_orm::QueryOrder;
-            efio::Entity::find()
-                .filter(efio::Column::Evaluation.eq(eval.id))
-                .order_by_asc(efio::Column::InputName)
-                .all(&state.worker_db)
-                .await?
-                .into_iter()
-                .map(|r| gradient_types::proto::FlakeInputOverride {
-                    input_name: r.input_name,
-                    url: r.url,
-                })
-                .collect::<Vec<_>>()
-        };
-
+        let input_overrides = maps.overrides.get(&eval.id).cloned().unwrap_or_default();
         let input_update = sidecar.map(|s| gradient_types::proto::InputUpdateSpec {
-            generator: s.generator,
+            generator: s.generator.clone(),
             inputs: s
                 .target_inputs
                 .as_array()
@@ -115,7 +98,6 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
                 .unwrap_or_default(),
         });
 
-        let split_fetch = scheduler.worker_pool.read().await.has_idle_eval_only_worker();
         let wildcards = eval
             .wildcard
             .parse::<Wildcard>()
@@ -130,19 +112,16 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             input_update,
         );
 
-        let organization_id = organization_id_for_eval(state, &eval).await;
-        let org_id = match organization_id {
-            Some(id) => id,
-            None => {
-                error!(evaluation_id = %eval.id, "could not determine organization for evaluation");
-                continue;
-            }
+        let Some(project_id) = eval.project else {
+            error!(evaluation_id = %eval.id, "evaluation has no project");
+            continue;
+        };
+        let Some(org_id) = maps.orgs.get(&project_id).copied() else {
+            error!(evaluation_id = %eval.id, %project_id, "could not determine organization for evaluation");
+            continue;
         };
 
-        let history = eval
-            .project
-            .and_then(|p| scheduler.eval_history.load().get(&p).copied())
-            .unwrap_or_default();
+        let history = eval_history.get(&project_id).copied().unwrap_or_default();
 
         let pending = PendingEvalJob {
             evaluation_id: eval.id,
@@ -163,6 +142,95 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
     }
 
     Ok(())
+}
+
+/// Every per-eval row a dispatch pass needs, loaded in one IN-list query per
+/// table instead of a round-trip per queued evaluation.
+struct EvalDispatchMaps {
+    commits: HashMap<CommitId, MCommit>,
+    sidecars: HashMap<EvaluationId, gradient_entity::evaluation_input_update::Model>,
+    overrides: HashMap<EvaluationId, Vec<gradient_types::proto::FlakeInputOverride>>,
+    orgs: HashMap<ProjectId, OrganizationId>,
+}
+
+impl EvalDispatchMaps {
+    async fn load(
+        state: &Arc<ServerState>,
+        evals: &[MEvaluation],
+    ) -> Result<Self, sea_orm::DbErr> {
+        use sea_orm::QueryOrder;
+
+        let commit_ids: Vec<CommitId> =
+            evals.iter().map(|e| e.commit).collect::<HashSet<_>>().into_iter().collect();
+        let commits = gradient_db::fetch_in_chunks(&commit_ids, |chunk| async move {
+            ECommit::find()
+                .filter(CCommit::Id.is_in(chunk))
+                .all(&state.worker_db)
+                .await
+        })
+        .await?
+        .into_iter()
+        .map(|c| (c.id, c))
+        .collect();
+
+        let update_ids: Vec<EvaluationId> = evals
+            .iter()
+            .filter(|e| e.kind == gradient_entity::evaluation::EvaluationKind::InputUpdate)
+            .map(|e| e.id)
+            .collect();
+        use gradient_entity::evaluation_input_update as eiu;
+        let sidecars = gradient_db::fetch_in_chunks(&update_ids, |chunk| async move {
+            eiu::Entity::find()
+                .filter(eiu::Column::Evaluation.is_in(chunk))
+                .all(&state.worker_db)
+                .await
+        })
+        .await?
+        .into_iter()
+        .map(|s| (s.evaluation, s))
+        .collect();
+
+        let eval_ids: Vec<EvaluationId> = evals.iter().map(|e| e.id).collect();
+        use gradient_entity::evaluation_flake_input_override as efio;
+        let mut overrides: HashMap<EvaluationId, Vec<gradient_types::proto::FlakeInputOverride>> =
+            HashMap::new();
+        for r in gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {
+            efio::Entity::find()
+                .filter(efio::Column::Evaluation.is_in(chunk))
+                .order_by_asc(efio::Column::InputName)
+                .all(&state.worker_db)
+                .await
+        })
+        .await?
+        {
+            overrides
+                .entry(r.evaluation)
+                .or_default()
+                .push(gradient_types::proto::FlakeInputOverride {
+                    input_name: r.input_name,
+                    url: r.url,
+                });
+        }
+
+        let project_ids: Vec<ProjectId> = evals
+            .iter()
+            .filter_map(|e| e.project)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let orgs = gradient_db::fetch_in_chunks(&project_ids, |chunk| async move {
+            EProject::find()
+                .filter(CProject::Id.is_in(chunk))
+                .all(&state.worker_db)
+                .await
+        })
+        .await?
+        .into_iter()
+        .map(|p| (p.id, p.organization))
+        .collect();
+
+        Ok(Self { commits, sidecars, overrides, orgs })
+    }
 }
 
 /// Build the eval `FlakeJob` and its `required_paths` from the evaluation's
