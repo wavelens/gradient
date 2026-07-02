@@ -15,7 +15,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_db::{
-    cascade_dependency_failed, eval_anchor_statuses, fail_latest_attempt,
+    cascade_dependency_failed, fail_latest_attempt,
     update_derivation_build_status, update_evaluation_status,
 };
 use gradient_types::*;
@@ -675,121 +675,11 @@ impl<'a> BuildStateHandler<'a> {
     }
 
     /// After an anchor reaches a terminal status, sweep every evaluation that
-    /// references the derivation (via `build_job`) and finalize the ones whose
-    /// whole anchor set is now resolved.
+    /// references the derivation and finalize the settled ones. Idempotent
+    /// belt-and-braces around the emitter's own finalize (which is skipped when
+    /// the state machine rejects a racing transition).
     async fn check_referencing_evals_done(&self, derivation: DerivationId) -> Result<()> {
-        let evals =
-            gradient_db::evals_referencing_derivation(&self.state.worker_db, derivation).await?;
-        for evaluation_id in evals {
-            self.check_evaluation_done(evaluation_id).await?;
-        }
-
-        Ok(())
-    }
-
-    /// Finalize every evaluation referencing any of `derivations`, deduped. The
-    /// bulk graph sweeps (`reconcile_dependency_failed`) move anchors with raw SQL
-    /// that bypasses the single-row status hook's reactive `check_evaluation_done`,
-    /// so an eval whose last active anchor the sweep just settled would otherwise
-    /// hang `Building`; drive finalization here instead.
-    pub(crate) async fn finalize_evals_for_derivations(
-        &self,
-        derivations: &[DerivationId],
-    ) -> Result<()> {
-        let mut seen = std::collections::HashSet::new();
-        for &derivation in derivations {
-            for evaluation_id in
-                gradient_db::evals_referencing_derivation(&self.state.worker_db, derivation).await?
-            {
-                if seen.insert(evaluation_id) {
-                    self.check_evaluation_done(evaluation_id).await?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Transitions the evaluation to its final state if all its anchors are done.
-    ///
-    /// Graph-derived via `eval_anchor_statuses`: returns early while any anchor is
-    /// still active (Created/Queued/Building/FailedTransient) or the evaluation is
-    /// not `Building`. Otherwise `Failed` when any anchor is a terminal failure or
-    /// the eval has an error message, else `Completed`.
-    pub(crate) async fn check_evaluation_done(&self, evaluation_id: EvaluationId) -> Result<()> {
-        let statuses = eval_anchor_statuses(&self.state.worker_db, evaluation_id)
-            .await
-            .context("fetch eval anchor statuses")?;
-
-        let any_active = statuses.iter().any(|s| {
-            matches!(
-                s,
-                BuildStatus::Created
-                    | BuildStatus::Queued
-                    | BuildStatus::Building
-                    | BuildStatus::FailedTransient
-            )
-        });
-        if any_active {
-            return Ok(());
-        }
-
-        let Some(eval) = EEvaluation::find_by_id(evaluation_id)
-            .one(&self.state.worker_db)
-            .await?
-        else {
-            return Ok(());
-        };
-
-        if !matches!(eval.status, EvaluationStatus::Building) {
-            return Ok(());
-        }
-
-        let any_failed = statuses.iter().any(|s| {
-            matches!(
-                s,
-                BuildStatus::FailedPermanent
-                    | BuildStatus::FailedTimeout
-                    | BuildStatus::DependencyFailed
-            )
-        });
-
-        // Also treat error-level evaluation messages (nix eval errors, attr
-        // resolution failures) as a failure signal - the evaluation was only
-        // partially successful even if every discovered build passed.
-        let eval_error_messages = EEvaluationMessage::find()
-            .filter(CEvaluationMessage::Evaluation.eq(evaluation_id))
-            .filter(CEvaluationMessage::Level.eq(gradient_entity::evaluation_message::MessageLevel::Error))
-            .all(&self.state.worker_db)
-            .await
-            .context("fetch eval error messages")?;
-
-        let target = if !any_failed && eval_error_messages.is_empty() {
-            EvaluationStatus::Completed
-        } else {
-            EvaluationStatus::Failed
-        };
-        info!(
-            %evaluation_id,
-            ?target,
-            any_failed,
-            eval_errors = eval_error_messages.len(),
-            "evaluation finished"
-        );
-
-        // Authoritative resync of the entry-point histogram now the eval has
-        // settled. The incremental deltas (#383) fire only from the single-row
-        // status hook; every bulk path (promote_ready/promote_dependents/
-        // cascade_dependency_failed/requeue_failed_anchors) moves anchors with
-        // raw SQL that bypasses it, so the live counts drift. A terminal eval has
-        // a fixed graph, so one recompute makes the displayed bar exact.
-        if let Err(e) =
-            gradient_db::reconcile_eval_dep_counts(&self.state.worker_db, evaluation_id).await
-        {
-            warn!(error = %e, %evaluation_id, "reconcile_eval_dep_counts at eval settle failed");
-        }
-
-        update_evaluation_status(&self.state.db(), eval, target).await;
+        gradient_db::finalize_evals_for_derivations(&self.state.db(), &[derivation]).await?;
         Ok(())
     }
 
@@ -1304,22 +1194,12 @@ pub async fn handle_build_job_failed(
         .await
 }
 
-pub(crate) async fn check_evaluation_done(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-) -> Result<()> {
-    BuildStateHandler::new(state)
-        .check_evaluation_done(evaluation_id)
-        .await
-}
-
 pub(crate) async fn finalize_evals_for_derivations(
     state: &Arc<ServerState>,
     derivations: &[DerivationId],
 ) -> Result<()> {
-    BuildStateHandler::new(state)
-        .finalize_evals_for_derivations(derivations)
-        .await
+    gradient_db::finalize_evals_for_derivations(&state.db(), derivations).await?;
+    Ok(())
 }
 
 pub async fn reconcile_waiting_state(

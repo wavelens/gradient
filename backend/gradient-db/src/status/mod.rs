@@ -11,6 +11,7 @@
 mod abort;
 mod derivation_build_status;
 mod effects;
+mod eval_finalize;
 mod evaluation_status;
 mod logging;
 
@@ -19,6 +20,7 @@ pub use derivation_build_status::{
     notify_build_status_for_derivations, update_derivation_build_status,
 };
 pub use effects::{TransitionChange, emit_transition_effects};
+pub use eval_finalize::{check_evaluation_done, finalize_evals_for_derivations};
 pub use evaluation_status::{update_evaluation_status, update_evaluation_status_with_error};
 pub use logging::{
     PHASE_SUBJECT_BUILD, PHASE_SUBJECT_EVALUATION, finalize_build_log, insert_evaluation_message,
