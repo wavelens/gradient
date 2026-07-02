@@ -427,6 +427,47 @@ pub async fn demote_unbacked_trusted_outputs<C: ConnectionTrait>(
     Ok(reset)
 }
 
+/// Clear the dispatch-gate trust flags invalidated by deleting the cache
+/// artifacts behind `hashes`, in the same transaction as the deletion when the
+/// caller runs one. `drv_closure_cached` is cleared on anchors whose own `.drv`
+/// hash was deleted; `closure_complete` on producers of a deleted output hash.
+/// Only the directly-affected anchors are touched - the bidirectional fixpoints
+/// on the reconcile tick ripple the clears up the graph. Without this, GC
+/// deletion (hourly) and flag repair (5s tick) live on different clocks and the
+/// gate trusts a vanished artifact in the window between them.
+pub async fn clear_gate_flags_for_hashes<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<(), sea_orm::DbErr> {
+    for chunk in hashes.chunks(crate::IN_CHUNK_SIZE) {
+        let chunk: Vec<String> = chunk.to_vec();
+        db.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            UPDATE derivation_build db SET drv_closure_cached = false
+            FROM derivation d
+            WHERE d.id = db.derivation AND db.drv_closure_cached AND d.hash = ANY($1)
+            "#,
+            [chunk.clone().into()],
+        ))
+        .await?;
+
+        db.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            UPDATE derivation_build db SET closure_complete = false
+            WHERE db.closure_complete
+              AND db.derivation IN (
+                SELECT o.derivation FROM derivation_output o WHERE o.hash = ANY($1))
+            "#,
+            [chunk.into()],
+        ))
+        .await?;
+    }
+
+    Ok(())
+}
+
 /// Self-heal flag clear: a proven-missing path leaves every (transitive)
 /// referrer closure-incomplete, so drop `closure_complete` up the chain - on the
 /// cached NARs and the anchors that produced them - without deleting the healthy
