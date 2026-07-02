@@ -179,89 +179,55 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
 /// For every derivation built by an organization subscribed to `cache_id`
 /// whose outputs are all cached and whose dependency closure is already
-/// recorded, insert a `cache_derivation` row. Idempotent.
+/// recorded, insert a `cache_derivation` row. One set-based statement instead
+/// of a per-derivation query cascade (org scoping mirrors
+/// `gradient_db::derivation_ids_for_org`: project -> evaluation -> build_job).
+/// Idempotent.
 async fn record_newly_completed_derivations(
     state: &ServerState,
     cache_id: CacheId,
 ) -> anyhow::Result<()> {
-    let org_ids: Vec<OrganizationId> = EOrganizationCache::find()
-        .filter(COrganizationCache::Cache.eq(cache_id))
-        .all(&state.worker_db)
+    use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+
+    let inserted = state
+        .worker_db
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            INSERT INTO cache_derivation (id, cache, derivation, cached_at)
+            SELECT uuidv7(), $1, d.id, $2
+            FROM derivation d
+            WHERE d.id IN (
+                SELECT bj.derivation
+                FROM build_job bj
+                JOIN evaluation ev ON ev.id = bj.evaluation
+                JOIN project p ON p.id = ev.project
+                JOIN organization_cache oc ON oc.organization = p.organization
+                WHERE oc.cache = $1)
+              AND NOT EXISTS (
+                SELECT 1 FROM derivation_output o
+                WHERE o.derivation = d.id AND o.is_cached = false)
+              AND NOT EXISTS (
+                SELECT 1 FROM derivation_dependency e
+                WHERE e.derivation = d.id
+                  AND NOT EXISTS (
+                    SELECT 1 FROM cache_derivation cd
+                    WHERE cd.cache = $1 AND cd.derivation = e.dependency))
+              AND NOT EXISTS (
+                SELECT 1 FROM cache_derivation cd2
+                WHERE cd2.cache = $1 AND cd2.derivation = d.id)
+            "#,
+            [
+                cache_id.into_inner().into(),
+                gradient_types::now().into(),
+            ],
+        ))
         .await?
-        .into_iter()
-        .map(|oc| oc.organization)
-        .collect();
+        .rows_affected();
 
-    if org_ids.is_empty() {
-        return Ok(());
+    if inserted > 0 {
+        debug!(cache = %cache_id, inserted, "recorded newly closure-complete derivations");
     }
-
-    let mut drv_ids: HashSet<DerivationId> = HashSet::new();
-    for org_id in org_ids {
-        drv_ids.extend(gradient_db::derivation_ids_for_org(&state.worker_db, org_id).await?);
-    }
-
-    let now = gradient_types::now();
-    for drv_id in drv_ids {
-        if let Err(e) = try_record_cache_derivation(state, cache_id, drv_id, now).await {
-            warn!(cache = %cache_id, drv = %drv_id, error = %e, "try_record_cache_derivation failed");
-        }
-    }
-    Ok(())
-}
-
-async fn try_record_cache_derivation(
-    state: &ServerState,
-    cache_id: CacheId,
-    derivation_id: DerivationId,
-    now: chrono::NaiveDateTime,
-) -> anyhow::Result<()> {
-    let any_uncached = EDerivationOutput::find()
-        .filter(CDerivationOutput::Derivation.eq(derivation_id))
-        .filter(CDerivationOutput::IsCached.eq(false))
-        .one(&state.worker_db)
-        .await?
-        .is_some();
-    if any_uncached {
-        return Ok(());
-    }
-
-    let dep_edges = EDerivationDependency::find()
-        .filter(CDerivationDependency::Derivation.eq(derivation_id))
-        .all(&state.worker_db)
-        .await?;
-    for edge in dep_edges {
-        let present = ECacheDerivation::find()
-            .filter(CCacheDerivation::Cache.eq(cache_id))
-            .filter(CCacheDerivation::Derivation.eq(edge.dependency))
-            .one(&state.worker_db)
-            .await?
-            .is_some();
-        if !present {
-            return Ok(());
-        }
-    }
-
-    let already = ECacheDerivation::find()
-        .filter(CCacheDerivation::Cache.eq(cache_id))
-        .filter(CCacheDerivation::Derivation.eq(derivation_id))
-        .one(&state.worker_db)
-        .await?
-        .is_some();
-    if already {
-        return Ok(());
-    }
-
-    let row = MCacheDerivation {
-        id: CacheDerivationId::now_v7(),
-        cache: cache_id,
-        derivation: derivation_id,
-        cached_at: now,
-        ..Default::default()
-    }
-    .into_active_model();
-
-    row.insert(&state.worker_db).await?;
     Ok(())
 }
 
