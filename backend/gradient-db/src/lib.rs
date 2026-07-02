@@ -66,10 +66,10 @@ pub use self::graph_sql::{
 pub use self::org_cache::org_has_writable_cache;
 pub use self::org_derivations::derivation_ids_for_org;
 pub use self::promotion::{
-    cascade_dependency_failed, mark_edges_complete_for_eval, promote_dependents, promote_ready,
-    propagate_closure_complete, reconcile_cached_anchors_for_eval, reconcile_closure_complete,
-    reconcile_dependency_failed, reconcile_drv_closure_cached, requeue_failed_anchors,
-    requeue_failed_closure_for_eval,
+    cascade_dependency_failed, find_ready_anchors, mark_edges_complete_for_eval,
+    promote_dependents, promote_ready, propagate_closure_complete,
+    reconcile_cached_anchors_for_eval, reconcile_closure_complete, reconcile_dependency_failed,
+    reconcile_drv_closure_cached, requeue_failed_anchors, requeue_failed_closure_for_eval,
 };
 pub use self::reachability::{
     build_jobs_for_derivation, derivation_is_reachable, eval_anchor_statuses,

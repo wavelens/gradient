@@ -64,10 +64,12 @@ pub async fn promote_dependents<C: ConnectionTrait>(
         .await?,
     );
 
+    let deps_ready = crate::graph_sql::deps_ready_predicate("db");
     affected.extend(returned_derivations(
         db.query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"
+            format!(
+                r#"
             UPDATE derivation_build AS db
             SET status = 1, queued_at = (now() AT TIME ZONE 'UTC'),
                 updated_at = (now() AT TIME ZONE 'UTC')
@@ -77,25 +79,10 @@ pub async fn promote_dependents<C: ConnectionTrait>(
                 SELECT dd.derivation FROM derivation_dependency dd WHERE dd.dependency = $1)
               AND EXISTS (
                 SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
-              AND (
-                db.substitutable
-                OR (
-                  NOT EXISTS (
-                    SELECT 1 FROM derivation_dependency e
-                    LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
-                    WHERE e.derivation = db.derivation
-                      AND (dep.status IS NULL
-                           OR NOT (((dep.status IN (3, 7)) AND dep.closure_complete)
-                                   OR dep.substitutable)))
-                  AND NOT EXISTS (
-                    SELECT 1 FROM derivation_input_source s
-                    WHERE s.derivation = db.derivation
-                      AND NOT EXISTS (
-                        SELECT 1 FROM cached_path cp
-                        WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL))
-                ))
+              AND (db.substitutable OR ({deps_ready}))
             RETURNING db.derivation
-            "#,
+            "#
+            ),
             [id()],
         ))
         .await?,
@@ -395,38 +382,69 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationI
     let rows = db
         .query_all(Statement::from_string(
             DatabaseBackend::Postgres,
-            r#"
-            UPDATE derivation_build
-            SET status = 1, queued_at = (now() AT TIME ZONE 'UTC'),
-                updated_at = (now() AT TIME ZONE 'UTC')
-            WHERE status = 0
-              AND edges_complete
-              AND EXISTS (
-                SELECT 1 FROM build_job bj WHERE bj.derivation = derivation_build.derivation)
-              AND (
-                derivation_build.substitutable
-                OR (
-                  NOT EXISTS (
-                    SELECT 1 FROM derivation_dependency e
-                    LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
-                    WHERE e.derivation = derivation_build.derivation
-                      AND (dep.status IS NULL
-                           OR NOT (((dep.status IN (3, 7)) AND dep.closure_complete)
-                                   OR dep.substitutable)))
-                  AND NOT EXISTS (
-                    SELECT 1 FROM derivation_input_source s
-                    WHERE s.derivation = derivation_build.derivation
-                      AND NOT EXISTS (
-                        SELECT 1 FROM cached_path cp
-                        WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL))
-                ))
-            RETURNING derivation_build.derivation
-            "#
-            .to_string(),
+            promote_ready_sql(),
         ))
         .await?;
 
     Ok(returned_derivations(rows))
+}
+
+fn promote_ready_sql() -> String {
+    let deps_ready = crate::graph_sql::deps_ready_predicate("db");
+    format!(
+        r#"
+        UPDATE derivation_build AS db
+        SET status = 1, queued_at = (now() AT TIME ZONE 'UTC'),
+            updated_at = (now() AT TIME ZONE 'UTC')
+        WHERE db.status = 0
+          AND db.edges_complete
+          AND EXISTS (
+            SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
+          AND (db.substitutable OR ({deps_ready}))
+        RETURNING db.derivation
+        "#
+    )
+}
+
+/// The dispatch gate: every `Queued` anchor whose inputs are genuinely present
+/// right now. Reachability (`build_job` EXISTS) skips anchors left Queued after
+/// their last referencing eval was torn down; a `substitutable` anchor dispatches
+/// with no dependency wait at all (its NAR is on an upstream cache); otherwise the
+/// anchor's own `.drv` closure must be importable (`drv_closure_cached`) and the
+/// shared readiness predicate must hold. Ordered by dependency count desc
+/// (integration builds first), then age. This is [`promote_ready`]'s predicate
+/// applied one step later - both embed [`crate::graph_sql::deps_ready_predicate`].
+pub async fn find_ready_anchors<C: ConnectionTrait>(
+    db: &C,
+) -> Result<Vec<gradient_types::MDerivationBuild>, DbErr> {
+    use sea_orm::EntityTrait;
+    gradient_types::EDerivationBuild::find()
+        .from_raw_sql(Statement::from_string(
+            DatabaseBackend::Postgres,
+            find_ready_anchors_sql(),
+        ))
+        .all(db)
+        .await
+}
+
+fn find_ready_anchors_sql() -> String {
+    let deps_ready = crate::graph_sql::deps_ready_predicate("db");
+    format!(
+        r#"
+        SELECT db.*
+        FROM derivation_build db
+        WHERE db.status = 1
+          AND db.edges_complete
+          AND EXISTS (
+            SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
+          AND (db.substitutable OR (db.drv_closure_cached AND {deps_ready}))
+        ORDER BY
+            (SELECT count(*)
+               FROM derivation_dependency dd
+              WHERE dd.derivation = db.derivation) DESC,
+            db.updated_at ASC
+        "#
+    )
 }
 
 /// Mark `edges_complete` across `evaluation`'s full build-dependency closure, not
@@ -620,6 +638,29 @@ mod tests {
         assert!(
             sql.contains("RETURNING db.derivation"),
             "must return failed derivations so the caller can finalize their evals: {sql}"
+        );
+    }
+
+    /// Promotion and the dispatch gate must share one readiness definition: both
+    /// statements embed `deps_ready_predicate` verbatim, and only the dispatch
+    /// gate adds the `.drv`-importability arm (`drv_closure_cached`). A drift
+    /// between the two is a latent dead zone (promoted but never dispatchable,
+    /// or dispatched without its inputs).
+    #[test]
+    fn promotion_and_dispatch_share_the_readiness_predicate() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let predicate = norm(crate::graph_sql::deps_ready_predicate("db"));
+        let promote = norm(promote_ready_sql());
+        let dispatch = norm(find_ready_anchors_sql());
+        assert!(promote.contains(&predicate), "promote_ready must embed the shared predicate: {promote}");
+        assert!(dispatch.contains(&predicate), "find_ready_anchors must embed the shared predicate: {dispatch}");
+        assert!(
+            dispatch.contains("db.substitutable OR (db.drv_closure_cached AND"),
+            "dispatch additionally requires an importable .drv closure: {dispatch}"
+        );
+        assert!(
+            promote.contains("db.substitutable OR (NOT EXISTS"),
+            "promotion must not gate on drv_closure_cached (the eval pushes .drvs progressively): {promote}"
         );
     }
 

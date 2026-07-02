@@ -1013,75 +1013,10 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     let state = &scheduler.state;
 
-    // Ready anchors: a global `derivation_build` is Queued, some `build_job`
-    // still references its derivation (reachable from a surviving evaluation),
-    // and either it is `substitutable` (its NAR is on an upstream cache, so it
-    // dispatches out of order with no dependency wait at all - #456) or all of:
-    // `drv_closure_cached` (the worker can import this `.drv` - its full input-
-    // `.drv` closure has been pushed, no longer racing the eval), every
-    // dependency ready (terminal-success AND `closure_complete`, or itself
-    // `substitutable`), and all input sources cached. The reachability check
-    // skips anchors left Queued after their last referencing eval was torn down,
-    // which have no driving evaluation to attribute the build to. Ordered by
-    // dependency count desc (integration builds first), then age.
-    let anchors_sql = sea_orm::Statement::from_string(
-        sea_orm::DbBackend::Postgres,
-        format!(
-            r#"
-            SELECT db.*
-            FROM public.derivation_build db
-            WHERE db.status = {queued}
-              AND db.edges_complete
-              AND EXISTS (
-                  SELECT 1 FROM public.build_job bj WHERE bj.derivation = db.derivation
-              )
-              AND (
-                db.substitutable
-                OR (
-                  db.drv_closure_cached
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM public.derivation_dependency dep_edge
-                      WHERE dep_edge.derivation = db.derivation
-                        AND NOT EXISTS (
-                            SELECT 1
-                            FROM public.derivation_build dep_db
-                            WHERE dep_db.derivation = dep_edge.dependency
-                              AND (
-                                (dep_db.status IN ({completed}, {substituted})
-                                   AND dep_db.closure_complete)
-                                OR dep_db.substitutable
-                              )
-                        )
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM public.derivation_input_source s
-                      WHERE s.derivation = db.derivation
-                        AND NOT EXISTS (
-                            SELECT 1 FROM public.cached_path cp
-                            WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL
-                        )
-                  )
-                )
-              )
-            ORDER BY
-                (SELECT count(*)
-                   FROM public.derivation_dependency dd
-                  WHERE dd.derivation = db.derivation) DESC,
-                db.updated_at ASC
-        "#,
-            queued = i32::from(BuildStatus::Queued),
-            completed = i32::from(BuildStatus::Completed),
-            substituted = i32::from(BuildStatus::Substituted),
-        ),
-    );
-
+    // The dispatch gate lives in gradient_db next to promotion so both embed the
+    // one shared readiness predicate; see `gradient_db::find_ready_anchors`.
     let started = std::time::Instant::now();
-    let anchors = EDerivationBuild::find()
-        .from_raw_sql(anchors_sql)
-        .all(&state.worker_db)
-        .await?;
+    let anchors = gradient_db::find_ready_anchors(&state.worker_db).await?;
     if anchors.is_empty() {
         return Ok(());
     }
