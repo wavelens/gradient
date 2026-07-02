@@ -49,7 +49,7 @@ impl ScoreRule for ResourceFitRule {
         if m.ram_free_mb > 0 && h.predicted_peak_ram_mb > m.ram_free_mb {
             let overshoot = ((h.predicted_peak_ram_mb - m.ram_free_mb) as f64 / m.ram_free_mb as f64).min(self.max_overshoot);
             // bounded so WaitTime can overcome it; scaled by per-job and instance-wide oom trend
-            s -= self.ram_overshoot_penalty * overshoot * (1.0 + h.oom_rate as f64) * (1.0 + instance.oom_rate.w1h);
+            s -= self.ram_overshoot_penalty * overshoot * (1.0 + h.oom_rate as f64) * (1.0 + instance.oom_rate.w1h.unwrap_or(0.0));
         }
 
         let cpu_threshold = instance.cpu_time_ms.w1h_or(self.cpu_heavy_threshold_ms as f64);
@@ -142,11 +142,10 @@ impl ScoreRule for ResourceSaturationRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob, Windowed, WorkerMetricsView};
+    use crate::context::{HistoryPrediction, ScoredJob, Windowed, WorkerMetricsView};
     use gradient_types::ids::OrganizationId;
 
     fn job_with_history(h: HistoryPrediction) -> ScoredJob<'static> {
-        let provider: &'static dyn Fn() -> HistoryPrediction = Box::leak(Box::new(move || h));
         ScoredJob::new_build(
             "test",
             OrganizationId::now_v7(),
@@ -154,7 +153,8 @@ mod tests {
             false,
             false,
             None,
-            LazyProviders { closure_size: &|| None, history: provider },
+            None,
+            h,
         )
     }
 
@@ -163,7 +163,7 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
-        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now }
+        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now: gradient_types::now() }
     }
 
     fn worker_with(metrics: WorkerMetricsView) -> WorkerContext<'static> {
@@ -190,7 +190,7 @@ mod tests {
         let rule = ResourceFitRule::default();
         let w = worker_with(WorkerMetricsView { ram_free_mb: 100, ..Default::default() });
         let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 1_000_000, oom_rate: 1.0, samples: 5, ..Default::default() });
-        let inst = InstanceContext { oom_rate: Windowed { w1h: 1.0, ..Default::default() }, ..Default::default() };
+        let inst = InstanceContext { oom_rate: Windowed { w1h: Some(1.0), ..Default::default() }, ..Default::default() };
 
         let s = rule.score(&ctx(&job), &w, &inst);
         assert!(s >= -(rule.ram_overshoot_penalty * rule.max_overshoot * 4.0) - 0.001, "penalty must be bounded by clamp, got {s}");
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(rule.score(&ctx(&job), &strong, &InstanceContext::default()), 0.0);
 
         let mut inst = InstanceContext::default();
-        inst.cpu_time_ms.w1h = 10_000.0;
+        inst.cpu_time_ms.w1h = Some(10_000.0);
         assert!(rule.score(&ctx(&job), &strong, &inst) > 0.0);
     }
 
@@ -270,7 +270,8 @@ mod tests {
             false,
             false,
             None,
-            LazyProviders { closure_size: &|| None, history: &|| HistoryPrediction::default() },
+            None,
+            HistoryPrediction::default(),
         )
     }
 
@@ -375,9 +376,9 @@ mod tests {
         let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 2000, samples: 5, ..Default::default() });
 
         let mut low = InstanceContext::default();
-        low.oom_rate.w1h = 0.0;
+        low.oom_rate.w1h = Some(0.0);
         let mut high = InstanceContext::default();
-        high.oom_rate.w1h = 1.0;
+        high.oom_rate.w1h = Some(1.0);
 
         assert!(rule.score(&ctx(&job), &w, &low) > rule.score(&ctx(&job), &w, &high));
     }

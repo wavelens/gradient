@@ -101,11 +101,10 @@ impl ScoreRule for DiskAffinityRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob, WorkerMetricsView};
+    use crate::context::{HistoryPrediction, ScoredJob, WorkerMetricsView};
     use gradient_types::ids::OrganizationId;
 
     fn job(is_fixed_output: bool, h: HistoryPrediction) -> ScoredJob<'static> {
-        let provider: &'static dyn Fn() -> HistoryPrediction = Box::leak(Box::new(move || h));
         ScoredJob::new_build(
             "t",
             OrganizationId::now_v7(),
@@ -113,12 +112,13 @@ mod tests {
             false,
             is_fixed_output,
             None,
-            LazyProviders { closure_size: &|| None, history: provider },
+            None,
+            h,
         )
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
-        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now }
+        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now: gradient_types::now() }
     }
 
     fn worker_with(metrics: WorkerMetricsView) -> WorkerContext<'static> {
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(rule.score(&ctx(&j), &fast, &InstanceContext::default()), 0.0);
 
         let mut inst = InstanceContext::default();
-        inst.disk_bytes.w24h = (10 * 1_048_576) as f64;
+        inst.disk_bytes.w24h = Some((10 * 1_048_576) as f64);
         assert!(rule.score(&ctx(&j), &fast, &inst) > 0.0);
     }
 }

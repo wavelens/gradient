@@ -39,6 +39,11 @@ impl ScoreRule for MissingPathsRule {
             None => 0.0,
             Some(n) => {
                 let base = self.k * instance.missing_paths.w1h_or(self.fallback_avg);
+                if base <= 0.0 {
+                    // Fleet average is a measured zero: any missing path is
+                    // above average, a fully-warm worker gets the full bonus.
+                    return if n == 0 { self.cap } else { 0.0 };
+                }
 
                 self.cap * (1.0 - (n as f64 / base).clamp(0.0, 1.0))
             }
@@ -165,6 +170,10 @@ impl ScoreRule for DependencyCountRule {
         }
 
         let base = self.k * instance.dependency_cnt.w1h_or(self.fallback_avg);
+        if base <= 0.0 {
+            // Fleet average is a measured zero: any dependent is above average.
+            return if job.dependency_count > 0 { self.cap } else { 0.0 };
+        }
 
         self.cap * (job.dependency_count as f64 / base).clamp(0.0, 1.0)
     }
@@ -204,6 +213,11 @@ impl ScoreRule for WaitTimeRule {
     ) -> f64 {
         let waited = (job.now - job.ready_at).num_seconds().max(0) as f64;
         let avg = instance.wait_secs.w1h_or(self.fallback_avg_secs);
+        if avg <= 0.0 {
+            // Fleet average is a measured zero: any wait at all is infinitely
+            // above it, saturating the anti-starvation cap.
+            return if waited > 0.0 { self.cap } else { 0.0 };
+        }
 
         (self.gain * (waited / avg)).min(self.cap)
     }
@@ -301,7 +315,7 @@ impl ScoreRule for RescoreWaitRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::{HistoryPrediction, LazyProviders, ScoredJob};
+    use crate::context::{HistoryPrediction, ScoredJob};
     use gradient_types::ids::OrganizationId;
 
     fn build_job(arch: &'static str) -> ScoredJob<'static> {
@@ -312,10 +326,8 @@ mod tests {
             false,
             false,
             None,
-            LazyProviders {
-                closure_size: &|| None,
-                history: &|| HistoryPrediction::default(),
-            },
+            None,
+            HistoryPrediction::default(),
         )
     }
 
@@ -335,7 +347,7 @@ mod tests {
         let w = worker(&archs, false);
         let now = gradient_types::now();
         let inst = crate::context::InstanceContext {
-            missing_paths: crate::context::Windowed { w1h: 10.0, ..Default::default() },
+            missing_paths: crate::context::Windowed { w1h: Some(10.0), ..Default::default() },
             ..Default::default()
         };
 
@@ -355,7 +367,7 @@ mod tests {
         let w = worker(&archs, false);
         let now = gradient_types::now();
         let inst = crate::context::InstanceContext {
-            missing_paths: crate::context::Windowed { w1h: 10.0, ..Default::default() },
+            missing_paths: crate::context::Windowed { w1h: Some(10.0), ..Default::default() },
             ..Default::default()
         };
 
@@ -375,7 +387,7 @@ mod tests {
         let w = worker(&archs, false);
         let now = gradient_types::now();
         let inst = crate::context::InstanceContext {
-            nar_size_mb: crate::context::Windowed { w1h: 100.0, ..Default::default() },
+            nar_size_mb: crate::context::Windowed { w1h: Some(100.0), ..Default::default() },
             ..Default::default()
         };
 
@@ -432,7 +444,7 @@ mod tests {
         let now = gradient_types::now();
         // w1h=10 → base=20; dep=1 → 2.5, dep=15 → 37.5 (both below saturation)
         let inst = crate::context::InstanceContext {
-            dependency_cnt: crate::context::Windowed { w1h: 10.0, ..Default::default() },
+            dependency_cnt: crate::context::Windowed { w1h: Some(10.0), ..Default::default() },
             ..Default::default()
         };
 
@@ -452,7 +464,7 @@ mod tests {
         let w = worker(&archs, false);
         let now = gradient_types::now();
         let inst = crate::context::InstanceContext {
-            dependency_cnt: crate::context::Windowed { w1h: 10.0, ..Default::default() },
+            dependency_cnt: crate::context::Windowed { w1h: Some(10.0), ..Default::default() },
             ..Default::default()
         };
 
@@ -471,7 +483,7 @@ mod tests {
         let w = worker(&archs, false);
         let now = gradient_types::now();
         let inst = crate::context::InstanceContext {
-            dependency_cnt: crate::context::Windowed { w1h: 10.0, ..Default::default() },
+            dependency_cnt: crate::context::Windowed { w1h: Some(10.0), ..Default::default() },
             ..Default::default()
         };
 

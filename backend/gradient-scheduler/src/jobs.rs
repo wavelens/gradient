@@ -16,7 +16,7 @@ use gradient_types::proto::{
     RequiredPath,
 };
 
-use gradient_score::{JobContext, LazyProviders, ScoredJob, ScoringPolicy, WorkerContext};
+use gradient_score::{JobContext, ScoredJob, ScoringPolicy, WorkerContext};
 
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
@@ -548,7 +548,7 @@ impl JobTracker {
                         b.history.build_time_ms as f64
                     } else {
                         // no per-build history: weight by instance avg, half for prefer-local (cheaper) builds
-                        (if b.prefer_local_build { 0.5 } else { 1.0 }) * instance.build_time_ms.w1h
+                        (if b.prefer_local_build { 0.5 } else { 1.0 }) * instance.build_time_ms.w1h.unwrap_or(0.0)
                     };
                     *org_work.entry(b.org_id).or_default() += w;
                     total_work += w;
@@ -566,16 +566,6 @@ impl JobTracker {
         // every candidate's breakdown is essentially free.
         let score_of = |id: &str, job: &PendingJob| -> ScoredCandidate {
             let s = worker_scores.as_ref().and_then(|ws| ws.get(id));
-            let closure_size = match job {
-                PendingJob::Build(b) => b.closure_size,
-                PendingJob::Eval(_) => None,
-            };
-            let history = match job {
-                PendingJob::Build(b) => b.history,
-                PendingJob::Eval(_) => gradient_score::HistoryPrediction::default(),
-            };
-            let closure = move || closure_size;
-            let history_provider = move || history;
             let scored = match job {
                 PendingJob::Eval(e) => ScoredJob::new_eval(
                     id,
@@ -589,8 +579,9 @@ impl JobTracker {
                     b.architecture.as_str(),
                     b.prefer_local_build,
                     b.is_fixed_output,
-                    None,
-                    LazyProviders { closure_size: &closure, history: &history_provider },
+                    b.pname.as_deref(),
+                    b.closure_size,
+                    b.history,
                 ),
             };
             let ctx = JobContext {

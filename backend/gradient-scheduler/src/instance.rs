@@ -21,36 +21,42 @@ pub struct InstanceCounts {
 }
 
 /// Build a [`gradient_score::Windowed`] from a 5m/1h/24h column triple.
-fn windowed(w5m: f64, w1h: f64, w24h: f64) -> gradient_score::Windowed {
+/// `None` (SQL NULL: no samples in the window) stays `None` - a window with no
+/// data must be distinguishable from a measured zero.
+fn windowed(
+    w5m: Option<f64>,
+    w1h: Option<f64>,
+    w24h: Option<f64>,
+) -> gradient_score::Windowed {
     gradient_score::Windowed { w5m, w1h, w24h }
 }
 
 #[derive(Debug, Default, FromQueryResult)]
 struct MetricRow {
-    peak_ram_5m: f64,
-    peak_ram_1h: f64,
-    peak_ram_24h: f64,
-    cpu_time_5m: f64,
-    cpu_time_1h: f64,
-    cpu_time_24h: f64,
-    cpu_pct_5m: f64,
-    cpu_pct_1h: f64,
-    cpu_pct_24h: f64,
-    disk_5m: f64,
-    disk_1h: f64,
-    disk_24h: f64,
-    network_5m: f64,
-    network_1h: f64,
-    network_24h: f64,
-    build_time_5m: f64,
-    build_time_1h: f64,
-    build_time_24h: f64,
-    closure_5m: f64,
-    closure_1h: f64,
-    closure_24h: f64,
-    oom_5m: f64,
-    oom_1h: f64,
-    oom_24h: f64,
+    peak_ram_5m: Option<f64>,
+    peak_ram_1h: Option<f64>,
+    peak_ram_24h: Option<f64>,
+    cpu_time_5m: Option<f64>,
+    cpu_time_1h: Option<f64>,
+    cpu_time_24h: Option<f64>,
+    cpu_pct_5m: Option<f64>,
+    cpu_pct_1h: Option<f64>,
+    cpu_pct_24h: Option<f64>,
+    disk_5m: Option<f64>,
+    disk_1h: Option<f64>,
+    disk_24h: Option<f64>,
+    network_5m: Option<f64>,
+    network_1h: Option<f64>,
+    network_24h: Option<f64>,
+    build_time_5m: Option<f64>,
+    build_time_1h: Option<f64>,
+    build_time_24h: Option<f64>,
+    closure_5m: Option<f64>,
+    closure_1h: Option<f64>,
+    closure_24h: Option<f64>,
+    oom_5m: Option<f64>,
+    oom_1h: Option<f64>,
+    oom_24h: Option<f64>,
     completed_5m: f64,
     completed_1h: f64,
     completed_24h: f64,
@@ -58,22 +64,22 @@ struct MetricRow {
 
 #[derive(Debug, Default, FromQueryResult)]
 struct DispatchRow {
-    wait_5m: f64,
-    wait_1h: f64,
-    wait_24h: f64,
-    nar_5m: f64,
-    nar_1h: f64,
-    nar_24h: f64,
-    miss_5m: f64,
-    miss_1h: f64,
-    miss_24h: f64,
-    dep_5m: f64,
-    dep_1h: f64,
-    dep_24h: f64,
+    wait_5m: Option<f64>,
+    wait_1h: Option<f64>,
+    wait_24h: Option<f64>,
+    nar_5m: Option<f64>,
+    nar_1h: Option<f64>,
+    nar_24h: Option<f64>,
+    miss_5m: Option<f64>,
+    miss_1h: Option<f64>,
+    miss_24h: Option<f64>,
+    dep_5m: Option<f64>,
+    dep_1h: Option<f64>,
+    dep_24h: Option<f64>,
 }
 
 /// Compute a fresh windowed snapshot from `derivation_metric` + `dispatched_job`.
-/// Each query degrades independently - errors are logged and that query's windows zero; counts always survive.
+/// Each query degrades independently - errors are logged and that query's windows read absent; counts always survive.
 pub async fn compute_instance_context(
     db: &impl ConnectionTrait,
     counts: InstanceCounts,
@@ -85,30 +91,30 @@ pub async fn compute_instance_context(
 
     let metric_sql = r#"
         SELECT
-          COALESCE(AVG(peak_ram_mb)    FILTER (WHERE created_at >= $1), 0)::float8 AS peak_ram_5m,
-          COALESCE(AVG(peak_ram_mb)    FILTER (WHERE created_at >= $2), 0)::float8 AS peak_ram_1h,
-          COALESCE(AVG(peak_ram_mb)    FILTER (WHERE created_at >= $3), 0)::float8 AS peak_ram_24h,
-          COALESCE(AVG(cpu_time_ms)    FILTER (WHERE created_at >= $1), 0)::float8 AS cpu_time_5m,
-          COALESCE(AVG(cpu_time_ms)    FILTER (WHERE created_at >= $2), 0)::float8 AS cpu_time_1h,
-          COALESCE(AVG(cpu_time_ms)    FILTER (WHERE created_at >= $3), 0)::float8 AS cpu_time_24h,
-          COALESCE(AVG(avg_cpu_pct)    FILTER (WHERE created_at >= $1), 0)::float8 AS cpu_pct_5m,
-          COALESCE(AVG(avg_cpu_pct)    FILTER (WHERE created_at >= $2), 0)::float8 AS cpu_pct_1h,
-          COALESCE(AVG(avg_cpu_pct)    FILTER (WHERE created_at >= $3), 0)::float8 AS cpu_pct_24h,
-          COALESCE(AVG(disk_read_bytes + disk_write_bytes) FILTER (WHERE created_at >= $1), 0)::float8 AS disk_5m,
-          COALESCE(AVG(disk_read_bytes + disk_write_bytes) FILTER (WHERE created_at >= $2), 0)::float8 AS disk_1h,
-          COALESCE(AVG(disk_read_bytes + disk_write_bytes) FILTER (WHERE created_at >= $3), 0)::float8 AS disk_24h,
-          COALESCE(AVG(peak_network_mbps) FILTER (WHERE created_at >= $1), 0)::float8 AS network_5m,
-          COALESCE(AVG(peak_network_mbps) FILTER (WHERE created_at >= $2), 0)::float8 AS network_1h,
-          COALESCE(AVG(peak_network_mbps) FILTER (WHERE created_at >= $3), 0)::float8 AS network_24h,
-          COALESCE(AVG(build_time_ms)  FILTER (WHERE created_at >= $1), 0)::float8 AS build_time_5m,
-          COALESCE(AVG(build_time_ms)  FILTER (WHERE created_at >= $2), 0)::float8 AS build_time_1h,
-          COALESCE(AVG(build_time_ms)  FILTER (WHERE created_at >= $3), 0)::float8 AS build_time_24h,
-          COALESCE(AVG(closure_size)   FILTER (WHERE created_at >= $1), 0)::float8 AS closure_5m,
-          COALESCE(AVG(closure_size)   FILTER (WHERE created_at >= $2), 0)::float8 AS closure_1h,
-          COALESCE(AVG(closure_size)   FILTER (WHERE created_at >= $3), 0)::float8 AS closure_24h,
-          COALESCE(AVG(CASE WHEN oom_killed THEN 1.0 ELSE 0.0 END) FILTER (WHERE created_at >= $1), 0)::float8 AS oom_5m,
-          COALESCE(AVG(CASE WHEN oom_killed THEN 1.0 ELSE 0.0 END) FILTER (WHERE created_at >= $2), 0)::float8 AS oom_1h,
-          COALESCE(AVG(CASE WHEN oom_killed THEN 1.0 ELSE 0.0 END) FILTER (WHERE created_at >= $3), 0)::float8 AS oom_24h,
+          (AVG(peak_ram_mb)    FILTER (WHERE created_at >= $1))::float8 AS peak_ram_5m,
+          (AVG(peak_ram_mb)    FILTER (WHERE created_at >= $2))::float8 AS peak_ram_1h,
+          (AVG(peak_ram_mb)    FILTER (WHERE created_at >= $3))::float8 AS peak_ram_24h,
+          (AVG(cpu_time_ms)    FILTER (WHERE created_at >= $1))::float8 AS cpu_time_5m,
+          (AVG(cpu_time_ms)    FILTER (WHERE created_at >= $2))::float8 AS cpu_time_1h,
+          (AVG(cpu_time_ms)    FILTER (WHERE created_at >= $3))::float8 AS cpu_time_24h,
+          (AVG(avg_cpu_pct)    FILTER (WHERE created_at >= $1))::float8 AS cpu_pct_5m,
+          (AVG(avg_cpu_pct)    FILTER (WHERE created_at >= $2))::float8 AS cpu_pct_1h,
+          (AVG(avg_cpu_pct)    FILTER (WHERE created_at >= $3))::float8 AS cpu_pct_24h,
+          (AVG(disk_read_bytes + disk_write_bytes) FILTER (WHERE created_at >= $1))::float8 AS disk_5m,
+          (AVG(disk_read_bytes + disk_write_bytes) FILTER (WHERE created_at >= $2))::float8 AS disk_1h,
+          (AVG(disk_read_bytes + disk_write_bytes) FILTER (WHERE created_at >= $3))::float8 AS disk_24h,
+          (AVG(peak_network_mbps) FILTER (WHERE created_at >= $1))::float8 AS network_5m,
+          (AVG(peak_network_mbps) FILTER (WHERE created_at >= $2))::float8 AS network_1h,
+          (AVG(peak_network_mbps) FILTER (WHERE created_at >= $3))::float8 AS network_24h,
+          (AVG(build_time_ms)  FILTER (WHERE created_at >= $1))::float8 AS build_time_5m,
+          (AVG(build_time_ms)  FILTER (WHERE created_at >= $2))::float8 AS build_time_1h,
+          (AVG(build_time_ms)  FILTER (WHERE created_at >= $3))::float8 AS build_time_24h,
+          (AVG(closure_size)   FILTER (WHERE created_at >= $1))::float8 AS closure_5m,
+          (AVG(closure_size)   FILTER (WHERE created_at >= $2))::float8 AS closure_1h,
+          (AVG(closure_size)   FILTER (WHERE created_at >= $3))::float8 AS closure_24h,
+          (AVG(CASE WHEN oom_killed THEN 1.0 ELSE 0.0 END) FILTER (WHERE created_at >= $1))::float8 AS oom_5m,
+          (AVG(CASE WHEN oom_killed THEN 1.0 ELSE 0.0 END) FILTER (WHERE created_at >= $2))::float8 AS oom_1h,
+          (AVG(CASE WHEN oom_killed THEN 1.0 ELSE 0.0 END) FILTER (WHERE created_at >= $3))::float8 AS oom_24h,
           COALESCE(COUNT(*) FILTER (WHERE created_at >= $1), 0)::float8 AS completed_5m,
           COALESCE(COUNT(*) FILTER (WHERE created_at >= $2), 0)::float8 AS completed_1h,
           COALESCE(COUNT(*) FILTER (WHERE created_at >= $3), 0)::float8 AS completed_24h
@@ -133,18 +139,18 @@ pub async fn compute_instance_context(
 
     let dispatch_sql = r#"
         SELECT
-          COALESCE(AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $1), 0)::float8 AS wait_5m,
-          COALESCE(AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $2), 0)::float8 AS wait_1h,
-          COALESCE(AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $3), 0)::float8 AS wait_24h,
-          COALESCE(AVG((job_context->>'missing_nar_size')::bigint / 1048576.0) FILTER (WHERE dispatched_at >= $1), 0)::float8 AS nar_5m,
-          COALESCE(AVG((job_context->>'missing_nar_size')::bigint / 1048576.0) FILTER (WHERE dispatched_at >= $2), 0)::float8 AS nar_1h,
-          COALESCE(AVG((job_context->>'missing_nar_size')::bigint / 1048576.0) FILTER (WHERE dispatched_at >= $3), 0)::float8 AS nar_24h,
-          COALESCE(AVG((job_context->>'missing_count')::int) FILTER (WHERE dispatched_at >= $1), 0)::float8 AS miss_5m,
-          COALESCE(AVG((job_context->>'missing_count')::int) FILTER (WHERE dispatched_at >= $2), 0)::float8 AS miss_1h,
-          COALESCE(AVG((job_context->>'missing_count')::int) FILTER (WHERE dispatched_at >= $3), 0)::float8 AS miss_24h,
-          COALESCE(AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $1), 0)::float8 AS dep_5m,
-          COALESCE(AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $2), 0)::float8 AS dep_1h,
-          COALESCE(AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $3), 0)::float8 AS dep_24h
+          (AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $1))::float8 AS wait_5m,
+          (AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $2))::float8 AS wait_1h,
+          (AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $3))::float8 AS wait_24h,
+          (AVG((job_context->>'missing_nar_size')::bigint / 1048576.0) FILTER (WHERE dispatched_at >= $1))::float8 AS nar_5m,
+          (AVG((job_context->>'missing_nar_size')::bigint / 1048576.0) FILTER (WHERE dispatched_at >= $2))::float8 AS nar_1h,
+          (AVG((job_context->>'missing_nar_size')::bigint / 1048576.0) FILTER (WHERE dispatched_at >= $3))::float8 AS nar_24h,
+          (AVG((job_context->>'missing_count')::int) FILTER (WHERE dispatched_at >= $1))::float8 AS miss_5m,
+          (AVG((job_context->>'missing_count')::int) FILTER (WHERE dispatched_at >= $2))::float8 AS miss_1h,
+          (AVG((job_context->>'missing_count')::int) FILTER (WHERE dispatched_at >= $3))::float8 AS miss_24h,
+          (AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $1))::float8 AS dep_5m,
+          (AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $2))::float8 AS dep_1h,
+          (AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $3))::float8 AS dep_24h
         FROM dispatched_job
         WHERE kind = 1 AND ready_at IS NOT NULL AND dispatched_at >= $3
     "#;
@@ -177,7 +183,7 @@ pub async fn compute_instance_context(
         nar_size_mb: windowed(dispatch.nar_5m, dispatch.nar_1h, dispatch.nar_24h),
         missing_paths: windowed(dispatch.miss_5m, dispatch.miss_1h, dispatch.miss_24h),
         dependency_cnt: windowed(dispatch.dep_5m, dispatch.dep_1h, dispatch.dep_24h),
-        completed: windowed(metric.completed_5m, metric.completed_1h, metric.completed_24h),
+        completed: windowed(Some(metric.completed_5m), Some(metric.completed_1h), Some(metric.completed_24h)),
         active_builds: counts.active_builds,
         pending_builds: counts.pending_builds,
         total_workers: counts.total_workers,
@@ -282,12 +288,12 @@ mod tests {
         };
         let ic = compute_instance_context(&db, counts, gradient_types::now()).await;
 
-        assert_eq!(ic.peak_ram_mb, windowed(100.0, 200.0, 300.0));
-        assert_eq!(ic.build_time_ms.w1h, 12.0);
-        assert_eq!(ic.completed.w24h, 400.0);
-        assert_eq!(ic.wait_secs, windowed(1.5, 2.5, 3.5));
-        assert_eq!(ic.nar_size_mb.w24h, 19.0);
-        assert_eq!(ic.dependency_cnt.w1h, 22.0);
+        assert_eq!(ic.peak_ram_mb, windowed(Some(100.0), Some(200.0), Some(300.0)));
+        assert_eq!(ic.build_time_ms.w1h, Some(12.0));
+        assert_eq!(ic.completed.w24h, Some(400.0));
+        assert_eq!(ic.wait_secs, windowed(Some(1.5), Some(2.5), Some(3.5)));
+        assert_eq!(ic.nar_size_mb.w24h, Some(19.0));
+        assert_eq!(ic.dependency_cnt.w1h, Some(22.0));
         assert_eq!(ic.active_builds, 2);
         assert_eq!(ic.pending_builds, 3);
         assert_eq!(ic.total_workers, 5);
