@@ -55,9 +55,13 @@
       machine.succeed("${nix} flake lock /root/fixture")
       machine.succeed("${git} -C /root/fixture add -A && ${git} -C /root/fixture commit -qm lock --allow-empty")
 
-      # ── Drive the eval-worker over its line-delimited JSON protocol ────────
-      # Shutdown produces no response, so we expect one line per List/Resolve.
-      banner("Run eval-worker")
+      # ── Drive the eval-worker over the production rkyv transport ───────────
+      # The wire is binary frames, so the hidden `--eval-driver` harness reads
+      # these requests as JSON lines, runs them through the real parent-side
+      # transport (spawn, version handshake, frames, streamed resolve) against
+      # a real subprocess, and prints one JSON response line per request.
+      # Shutdown produces no response, so we expect one line per other request.
+      banner("Run eval-worker via --eval-driver")
       requests = [
           {"op": "list", "repository": REPO, "wildcards": ["packages.x86_64-linux.*"]},
           {"op": "list", "repository": REPO, "wildcards": ["packages.x86_64-linux.#"]},
@@ -72,15 +76,14 @@
       b64 = base64.b64encode(payload.encode()).decode()
       machine.succeed(f"echo {b64} | base64 -d > /root/reqs.jsonl")
 
-      # `--eval-worker` is a flag (clap SetTrue); the env form GRADIENT_EVAL_WORKER=1
-      # is rejected by clap's bool parser. Mirror the production spawn (pool.rs).
       status, _ = machine.execute(
           "HOME=/root GRADIENT_WORKER_SERVER_URL=ws://dummy/proto "
-          "${worker} --eval-worker < /root/reqs.jsonl > /root/out.jsonl 2> /root/eval.log"
+          "GRADIENT_EVAL_CACHE_DIR=/root/eval-cache "
+          "${worker} --eval-driver /root/reqs.jsonl > /root/out.jsonl 2> /root/eval.log"
       )
       print(machine.succeed("cat /root/out.jsonl || true"))
       print(machine.succeed("cat /root/eval.log || true"))
-      assert status == 0, f"eval-worker exited {status}; see eval.log above"
+      assert status == 0, f"eval driver exited {status}; see eval.log above"
 
       responses = [json.loads(l) for l in machine.succeed("cat /root/out.jsonl").splitlines() if l.strip()]
       assert len(responses) == 5, f"expected 5 responses, got {len(responses)}: {responses}"
@@ -116,12 +119,14 @@
 
       # ── Fingerprint ↔ on-disk eval-cache path agreement (#386 L3) ──────────
       # The lock-only `fingerprint` op must yield the same key Nix names the
-      # on-disk cache after, so the worker can stage/pull `<fp>.sqlite`.
+      # on-disk cache after, so the worker can stage/pull `<fp>.sqlite`. The
+      # driver spawns the subprocess like the production pool, exporting the
+      # configured eval-cache dir as NIX_CACHE_HOME.
       banner("Assert fingerprint matches the eval-cache filename")
       assert responses[4]["kind"] == "fingerprint_ok", responses[4]
       fp = responses[4].get("fingerprint")
       assert fp, f"expected a fingerprint for the committed flake, got {fp}"
-      machine.succeed(f"test -f /root/.cache/nix/eval-cache-v6/{fp}.sqlite")
+      machine.succeed(f"test -f /root/eval-cache/eval-cache-v6/{fp}.sqlite")
 
       banner("Eval test PASSED")
       '';

@@ -8,99 +8,26 @@
 //!
 //! The parent process spawns one or more copies of the gradient-worker binary
 //! with `--eval-worker` to host a persistent [`NixEvaluator`]. Parent and
-//! worker exchange line-delimited JSON over the worker's stdin/stdout, so the
-//! libnix init cost is paid only once per worker (vs. once per `resolve` call
-//! when using the in-process resolver).
+//! worker exchange rkyv frames over the worker's stdin/stdout (see
+//! [`crate::ipc`]), so the libnix init cost is paid only once per worker.
 //!
-//! This file defines the wire protocol shared by both sides plus the
-//! subprocess entry point [`run_eval_worker`]. The pool implementation lives
-//! in [`super::worker_pool`].
+//! This file is the subprocess entry point [`run_eval_worker`]; the protocol
+//! lives in [`crate::ipc`] and the parent-side pool in the worker crate.
 
-use serde::{Deserialize, Serialize};
-use std::io::{BufRead, Write};
+use std::io::Write;
 use tracing::{error, trace};
 
+use crate::flake_walk::FlakeWalker;
+use crate::ipc::{
+    EVAL_IPC_VERSION, EvalRequest, EvalResponse, ResolvedItem, decode_request, encode_response,
+    read_frame, write_frame,
+};
 use crate::nix_eval::NixEvaluator;
 use crate::stats::StatsDelta;
 
-/// Request from parent → worker. One JSON object per line on the worker's stdin.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum EvalRequest {
-    /// Split `wildcards` into disjoint sub-patterns (one per first-wildcard
-    /// child) so the parent can fan discovery across the pool, one shard per
-    /// system within each worker's memory budget.
-    Plan {
-        repository: String,
-        wildcards: Vec<String>,
-    },
-    /// Discover all attribute paths in `repository` matching `wildcards`.
-    List {
-        repository: String,
-        wildcards: Vec<String>,
-    },
-    /// Resolve a batch of attribute paths to `(drv_path, references)` tuples.
-    /// Per-attr failures are reported in the response, not as a top-level err.
-    Resolve {
-        repository: String,
-        attrs: Vec<String>,
-    },
-    /// Return `repository`'s eval-cache fingerprint without evaluating it.
-    /// `None` in the response for mutable/dirty flakes.
-    Fingerprint { repository: String },
-    /// Fold the eval-cache WAL into the main `.sqlite` (truncate checkpoint).
-    /// Run once after all shards finish, before the fleet-share push.
-    Checkpoint { repository: String },
-    /// Ask the worker to exit cleanly. Parent uses this on graceful shutdown.
-    Shutdown,
-}
-
-/// Response from worker → parent. One JSON object per line on the worker's stdout.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum EvalResponse {
-    PlanOk {
-        sub_patterns: Vec<String>,
-    },
-    ListOk {
-        attrs: Vec<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        warnings: Vec<String>,
-        #[serde(default)]
-        stats: Option<crate::stats::StatsDelta>,
-    },
-    ResolveOk {
-        items: Vec<ResolvedItem>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        warnings: Vec<String>,
-        #[serde(default)]
-        stats: Option<crate::stats::StatsDelta>,
-    },
-    FingerprintOk {
-        fingerprint: Option<String>,
-    },
-    CheckpointOk,
-    Err {
-        message: String,
-    },
-}
-
-/// One element of a `ResolveOk` payload. Either `drv_path` is set (success)
-/// or `error` is set (failure for that one attr).
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ResolvedItem {
-    pub attr: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub drv_path: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub references: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
-/// Subprocess entry point. Reads `EvalRequest` lines from stdin, processes
-/// them with one persistent `NixEvaluator`, writes `EvalResponse` lines to
-/// stdout. Returns when stdin reaches EOF or a `Shutdown` request is received.
+/// Subprocess entry point. Reads [`EvalRequest`] frames from stdin, processes
+/// them with one persistent [`NixEvaluator`], writes [`EvalResponse`] frames
+/// to stdout. Returns when stdin reaches EOF or a `Shutdown` request arrives.
 ///
 /// Diagnostics go through `tracing` (configured in `worker::main` to write
 /// formatted records to stderr, which the parent inherits) so init failures
@@ -111,6 +38,11 @@ pub fn run_eval_worker() -> std::io::Result<()> {
     let stdout = std::io::stdout();
     let mut reader = stdin.lock();
     let mut writer = stdout.lock();
+
+    // Version handshake before the (slow) evaluator init, so the parent can
+    // reject a mid-run binary swap without waiting on libnix.
+    writer.write_all(&[EVAL_IPC_VERSION])?;
+    writer.flush()?;
 
     // Construct the evaluator once. If init fails we still loop so that the
     // parent gets an error response per request instead of a silent EOF; the
@@ -160,28 +92,30 @@ pub fn run_eval_worker() -> std::io::Result<()> {
         })
     };
 
-    let mut line = String::new();
+    // One walker (locked flake + open eval cache) reused across consecutive
+    // requests for the same repository, so a Plan/List/Resolve sequence pays
+    // the lock + cache open once. Writes are committed to the WAL after every
+    // request, so holding it open never withholds progress from shard peers.
+    let mut walkers = WalkerCache { entry: None };
+
     loop {
-        line.clear();
-        let n = match reader.read_line(&mut line) {
-            Ok(n) => n,
-            Err(e) => {
-                error!(error = %e, "eval worker: stdin read error");
-                return Err(e);
-            }
-        };
-        if n == 0 {
+        let Some(payload) = read_frame(&mut reader).inspect_err(|e| {
+            error!(error = %e, "eval worker: stdin read error");
+        })?
+        else {
             // EOF: parent closed the pipe.
             return Ok(());
-        }
+        };
 
-        let req: EvalRequest = match serde_json::from_str(line.trim_end()) {
+        let req = match decode_request(&payload) {
             Ok(r) => r,
             Err(e) => {
-                write_response(
+                // The length prefix kept the stream aligned, so an undecodable
+                // payload is per-request recoverable: report and keep serving.
+                send(
                     &mut writer,
                     &EvalResponse::Err {
-                        message: format!("malformed request: {}", e),
+                        message: format!("malformed request: {e}"),
                     },
                 )?;
                 continue;
@@ -197,184 +131,214 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             EvalRequest::Plan {
                 repository,
                 wildcards,
-            } => {
-                let Some(ev) = evaluator.as_ref() else {
-                    write_response(
-                        &mut writer,
-                        &EvalResponse::Err {
-                            message: "evaluator not initialized".to_string(),
-                        },
-                    )?;
-                    continue;
-                };
+            } => with_evaluator(&evaluator, |ev| {
                 // Warnings from priming the prefix attrset resurface when each
                 // shard re-forces it, so they are not captured here.
-                let result = (|| -> anyhow::Result<Vec<String>> {
-                    let walker = ev.walker(&repository)?;
+                or_err(walkers.with(ev, &repository, |walker| {
                     let shards = walker.plan_shards(&wildcards)?;
                     let _ = walker.commit_cache();
                     Ok(shards)
-                })();
-                match result {
-                    Ok(sub_patterns) => EvalResponse::PlanOk { sub_patterns },
-                    Err(e) => EvalResponse::Err {
-                        message: format!("{:#}", e),
-                    },
-                }
-            }
+                })
+                .map(|sub_patterns| EvalResponse::PlanOk { sub_patterns }))
+            }),
             EvalRequest::List {
                 repository,
                 wildcards,
-            } => {
-                let Some(ev) = evaluator.as_ref() else {
-                    write_response(
-                        &mut writer,
-                        &EvalResponse::Err {
-                            message: "evaluator not initialized".to_string(),
-                        },
-                    )?;
-                    continue;
-                };
-                let (result, warnings) =
-                    capture_warnings_during(|| -> anyhow::Result<Vec<String>> {
-                        let walker = ev.walker(&repository)?;
+            } => with_evaluator(&evaluator, |ev| {
+                let (result, warnings) = capture_warnings_during(|| {
+                    walkers.with(ev, &repository, |walker| {
                         let attrs = walker.discover(&wildcards)?;
                         let _ = walker.commit_cache();
                         Ok(attrs)
-                    });
+                    })
+                });
                 let stats = take_delta(ev);
-                match result {
-                    Ok(attrs) => EvalResponse::ListOk {
-                        attrs,
-                        warnings,
-                        stats,
-                    },
-                    Err(e) => EvalResponse::Err {
-                        message: format!("{:#}", e),
-                    },
-                }
-            }
-            EvalRequest::Resolve { repository, attrs } => {
-                let Some(ev) = evaluator.as_ref() else {
-                    write_response(
-                        &mut writer,
-                        &EvalResponse::Err {
-                            message: "evaluator not initialized".to_string(),
-                        },
-                    )?;
-                    continue;
-                };
-
-                let mut all_warnings = Vec::new();
-                let mut items = Vec::with_capacity(attrs.len());
-                let (walker, build_warnings) = capture_warnings_during(|| ev.walker(&repository));
-                all_warnings.extend(build_warnings);
-
-                match walker {
-                    Ok(walker) => {
-                        for attr in attrs {
-                            let (result, warnings) =
-                                capture_warnings_during(|| walker.resolve(&attr));
-                            all_warnings.extend(warnings);
-                            match result {
-                                Ok((drv, references)) => items.push(ResolvedItem {
-                                    attr,
-                                    drv_path: Some(drv),
-                                    references,
-                                    error: None,
-                                }),
-                                Err(e) => items.push(ResolvedItem {
-                                    attr,
-                                    drv_path: None,
-                                    references: vec![],
-                                    error: Some(format!("{:#}", e)),
-                                }),
-                            }
-                        }
-
-                        let _ = walker.commit_cache();
-                    }
-                    Err(e) => {
-                        let msg = format!("{:#}", e);
-                        for attr in attrs {
-                            items.push(ResolvedItem {
-                                attr,
-                                drv_path: None,
-                                references: vec![],
-                                error: Some(msg.clone()),
-                            });
-                        }
-                    }
-                }
-
-                all_warnings.dedup();
-                let stats = take_delta(ev);
-                EvalResponse::ResolveOk {
-                    items,
-                    warnings: all_warnings,
+                or_err(result.map(|attrs| EvalResponse::ListOk {
+                    attrs,
+                    warnings,
                     stats,
-                }
-            }
-            EvalRequest::Fingerprint { repository } => {
-                let Some(ev) = evaluator.as_ref() else {
-                    write_response(
-                        &mut writer,
-                        &EvalResponse::Err {
-                            message: "evaluator not initialized".to_string(),
-                        },
-                    )?;
-                    continue;
-                };
-                match ev.fingerprint(&repository) {
-                    Ok(fingerprint) => EvalResponse::FingerprintOk { fingerprint },
-                    Err(e) => EvalResponse::Err {
-                        message: format!("{:#}", e),
+                }))
+            }),
+            EvalRequest::Resolve { repository, attrs } => {
+                let resp = match evaluator.as_ref() {
+                    None => EvalResponse::Err {
+                        message: "evaluator not initialized".to_string(),
                     },
-                }
-            }
-            EvalRequest::Checkpoint { repository } => {
-                let Some(ev) = evaluator.as_ref() else {
-                    write_response(
-                        &mut writer,
-                        &EvalResponse::Err {
-                            message: "evaluator not initialized".to_string(),
-                        },
-                    )?;
-                    continue;
+                    Some(ev) => {
+                        let (warnings, io) =
+                            stream_resolve(&mut writer, ev, &mut walkers, &repository, attrs);
+                        // A failed item-frame write means the parent is gone.
+                        io?;
+                        EvalResponse::ResolveEnd {
+                            warnings,
+                            stats: take_delta(ev),
+                        }
+                    }
                 };
-                let result =
-                    (|| -> anyhow::Result<()> { ev.walker(&repository)?.checkpoint_cache() })();
-                match result {
-                    Ok(()) => EvalResponse::CheckpointOk,
-                    Err(e) => EvalResponse::Err {
-                        message: format!("{:#}", e),
-                    },
-                }
+                send(&mut writer, &resp)?;
+                continue;
             }
+            EvalRequest::Fingerprint { repository } => with_evaluator(&evaluator, |ev| {
+                or_err(
+                    ev.fingerprint(&repository)
+                        .map(|fingerprint| EvalResponse::FingerprintOk { fingerprint }),
+                )
+            }),
+            EvalRequest::Checkpoint { repository } => with_evaluator(&evaluator, |ev| {
+                or_err(walkers
+                    .with(ev, &repository, |walker| walker.checkpoint_cache())
+                    .map(|()| EvalResponse::CheckpointOk))
+            }),
         };
 
-        let kind = match &resp {
-            EvalResponse::PlanOk { sub_patterns } => {
-                format!("PlanOk({} shards)", sub_patterns.len())
-            }
-            EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
-            EvalResponse::ResolveOk { items, .. } => format!("ResolveOk({} items)", items.len()),
-            EvalResponse::FingerprintOk { fingerprint } => {
-                format!("FingerprintOk({})", fingerprint.is_some())
-            }
-            EvalResponse::CheckpointOk => "CheckpointOk".to_string(),
-            EvalResponse::Err { message } => format!("Err({message})"),
-        };
-        trace!(%kind, "eval worker sending response");
-        write_response(&mut writer, &resp)?;
+        trace!(kind = response_kind(&resp), "eval worker sending response");
+        send(&mut writer, &resp)?;
     }
 }
 
-fn write_response<W: Write>(w: &mut W, resp: &EvalResponse) -> std::io::Result<()> {
-    let mut bytes = serde_json::to_vec(resp).map_err(std::io::Error::other)?;
-    bytes.push(b'\n');
-    w.write_all(&bytes)?;
-    w.flush()
+/// Runs `f` against the initialized evaluator, or answers the one canonical
+/// error when libnix failed to come up (the parent then discards this worker).
+fn with_evaluator<'ev>(
+    evaluator: &'ev Option<NixEvaluator>,
+    f: impl FnOnce(&'ev NixEvaluator) -> EvalResponse,
+) -> EvalResponse {
+    match evaluator {
+        Some(ev) => f(ev),
+        None => EvalResponse::Err {
+            message: "evaluator not initialized".to_string(),
+        },
+    }
+}
+
+/// Collapses an operation's error into the wire's `Err` response.
+fn or_err(result: anyhow::Result<EvalResponse>) -> EvalResponse {
+    result.unwrap_or_else(|e| EvalResponse::Err {
+        message: format!("{e:#}"),
+    })
+}
+
+/// Single-entry walker cache keyed by repository. Consecutive requests for the
+/// same flake (the common Plan/List/Resolve sequence) reuse one locked flake +
+/// open eval cache; a different repository replaces the entry.
+struct WalkerCache<'ev> {
+    entry: Option<(String, FlakeWalker<'ev>)>,
+}
+
+impl<'ev> WalkerCache<'ev> {
+    /// The cached walker for `repository`, opening (and caching) it if absent.
+    fn open(
+        &mut self,
+        ev: &'ev NixEvaluator,
+        repository: &str,
+    ) -> anyhow::Result<&FlakeWalker<'ev>> {
+        let stale = self.entry.as_ref().is_none_or(|(repo, _)| repo != repository);
+        if stale {
+            // Drop the previous walker before locking the next flake.
+            self.entry = None;
+            let walker = ev.walker(repository)?;
+            self.entry = Some((repository.to_string(), walker));
+        }
+
+        Ok(&self.entry.as_ref().expect("entry just ensured").1)
+    }
+
+    fn with<T>(
+        &mut self,
+        ev: &'ev NixEvaluator,
+        repository: &str,
+        f: impl FnOnce(&FlakeWalker<'ev>) -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        f(self.open(ev, repository)?)
+    }
+}
+
+/// Resolve each attr in order, streaming one `ResolveItem` frame per attr the
+/// moment it is resolved. Returns the batch's captured warnings plus the IO
+/// status of the frame writes. A walker that cannot open becomes one per-attr
+/// error item per attr (streamed), never a top-level `Err`, matching the
+/// per-attr isolation contract of `Resolve`.
+fn stream_resolve<'ev, W: Write>(
+    writer: &mut W,
+    ev: &'ev NixEvaluator,
+    walkers: &mut WalkerCache<'ev>,
+    repository: &str,
+    attrs: Vec<String>,
+) -> (Vec<String>, std::io::Result<()>) {
+    let mut all_warnings = Vec::new();
+    let mut io = Ok(());
+    let emit = |writer: &mut W, io: &mut std::io::Result<()>, item: ResolvedItem| {
+        if io.is_ok() {
+            *io = send(writer, &EvalResponse::ResolveItem { item });
+        }
+    };
+
+    let (walker_result, build_warnings) = capture_warnings_during(|| walkers.open(ev, repository));
+    all_warnings.extend(build_warnings);
+
+    match walker_result {
+        Ok(walker) => {
+            for attr in attrs {
+                let (result, warnings) = capture_warnings_during(|| walker.resolve(&attr));
+                all_warnings.extend(warnings);
+                let item = match result {
+                    Ok((drv, references)) => ResolvedItem {
+                        attr,
+                        drv_path: Some(drv),
+                        references,
+                        error: None,
+                    },
+                    Err(e) => ResolvedItem {
+                        attr,
+                        drv_path: None,
+                        references: vec![],
+                        error: Some(format!("{e:#}")),
+                    },
+                };
+                emit(writer, &mut io, item);
+            }
+
+            let _ = walker.commit_cache();
+        }
+        Err(e) => {
+            let msg = format!("{e:#}");
+            for attr in attrs {
+                emit(
+                    writer,
+                    &mut io,
+                    ResolvedItem {
+                        attr,
+                        drv_path: None,
+                        references: vec![],
+                        error: Some(msg.clone()),
+                    },
+                );
+            }
+        }
+    }
+
+    all_warnings.dedup();
+    (all_warnings, io)
+}
+
+fn send<W: Write>(w: &mut W, resp: &EvalResponse) -> std::io::Result<()> {
+    let payload = encode_response(resp).map_err(std::io::Error::other)?;
+    write_frame(w, &payload)
+}
+
+fn response_kind(resp: &EvalResponse) -> String {
+    match resp {
+        EvalResponse::PlanOk { sub_patterns } => format!("PlanOk({} shards)", sub_patterns.len()),
+        EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
+        EvalResponse::ResolveItem { item } => format!("ResolveItem({})", item.attr),
+        EvalResponse::ResolveEnd { warnings, .. } => {
+            format!("ResolveEnd({} warnings)", warnings.len())
+        }
+        EvalResponse::FingerprintOk { fingerprint } => {
+            format!("FingerprintOk({})", fingerprint.is_some())
+        }
+        EvalResponse::CheckpointOk => "CheckpointOk".to_string(),
+        EvalResponse::Err { message } => format!("Err({message})"),
+    }
 }
 
 /// Runs `f` while capturing everything written to stderr (fd 2).
@@ -496,82 +460,5 @@ mod tests {
             parse_warnings(captured),
             vec!["warning: first", "warning: second"]
         );
-    }
-
-    #[test]
-    fn eval_request_serde_roundtrip() {
-        let requests = [
-            EvalRequest::Plan {
-                repository: "github:nixos/nixpkgs".into(),
-                wildcards: vec!["packages.*.*".into()],
-            },
-            EvalRequest::List {
-                repository: "github:nixos/nixpkgs".into(),
-                wildcards: vec!["packages.*.*".into()],
-            },
-            EvalRequest::Resolve {
-                repository: "github:nixos/nixpkgs".into(),
-                attrs: vec!["packages.x86_64-linux.hello".into()],
-            },
-            EvalRequest::Fingerprint {
-                repository: "github:nixos/nixpkgs".into(),
-            },
-            EvalRequest::Checkpoint {
-                repository: "github:nixos/nixpkgs".into(),
-            },
-            EvalRequest::Shutdown,
-        ];
-
-        for req in &requests {
-            let json = serde_json::to_string(req).expect("serialize failed");
-            let back: EvalRequest = serde_json::from_str(&json).expect("deserialize failed");
-            // Re-serialize and compare JSON strings (no PartialEq on enums)
-            assert_eq!(
-                serde_json::to_string(&back).unwrap(),
-                json,
-                "roundtrip mismatch for request"
-            );
-        }
-    }
-
-    #[test]
-    fn eval_response_serde_roundtrip() {
-        let responses: Vec<EvalResponse> = vec![
-            EvalResponse::PlanOk {
-                sub_patterns: vec!["packages.x86_64-linux.#".into()],
-            },
-            EvalResponse::ListOk {
-                attrs: vec!["packages.x86_64-linux.hello".into()],
-                warnings: vec![],
-                stats: None,
-            },
-            EvalResponse::ResolveOk {
-                items: vec![ResolvedItem {
-                    attr: "packages.x86_64-linux.hello".into(),
-                    drv_path: Some("aaaa-hello.drv".into()),
-                    references: vec![],
-                    error: None,
-                }],
-                warnings: vec![],
-                stats: None,
-            },
-            EvalResponse::FingerprintOk {
-                fingerprint: Some("deadbeef".into()),
-            },
-            EvalResponse::CheckpointOk,
-            EvalResponse::Err {
-                message: "something went wrong".into(),
-            },
-        ];
-
-        for resp in &responses {
-            let json = serde_json::to_string(resp).expect("serialize failed");
-            let back: EvalResponse = serde_json::from_str(&json).expect("deserialize failed");
-            assert_eq!(
-                serde_json::to_string(&back).unwrap(),
-                json,
-                "roundtrip mismatch for response"
-            );
-        }
     }
 }

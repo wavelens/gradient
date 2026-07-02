@@ -23,6 +23,7 @@ doctest = false
 anyhow       = { version = "1.0", default-features = false, features = ["std"] }
 libc         = { version = "0.2", default-features = false }
 nix-bindings = { git = "https://github.com/DerDennisOP/nix-bindings", branch = "feat/eval-metrics-stats", default-features = false, features = ["flake"] }
+rkyv         = { version = "0.8", default-features = false, features = ["alloc", "bytecheck"] }
 serde        = { version = "1", default-features = false, features = ["std", "derive"] }
 serde_json   = { version = "1.0", default-features = false, features = ["std"] }
 tracing      = { version = "0.1", default-features = false, features = ["std", "attributes"] }

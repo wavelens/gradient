@@ -7,6 +7,7 @@
 //! Eval-cache counter deltas shared by the eval-worker wire protocol and the
 //! worker's per-eval stats accumulator.
 
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
 /// Whether per-eval metrics collection is enabled (default on). Disabling skips
@@ -21,8 +22,11 @@ pub fn metrics_enabled() -> bool {
 /// Per-request counter delta a worker reports after serving List/Resolve.
 /// Counters are diffs since the worker's prior request; gc_heap_size is the
 /// current gauge at report time. Canonical delta type, shared internally and
-/// on the eval-worker wire protocol.
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+/// on the eval-worker wire protocol (rkyv frames; serde for the test driver).
+#[derive(
+    Clone, Copy, Debug, Default, Archive, RkyvSerialize, RkyvDeserialize, Serialize, Deserialize,
+)]
+#[rkyv(derive(Debug))]
 pub struct StatsDelta {
     pub nr_thunks: u64,
     pub nr_function_calls: u64,

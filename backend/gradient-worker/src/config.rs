@@ -78,6 +78,12 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_EVAL_WORKER", hide = true)]
     pub eval_worker: bool,
 
+    /// Drive one eval-worker subprocess over the production rkyv transport
+    /// from a JSONL request file, printing JSON responses (internal test
+    /// harness for the NixOS VM integration test).
+    #[arg(long, env = "GRADIENT_EVAL_DRIVER", hide = true)]
+    pub eval_driver: Option<String>,
+
     /// Number of parallel Nix evaluator subprocesses.
     /// Only effective when `--capability-eval` is enabled.
     #[arg(long, env = "GRADIENT_WORKER_EVAL_WORKERS", default_value_t = 1)]
@@ -405,6 +411,7 @@ mod tests {
             binpath_ssh: "ssh".to_owned(),
             gcroots_dir: String::new(),
             eval_worker: false,
+            eval_driver: None,
             eval_workers: 1,
             eval_fork_workers: 2,
             max_eval_rss: 8 * 1024 * 1024 * 1024,
@@ -502,6 +509,7 @@ mod tests {
             binpath_ssh: "ssh".to_owned(),
             gcroots_dir: String::new(),
             eval_worker: false,
+            eval_driver: None,
             eval_workers: 1,
             eval_fork_workers: 2,
             max_eval_rss: 8 * 1024 * 1024 * 1024,
@@ -576,6 +584,7 @@ mod tests {
             binpath_ssh: "ssh".to_owned(),
             gcroots_dir: String::new(),
             eval_worker: false,
+            eval_driver: None,
             eval_workers: 1,
             eval_fork_workers: 2,
             max_eval_rss: 8 * 1024 * 1024 * 1024,

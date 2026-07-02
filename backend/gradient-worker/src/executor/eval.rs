@@ -67,7 +67,11 @@ const DRV_READ_CONCURRENCY: usize = 64;
 /// leaving headroom for the OS, the parent worker, and a concurrent build.
 const EVAL_RAM_SHARE: f64 = 0.75;
 
-/// Total physical RAM in bytes, or a 4 GiB fallback if it cannot be read.
+/// Assumed host RAM when `sysinfo` cannot read it (containers without
+/// /proc/meminfo): small enough to keep the pool conservative.
+const TOTAL_RAM_FALLBACK_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+/// Total physical RAM in bytes, or [`TOTAL_RAM_FALLBACK_BYTES`] if unreadable.
 fn total_memory_bytes() -> u64 {
     use sysinfo::{MemoryRefreshKind, RefreshKind, System};
     let sys = System::new_with_specifics(
@@ -75,7 +79,7 @@ fn total_memory_bytes() -> u64 {
     );
     let total = sys.total_memory();
     if total == 0 {
-        4 * 1024 * 1024 * 1024
+        TOTAL_RAM_FALLBACK_BYTES
     } else {
         total
     }
