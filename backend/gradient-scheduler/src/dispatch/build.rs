@@ -105,7 +105,7 @@ pub(crate) async fn requeue_transient_failures(scheduler: &Scheduler) -> anyhow:
 /// All DB data needed to assemble [`PendingBuildJob`]s for a dispatch pass.
 ///
 /// Loaded in bulk (one IN-list query per table) by [`BuildDispatchMaps::load`],
-/// then queried in-memory by [`BuildDispatchMaps::make_pending_job`].
+/// then queried in-memory by [`BuildDispatchMaps::classify_dispatch`].
 /// This avoids O(n) serial round-trips when hundreds of builds become ready
 /// at once.
 struct BuildDispatchMaps {
@@ -139,11 +139,30 @@ struct BuildDispatchMaps {
     /// derivation_build → the evaluation driving this anchor's dispatch (used for
     /// peer routing and `build_job` attribution on win). Prefers a non-terminal eval.
     driving_eval: HashMap<DerivationBuildId, EvaluationId>,
-    substitute_miss_escalation_threshold: i64,
     connected_architectures: HashSet<String>,
+    config: DispatchConfig,
+}
+
+/// The scalar dispatch knobs, split from the per-pass lookup maps.
+struct DispatchConfig {
+    substitute_miss_escalation_threshold: i64,
     build_retry_backoff_secs: u64,
     default_timeout_secs: Option<u64>,
     default_max_silent_secs: Option<u64>,
+}
+
+impl DispatchConfig {
+    fn from_state(state: &ServerState) -> Self {
+        Self {
+            substitute_miss_escalation_threshold: state
+                .config
+                .eval
+                .substitute_miss_escalation_threshold as i64,
+            build_retry_backoff_secs: state.config.eval.build_retry_backoff_secs,
+            default_timeout_secs: nonzero(state.config.eval.build_default_timeout_secs),
+            default_max_silent_secs: nonzero(state.config.eval.build_default_max_silent_secs),
+        }
+    }
 }
 
 impl BuildDispatchMaps {
@@ -154,27 +173,27 @@ impl BuildDispatchMaps {
         uses_history: bool,
         connected_architectures: HashSet<String>,
     ) -> anyhow::Result<Self> {
-        let default_timeout_secs = nonzero(state.config.eval.build_default_timeout_secs);
-        let default_max_silent_secs = nonzero(state.config.eval.build_default_max_silent_secs);
-
+        // Every load below propagates its error: a failed query must abort the
+        // dispatch pass (retried next tick) instead of masquerading as "no
+        // rows", which dispatched builds against phantom-empty inputs.
         let drv_ids: Vec<DerivationId> = anchors.iter().map(|a| a.derivation).collect();
         let anchor_ids: Vec<DerivationBuildId> = anchors.iter().map(|a| a.id).collect();
 
         let db = &state.worker_db;
-        let substitute_misses = gradient_db::substitute_miss_counts(db, &anchor_ids)
-            .await
-            .unwrap_or_default();
+        let substitute_misses = gradient_db::substitute_miss_counts(db, &anchor_ids).await?;
 
         // Resolve the eval driving each anchor's dispatch: any referencing
         // build_job, preferring one whose evaluation is not terminal. The driving
         // eval is the job's peer-routing source and the build_job attributed on win.
         let mut driving_eval: HashMap<DerivationBuildId, EvaluationId> = HashMap::new();
+        let jobs_by_drv = gradient_db::build_jobs_for_derivations(db, &drv_ids).await?;
         let mut jobs_by_anchor: HashMap<DerivationBuildId, Vec<EvaluationId>> = HashMap::new();
         for anchor in anchors {
-            let jobs = gradient_db::build_jobs_for_derivation(db, anchor.derivation)
-                .await
+            let evals = jobs_by_drv
+                .get(&anchor.derivation)
+                .map(|jobs| jobs.iter().map(|j| j.evaluation).collect())
                 .unwrap_or_default();
-            jobs_by_anchor.insert(anchor.id, jobs.iter().map(|j| j.evaluation).collect());
+            jobs_by_anchor.insert(anchor.id, evals);
         }
 
         let eval_ids: Vec<EvaluationId> = jobs_by_anchor
@@ -242,8 +261,7 @@ impl BuildDispatchMaps {
                 .all(db)
                 .await
         })
-        .await
-        .unwrap_or_default();
+        .await?;
         let mut features_by_drv: HashMap<DerivationId, Vec<FeatureId>> = HashMap::new();
         for e in &feature_edges {
             features_by_drv
@@ -262,8 +280,7 @@ impl BuildDispatchMaps {
                     .all(db)
                     .await
             })
-            .await
-            .unwrap_or_default()
+            .await?
             .into_iter()
             .map(|f| (f.id, f.name))
             .collect()
@@ -277,8 +294,7 @@ impl BuildDispatchMaps {
                 .all(db)
                 .await
         })
-        .await
-        .unwrap_or_default();
+        .await?;
 
         let mut deps_by_drv: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();
         for e in &dep_edges {
@@ -312,8 +328,7 @@ impl BuildDispatchMaps {
                         .all(db)
                         .await
                 })
-                .await
-                .unwrap_or_default();
+                .await?;
                 let mut map: HashMap<DerivationId, Vec<MDerivationOutput>> = HashMap::new();
                 for o in outs {
                     map.entry(o.derivation).or_default().push(o);
@@ -335,8 +350,7 @@ impl BuildDispatchMaps {
                     .all(db)
                     .await
             })
-            .await
-            .unwrap_or_default()
+            .await?
             .into_iter()
             .filter_map(|cp| {
                     let nar_size = cp.nar_size? as u64;
@@ -379,8 +393,7 @@ impl BuildDispatchMaps {
                 .all(db)
                 .await
         })
-        .await
-        .unwrap_or_default()
+        .await?
         {
             let path = get_path_from_derivation_output(o.clone()).full();
             self_outputs
@@ -389,53 +402,8 @@ impl BuildDispatchMaps {
                 .push(DerivationOutput { name: o.name, path });
         }
 
-        // Closure sizes and historical predictions are only consumed by
-        // policies that read history (resource-aware). Under the simple policy
-        // we skip the walk entirely and use whatever is already persisted.
-        // Derivations missing `closure_size` are sized in one batched walk
-        // rather than one DB walk per derivation, then backfilled.
-        let mut closure_sizes: HashMap<DerivationId, Option<i64>> = HashMap::new();
-        let mut histories: HashMap<DerivationId, gradient_score::HistoryPrediction> = HashMap::new();
-        if uses_history {
-            let need: Vec<DerivationId> = derivations
-                .iter()
-                .filter(|(_, d)| d.closure_size.is_none())
-                .map(|(id, _)| *id)
-                .collect();
-            let computed = if need.is_empty() {
-                HashMap::new()
-            } else {
-                gradient_db::transitive_closure_sizes(&state.worker_db, &need)
-                    .await
-                    .unwrap_or_else(|e| {
-                        error!(error = %e, "failed to compute closure sizes");
-                        HashMap::new()
-                    })
-            };
-            for (drv_id, size) in &computed {
-                if let Err(e) = EDerivation::update_many()
-                    .col_expr(CDerivation::ClosureSize, sea_orm::sea_query::Expr::value(*size))
-                    .filter(CDerivation::Id.eq(*drv_id))
-                    .exec(&state.worker_db)
-                    .await
-                {
-                    error!(derivation_id = %drv_id, error = %e, "failed to persist closure size");
-                }
-            }
-            for (drv_id, drv) in &derivations {
-                let size = drv.closure_size.or_else(|| computed.get(drv_id).copied());
-                closure_sizes.insert(*drv_id, size);
-                if let Some(pname) = &drv.pname {
-                    let prediction =
-                        crate::history::predict(&state.worker_db, pname, size).await;
-                    histories.insert(*drv_id, prediction);
-                }
-            }
-        } else {
-            for (drv_id, drv) in &derivations {
-                closure_sizes.insert(*drv_id, drv.closure_size);
-            }
-        }
+        let (closure_sizes, histories) =
+            load_sizes_and_histories(state, &derivations, uses_history).await;
 
         Ok(Self {
             derivations,
@@ -450,14 +418,8 @@ impl BuildDispatchMaps {
             histories,
             substitute_misses,
             driving_eval,
-            substitute_miss_escalation_threshold: state
-                .config
-                .eval
-                .substitute_miss_escalation_threshold as i64,
             connected_architectures,
-            build_retry_backoff_secs: state.config.eval.build_retry_backoff_secs,
-            default_timeout_secs,
-            default_max_silent_secs,
+            config: DispatchConfig::from_state(state),
         })
     }
 
@@ -480,27 +442,23 @@ impl BuildDispatchMaps {
             .unwrap_or_default()
     }
 
-    /// Assemble a `(job_id, PendingBuildJob)` pair for `anchor`, or `None` if
-    /// any required map lookup fails (logged as errors at call site).
-    fn make_pending_job(&self, anchor: &MDerivationBuild) -> Option<(String, PendingBuildJob)> {
-        let derivation = self.derivations.get(&anchor.derivation).or_else(|| {
-            error!(derivation_build = %anchor.id, "derivation not found for anchor");
-            None
-        })?;
-        let eval_id = self.driving_eval.get(&anchor.id).copied().or_else(|| {
-            error!(derivation_build = %anchor.id, "no driving evaluation for anchor");
-            None
-        })?;
-        let eval = self.evaluations.get(&eval_id).or_else(|| {
-            error!(derivation_build = %anchor.id, "driving evaluation row not found");
-            None
-        })?;
-        let org_id = self.resolve_org_id(eval).or_else(|| {
-            error!(derivation_build = %anchor.id, "could not resolve org_id for anchor");
-            None
-        })?;
+    /// Decide whether `anchor` dispatches this pass, and how - an explicit
+    /// three-way outcome instead of a `None` that conflated "hard error" with
+    /// "deliberately deferred".
+    fn classify_dispatch(&self, anchor: &MDerivationBuild) -> DispatchOutcome {
+        let Some(derivation) = self.derivations.get(&anchor.derivation) else {
+            return DispatchOutcome::Skip("derivation not found for anchor");
+        };
+        let Some(eval_id) = self.driving_eval.get(&anchor.id).copied() else {
+            return DispatchOutcome::Skip("no driving evaluation for anchor");
+        };
+        let Some(eval) = self.evaluations.get(&eval_id) else {
+            return DispatchOutcome::Skip("driving evaluation row not found");
+        };
+        let Some(org_id) = self.resolve_org_id(eval) else {
+            return DispatchOutcome::Skip("could not resolve org_id for anchor");
+        };
 
-        let job_id = format!("build:{}", anchor.id);
         let miss_count = self
             .substitute_misses
             .get(&(anchor.id, eval_id))
@@ -510,7 +468,7 @@ impl BuildDispatchMaps {
         let mode = decide_dispatch_mode(
             anchor.substitutable,
             miss_count,
-            self.substitute_miss_escalation_threshold,
+            self.config.substitute_miss_escalation_threshold,
             arch_has_worker,
         );
 
@@ -519,13 +477,26 @@ impl BuildDispatchMaps {
                 miss_count as i32,
                 anchor.updated_at,
                 now(),
-                self.build_retry_backoff_secs,
+                self.config.build_retry_backoff_secs,
             )
         {
-            debug!(derivation_build = %anchor.id, "substitute stalled (no arch worker); backing off re-probe");
-            return None;
+            return DispatchOutcome::Defer("substitute stalled (no arch worker); backing off re-probe");
         }
 
+        let (job_id, pending) = self.assemble_job(anchor, derivation, eval_id, org_id, mode);
+        DispatchOutcome::Dispatch(job_id, Box::new(pending))
+    }
+
+    /// Pure assembly of the pending job once `classify_dispatch` decided to go.
+    fn assemble_job(
+        &self,
+        anchor: &MDerivationBuild,
+        derivation: &MDerivation,
+        eval_id: EvaluationId,
+        org_id: OrganizationId,
+        mode: BuildDispatchMode,
+    ) -> (String, PendingBuildJob) {
+        let job_id = format!("build:{}", anchor.id);
         let substitute = matches!(
             mode,
             BuildDispatchMode::SubstituteBuiltin | BuildDispatchMode::SubstituteStalled
@@ -546,8 +517,8 @@ impl BuildDispatchMaps {
                 external_cached: substitute,
                 is_fixed_output: derivation.is_fixed_output,
                 outputs,
-                timeout_secs: resolve_limit(anchor.timeout_secs, self.default_timeout_secs),
-                max_silent_secs: resolve_limit(anchor.max_silent_secs, self.default_max_silent_secs),
+                timeout_secs: resolve_limit(anchor.timeout_secs, self.config.default_timeout_secs),
+                max_silent_secs: resolve_limit(anchor.max_silent_secs, self.config.default_max_silent_secs),
             }],
         };
         let (architecture, required_features) = if substitute {
@@ -590,8 +561,87 @@ impl BuildDispatchMaps {
             substitute,
         };
 
-        Some((job_id, pending))
+        (job_id, pending)
     }
+}
+
+/// The dispatch decision for one ready anchor.
+enum DispatchOutcome {
+    /// Enqueue this job now.
+    Dispatch(String, Box<PendingBuildJob>),
+    /// Deliberately held this pass (re-probed on a later tick).
+    Defer(&'static str),
+    /// A required lookup failed; the anchor cannot be assembled.
+    Skip(&'static str),
+}
+
+/// Closure sizes and historical predictions, consumed only by policies that
+/// read history (resource-aware); the simple policy skips the walk and uses
+/// whatever is persisted. Derivations missing `closure_size` are sized in one
+/// batched walk and backfilled; history is queried once per distinct
+/// `(pname, size bucket)` instead of once per derivation.
+async fn load_sizes_and_histories(
+    state: &Arc<ServerState>,
+    derivations: &HashMap<DerivationId, MDerivation>,
+    uses_history: bool,
+) -> (
+    HashMap<DerivationId, Option<i64>>,
+    HashMap<DerivationId, gradient_score::HistoryPrediction>,
+) {
+    let mut closure_sizes: HashMap<DerivationId, Option<i64>> = HashMap::new();
+    let mut histories: HashMap<DerivationId, gradient_score::HistoryPrediction> = HashMap::new();
+    if !uses_history {
+        for (drv_id, drv) in derivations {
+            closure_sizes.insert(*drv_id, drv.closure_size);
+        }
+        return (closure_sizes, histories);
+    }
+
+    let need: Vec<DerivationId> = derivations
+        .iter()
+        .filter(|(_, d)| d.closure_size.is_none())
+        .map(|(id, _)| *id)
+        .collect();
+    let computed = if need.is_empty() {
+        HashMap::new()
+    } else {
+        gradient_db::transitive_closure_sizes(&state.worker_db, &need)
+            .await
+            .unwrap_or_else(|e| {
+                error!(error = %e, "failed to compute closure sizes");
+                HashMap::new()
+            })
+    };
+    for (drv_id, size) in &computed {
+        if let Err(e) = EDerivation::update_many()
+            .col_expr(CDerivation::ClosureSize, sea_orm::sea_query::Expr::value(*size))
+            .filter(CDerivation::Id.eq(*drv_id))
+            .exec(&state.worker_db)
+            .await
+        {
+            error!(derivation_id = %drv_id, error = %e, "failed to persist closure size");
+        }
+    }
+
+    let mut predictions: HashMap<(String, Option<i64>), gradient_score::HistoryPrediction> =
+        HashMap::new();
+    for (drv_id, drv) in derivations {
+        let size = drv.closure_size.or_else(|| computed.get(drv_id).copied());
+        closure_sizes.insert(*drv_id, size);
+        let Some(pname) = &drv.pname else { continue };
+        let key = (pname.clone(), size.map(crate::history::closure_bucket));
+        let prediction = match predictions.get(&key) {
+            Some(p) => *p,
+            None => {
+                let p = crate::history::predict(&state.worker_db, pname, size).await;
+                predictions.insert(key, p);
+                p
+            }
+        };
+        histories.insert(*drv_id, prediction);
+    }
+
+    (closure_sizes, histories)
 }
 
 /// Whether an evaluation has reached a terminal status (won't drive new builds).
@@ -665,11 +715,18 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     let mut enqueued = 0usize;
     for anchor in new_anchors {
-        let Some((job_id, pending)) = maps.make_pending_job(&anchor) else {
-            continue;
-        };
-        scheduler.enqueue_build_job(job_id, pending).await;
-        enqueued += 1;
+        match maps.classify_dispatch(&anchor) {
+            DispatchOutcome::Dispatch(job_id, pending) => {
+                scheduler.enqueue_build_job(job_id, *pending).await;
+                enqueued += 1;
+            }
+            DispatchOutcome::Defer(reason) => {
+                debug!(derivation_build = %anchor.id, reason, "dispatch deferred");
+            }
+            DispatchOutcome::Skip(reason) => {
+                error!(derivation_build = %anchor.id, reason, "dispatch skipped");
+            }
+        }
     }
     info!(
         enqueued,
