@@ -13,8 +13,10 @@
 //!
 //! `dispatch_queued_evals`:
 //!   1. `EEvaluation::find().filter(status=Queued).all()` → Q
-//!   2. Per eval: `ECommit::find_by_id(commit_id).one()` → Q
-//!   3. `organization_id_for_eval`: `EProject::find_by_id(pid).one()` → Q
+//!   2. Bulk `ECommit IN (commit ids)` → Q (skipped when no untracked evals)
+//!   3. Bulk sidecar `evaluation_input_update IN (...)` → Q (InputUpdate evals only)
+//!   4. Bulk `evaluation_flake_input_override IN (eval ids)` → Q
+//!   5. Bulk `EProject IN (project ids)` → Q (skipped when no eval has a project)
 //!
 //! `dispatch_ready_builds`:
 //!   1. `EBuild::find().from_raw_sql(ready_builds_query).all()` → Q
@@ -102,11 +104,11 @@ async fn dispatch_queued_eval_enqueues_job() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
-        // 2. find commit
+        // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
-        // 3. snapshot flake input overrides (none)
+        // 3. bulk flake input overrides (none)
         .append_query_results([Vec::<gradient_entity::evaluation_flake_input_override::Model>::new()])
-        // 4. organization_id_for_eval: find project → returns org_id
+        // 4. bulk projects → returns org_id
         .append_query_results([vec![make_project(project_id, org_id)]])
         .into_connection();
 
@@ -135,16 +137,16 @@ async fn dispatch_queued_eval_skips_already_enqueued() {
         // First dispatch:
         // 1. find Queued evaluations
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
-        // 2. find commit
+        // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
-        // 3. snapshot flake input overrides (none)
+        // 3. bulk flake input overrides (none)
         .append_query_results([Vec::<gradient_entity::evaluation_flake_input_override::Model>::new()])
-        // 4. find project
+        // 4. bulk projects
         .append_query_results([vec![make_project(project_id, org_id)]])
         // Second dispatch:
         // 5. find Queued evaluations (same eval still Queued in DB)
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
-        // No commit/project lookup - contains_job check short-circuits
+        // No bulk loads - the tracker snapshot filters out every eval
         .into_connection();
 
     let scheduler = make_scheduler(db);
@@ -172,9 +174,12 @@ async fn dispatch_queued_eval_skips_missing_commit() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(project_id))]])
-        // 2. find commit → None
+        // 2. bulk commits → none found
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
-        // No project lookup - skipped after missing commit
+        // 3. bulk flake input overrides (none)
+        .append_query_results([Vec::<gradient_entity::evaluation_flake_input_override::Model>::new()])
+        // 4. bulk projects (loaded up front; the eval is skipped per-row later)
+        .append_query_results([Vec::<gradient_entity::project::Model>::new()])
         .into_connection();
 
     let scheduler = make_scheduler(db);
@@ -199,11 +204,11 @@ async fn dispatch_queued_eval_without_project_is_skipped() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations - project: None
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, None)]])
-        // 2. find commit
+        // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
-        // 3. snapshot flake input overrides (none) - runs even when project: None
+        // 3. bulk flake input overrides (none)
         .append_query_results([Vec::<gradient_entity::evaluation_flake_input_override::Model>::new()])
-        // No project lookup - organization_id_for_eval bails on None project
+        // No project query - no eval carries a project id
         .into_connection();
 
     let scheduler = make_scheduler(db);
