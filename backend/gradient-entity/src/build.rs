@@ -89,11 +89,41 @@ impl BuildStatus {
             Self::FailedPermanent | Self::FailedTimeout | Self::DependencyFailed
         )
     }
+
+    /// Build-once success states, never re-queued by a new evaluation.
+    pub const fn is_terminal_success(self) -> bool {
+        matches!(self, Self::Completed | Self::Substituted)
+    }
+
+    pub const TERMINAL_SUCCESS: [Self; 2] = [Self::Completed, Self::Substituted];
+
+    pub const TERMINAL_FAILURE: [Self; 3] = [
+        Self::FailedPermanent,
+        Self::DependencyFailed,
+        Self::FailedTimeout,
+    ];
+
+    pub const FAILURE: [Self; 4] = [
+        Self::FailedPermanent,
+        Self::DependencyFailed,
+        Self::FailedTransient,
+        Self::FailedTimeout,
+    ];
+
+    /// States a fresh evaluation intent thaws back to `Created`: the terminal
+    /// failures plus `Aborted` (retried, not permanent).
+    pub const REQUEUEABLE: [Self; 4] = [
+        Self::FailedPermanent,
+        Self::Aborted,
+        Self::DependencyFailed,
+        Self::FailedTimeout,
+    ];
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::Iterable;
 
     #[test]
     fn for_api_collapses_created_to_queued() {
@@ -132,5 +162,40 @@ mod tests {
         assert!(BuildStatus::FailedPermanent.is_terminal_failure());
         assert!(BuildStatus::FailedTimeout.is_terminal_failure());
         assert!(!BuildStatus::FailedTransient.is_terminal_failure());
+    }
+
+    /// Raw SQL composes fragments from these numbers; a renumber must fail CI
+    /// (the m20260407 evaluation-status renumber corrupted every sweep once).
+    #[test]
+    fn numbering_is_pinned() {
+        for (status, n) in [
+            (BuildStatus::Created, 0),
+            (BuildStatus::Queued, 1),
+            (BuildStatus::Building, 2),
+            (BuildStatus::Completed, 3),
+            (BuildStatus::FailedPermanent, 4),
+            (BuildStatus::Aborted, 5),
+            (BuildStatus::DependencyFailed, 6),
+            (BuildStatus::Substituted, 7),
+            (BuildStatus::FailedTransient, 8),
+            (BuildStatus::FailedTimeout, 9),
+        ] {
+            assert_eq!(i32::from(status), n);
+        }
+        assert_eq!(BuildStatus::iter().count(), 10);
+    }
+
+    #[test]
+    fn semantic_sets_match_their_predicates() {
+        let by = |pred: fn(BuildStatus) -> bool| -> Vec<BuildStatus> {
+            BuildStatus::iter().filter(|s| pred(*s)).collect()
+        };
+        assert_eq!(by(BuildStatus::is_terminal_failure), BuildStatus::TERMINAL_FAILURE);
+        assert_eq!(by(BuildStatus::is_failure), BuildStatus::FAILURE);
+        assert_eq!(by(BuildStatus::is_terminal_success), BuildStatus::TERMINAL_SUCCESS);
+        assert_eq!(
+            by(|s| s.is_terminal_failure() || s == BuildStatus::Aborted),
+            BuildStatus::REQUEUEABLE
+        );
     }
 }

@@ -70,6 +70,44 @@ impl EvaluationStatus {
         Self::Building,
         Self::Waiting,
     ];
+
+    pub const TERMINAL: [Self; 3] = [Self::Completed, Self::Failed, Self::Aborted];
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+    use sea_orm::Iterable;
+
+    /// Raw SQL composes fragments from these numbers; a renumber must fail CI
+    /// (the m20260407 in-place renumber is exactly the hazard this pins).
+    #[test]
+    fn numbering_is_pinned() {
+        for (status, n) in [
+            (EvaluationStatus::Queued, 0),
+            (EvaluationStatus::EvaluatingFlake, 1),
+            (EvaluationStatus::EvaluatingDerivation, 2),
+            (EvaluationStatus::Building, 3),
+            (EvaluationStatus::Waiting, 4),
+            (EvaluationStatus::Completed, 5),
+            (EvaluationStatus::Failed, 6),
+            (EvaluationStatus::Aborted, 7),
+            (EvaluationStatus::Fetching, 8),
+        ] {
+            assert_eq!(i32::from(status), n);
+        }
+        assert_eq!(EvaluationStatus::iter().count(), 9);
+    }
+
+    #[test]
+    fn active_and_terminal_partition_every_status() {
+        for status in EvaluationStatus::iter() {
+            let active = EvaluationStatus::ACTIVE.contains(&status);
+            let terminal = EvaluationStatus::TERMINAL.contains(&status);
+            assert!(active ^ terminal, "{status:?} must be exactly one of active/terminal");
+            assert_eq!(status.is_active(), active);
+        }
+    }
 }
 
 /// What an evaluation is for: a normal CI run, or an `input_update` run that
