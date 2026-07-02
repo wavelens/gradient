@@ -38,6 +38,7 @@ pub mod runtime_closure;
 pub mod state_machine;
 pub mod status;
 pub mod status_reactor;
+pub mod status_sql;
 
 pub use self::build_attempt::*;
 pub use self::cache_reach::*;

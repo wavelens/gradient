@@ -10,6 +10,7 @@
 //! global sum. Backend-agnostic (works for local FS and S3).
 
 use gradient_types::ids::{CacheId, DerivationId, OrganizationId};
+use gradient_entity::build::BuildStatus;
 use gradient_entity::cache::Model as MCache;
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use sea_orm::sea_query::{Alias, SimpleExpr};
@@ -280,13 +281,17 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
         db.execute(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            r#"
+            format!(
+                r#"
             UPDATE derivation_build
-            SET status = 0, substitutable = false, substituted = false,
+            SET status = {created}, substitutable = false, substituted = false,
                 attempt = 0, closure_complete = false,
                 updated_at = (now() AT TIME ZONE 'UTC')
-            WHERE derivation = ANY($1) AND status IN (3, 7)
+            WHERE derivation = ANY($1) AND status IN ({terminal_success})
             "#,
+                created = crate::status_sql::build(BuildStatus::Created),
+                terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+            ),
             [ids.into()],
         ))
         .await?;
@@ -389,16 +394,21 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
 /// straight from an upstream (not from our cache). The completion path records each
 /// output's `cached_path` before flipping the anchor terminal (#303/#399), so a
 /// genuinely-complete anchor is never selected mid-completion.
-pub(crate) const UNBACKED_TRUSTED_OUTPUTS_SELECT: &str = r#"
+pub(crate) fn unbacked_trusted_outputs_select() -> String {
+    format!(
+        r#"
     SELECT DISTINCT o.hash
     FROM derivation_output o
     JOIN derivation_build db ON db.derivation = o.derivation
-    WHERE db.status IN (3, 7)
+    WHERE db.status IN ({terminal_success})
       AND o.external_url IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM cached_path cp
           WHERE cp.hash = o.hash AND cp.file_hash IS NOT NULL)
-"#;
+"#,
+        terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
+    )
+}
 
 pub async fn demote_unbacked_trusted_outputs<C: ConnectionTrait>(
     db: &C,
@@ -413,7 +423,7 @@ pub async fn demote_unbacked_trusted_outputs<C: ConnectionTrait>(
 
     let hashes = OutputHash::find_by_statement(Statement::from_string(
         DatabaseBackend::Postgres,
-        UNBACKED_TRUSTED_OUTPUTS_SELECT.to_owned(),
+        unbacked_trusted_outputs_select(),
     ))
     .all(db)
     .await?;
@@ -631,18 +641,22 @@ mod tests {
     }
 
     /// The reconciler enforces the row-vs-object invariant on terminal-success
-    /// anchors (`status IN (3, 7)`): any output with no backing NAR is demoted. It
-    /// must key on the **ground truth** (a missing `cached_path` NAR), NOT the
-    /// derived `is_cached` flag - that flag is `false` for the never-cached-output
+    /// anchors: any output with no backing NAR is demoted. It must key on the
+    /// **ground truth** (a missing `cached_path` NAR), NOT the derived
+    /// `is_cached` flag - that flag is `false` for the never-cached-output
     /// dead zone this sweep must rescue - nor `closure_complete` (false for every
     /// dead-zone anchor), and must skip upstream-fetchable outputs (`external_url`).
     #[test]
     fn unbacked_trusted_select_matches_the_gate() {
-        let sql = UNBACKED_TRUSTED_OUTPUTS_SELECT
+        let sql = unbacked_trusted_outputs_select()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
-        assert!(sql.contains("db.status IN (3, 7)"), "must mirror the gate's success states: {sql}");
+        let terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS);
+        assert!(
+            sql.contains(&format!("db.status IN ({terminal_success})")),
+            "must mirror the gate's success states: {sql}"
+        );
         assert!(
             !sql.contains("o.is_cached"),
             "must NOT gate on is_cached (it is false for the never-cached-output dead zone): {sql}"

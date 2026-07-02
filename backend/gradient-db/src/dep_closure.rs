@@ -189,34 +189,35 @@ pub async fn reconcile_inflight_dep_counts<C: ConnectionTrait>(db: &C) -> Result
 pub async fn apply_dep_count_delta<C: ConnectionTrait>(
     db: &C,
     dep_derivation: DerivationId,
-    old_status: i32,
-    new_status: i32,
+    old_status: BuildStatus,
+    new_status: BuildStatus,
 ) -> Result<(), DbErr> {
-    let dep = dep_derivation.into_inner();
+    let dep = || sea_orm::Value::from(dep_derivation.into_inner());
     let affected = "FROM entry_point ep \
          JOIN derivation_closure dc ON dc.root_derivation = ep.derivation";
-    let predicate = format!("dc.dep_derivation = '{dep}'");
 
-    db.execute(Statement::from_string(
+    db.execute(Statement::from_sql_and_values(
         DbBackend::Postgres,
         format!(
             "UPDATE entry_point_dep_count c SET count = c.count - 1 \
              {affected} \
-             WHERE c.entry_point = ep.id AND c.status = {old_status} AND c.count > 0 \
-               AND {predicate}"
+             WHERE c.entry_point = ep.id AND c.status = $1 AND c.count > 0 \
+               AND dc.dep_derivation = $2"
         ),
+        [i32::from(old_status).into(), dep()],
     ))
     .await?;
 
-    db.execute(Statement::from_string(
+    db.execute(Statement::from_sql_and_values(
         DbBackend::Postgres,
         format!(
             "INSERT INTO entry_point_dep_count (id, entry_point, status, count) \
-             SELECT uuidv7(), ep.id, {new_status}, 1 \
+             SELECT uuidv7(), ep.id, $1, 1 \
              {affected} \
-             WHERE {predicate} \
+             WHERE dc.dep_derivation = $2 \
              ON CONFLICT (entry_point, status) DO UPDATE SET count = entry_point_dep_count.count + 1"
         ),
+        [i32::from(new_status).into(), dep()],
     ))
     .await?;
 

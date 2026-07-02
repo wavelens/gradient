@@ -59,13 +59,8 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
         if c.from == c.to {
             continue;
         }
-        if let Err(e) = crate::dep_closure::apply_dep_count_delta(
-            db,
-            c.derivation,
-            i32::from(c.from),
-            i32::from(c.to),
-        )
-        .await
+        if let Err(e) =
+            crate::dep_closure::apply_dep_count_delta(db, c.derivation, c.from, c.to).await
         {
             error!(error = %e, derivation = %c.derivation, "failed to update entry-point dep counts");
         }

@@ -427,7 +427,10 @@ pub async fn get_board_durations_heatmap(
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let window = window_clause(&params);
     let mut clauses = vec![
-        "b.status = 3".to_string(),
+        format!(
+            "b.status = {}",
+            gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed)
+        ),
         "ba.build_started_at IS NOT NULL".to_string(),
         "ba.build_finished_at IS NOT NULL".to_string(),
         format!("ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"),

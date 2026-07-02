@@ -24,8 +24,10 @@ use prometheus::{
     Encoder, Gauge, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
     Opts, Registry, TextEncoder,
 };
+use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_scheduler::Scheduler;
-use sea_orm::{DatabaseBackend, FromQueryResult, Statement};
+use sea_orm::{DatabaseBackend, FromQueryResult, Iterable, Statement};
 use subtle::ConstantTimeEq;
 
 use crate::error::{WebError, WebResult};
@@ -35,7 +37,7 @@ pub(crate) const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4";
 #[derive(Debug, FromQueryResult)]
 struct CountRow {
     kind: String,
-    label: Option<String>,
+    status: Option<i32>,
     value: i64,
 }
 
@@ -417,95 +419,74 @@ pub(crate) async fn collect(
     scheduler: &Scheduler,
 ) -> WebResult<Observations> {
     // Single CTE-style query returning typed rows for every counter we need.
-    // Statuses are mapped to text via CASE so values survive numeric reshuffles
-    // in `BuildStatus` / `EvaluationStatus` ordering.
-    let sql = r#"
-        SELECT 'build_total'::text AS kind,
-               CASE status
-                 WHEN 3 THEN 'Completed'
-                 WHEN 4 THEN 'Failed'
-                 WHEN 5 THEN 'Aborted'
-                 WHEN 6 THEN 'DependencyFailed'
-                 WHEN 7 THEN 'Substituted'
-                 ELSE NULL
-               END AS label,
-               COUNT(*)::bigint AS value
+    // Status sets and label names come from the enums (decoded in Rust below),
+    // so a new or renumbered variant can never silently vanish from a series.
+    let build_terminal: Vec<BuildStatus> = BuildStatus::iter()
+        .filter(|s| s.is_terminal_success() || s.is_terminal_failure() || *s == BuildStatus::Aborted)
+        .collect();
+    let build_live: Vec<BuildStatus> = BuildStatus::iter()
+        .filter(|s| !build_terminal.contains(s))
+        .collect();
+    let sql = format!(
+        r#"
+        SELECT 'build_total'::text AS kind, status::int AS status, COUNT(*)::bigint AS value
         FROM derivation_build
-        WHERE status IN (3,4,5,6,7)
+        WHERE status IN ({build_terminal})
         GROUP BY status
 
         UNION ALL
 
-        SELECT 'build_in_state'::text,
-               CASE status
-                 WHEN 0 THEN 'Created'
-                 WHEN 1 THEN 'Queued'
-                 WHEN 2 THEN 'Building'
-                 ELSE NULL
-               END,
-               COUNT(*)::bigint
+        SELECT 'build_in_state'::text, status::int, COUNT(*)::bigint
         FROM derivation_build
-        WHERE status IN (0,1,2)
+        WHERE status IN ({build_live})
         GROUP BY status
 
         UNION ALL
 
-        SELECT 'evaluation_total'::text,
-               CASE status
-                 WHEN 5 THEN 'Completed'
-                 WHEN 6 THEN 'Failed'
-                 WHEN 7 THEN 'Aborted'
-                 ELSE NULL
-               END,
-               COUNT(*)::bigint
+        SELECT 'evaluation_total'::text, status::int, COUNT(*)::bigint
         FROM evaluation
-        WHERE status IN (5,6,7)
+        WHERE status IN ({eval_terminal})
         GROUP BY status
 
         UNION ALL
 
-        SELECT 'evaluation_in_state'::text,
-               CASE status
-                 WHEN 0 THEN 'Queued'
-                 WHEN 1 THEN 'EvaluatingFlake'
-                 WHEN 2 THEN 'EvaluatingDerivation'
-                 WHEN 3 THEN 'Building'
-                 WHEN 4 THEN 'Waiting'
-                 WHEN 8 THEN 'Fetching'
-                 ELSE NULL
-               END,
-               COUNT(*)::bigint
+        SELECT 'evaluation_in_state'::text, status::int, COUNT(*)::bigint
         FROM evaluation
-        WHERE status IN (0,1,2,3,4,8)
+        WHERE status IN ({eval_active})
         GROUP BY status
 
         UNION ALL
 
-        SELECT 'cache_bytes'::text, NULL::text, COALESCE(SUM(file_size), 0)::bigint
+        SELECT 'cache_bytes'::text, NULL::int, COALESCE(SUM(file_size), 0)::bigint
         FROM cached_path
 
         UNION ALL
 
-        SELECT 'cache_nar_bytes'::text, NULL::text, COALESCE(SUM(nar_size), 0)::bigint
+        SELECT 'cache_nar_bytes'::text, NULL::int, COALESCE(SUM(nar_size), 0)::bigint
         FROM cached_path
 
         UNION ALL
 
-        SELECT 'cache_packages'::text, NULL::text, COUNT(*)::bigint
+        SELECT 'cache_packages'::text, NULL::int, COUNT(*)::bigint
         FROM cached_path_signature
 
         UNION ALL
 
-        SELECT 'cache_nar_bytes_sent_total'::text, NULL::text,
+        SELECT 'cache_nar_bytes_sent_total'::text, NULL::int,
                COALESCE(SUM(bytes_sent), 0)::bigint
         FROM cache_metric
 
         UNION ALL
 
-        SELECT 'cache_nar_requests_total'::text, NULL::text,
+        SELECT 'cache_nar_requests_total'::text, NULL::int,
                COALESCE(SUM(nar_count)::bigint, 0)
         FROM cache_metric
-    "#;
+    "#,
+        build_terminal = gradient_db::status_sql::build_in(&build_terminal),
+        build_live = gradient_db::status_sql::build_in(&build_live),
+        eval_terminal = gradient_db::status_sql::eval_in(&EvaluationStatus::TERMINAL),
+        eval_active = gradient_db::status_sql::eval_in(&EvaluationStatus::ACTIVE),
+    );
 
     let rows: Vec<CountRow> =
         CountRow::find_by_statement(Statement::from_string(DatabaseBackend::Postgres, sql))
@@ -519,25 +500,27 @@ pub(crate) async fn collect(
         ..Default::default()
     };
 
+    let build_label = |s: Option<i32>| s.and_then(|n| BuildStatus::try_from(n).ok()).map(|v| format!("{v:?}"));
+    let eval_label = |s: Option<i32>| s.and_then(|n| EvaluationStatus::try_from(n).ok()).map(|v| format!("{v:?}"));
     for row in rows {
         match row.kind.as_str() {
             "build_total" => {
-                if let Some(l) = row.label {
+                if let Some(l) = build_label(row.status) {
                     obs.builds_total.push((l, row.value));
                 }
             }
             "build_in_state" => {
-                if let Some(l) = row.label {
+                if let Some(l) = build_label(row.status) {
                     obs.builds_in_state.push((l, row.value));
                 }
             }
             "evaluation_total" => {
-                if let Some(l) = row.label {
+                if let Some(l) = eval_label(row.status) {
                     obs.evaluations_total.push((l, row.value));
                 }
             }
             "evaluation_in_state" => {
-                if let Some(l) = row.label {
+                if let Some(l) = eval_label(row.status) {
                     obs.evaluations_in_state.push((l, row.value));
                 }
             }

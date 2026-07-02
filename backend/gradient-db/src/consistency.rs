@@ -12,6 +12,9 @@
 //! Transient non-zero counts between a transition and the next reconcile tick
 //! are expected; persistent counts are the alert.
 
+use crate::status_sql;
+use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
 
 /// Counts of graph-invariant violations at one instant.
@@ -50,10 +53,10 @@ async fn count<C: ConnectionTrait>(db: &C, sql: String) -> Result<i64, DbErr> {
 pub async fn graph_consistency_report<C: ConnectionTrait>(
     db: &C,
 ) -> Result<ConsistencyReport, DbErr> {
-    let closure_gate = crate::promotion::CLOSURE_COMPLETE_GATE;
+    let closure_gate = crate::promotion::closure_complete_gate();
     let drv_gate = crate::promotion::DRV_CLOSURE_CACHED_GATE;
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");
-    let unbacked = crate::cache_storage::UNBACKED_TRUSTED_OUTPUTS_SELECT;
+    let unbacked = crate::cache_storage::unbacked_trusted_outputs_select();
 
     let stale_closure_complete = count(
         db,
@@ -77,10 +80,11 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
         db,
         format!(
             "SELECT count(*) AS n FROM derivation_build db \
-             WHERE db.status = 0 \
+             WHERE db.status = {created} \
                AND db.edges_complete \
                AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) \
-               AND (db.substitutable OR ({deps_ready}))"
+               AND (db.substitutable OR ({deps_ready}))",
+            created = status_sql::build(BuildStatus::Created),
         ),
     )
     .await?;
@@ -88,7 +92,6 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
     let unbacked_trusted_outputs =
         count(db, format!("SELECT count(*) AS n FROM ({unbacked}) u")).await?;
 
-    let building = gradient_entity::evaluation::EvaluationStatus::Building as i32;
     let wedged_building_evals = count(
         db,
         format!(
@@ -97,7 +100,14 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
                AND NOT EXISTS ( \
                  SELECT 1 FROM build_job bj \
                  JOIN derivation_build db ON db.derivation = bj.derivation \
-                 WHERE bj.evaluation = ev.id AND db.status IN (0, 1, 2, 8))"
+                 WHERE bj.evaluation = ev.id AND db.status IN ({non_terminal}))",
+            building = status_sql::eval(EvaluationStatus::Building),
+            non_terminal = status_sql::build_in(&[
+                BuildStatus::Created,
+                BuildStatus::Queued,
+                BuildStatus::Building,
+                BuildStatus::FailedTransient,
+            ]),
         ),
     )
     .await?;

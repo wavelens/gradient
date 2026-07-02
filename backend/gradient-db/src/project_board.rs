@@ -113,27 +113,39 @@ pub async fn project_queue_summary<C: ConnectionTrait>(
     db: &C,
     project: ProjectId,
 ) -> Result<(i64, i64), DbErr> {
-    // EvaluationStatus terminal: Completed=5, Failed=6, Aborted=7.
-    // BuildStatus building: Building=2. queued: Created=0, Queued=1, FailedTransient=8.
     let sql = format!(
         "SELECT b.status AS status, COUNT(*) AS cnt \
          FROM build_job bj \
          JOIN evaluation e ON e.id = bj.evaluation \
          JOIN derivation_build b ON b.id = bj.derivation_build \
-         WHERE e.project = '{project}' AND e.status NOT IN (5,6,7) \
-           AND b.status IN (0,1,2,8) \
-         GROUP BY b.status"
+         WHERE e.project = $1 AND e.status NOT IN ({eval_terminal}) \
+           AND b.status IN ({live}) \
+         GROUP BY b.status",
+        eval_terminal =
+            crate::status_sql::eval_in(&gradient_entity::evaluation::EvaluationStatus::TERMINAL),
+        live = crate::status_sql::build_in(&[
+            BuildStatus::Created,
+            BuildStatus::Queued,
+            BuildStatus::Building,
+            BuildStatus::FailedTransient,
+        ]),
     );
-    let rows = StatusCountRow::find_by_statement(Statement::from_string(DbBackend::Postgres, sql))
-        .all(db)
-        .await?;
+    let rows = StatusCountRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        sql,
+        [project.into_inner().into()],
+    ))
+    .all(db)
+    .await?;
 
     let mut building = 0i64;
     let mut queued = 0i64;
     for r in rows {
-        match r.status {
-            2 => building += r.cnt,
-            0 | 1 | 8 => queued += r.cnt,
+        match BuildStatus::try_from(r.status) {
+            Ok(BuildStatus::Building) => building += r.cnt,
+            Ok(BuildStatus::Created | BuildStatus::Queued | BuildStatus::FailedTransient) => {
+                queued += r.cnt
+            }
             _ => {}
         }
     }
