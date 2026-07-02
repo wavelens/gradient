@@ -5,112 +5,73 @@
  */
 
 use anyhow::{Context, Result};
+use gradient_core::ServerState;
 use gradient_db::collect_transitive_dependents;
 use gradient_sources::get_hash_from_path;
 use gradient_types::*;
-use gradient_core::ServerState;
-use sea_orm::ActiveValue::Set;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, TransactionTrait};
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
-/// Invalidates a path's cached state across all caches:
-///   - removes its NAR file from storage
-///   - clears `is_cached` / `file_hash` / `file_size` on all matching outputs
-///   - deletes any `cache_derivation` rows for the owning derivation
-///   - walks reverse dependency edges and deletes `cache_derivation` rows for
-///     every transitive dependent in the same cache (their closures are now
-///     incomplete). Their NAR files stay; only the closure assertion is revoked.
+/// Invalidates a path's cached state across all caches, in one transaction, by
+/// demoting it like any other proven-bad artifact ([`gradient_db::demote_cached_output`]):
+///   - clears the cache link AND upstream availability on all matching outputs
+///   - resets trusted producers (`Completed`/`Substituted`) to `Created` so the
+///     path rebuilds instead of staying trusted-but-gone
+///   - deletes the `cached_path` rows (signatures cascade) and the NAR object
+///   - clears the gate flags the deleted rows backed
+///   - revokes `cache_derivation` closure assertions for the producers and
+///     every transitive dependent (their closures are no longer complete);
+///     dependents' NAR files stay.
 pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) -> Result<()> {
-    let (hash, package) = get_hash_from_path(path.clone())
+    let (hash, _package) = get_hash_from_path(path.clone())
         .with_context(|| format!("Failed to parse path {}", path))?;
 
-    let outputs = EDerivationOutput::find()
-        .filter(
-            Condition::all()
-                .add(CDerivationOutput::Hash.eq(hash.clone()))
-                .add(CDerivationOutput::Package.eq(package.clone()))
-                .add(CDerivationOutput::IsCached.eq(true)),
-        )
-        .all(&state.worker_db)
+    let txn = state
+        .worker_db
+        .inner()
+        .begin()
         .await
-        .context("Database error while finding derivation outputs")?;
+        .context("Failed to open invalidation transaction")?;
 
-    for output in outputs {
-        let derivation_id = output.derivation;
+    let producers = gradient_db::demote_cached_output(&txn, &state.nar_storage, &hash)
+        .await
+        .context("Failed to demote cached output")?;
+    gradient_db::clear_gate_flags_for_hashes(&txn, std::slice::from_ref(&hash))
+        .await
+        .context("Failed to clear gate flags")?;
+    gradient_db::clear_closure_complete_for_referrers(&txn, &hash)
+        .await
+        .context("Failed to clear referrer closure flags")?;
 
-        let mut active = output.clone().into_active_model();
-        active.is_cached = Set(false);
-        active
-            .update(&state.worker_db)
-            .await
-            .context("Failed to update derivation output")?;
-
-        state
-            .nar_storage
-            .delete(&hash)
-            .await
-            .with_context(|| format!("Failed to remove cached NAR for {}", hash))?;
-
-        // Delete cached_path + signatures for this output.
-        let cached_paths = ECachedPath::find()
-            .filter(CCachedPath::Hash.eq(&hash))
-            .all(&state.worker_db)
-            .await
-            .context("Failed to find cached_path rows")?;
-
-        for cp in &cached_paths {
-            let sigs = ECachedPathSignature::find()
-                .filter(CCachedPathSignature::CachedPath.eq(cp.id))
-                .all(&state.worker_db)
-                .await
-                .unwrap_or_default();
-            for sig in sigs {
-                sig.into_active_model()
-                    .delete(&state.worker_db)
-                    .await
-                    .context("Failed to delete signature")?;
-            }
-            cp.clone()
-                .into_active_model()
-                .delete(&state.worker_db)
-                .await
-                .context("Failed to delete cached_path")?;
-        }
-
-        // Drop cache_derivation rows for this derivation in every cache,
-        // plus walk reverse derivation_dependency edges and remove rows for
-        // every dependent (its closure is no longer complete).
-        revoke_cache_derivation_closure(&state, derivation_id).await?;
-
-        info!(path = %path, "Invalidated cache for path");
+    for derivation_id in &producers {
+        revoke_cache_derivation_closure(&txn, *derivation_id).await?;
     }
 
+    txn.commit()
+        .await
+        .context("Failed to commit invalidation")?;
+
+    info!(path = %path, producers = producers.len(), "Invalidated cache for path");
     Ok(())
 }
 
 /// Removes all `cache_derivation` rows touching `derivation_id` and any of its
 /// transitive dependents across every cache.
-async fn revoke_cache_derivation_closure(
-    state: &Arc<ServerState>,
+async fn revoke_cache_derivation_closure<C: ConnectionTrait>(
+    db: &C,
     derivation_id: DerivationId,
 ) -> Result<()> {
-    let visited = collect_transitive_dependents(&state.worker_db, derivation_id).await?;
+    let visited = collect_transitive_dependents(db, derivation_id).await?;
     let drv_ids: Vec<DerivationId> = visited.into_iter().collect();
-    let cache_rows = ECacheDerivation::find()
-        .filter(CCacheDerivation::Derivation.is_in(drv_ids))
-        .all(&state.worker_db)
-        .await
-        .context("Failed to query cache_derivation rows")?;
-
-    for row in cache_rows {
-        let active = row.into_active_model();
-        if let Err(e) = active.delete(&state.worker_db).await {
-            warn!(error = %e, "Failed to delete cache_derivation row");
-        }
-    }
+    gradient_db::for_each_chunk(&drv_ids, |chunk| async move {
+        ECacheDerivation::delete_many()
+            .filter(CCacheDerivation::Derivation.is_in(chunk))
+            .exec(db)
+            .await
+    })
+    .await
+    .context("Failed to delete cache_derivation rows")?;
 
     Ok(())
 }
