@@ -775,6 +775,22 @@ impl JobTracker {
         self.active.get(job_id).map(|(_, j)| j)
     }
 
+    /// The active eval job for `job_id`, if any.
+    pub fn active_eval_job(&self, job_id: &str) -> Option<&PendingEvalJob> {
+        match self.active_job(job_id) {
+            Some(PendingJob::Eval(j)) => Some(j),
+            _ => None,
+        }
+    }
+
+    /// The active build job for `job_id`, if any.
+    pub fn active_build_job(&self, job_id: &str) -> Option<&PendingBuildJob> {
+        match self.active_job(job_id) {
+            Some(PendingJob::Build(j)) => Some(j),
+            _ => None,
+        }
+    }
+
     pub fn pending_job(&self, job_id: &str) -> Option<&PendingJob> {
         self.pending.get(job_id)
     }
