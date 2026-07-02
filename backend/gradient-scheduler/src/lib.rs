@@ -12,8 +12,12 @@
 //! - [`worker_lifecycle`] - connect / disconnect / capability updates
 //! - [`job_handlers`] - queue, assignment, status, completion, log, abort
 //! - [`dispatch`] - background loops that poll the DB and enqueue jobs
+//! - [`build`] - `BuildOutput`/completion/failure handling and self-heal
+//! - [`waiting_state`] - reconciles evaluation status against the worker pool
+//! - [`buildability`] - whether the connected pool can build a pending anchor
 
 pub mod build;
+pub mod buildability;
 pub mod dispatch;
 pub mod eval;
 pub mod history;
@@ -22,6 +26,7 @@ pub mod jobs;
 pub mod log_substitution;
 pub mod peer_auth;
 pub mod views;
+pub mod waiting_state;
 pub mod worker_pool;
 pub mod worker_state;
 
