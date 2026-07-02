@@ -420,14 +420,12 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
             match gradient_db::reconcile_dependency_failed(&scheduler.state.worker_db).await {
                 Ok(failed) if !failed.is_empty() => {
                     info!(failed = failed.len(), "reconcile_dependency_failed swept dead-zone anchors");
-                    gradient_db::notify_build_status_for_derivations(
-                        &scheduler.state.db(),
-                        &failed,
-                    )
-                    .await;
+                    gradient_db::emit_transition_effects(&scheduler.state.db(), &failed).await;
 
+                    let derivations: Vec<_> = failed.iter().map(|c| c.derivation).collect();
                     if let Err(e) =
-                        crate::build::finalize_evals_for_derivations(&scheduler.state, &failed).await
+                        crate::build::finalize_evals_for_derivations(&scheduler.state, &derivations)
+                            .await
                     {
                         error!(error = %e, "finalize after reconcile_dependency_failed failed");
                     }
@@ -450,11 +448,7 @@ async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
                         info!(promoted = queued.len(), "promote_ready swept ready anchors");
                     }
 
-                    gradient_db::notify_build_status_for_derivations(
-                        &scheduler.state.db(),
-                        &queued,
-                    )
-                    .await;
+                    gradient_db::emit_transition_effects(&scheduler.state.db(), &queued).await;
                 }
                 Err(e) => error!(error = %e, "periodic promote_ready failed"),
             }

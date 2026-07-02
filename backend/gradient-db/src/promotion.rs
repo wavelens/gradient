@@ -41,6 +41,8 @@
 //! separate `edges_unresolved` flag instead of a clear.
 
 use crate::graph_sql::{ClosureDirection, dependency_closure_cte, eval_closure_cte};
+use crate::status::TransitionChange;
+use gradient_entity::build::BuildStatus;
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, QueryResult, Statement, Value};
 
@@ -57,31 +59,61 @@ fn returned_derivations(rows: Vec<QueryResult>) -> Vec<DerivationId> {
         .collect()
 }
 
+/// Collect `RETURNING db.derivation, old.status AS from_status, db.status AS
+/// to_status` rows into the typed changes the effects emitter consumes. Bulk
+/// statements capture the pre-update status via a `FROM derivation_build old`
+/// self-join on the primary key (Postgres evaluates `old` against the snapshot).
+fn returned_transitions(rows: Vec<QueryResult>) -> Vec<TransitionChange> {
+    rows.into_iter()
+        .filter_map(|r| {
+            let derivation = r.try_get::<uuid::Uuid>("", "derivation").ok()?;
+            let from = BuildStatus::try_from(r.try_get::<i32>("", "from_status").ok()?).ok()?;
+            let to = BuildStatus::try_from(r.try_get::<i32>("", "to_status").ok()?).ok()?;
+            Some(TransitionChange { derivation: DerivationId::new(derivation), from, to })
+        })
+        .collect()
+}
+
+/// Changes for rows a statement moved from a statically-known status (e.g. a
+/// `WHERE status = 0` promote): no self-join needed, the predicate is the proof.
+fn transitions_from(
+    derivations: Vec<DerivationId>,
+    from: BuildStatus,
+    to: BuildStatus,
+) -> Vec<TransitionChange> {
+    derivations
+        .into_iter()
+        .map(|derivation| TransitionChange { derivation, from, to })
+        .collect()
+}
+
 /// Re-evaluate the dependents of a just-finished `completed_derivation`:
 /// mark any dependent with a terminal-failed dependency `DependencyFailed`,
 /// then promote every `Created` dependent whose dependency anchors are all
-/// terminal-success to `Queued`. Returns the derivations it moved (queued or
-/// dependency-failed) so the caller can post their CI status.
+/// terminal-success to `Queued`. Returns the changes it made so the caller can
+/// feed [`crate::status::emit_transition_effects`].
 pub async fn promote_dependents<C: ConnectionTrait>(
     db: &C,
     completed_derivation: DerivationId,
-) -> Result<Vec<DerivationId>, DbErr> {
+) -> Result<Vec<TransitionChange>, DbErr> {
     let id = || Value::Uuid(Some(Box::new(completed_derivation.into_inner())));
 
-    let mut affected = returned_derivations(
+    let mut affected = returned_transitions(
         db.query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
             UPDATE derivation_build AS db
             SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
-            WHERE db.status IN (0, 1)
+            FROM derivation_build old
+            WHERE old.id = db.id
+              AND db.status IN (0, 1)
               AND db.derivation IN (
                 SELECT dd.derivation FROM derivation_dependency dd WHERE dd.dependency = $1)
               AND EXISTS (
                 SELECT 1 FROM derivation_dependency e
                 JOIN derivation_build dep ON dep.derivation = e.dependency
                 WHERE e.derivation = db.derivation AND dep.status IN (4, 6, 9))
-            RETURNING db.derivation
+            RETURNING db.derivation, old.status AS from_status, db.status AS to_status
             "#,
             [id()],
         ))
@@ -89,11 +121,12 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     );
 
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");
-    affected.extend(returned_derivations(
-        db.query_all(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            format!(
-                r#"
+    affected.extend(transitions_from(
+        returned_derivations(
+            db.query_all(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                format!(
+                    r#"
             UPDATE derivation_build AS db
             SET status = 1, queued_at = (now() AT TIME ZONE 'UTC'),
                 updated_at = (now() AT TIME ZONE 'UTC')
@@ -106,10 +139,13 @@ pub async fn promote_dependents<C: ConnectionTrait>(
               AND (db.substitutable OR ({deps_ready}))
             RETURNING db.derivation
             "#
-            ),
-            [id()],
-        ))
-        .await?,
+                ),
+                [id()],
+            ))
+            .await?,
+        ),
+        BuildStatus::Created,
+        BuildStatus::Queued,
     ));
 
     Ok(affected)
@@ -316,12 +352,12 @@ pub async fn reconcile_drv_closure_cached<C: ConnectionTrait>(db: &C) -> Result<
 /// Recursively mark every dependent of `failed_derivation` `DependencyFailed`.
 /// Walks the global `derivation_dependency` graph upward: any non-terminal
 /// anchor (`Created`/`Queued`/`FailedTransient`) reachable from the failure can
-/// never build, so it is failed in one recursive statement. Returns the
-/// derivations it failed so the caller can post their CI status.
+/// never build, so it is failed in one recursive statement. Returns the changes
+/// it made so the caller can feed [`crate::status::emit_transition_effects`].
 pub async fn cascade_dependency_failed<C: ConnectionTrait>(
     db: &C,
     failed_derivation: DerivationId,
-) -> Result<Vec<DerivationId>, DbErr> {
+) -> Result<Vec<TransitionChange>, DbErr> {
     let cte = dependency_closure_cte("dependents", "SELECT $1::uuid", ClosureDirection::Dependents);
     let rows = db
         .query_all(Statement::from_sql_and_values(
@@ -331,16 +367,18 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
             {cte}
             UPDATE derivation_build AS db
             SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
-            WHERE db.status IN (0, 1, 8)
+            FROM derivation_build old
+            WHERE old.id = db.id
+              AND db.status IN (0, 1, 8)
               AND db.derivation IN (SELECT derivation FROM dependents WHERE derivation <> $1)
-            RETURNING db.derivation
+            RETURNING db.derivation, old.status AS from_status, db.status AS to_status
             "#
             ),
             [Value::Uuid(Some(Box::new(failed_derivation.into_inner())))],
         ))
         .await?;
 
-    Ok(returned_derivations(rows))
+    Ok(returned_transitions(rows))
 }
 
 /// Global proactive mirror of [`cascade_dependency_failed`]. The reactive cascade
@@ -356,11 +394,11 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
 /// reachable non-terminal anchor in one statement (the recursive term traverses
 /// the graph structurally, so a whole poisoned subtree converges per pass). It is
 /// the failure-side counterpart of the [`promote_ready`] success-side backstop.
-/// Returns the derivations it failed so the caller can fan out the CI status and
+/// Returns the changes it made so the caller can fan out the effects and
 /// finalize the now-settled evaluations.
 pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
     db: &C,
-) -> Result<Vec<DerivationId>, DbErr> {
+) -> Result<Vec<TransitionChange>, DbErr> {
     let rows = db
         .query_all(Statement::from_string(
             DatabaseBackend::Postgres,
@@ -368,7 +406,7 @@ pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
         ))
         .await?;
 
-    Ok(returned_derivations(rows))
+    Ok(returned_transitions(rows))
 }
 
 /// Recursive upward walk from every terminal-failed anchor (`FailedPermanent=4`/
@@ -388,9 +426,11 @@ fn dependency_failed_reconcile_sql() -> String {
     {cte}
     UPDATE derivation_build AS db
     SET status = 6, updated_at = (now() AT TIME ZONE 'UTC')
-    WHERE db.status IN (0, 1, 8)
+    FROM derivation_build old
+    WHERE old.id = db.id
+      AND db.status IN (0, 1, 8)
       AND db.derivation IN (SELECT derivation FROM dependents)
-    RETURNING db.derivation
+    RETURNING db.derivation, old.status AS from_status, db.status AS to_status
     "#
     )
 }
@@ -401,8 +441,8 @@ fn dependency_failed_reconcile_sql() -> String {
 /// this seeds the graph from its leaves and from anchors whose deps were already
 /// cached/substituted at resolve time (for which no completion event ever
 /// fires). Subsequent completions cascade via [`promote_dependents`]. Returns
-/// the derivations it queued so the caller can post their CI status.
-pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationId>, DbErr> {
+/// the changes it made so the caller can feed the effects emitter.
+pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<TransitionChange>, DbErr> {
     let rows = db
         .query_all(Statement::from_string(
             DatabaseBackend::Postgres,
@@ -410,7 +450,11 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<DerivationI
         ))
         .await?;
 
-    Ok(returned_derivations(rows))
+    Ok(transitions_from(
+        returned_derivations(rows),
+        BuildStatus::Created,
+        BuildStatus::Queued,
+    ))
 }
 
 fn promote_ready_sql() -> String {
@@ -593,14 +637,15 @@ pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
 /// for "is this built", so trust it here; the reactive heals
 /// (`demote_referrers_of` / absent-orphan recovery) remain the backstop for the
 /// rare case where a cached output's runtime closure is itself incomplete. Returns
-/// the number reconciled.
+/// the changes it made (flag-only touches on already-terminal anchors report
+/// `from == to`, which the effects emitter treats as a re-announce).
 pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
-) -> Result<u64, DbErr> {
+) -> Result<Vec<TransitionChange>, DbErr> {
     let cte = eval_closure_cte();
-    let affected = db
-        .execute(Statement::from_sql_and_values(
+    let rows = db
+        .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             format!(
                 r#"
@@ -610,21 +655,23 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
                 closure_complete = true,
                 edges_complete = true,
                 updated_at = (now() AT TIME ZONE 'UTC')
-            WHERE db.derivation IN (SELECT derivation FROM closure)
+            FROM derivation_build old
+            WHERE old.id = db.id
+              AND db.derivation IN (SELECT derivation FROM closure)
               AND (db.status NOT IN (3, 7) OR NOT db.closure_complete)
               AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.derivation = db.derivation)
               AND NOT EXISTS (
                 SELECT 1 FROM derivation_output o
                 LEFT JOIN cached_path cp ON cp.hash = o.hash AND cp.file_hash IS NOT NULL
                 WHERE o.derivation = db.derivation AND cp.hash IS NULL)
+            RETURNING db.derivation, old.status AS from_status, db.status AS to_status
             "#
             ),
             [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
         ))
-        .await?
-        .rows_affected();
+        .await?;
 
-    Ok(affected)
+    Ok(returned_transitions(rows))
 }
 
 #[cfg(test)]
@@ -653,8 +700,12 @@ mod tests {
             "must fail dependents to DependencyFailed: {sql}"
         );
         assert!(
-            sql.contains("WHERE db.status IN (0, 1, 8)"),
+            sql.contains("db.status IN (0, 1, 8)"),
             "must only touch non-terminal anchors (never terminal-success): {sql}"
+        );
+        assert!(
+            sql.contains("FROM derivation_build old") && sql.contains("old.status AS from_status"),
+            "must capture the pre-update status for the effects emitter: {sql}"
         );
         assert!(
             sql.contains("JOIN dependents c ON e.dependency = c.derivation"),

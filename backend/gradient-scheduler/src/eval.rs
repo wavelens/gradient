@@ -937,10 +937,9 @@ pub async fn handle_eval_job_completed(
     // blocks its dependents though its artifacts exist. Cache presence is the
     // ground truth for "is this built", so mark such anchors Completed +
     // closure_complete before promoting.
-    if let Err(e) =
-        gradient_db::reconcile_cached_anchors_for_eval(&state.worker_db, evaluation_id).await
-    {
-        error!(error = %e, %evaluation_id, "reconcile_cached_anchors_for_eval failed");
+    match gradient_db::reconcile_cached_anchors_for_eval(&state.worker_db, evaluation_id).await {
+        Ok(changes) => gradient_db::emit_transition_effects(&state.db(), &changes).await,
+        Err(e) => error!(error = %e, %evaluation_id, "reconcile_cached_anchors_for_eval failed"),
     }
 
     // Self-heal stale `closure_complete` before promoting: anchors that
@@ -963,7 +962,7 @@ pub async fn handle_eval_job_completed(
     // completion cascades upward.
     match gradient_db::promote_ready(&state.worker_db).await {
         Ok(queued) => {
-            gradient_db::notify_build_status_for_derivations(&state.db(), &queued).await
+            gradient_db::emit_transition_effects(&state.db(), &queued).await
         }
         Err(e) => error!(error = %e, %evaluation_id, "promote_ready failed"),
     }

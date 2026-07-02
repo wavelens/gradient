@@ -10,15 +10,15 @@
 //! a single global entry-point dep-count delta. Graph-driven promotion runs on
 //! terminal-success; dependency-failure cascades on terminal-failure.
 
+use super::effects::{TransitionChange, emit_transition_effects};
 use super::logging::{PHASE_SUBJECT_BUILD, finalize_build_log, record_phase_event};
 use crate::DbContext;
-use crate::reachability::build_jobs_for_derivation;
 use crate::state_machine::BuildStateMachine;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use tracing::{error, info};
 
 pub async fn update_derivation_build_status(
@@ -68,38 +68,16 @@ pub async fn update_derivation_build_status(
         }
     };
 
-    // Global entry-point dep-count delta: one statement shifts the unit across
-    // every entry point (in any eval) whose closure contains this derivation.
-    let dep_ctx = ctx.clone();
-    let drv = updated.derivation;
-    let (old_i, new_i) = (i32::from(prev_status), i32::from(status));
-    ctx.shutdown.spawn(async move {
-        if let Err(e) =
-            crate::dep_closure::apply_dep_count_delta(&dep_ctx.worker_db, drv, old_i, new_i).await
-        {
-            error!(error = %e, "failed to update entry-point dep counts");
-        }
-    });
-
-    // Fan side-effects across every eval that references the derivation.
-    let jobs = build_jobs_for_derivation(&ctx.worker_db, updated.derivation)
-        .await
-        .unwrap_or_default();
-    for job in &jobs {
-        let _ = ctx
-            .board_events
-            .send(gradient_types::BoardEvent::BuildStatusChanged {
-                evaluation_id: job.evaluation.into_inner(),
-                build_id: job.id.into_inner(),
-                status: i32::from(status) as i16,
-            });
-    }
+    // All fan-out (dep-count delta, board events, CI reactor, cache-changed)
+    // goes through the one effects emitter - the same path the bulk sweeps
+    // feed - so the reactive and proactive models can never drift apart.
+    emit_transition_effects(
+        ctx,
+        &[TransitionChange { derivation: updated.derivation, from: prev_status, to: status }],
+    )
+    .await;
 
     if matches!(status, BuildStatus::Completed | BuildStatus::Substituted) {
-        let _ = ctx
-            .board_events
-            .send(gradient_types::BoardEvent::CacheChanged);
-
         // Recompute closure-completeness up the build-dependency graph from this
         // anchor, before promoting. A built anchor becomes `closure_complete` once
         // its build deps are each `closure_complete` or `substitutable`; this also
@@ -111,7 +89,7 @@ pub async fn update_derivation_build_status(
         }
 
         match crate::promotion::promote_dependents(&ctx.worker_db, updated.derivation).await {
-            Ok(changed) => notify_build_status_for_derivations(ctx, &changed).await,
+            Ok(changes) => emit_transition_effects(ctx, &changes).await,
             Err(e) => error!(error = %e, "failed to promote dependents"),
         }
     }
@@ -121,25 +99,8 @@ pub async fn update_derivation_build_status(
         BuildStatus::FailedPermanent | BuildStatus::FailedTimeout | BuildStatus::DependencyFailed
     ) {
         match crate::promotion::cascade_dependency_failed(&ctx.worker_db, updated.derivation).await {
-            Ok(failed) => notify_build_status_for_derivations(ctx, &failed).await,
+            Ok(changes) => emit_transition_effects(ctx, &changes).await,
             Err(e) => error!(error = %e, "failed to cascade dependency failure"),
-        }
-    }
-
-    // Post the per-entry-point forge check on every status the CI side reports -
-    // `Queued` (Pending) and `Building` (Running), not just the terminal result -
-    // so the check tracks live progress instead of only appearing once done.
-    if matches!(status, BuildStatus::Queued | BuildStatus::Building)
-        || BuildStateMachine::is_terminal(&status)
-    {
-        for job in jobs {
-            let action_ctx = ctx.clone();
-            ctx.shutdown.spawn(async move {
-                action_ctx
-                    .reactor
-                    .on_build_status_changed(&action_ctx, job, status)
-                    .await;
-            });
         }
     }
 
@@ -174,20 +135,17 @@ pub async fn update_derivation_build_status(
     updated
 }
 
-/// Fan the CI status reactor out over the entry-point builds of `derivations` at
-/// each anchor's current status. The bulk graph transitions (`promote_ready`,
-/// `promote_dependents`, `cascade_dependency_failed`, abort) move anchors with a
-/// single SQL statement and so bypass [`update_derivation_build_status`]; this
-/// keeps every per-entry-point forge check in step with them. Only declared entry
-/// points get a forge check, so non-entry-point builds are filtered out here
-/// rather than spawning a reactor call per intermediate build.
+/// Re-announce the current status of `derivations` through the effects emitter
+/// (board events + per-entry-point forge checks). For callers that only know
+/// the affected derivation set, not the transitions that produced it - e.g.
+/// state import; paths with the actual changes in hand should call
+/// [`emit_transition_effects`] directly.
 pub async fn notify_build_status_for_derivations(ctx: &DbContext, derivations: &[DerivationId]) {
     if derivations.is_empty() {
         return;
     }
 
     let db = &ctx.worker_db;
-
     let status_by_drv: HashMap<DerivationId, BuildStatus> =
         crate::fetch_in_chunks(derivations, |chunk| async move {
             EDerivationBuild::find()
@@ -201,45 +159,9 @@ pub async fn notify_build_status_for_derivations(ctx: &DbContext, derivations: &
         .map(|a| (a.derivation, a.status))
         .collect();
 
-    let entry_keys: HashSet<(EvaluationId, DerivationId)> =
-        crate::fetch_in_chunks(derivations, |chunk| async move {
-            EEntryPoint::find()
-                .filter(CEntryPoint::Derivation.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        .unwrap_or_default()
+    let changes: Vec<TransitionChange> = status_by_drv
         .into_iter()
-        .map(|ep| (ep.evaluation, ep.derivation))
+        .map(|(derivation, status)| TransitionChange::unchanged(derivation, status))
         .collect();
-    if entry_keys.is_empty() {
-        return;
-    }
-
-    let jobs = crate::fetch_in_chunks(derivations, |chunk| async move {
-        EBuildJob::find()
-            .filter(CBuildJob::Derivation.is_in(chunk))
-            .all(db)
-            .await
-    })
-    .await
-    .unwrap_or_default();
-
-    for job in jobs {
-        if !entry_keys.contains(&(job.evaluation, job.derivation)) {
-            continue;
-        }
-        let Some(&status) = status_by_drv.get(&job.derivation) else {
-            continue;
-        };
-
-        let action_ctx = ctx.clone();
-        ctx.shutdown.spawn(async move {
-            action_ctx
-                .reactor
-                .on_build_status_changed(&action_ctx, job, status)
-                .await;
-        });
-    }
+    emit_transition_effects(ctx, &changes).await;
 }

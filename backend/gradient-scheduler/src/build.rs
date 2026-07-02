@@ -1050,7 +1050,10 @@ impl<'a> BuildStateHandler<'a> {
         // sits Created and blocks its dependents though its artifacts exist. Mark
         // it Completed + closure_complete so the gate sees the cached truth.
         match gradient_db::reconcile_cached_anchors_for_eval(db, evaluation_id).await {
-            Ok(n) if n > 0 => info!(%evaluation_id, reconciled = n, "graph-unstick: reconciled fully-cached anchors to Completed"),
+            Ok(changes) if !changes.is_empty() => {
+                info!(%evaluation_id, reconciled = changes.len(), "graph-unstick: reconciled fully-cached anchors to Completed");
+                gradient_db::emit_transition_effects(&self.state.db(), &changes).await;
+            }
             Ok(_) => {}
             Err(e) => error!(error = %e, %evaluation_id, "reconcile_cached_anchors_for_eval during graph-unstick failed"),
         }
@@ -1065,7 +1068,7 @@ impl<'a> BuildStateHandler<'a> {
 
         match gradient_db::promote_ready(db).await {
             Ok(queued) => {
-                gradient_db::notify_build_status_for_derivations(&self.state.db(), &queued).await
+                gradient_db::emit_transition_effects(&self.state.db(), &queued).await
             }
             Err(e) => error!(error = %e, %evaluation_id, "promote_ready during graph-unstick failed"),
         }
