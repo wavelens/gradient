@@ -139,6 +139,27 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
             .board_events
             .send(gradient_types::BoardEvent::CacheChanged);
     }
+
+    // A terminal transition may have settled its referencing evaluations; the
+    // finalize decision is graph-derived and idempotent, so checking here (for
+    // every mover, bulk or single-row) closes the "eval hangs Building because
+    // a bulk sweep bypassed the reactive finalize hook" dead-zone class.
+    let terminal_evals: HashSet<EvaluationId> = changes
+        .iter()
+        .filter(|c| crate::state_machine::BuildStateMachine::is_terminal(&c.to))
+        .flat_map(|c| {
+            jobs_by_drv
+                .get(&c.derivation)
+                .into_iter()
+                .flatten()
+                .map(|j| j.evaluation)
+        })
+        .collect();
+    for evaluation_id in terminal_evals {
+        if let Err(e) = super::eval_finalize::check_evaluation_done(ctx, evaluation_id).await {
+            error!(error = %e, %evaluation_id, "eval finalize after transition failed");
+        }
+    }
 }
 
 #[cfg(test)]

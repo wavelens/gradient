@@ -23,7 +23,6 @@ use gradient_core::ServerState;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, error, info, warn};
 
-use super::build::check_evaluation_done;
 use super::jobs::PendingEvalJob;
 use gradient_types::proto::DiscoveredDerivation;
 
@@ -983,7 +982,8 @@ pub async fn handle_eval_job_completed(
 
     // If every build was already terminal (e.g. all Substituted), close the
     // evaluation out via the shared decision function.
-    check_evaluation_done(state, evaluation_id).await
+    gradient_db::check_evaluation_done(&state.db(), evaluation_id).await?;
+    Ok(())
 }
 
 /// Resolve `(drv_path, Vec<dep_drv_path>)` pairs to `(derivation_uuid,
