@@ -34,7 +34,10 @@ pub struct DeepGcReport {
 
 impl DeepGcReport {
     fn to_json(&self) -> serde_json::Value {
-        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+        serde_json::to_value(self).unwrap_or_else(|e| {
+            warn!(error = ?e, "deep_gc: report serialization failed");
+            serde_json::Value::Null
+        })
     }
 }
 
@@ -188,42 +191,19 @@ async fn pass_logs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_db::{WebDb, WorkerDb};
+    use crate::cacher::test_support::test_server_state_with_log;
     use gradient_entity::ids::{BuildRequestBlobId, OrganizationId};
-    use gradient_storage::{EmailSender, FileLogStorage, LogStorage, NarStore};
+    use gradient_storage::{FileLogStorage, LogStorage, NarStore};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use std::sync::Arc;
-    use gradient_test_support::fakes::email::InMemoryEmailSender;
     use gradient_test_support::log_storage::NoopLogStorage;
-    use gradient_test_support::prelude::test_cli;
 
     fn make_state(
         nar: NarStore,
         log: Arc<dyn LogStorage>,
         db: sea_orm::DatabaseConnection,
     ) -> Arc<ServerState> {
-        Arc::new(ServerState {
-            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
-            worker_db: WorkerDb::new(db),
-            config: Arc::new(RuntimeConfig::from_cli(&test_cli()).expect("valid test config")),
-            log_storage: log,
-            email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
-            nar_storage: nar,
-            manifest_state: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            pending_credentials: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            http: gradient_util::http::build_client().expect("http client"),
-            shutdown: gradient_util::shutdown::Shutdown::new(),
-            jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
-            started_at: chrono::Utc::now(),
-            pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
-            oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
-            scim_group_roles: std::sync::Arc::new(Default::default()),
-            board_events: tokio::sync::broadcast::channel(256).0,
-            forge: gradient_forge::ForgeRegistry::with_builtin(),
-            upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
-            reactor: std::sync::Arc::new(gradient_db::NoReactor),
-        })
+        test_server_state_with_log(nar, log, db, |_| {})
     }
 
     #[tokio::test]
