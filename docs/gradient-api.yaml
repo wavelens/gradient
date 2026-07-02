@@ -10099,11 +10099,13 @@ components:
 
     Windowed:
       type: object
-      description: A metric averaged over the 5-minute, 1-hour and 24-hour windows.
+      description: |
+        A metric averaged over the 5-minute, 1-hour and 24-hour windows.
+        A window with no samples is null, distinct from a measured zero.
       properties:
-        w5m: { type: number }
-        w1h: { type: number }
-        w24h: { type: number }
+        w5m: { type: number, nullable: true }
+        w1h: { type: number, nullable: true }
+        w24h: { type: number, nullable: true }
 
     WorkerContext:
       type: object
@@ -10123,8 +10125,8 @@ components:
         cpu_count: { type: integer }
         cpu_core_score: { type: integer }
         ram_total_mb: { type: integer }
-        ram_free_mb: { type: integer }
-        cpu_usage_pct: { type: number }
+        ram_free_mb: { type: integer, nullable: true, description: Null until the worker's first live-metrics heartbeat. }
+        cpu_usage_pct: { type: number, nullable: true, description: Null until the worker's first live-metrics heartbeat. }
         disk_speed_mbps: { type: number, nullable: true }
         network_speed_mbps: { type: number, nullable: true }
 
