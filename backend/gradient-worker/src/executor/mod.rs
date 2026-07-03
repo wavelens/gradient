@@ -12,6 +12,7 @@
 pub mod build;
 pub mod compress;
 pub mod eval;
+pub(crate) mod failure;
 pub mod fetch;
 pub mod log_limit;
 
@@ -165,35 +166,6 @@ async fn drv_input_sources(drv_paths: &[String]) -> std::collections::HashSet<St
         .await
         .into_iter()
         .collect()
-}
-
-/// Classify a failed `external_cached` relay. Only a genuine "not on any
-/// upstream" miss ([`SubstituteNotOnUpstream`]) is reported as
-/// `SubstituteUnavailable` (which counts toward the scheduler's miss-escalation
-/// threshold). A transient timeout/transport failure (Pull RPC, NAR download, or
-/// the presigned PUT into our own store) is `Transient` so it retries as a
-/// substitute instead of escalating an otherwise-substitutable build into a
-/// from-scratch one whose `.drv` may never have been pushed.
-fn classify_substitute_failure(
-    build_id: &str,
-    e: anyhow::Error,
-) -> crate::executor::build::BuildError {
-    use crate::executor::build::BuildError;
-    use crate::proto::nar_import::{MissingInputs, SubstituteNotOnUpstream};
-
-    if e.chain().any(|c| c.is::<SubstituteNotOnUpstream>()) {
-        tracing::warn!(%build_id, error = %e, "external_cached relay: output on no upstream; SubstituteUnavailable");
-        BuildError::substitute_unavailable(e)
-    } else if let Some(mi) = e.chain().find_map(|c| c.downcast_ref::<MissingInputs>()) {
-        // The upstream advertised the path but the object GET 404'd: surface
-        // the paths so the server's demote/reconcile self-heal clears the
-        // stale record instead of this build retrying against it forever.
-        tracing::warn!(%build_id, error = %e, "external_cached relay: advertised NAR object missing; InputsUnavailable");
-        BuildError::inputs_unavailable(mi.0.clone(), e)
-    } else {
-        tracing::warn!(%build_id, error = %e, "external_cached relay failed transiently; retrying without escalating");
-        BuildError::transient(e)
-    }
 }
 
 /// Upload one path's NAR using the method the server advertised in its
@@ -395,7 +367,9 @@ impl JobExecutor {
                 let outputs =
                     crate::proto::nar_import::relay_external_cached_outputs(build_task, updater)
                         .await
-                        .map_err(|e| classify_substitute_failure(&build_task.build_id, e))?;
+                        .map_err(|e| {
+                            failure::classify_substitute_failure(&build_task.build_id, e)
+                        })?;
 
                 let reported: Vec<gradient_proto::messages::BuildOutput> = outputs
                     .iter()
@@ -435,33 +409,7 @@ impl JobExecutor {
             // and don't reach here as `Err`.
             crate::proto::nar_import::prefetch_inputs(&self.store, build_task, updater)
                 .await
-                .map_err(|e| {
-                    tracing::error!(
-                        build_id = %build_task.build_id,
-                        error = %e,
-                        "input prefetch failed; aborting build"
-                    );
-                    // A "required inputs not in cache" miss is terminal and
-                    // self-healing server-side: forward the paths so the server
-                    // demotes them and re-queues their producers. A cached NAR
-                    // that fails integrity (its bytes don't match the recorded
-                    // nar_hash, e.g. a non-reproducible local build desynced from
-                    // upstream-substitute metadata) is the same class: report the
-                    // path so the server demotes the corrupt object and rebuilds
-                    // it. Every other prefetch error is infrastructure-transient.
-                    if let Some(mi) = e.downcast_ref::<crate::proto::nar_import::MissingInputs>() {
-                        crate::executor::build::BuildError::inputs_unavailable(mi.0.clone(), e)
-                    } else if let Some(corrupt) = e.chain().find_map(|s| {
-                        s.downcast_ref::<crate::proto::nar_import::CorruptCachedNar>()
-                    }) {
-                        crate::executor::build::BuildError::inputs_unavailable(
-                            vec![corrupt.0.clone()],
-                            e,
-                        )
-                    } else {
-                        crate::executor::build::BuildError::transient(e)
-                    }
-                })?;
+                .map_err(|e| failure::classify_prefetch_error(&build_task.build_id, e))?;
             let outputs = build::build_derivation(
                 &self.store,
                 build_task,
@@ -489,7 +437,7 @@ impl JobExecutor {
         // `JobFailed`.
         compress::compress_and_push_paths(&self.store, &all_output_paths, updater, &mut abort)
             .await
-            .map_err(crate::executor::build::BuildError::transient)?;
+            .map_err(failure::BuildError::transient)?;
 
         // Release every indirect GC root for this job; symlinks are removed
         // and the daemon's next GC walk is free to delete unreachable paths.
@@ -510,38 +458,6 @@ pub(crate) fn check_abort(abort: &mut watch::Receiver<bool>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Only a genuine "not on any upstream" miss escalates; a transient relay
-    /// timeout (Pull RPC / NAR download / presigned PUT) retries as a substitute
-    /// instead of counting toward miss-escalation - two transient timeouts must
-    /// not turn a substitutable build into a from-scratch one.
-    #[test]
-    fn substitute_failure_classification() {
-        use crate::proto::nar_import::SubstituteNotOnUpstream;
-        use gradient_proto::messages::BuildFailureKind;
-
-        let genuine = classify_substitute_failure(
-            "b",
-            anyhow::Error::new(SubstituteNotOnUpstream("/nix/store/p".into())),
-        );
-        assert!(matches!(
-            genuine.kind,
-            BuildFailureKind::SubstituteUnavailable
-        ));
-
-        // wrapped in context is still recognized via the error chain
-        let wrapped = classify_substitute_failure(
-            "b",
-            anyhow::Error::new(SubstituteNotOnUpstream("/nix/store/p".into())).context("relay"),
-        );
-        assert!(matches!(
-            wrapped.kind,
-            BuildFailureKind::SubstituteUnavailable
-        ));
-
-        let timeout = classify_substitute_failure("b", anyhow::anyhow!("operation timed out"));
-        assert!(matches!(timeout.kind, BuildFailureKind::Transient));
-    }
 
     /// Regression: a `.drv`'s `inputSrcs` (e.g. `builtins.toFile` configs like
     /// `grub-config.xml`) must be discovered by parsing the `.drv`, not via the

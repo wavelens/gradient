@@ -246,7 +246,10 @@ pub enum EvalCachePullOutcome {
     Presigned { url: String },
     /// The server will stream the blob inline as `EvalCacheChunk` frames.
     /// `stream_token` guards the chunk stream like the NAR transfer token.
-    Inline { total_bytes: u64, stream_token: String },
+    Inline {
+        total_bytes: u64,
+        stream_token: String,
+    },
 }
 
 /// Result of an eval-cache push grant (`EvalCachePushGrant`).
@@ -528,12 +531,14 @@ pub enum JobKind {
 #[rkyv(derive(Debug, PartialEq))]
 pub enum BuildFailureKind {
     /// Infrastructure failure (OOM, disk full, network/substitution error,
-    /// builder crash) - eligible for retry.
+    /// builder crash) - eligible for retry. Default so a wire-decode glitch
+    /// retries within the bounded attempt budget instead of permanently
+    /// poisoning the build-once anchor; unclassified worker errors map to
+    /// `Permanent` explicitly in `wire_failure`, never via this default.
+    #[default]
     Transient,
     /// The builder exited non-zero, or the retry budget is exhausted -
-    /// terminal. Default so eval-job failures (which ignore the kind) decode
-    /// to a safe terminal value.
-    #[default]
+    /// terminal.
     Permanent,
     /// Wall-clock or silent timeout exceeded - terminal.
     Timeout,
