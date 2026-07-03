@@ -174,12 +174,23 @@ async fn dispatch_event(ctx: &CiContext, project_id: ProjectId, event: &str, pay
         let payload = payload.clone();
         let event = event.to_string();
         tokio::spawn(async move {
+            // A mass status-transition wave (promotion, thaw, requeue) fires
+            // one event per anchor; unbounded execution exhausted the DB pool
+            // and convoyed on the per-action bookkeeping row.
+            let Ok(_permit) = std::sync::Arc::clone(&ACTION_PERMITS).acquire_owned().await
+            else {
+                return;
+            };
             if let Err(e) = execute_action(&ctx, action, &event, payload).await {
                 warn!(error = %e, "Action execution failed");
             }
         });
     }
 }
+
+/// Process-wide bound on concurrently executing project actions.
+static ACTION_PERMITS: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(8)));
 
 #[cfg(test)]
 mod tests;

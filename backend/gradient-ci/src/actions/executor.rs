@@ -13,8 +13,7 @@ use gradient_types::{
     ActionConfig, MProjectAction, MProjectActionDelivery, ProjectActionDeliveryId,
 };
 use anyhow::{Context, Result};
-use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, IntoActiveModel};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseBackend, IntoActiveModel, Statement};
 use serde_json::Value as JsonValue;
 use std::time::Instant;
 use tracing::warn;
@@ -112,10 +111,20 @@ pub async fn execute_action(
     }
 
     if success {
-        let mut am = sea_orm::IntoActiveModel::into_active_model(action);
-        am.last_fired_at = Set(Some(gradient_types::now()));
-        am.updated_at = Set(gradient_types::now());
-        if let Err(e) = am.update(&ctx.db.worker_db).await {
+        // Bookkeeping only: a concurrent burst of firings all writes an
+        // equivalent timestamp to this one row, so skip when another writer
+        // holds the lock instead of convoying pool connections behind it.
+        let stamp = gradient_types::now();
+        let update = Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "UPDATE project_action SET last_fired_at = $1, updated_at = $1 \
+             WHERE id IN (SELECT id FROM project_action WHERE id = $2 FOR UPDATE SKIP LOCKED)",
+            [
+                stamp.into(),
+                sea_orm::Value::Uuid(Some(Box::new(action_id.into_inner()))),
+            ],
+        );
+        if let Err(e) = ctx.db.worker_db.execute(update).await {
             warn!(error = %e, %action_id, "Failed to update action last_fired_at");
         }
     }
