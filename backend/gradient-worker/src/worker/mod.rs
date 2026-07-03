@@ -196,19 +196,17 @@ impl Worker<Connected> {
             ..
         } = self;
 
-        let mut credentials = credentials;
-
-        let outcome = dispatch::run_dispatch_loop(
-            conn,
-            &config,
-            &executor,
+        let (writer, reader) = conn.split();
+        let state = dispatch::DispatchState::new(
+            writer,
+            config.clone(),
+            executor.clone(),
             scorer,
-            &mut credentials,
-            &candidates,
-            &last_scores,
-            shutdown,
-        )
-        .await;
+            credentials.clone(),
+            Arc::clone(&candidates),
+            Arc::clone(&last_scores),
+        );
+        let outcome = dispatch::run_dispatch_loop(state, reader, shutdown).await;
 
         let disconnected = Worker {
             config,
