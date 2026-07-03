@@ -36,6 +36,10 @@ use super::socket::{
     send_server_msg,
 };
 
+/// Detached `NarUploaded` commits running concurrently per connection; each
+/// pins one whole staged NAR in memory while writing it to `nar_storage`.
+const NAR_COMMIT_CONCURRENCY: usize = 2;
+
 // ── Session state markers ─────────────────────────────────────────────────────
 
 pub(super) struct Opening;
@@ -288,6 +292,7 @@ impl ProtoSession<Registered> {
                 .expect("temp partial dir must be creatable")
             });
         let nar_serve_semaphore = Arc::new(Semaphore::new(proto_cfg.max_concurrent_nar_serves));
+        let nar_commit_semaphore = Arc::new(Semaphore::new(NAR_COMMIT_CONCURRENCY));
         let mut eval_cache = EvalCacheReceiveStore::new(max_partial_bytes);
 
         // Lock-free handle into the worker's `last_seen`, stamped on every
@@ -343,6 +348,7 @@ impl ProtoSession<Registered> {
                 scheduler: &scheduler,
                 peer_id: &peer_id,
                 nar_serve_semaphore: &nar_serve_semaphore,
+                nar_commit_semaphore: &nar_commit_semaphore,
             };
             if !ctx.dispatch(msg, &mut nar, &mut eval_cache).await {
                 break;

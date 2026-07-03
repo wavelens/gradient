@@ -5654,6 +5654,10 @@ the 151 pre-globalization migrations were squashed into one guarded baseline.
   an already-provisioned database upgrades with a pruned `seaql_migrations`
   table and an untouched schema.
 
+## NarUploaded commits run off the session read loop
+
+`commit_relayed` ran inline in the session's read loop: it read the whole staged NAR and wrote it to `nar_storage` (an S3 upload on object-store backends), freezing this connection's inbound processing for the duration. The worker's bounded sends then backed up, its dispatch loop blocked, it stopped reading - and every concurrent transfer on the connection ran into its send timeout (observed as `input prefetch failed ... WebSocket send stalled on final NarPush at offset 41943040` while a large output commit was in flight on the same connection). `on_nar_uploaded` now detaches the staged stream synchronously (`NarReceiveStore::take_staged` removes the per-path state and hands out a `StagedNar` handle) and runs the validate/read/commit plus `mark_nar_stored` on a spawned task, bounded per connection by `NAR_COMMIT_CONCURRENCY = 2` (each task pins one whole NAR in RAM). Failure paths (`fail_build_transient`) still abort the job and requeue the build. `nar_receive_store_tests` pin the detach semantics: `append_below_budget_stages_and_reads_back` (take_staged detaches - second take is `None` - and the handle reads the staged bytes), `presigned_mode_has_no_active_stream` (no direct stream means `None`, selecting the presigned HEAD commit), `finish_discards_staged_partial` (a fresh header after finish resumes at 0). The end-to-end no-stall behaviour is E2E-CI territory.
+
 ## Protocol consolidation and NAR transfer unification (#477)
 
 The two protocol stacks collapsed into one: the pure handshake FSM in

@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use gradient_core::ServerState;
+use gradient_scheduler::Scheduler;
 use tracing::{debug, error, warn};
 
 use crate::messages::ServerMessage;
@@ -42,6 +43,14 @@ struct PathState {
     token: String,
     /// Bytes staged for this path on this session (resumed prefix + appends).
     staged: u64,
+}
+
+/// A staged direct-mode upload detached from the session's receive store so a
+/// spawned task can validate, read, and commit it off the read loop.
+pub(super) struct StagedNar {
+    store: gradient_storage::PartialStore,
+    key: String,
+    token: String,
 }
 
 /// Disk-backed receiver for inbound `NarPush` chunks. Each push is staged to a
@@ -158,36 +167,19 @@ impl NarReceiveStore {
         self.poisoned.insert(store_path.to_owned());
     }
 
-    /// A push stream is open for this path (direct mode). `false` means the
-    /// worker uploaded via presigned S3 and there is nothing to commit.
-    pub(super) fn is_active(&self, store_path: &str) -> bool {
-        self.active.contains_key(store_path)
-    }
-
-    /// Actual on-disk length of the staged partial (validating the token).
-    pub(super) async fn committed_len(&self, store_path: &str) -> u64 {
-        let Some(hash) = store_hash(store_path) else {
-            return 0;
-        };
-        let token = self
-            .active
-            .get(store_path)
-            .map(|s| s.token.clone())
-            .unwrap_or_default();
-        let (store, key) = (self.store.clone(), self.key(hash));
-        tokio::task::spawn_blocking(move || store.received_len(&key, &token).unwrap_or(0))
-            .await
-            .unwrap_or(0)
-    }
-
-    /// Read the staged bytes so the caller can commit them to `nar_storage`.
-    pub(super) async fn read_staged(&self, store_path: &str) -> anyhow::Result<Vec<u8>> {
-        let hash = store_hash(store_path)
-            .ok_or_else(|| anyhow::anyhow!("malformed store path {store_path}"))?;
-        let (store, key) = (self.store.clone(), self.key(hash));
-        tokio::task::spawn_blocking(move || store.read_all(&key))
-            .await
-            .map_err(|e| anyhow::anyhow!("read staged NAR task panicked: {e}"))?
+    /// Detach the staged stream for `store_path` so a spawned task can commit
+    /// it without borrowing the session's receive store. Returns `None` when no
+    /// direct-mode stream is open (a presigned upload). The per-path state is
+    /// removed here, synchronously, so a later header for the same path starts
+    /// a fresh stream instead of racing the in-flight commit.
+    pub(super) fn take_staged(&mut self, store_path: &str) -> Option<StagedNar> {
+        let state = self.active.remove(store_path)?;
+        let hash = store_hash(store_path)?;
+        Some(StagedNar {
+            store: self.store.clone(),
+            key: self.key(hash),
+            token: state.token,
+        })
     }
 
     /// Drop the staged partial and per-path state after a successful commit.
@@ -340,164 +332,251 @@ impl<'a> DispatchContext<'a> {
             return;
         };
 
-        let committed = if nar.is_active(&store_path) {
-            self.commit_relayed(&job_id, &store_path, hash, &file_hash, file_size, nar)
-                .await
-        } else {
-            self.commit_presigned(&job_id, &store_path, hash, file_size)
-                .await
-        };
-        if !committed {
-            return;
-        }
-
-        let file_size_i64 = file_size as i64;
-        let nar_record = NarUploadRecord {
-            file_hash: &file_hash,
-            file_size: file_size_i64,
-            nar_size: nar_size as i64,
-            nar_hash: &nar_hash,
-            references: &references,
-            deriver: deriver.as_deref(),
-        };
-        if let Err(e) = mark_nar_stored(
-            self.state,
-            self.scheduler,
-            &job_id,
-            &store_path,
-            &nar_record,
-        )
-        .await
-        {
-            warn!(%store_path, error = %e, "failed to mark NAR as stored");
-        }
-        if let Err(e) =
-            record_nar_push_metric(self.state, self.scheduler, &job_id, file_size_i64).await
-        {
-            debug!(error = %e, "failed to record cache metric for NarUploaded");
-        }
-    }
-
-    /// Commit a direct-mode (relayed) push: validate the staged partial's size
-    /// against the reported `file_size`, write it to `nar_storage`, then drop
-    /// the partial. Returns `false` (after failing the build transiently) if
-    /// any step fails, in which case `on_nar_uploaded` must return early.
-    async fn commit_relayed(
-        &mut self,
-        job_id: &str,
-        store_path: &str,
-        hash: &str,
-        file_hash: &str,
-        file_size: u64,
-        nar: &mut NarReceiveStore,
-    ) -> bool {
-        let staged = nar.committed_len(store_path).await;
-        if staged != file_size {
-            let reason =
-                format!("staged NAR size {staged} does not match reported file_size {file_size}");
-            error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
-            self.fail_build_transient(job_id, reason).await;
-            return false;
-        }
-        let buf = match nar.read_staged(store_path).await {
-            Ok(b) => b,
-            Err(e) => {
-                let reason = format!("failed to read staged NAR: {e}");
-                error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "read staged NAR failed");
-                self.fail_build_transient(job_id, reason).await;
-                return false;
-            }
-        };
-        if let Err(e) = crate::ingest::put_nar_idempotent(
-            &self.state.worker_db,
-            &self.state.nar_storage,
-            hash,
-            file_hash,
-            buf,
-        )
-        .await
-        {
-            let reason = format!("failed to write NAR to storage: {e}");
-            error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "nar_storage.put failed");
-            self.fail_build_transient(job_id, reason).await;
-            return false;
-        }
-        nar.finish(store_path).await;
-        debug!(peer_id = %self.peer_id, %job_id, %store_path, file_size, "NAR stored");
-        true
-    }
-
-    /// Commit a presigned (S3) upload: the worker already PUT the bytes
-    /// directly, so HEAD the object and compare its size against the reported
-    /// `file_size`. Returns `false` (after failing the build transiently) if
-    /// the object is missing or its size mismatches.
-    async fn commit_presigned(
-        &mut self,
-        job_id: &str,
-        store_path: &str,
-        hash: &str,
-        file_size: u64,
-    ) -> bool {
-        match self.state.nar_storage.head_size(hash).await {
-            Ok(Some(size)) if size == file_size => true,
-            Ok(Some(size)) => {
-                let reason = format!(
-                    "presigned NAR object size {size} does not match reported file_size {file_size}"
-                );
-                error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "presigned NAR upload integrity check failed");
-                self.fail_build_transient(job_id, reason).await;
-                false
-            }
-            Ok(None) => {
-                let reason =
-                    format!("presigned NAR object for {store_path} is missing from storage");
-                error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "presigned NAR upload integrity check failed");
-                self.fail_build_transient(job_id, reason).await;
-                false
-            }
-            Err(e) => {
-                let reason = format!("failed to head presigned NAR object: {e}");
-                error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "presigned NAR HEAD failed");
-                self.fail_build_transient(job_id, reason).await;
-                false
-            }
-        }
+        // The commit reads the whole staged NAR and writes it to `nar_storage`
+        // (an S3 upload on object-store backends). Inline it froze this
+        // session's read loop for the duration, so the worker's own bounded
+        // sends backed up, the worker stopped reading, and every concurrent
+        // transfer on the connection stalled into its send timeout
+        // ("WebSocket send stalled on final NarPush"). Detach the staged
+        // stream synchronously, then commit on a bounded spawned task.
+        let staged = nar.take_staged(&store_path);
+        let writer = self.writer.clone();
+        let state = Arc::clone(self.state);
+        let scheduler = Arc::clone(self.scheduler);
+        let peer_id = self.peer_id.to_owned();
+        let semaphore = Arc::clone(self.nar_commit_semaphore);
+        let hash = hash.to_owned();
+        tokio::spawn(async move {
+            let Ok(_permit) = semaphore.acquire_owned().await else {
+                return;
+            };
+            commit_uploaded_nar(CommitUploadedNar {
+                writer,
+                state,
+                scheduler,
+                peer_id,
+                job_id,
+                store_path,
+                hash,
+                file_hash,
+                file_size,
+                nar_size,
+                nar_hash,
+                references,
+                deriver,
+                staged,
+            })
+            .await;
+        });
     }
 
     /// Send `AbortJob` to the worker. Used when a NAR upload cannot be
     /// committed safely - the worker stops the job and replies with
     /// `JobFailed`, which the scheduler turns into a failed build.
     async fn abort_job(&mut self, job_id: &str, reason: String) {
-        let _ = send_server_msg(
-            self.writer,
-            &ServerMessage::AbortJob {
-                job_id: job_id.to_owned(),
-                reason,
-            },
-        )
-        .await;
+        abort_job_msg(self.writer, job_id, reason).await;
     }
+}
 
-    /// A transient server-side NAR storage failure (staged-read or
-    /// `nar_storage` write). Stop the worker and mark the build
-    /// `FailedTransient` directly so the dispatcher re-queues it - a bare
-    /// `abort_job` would be reported by the worker as a permanent failure and
-    /// never retry. The connection is untouched; only this build fails.
-    async fn fail_build_transient(&mut self, job_id: &str, reason: String) {
-        self.abort_job(job_id, reason.clone()).await;
-        if let Err(e) = self
-            .scheduler
-            .handle_job_failed(
-                self.peer_id,
-                job_id,
-                &reason,
-                gradient_types::proto::BuildFailureKind::Transient,
-                &[],
+/// Everything a detached NAR commit needs, owned so the session read loop is
+/// free the moment the task is spawned.
+struct CommitUploadedNar {
+    writer: ProtoWriter,
+    state: Arc<ServerState>,
+    scheduler: Arc<Scheduler>,
+    peer_id: String,
+    job_id: String,
+    store_path: String,
+    hash: String,
+    file_hash: String,
+    file_size: u64,
+    nar_size: u64,
+    nar_hash: String,
+    references: Vec<String>,
+    deriver: Option<String>,
+    staged: Option<StagedNar>,
+}
+
+/// Detached storage commit plus DB effects for one `NarUploaded`.
+async fn commit_uploaded_nar(c: CommitUploadedNar) {
+    let committed = match c.staged {
+        Some(ref staged) => {
+            commit_relayed(
+                &c.writer, &c.state, &c.scheduler, &c.peer_id, &c.job_id, &c.store_path, &c.hash,
+                &c.file_hash, c.file_size, staged,
             )
             .await
-        {
-            error!(peer_id = %self.peer_id, %job_id, error = %e, "fail_build_transient: handle_job_failed failed");
         }
+        None => {
+            commit_presigned(
+                &c.writer, &c.state, &c.scheduler, &c.peer_id, &c.job_id, &c.store_path, &c.hash,
+                c.file_size,
+            )
+            .await
+        }
+    };
+    if !committed {
+        return;
+    }
+
+    let file_size_i64 = c.file_size as i64;
+    let nar_record = NarUploadRecord {
+        file_hash: &c.file_hash,
+        file_size: file_size_i64,
+        nar_size: c.nar_size as i64,
+        nar_hash: &c.nar_hash,
+        references: &c.references,
+        deriver: c.deriver.as_deref(),
+    };
+    if let Err(e) = mark_nar_stored(&c.state, &c.scheduler, &c.job_id, &c.store_path, &nar_record).await
+    {
+        warn!(store_path = %c.store_path, error = %e, "failed to mark NAR as stored");
+    }
+    if let Err(e) = record_nar_push_metric(&c.state, &c.scheduler, &c.job_id, file_size_i64).await {
+        debug!(error = %e, "failed to record cache metric for NarUploaded");
+    }
+}
+
+/// Commit a direct-mode (relayed) push: validate the staged partial's size
+/// against the reported `file_size`, write it to `nar_storage`, then drop
+/// the partial. Returns `false` (after failing the build transiently) if
+/// any step fails.
+#[allow(clippy::too_many_arguments)]
+async fn commit_relayed(
+    writer: &ProtoWriter,
+    state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
+    peer_id: &str,
+    job_id: &str,
+    store_path: &str,
+    hash: &str,
+    file_hash: &str,
+    file_size: u64,
+    staged: &StagedNar,
+) -> bool {
+    let (store, key, token) = (staged.store.clone(), staged.key.clone(), staged.token.clone());
+    let staged_len =
+        tokio::task::spawn_blocking(move || store.received_len(&key, &token).unwrap_or(0))
+            .await
+            .unwrap_or(0);
+    if staged_len != file_size {
+        let reason =
+            format!("staged NAR size {staged_len} does not match reported file_size {file_size}");
+        error!(%peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
+        fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+        return false;
+    }
+    let (store, key) = (staged.store.clone(), staged.key.clone());
+    let buf = match tokio::task::spawn_blocking(move || store.read_all(&key)).await {
+        Ok(Ok(b)) => b,
+        Ok(Err(e)) => {
+            let reason = format!("failed to read staged NAR: {e}");
+            error!(%peer_id, %job_id, %store_path, error = %e, "read staged NAR failed");
+            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+            return false;
+        }
+        Err(e) => {
+            let reason = format!("read staged NAR task panicked: {e}");
+            error!(%peer_id, %job_id, %store_path, %reason, "read staged NAR failed");
+            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+            return false;
+        }
+    };
+    if let Err(e) = crate::ingest::put_nar_idempotent(
+        &state.worker_db,
+        &state.nar_storage,
+        hash,
+        file_hash,
+        buf,
+    )
+    .await
+    {
+        let reason = format!("failed to write NAR to storage: {e}");
+        error!(%peer_id, %job_id, %store_path, error = %e, "nar_storage.put failed");
+        fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+        return false;
+    }
+    let (store, key) = (staged.store.clone(), staged.key.clone());
+    let _ = tokio::task::spawn_blocking(move || store.discard(&key)).await;
+    debug!(%peer_id, %job_id, %store_path, file_size, "NAR stored");
+    true
+}
+
+/// Commit a presigned (S3) upload: the worker already PUT the bytes
+/// directly, so HEAD the object and compare its size against the reported
+/// `file_size`. Returns `false` (after failing the build transiently) if
+/// the object is missing or its size mismatches.
+#[allow(clippy::too_many_arguments)]
+async fn commit_presigned(
+    writer: &ProtoWriter,
+    state: &Arc<ServerState>,
+    scheduler: &Arc<Scheduler>,
+    peer_id: &str,
+    job_id: &str,
+    store_path: &str,
+    hash: &str,
+    file_size: u64,
+) -> bool {
+    match state.nar_storage.head_size(hash).await {
+        Ok(Some(size)) if size == file_size => true,
+        Ok(Some(size)) => {
+            let reason = format!(
+                "presigned NAR object size {size} does not match reported file_size {file_size}"
+            );
+            error!(%peer_id, %job_id, %store_path, %reason, "presigned NAR upload integrity check failed");
+            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+            false
+        }
+        Ok(None) => {
+            let reason = format!("presigned NAR object for {store_path} is missing from storage");
+            error!(%peer_id, %job_id, %store_path, %reason, "presigned NAR upload integrity check failed");
+            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+            false
+        }
+        Err(e) => {
+            let reason = format!("failed to head presigned NAR object: {e}");
+            error!(%peer_id, %job_id, %store_path, error = %e, "presigned NAR HEAD failed");
+            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+            false
+        }
+    }
+}
+
+async fn abort_job_msg(writer: &ProtoWriter, job_id: &str, reason: String) {
+    let _ = send_server_msg(
+        writer,
+        &ServerMessage::AbortJob {
+            job_id: job_id.to_owned(),
+            reason,
+        },
+    )
+    .await;
+}
+
+/// A transient server-side NAR storage failure (staged-read or
+/// `nar_storage` write). Stop the worker and mark the build
+/// `FailedTransient` directly so the dispatcher re-queues it - a bare
+/// abort would be reported by the worker as a permanent failure and
+/// never retry. The connection is untouched; only this build fails.
+async fn fail_build_transient(
+    writer: &ProtoWriter,
+    scheduler: &Arc<Scheduler>,
+    peer_id: &str,
+    job_id: &str,
+    reason: String,
+) {
+    abort_job_msg(writer, job_id, reason.clone()).await;
+    if let Err(e) = scheduler
+        .handle_job_failed(
+            peer_id,
+            job_id,
+            &reason,
+            gradient_types::proto::BuildFailureKind::Transient,
+            &[],
+        )
+        .await
+    {
+        error!(%peer_id, %job_id, error = %e, "fail_build_transient: handle_job_failed failed");
     }
 }
 
@@ -799,8 +878,10 @@ mod nar_receive_store_tests {
         let a = path('a');
         assert_ok(s.append(&a, 0, &[0u8; 256]).await);
         assert_ok(s.append(&a, 256, &[1u8; 256]).await);
-        assert_eq!(s.committed_len(&a).await, 512);
-        assert_eq!(s.read_staged(&a).await.unwrap().len(), 512);
+        let staged = s.take_staged(&a).expect("direct stream is active");
+        assert!(s.take_staged(&a).is_none(), "take_staged must detach the stream");
+        assert_eq!(staged.store.received_len(&staged.key, &staged.token).unwrap(), 512);
+        assert_eq!(staged.store.read_all(&staged.key).unwrap().len(), 512);
     }
 
     #[tokio::test]
@@ -860,9 +941,9 @@ mod nar_receive_store_tests {
 
     #[test]
     fn presigned_mode_has_no_active_stream() {
-        let (_d, s) = store(1024);
+        let (_d, mut s) = store(1024);
         assert!(
-            !s.is_active(&path('a')),
+            s.take_staged(&path('a')).is_none(),
             "a path with no header/push must not be treated as direct mode"
         );
     }
@@ -887,8 +968,8 @@ mod nar_receive_store_tests {
         let a = path('a');
         assert_ok(s.append(&a, 0, b"hello").await);
         s.finish(&a).await;
-        assert!(!s.is_active(&a));
-        assert_eq!(s.committed_len(&a).await, 0);
+        assert!(s.take_staged(&a).is_none());
+        assert_eq!(s.note_header(&a, "").await, 0, "partial must be gone from disk");
     }
 }
 
