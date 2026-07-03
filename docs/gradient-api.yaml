@@ -228,7 +228,7 @@ paths:
       summary: Binary WebSocket protocol endpoint
       description: |-
         Upgrades the connection to a WebSocket carrying rkyv-encoded binary
-        frames. Only available when `GRADIENT_PROTO_ENABLE=true`.
+        frames. Only available when `GRADIENT_DISCOVERABLE=true`.
 
         **Protocol flow**
         1. Client sends `ClientMessage::InitConnection { version, features }`.
@@ -244,7 +244,7 @@ paths:
         '101':
           description: Switching Protocols - WebSocket upgrade successful
         '404':
-          description: Protocol endpoint is disabled (`GRADIENT_PROTO_ENABLE=false`)
+          description: Protocol endpoint is disabled (`GRADIENT_DISCOVERABLE=false`)
 
   # ── Auth ─────────────────────────────────────────────────────────────────────
 

@@ -5645,3 +5645,52 @@ the 151 pre-globalization migrations were squashed into one guarded baseline.
   migrations is schema- and seed-identical to the full historical chain, and
   an already-provisioned database upgrades with a pruned `seaql_migrations`
   table and an untouched schema.
+
+## Protocol consolidation and NAR transfer unification (#477)
+
+The two protocol stacks collapsed into one: the pure handshake FSM in
+`session/handshake.rs` now drives the server (`as_authority` over a
+`PeerAuthority` impl wrapping `decide_auth`), the worker (`as_peer`), and the
+cache session's version gate, while both roles ride the shared
+direction-generic framing in `session/frame.rs`. The four worker NAR push
+functions became one `upload_nar(NarSource, NarSink)` pair, the server's
+staging/serving/commit moved into `handler/nar_transfer.rs` with the commit
+split by transport, and the presigned (S3) commit now HEADs the object and
+compares sizes before recording metadata - previously a failed or truncated
+direct PUT silently minted an `is_cached=true` row pointing at a missing
+object. Failure classification is a single module (`executor/failure.rs`)
+ending at one explicit `wire_failure` mapping, and the wire enum's decode
+default flipped from Permanent to Transient so a decode glitch retries within
+the bounded attempt budget instead of poisoning the build-once anchor.
+
+- `gradient-storage` `nar::tests` - `head_size_none_for_missing` /
+  `head_size_reports_object_len` pin the HEAD probe the presigned commit
+  verification relies on.
+- `gradient-proto` `session::handshake::tests` - the FSM transitions now
+  carry wire reject codes; `opening_rejects_version_mismatch` asserts the 400
+  alongside the reason, and the auth policy tests
+  (`handler::session::auth_decision_tests`) survive unchanged because
+  `decide_auth` moved verbatim behind the `PeerAuthority` impl.
+- `gradient-proto` `handler::nar_transfer` - the `NarReceiveStore` staging
+  tests (budget overflow poisoning, resumable prefix, presigned mode has no
+  active stream) and the `serve_nar_tests` moved with the code; the commit
+  paths they guard are now `commit_relayed` (staged-length check) and
+  `commit_presigned` (HEAD + size check).
+- `gradient-worker` `proto::nar::tests` - the transfer matrix is covered
+  quadrant by quadrant: `path_relay_sends_chunks_and_final` /
+  `path_relay_data_is_valid_zstd` (pack + relay),
+  `path_presigned_sends_nar_uploaded` (pack + presigned PUT),
+  `compressed_relay_streams_bytes_and_confirms` (relay of pre-compressed
+  substitute bytes), and the previously untested fourth quadrant
+  `compressed_presigned_puts_verbatim_and_confirms`; the
+  `*_fails_when_path_meta_unavailable` pair keeps the fail-loud contract for
+  incomplete cache metadata.
+- `gradient-worker` `executor::failure::tests` -
+  `wire_failure_downcasts_build_error` and
+  `wire_failure_unclassified_is_explicit_permanent` pin the one wire mapping
+  (unknown errors map to Permanent explicitly, never via the enum default);
+  `prefetch_missing_inputs_carries_paths`,
+  `substitute_relay_404_is_inputs_unavailable` (the relay's
+  advertised-but-missing 404 now carries the typed self-heal signal instead
+  of a plain string) and `substitute_not_on_upstream_wins` cover the
+  classifier precedence.
