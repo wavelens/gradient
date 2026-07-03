@@ -1069,44 +1069,43 @@ tokio runtime).
 
 ---
 
-## `worker::nar` - NAR Push & Upload
+## `worker::proto::nar` - Unified NAR Upload
 
-**File:** `backend/worker/src/nar.rs`
-**Run:** `cargo test -p worker`
+**File:** `backend/gradient-worker/src/proto/nar.rs`
+**Run:** `cargo test -p gradient-worker`
 
-Tests for `push_direct()` (chunk-streaming to server) and `upload_presigned()`
-(streaming to a presigned URL). Both use `MockProtoServer` and temp directories;
-`push_direct` also validates zstd compression integrity.
+Every worker-originated NAR upload goes through one function,
+`upload_nar(job_id, store_path, NarSource, NarSink, writer)`. The source is
+either `Path` (pack + zstd-compress a store path on the fly) or `Compressed`
+(pre-compressed substitute-relay bytes with precomputed metadata); the sink is
+either `Relay` (chunked `NarPush` frames with the resume handshake) or
+`Presigned` (HTTP PUT to the URL from the `CacheQuery{Push}` reply). Tests use
+`MockProtoServer`, temp directories, and a one-shot HTTP server, covering the
+matrix quadrant by quadrant.
 
-### `push_direct` flow
-
-```text
-  push_direct(job_id, store_path, conn)
-       │
-       ├─ NarByteStream::new(store_path) → async byte stream
-       ├─ zstd-compress chunks (64 KiB each)
-       │
-       ├─► NarPush { job_id, store_path, offset: 0, data: <bytes>, is_final: false }
-       ├─► NarPush { job_id, store_path, offset: N, data: <bytes>, is_final: false }
-       └─► NarPush { job_id, store_path, offset: M, data: [],      is_final: true  }
-```
-
-### `upload_presigned` flow
+### `Path` source + `Relay` sink
 
 ```text
-  upload_presigned(job_id, store_path, url, conn)
+  upload_nar(job, path, Path, Relay, writer)
        │
-       ├─ stream NAR → HTTP PUT to presigned URL
-       ├─ compute sha256 of raw NAR bytes
+       ├─ NarStreamHeader { stream_token } / await NarPushResume
+       ├─ NarByteStream(store_path) → zstd-compress → 4 MiB parts
        │
-       └─► NarReady { job_id, store_path, sha256: "sha256:<hex>", nar_size: N }
+       ├─► NarPush { offset: 0, data: <bytes>, is_final: false }
+       ├─► NarPush { offset: N, data: <bytes>, is_final: false }
+       ├─► NarPush { offset: M, data: [],      is_final: true  }
+       └─► NarUploaded { file_hash, file_size, nar_size, nar_hash, references, deriver }
 ```
 
 | Test | What it checks |
 |------|---------------|
-| `push_direct_sends_chunks_and_final` | At least 2 `NarPush` messages sent; last has `is_final: true` and empty `data`; offsets are monotonically increasing |
-| `push_direct_data_is_valid_zstd` | All chunk `data` bytes concatenated then zstd-decompressed without error |
-| `upload_presigned_sends_nar_ready` | Spins up a one-shot HTTP server (accepts PUT, returns 200); verifies `NarReady` message has `sha256:` prefix and nonzero `nar_size` |
+| `path_relay_sends_chunks_and_final` | At least 2 `NarPush` messages sent; last has `is_final: true` and empty `data`; offsets are monotonically increasing |
+| `path_relay_data_is_valid_zstd` | All chunk `data` bytes concatenated then zstd-decompressed without error |
+| `path_presigned_sends_nar_uploaded` | One-shot HTTP server accepts the PUT; `NarUploaded` carries `sha256:`-prefixed hashes and nonzero sizes |
+| `compressed_relay_streams_bytes_and_confirms` | Pre-compressed bytes reconstruct verbatim from the `NarPush` stream; `NarUploaded` echoes the supplied metadata and references |
+| `compressed_presigned_puts_verbatim_and_confirms` | Fourth quadrant: verbatim PUT of pre-compressed bytes, confirmation carries the caller-supplied `file_hash` |
+| `path_relay_fails_when_path_meta_unavailable`, `path_presigned_fails_when_path_meta_unavailable` | Uploads fail loudly (no frames sent) when daemon path metadata is unavailable, instead of seeding an incomplete `cached_path` row |
+| `trim_for_resume_skips_trims_and_passes` | Resume trimming skips fully-sent parts, trims the boundary part, passes later parts whole |
 
 ---
 

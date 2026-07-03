@@ -17,6 +17,8 @@ Connection lifecycle: **handshake → auth challenge → capabilities → pull-b
 
 The first message on every connection is `InitConnection`. The server responds with either an `AuthChallenge` (listing peers that have registered this worker) or `Reject`.
 
+One handshake implementation drives every session: the pure FSM in `gradient-proto/src/session/handshake.rs`. The server runs `as_authority` with a `PeerAuthority` impl wrapping its registration tables and the `decide_auth` policy; the worker runs `as_peer` with its `PeerIdentity`/`CapabilitiesProvider` impls; the read-only cache session reuses the same `on_init_connection` transition for its version gate. Framing is likewise shared: both roles split one `ProtoSocket` into a typed reader plus a bounded, batch-draining writer (`session/frame.rs`).
+
 ```mermaid
 sequenceDiagram
     participant W as Worker
@@ -643,7 +645,7 @@ CachedPath {
 
 **"Cached" requires fully-stored bytes.** A `cached_path` row only counts as `cached: true` when its `file_hash IS NOT NULL` (`is_fully_cached()`). Placeholder rows for in-flight or aborted uploads are excluded from `CacheStatus` so the worker never receives "yes, fetch via `NarRequest`" for a path the server can't actually serve.
 
-**Off-loop dispatch.** Both ends process a connection's frames serially, so a slow handler would head-of-line-block every other message on that connection. `CacheQuery` is a request/response RPC with a worker-side deadline (`CACHE_QUERY_TIMEOUT`, 75 s), so the order-independent handlers run off the dispatch loop: the server spawns `CacheQuery` (whose `Pull` mode may probe upstream narinfo inline), `QueryKnownDerivations`, and `WorkerMetrics`; the worker spawns the presigned NAR upload (a slow object-store `PUT` previously blocked it). Replies travel the cloneable writer, so out-of-order completion is safe. Order-sensitive handlers (NAR push stream chunks, log appends) stay inline.
+**Off-loop dispatch.** Both ends process a connection's frames serially, so a slow handler would head-of-line-block every other message on that connection. `CacheQuery` is a request/response RPC with a worker-side deadline (`CACHE_QUERY_TIMEOUT`, 75 s), so the order-independent handlers run off the dispatch loop: the server spawns `CacheQuery` (whose `Pull` mode may probe upstream narinfo inline), `QueryKnownDerivations`, and `WorkerMetrics`; Replies travel the cloneable writer, so out-of-order completion is safe. Order-sensitive handlers (NAR push stream chunks, log appends) stay inline.
 
 **Indeterminate is not absent (`CacheError`).** A DB error while answering a `CacheQuery` must never be reported as `cached: false` - a fully-cached input would then be taken as a missing one and the build would fail terminally (`InputsUnavailable`), failing the whole eval. So the local-cache lookups propagate their error rather than swallowing it into an empty result, and the handler replies `CacheError { job_id, message }` instead of a `CacheStatus`. The worker resolves that as a transport failure and retries the prefetch transiently. The same `CacheError` is sent if the handler exceeds its server-side budget (`CACHE_QUERY_BUDGET`, 45 s): the reads are index-backed and the upstream probe is itself bounded, so no query of any size legitimately runs that long - exceeding it means the server is pathologically slow and a retry is the right answer, rather than letting the worker burn its full deadline.
 
@@ -802,7 +804,7 @@ sequenceDiagram
     W->>S: AssignJobResponse { accepted: true }
     W->>S: NarRequest { missing paths }
     Note right of W: cached from JobOffer scoring
-    S-->>W: NarPush / PresignedDownload (batched, zstd-compressed)
+    S-->>W: NarPush (batched, zstd-compressed); S3-backed paths arrive as presigned GET URLs in the CacheQuery reply
     Note over W: builds in order,<br/>parses .drv from local store
     W->>S: JobUpdate::BuildOutput { dep₀ }
     W->>S: JobUpdate::BuildOutput { dep₁ }
@@ -839,7 +841,7 @@ enum ServerMessage {
     // Job dispatch
     JobOffer { candidates: Vec<JobCandidate> },  // delta-only: only new candidates; paginated at 1 000
     RevokeJob { job_ids: Vec<Uuid> },            // remove candidates assigned to another worker
-    AssignJob { job_id: Uuid, job: Job, timeout_secs: Option<u64> },
+    AssignJob { job_id: Uuid, job: Job },
     AbortJob { job_id: Uuid, reason: String },
     RequestAllScores,                           // startup-only: ask worker to re-send all scores once
     Draining,                                   // server shutting down; finish work, buffer results, delay reconnect
@@ -853,10 +855,6 @@ enum ServerMessage {
     // NAR transfer - failure signals (responses to NarRequest)
     NarUnavailable { job_id: Uuid, store_path: String, reason: String },  // server cannot serve; no chunks will follow
     NarAbort       { job_id: Uuid, store_path: String, reason: String },  // in-flight transfer aborted; discard partial buffer
-
-    // NAR transfer - S3 mode (batched)
-    PresignedUpload { job_id: Uuid, store_path: String, url: String, method: String, headers: Vec<(String, String)> },
-    PresignedDownload { job_id: Uuid, store_path: String, url: String },
 
     // Cache queries
     CacheStatus { job_id: String, cached: Vec<CachedPath> },   // response to CacheQuery
@@ -1051,7 +1049,9 @@ The worker captures `BuildMetrics` best-effort from each build's cgroup (require
 
 ## NAR Transfer
 
-Two modes, chosen by the server based on `NarStore` configuration. Both support **batched transfers** - the server sends all NARs for a job at once (e.g. all inputs for a build chain), avoiding per-path round trips.
+Two transports, chosen by the server based on `NarStore` configuration and advertised per path in `CacheQuery` replies (`CachedPath.url`). Both support **batched transfers** - the server sends all NARs for a job at once (e.g. all inputs for a build chain), avoiding per-path round trips.
+
+Worker-side, every upload goes through one function: `proto::nar::upload_nar(source, sink)` pairs a `NarSource` (pack a store path on the fly, or relay pre-compressed substitute bytes) with a `NarSink` (`Presigned` HTTP PUT or `Relay` over chunked `NarPush` frames with the resume handshake). Server-side, staging, serving, and commit live in `handler/nar_transfer.rs`; the relayed commit checks the staged length against the reported `file_size`, and the presigned commit HEADs the object and compares sizes before any `cached_path` metadata is recorded, so a failed or truncated PUT can never mint a zombie cache entry.
 
 ### Worker → Server (upload, FetchFlake)
 
@@ -1097,6 +1097,7 @@ sequenceDiagram
     S->>W: CacheStatus [A: cached=false url=s3, B: cached=true, C: cached=false url=s3]
     W->>S3: PUT A (direct, no data through server)
     W->>S: NarUploaded {path:A, file_hash, file_size, nar_size, nar_hash, references, deriver}
+    S->>S3: HEAD A (verify object exists and matches file_size)
     W->>S3: PUT C
     W->>S: NarUploaded {path:C, file_hash, file_size, nar_size, nar_hash, references, deriver}
 ```
@@ -1110,7 +1111,7 @@ The worker drives NAR requests - it knows what it needs to build, checks its loc
 NarRequest { job_id: Uuid, paths: Vec<String> }
 ```
 
-The server responds with batched `NarPush` (direct mode) or `PresignedDownload` (S3 mode) for the requested paths. This avoids the server needing to know the worker's store state.
+The server responds with batched `NarPush` frames. On S3-backed stores there is no server relay at all: the `CacheQuery { mode: Pull }` reply already carried a presigned GET URL per path, and the worker downloads directly. Either way the server never needs to know the worker's store state.
 
 ```mermaid
 sequenceDiagram
@@ -1443,8 +1444,13 @@ On receiving `ServerMessage::Draining`, workers:
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `2`) is incremented on breaking wire changes.
- - Server accepts any `client_version == PROTO_VERSION`.
+ - `PROTO_VERSION` (currently `5`) is incremented on breaking wire changes.
+ - Server accepts any `client_version == PROTO_VERSION`; the check lives once, in
+   `session::handshake::on_init_connection`, and every session flavor (worker,
+   cache-scoped, outbound) goes through it.
+ - v5 dropped the dead `PresignedUpload`/`PresignedDownload` messages and
+   `AssignJob.timeout_secs`; presigned URLs travel exclusively in `CacheQuery`
+   replies (`CachedPath.url`).
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
 ---
