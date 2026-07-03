@@ -102,14 +102,18 @@ pub struct ProtoArgs {
 
     /// Seconds a connected worker may go silent before the server declares it
     /// dead and re-queues its in-flight jobs. The worker heartbeats every 10 s,
-    /// so the default 30 s tolerates three missed beats. This is the only
-    /// detector for a worker that dies without a clean TCP close (hard OOM-kill,
-    /// frozen host, network partition); a graceful disconnect is handled
-    /// immediately regardless. Set to 0 to disable the liveness watchdog.
+    /// so the default 120 s tolerates twelve missed beats: `last_seen` is
+    /// stamped when the session loop processes a frame, so a server briefly
+    /// stalled on slow DB acquires must not false-declare a healthy worker dead
+    /// (requeued in-flight builds cost far more than slower detection). This is
+    /// the only detector for a worker that dies without a clean TCP close (hard
+    /// OOM-kill, frozen host, network partition); a graceful disconnect is
+    /// handled immediately regardless. Set to 0 to disable the liveness
+    /// watchdog.
     #[arg(
         long,
         env = "GRADIENT_WORKER_HEARTBEAT_TIMEOUT_SECS",
-        default_value_t = 30
+        default_value_t = 120
     )]
     pub worker_heartbeat_timeout_secs: u64,
 
@@ -140,7 +144,7 @@ impl Default for ProtoArgs {
             max_concurrent_nar_serves: 8,
             max_nar_buffer_bytes: 10 * 1024 * 1024 * 1024,
             nar_partial_ttl_secs: 86400,
-            worker_heartbeat_timeout_secs: 30,
+            worker_heartbeat_timeout_secs: 120,
             upstream_query_concurrency: 32,
         }
     }

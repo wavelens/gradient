@@ -5480,7 +5480,7 @@ socket half-open, so the worker stays "connected" and its in-flight eval/build
 jobs sit non-terminal forever. The session loop stamps each worker's `last_seen`
 on every inbound frame (the worker heartbeats every 10 s) and a watchdog
 (`worker_liveness_loop`, `backend/gradient-scheduler/src/dispatch.rs`) unregisters
-any worker silent past `worker_heartbeat_timeout_secs` (default 30 s), reusing
+any worker silent past `worker_heartbeat_timeout_secs` (default 120 s), reusing
 `unregister_worker` to re-queue its jobs. The deadline logic is covered in
 `backend/gradient-scheduler/src/worker_pool.rs`:
 

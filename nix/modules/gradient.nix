@@ -765,13 +765,15 @@ in {
           description = ''
             Seconds a connected worker may go silent before the server declares
             it dead and re-queues its in-flight jobs. The worker heartbeats every
-            10 s, so the default 30 s tolerates three missed beats. This is the
+            10 s, so the default 120 s tolerates twelve missed beats: liveness is
+            stamped when the server processes a frame, so a briefly stalled
+            server must not false-declare a healthy worker dead. This is the
             only detector for a worker that dies without a clean TCP close (hard
             OOM-kill, frozen host, network partition). Set to 0 to disable the
             liveness watchdog.
           '';
           type = lib.types.ints.unsigned;
-          default = 30;
+          default = 120;
         };
 
         allowAnonymousCache = lib.mkOption {
