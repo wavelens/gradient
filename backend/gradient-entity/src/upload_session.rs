@@ -20,8 +20,8 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: UploadSessionId,
     pub organization: OrganizationId,
-    pub manifest: serde_json::Value,
-    pub missing: serde_json::Value,
+    pub manifest: Json,
+    pub missing: Json,
     pub total_size: i64,
     pub created_at: NaiveDateTime,
     pub expires_at: NaiveDateTime,

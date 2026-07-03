@@ -107,6 +107,52 @@ impl<'de> Deserialize<'de> for StorePath {
     }
 }
 
+impl From<StorePath> for sea_orm::Value {
+    fn from(p: StorePath) -> Self {
+        sea_orm::Value::String(Some(Box::new(p.base())))
+    }
+}
+
+impl sea_orm::TryGetable for StorePath {
+    fn try_get_by<I: sea_orm::ColIdx>(
+        res: &sea_orm::QueryResult,
+        idx: I,
+    ) -> Result<Self, sea_orm::TryGetError> {
+        let raw = String::try_get_by(res, idx)?;
+        StorePath::parse(&raw)
+            .map_err(|e| sea_orm::TryGetError::DbErr(sea_orm::DbErr::Type(e.to_string())))
+    }
+}
+
+impl sea_orm::sea_query::ValueType for StorePath {
+    fn try_from(v: sea_orm::Value) -> Result<Self, sea_orm::sea_query::ValueTypeErr> {
+        match v {
+            sea_orm::Value::String(Some(s)) => {
+                StorePath::parse(&s).map_err(|_| sea_orm::sea_query::ValueTypeErr)
+            }
+            _ => Err(sea_orm::sea_query::ValueTypeErr),
+        }
+    }
+
+    fn type_name() -> String {
+        "StorePath".to_owned()
+    }
+
+    fn array_type() -> sea_orm::sea_query::ArrayType {
+        sea_orm::sea_query::ArrayType::String
+    }
+
+    fn column_type() -> sea_orm::sea_query::ColumnType {
+        sea_orm::sea_query::ColumnType::Text
+    }
+}
+
+impl sea_orm::sea_query::Nullable for StorePath {
+    fn null() -> sea_orm::Value {
+        sea_orm::Value::String(None)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StorePathError {
     Malformed(String),
@@ -175,5 +221,17 @@ mod tests {
         assert!(StorePath::parse("-noname").is_err());
         assert!(StorePath::parse("nohash-").is_err());
         assert!(StorePath::parse("/nix/store/").is_err());
+    }
+
+    #[test]
+    fn sea_orm_value_round_trip_is_prefix_free() {
+        use sea_orm::sea_query::ValueType;
+        let p = StorePath::from_parts("abc123", "hello-2.12.1");
+        let v = sea_orm::Value::from(p.clone());
+        assert_eq!(v, sea_orm::Value::String(Some(Box::new(p.base()))));
+        assert_eq!(<StorePath as ValueType>::try_from(v).unwrap(), p);
+        // Full-path values written before the typed column parse identically.
+        let legacy = sea_orm::Value::String(Some(Box::new(p.full())));
+        assert_eq!(<StorePath as ValueType>::try_from(legacy).unwrap(), p);
     }
 }

@@ -14,15 +14,17 @@ use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{DerivationId, DerivationInputSourceId};
+use crate::store_path::StorePath;
 
-#[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation_input_source")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: DerivationInputSourceId,
     pub derivation: DerivationId,
     pub hash: String,
-    pub store_path: String,
+    #[sea_orm(column_type = "Text")]
+    pub store_path: StorePath,
     pub created_at: NaiveDateTime,
 }
 

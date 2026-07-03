@@ -25,12 +25,12 @@ pub struct Model {
     /// `PatchGeneratorKind` as snake_case, e.g. `flake_lock`.
     pub generator: String,
     /// Requested input names; an empty array means "all tracked inputs".
-    pub target_inputs: serde_json::Value,
+    pub target_inputs: Json,
     /// Worker-produced candidate `flake.lock` (utf-8), `None` until reported.
     #[sea_orm(column_type = "Text", nullable)]
     pub candidate_lock: Option<String>,
     /// Worker-reported actual bumps `[{name, old_rev, new_rev}]`.
-    pub bumped_inputs: Option<serde_json::Value>,
+    pub bumped_inputs: Option<Json>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
