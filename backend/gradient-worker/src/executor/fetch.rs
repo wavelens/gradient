@@ -281,9 +281,12 @@ async fn archive_flake(
     let _key_file: Option<NamedTempFile> = if let Some(key) = ssh_key {
         let kf =
             NamedTempFile::with_suffix(".key").context("failed to create SSH key temp file")?;
-        std::fs::set_permissions(kf.path(), std::fs::Permissions::from_mode(0o600))
+        tokio::fs::set_permissions(kf.path(), std::fs::Permissions::from_mode(0o600))
+            .await
             .context("failed to chmod SSH key file")?;
-        std::fs::write(kf.path(), key.as_bytes()).context("failed to write SSH key file")?;
+        tokio::fs::write(kf.path(), key.as_bytes())
+            .await
+            .context("failed to write SSH key file")?;
         let ssh_command = format!(
             "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
             binpath_ssh,
