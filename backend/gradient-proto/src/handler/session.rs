@@ -10,20 +10,23 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_types::ids::OrganizationId;
 use gradient_core::ServerState;
+use gradient_types::ids::OrganizationId;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, instrument, warn};
 
-use crate::messages::{
-    ClientMessage, FailedPeer, GradientCapabilities, PROTO_VERSION, ServerMessage,
-};
+use anyhow::Result;
+use async_trait::async_trait;
+
+use crate::messages::{GradientCapabilities, ServerMessage};
+use crate::session::handshake as handshake_fsm;
+use crate::traits::{AuthOutcome, PeerAuthority};
 use gradient_scheduler::Scheduler;
 
 use super::auth::{
-    aggregate_enabled_caps, expand_base_authorized, filter_org_peers_without_cache,
-    has_any_registrations, lookup_base_worker_challenge, lookup_registered_peers,
-    negotiate_capabilities, validate_tokens,
+    BaseWorkerChallenge, aggregate_enabled_caps, expand_base_authorized,
+    filter_org_peers_without_cache, has_any_registrations, lookup_base_worker_challenge,
+    lookup_registered_peers, negotiate_capabilities, validate_tokens,
 };
 use super::dispatch::{DispatchContext, NarReceiveStore};
 use super::eval_cache::EvalCacheReceiveStore;
@@ -70,7 +73,9 @@ impl ProtoSession<Opening> {
         }
     }
 
-    /// Discoverable check → InitConnection → auth challenge/response → InitAck.
+    /// Discoverable check, then the shared handshake FSM drives
+    /// InitConnection → AuthChallenge/AuthResponse → InitAck with
+    /// [`ServerAuthority`] supplying the auth policy.
     pub async fn handshake(
         mut self,
         server_initiated: bool,
@@ -81,83 +86,77 @@ impl ProtoSession<Opening> {
                 .await;
             return None;
         }
-        let (peer_id, client_capabilities) = self.recv_init_connection().await?;
-        let (authorized_peers, failed_peers) =
-            self.perform_auth(&peer_id, server_initiated).await?;
-        let enabled_caps = aggregate_enabled_caps(&self.state, &peer_id).await;
-        let negotiated = negotiate_capabilities(&self.state, client_capabilities, enabled_caps);
-        self.send_init_ack(&negotiated, &authorized_peers, &failed_peers)
-            .await
-            .ok()?;
-        info!(%peer_id, authorized = authorized_peers.len(), "handshake complete");
+        let authority = ServerAuthority {
+            state: Arc::clone(&self.state),
+            server_initiated,
+        };
+        let result = match handshake_fsm::as_authority(&mut self.socket, &authority).await {
+            Ok(r) => r,
+            Err(e) => {
+                debug!(error = %e, server_initiated, "handshake failed");
+                return None;
+            }
+        };
+        info!(peer_id = %result.peer_id, authorized = result.authorized_peers.len(), "handshake complete");
         Some(ProtoSession {
             socket: self.socket,
             state: self.state,
             scheduler: self.scheduler,
             session_state: Authenticated {
-                peer_id,
-                negotiated,
-                authorized_peers,
+                peer_id: result.peer_id,
+                negotiated: result.negotiated,
+                authorized_peers: result.authorized_peers,
             },
         })
     }
+}
 
-    async fn recv_init_connection(&mut self) -> Option<(String, GradientCapabilities)> {
-        let msg = self.socket.recv_msg().await?;
-        match msg {
-            ClientMessage::InitConnection {
-                version,
-                capabilities,
-                id,
-            } => {
-                debug!(version, ?capabilities, %id, "InitConnection received");
-                if version != PROTO_VERSION {
-                    self.socket
-                        .send_reject(400, format!("unsupported protocol version {version}"))
-                        .await;
-                    return None;
-                }
-                Some((id, capabilities))
-            }
-            _ => {
-                self.socket
-                    .send_error(400, "expected InitConnection".into())
-                    .await;
-                None
-            }
-        }
-    }
+// ── Authority impl over the server's auth store ──────────────────────────────
 
-    async fn perform_auth(
-        &mut self,
-        peer_id: &str,
-        server_initiated: bool,
-    ) -> Option<(Vec<String>, Vec<FailedPeer>)> {
-        let base = lookup_base_worker_challenge(&self.state, peer_id).await;
+/// [`PeerAuthority`] over gradient-server's registration tables: the shared
+/// handshake FSM drives the wire while this supplies challenges, token
+/// validation, the pure [`decide_auth`] policy, and capability negotiation.
+struct ServerAuthority {
+    state: Arc<ServerState>,
+    server_initiated: bool,
+}
+
+struct ServerChallenge {
+    base: Option<BaseWorkerChallenge>,
+    registered_peers: Vec<(String, String)>,
+}
+
+#[async_trait]
+impl PeerAuthority for ServerAuthority {
+    type Challenge = ServerChallenge;
+
+    async fn challenge(&self, claimed: &str) -> Result<(ServerChallenge, Vec<String>)> {
+        let base = lookup_base_worker_challenge(&self.state, claimed).await;
         let registered_peers = match &base {
             Some(b) => b.challenge.clone(),
-            None => lookup_registered_peers(&self.state, peer_id).await,
+            None => lookup_registered_peers(&self.state, claimed).await,
         };
+        let names = registered_peers.iter().map(|(id, _)| id.clone()).collect();
+        Ok((
+            ServerChallenge {
+                base,
+                registered_peers,
+            },
+            names,
+        ))
+    }
 
-        self.socket
-            .send_msg(&ServerMessage::AuthChallenge {
-                peers: registered_peers.iter().map(|(id, _)| id.clone()).collect(),
-            })
-            .await
-            .ok()?;
-
-        let tokens = match self.socket.recv_msg().await {
-            Some(ClientMessage::AuthResponse { tokens }) => tokens,
-            Some(_) => {
-                self.socket
-                    .send_error(400, "expected AuthResponse".into())
-                    .await;
-                return None;
-            }
-            None => return None,
-        };
-
-        let (token_authorized, mut failed_peers) = validate_tokens(&registered_peers, &tokens);
+    async fn authorize(
+        &self,
+        claimed: &str,
+        challenge: ServerChallenge,
+        tokens: &[(String, String)],
+    ) -> Result<AuthOutcome> {
+        let ServerChallenge {
+            base,
+            registered_peers,
+        } = challenge;
+        let (token_authorized, mut failed_peers) = validate_tokens(&registered_peers, tokens);
         let token_authorized = expand_base_authorized(&base, token_authorized);
 
         let had_token_authorized = !token_authorized.is_empty();
@@ -169,9 +168,9 @@ impl ProtoSession<Opening> {
 
         let is_base = base.is_some();
         let has_any =
-            registered_peers.is_empty() && has_any_registrations(&self.state, peer_id).await;
+            registered_peers.is_empty() && has_any_registrations(&self.state, claimed).await;
         match decide_auth(
-            server_initiated,
+            self.server_initiated,
             registered_peers.is_empty(),
             has_any,
             authorized_peers.is_empty(),
@@ -181,34 +180,29 @@ impl ProtoSession<Opening> {
             AuthDecision::Accept => {
                 if registered_peers.is_empty() {
                     debug!(
-                        %peer_id,
+                        peer_id = %claimed,
                         "server-initiated, no registered peers - open connection accepted"
                     );
                 }
+                Ok(AuthOutcome::Accept {
+                    authorized_peers,
+                    failed_peers,
+                })
             }
-            AuthDecision::Reject { code, reason } => {
-                self.socket.send_reject(code, reason.into()).await;
-                return None;
-            }
+            AuthDecision::Reject { code, reason } => Ok(AuthOutcome::Reject {
+                code,
+                reason: reason.into(),
+            }),
         }
-
-        Some((authorized_peers, failed_peers))
     }
 
-    async fn send_init_ack(
-        &mut self,
-        negotiated: &GradientCapabilities,
-        authorized_peers: &[String],
-        failed_peers: &[FailedPeer],
-    ) -> Result<(), ()> {
-        self.socket
-            .send_msg(&ServerMessage::InitAck {
-                version: PROTO_VERSION,
-                capabilities: negotiated.clone(),
-                authorized_peers: authorized_peers.to_vec(),
-                failed_peers: failed_peers.to_vec(),
-            })
-            .await
+    async fn negotiate(
+        &self,
+        claimed: &str,
+        client: GradientCapabilities,
+    ) -> Result<GradientCapabilities> {
+        let enabled = aggregate_enabled_caps(&self.state, claimed).await;
+        Ok(negotiate_capabilities(&self.state, client, enabled))
     }
 }
 
@@ -368,7 +362,8 @@ async fn on_reauth_notify(writer: &ProtoWriter, state: &ServerState, peer_id: &s
         Some(b) => b.challenge.clone(),
         None => lookup_registered_peers(state, peer_id).await,
     };
-    if base.is_none() && registered_peers.is_empty() && has_any_registrations(state, peer_id).await {
+    if base.is_none() && registered_peers.is_empty() && has_any_registrations(state, peer_id).await
+    {
         info!(%peer_id, "all registrations deactivated - disconnecting worker");
         let _ = send_server_msg(
             writer,

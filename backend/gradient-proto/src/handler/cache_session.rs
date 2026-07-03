@@ -15,12 +15,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_types::ids::CacheId;
 use gradient_core::ServerState;
+use gradient_types::ids::CacheId;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
 use crate::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
+use crate::session::handshake as handshake_fsm;
 
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, recv_client_msg, send_server_msg};
 
@@ -63,18 +64,18 @@ pub async fn handle_cache_socket(
 ) {
     info!(%cache_id, "cache websocket session opened");
 
+    // Version gate through the shared handshake FSM; auth already happened at
+    // the HTTP layer, so this session skips the challenge round-trip.
     match tokio::time::timeout(HANDSHAKE_TIMEOUT, socket.recv_msg()).await {
-        Ok(Some(ClientMessage::InitConnection { version, .. })) => {
-            if version != PROTO_VERSION {
-                socket
-                    .send_reject(400, format!("unsupported protocol version {version}"))
-                    .await;
-                return;
+        Ok(Some(msg)) => {
+            match handshake_fsm::on_init_connection(handshake_fsm::Opening, msg, PROTO_VERSION) {
+                Ok(_) => {}
+                Err(handshake_fsm::Intent::Reject { code, reason }) => {
+                    socket.send_reject(code, reason).await;
+                    return;
+                }
+                Err(_) => return,
             }
-        }
-        Ok(Some(_)) => {
-            socket.send_error(400, "expected InitConnection".into()).await;
-            return;
         }
         Ok(None) => return,
         Err(_) => {
@@ -172,7 +173,12 @@ pub async fn handle_cache_socket(
                     tokio::spawn(async move {
                         let _permit = permit;
                         if let Err(e) = super::socket::serve_nar_request(
-                            &state, &writer, &job_id, &store_path, 0, None,
+                            &state,
+                            &writer,
+                            &job_id,
+                            &store_path,
+                            0,
+                            None,
                         )
                         .await
                         {

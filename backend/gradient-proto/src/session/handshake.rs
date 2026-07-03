@@ -19,7 +19,7 @@ use crate::messages::{
     ClientMessage, FailedPeer, GradientCapabilities, PROTO_VERSION, ServerMessage,
 };
 use crate::session::frame::{ProtoSocket, recv_server_msg, send_client_msg};
-use crate::traits::{CapabilitiesProvider, PeerAuthority, PeerIdentity, SessionFactory};
+use crate::traits::{AuthOutcome, CapabilitiesProvider, PeerAuthority, PeerIdentity};
 
 /// State markers - zero-sized; the FSM is encoded entirely in the type.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -51,8 +51,9 @@ pub enum Intent {
     Send(Box<ServerMessage>),
     /// Advance state silently (no message emitted).
     Advance,
-    /// Reject the peer with an error reason; the driver closes the socket.
-    Reject(String),
+    /// Reject the peer with a wire code and reason; the driver relays the
+    /// `Reject` and closes the socket.
+    Reject { code: u16, reason: String },
 }
 
 /// Pure transition: `Opening` on receipt of `InitConnection`.
@@ -70,12 +71,18 @@ pub fn on_init_connection(
         id,
     } = msg
     else {
-        return Err(Intent::Reject("expected InitConnection".into()));
+        return Err(Intent::Reject {
+            code: 400,
+            reason: "expected InitConnection".into(),
+        });
     };
     if version != expected_version {
-        return Err(Intent::Reject(format!(
-            "protocol version mismatch: peer={version}, expected={expected_version}"
-        )));
+        return Err(Intent::Reject {
+            code: 400,
+            reason: format!(
+                "protocol version mismatch: peer={version}, expected={expected_version}"
+            ),
+        });
     }
     Ok(Greeted {
         peer_id: id,
@@ -93,7 +100,10 @@ pub fn on_auth_response(
     negotiated: GradientCapabilities,
 ) -> Result<Authenticated, Intent> {
     let ClientMessage::AuthResponse { .. } = msg else {
-        return Err(Intent::Reject("expected AuthResponse".into()));
+        return Err(Intent::Reject {
+            code: 400,
+            reason: "expected AuthResponse".into(),
+        });
     };
     Ok(Authenticated {
         peer_id: greeted.peer_id,
@@ -184,25 +194,25 @@ where
 }
 
 /// Run the authority side of the handshake on an established socket.
-/// Receives `InitConnection`, sends `AuthChallenge` with the list of peers
-/// the authority wants verified, receives `AuthResponse`, validates tokens,
-/// sends `InitAck`.
+/// Receives `InitConnection`, sends `AuthChallenge` with the peers the
+/// authority wants verified (an empty challenge is valid in open and
+/// base-worker modes), receives `AuthResponse`, lets the authority decide
+/// accept or reject, negotiates capabilities, sends `InitAck`.
 ///
 /// Used by:
 /// - gradient-server accepting worker connections (axum-WS path).
 /// - gradient-server dialing discoverable workers.
-/// - gradient-proxy accepting backend worker connections.
 ///
-/// Returns on success with a populated `HandshakeResult`. On any failure the
-/// driver sends an appropriate `ServerMessage::Reject` and returns Err.
-pub async fn as_authority<A, F>(
+/// Registration in a session registry is the caller's post-handshake step -
+/// it typically hands back per-session channels a handshake result cannot
+/// carry. On any failure the peer receives a `ServerMessage::Reject` with the
+/// authority's code and this returns Err.
+pub async fn as_authority<A>(
     socket: &mut ProtoSocket,
     authority: &A,
-    factory: &F,
 ) -> anyhow::Result<HandshakeResult>
 where
     A: PeerAuthority + ?Sized,
-    F: SessionFactory + ?Sized,
 {
     let init = socket
         .recv_msg()
@@ -210,24 +220,21 @@ where
         .ok_or_else(|| anyhow::anyhow!("connection closed before InitConnection"))?;
     let greeted = match on_init_connection(Opening, init, PROTO_VERSION) {
         Ok(g) => g,
-        Err(Intent::Reject(reason)) => {
-            socket.send_reject(400, reason.clone()).await;
+        Err(Intent::Reject { code, reason }) => {
+            socket.send_reject(code, reason.clone()).await;
             anyhow::bail!("handshake rejected: {reason}");
         }
         Err(other) => anyhow::bail!("unexpected intent during init: {other:?}"),
     };
 
-    let challenge_peers = authority.challenge_peers(&greeted.peer_id).await?;
-    if challenge_peers.is_empty() {
-        let reason = format!("unknown peer {}", greeted.peer_id);
-        socket.send_reject(401, reason.clone()).await;
-        anyhow::bail!("{reason}");
-    }
-    let allowed = authority.allowed_capabilities(&greeted.peer_id).await?;
+    let (challenge, challenge_peers) = authority
+        .challenge(&greeted.peer_id)
+        .await
+        .context("challenge")?;
 
     socket
         .send_msg(&ServerMessage::AuthChallenge {
-            peers: challenge_peers.clone(),
+            peers: challenge_peers,
         })
         .await
         .map_err(|_| anyhow::anyhow!("send AuthChallenge"))?;
@@ -238,22 +245,35 @@ where
         .ok_or_else(|| anyhow::anyhow!("connection closed before AuthResponse"))?;
     let tokens = match &auth_response {
         ClientMessage::AuthResponse { tokens } => tokens.clone(),
-        other => anyhow::bail!("expected AuthResponse, got: {other:?}"),
+        _ => {
+            let reason = "expected AuthResponse".to_string();
+            socket.send_reject(400, reason.clone()).await;
+            anyhow::bail!("{reason}");
+        }
     };
-    let (authorized_peers, failed_peers) = authority
-        .validate_tokens(&challenge_peers, &tokens)
+    let (authorized_peers, failed_peers) = match authority
+        .authorize(&greeted.peer_id, challenge, &tokens)
         .await
-        .context("validate_tokens")?;
-    if authorized_peers.is_empty() {
-        let reason = "no claimed peers validated".to_string();
-        socket.send_reject(401, reason.clone()).await;
-        anyhow::bail!("{reason}");
-    }
-    let negotiated = intersect_capabilities(&greeted.client_capabilities, &allowed);
+        .context("authorize")?
+    {
+        AuthOutcome::Accept {
+            authorized_peers,
+            failed_peers,
+        } => (authorized_peers, failed_peers),
+        AuthOutcome::Reject { code, reason } => {
+            socket.send_reject(code, reason.clone()).await;
+            anyhow::bail!("handshake rejected ({code}): {reason}");
+        }
+    };
+
+    let negotiated = authority
+        .negotiate(&greeted.peer_id, greeted.client_capabilities.clone())
+        .await
+        .context("negotiate")?;
     let authenticated = match on_auth_response(greeted, auth_response, negotiated.clone()) {
         Ok(a) => a,
-        Err(Intent::Reject(reason)) => {
-            socket.send_reject(400, reason.clone()).await;
+        Err(Intent::Reject { code, reason }) => {
+            socket.send_reject(code, reason.clone()).await;
             anyhow::bail!("auth response rejected: {reason}");
         }
         Err(other) => anyhow::bail!("unexpected intent during auth: {other:?}"),
@@ -270,11 +290,6 @@ where
         .map_err(|_| anyhow::anyhow!("send InitAck"))?;
 
     let registered = to_registered(authenticated);
-    factory
-        .on_registered(registered.peer_id.clone(), registered.negotiated.clone())
-        .await
-        .context("factory.on_registered")?;
-
     Ok(HandshakeResult {
         peer_id: registered.peer_id,
         negotiated: registered.negotiated,
@@ -282,20 +297,6 @@ where
         failed_peers,
         server_version: PROTO_VERSION,
     })
-}
-
-fn intersect_capabilities(
-    a: &GradientCapabilities,
-    b: &GradientCapabilities,
-) -> GradientCapabilities {
-    GradientCapabilities {
-        core: a.core && b.core,
-        federate: a.federate && b.federate,
-        fetch: a.fetch && b.fetch,
-        eval: a.eval && b.eval,
-        build: a.build && b.build,
-        cache: a.cache && b.cache,
-    }
 }
 
 #[cfg(test)]
@@ -329,16 +330,17 @@ mod tests {
             },
             PROTO_VERSION,
         );
-        let Err(Intent::Reject(reason)) = result else {
+        let Err(Intent::Reject { code, reason }) = result else {
             panic!("expected Reject");
         };
+        assert_eq!(code, 400);
         assert!(reason.contains("version mismatch"));
     }
 
     #[test]
     fn opening_rejects_wrong_variant() {
         let result = on_init_connection(Opening, ClientMessage::Draining, PROTO_VERSION);
-        assert!(matches!(result, Err(Intent::Reject(_))));
+        assert!(matches!(result, Err(Intent::Reject { .. })));
     }
 
     #[test]
@@ -377,7 +379,7 @@ mod tests {
             ClientMessage::Draining,
             GradientCapabilities::default(),
         );
-        assert!(matches!(result, Err(Intent::Reject(_))));
+        assert!(matches!(result, Err(Intent::Reject { .. })));
     }
 
     #[test]

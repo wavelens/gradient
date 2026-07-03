@@ -151,42 +151,50 @@ pub trait CapabilitiesProvider: Send + Sync {
 
 // ── Inbound-session-driver callbacks ─────────────────────────────────────────
 
-/// Resolves an incoming peer claim against the implementation's auth store
-/// and reports back which `(peer_id, token)` pairs validated successfully
-/// (and which failed). Implementations look this up in their state - sea-orm
-/// tables for gradient-server, the `authorized_peers` Postgres table for
-/// proxy.
-#[async_trait]
-pub trait PeerAuthority: Send + Sync {
-    /// Given a peer claim from `InitConnection.id`, return the list of peer
-    /// ids the server wants the client to prove control of. For
-    /// gradient-server this comes from `lookup_registered_peers` (existing).
-    /// For proxy, this is simply `vec![claimed]` if the row exists in
-    /// `authorized_peers`, or empty if the peer is unknown/revoked.
-    async fn challenge_peers(&self, claimed: &str) -> Result<Vec<String>>;
-
-    /// Validate `(peer_id, plaintext_token)` pairs against stored argon2
-    /// hashes. Returns `(authorized_peers, failed_peers)` - matching the
-    /// existing `crate::handler::auth::validate_tokens` contract.
-    async fn validate_tokens(
-        &self,
-        challenged: &[String],
-        tokens: &[(String, String)],
-    ) -> Result<(Vec<String>, Vec<FailedPeer>)>;
-
-    /// Returns the capabilities this peer is *allowed* to advertise. The
-    /// driver intersects this with the peer's advertised set during
-    /// negotiation.
-    async fn allowed_capabilities(&self, peer_id: &str) -> Result<GradientCapabilities>;
+/// Outcome of authorizing a peer's `AuthResponse`. `Reject` carries the wire
+/// code the handshake driver relays before closing the socket.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AuthOutcome {
+    Accept {
+        authorized_peers: Vec<String>,
+        failed_peers: Vec<FailedPeer>,
+    },
+    Reject {
+        code: u16,
+        reason: String,
+    },
 }
 
-/// Called when an inbound session reaches `Registered`. Implementations
-/// record the peer in their session registry, start any per-session
-/// background tasks, and return a driver for the run-loop. The trait
-/// object lives for the lifetime of the session.
+/// Resolves an incoming peer claim against the implementation's auth store
+/// and decides the session's fate. gradient-server's impl wraps its sea-orm
+/// lookups and the pure `decide_auth` policy.
 #[async_trait]
-pub trait SessionFactory: Send + Sync {
-    async fn on_registered(&self, peer_id: String, negotiated: GradientCapabilities) -> Result<()>;
+pub trait PeerAuthority: Send + Sync {
+    /// Opaque per-handshake state carried from [`challenge`](Self::challenge)
+    /// to [`authorize`](Self::authorize) (e.g. the challenged peers' token
+    /// hashes) so the authority never re-queries its store mid-handshake.
+    type Challenge: Send;
+
+    /// Peer ids the authority wants the claimed identity to prove control of.
+    /// An empty list is valid (open/discoverable and base-worker modes);
+    /// acceptance is decided in [`authorize`](Self::authorize).
+    async fn challenge(&self, claimed: &str) -> Result<(Self::Challenge, Vec<String>)>;
+
+    /// Validate `(peer_id, plaintext_token)` pairs against the challenge and
+    /// decide accept or reject, including demotions and policy checks.
+    async fn authorize(
+        &self,
+        claimed: &str,
+        challenge: Self::Challenge,
+        tokens: &[(String, String)],
+    ) -> Result<AuthOutcome>;
+
+    /// Negotiate the session capability set from the peer's advertised one.
+    async fn negotiate(
+        &self,
+        claimed: &str,
+        client: GradientCapabilities,
+    ) -> Result<GradientCapabilities>;
 }
 
 #[cfg(test)]
