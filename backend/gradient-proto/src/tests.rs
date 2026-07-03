@@ -133,7 +133,6 @@ fn assign_job_roundtrip() {
             input_overrides: vec![],
             input_update: None,
         }),
-        timeout_secs: Some(600),
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ServerMessage, RkyvError>(&bytes).unwrap();

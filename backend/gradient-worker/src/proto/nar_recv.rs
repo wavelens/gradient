@@ -32,12 +32,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
+use gradient_proto::messages::TRANSFER_TIMEOUT;
 use tokio::sync::oneshot;
 use tracing::{debug, warn};
-
-/// Hard ceiling on a single NAR transfer. Hit only when the server stops
-/// responding entirely without sending `NarUnavailable`/`NarAbort`.
-const NAR_RECV_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Ceiling on the push-resume handshake. A server that never answers a
 /// `NarStreamHeader` falls back to a fresh upload from offset 0.
@@ -164,7 +161,7 @@ impl NarReceiver {
     }
 
     /// Await a previously [`Self::register`]ed waiter, bounded by
-    /// [`NAR_RECV_TIMEOUT`].
+    /// [`gradient_proto::messages::TRANSFER_TIMEOUT`].
     pub async fn await_pending(&self, pending: PendingNar) -> Result<Vec<u8>> {
         let PendingNar {
             job_id,
@@ -172,7 +169,7 @@ impl NarReceiver {
             rx,
         } = pending;
         let key = (job_id.clone(), store_path.clone());
-        match tokio::time::timeout(NAR_RECV_TIMEOUT, rx).await {
+        match tokio::time::timeout(TRANSFER_TIMEOUT, rx).await {
             Ok(Ok(Ok(bytes))) => Ok(bytes),
             Ok(Ok(Err(reason))) => Err(anyhow::anyhow!(
                 "NAR transfer for {} failed: {}",
@@ -194,7 +191,7 @@ impl NarReceiver {
                     "NarRequest for {} timed out after {}s waiting for NarPush \
                      (job_id={})",
                     store_path,
-                    NAR_RECV_TIMEOUT.as_secs(),
+                    TRANSFER_TIMEOUT.as_secs(),
                     job_id,
                 ))
             }
@@ -237,9 +234,14 @@ impl NarReceiver {
         let token = {
             let mut g = self.inner.lock().unwrap();
             if !data.is_empty() {
-                g.started.entry(key.clone()).or_insert_with(std::time::Instant::now);
+                g.started
+                    .entry(key.clone())
+                    .or_insert_with(std::time::Instant::now);
             }
-            g.headers.get(&key).map(|h| h.token.clone()).unwrap_or_default()
+            g.headers
+                .get(&key)
+                .map(|h| h.token.clone())
+                .unwrap_or_default()
         };
 
         if !data.is_empty() {
@@ -424,9 +426,12 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
         tokio::task::yield_now().await;
-        r.accept_chunk("j", "/nix/store/x", b"abc".to_vec(), 0, false).await;
-        r.accept_chunk("j", "/nix/store/x", b"def".to_vec(), 3, false).await;
-        r.accept_chunk("j", "/nix/store/x", b"ghi".to_vec(), 6, true).await;
+        r.accept_chunk("j", "/nix/store/x", b"abc".to_vec(), 0, false)
+            .await;
+        r.accept_chunk("j", "/nix/store/x", b"def".to_vec(), 3, false)
+            .await;
+        r.accept_chunk("j", "/nix/store/x", b"ghi".to_vec(), 6, true)
+            .await;
         let bytes = task.await.unwrap().unwrap();
         assert_eq!(bytes, b"abcdefghi");
     }
@@ -449,7 +454,10 @@ mod tests {
         let task = tokio::spawn(async move { r2.wait_for("doomed", "/nix/store/x").await });
         tokio::task::yield_now().await;
         r.forget_job("doomed");
-        assert!(task.await.unwrap().is_err(), "waiter should have been cancelled");
+        assert!(
+            task.await.unwrap().is_err(),
+            "waiter should have been cancelled"
+        );
     }
 
     #[tokio::test]
@@ -483,7 +491,8 @@ mod tests {
     #[tokio::test]
     async fn partial_store_resumes_across_reconnect() {
         let dir = TempDir::new().unwrap();
-        let store = gradient_storage::PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let store =
+            gradient_storage::PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
         let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let path = format!("/nix/store/{hash}-pkg");
 

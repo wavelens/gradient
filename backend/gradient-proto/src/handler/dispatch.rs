@@ -16,7 +16,9 @@ use gradient_types::*;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
-use crate::messages::{CandidateScore, ClientMessage, JobKind, JobUpdateKind, ServerMessage};
+use crate::messages::{
+    CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind, JobUpdateKind, ServerMessage,
+};
 use gradient_scheduler::Scheduler;
 
 use super::auth::{
@@ -666,7 +668,6 @@ impl<'a> DispatchContext<'a> {
                 &ServerMessage::AssignJob {
                     job_id: assignment.job_id,
                     job: assignment.job,
-                    timeout_secs: Some(3600),
                 },
             )
             .await
@@ -962,9 +963,13 @@ impl<'a> DispatchContext<'a> {
     /// [`ServerMessage::AbortJob`] so the build is marked failed and the
     /// scheduler does not advertise the path as cached.
     ///
-    /// For S3 / presigned uploads (no preceding push stream), there is nothing
-    /// staged to commit - the worker has already PUT the bytes directly to
-    /// object storage and we just record the metadata.
+    /// For S3 / presigned uploads (no preceding push stream), the worker has
+    /// already PUT the bytes directly to object storage, so the object is
+    /// HEADed and its size compared against the reported `file_size` before
+    /// any metadata is recorded. Skipping that check would let a failed or
+    /// truncated PUT create a `cached_path` row pointing at a missing or
+    /// corrupt object - the zombie class the demote/reconcile machinery
+    /// exists to repair.
     #[allow(clippy::too_many_arguments)] // mirrors the wire-protocol message fields
     async fn on_nar_uploaded(
         &mut self,
@@ -995,13 +1000,14 @@ impl<'a> DispatchContext<'a> {
             return;
         }
 
+        let Some(hash) = store_hash(&store_path) else {
+            let reason = format!("NarUploaded for malformed store path {store_path}");
+            error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "NarUploaded for malformed store path");
+            self.abort_job(&job_id, reason).await;
+            return;
+        };
+
         if nar.is_active(&store_path) {
-            let Some(hash) = store_hash(&store_path) else {
-                let reason = format!("NarUploaded for malformed store path {store_path}");
-                error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "NarUploaded for malformed store path");
-                self.abort_job(&job_id, reason).await;
-                return;
-            };
             let staged = nar.committed_len(&store_path).await;
             if staged != file_size {
                 let reason = format!(
@@ -1036,6 +1042,31 @@ impl<'a> DispatchContext<'a> {
             }
             nar.finish(&store_path).await;
             debug!(peer_id = %self.peer_id, %job_id, %store_path, file_size, "NAR stored");
+        } else {
+            match self.state.nar_storage.head_size(hash).await {
+                Ok(Some(size)) if size == file_size => {}
+                Ok(Some(size)) => {
+                    let reason = format!(
+                        "presigned NAR object size {size} does not match reported file_size {file_size}"
+                    );
+                    error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "presigned NAR upload integrity check failed");
+                    self.fail_build_transient(&job_id, reason).await;
+                    return;
+                }
+                Ok(None) => {
+                    let reason =
+                        format!("presigned NAR object for {store_path} is missing from storage");
+                    error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "presigned NAR upload integrity check failed");
+                    self.fail_build_transient(&job_id, reason).await;
+                    return;
+                }
+                Err(e) => {
+                    let reason = format!("failed to head presigned NAR object: {e}");
+                    error!(peer_id = %self.peer_id, %job_id, %store_path, error = %e, "presigned NAR HEAD failed");
+                    self.fail_build_transient(&job_id, reason).await;
+                    return;
+                }
+            }
         }
 
         let file_size_i64 = file_size as i64;
@@ -1113,13 +1144,6 @@ pub(super) struct RpcContext {
     writer: ProtoWriter,
     peer_id: String,
 }
-
-/// Hard ceiling on a single `CacheQuery` handler. The reads are index-backed
-/// and the upstream probe is itself bounded (~35s), so any query - whatever its
-/// path count - completes well inside this. Exceeding it means the server is
-/// pathologically slow (pool exhaustion); we then reply `CacheError` (retryable)
-/// rather than letting the worker burn its full `CacheStatus` deadline.
-const CACHE_QUERY_BUDGET: std::time::Duration = std::time::Duration::from_secs(45);
 
 impl RpcContext {
     async fn on_cache_query(

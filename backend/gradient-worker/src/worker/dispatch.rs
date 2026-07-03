@@ -15,7 +15,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
-use gradient_proto::messages::{CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage};
+use gradient_proto::messages::{
+    CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage,
+};
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -103,7 +105,7 @@ pub(super) async fn run_dispatch_loop(
                     }
                 };
                 let started = std::time::Instant::now();
-                let kind = msg_kind(&msg);
+                let kind = msg.variant_name();
                 let result = MessageHandler {
                     writer: &writer,
                     cache_waiters: &cache_waiters,
@@ -318,11 +320,7 @@ impl<'a> MessageHandler<'a> {
             ServerMessage::RevokeJob { job_ids } => {
                 self.on_revoke_job(job_ids);
             }
-            ServerMessage::AssignJob {
-                job_id,
-                job,
-                timeout_secs: _,
-            } => {
+            ServerMessage::AssignJob { job_id, job } => {
                 self.on_assign_job(job_id, job)?;
             }
             ServerMessage::AbortJob { job_id, reason } => {
@@ -345,7 +343,8 @@ impl<'a> MessageHandler<'a> {
                 store_path,
                 received_bytes,
             } => {
-                self.nar_recv.resolve_push(&job_id, &store_path, received_bytes);
+                self.nar_recv
+                    .resolve_push(&job_id, &store_path, received_bytes);
             }
             ServerMessage::NarPush {
                 job_id,
@@ -369,23 +368,6 @@ impl<'a> MessageHandler<'a> {
             } => {
                 warn!(%job_id, %store_path, %reason, "server cannot deliver NAR");
                 self.nar_recv.fail(&job_id, &store_path, reason);
-            }
-            ServerMessage::PresignedDownload {
-                job_id,
-                store_path,
-                url: _,
-            } => {
-                debug!(%job_id, %store_path, "received presigned download URL");
-            }
-            ServerMessage::PresignedUpload {
-                job_id,
-                store_path,
-                url,
-                method,
-                headers,
-            } => {
-                self.on_presigned_upload(job_id, store_path, url, method, headers)
-                    .await;
             }
             ServerMessage::RequestAllScores => {
                 self.on_request_all_scores();
@@ -481,10 +463,16 @@ impl<'a> MessageHandler<'a> {
                 .collect()
         };
         if !new_candidates.is_empty() {
-            let active_eval =
-                self.job_kinds.values().filter(|k| **k == JobKind::Flake).count() as u32;
-            let active_build =
-                self.job_kinds.values().filter(|k| **k == JobKind::Build).count() as u32;
+            let active_eval = self
+                .job_kinds
+                .values()
+                .filter(|k| **k == JobKind::Flake)
+                .count() as u32;
+            let active_build = self
+                .job_kinds
+                .values()
+                .filter(|k| **k == JobKind::Build)
+                .count() as u32;
             let mut request_after = Vec::new();
             if active_build < self.max_build {
                 request_after.push(JobKind::Build);
@@ -663,37 +651,6 @@ impl<'a> MessageHandler<'a> {
             .await;
     }
 
-    async fn on_presigned_upload(
-        self,
-        job_id: String,
-        store_path: String,
-        url: String,
-        method: String,
-        headers: Vec<(String, String)>,
-    ) {
-        debug!(%job_id, %store_path, %method, "received presigned upload URL");
-        // Spawn so a large/slow upload can't block the dispatch loop from routing
-        // a CacheStatus to a waiting CacheQuery (its 120s deadline). Uploads go
-        // straight to object storage and are independent per store path.
-        let store = std::sync::Arc::clone(&self.executor.store);
-        let writer = self.writer.clone();
-        tokio::spawn(async move {
-            if let Err(e) = crate::proto::nar::upload_presigned(
-                &job_id,
-                &store_path,
-                &url,
-                &method,
-                &headers,
-                &writer,
-                Some(&store),
-            )
-            .await
-            {
-                error!(%job_id, %store_path, error = %e, "presigned NAR upload failed");
-            }
-        });
-    }
-
     fn on_cache_status(self, job_id: String, cached: Vec<CachedPath>) {
         if let Some(tx) = self.cache_waiters.lock().unwrap().remove(&job_id) {
             let _ = tx.send(Ok(cached));
@@ -753,37 +710,6 @@ impl<'a> MessageHandler<'a> {
 }
 
 // ── Job runner ────────────────────────────────────────────────────────────────
-
-pub(super) fn msg_kind(msg: &ServerMessage) -> &'static str {
-    match msg {
-        ServerMessage::JobListChunk { .. } => "JobListChunk",
-        ServerMessage::JobOffer { .. } => "JobOffer",
-        ServerMessage::RevokeJob { .. } => "RevokeJob",
-        ServerMessage::AssignJob { .. } => "AssignJob",
-        ServerMessage::AbortJob { .. } => "AbortJob",
-        ServerMessage::Credential { .. } => "Credential",
-        ServerMessage::NarStreamHeader { .. } => "NarStreamHeader",
-        ServerMessage::NarPushResume { .. } => "NarPushResume",
-        ServerMessage::NarPush { .. } => "NarPush",
-        ServerMessage::NarUnavailable { .. } => "NarUnavailable",
-        ServerMessage::NarAbort { .. } => "NarAbort",
-        ServerMessage::PresignedDownload { .. } => "PresignedDownload",
-        ServerMessage::PresignedUpload { .. } => "PresignedUpload",
-        ServerMessage::RequestAllScores => "RequestAllScores",
-        ServerMessage::Draining => "Draining",
-        ServerMessage::Error { .. } => "Error",
-        ServerMessage::InitAck { .. } => "InitAck",
-        ServerMessage::Reject { .. } => "Reject",
-        ServerMessage::AuthChallenge { .. } => "AuthChallenge",
-        ServerMessage::AuthUpdate { .. } => "AuthUpdate",
-        ServerMessage::CacheStatus { .. } => "CacheStatus",
-        ServerMessage::CacheError { .. } => "CacheError",
-        ServerMessage::KnownDerivations { .. } => "KnownDerivations",
-        ServerMessage::EvalCachePullResult { .. } => "EvalCachePullResult",
-        ServerMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
-        ServerMessage::EvalCachePushGrant { .. } => "EvalCachePushGrant",
-    }
-}
 
 async fn run_job(
     executor: JobExecutor,

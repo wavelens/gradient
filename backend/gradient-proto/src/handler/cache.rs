@@ -6,9 +6,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use gradient_core::ServerState;
 use gradient_types::ids::{CacheId, CachedPathId, OrganizationId};
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::{error, warn};
 
@@ -89,7 +89,10 @@ async fn ensure_push_signatures(
     }
 
     let cache_ids: Vec<uuid::Uuid> = org_caches.iter().map(|oc| oc.cache.into_inner()).collect();
-    let path_ids: Vec<uuid::Uuid> = cached_path_rows.iter().map(|cp| cp.id.into_inner()).collect();
+    let path_ids: Vec<uuid::Uuid> = cached_path_rows
+        .iter()
+        .map(|cp| cp.id.into_inner())
+        .collect();
 
     // Insert via `SELECT FROM cached_path` (cross-joined with the org caches) so a
     // path concurrently purged between the lookup and here is simply skipped,
@@ -383,16 +386,19 @@ async fn extend_with_upstream_results(
 ) {
     const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
-    let endpoints =
-        match gradient_db::upstream_endpoints_for_org(&state.cache_db, org_id, UPSTREAM_WINDOW_MINUTES)
-            .await
-        {
-            Ok(eps) => eps,
-            Err(e) => {
-                warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
-                return;
-            }
-        };
+    let endpoints = match gradient_db::upstream_endpoints_for_org(
+        &state.cache_db,
+        org_id,
+        UPSTREAM_WINDOW_MINUTES,
+    )
+    .await
+    {
+        Ok(eps) => eps,
+        Err(e) => {
+            warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
+            return;
+        }
+    };
     if endpoints.is_empty() {
         return;
     }
@@ -519,7 +525,7 @@ async fn query(
         ensure_push_signatures(state, oid, &cached_path_rows).await;
     }
 
-    let expire = std::time::Duration::from_secs(3600);
+    let expire = crate::messages::PRESIGN_TTL;
     let mut result: Vec<gradient_types::proto::CachedPath> = Vec::new();
 
     for (hash, path) in &hash_path_pairs {
@@ -620,8 +626,10 @@ async fn hashes_in_cache(
         }
     };
 
-    let id_to_hash: HashMap<CachedPathId, String> =
-        cached_paths.into_iter().map(|cp| (cp.id, cp.hash)).collect();
+    let id_to_hash: HashMap<CachedPathId, String> = cached_paths
+        .into_iter()
+        .map(|cp| (cp.id, cp.hash))
+        .collect();
     if id_to_hash.is_empty() {
         return HashSet::new();
     }
@@ -694,7 +702,7 @@ pub(super) async fn query_for_cache(
             HashMap::new()
         });
 
-    let expire = std::time::Duration::from_secs(3600);
+    let expire = crate::messages::PRESIGN_TTL;
     let mut result: Vec<gradient_types::proto::CachedPath> = Vec::new();
 
     for (hash, path) in &hash_path_pairs {
@@ -765,8 +773,8 @@ fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use gradient_types::proto::QueryMode;
+    use std::sync::Arc;
 
     fn make_state() -> ServerState {
         // Seed empty (not errored) result sets: an unseeded MockDatabase errors
@@ -795,8 +803,7 @@ mod tests {
                 "Connection pool timed out".to_string(),
             ))])
             .into_connection();
-        let state =
-            Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap();
+        let state = Arc::try_unwrap(gradient_test_support::prelude::test_state_cache(db)).unwrap();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".to_string()];
         assert!(
             query(&state, None, &paths, QueryMode::Pull).await.is_err(),
@@ -808,9 +815,24 @@ mod tests {
     async fn cache_query_empty_paths_returns_empty() {
         let state = make_state();
 
-        assert!(query(&state, None, &[], QueryMode::Normal).await.unwrap().is_empty());
-        assert!(query(&state, None, &[], QueryMode::Push).await.unwrap().is_empty());
-        assert!(query(&state, None, &[], QueryMode::Pull).await.unwrap().is_empty());
+        assert!(
+            query(&state, None, &[], QueryMode::Normal)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            query(&state, None, &[], QueryMode::Push)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            query(&state, None, &[], QueryMode::Pull)
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -845,7 +867,9 @@ mod tests {
     async fn cache_query_normal_uncached_returns_empty() {
         let state = make_state();
         let paths = vec!["/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello".to_string()];
-        let result = query(&state, None, &paths, QueryMode::Normal).await.unwrap();
+        let result = query(&state, None, &paths, QueryMode::Normal)
+            .await
+            .unwrap();
         assert!(
             result.is_empty(),
             "Normal mode should not return uncached paths"
