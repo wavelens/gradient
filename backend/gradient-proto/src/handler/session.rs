@@ -28,8 +28,9 @@ use super::auth::{
     filter_org_peers_without_cache, has_any_registrations, lookup_base_worker_challenge,
     lookup_registered_peers, negotiate_capabilities, validate_tokens,
 };
-use super::dispatch::{DispatchContext, NarReceiveStore};
+use super::dispatch::DispatchContext;
 use super::eval_cache::EvalCacheReceiveStore;
+use super::nar_transfer::NarReceiveStore;
 use super::socket::{
     HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg,
     send_server_msg,

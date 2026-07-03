@@ -12,6 +12,7 @@ mod dispatch;
 mod eval_cache;
 mod limiter;
 mod nar;
+mod nar_transfer;
 mod session;
 mod socket;
 
@@ -26,8 +27,8 @@ use axum::routing::get;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 
-pub use cache_session::handle_cache_socket;
 pub use crate::session::frame::MAX_PROTO_MESSAGE_SIZE;
+pub use cache_session::handle_cache_socket;
 pub use limiter::{PerIpLimiter, ProtoLimiter};
 pub(crate) use session::handle_socket;
 pub(crate) use socket::ProtoSocket;

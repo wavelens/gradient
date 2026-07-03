@@ -172,7 +172,7 @@ pub async fn handle_cache_socket(
                     let job_id = job_id.clone();
                     tokio::spawn(async move {
                         let _permit = permit;
-                        if let Err(e) = super::socket::serve_nar_request(
+                        if let Err(e) = super::nar_transfer::serve_nar_request(
                             &state,
                             &writer,
                             &job_id,
