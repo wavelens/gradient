@@ -25,9 +25,7 @@ use bytes::Bytes;
 use futures::StreamExt as _;
 use gradient_db::{DrvOutputSpec, parse_drv};
 use gradient_exec::path_utils::{nix_store_path, strip_nix_store_prefix, strip_store_prefix};
-use gradient_proto::messages::{
-    BuildFailureKind, BuildMetrics, BuildOutput, BuildProduct, BuildTask,
-};
+use gradient_proto::messages::{BuildMetrics, BuildOutput, BuildProduct, BuildTask};
 use gradient_sources::get_hash_from_path;
 use gradient_util::hydra::parse_hydra_product_line;
 use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResultInner, Microseconds};
@@ -48,95 +46,12 @@ use crate::metrics::cgroup::{BuildMetricsRaw, read_build_cgroup};
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
 
+pub use super::failure::BuildError;
+use super::failure::classify_build_error;
+
 const BYTES_PER_MB: u64 = 1_048_576;
 /// Cadence for sampling a live build cgroup's `memory.peak` / `io.stat`.
 const CGROUP_SAMPLE_MS: u64 = 200;
-
-// ── Failure classification ────────────────────────────────────────────────────
-
-/// A build failure carrying its classification, so the dispatch layer can
-/// report the right `BuildFailureKind` to the server.
-#[derive(Debug)]
-pub struct BuildError {
-    pub kind: BuildFailureKind,
-    pub source: anyhow::Error,
-    /// For `BuildFailureKind::InputsUnavailable`: the required input store paths
-    /// the cache could not serve. Empty for every other kind.
-    pub missing_paths: Vec<String>,
-}
-
-impl std::fmt::Display for BuildError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#}", self.source)
-    }
-}
-impl std::error::Error for BuildError {}
-
-impl BuildError {
-    fn new(kind: BuildFailureKind, source: anyhow::Error) -> Self {
-        Self {
-            kind,
-            source,
-            missing_paths: Vec::new(),
-        }
-    }
-    pub(crate) fn transient(e: impl Into<anyhow::Error>) -> Self {
-        Self::new(BuildFailureKind::Transient, e.into())
-    }
-    pub(crate) fn permanent(e: impl Into<anyhow::Error>) -> Self {
-        Self::new(BuildFailureKind::Permanent, e.into())
-    }
-    pub(crate) fn timeout(e: impl Into<anyhow::Error>) -> Self {
-        Self::new(BuildFailureKind::Timeout, e.into())
-    }
-    /// A substitute attempt missed: this worker could not pull the output from
-    /// cache. Never falls back to a local build (wrong-arch); the scheduler
-    /// re-dispatches or escalates to a real build.
-    pub(crate) fn substitute_unavailable(e: impl Into<anyhow::Error>) -> Self {
-        Self::new(BuildFailureKind::SubstituteUnavailable, e.into())
-    }
-    /// Prefetch found required inputs the gradient cache cannot serve. Carries
-    /// the offending paths so the server demotes them and re-queues their
-    /// producers; terminal for this build.
-    pub(crate) fn inputs_unavailable(
-        missing_paths: Vec<String>,
-        e: impl Into<anyhow::Error>,
-    ) -> Self {
-        Self {
-            kind: BuildFailureKind::InputsUnavailable,
-            source: e.into(),
-            missing_paths,
-        }
-    }
-    /// The server sent `AbortJob` while the daemon was building. Terminal: the
-    /// build is already in a terminal state server-side, so retrying is wrong.
-    pub(crate) fn aborted(drv_path: &str) -> Self {
-        Self::new(
-            BuildFailureKind::Permanent,
-            anyhow::anyhow!("build aborted by server: {}", drv_path),
-        )
-    }
-}
-
-/// Best-effort OOM signature scan. OOM presents as a generic build failure but
-/// is transient (retry on a less-loaded builder).
-pub(super) fn looks_like_oom(msg: &str) -> bool {
-    let l = msg.to_ascii_lowercase();
-    l.contains("out of memory")
-        || l.contains("cannot allocate memory")
-        || l.contains("oom-killer")
-        || l.contains("killed")
-}
-
-/// Classify a builder-reported failure message: OOM -> Transient, otherwise a
-/// real build error -> Permanent.
-pub(super) fn classify_build_error(msg: &str) -> BuildFailureKind {
-    if looks_like_oom(msg) {
-        BuildFailureKind::Transient
-    } else {
-        BuildFailureKind::Permanent
-    }
-}
 
 // ── Build metrics ───────────────────────────────────────────────────────────
 
@@ -1473,37 +1388,5 @@ mod tests {
         assert_eq!(products[0].subtype, "html");
         assert_eq!(products[0].name, "index.html");
         assert_eq!(products[0].size, Some(13));
-    }
-}
-
-#[cfg(test)]
-mod classify_tests {
-    use super::{classify_build_error, looks_like_oom};
-    use gradient_proto::messages::BuildFailureKind;
-
-    #[test]
-    fn builder_nonzero_is_permanent() {
-        assert_eq!(
-            classify_build_error(
-                "build failed: builder for '/nix/store/x.drv' failed with exit code 1"
-            ),
-            BuildFailureKind::Permanent
-        );
-    }
-
-    #[test]
-    fn oom_signature_is_transient() {
-        assert_eq!(
-            classify_build_error(
-                "build failed: gcc: fatal error: Killed signal terminated; out of memory"
-            ),
-            BuildFailureKind::Transient
-        );
-        assert!(looks_like_oom(
-            "cc1plus: out of memory allocating 1048576 bytes"
-        ));
-        assert!(looks_like_oom("Killed"));
-        assert!(looks_like_oom("oom-killer: invoked"));
-        assert!(!looks_like_oom("error: undefined reference to `foo'"));
     }
 }

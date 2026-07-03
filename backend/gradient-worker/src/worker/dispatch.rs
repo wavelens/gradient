@@ -328,13 +328,7 @@ impl DispatchState {
             }
             Err(e) => {
                 let error_chain = format!("{e:#}");
-                let (kind, missing_paths) = e
-                    .downcast_ref::<crate::executor::build::BuildError>()
-                    .map(|be| (be.kind, be.missing_paths.clone()))
-                    .unwrap_or((
-                        gradient_proto::messages::BuildFailureKind::Permanent,
-                        Vec::new(),
-                    ));
+                let (kind, missing_paths) = crate::executor::failure::wire_failure(&e);
                 error!(%job_id, error = %error_chain, ?kind, "job failed");
                 self.writer
                     .send(ClientMessage::JobFailed {
