@@ -10,8 +10,9 @@ use gradient_types::ids::{CacheId, CacheMetricId};
 use gradient_types::*;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
+use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
-use tracing::{debug, warn};
+use tracing::debug;
 
 pub(super) struct NarUploadRecord<'a> {
     pub file_hash: &'a str,
@@ -120,21 +121,13 @@ pub(super) async fn mark_nar_stored(
         .await?
         .cached_path;
 
-    let outputs = EDerivationOutput::find()
+    let marked = EDerivationOutput::update_many()
+        .col_expr(CDerivationOutput::IsCached, Expr::value(true))
+        .col_expr(CDerivationOutput::CachedPath, Expr::value(cached_path_id))
         .filter(CDerivationOutput::Hash.eq(hash))
-        .all(&state.worker_db)
-        .await?;
-    let mut marked = 0usize;
-    for row in outputs {
-        let mut active = row.into_active_model();
-        active.is_cached = Set(true);
-        active.cached_path = Set(Some(cached_path_id));
-        if let Err(e) = active.update(&state.worker_db).await {
-            warn!(store_path, error = %e, "failed to mark derivation_output cached");
-        } else {
-            marked += 1;
-        }
-    }
+        .exec(&state.worker_db)
+        .await?
+        .rows_affected;
     if marked > 0 {
         debug!(
             store_path,
