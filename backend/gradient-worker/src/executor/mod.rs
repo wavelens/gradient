@@ -179,11 +179,17 @@ fn classify_substitute_failure(
     e: anyhow::Error,
 ) -> crate::executor::build::BuildError {
     use crate::executor::build::BuildError;
-    use crate::proto::nar_import::SubstituteNotOnUpstream;
+    use crate::proto::nar_import::{MissingInputs, SubstituteNotOnUpstream};
 
     if e.chain().any(|c| c.is::<SubstituteNotOnUpstream>()) {
         tracing::warn!(%build_id, error = %e, "external_cached relay: output on no upstream; SubstituteUnavailable");
         BuildError::substitute_unavailable(e)
+    } else if let Some(mi) = e.chain().find_map(|c| c.downcast_ref::<MissingInputs>()) {
+        // The upstream advertised the path but the object GET 404'd: surface
+        // the paths so the server's demote/reconcile self-heal clears the
+        // stale record instead of this build retrying against it forever.
+        tracing::warn!(%build_id, error = %e, "external_cached relay: advertised NAR object missing; InputsUnavailable");
+        BuildError::inputs_unavailable(mi.0.clone(), e)
     } else {
         tracing::warn!(%build_id, error = %e, "external_cached relay failed transiently; retrying without escalating");
         BuildError::transient(e)
@@ -205,32 +211,13 @@ pub(crate) async fn upload_one_nar(
             tracing::debug!(store_path = %cp.path, "skipping NAR upload - already cached");
             Ok(())
         }
-        CachedPathInfo::Uncached {
-            path,
-            upload_url: Some(url),
-        } => {
-            tracing::debug!(store_path = %path, "uploading NAR via presigned PUT URL");
-            nar::upload_presigned(
+        CachedPathInfo::Uncached { path, upload_url } => {
+            nar::upload_nar(
                 &updater.job_id,
                 path,
-                url,
-                "PUT",
-                &[],
+                nar::NarSource::Path { store: Some(store) },
+                nar::NarSink::from_upload_url(upload_url, &updater.nar_recv),
                 &updater.writer,
-                Some(store),
-            )
-            .await
-        }
-        CachedPathInfo::Uncached {
-            path,
-            upload_url: None,
-        } => {
-            nar::push_direct(
-                &updater.job_id,
-                path,
-                &updater.writer,
-                &updater.nar_recv,
-                Some(store),
             )
             .await
         }

@@ -860,7 +860,12 @@ pub async fn relay_external_cached_outputs(
             .await
             .with_context(|| format!("download upstream NAR for {path}"))?;
         let (compressed, meta) = fetched.ok_or_else(|| {
-            anyhow::anyhow!("upstream reported {path} but the NAR object is missing")
+            // The Pull reply said cached but the GET 404'd: the same typed
+            // self-heal signal as a missing prefetch input, so the server can
+            // demote the stale upstream record instead of retrying forever.
+            anyhow::Error::new(MissingInputs(vec![path.clone()])).context(format!(
+                "upstream reported {path} but the NAR object is missing"
+            ))
         })?;
 
         let kind = meta
@@ -911,52 +916,46 @@ pub async fn relay_external_cached_outputs(
         } else {
             // Weaker/absent upstream compression: decompress (verifying against
             // the upstream nar_hash) and recompress at our level-6 threshold.
-            let raw = decompress(&compressed, kind)
-                .with_context(|| format!("{kind:?} decompress for {path}"))?;
-            if let Some(claimed) = meta.nar_hash.as_deref() {
-                let actual: [u8; 32] = Sha256::digest(&raw).into();
-                let want = parse_nar_hash_to_bytes(claimed)
-                    .with_context(|| format!("invalid upstream nar_hash for {path}"))?;
-                if actual != want {
-                    anyhow::bail!("upstream NAR hash mismatch for {path}");
+            // Multi-MB CPU work, so it runs on the blocking pool.
+            let claimed = meta.nar_hash.clone();
+            let p = path.clone();
+            tokio::task::spawn_blocking(move || {
+                let raw = decompress(&compressed, kind)
+                    .with_context(|| format!("{kind:?} decompress for {p}"))?;
+                if let Some(claimed) = claimed.as_deref() {
+                    let actual: [u8; 32] = Sha256::digest(&raw).into();
+                    let want = parse_nar_hash_to_bytes(claimed)
+                        .with_context(|| format!("invalid upstream nar_hash for {p}"))?;
+                    if actual != want {
+                        return Err(anyhow::Error::new(CorruptCachedNar(p.clone()))
+                            .context(format!("upstream NAR hash mismatch for {p}")));
+                    }
                 }
-            }
-            crate::proto::nar::compress_nar(&raw)
-                .with_context(|| format!("recompress relay NAR for {path}"))?
+                crate::proto::nar::compress_nar(&raw)
+                    .with_context(|| format!("recompress relay NAR for {p}"))
+            })
+            .await
+            .context("relay decompress task panicked")??
         };
 
         // Transport: S3-backed caches expose a presigned PUT URL; local-disk
         // caches return none and accept the bytes via direct NarPush frames.
-        match push.get(path).and_then(|c| c.url.clone()) {
-            Some(put_url) => {
-                crate::proto::nar::upload_presigned_compressed(
-                    &updater.job_id,
-                    path,
-                    &bytes,
-                    cmeta,
-                    references,
-                    meta.deriver.clone(),
-                    &put_url,
-                    "PUT",
-                    &[],
-                    &updater.writer,
-                )
-                .await
-            }
-            None => {
-                crate::proto::nar::push_compressed_direct(
-                    &updater.job_id,
-                    path,
-                    &bytes,
-                    cmeta,
-                    references,
-                    meta.deriver.clone(),
-                    &updater.writer,
-                    &updater.nar_recv,
-                )
-                .await
-            }
-        }
+        crate::proto::nar::upload_nar(
+            &updater.job_id,
+            path,
+            crate::proto::nar::NarSource::Compressed {
+                bytes: &bytes,
+                meta: cmeta,
+                references,
+                deriver: meta.deriver.clone(),
+            },
+            crate::proto::nar::NarSink::from_upload_url(
+                push.get(path).and_then(|c| c.url.as_deref()),
+                &updater.nar_recv,
+            ),
+            &updater.writer,
+        )
+        .await
         .with_context(|| format!("relay-push {path} into our cache"))?;
 
         debug!(%path, "relayed substitute NAR into our cache");
@@ -983,59 +982,6 @@ impl<'a> NarImporter<'a> {
             store_path,
             meta,
         }
-    }
-
-    fn decompress(&self, compressed: &[u8]) -> Result<Vec<u8>> {
-        // Compression is inferred from the `URL:` field in the narinfo that
-        // was rewritten into `meta.url`. When the bytes came in via
-        // `NarRequest` (WebSocket, no URL), we default to zstd - that's
-        // the only format our own cache ever produces.
-        let kind = self
-            .meta
-            .url
-            .as_deref()
-            .map(detect_compression)
-            .unwrap_or(Compression::Zstd);
-        decompress(compressed, kind)
-            .with_context(|| format!("{kind:?} decompress failed for {}", self.store_path))
-    }
-
-    fn verify_size(&self, decompressed: &[u8]) -> Result<()> {
-        if let Some(expected) = self.meta.nar_size
-            && decompressed.len() as u64 != expected
-        {
-            return Err(
-                anyhow::Error::new(CorruptCachedNar(self.store_path.to_owned())).context(format!(
-                    "NAR size mismatch for {}: expected {}, got {}",
-                    self.store_path,
-                    expected,
-                    decompressed.len()
-                )),
-            );
-        }
-
-        Ok(())
-    }
-
-    fn verify_hash(&self, decompressed: &[u8]) -> Result<()> {
-        if let Some(claimed_nar_hash) = self.meta.nar_hash.as_deref() {
-            let actual_nar_hash: [u8; 32] = Sha256::digest(decompressed).into();
-            let claimed = parse_nar_hash_to_bytes(claimed_nar_hash)
-                .with_context(|| format!("invalid nar_hash for {}", self.store_path))?;
-
-            if actual_nar_hash != claimed {
-                return Err(
-                    anyhow::Error::new(CorruptCachedNar(self.store_path.to_owned())).context(
-                        format!(
-                            "NAR hash mismatch for {}: server said {}, computed sha256:<...>",
-                            self.store_path, claimed_nar_hash
-                        ),
-                    ),
-                );
-            }
-        }
-
-        Ok(())
     }
 
     fn build_path_info(&self, nar_size: u64) -> Result<ValidPathInfo> {
@@ -1088,14 +1034,76 @@ impl<'a> NarImporter<'a> {
     }
 
     async fn import(&self, compressed_nar: Vec<u8>) -> Result<()> {
-        let decompressed = self.decompress(&compressed_nar)?;
-        self.verify_size(&decompressed)?;
-        self.verify_hash(&decompressed)?;
+        // Compression is inferred from the `URL:` field in the narinfo that
+        // was rewritten into `meta.url`. When the bytes came in via
+        // `NarRequest` (WebSocket, no URL), we default to zstd - that's the
+        // only format our own cache ever produces. Decompress + digest are
+        // multi-MB CPU work, so both run on the blocking pool.
+        let kind = self
+            .meta
+            .url
+            .as_deref()
+            .map(detect_compression)
+            .unwrap_or(Compression::Zstd);
+        let store_path = self.store_path.to_owned();
+        let expected_size = self.meta.nar_size;
+        let claimed_hash = self.meta.nar_hash.clone();
+        let compressed_len = compressed_nar.len();
+        let decompressed = tokio::task::spawn_blocking(move || {
+            let raw = decompress(&compressed_nar, kind)
+                .with_context(|| format!("{kind:?} decompress failed for {store_path}"))?;
+            verify_nar(&store_path, &raw, expected_size, claimed_hash.as_deref())?;
+            Ok::<_, anyhow::Error>(raw)
+        })
+        .await
+        .context("decompress task panicked")??;
         let valid_info = self.build_path_info(decompressed.len() as u64)?;
         self.stream_to_daemon(&decompressed, &valid_info).await?;
-        debug!(%self.store_path, bytes = compressed_nar.len(), "imported NAR into local store");
+        debug!(%self.store_path, bytes = compressed_len, "imported NAR into local store");
         Ok(())
     }
+}
+
+/// Check a decompressed NAR against the size and `sha256:` hash its metadata
+/// claims. A mismatch is a typed [`CorruptCachedNar`] so the executor can
+/// route it into the demote-and-refetch self-heal instead of a retry loop.
+fn verify_nar(
+    store_path: &str,
+    decompressed: &[u8],
+    expected_size: Option<u64>,
+    claimed_nar_hash: Option<&str>,
+) -> Result<()> {
+    if let Some(expected) = expected_size
+        && decompressed.len() as u64 != expected
+    {
+        return Err(
+            anyhow::Error::new(CorruptCachedNar(store_path.to_owned())).context(format!(
+                "NAR size mismatch for {}: expected {}, got {}",
+                store_path,
+                expected,
+                decompressed.len()
+            )),
+        );
+    }
+
+    if let Some(claimed_nar_hash) = claimed_nar_hash {
+        let actual_nar_hash: [u8; 32] = Sha256::digest(decompressed).into();
+        let claimed = parse_nar_hash_to_bytes(claimed_nar_hash)
+            .with_context(|| format!("invalid nar_hash for {store_path}"))?;
+
+        if actual_nar_hash != claimed {
+            return Err(
+                anyhow::Error::new(CorruptCachedNar(store_path.to_owned())).context(format!(
+                    "NAR hash mismatch for {}: server said {}, computed {}",
+                    store_path,
+                    claimed_nar_hash,
+                    crate::proto::nar::sha256_nix32(decompressed)
+                )),
+            );
+        }
+    }
+
+    Ok(())
 }
 
 // ── Public import entry point ─────────────────────────────────────────────────
@@ -1308,10 +1316,15 @@ async fn drv_closure_seeds_from_compressed_nar(
     drv_path: &str,
     mode: ClosureMode,
 ) -> Vec<String> {
-    let nar = match decompress(compressed, compression) {
-        Ok(b) => b,
-        Err(e) => {
+    let owned = compressed.to_vec();
+    let nar = match tokio::task::spawn_blocking(move || decompress(&owned, compression)).await {
+        Ok(Ok(b)) => b,
+        Ok(Err(e)) => {
             warn!(drv = %drv_path, error = %e, "decompress failed while harvesting drv closure seeds");
+            return Vec::new();
+        }
+        Err(e) => {
+            warn!(drv = %drv_path, error = %e, "decompress task panicked while harvesting drv closure seeds");
             return Vec::new();
         }
     };
