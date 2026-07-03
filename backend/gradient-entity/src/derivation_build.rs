@@ -55,7 +55,6 @@ pub struct Model {
     pub attempt: i32,
     pub timeout_secs: Option<i64>,
     pub max_silent_secs: Option<i64>,
-    pub prefer_local_build: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
     pub queued_at: Option<NaiveDateTime>,
