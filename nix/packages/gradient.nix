@@ -30,13 +30,14 @@ let
     ];
   };
 
-  # Final build also needs .nix files
+  # Final build also needs .nix files and include_str! assets like the migration baseline .sql
   src = lib.fileset.toSource {
     root = unfilteredRoot;
     fileset = lib.fileset.unions [
       (craneLib.fileset.commonCargoSources unfilteredRoot)
       (lib.fileset.fileFilter (file: file.hasExt "md") unfilteredRoot)
       (lib.fileset.fileFilter (file: file.hasExt "nix") unfilteredRoot)
+      (lib.fileset.fileFilter (file: file.hasExt "sql") unfilteredRoot)
     ];
   };
 
