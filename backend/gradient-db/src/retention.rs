@@ -13,14 +13,13 @@
 
 use std::time::Duration;
 
+use gradient_entity::metric_rollup::RollupGranularity;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{debug, warn};
 
 use super::DbContext;
 
 const RETENTION_INTERVAL_SECS: u64 = 3600;
-const GRAN_MINUTE: i16 = 0;
-const GRAN_HOUR: i16 = 1;
 
 pub fn start_retention_loop(ctx: DbContext) {
     let shutdown = ctx.shutdown.clone();
@@ -74,7 +73,8 @@ async fn run_retention(ctx: &DbContext) {
         if let Err(e) = gradient_entity::metric_rollup::Entity::delete_many()
             .filter(gradient_entity::metric_rollup::Column::BucketStart.lt(cutoff))
             .filter(
-                gradient_entity::metric_rollup::Column::Granularity.is_in([GRAN_MINUTE, GRAN_HOUR]),
+                gradient_entity::metric_rollup::Column::Granularity
+                    .is_in([RollupGranularity::Minute, RollupGranularity::Hour]),
             )
             .exec(db)
             .await

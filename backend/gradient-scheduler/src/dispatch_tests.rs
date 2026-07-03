@@ -80,7 +80,7 @@ fn make_project(id: ProjectId, org_id: OrganizationId) -> gradient_entity::proje
         created_by: UserId::nil(),
         created_at: test_date(),
         keep_evaluations: 30,
-        concurrency: 3,
+        concurrency: ConcurrencyPolicy::Skip,
         sign_cache: true,
         ..Default::default()
     }

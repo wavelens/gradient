@@ -21,7 +21,7 @@
 //!   6. SELECT org_user membership (permission check)
 
 use gradient_entity::{ids::*, integration, organization_user, project, project_trigger};
-use gradient_types::SessionId;
+use gradient_types::{ConcurrencyPolicy, ForgeType, SessionId, TriggerType};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use gradient_test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
@@ -47,7 +47,7 @@ fn project_row() -> gradient_entity::project::Model {
         created_by: user_id(),
         created_at: test_date(),
         keep_evaluations: 10,
-        concurrency: 3,
+        concurrency: ConcurrencyPolicy::Skip,
         sign_cache: true,
         ..Default::default()
     }
@@ -95,7 +95,7 @@ fn github_inbound_integration_row() -> integration::Model {
         organization: org_id(),
         name: "github".into(),
         display_name: "GitHub".into(),
-        forge_type: 3, // GitHub
+        forge_type: ForgeType::GitHub,
         created_by: user_id(),
         created_at: test_date(),
         ..Default::default()
@@ -106,7 +106,7 @@ fn reporter_push_trigger_row() -> project_trigger::Model {
     project_trigger::Model {
         id: trigger_id(),
         project: project_id(),
-        trigger_type: 1, // ReporterPush
+        trigger_type: TriggerType::ReporterPush,
         config: serde_json::json!({
             "integration_id": github_integration_id().to_string(),
             "branches": ["main"],
@@ -390,7 +390,7 @@ fn patch_trigger_config_type_change() {
         let tid = trigger_id();
 
         let updated = project_trigger::Model {
-            trigger_type: 3, // Time
+            trigger_type: TriggerType::Time,
             config: serde_json::json!({"cron": "0 0 2 * * *"}),
             ..polling_trigger_row()
         };
@@ -543,7 +543,7 @@ fn create_project_seeds_default_polling_trigger() {
             created_by: user_id(),
             created_at: test_date(),
             keep_evaluations: 30,
-            concurrency: 3,
+            concurrency: ConcurrencyPolicy::Skip,
             sign_cache: true,
             ..Default::default()
         };
@@ -614,7 +614,7 @@ fn create_project_with_all_concurrency_returns_id() {
             created_by: user_id(),
             created_at: test_date(),
             keep_evaluations: 30,
-            concurrency: 2, // All
+            concurrency: ConcurrencyPolicy::All,
             sign_cache: true,
             ..Default::default()
         };

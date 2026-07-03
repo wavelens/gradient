@@ -20,7 +20,7 @@ pub fn make_project() -> MProject {
         wildcard: "*".into(),
         created_by: UserId::nil(),
         keep_evaluations: 10,
-        concurrency: 3,
+        concurrency: ConcurrencyPolicy::Skip,
         sign_cache: true,
         ..Default::default()
     }

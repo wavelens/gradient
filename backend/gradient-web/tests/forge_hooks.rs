@@ -20,7 +20,8 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_ci::actions::encrypt_secret_with_file as encrypt_webhook_secret;
 use gradient_storage::{EmailSender, NarStore};
 use gradient_types::ids::*;
-use gradient_types::triggers::TriggerConfig;
+use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig};
+use gradient_types::ForgeType;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
 use hmac::{Hmac, KeyInit, Mac};
@@ -222,7 +223,7 @@ fn github_integration_row() -> gradient_entity::integration::Model {
         organization: org_id(),
         name: "github-app".into(),
         display_name: "GitHub App".into(),
-        forge_type: 3, // GitHub
+        forge_type: ForgeType::GitHub,
         github_installation: Some(github_installation_id()),
         created_by: user_id(),
         created_at: fixture_date(),
@@ -257,7 +258,7 @@ fn project_row_with(
         created_by: user_id(),
         created_at: fixture_date(),
         keep_evaluations: 10,
-        concurrency: 3,
+        concurrency: ConcurrencyPolicy::Skip,
         sign_cache: true,
         ..Default::default()
     }
@@ -336,7 +337,7 @@ fn trigger_row(cfg: TriggerConfig) -> gradient_entity::project_trigger::Model {
     gradient_entity::project_trigger::Model {
         id: trigger_id(),
         project: project_id(),
-        trigger_type: i16::from(cfg.trigger_type()),
+        trigger_type: cfg.trigger_type(),
         config: cfg.to_db_json(),
         active: true,
         created_at: fixture_date(),

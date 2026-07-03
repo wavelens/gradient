@@ -61,7 +61,7 @@ fn base_from(m: MIntegration) -> IntegrationResponse {
         name: m.name,
         display_name: m.display_name,
         kind: kind_to_str(m.kind).to_string(),
-        forge_type: forge_to_str(m.forge_type).to_string(),
+        forge_type: m.forge_type.as_path_segment().to_string(),
         endpoint_url: m.endpoint_url,
         has_secret: m.secret.is_some(),
         has_access_token: m.access_token.is_some(),
@@ -149,7 +149,7 @@ impl From<MIntegration> for IntegrationSummaryResponse {
             name: m.name,
             display_name: m.display_name,
             kind: kind_to_str(m.kind).to_string(),
-            forge_type: forge_to_str(m.forge_type).to_string(),
+            forge_type: m.forge_type.as_path_segment().to_string(),
         }
     }
 }
@@ -190,18 +190,11 @@ fn parse_forge(s: &str) -> Result<ForgeType, WebError> {
     })
 }
 
-fn kind_to_str(k: i16) -> &'static str {
+fn kind_to_str(k: IntegrationKind) -> &'static str {
     match k {
-        0 => "inbound",
-        1 => "outbound",
-        _ => "unknown",
+        IntegrationKind::Inbound => "inbound",
+        IntegrationKind::Outbound => "outbound",
     }
-}
-
-fn forge_to_str(f: i16) -> &'static str {
-    ForgeType::try_from(f)
-        .map(ForgeType::as_path_segment)
-        .unwrap_or("unknown")
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -330,7 +323,7 @@ pub async fn put_integration(
 
         let created = EIntegration::find()
             .filter(CIntegration::Organization.eq(org.id))
-            .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Outbound)))
+            .filter(CIntegration::Kind.eq(IntegrationKind::Outbound))
             .filter(CIntegration::GithubInstallation.eq(inst))
             .one(&txn)
             .await?
@@ -350,7 +343,7 @@ pub async fn put_integration(
     // Name must be unique within (organization, kind).
     let existing = EIntegration::find()
         .filter(CIntegration::Organization.eq(org.id))
-        .filter(CIntegration::Kind.eq(i16::from(kind)))
+        .filter(CIntegration::Kind.eq(kind))
         .filter(CIntegration::Name.eq(body.name.as_str()))
         .one(&state.web_db)
         .await?;
@@ -394,8 +387,8 @@ pub async fn put_integration(
         organization: org.id,
         name: body.name,
         display_name,
-        kind: i16::from(kind),
-        forge_type: i16::from(forge),
+        kind,
+        forge_type: forge,
         secret: encrypted_secret,
         endpoint_url,
         access_token: encrypted_token,
@@ -453,7 +446,7 @@ pub async fn patch_integration(
     )
     .await?;
     let integration = load_integration_in_org(&state, org.id, integration_id).await?;
-    if integration.forge_type == i16::from(ForgeType::GitHub) {
+    if integration.forge_type == ForgeType::GitHub {
         return Err(WebError::bad_request(
             "GitHub App integrations are managed automatically and cannot be edited.",
         ));
@@ -497,7 +490,7 @@ pub async fn patch_integration(
                  enable the App on the organization instead of switching forge_type to github.",
             ));
         }
-        active.forge_type = Set(i16::from(parsed));
+        active.forge_type = Set(parsed);
     }
 
     if let Some(url) = body.endpoint_url {
@@ -559,7 +552,7 @@ pub async fn delete_integration(
     )
     .await?;
     let integration = load_integration_in_org(&state, org.id, integration_id).await?;
-    if integration.forge_type == i16::from(ForgeType::GitHub) {
+    if integration.forge_type == ForgeType::GitHub {
         let txn = state.web_db.inner().begin().await?;
         match integration.github_installation {
             Some(fk) => {

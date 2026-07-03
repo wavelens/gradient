@@ -17,6 +17,7 @@ use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
+use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
@@ -48,9 +49,10 @@ async fn infra_series(
 ) -> WebResult<Vec<SeriesPoint>> {
     let sql = format!(
         "SELECT bucket_start, sum(count)::bigint AS c, sum(sum) AS s \
-         FROM metric_rollup WHERE metric = $1 AND granularity = 1 \
+         FROM metric_rollup WHERE metric = $1 AND granularity = {gran} \
            AND bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window_hours} hours' \
-         GROUP BY bucket_start ORDER BY bucket_start"
+         GROUP BY bucket_start ORDER BY bucket_start",
+        gran = i16::from(RollupGranularity::Hour),
     );
 
     let rows = db
@@ -142,9 +144,10 @@ pub async fn get_board_upstreams(
                 mr.bucket_start AS bucket_start, mr.count AS c, mr.sum AS s \
          FROM metric_rollup mr \
          WHERE mr.metric IN ('upstream.latency_ms','upstream.narinfo_hits','upstream.narinfo_misses') \
-           AND mr.granularity = 1 \
+           AND mr.granularity = {gran} \
            AND mr.bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window} hours' \
-         ORDER BY mr.bucket_start"
+         ORDER BY mr.bucket_start",
+        gran = i16::from(RollupGranularity::Hour),
     );
 
     let rows = state
@@ -362,12 +365,13 @@ pub async fn get_board_fleet(
     let mut sql = format!(
         "SELECT date_trunc('hour', at) AS bucket, \
                 count(DISTINCT worker_id) AS connected, \
-                count(DISTINCT worker_id) FILTER (WHERE state = 1) AS draining, \
+                count(DISTINCT worker_id) FILTER (WHERE state = {draining}) AS draining, \
                 count(DISTINCT worker_id) FILTER (WHERE (capabilities->>'eval')::boolean) AS ev, \
                 count(DISTINCT worker_id) FILTER (WHERE (capabilities->>'fetch')::boolean) AS ft, \
                 count(DISTINCT worker_id) FILTER (WHERE (capabilities->>'build')::boolean) AS bd \
          FROM worker_sample \
-         WHERE at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"
+         WHERE at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'",
+        draining = i16::from(gradient_entity::worker_sample::WorkerSampleState::Draining),
     );
 
     if let Some(list) = scope.org_in_list() {
@@ -533,7 +537,10 @@ pub async fn get_board_health(
         .web_db
         .query_one(Statement::from_string(
             DatabaseBackend::Postgres,
-            "SELECT max(bucket_start) AS m FROM metric_rollup WHERE granularity = 0".to_owned(),
+            format!(
+                "SELECT max(bucket_start) AS m FROM metric_rollup WHERE granularity = {}",
+                i16::from(RollupGranularity::Minute)
+            ),
         ))
         .await?
         .and_then(|r| r.try_get("", "m").ok().flatten());

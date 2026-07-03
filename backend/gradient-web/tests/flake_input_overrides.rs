@@ -6,7 +6,7 @@
 
 use gradient_entity::ids::*;
 use gradient_entity::project_flake_input_override;
-use gradient_types::SessionId;
+use gradient_types::{ConcurrencyPolicy, SessionId};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use gradient_test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
@@ -32,7 +32,7 @@ fn project_row() -> gradient_entity::project::Model {
         created_by: user_id(),
         created_at: test_date(),
         keep_evaluations: 10,
-        concurrency: 3,
+        concurrency: ConcurrencyPolicy::Skip,
         sign_cache: true,
         ..Default::default()
     }

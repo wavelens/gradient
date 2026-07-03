@@ -22,7 +22,6 @@ use super::types::{
     EvaluationTriggerSummary, PaginatedBuilds,
 };
 use gradient_entity::build::BuildStatus;
-use gradient_types::triggers::TriggerType;
 
 pub async fn get_evaluation(
     state: State<Arc<ServerState>>,
@@ -123,13 +122,9 @@ pub async fn get_evaluation(
         EProjectTrigger::find_by_id(trigger_id)
             .one(&state.web_db)
             .await?
-            .and_then(|t| {
-                TriggerType::try_from(t.trigger_type)
-                    .ok()
-                    .map(|tt| EvaluationTriggerSummary {
-                        id: trigger_id,
-                        trigger_type: tt,
-                    })
+            .map(|t| EvaluationTriggerSummary {
+                id: trigger_id,
+                trigger_type: t.trigger_type,
             })
     } else {
         None

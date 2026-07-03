@@ -142,7 +142,7 @@ impl Scheduler {
                 let _ = self.state.board_events.send(crate::BoardEvent::JobDispatched {
                     organization: record.organization.into(),
                     worker_id: worker_id.to_owned(),
-                    kind: record.kind,
+                    kind: i16::from(record.kind),
                     score: record.score,
                     build_id: record.derivation_build.map(Into::into),
                     evaluation_id: record.evaluation_id.into(),

@@ -562,7 +562,7 @@ mod tests {
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };
     use gradient_types::ids::{OrganizationUserId, ProjectId, RoleId};
-    use gradient_types::{RuntimeConfig};
+    use gradient_types::{ConcurrencyPolicy, RuntimeConfig};
     use gradient_db::{WebDb, WorkerDb};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use gradient_test_support::cli::test_cli;
@@ -606,7 +606,7 @@ mod tests {
             created_at: fixture_date(),
             managed,
             keep_evaluations: 30,
-            concurrency: 3,
+            concurrency: ConcurrencyPolicy::Skip,
             sign_cache: true,
             ..Default::default()
         }

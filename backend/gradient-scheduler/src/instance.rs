@@ -137,7 +137,8 @@ pub async fn compute_instance_context(
         }
     };
 
-    let dispatch_sql = r#"
+    let dispatch_sql = format!(
+        r#"
         SELECT
           (AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $1))::float8 AS wait_5m,
           (AVG(EXTRACT(EPOCH FROM (dispatched_at - ready_at))) FILTER (WHERE dispatched_at >= $2))::float8 AS wait_1h,
@@ -152,8 +153,10 @@ pub async fn compute_instance_context(
           (AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $2))::float8 AS dep_1h,
           (AVG((job_context->>'dependency_count')::int) FILTER (WHERE dispatched_at >= $3))::float8 AS dep_24h
         FROM dispatched_job
-        WHERE kind = 1 AND ready_at IS NOT NULL AND dispatched_at >= $3
-    "#;
+        WHERE kind = {kind} AND ready_at IS NOT NULL AND dispatched_at >= $3
+    "#,
+        kind = i16::from(gradient_entity::dispatched_job::DispatchedJobKind::Build)
+    );
 
     let dispatch = match DispatchRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Postgres,

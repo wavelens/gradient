@@ -153,7 +153,7 @@ async fn polling_with_in_flight_same_commit_skips_without_aborting() {
     // being built must NOT abort the running evaluation. Even if
     // last_evaluation is dangling or missing, dedup against the in-flight
     // eval's commit catches it before the concurrency policy fires.
-    let project = make_project_with_concurrency(None, 1); // SoftAbort
+    let project = make_project_with_concurrency(None, ConcurrencyPolicy::SoftAbort);
     let running_eval_id = EvaluationId::now_v7();
     let running_commit_id = CommitId::now_v7();
     let same_hash = vec![3u8; 20];
@@ -188,7 +188,7 @@ async fn polling_with_in_flight_same_commit_skips_without_aborting() {
 
 #[tokio::test]
 async fn all_concurrency_creates_evaluation_alongside_running() {
-    let project = make_project_with_concurrency(None, 2); // All
+    let project = make_project_with_concurrency(None, ConcurrencyPolicy::All);
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();
     let trig = ProjectTriggerId::now_v7();
@@ -328,7 +328,7 @@ async fn manual_bypasses_same_commit_check() {
 
 #[tokio::test]
 async fn hard_abort_populates_aborted_fields() {
-    let project = make_project_with_concurrency(None, 0); // HardAbort
+    let project = make_project_with_concurrency(None, ConcurrencyPolicy::HardAbort);
     let running_eval_id = EvaluationId::now_v7();
     let running_eval = make_eval(
         running_eval_id,

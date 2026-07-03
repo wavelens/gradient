@@ -16,7 +16,6 @@ use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use chrono::Utc;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
-use gradient_types::ForgeType;
 use gradient_sources::resolve_head;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
@@ -54,15 +53,9 @@ impl TriggerIntegrationSummary {
             id: m.id,
             name: m.name.clone(),
             display_name: m.display_name.clone(),
-            forge_type: forge_to_str(m.forge_type).to_string(),
+            forge_type: m.forge_type.as_path_segment().to_string(),
         }
     }
-}
-
-fn forge_to_str(f: i16) -> &'static str {
-    ForgeType::try_from(f)
-        .map(ForgeType::as_path_segment)
-        .unwrap_or("unknown")
 }
 
 #[derive(Serialize, Debug)]
@@ -91,7 +84,7 @@ impl TriggerOut {
         Self {
             id: m.id,
             project: m.project,
-            trigger_type: TriggerType::try_from(m.trigger_type).unwrap_or(TriggerType::Polling),
+            trigger_type: m.trigger_type,
             config: m.config,
             active: m.active,
             last_fired_at: m.last_fired_at,
@@ -102,7 +95,10 @@ impl TriggerOut {
     }
 }
 
-fn trigger_integration_id(trigger_type: i16, config: &serde_json::Value) -> Option<IntegrationId> {
+fn trigger_integration_id(
+    trigger_type: TriggerType,
+    config: &serde_json::Value,
+) -> Option<IntegrationId> {
     TriggerConfig::parse_row(trigger_type, config)
         .ok()
         .and_then(|cfg| match cfg {
@@ -215,7 +211,7 @@ pub async fn create(
     let row = MProjectTrigger {
         id: ProjectTriggerId::now_v7(),
         project: proj.id,
-        trigger_type: i16::from(trigger_type),
+        trigger_type,
         config: config_json,
         active: body.active,
         created_at: now,
@@ -296,7 +292,7 @@ pub async fn update(
     let mut active: AProjectTrigger = row.into();
     if let Some(cfg) = body.config {
         let tt = cfg.trigger_type();
-        active.trigger_type = Set(i16::from(tt));
+        active.trigger_type = Set(tt);
         active.config = Set(cfg.to_db_json());
     }
     if let Some(a) = body.active {
@@ -376,8 +372,7 @@ pub async fn fire_now(
         return Err(WebError::bad_request("trigger is inactive"));
     }
 
-    let trigger_type = TriggerType::try_from(row.trigger_type)
-        .map_err(|_| WebError::internal("invalid trigger_type in row"))?;
+    let trigger_type = row.trigger_type;
 
     let branch_for_fire: Option<String> = TriggerConfig::parse_row(row.trigger_type, &row.config)
         .ok()

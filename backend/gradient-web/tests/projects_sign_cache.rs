@@ -15,7 +15,7 @@ use chrono::{Duration, Utc};
 use gradient_entity::{ids::*, organization_user, project, project_trigger, role, session};
 use gradient_db::permissions::admin_mask;
 use gradient_storage::{EmailSender, NarStore};
-use gradient_types::{RuntimeConfig, SecretString, SessionId};
+use gradient_types::{ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -130,7 +130,7 @@ fn project_with(sign_cache: bool) -> project::Model {
         created_by: user_id(),
         created_at: test_date(),
         keep_evaluations: 30,
-        concurrency: 1,
+        concurrency: ConcurrencyPolicy::SoftAbort,
         sign_cache,
         ..Default::default()
     }

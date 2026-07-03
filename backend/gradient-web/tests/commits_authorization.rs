@@ -29,7 +29,7 @@ use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_entity::ids::*;
 use gradient_storage::{EmailSender, NarStore};
-use gradient_types::{RuntimeConfig, SecretString, SessionId};
+use gradient_types::{ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -113,7 +113,7 @@ fn project_row() -> gradient_entity::project::Model {
         created_by: user_id(),
         created_at: test_date(),
         keep_evaluations: 10,
-        concurrency: 3,
+        concurrency: ConcurrencyPolicy::Skip,
         sign_cache: true,
         ..Default::default()
     }

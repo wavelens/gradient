@@ -52,7 +52,7 @@ impl<'a> StateApplicator<'a> {
                 proj.wildcard = Set(state_project.wildcard.clone());
                 proj.keep_evaluations = Set(state_project.keep_evaluations);
                 proj.created_by = Set(created_by_id);
-                proj.concurrency = Set(i16::from(state_project.concurrency));
+                proj.concurrency = Set(state_project.concurrency);
                 proj.sign_cache = Set(state_project.sign_cache);
                 proj.managed = Set(true);
                 proj.update(self.db).await?;
@@ -78,7 +78,7 @@ impl<'a> StateApplicator<'a> {
                     created_at: now,
                     managed: true,
                     keep_evaluations: state_project.keep_evaluations,
-                    concurrency: i16::from(state_project.concurrency),
+                    concurrency: state_project.concurrency,
                     sign_cache: state_project.sign_cache,
                     ..Default::default()
                 }
@@ -183,12 +183,12 @@ impl<'a> StateApplicator<'a> {
                 serde_json::to_value(&cfg).map_err(|e| format!("encoding action config: {e}"))?;
             let events_json = serde_json::to_value(&action.events)
                 .map_err(|e| format!("encoding action events: {e}"))?;
-            let action_type_i16 = cfg.action_type().to_i16();
+            let action_type = cfg.action_type();
 
             match existing_by_name.get(&action.name) {
                 Some(row) => {
                     let mut am: AProjectAction = row.clone().into();
-                    am.action_type = Set(action_type_i16);
+                    am.action_type = Set(action_type);
                     am.config = Set(cfg_json);
                     am.events = Set(events_json);
                     am.active = Set(action.active);
@@ -205,7 +205,7 @@ impl<'a> StateApplicator<'a> {
                         id: ProjectActionId::now_v7(),
                         project: project_id,
                         name: action.name.clone(),
-                        action_type: action_type_i16,
+                        action_type,
                         config: cfg_json,
                         events: events_json,
                         active: action.active,
@@ -348,7 +348,7 @@ pub(crate) async fn apply_project_triggers<C: ConnectionTrait>(
         MProjectTrigger {
             id: ProjectTriggerId::now_v7(),
             project: project.id,
-            trigger_type: i16::from(cfg.trigger_type()),
+            trigger_type: cfg.trigger_type(),
             config: cfg.to_db_json(),
             active: *active,
             created_at: now,

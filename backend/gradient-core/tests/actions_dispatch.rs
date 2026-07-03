@@ -21,7 +21,7 @@ fn action_with(action_type: ActionType, events: serde_json::Value) -> MProjectAc
         id: ProjectActionId::now_v7(),
         project: ProjectId::new(Uuid::nil()),
         name: "test".into(),
-        action_type: action_type.to_i16(),
+        action_type,
         config: json!({}),
         events,
         active: true,

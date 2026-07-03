@@ -412,7 +412,7 @@ pub async fn get_org_worker_metrics(
             network_speed_mbps: s.network_speed_mbps,
             assigned_jobs: s.assigned_jobs,
             max_concurrent_builds: s.max_concurrent_builds,
-            state: s.state,
+            state: i16::from(s.state),
         })
         .collect();
 

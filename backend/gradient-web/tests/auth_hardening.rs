@@ -14,7 +14,7 @@ use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_entity::{api, session};
 use gradient_storage::{EmailSender, NarStore};
-use gradient_types::{ApiId, RuntimeConfig, SecretString, SessionId, UserId};
+use gradient_types::{ApiId, ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId, UserId};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
 use jsonwebtoken::{EncodingKey, Header, encode};
@@ -343,7 +343,7 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
                         .and_hms_opt(0, 0, 0)
                         .unwrap(),
                     keep_evaluations: 30,
-                    concurrency: 3,
+                    concurrency: ConcurrencyPolicy::Skip,
                     sign_cache: true,
                     ..Default::default()
                 }]])

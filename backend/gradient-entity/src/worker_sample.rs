@@ -5,10 +5,43 @@
  */
 
 use chrono::NaiveDateTime;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{OrganizationId, WorkerSampleId};
+
+/// Worker lifecycle state at sample time; today a typed draining flag.
+#[repr(i16)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
+#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
+#[serde(rename_all = "snake_case")]
+pub enum WorkerSampleState {
+    #[default]
+    #[sea_orm(num_value = 0)]
+    Active = 0,
+    #[sea_orm(num_value = 1)]
+    Draining = 1,
+}
+
+impl From<bool> for WorkerSampleState {
+    fn from(draining: bool) -> Self {
+        if draining { Self::Draining } else { Self::Active }
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "worker_sample")]
@@ -25,7 +58,7 @@ pub struct Model {
     pub network_speed_mbps: Option<f32>,
     pub assigned_jobs: i32,
     pub max_concurrent_builds: i32,
-    pub state: i16,
+    pub state: WorkerSampleState,
     pub capabilities: Json,
 }
 

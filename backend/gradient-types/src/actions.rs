@@ -7,30 +7,7 @@
 use crate::ids::IntegrationId;
 use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[repr(i16)]
-pub enum ActionType {
-    SendMail = 0,
-    SendWebRequest = 1,
-    ForgeStatusReport = 2,
-    OpenPr = 3,
-}
-
-impl ActionType {
-    pub fn from_i16(v: i16) -> Option<Self> {
-        match v {
-            0 => Some(Self::SendMail),
-            1 => Some(Self::SendWebRequest),
-            2 => Some(Self::ForgeStatusReport),
-            3 => Some(Self::OpenPr),
-            _ => None,
-        }
-    }
-
-    pub fn to_i16(self) -> i16 {
-        self as i16
-    }
-}
+pub use gradient_entity::project_action::ActionType;
 
 /// Which [`crate::actions`] patch generator an `OpenPr` action runs.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,9 +136,9 @@ mod tests {
             ActionType::ForgeStatusReport,
             ActionType::OpenPr,
         ] {
-            assert_eq!(ActionType::from_i16(at.to_i16()), Some(at));
+            assert_eq!(ActionType::try_from(i16::from(at)), Ok(at));
         }
-        assert_eq!(ActionType::from_i16(99), None);
+        assert!(ActionType::try_from(99i16).is_err());
     }
 
     #[test]

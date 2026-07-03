@@ -64,7 +64,7 @@ pub(super) async fn evaluations_to_summaries(
         })
         .await?
         .into_iter()
-        .filter_map(|t| TriggerType::try_from(t.trigger_type).ok().map(|tt| (t.id, tt)))
+        .map(|t| (t.id, t.trigger_type))
         .collect();
 
     let commit_ids: Vec<CommitId> = evaluations.iter().map(|e| e.commit).collect();

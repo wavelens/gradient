@@ -13,7 +13,7 @@ pub fn action_with(action_type: ActionType, events: Vec<&str>) -> MProjectAction
         id: gradient_types::ProjectActionId::now_v7(),
         project: ProjectId::new(Uuid::nil()),
         name: "t".into(),
-        action_type: action_type.to_i16(),
+        action_type,
         config: json!({}),
         events: json!(events),
         active: true,

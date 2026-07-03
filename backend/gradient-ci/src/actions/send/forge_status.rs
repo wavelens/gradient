@@ -10,7 +10,6 @@ use crate::actions::report::{build_ci_report_from_payload, persist_evaluation_ch
 use crate::actions::ExecutorOk;
 use crate::context::CiContext;
 use crate::integration_lookup::IntegrationKind;
-use gradient_types::ForgeType;
 use gradient_forge::reporter::{CiReporter, GithubAppReporter};
 use gradient_types::{
     ActionConfig, ActionType, CIntegration, CProjectAction, EIntegration, EProjectAction,
@@ -98,7 +97,7 @@ pub async fn reporter_for_project(
     let action = EProjectAction::find()
         .filter(CProjectAction::Project.eq(project_id))
         .filter(CProjectAction::Active.eq(true))
-        .filter(CProjectAction::ActionType.eq(ActionType::ForgeStatusReport.to_i16()))
+        .filter(CProjectAction::ActionType.eq(ActionType::ForgeStatusReport))
         .one(&ctx.db.worker_db)
         .await
         .context("loading forge_status_report action")?;
@@ -126,8 +125,7 @@ pub(crate) async fn build_reporter_for_integration(
         .context("loading integration")?
         .ok_or_else(|| anyhow!("outbound integration {} not found", integration_id))?;
 
-    let forge = ForgeType::try_from(integration.forge_type)
-        .map_err(|_| anyhow!("integration has unknown forge_type"))?;
+    let forge = integration.forge_type;
     let provider = ctx
         .forge
         .get(forge)

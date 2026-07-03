@@ -5,10 +5,41 @@
  */
 
 use chrono::NaiveDateTime;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{EvaluationId, OrganizationId, ProjectId, UserId};
+
+/// What happens to a project's in-flight evaluation when a new one triggers.
+#[repr(i16)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
+#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
+#[serde(rename_all = "snake_case")]
+pub enum ConcurrencyPolicy {
+    #[sea_orm(num_value = 0)]
+    HardAbort = 0,
+    #[default]
+    #[sea_orm(num_value = 1)]
+    SoftAbort = 1,
+    #[sea_orm(num_value = 2)]
+    All = 2,
+    #[sea_orm(num_value = 3)]
+    Skip = 3,
+}
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "project")]
@@ -31,8 +62,7 @@ pub struct Model {
     pub created_at: NaiveDateTime,
     pub managed: bool,
     pub keep_evaluations: i32,
-    /// 0 = hard_abort, 1 = soft_abort, 2 = allow, 3 = skip
-    pub concurrency: i16,
+    pub concurrency: ConcurrencyPolicy,
     pub sign_cache: bool,
 }
 

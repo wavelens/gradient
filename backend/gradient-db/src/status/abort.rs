@@ -5,7 +5,7 @@
  */
 
 use super::evaluation_status::update_evaluation_status;
-use super::logging::{PHASE_SUBJECT_BUILD, finalize_build_log, record_phase_events};
+use super::logging::{PhaseSubjectKind, finalize_build_log, record_phase_events};
 use crate::dep_closure::reconcile_eval_dep_counts;
 use crate::state_machine::EvalStateMachine;
 use crate::{DbContext, fetch_in_chunks, for_each_chunk};
@@ -150,7 +150,7 @@ async fn abort_eval_anchors(
     let pe_ids: Vec<uuid::Uuid> = abort_ids.iter().map(|id| id.into_inner()).collect();
     record_phase_events(
         &ctx.worker_db,
-        PHASE_SUBJECT_BUILD,
+        PhaseSubjectKind::Build,
         &pe_ids,
         i32::from(BuildStatus::Aborted) as i16,
         now,
