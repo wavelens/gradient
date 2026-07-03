@@ -132,7 +132,7 @@ pub struct WorkerConfig {
     /// pool. Each in-flight `add_to_store_nar` (NAR import during prefetch)
     /// holds one connection for the duration of the upload, so the pool
     /// must comfortably fit `max_concurrent_builds *
-    /// nar_import::PREFETCH_CONCURRENCY` plus headroom for `has_path`
+    /// prefetch::PREFETCH_CONCURRENCY` plus headroom for `has_path`
     /// probes and build dispatch.
     #[arg(long, env = "GRADIENT_MAX_NIXDAEMON_CONNECTIONS", default_value_t = 32)]
     pub max_nixdaemon_connections: usize,
