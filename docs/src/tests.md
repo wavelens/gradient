@@ -1138,22 +1138,33 @@ persisting `derivation_output.external_url` + metadata, and `query()` serving th
 persisted URL without re-running narinfo) is covered end-to-end in CI - there is
 no real-Postgres/HTTP unit harness for it.
 
-## Eval BFS pruning honours substitutable closures
+## Eval BFS pruning honours substitutable and locally-complete closures
 
 Backend (`cargo test -p gradient-proto --lib prunable_known_derivations_tests`):
 - `prunes_only_outputs_on_a_real_upstream` - the `QueryKnownDerivations` handler
-  may prune a derivation's subtree only when **every** output is on a real upstream
+  may prune a derivation's subtree when **every** output is on a real upstream
   cache (`external_url`). An upstream binary cache serves a *complete closure*, so
-  the pruned subtree's outputs are fetchable on demand. Our own cache (`is_cached`
-  / `cached_path`) is **not** accepted: it is output-only (substitution relays just
-  the output NAR; a config-specific node's subtree may never have been pushed), so
-  pruning on it strands that subtree - never walked, recorded, or built, and
-  off-upstream so unfetchable, a permanent `InputsUnavailable` dead-end (observed
-  live: `unit-*.service` -> `X-Restart-Triggers-*` / `unit-script-*`, none on
-  cache.nixos.org, 0 rows in the DB). The cost - re-walking our own (unreliable)
-  cached closures every eval - is the correctness price of an output-only cache;
-  upstream-served nixpkgs stays pruned via persisted `external_url`. A derivation
-  with any output not on an upstream, no outputs, or no rows is not pruned.
+  the pruned subtree's outputs are fetchable on demand. Bare `is_cached` /
+  `cached_path` presence in our own cache is **not** accepted: it is output-only
+  (substitution relays just the output NAR; a config-specific node's subtree may
+  never have been pushed), so pruning on it strands that subtree - never walked,
+  recorded, or built, and off-upstream so unfetchable, a permanent
+  `InputsUnavailable` dead-end (observed live: `unit-*.service` ->
+  `X-Restart-Triggers-*` / `unit-script-*`, none on cache.nixos.org, 0 rows in
+  the DB). A derivation with any output not on an upstream, no outputs, or no
+  rows is not pruned by this arm.
+- `locally_closure_complete_anchor_prunes` - the local arm: a terminal-success
+  anchor with `edges_complete` (its subtree's graph is durably recorded) whose
+  every output has a fully-cached `cached_path` with `closure_complete` prunes
+  even off-upstream. `cached_path.closure_complete` is the reconciled ground
+  truth (forward-maintained + `reconcile_cached_path_closure_complete`) that
+  was missing when the upstream-only rule was written - without this arm every
+  built (config-specific) node re-walked on every evaluation, which is why
+  incremental evals still walked the entire tree. Both preconditions are
+  load-bearing and tested: closure-cached output without the anchor, or a
+  complete anchor with one output lacking `closure_complete`, keeps walking.
+  If GC evicts a member later, the demote paths clear the flag and the next
+  eval re-walks.
 
 ## Promotion gated on `edges_complete`
 
