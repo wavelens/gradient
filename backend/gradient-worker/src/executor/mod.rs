@@ -10,7 +10,9 @@
 //! appropriate sub-executor based on the job type received from the server.
 
 pub mod build;
+mod build_metrics;
 pub mod compress;
+mod derivation;
 pub mod eval;
 pub(crate) mod failure;
 pub mod fetch;
