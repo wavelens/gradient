@@ -37,7 +37,15 @@ pub enum ReconcileScope {
     Tick,
     /// The periodic backstop (every Nth dispatch tick): global flag fixpoints,
     /// the unbacked-output demote, the dependency-failed sweep, and promotion.
+    /// Skips the `cached_path`-side fixpoint - deletion clears those flags
+    /// transactionally with a recursive referrer walk
+    /// (`clear_gate_flags_for_hashes`) and ingest forward-maintains them, so
+    /// re-deriving every row is only the rare `Deep` backstop.
     Global,
+    /// `Global` plus the full `cached_path.closure_complete` re-derivation, on
+    /// an hourly-order cadence (its CLEAR pass re-verifies every complete
+    /// row's whole reference list - tens of seconds on a large cache).
+    Deep,
     /// An evaluation just flushed its graph: mark its edges complete, heal
     /// cache-trust across its closure, then the fixpoints and promotion.
     Eval(EvaluationId),
@@ -49,7 +57,7 @@ pub enum ReconcileScope {
 impl ReconcileScope {
     fn evaluation(&self) -> Option<EvaluationId> {
         match self {
-            ReconcileScope::Tick | ReconcileScope::Global => None,
+            ReconcileScope::Tick | ReconcileScope::Global | ReconcileScope::Deep => None,
             ReconcileScope::Eval(id) | ReconcileScope::Unstick(id) => Some(*id),
         }
     }
@@ -103,7 +111,10 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         }
     }
 
-    if matches!(scope, ReconcileScope::Global | ReconcileScope::Eval(_)) {
+    if matches!(
+        scope,
+        ReconcileScope::Global | ReconcileScope::Deep | ReconcileScope::Eval(_)
+    ) {
         // Heal the cache-trust invariant before the fixpoints and promotion: a
         // trusted producer whose output artifact is gone (GC, partial cache
         // hit) is demoted to a fresh build intent so dependents stop failing
@@ -128,7 +139,7 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         }
     }
 
-    if !matches!(scope, ReconcileScope::Tick)
+    if matches!(scope, ReconcileScope::Deep | ReconcileScope::Unstick(_))
         && let Err(e) = crate::cache_storage::reconcile_cached_path_closure_complete(db).await
     {
         error!(error = %e, "reconcile: reconcile_cached_path_closure_complete failed");
@@ -140,7 +151,7 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         error!(error = %e, "reconcile: reconcile_closure_complete failed");
     }
 
-    if matches!(scope, ReconcileScope::Global) {
+    if matches!(scope, ReconcileScope::Global | ReconcileScope::Deep) {
         // Failure-side backstop: fail every non-terminal anchor reachable from a
         // terminal failure (the reactive cascade misses anchors thawed after
         // their dependency already failed).

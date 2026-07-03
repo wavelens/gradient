@@ -28,6 +28,7 @@ mod m20260627_000000_derivation_build_edges_unresolved;
 mod m20260629_000000_derivation_build_drv_closure_cached;
 mod m20260703_000000_drop_derivation_build_prefer_local_build;
 mod m20260703_000001_terminal_failed_partial_index;
+mod m20260704_000000_flag_partial_indexes;
 
 pub struct Migrator;
 
@@ -57,6 +58,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260629_000000_derivation_build_drv_closure_cached::Migration),
             Box::new(m20260703_000000_drop_derivation_build_prefer_local_build::Migration),
             Box::new(m20260703_000001_terminal_failed_partial_index::Migration),
+            Box::new(m20260704_000000_flag_partial_indexes::Migration),
         ]
     }
 }

@@ -203,8 +203,14 @@ fn full_backfill_due() -> bool {
     static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
     let mut last = LAST.lock().unwrap();
     match *last {
+        // Arm on first call instead of running: a restart must not pay the
+        // full scan immediately (frontier passes cover the steady state).
+        None => {
+            *last = Some(std::time::Instant::now());
+            false
+        }
         Some(t) if t.elapsed().as_secs() < FULL_BACKFILL_SECS => false,
-        _ => {
+        Some(_) => {
             *last = Some(std::time::Instant::now());
             true
         }
@@ -229,7 +235,7 @@ async fn record_newly_completed_derivations(
         INSERT INTO cache_derivation (id, cache, derivation, cached_at)
         SELECT uuidv7(), $1, d.id, $2
         FROM derivation d
-        WHERE {candidates}
+        WHERE d.id = ANY($3)
           AND d.id IN (
             SELECT bj.derivation
             FROM build_job bj
@@ -253,11 +259,38 @@ async fn record_newly_completed_derivations(
     "#;
 
     if full {
+        // Set-based shape: materialise the already-recorded set once and hash
+        // anti-join against it, instead of a correlated probe per candidate
+        // per dependency (which scanned for minutes on a large graph).
         let inserted = state
             .worker_db
             .execute(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
-                INSERT_LAYER.replace("{candidates}", "TRUE"),
+                r#"
+        WITH have AS MATERIALIZED (
+            SELECT derivation FROM cache_derivation WHERE cache = $1
+        ),
+        org_drvs AS (
+            SELECT DISTINCT bj.derivation
+            FROM build_job bj
+            JOIN evaluation ev ON ev.id = bj.evaluation
+            JOIN project p ON p.id = ev.project
+            JOIN organization_cache oc ON oc.organization = p.organization
+            WHERE oc.cache = $1
+        )
+        INSERT INTO cache_derivation (id, cache, derivation, cached_at)
+        SELECT uuidv7(), $1, c.derivation, $2
+        FROM org_drvs c
+        LEFT JOIN have ON have.derivation = c.derivation
+        WHERE have.derivation IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM derivation_output o
+            WHERE o.derivation = c.derivation AND o.is_cached = false)
+          AND NOT EXISTS (
+            SELECT 1 FROM derivation_dependency e
+            LEFT JOIN have h ON h.derivation = e.dependency
+            WHERE e.derivation = c.derivation AND h.derivation IS NULL)
+                "#,
                 [cache_id.into_inner().into(), gradient_types::now().into()],
             ))
             .await?
@@ -268,7 +301,6 @@ async fn record_newly_completed_derivations(
         return Ok(());
     }
 
-    let sql = INSERT_LAYER.replace("{candidates}", "d.id = ANY($3)");
     let mut frontier: Vec<uuid::Uuid> = seed.to_vec();
     let mut inserted_total = 0usize;
     while !frontier.is_empty() {
@@ -276,7 +308,7 @@ async fn record_newly_completed_derivations(
             .worker_db
             .query_all(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
-                &sql,
+                INSERT_LAYER,
                 [
                     cache_id.into_inner().into(),
                     gradient_types::now().into(),

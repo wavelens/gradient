@@ -490,11 +490,12 @@ pub async fn reconcile_cached_path_closure_complete<C: ConnectionTrait>(
 /// Clear the dispatch-gate trust flags invalidated by deleting the cache
 /// artifacts behind `hashes`, in the same transaction as the deletion when the
 /// caller runs one. `drv_closure_cached` is cleared on anchors whose own `.drv`
-/// hash was deleted; `closure_complete` on producers of a deleted output hash.
-/// Only the directly-affected anchors are touched - the bidirectional fixpoints
-/// on the reconcile tick ripple the clears up the graph. Without this, GC
-/// deletion (hourly) and flag repair (5s tick) live on different clocks and the
-/// gate trusts a vanished artifact in the window between them.
+/// hash was deleted; `closure_complete` on producers of a deleted output hash;
+/// and `cached_path.closure_complete` on every transitive referrer of a deleted
+/// hash (set-based recursive walk, pruned at already-false rows). The anchor
+/// fixpoints on the reconcile tick ripple the anchor clears up the graph; the
+/// referrer clear here is what lets the expensive `cached_path` fixpoint run as
+/// a rare backstop instead of on every pass.
 pub async fn clear_gate_flags_for_hashes<C: ConnectionTrait>(
     db: &C,
     hashes: &[String],
@@ -519,6 +520,26 @@ pub async fn clear_gate_flags_for_hashes<C: ConnectionTrait>(
             WHERE db.closure_complete
               AND db.derivation IN (
                 SELECT o.derivation FROM derivation_output o WHERE o.hash = ANY($1))
+            "#,
+            [chunk.clone().into()],
+        ))
+        .await?;
+
+        db.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            WITH RECURSIVE dirty(hash) AS (
+                SELECT unnest($1::text[])
+                UNION
+                SELECT r.referrer
+                FROM cached_path_reference r
+                JOIN dirty d ON r.reference_hash = d.hash
+                JOIN cached_path cp ON cp.hash = r.referrer
+                WHERE cp.closure_complete
+            )
+            UPDATE cached_path cp SET closure_complete = false
+            FROM dirty
+            WHERE cp.hash = dirty.hash AND cp.closure_complete
             "#,
             [chunk.into()],
         ))

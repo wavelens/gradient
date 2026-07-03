@@ -30,6 +30,10 @@ use super::DISPATCH_TICK_SECS;
 /// Full-backstop (Global) reconcile cadence, in dispatch ticks: 6 x 5s = 30s.
 const GLOBAL_RECONCILE_TICKS: u64 = 6;
 
+/// Deep reconcile cadence (Global plus the cached_path closure re-derivation,
+/// tens of seconds on a large cache): 720 x 5s = 1h.
+const DEEP_RECONCILE_TICKS: u64 = 720;
+
 pub(super) async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
     let mut interval = tokio::time::interval(Duration::from_secs(DISPATCH_TICK_SECS));
     let cancel = scheduler.state.shutdown.token();
@@ -56,7 +60,9 @@ pub(super) async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
             // every GLOBAL_RECONCILE_TICKS - its full-table scans saturated
             // Postgres when re-run every 5s on a large graph.
             tick_count = tick_count.wrapping_add(1);
-            let scope = if tick_count.is_multiple_of(GLOBAL_RECONCILE_TICKS) {
+            let scope = if tick_count.is_multiple_of(DEEP_RECONCILE_TICKS) {
+                gradient_db::ReconcileScope::Deep
+            } else if tick_count.is_multiple_of(GLOBAL_RECONCILE_TICKS) {
                 gradient_db::ReconcileScope::Global
             } else {
                 gradient_db::ReconcileScope::Tick
