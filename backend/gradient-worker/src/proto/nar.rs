@@ -191,12 +191,14 @@ pub async fn push_direct(
     // mismatch the server replies 0 and we restart from the beginning.
     let token = push_stream_token(NAR_ZSTD_LEVEL);
     let gate = nar_recv.register_push(job_id, store_path);
-    writer.send(ClientMessage::NarStreamHeader {
-        job_id: job_id.to_owned(),
-        store_path: store_path.to_owned(),
-        total_bytes: None,
-        stream_token: token,
-    })?;
+    writer
+        .send(ClientMessage::NarStreamHeader {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            total_bytes: None,
+            stream_token: token,
+        })
+        .await?;
     let resume_from = gate.await_resume().await;
 
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
@@ -222,13 +224,15 @@ pub async fn push_direct(
             let part: Vec<u8> = buf.drain(..NAR_CHUNK_SIZE).collect();
             file_hasher.update(&part);
             if let Some((offset, range)) = trim_for_resume(part.len(), produced, resume_from) {
-                writer.send(ClientMessage::NarPush {
-                    job_id: job_id.to_owned(),
-                    store_path: store_path.to_owned(),
-                    data: part[range].to_vec(),
-                    offset,
-                    is_final: false,
-                })?;
+                writer
+                    .send(ClientMessage::NarPush {
+                        job_id: job_id.to_owned(),
+                        store_path: store_path.to_owned(),
+                        data: part[range].to_vec(),
+                        offset,
+                        is_final: false,
+                    })
+                    .await?;
             }
             produced += part.len() as u64;
         }
@@ -238,25 +242,29 @@ pub async fn push_direct(
     if !remaining.is_empty() {
         file_hasher.update(&remaining);
         if let Some((offset, range)) = trim_for_resume(remaining.len(), produced, resume_from) {
-            writer.send(ClientMessage::NarPush {
-                job_id: job_id.to_owned(),
-                store_path: store_path.to_owned(),
-                data: remaining[range].to_vec(),
-                offset,
-                is_final: false,
-            })?;
+            writer
+                .send(ClientMessage::NarPush {
+                    job_id: job_id.to_owned(),
+                    store_path: store_path.to_owned(),
+                    data: remaining[range].to_vec(),
+                    offset,
+                    is_final: false,
+                })
+                .await?;
         }
         produced += remaining.len() as u64;
     }
 
     // Empty final chunk signals end-of-path; `offset` is the full size.
-    writer.send(ClientMessage::NarPush {
-        job_id: job_id.to_owned(),
-        store_path: store_path.to_owned(),
-        data: vec![],
-        offset: produced,
-        is_final: true,
-    })?;
+    writer
+        .send(ClientMessage::NarPush {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            data: vec![],
+            offset: produced,
+            is_final: true,
+        })
+        .await?;
 
     let sent = produced.saturating_sub(resume_from);
     crate::metrics::throughput::NETWORK
@@ -266,16 +274,18 @@ pub async fn push_direct(
     let nar_hash = format!("sha256:{}", nix32_encode(&nar_hasher.finalize()));
 
     // Report metadata so the server can update cache records.
-    writer.send(ClientMessage::NarUploaded {
-        job_id: job_id.to_owned(),
-        store_path: store_path.to_owned(),
-        file_hash: file_hash.clone(),
-        file_size: produced,
-        nar_size,
-        nar_hash,
-        references: meta.references,
-        deriver: meta.deriver,
-    })?;
+    writer
+        .send(ClientMessage::NarUploaded {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            file_hash: file_hash.clone(),
+            file_size: produced,
+            nar_size,
+            nar_hash,
+            references: meta.references,
+            deriver: meta.deriver,
+        })
+        .await?;
 
     debug!(
         store_path,
@@ -369,16 +379,18 @@ pub async fn upload_presigned_compressed(
         anyhow::bail!("presigned upload returned {}: {}", status, body);
     }
 
-    writer.send(ClientMessage::NarUploaded {
-        job_id: job_id.to_owned(),
-        store_path: store_path.to_owned(),
-        file_hash: meta.file_hash,
-        file_size: meta.file_size,
-        nar_size: meta.nar_size,
-        nar_hash: meta.nar_hash,
-        references,
-        deriver,
-    })?;
+    writer
+        .send(ClientMessage::NarUploaded {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            file_hash: meta.file_hash,
+            file_size: meta.file_size,
+            nar_size: meta.nar_size,
+            nar_hash: meta.nar_hash,
+            references,
+            deriver,
+        })
+        .await?;
 
     debug!(
         store_path,
@@ -417,46 +429,54 @@ pub async fn push_compressed_direct(
 
     let token = push_stream_token(NAR_ZSTD_LEVEL);
     let gate = nar_recv.register_push(job_id, store_path);
-    writer.send(ClientMessage::NarStreamHeader {
-        job_id: job_id.to_owned(),
-        store_path: store_path.to_owned(),
-        total_bytes: Some(compressed.len() as u64),
-        stream_token: token,
-    })?;
+    writer
+        .send(ClientMessage::NarStreamHeader {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            total_bytes: Some(compressed.len() as u64),
+            stream_token: token,
+        })
+        .await?;
     let resume_from = gate.await_resume().await;
 
     let mut produced: u64 = 0;
     for part in compressed.chunks(NAR_CHUNK_SIZE) {
         if let Some((offset, range)) = trim_for_resume(part.len(), produced, resume_from) {
-            writer.send(ClientMessage::NarPush {
-                job_id: job_id.to_owned(),
-                store_path: store_path.to_owned(),
-                data: part[range].to_vec(),
-                offset,
-                is_final: false,
-            })?;
+            writer
+                .send(ClientMessage::NarPush {
+                    job_id: job_id.to_owned(),
+                    store_path: store_path.to_owned(),
+                    data: part[range].to_vec(),
+                    offset,
+                    is_final: false,
+                })
+                .await?;
         }
         produced += part.len() as u64;
     }
 
-    writer.send(ClientMessage::NarPush {
-        job_id: job_id.to_owned(),
-        store_path: store_path.to_owned(),
-        data: vec![],
-        offset: produced,
-        is_final: true,
-    })?;
+    writer
+        .send(ClientMessage::NarPush {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            data: vec![],
+            offset: produced,
+            is_final: true,
+        })
+        .await?;
 
-    writer.send(ClientMessage::NarUploaded {
-        job_id: job_id.to_owned(),
-        store_path: store_path.to_owned(),
-        file_hash: meta.file_hash,
-        file_size: meta.file_size,
-        nar_size: meta.nar_size,
-        nar_hash: meta.nar_hash,
-        references,
-        deriver,
-    })?;
+    writer
+        .send(ClientMessage::NarUploaded {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            file_hash: meta.file_hash,
+            file_size: meta.file_size,
+            nar_size: meta.nar_size,
+            nar_hash: meta.nar_hash,
+            references,
+            deriver,
+        })
+        .await?;
 
     debug!(
         store_path,
@@ -544,16 +564,18 @@ pub async fn upload_presigned(
     }
 
     // --- 3. Confirm to the server ---
-    writer.send(ClientMessage::NarUploaded {
-        job_id: job_id.to_owned(),
-        store_path: store_path.to_owned(),
-        file_hash,
-        file_size,
-        nar_size,
-        nar_hash,
-        references: meta.references,
-        deriver: meta.deriver,
-    })?;
+    writer
+        .send(ClientMessage::NarUploaded {
+            job_id: job_id.to_owned(),
+            store_path: store_path.to_owned(),
+            file_hash,
+            file_size,
+            nar_size,
+            nar_hash,
+            references: meta.references,
+            deriver: meta.deriver,
+        })
+        .await?;
 
     debug!(
         store_path,

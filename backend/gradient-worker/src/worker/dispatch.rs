@@ -89,15 +89,15 @@ pub(super) async fn run_dispatch_loop(
                     &writer, &cache_waiters, &known_derivation_waiters, &nar_recv, &eval_cache_recv,
                     credentials, &mut job_kinds, &mut abort_senders,
                     &draining, max_eval, max_build,
-                )?;
+                ).await?;
             }
 
             _ = heartbeat.tick() => {
-                on_heartbeat(&writer, &job_kinds, &draining, max_eval, max_build);
+                on_heartbeat(&writer, &job_kinds, &draining, max_eval, max_build).await;
             }
 
             msg_result = reader.recv() => {
-                let msg = match msg_result? {
+                let msg = match msg_result {
                     Some(m) => m,
                     None => {
                         info!("server closed connection");
@@ -154,7 +154,7 @@ pub(super) async fn run_dispatch_loop(
 /// Cleans up per-job state, reports the result to the server, and requests
 /// a new job if the worker still has capacity.
 #[allow(clippy::too_many_arguments)]
-fn on_job_done(
+async fn on_job_done(
     job_id: String,
     result: Result<()>,
     writer: &ProtoWriter,
@@ -181,7 +181,7 @@ fn on_job_done(
     match result {
         Ok(()) => {
             info!(%job_id, "job completed");
-            writer.send(ClientMessage::JobCompleted { job_id })?;
+            writer.send(ClientMessage::JobCompleted { job_id }).await?;
         }
         Err(e) => {
             let error_chain = format!("{e:#}");
@@ -193,12 +193,14 @@ fn on_job_done(
                     Vec::new(),
                 ));
             error!(%job_id, error = %error_chain, ?kind, "job failed");
-            writer.send(ClientMessage::JobFailed {
-                job_id,
-                error: error_chain,
-                kind,
-                missing_paths,
-            })?;
+            writer
+                .send(ClientMessage::JobFailed {
+                    job_id,
+                    error: error_chain,
+                    kind,
+                    missing_paths,
+                })
+                .await?;
         }
     }
 
@@ -210,7 +212,7 @@ fn on_job_done(
             JobKind::Build => max_build,
         };
         if active < max {
-            writer.send(ClientMessage::RequestJob { kind })?;
+            writer.send(ClientMessage::RequestJob { kind }).await?;
         }
     }
 
@@ -219,7 +221,7 @@ fn on_job_done(
 
 /// Heartbeat tick: send live host metrics and request more jobs if the worker
 /// has capacity.
-fn on_heartbeat(
+async fn on_heartbeat(
     writer: &ProtoWriter,
     job_kinds: &HashMap<String, JobKind>,
     draining: &bool,
@@ -244,16 +246,20 @@ fn on_heartbeat(
         "heartbeat tick"
     );
     if want_eval
-        && let Err(e) = writer.send(ClientMessage::RequestJob {
-            kind: JobKind::Flake,
-        })
+        && let Err(e) = writer
+            .send(ClientMessage::RequestJob {
+                kind: JobKind::Flake,
+            })
+            .await
     {
         warn!(error = %e, "heartbeat RequestJob Flake send failed");
     }
     if want_build
-        && let Err(e) = writer.send(ClientMessage::RequestJob {
-            kind: JobKind::Build,
-        })
+        && let Err(e) = writer
+            .send(ClientMessage::RequestJob {
+                kind: JobKind::Build,
+            })
+            .await
     {
         warn!(error = %e, "heartbeat RequestJob Build send failed");
     }
@@ -262,17 +268,28 @@ fn on_heartbeat(
 /// Sample live host load off the dispatch thread (the CPU sample blocks for
 /// [`sysinfo::MINIMUM_CPU_UPDATE_INTERVAL`]) and send it to the scheduler.
 /// `disk_speed_mbps` / `network_speed_mbps` come from passive EWMA
-/// accumulators and stay `None` until the first build / NAR transfer.
+/// accumulators and stay `None` until the first build / NAR transfer. Detached
+/// (not awaited by the heartbeat tick): the blocking sample runs on
+/// `spawn_blocking`, then the async send runs on the runtime once it finishes.
 fn send_live_metrics(writer: &ProtoWriter) {
     let writer = writer.clone();
-    tokio::task::spawn_blocking(move || {
-        let m = crate::metrics::host_dynamic();
-        if let Err(e) = writer.send(ClientMessage::WorkerMetrics {
-            cpu_usage_pct: m.cpu_usage_pct,
-            ram_free_mb: m.ram_free_mb,
-            disk_speed_mbps: crate::metrics::throughput::DISK.current(),
-            network_speed_mbps: crate::metrics::throughput::NETWORK.current(),
-        }) {
+    tokio::spawn(async move {
+        let m = match tokio::task::spawn_blocking(crate::metrics::host_dynamic).await {
+            Ok(m) => m,
+            Err(e) => {
+                debug!(error = %e, "host_dynamic sampling task failed");
+                return;
+            }
+        };
+        if let Err(e) = writer
+            .send(ClientMessage::WorkerMetrics {
+                cpu_usage_pct: m.cpu_usage_pct,
+                ram_free_mb: m.ram_free_mb,
+                disk_speed_mbps: crate::metrics::throughput::DISK.current(),
+                network_speed_mbps: crate::metrics::throughput::NETWORK.current(),
+            })
+            .await
+        {
             debug!(error = %e, "heartbeat WorkerMetrics send failed");
         }
     });
@@ -321,7 +338,7 @@ impl<'a> MessageHandler<'a> {
                 self.on_revoke_job(job_ids);
             }
             ServerMessage::AssignJob { job_id, job } => {
-                self.on_assign_job(job_id, job)?;
+                self.on_assign_job(job_id, job).await?;
             }
             ServerMessage::AbortJob { job_id, reason } => {
                 self.on_abort_job(job_id, reason);
@@ -370,7 +387,7 @@ impl<'a> MessageHandler<'a> {
                 self.nar_recv.fail(&job_id, &store_path, reason);
             }
             ServerMessage::RequestAllScores => {
-                self.on_request_all_scores();
+                self.on_request_all_scores().await;
             }
             ServerMessage::Draining => {
                 info!("server is draining; finishing in-flight work then disconnecting");
@@ -383,7 +400,7 @@ impl<'a> MessageHandler<'a> {
                 warn!("unexpected handshake message in dispatch loop - ignoring");
             }
             ServerMessage::AuthChallenge { peers } => {
-                self.on_auth_challenge(peers)?;
+                self.on_auth_challenge(peers).await?;
             }
             ServerMessage::AuthUpdate {
                 authorized_peers,
@@ -505,14 +522,14 @@ impl<'a> MessageHandler<'a> {
         }
     }
 
-    fn on_request_all_scores(self) {
+    async fn on_request_all_scores(self) {
         let all: Vec<JobCandidate> = self.candidates.lock().unwrap().values().cloned().collect();
         debug!(
             count = all.len(),
             "RequestAllScores - re-scoring all cached candidates"
         );
         if all.is_empty() {
-            if let Err(e) = send_score_chunks(self.writer, vec![]) {
+            if let Err(e) = send_score_chunks(self.writer, vec![]).await {
                 warn!(error = %e, "send_score_chunks (empty) failed");
             }
         } else {
@@ -539,7 +556,7 @@ impl<'a> MessageHandler<'a> {
         self.last_scores.lock().unwrap().remove(job_id);
     }
 
-    fn on_assign_job(self, job_id: String, job: Job) -> Result<()> {
+    async fn on_assign_job(self, job_id: String, job: Job) -> Result<()> {
         // Drop the cached candidate + score on any reject too (not just accept):
         // the server re-queues a rejected job and re-offers it, but our delta
         // filter would skip an unchanged cached entry, so it would never be
@@ -547,11 +564,13 @@ impl<'a> MessageHandler<'a> {
         if *self.draining {
             warn!(%job_id, "rejecting assigned job - draining");
             self.forget_candidate(&job_id);
-            self.writer.send(ClientMessage::AssignJobResponse {
-                job_id,
-                accepted: false,
-                reason: Some("worker is draining".to_owned()),
-            })?;
+            self.writer
+                .send(ClientMessage::AssignJobResponse {
+                    job_id,
+                    accepted: false,
+                    reason: Some("worker is draining".to_owned()),
+                })
+                .await?;
             return Ok(());
         }
 
@@ -568,20 +587,24 @@ impl<'a> MessageHandler<'a> {
         if active_count >= max {
             warn!(%job_id, ?kind, active = active_count, limit = max, "rejecting assigned job - at capacity");
             self.forget_candidate(&job_id);
-            self.writer.send(ClientMessage::AssignJobResponse {
-                job_id,
-                accepted: false,
-                reason: Some(format!("at capacity ({}/{})", active_count, max)),
-            })?;
+            self.writer
+                .send(ClientMessage::AssignJobResponse {
+                    job_id,
+                    accepted: false,
+                    reason: Some(format!("at capacity ({}/{})", active_count, max)),
+                })
+                .await?;
             return Ok(());
         }
 
         info!(%job_id, ?kind, "job assigned - accepting");
-        self.writer.send(ClientMessage::AssignJobResponse {
-            job_id: job_id.clone(),
-            accepted: true,
-            reason: None,
-        })?;
+        self.writer
+            .send(ClientMessage::AssignJobResponse {
+                job_id: job_id.clone(),
+                accepted: true,
+                reason: None,
+            })
+            .await?;
 
         self.job_kinds.insert(job_id.clone(), kind.clone());
         self.forget_candidate(&job_id);
@@ -615,7 +638,7 @@ impl<'a> MessageHandler<'a> {
         });
 
         if active_count + 1 < max {
-            self.writer.send(ClientMessage::RequestJob { kind })?;
+            self.writer.send(ClientMessage::RequestJob { kind }).await?;
         }
 
         Ok(())
@@ -682,14 +705,16 @@ impl<'a> MessageHandler<'a> {
 
     // ── Auth ──────────────────────────────────────────────────────────────────
 
-    fn on_auth_challenge(self, peers: Vec<String>) -> Result<()> {
+    async fn on_auth_challenge(self, peers: Vec<String>) -> Result<()> {
         debug!(
             ?peers,
             "mid-connection AuthChallenge - sending AuthResponse"
         );
         let peer_tokens = self.config.peer_tokens();
         let tokens = WorkerConfig::resolve_tokens_for_challenge(&peer_tokens, &peers);
-        self.writer.send(ClientMessage::AuthResponse { tokens })?;
+        self.writer
+            .send(ClientMessage::AuthResponse { tokens })
+            .await?;
         Ok(())
     }
 

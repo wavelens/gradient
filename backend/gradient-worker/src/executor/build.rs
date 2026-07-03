@@ -25,8 +25,11 @@ use bytes::Bytes;
 use futures::StreamExt as _;
 use gradient_db::{DrvOutputSpec, parse_drv};
 use gradient_exec::path_utils::{nix_store_path, strip_nix_store_prefix, strip_store_prefix};
-use gradient_util::hydra::parse_hydra_product_line;
+use gradient_proto::messages::{
+    BuildFailureKind, BuildMetrics, BuildOutput, BuildProduct, BuildTask,
+};
 use gradient_sources::get_hash_from_path;
+use gradient_util::hydra::parse_hydra_product_line;
 use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResultInner, Microseconds};
 use harmonia_protocol::log::{Field, LogMessage, ResultType, Verbosity};
 use harmonia_protocol::types::ClientOptions;
@@ -35,7 +38,6 @@ use harmonia_store_derivation::derivation::{BasicDerivation, DerivationOutput, D
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::{Algorithm, Hash};
-use gradient_proto::messages::{BuildFailureKind, BuildMetrics, BuildOutput, BuildProduct, BuildTask};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::pin::{Pin, pin};
@@ -96,7 +98,10 @@ impl BuildError {
     /// Prefetch found required inputs the gradient cache cannot serve. Carries
     /// the offending paths so the server demotes them and re-queues their
     /// producers; terminal for this build.
-    pub(crate) fn inputs_unavailable(missing_paths: Vec<String>, e: impl Into<anyhow::Error>) -> Self {
+    pub(crate) fn inputs_unavailable(
+        missing_paths: Vec<String>,
+        e: impl Into<anyhow::Error>,
+    ) -> Self {
         Self {
             kind: BuildFailureKind::InputsUnavailable,
             source: e.into(),
@@ -254,8 +259,8 @@ struct NetworkPeakSampler {
 
 impl NetworkPeakSampler {
     fn start() -> Self {
-        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
         let peak = Arc::new(AtomicU64::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let (p, s) = (peak.clone(), stop.clone());
@@ -265,8 +270,12 @@ impl NetworkPeakSampler {
                     let bits = (v as f64).to_bits();
                     let mut prev = p.load(Ordering::Relaxed);
                     while f64::from_bits(prev) < v as f64 {
-                        match p.compare_exchange_weak(prev, bits, Ordering::Relaxed, Ordering::Relaxed)
-                        {
+                        match p.compare_exchange_weak(
+                            prev,
+                            bits,
+                            Ordering::Relaxed,
+                            Ordering::Relaxed,
+                        ) {
                             Ok(_) => break,
                             Err(cur) => prev = cur,
                         }
@@ -314,8 +323,8 @@ impl CgroupSampler {
             while !s.load(Ordering::Relaxed) {
                 if cgroup.is_none() {
                     // Trust only paths under the configured cgroup root.
-                    cgroup = newest_build_cgroup(dir, since)
-                        .filter(|p| p.starts_with(&cgroup_root));
+                    cgroup =
+                        newest_build_cgroup(dir, since).filter(|p| p.starts_with(&cgroup_root));
                 }
                 if let Some(dir) = cgroup.as_ref() {
                     match read_build_cgroup(dir) {
@@ -513,7 +522,7 @@ impl ParsedDerivation {
                          protocol); recovering input-addressed/FOD paths from .drv"
                     );
                     if log_fetch_from_store {
-                        forward_store_build_log(updater, task_index, drv_path);
+                        forward_store_build_log(updater, task_index, drv_path).await;
                     }
                 }
                 let mut outputs = Vec::with_capacity(pairs.len());
@@ -682,12 +691,17 @@ pub async fn build_derivation(
         None => None,
     };
     let cpu_usec = realize_result.as_ref().ok().and_then(|(_, _, c)| *c);
-    let metrics =
-        assemble_build_metrics(cgroup_raw, cpu_usec, build_time_ms, peak_network_mbps);
+    let metrics = assemble_build_metrics(cgroup_raw, cpu_usec, build_time_ms, peak_network_mbps);
 
     let (outputs, substituted, _) = realize_result?;
     updater
-        .report_build_output(task.build_id.clone(), outputs.clone(), Some(metrics), substituted)
+        .report_build_output(
+            task.build_id.clone(),
+            outputs.clone(),
+            Some(metrics),
+            substituted,
+        )
+        .await
         .map_err(BuildError::transient)?;
     Ok(outputs)
 }
@@ -697,13 +711,13 @@ pub async fn build_derivation(
 /// When a derivation is already built locally the daemon produces no log.
 /// Read nix's stored `.bz2` log and forward it so the UI still shows output.
 /// Best-effort: missing logs and read errors are logged at debug and ignored.
-fn forward_store_build_log(updater: &mut JobUpdater, task_index: u32, drv_path: &str) {
+async fn forward_store_build_log(updater: &mut JobUpdater, task_index: u32, drv_path: &str) {
     match crate::nix::log::read_store_build_log(drv_path) {
         Ok(Some(text)) if !text.is_empty() => {
             const SEND_CHUNK: usize = 256 * 1024;
             let bytes = text.into_bytes();
             for slice in bytes.chunks(SEND_CHUNK) {
-                if let Err(e) = updater.send_log_chunk(task_index, slice.to_vec()) {
+                if let Err(e) = updater.send_log_chunk(task_index, slice.to_vec()).await {
                     warn!(error = %e, "failed to forward stored build log; continuing");
                     break;
                 }
@@ -815,16 +829,19 @@ where
             let len = line.len();
             if !limiter.admit(len as u64, started.elapsed().as_secs_f64()) {
                 limit_hit = true;
-                let _ = updater.send_log_chunk(
-                    task_index,
-                    b"\x1b[0m[gradient: log truncated \xe2\x80\x94 rate limit exceeded]\n".to_vec(),
-                );
+                let _ = updater
+                    .send_log_chunk(
+                        task_index,
+                        b"\x1b[0m[gradient: log truncated \xe2\x80\x94 rate limit exceeded]\n"
+                            .to_vec(),
+                    )
+                    .await;
                 warn!("build log rate limit exceeded; truncating remaining output");
                 continue;
             }
             // Log streaming is best-effort - never fail the build because the
             // server connection hiccupped.
-            match updater.send_log_chunk(task_index, line.into_bytes()) {
+            match updater.send_log_chunk(task_index, line.into_bytes()).await {
                 Ok(()) => {
                     stats.forwarded_lines += 1;
                     stats.forwarded_bytes += len as u64;
@@ -1376,7 +1393,10 @@ mod tests {
             Some(1000),
         );
         // Negative (unset/garbage) clamps to zero rather than underflowing.
-        assert_eq!(daemon_cpu_usec(Some(Microseconds(-1)), Some(Microseconds(5))), Some(5));
+        assert_eq!(
+            daemon_cpu_usec(Some(Microseconds(-1)), Some(Microseconds(5))),
+            Some(5)
+        );
     }
 
     #[test]
@@ -1464,7 +1484,9 @@ mod classify_tests {
     #[test]
     fn builder_nonzero_is_permanent() {
         assert_eq!(
-            classify_build_error("build failed: builder for '/nix/store/x.drv' failed with exit code 1"),
+            classify_build_error(
+                "build failed: builder for '/nix/store/x.drv' failed with exit code 1"
+            ),
             BuildFailureKind::Permanent
         );
     }
@@ -1472,10 +1494,14 @@ mod classify_tests {
     #[test]
     fn oom_signature_is_transient() {
         assert_eq!(
-            classify_build_error("build failed: gcc: fatal error: Killed signal terminated; out of memory"),
+            classify_build_error(
+                "build failed: gcc: fatal error: Killed signal terminated; out of memory"
+            ),
             BuildFailureKind::Transient
         );
-        assert!(looks_like_oom("cc1plus: out of memory allocating 1048576 bytes"));
+        assert!(looks_like_oom(
+            "cc1plus: out of memory allocating 1048576 bytes"
+        ));
         assert!(looks_like_oom("Killed"));
         assert!(looks_like_oom("oom-killer: invoked"));
         assert!(!looks_like_oom("error: undefined reference to `foo'"));

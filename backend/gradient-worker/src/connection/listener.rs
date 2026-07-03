@@ -63,7 +63,7 @@ async fn handle_incoming(
     config: WorkerConfig,
     shutdown: CancellationToken,
 ) -> Result<()> {
-    let ws = accept_async(stream)
+    let ws = accept_async(tokio_tungstenite::MaybeTlsStream::Plain(stream))
         .await
         .context("WebSocket upgrade failed")?;
 

@@ -75,15 +75,18 @@ pub(super) fn spawn_scoring_task(
 
         use gradient_proto::messages::ClientMessage;
         if is_final {
-            if let Err(e) = send_score_chunks(&writer, to_send) {
+            if let Err(e) = send_score_chunks(&writer, to_send).await {
                 warn!(error = %e, "send_score_chunks (final) failed");
             }
         } else {
             for chunk in to_send.chunks(1_000) {
-                if let Err(e) = writer.send(ClientMessage::RequestJobChunk {
-                    scores: chunk.to_vec(),
-                    is_final: false,
-                }) {
+                if let Err(e) = writer
+                    .send(ClientMessage::RequestJobChunk {
+                        scores: chunk.to_vec(),
+                        is_final: false,
+                    })
+                    .await
+                {
                     warn!(error = %e, "send RequestJobChunk (non-final) failed");
                     break;
                 }
@@ -93,7 +96,10 @@ pub(super) fn spawn_scoring_task(
         // Now that the server has the scores, claim work: the freshly-scored
         // candidates have cleared the rescore gate and may be dispatchable.
         for kind in request_after {
-            if let Err(e) = writer.send(ClientMessage::RequestJob { kind: kind.clone() }) {
+            if let Err(e) = writer
+                .send(ClientMessage::RequestJob { kind: kind.clone() })
+                .await
+            {
                 warn!(error = %e, ?kind, "RequestJob after scoring failed");
             }
         }
@@ -104,25 +110,29 @@ pub(super) fn spawn_scoring_task(
 ///
 /// Always sends at least one message (even when `scores` is empty) so the
 /// server sees the `is_final` sentinel.
-pub(super) fn send_score_chunks(
+pub(super) async fn send_score_chunks(
     writer: &ProtoWriter,
     scores: Vec<CandidateScore>,
 ) -> anyhow::Result<()> {
     use gradient_proto::messages::ClientMessage;
     if scores.is_empty() {
-        writer.send(ClientMessage::RequestJobChunk {
-            scores: vec![],
-            is_final: true,
-        })?;
+        writer
+            .send(ClientMessage::RequestJobChunk {
+                scores: vec![],
+                is_final: true,
+            })
+            .await?;
         return Ok(());
     }
     let chunks: Vec<_> = scores.chunks(1_000).collect();
     let total = chunks.len();
     for (i, chunk) in chunks.into_iter().enumerate() {
-        writer.send(ClientMessage::RequestJobChunk {
-            scores: chunk.to_vec(),
-            is_final: i + 1 == total,
-        })?;
+        writer
+            .send(ClientMessage::RequestJobChunk {
+                scores: chunk.to_vec(),
+                is_final: i + 1 == total,
+            })
+            .await?;
     }
     Ok(())
 }

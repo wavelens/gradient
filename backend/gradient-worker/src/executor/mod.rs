@@ -22,8 +22,8 @@ use gradient_proto::messages::{BuildJob, FlakeJob, FlakeTask};
 use tokio::sync::watch;
 use tracing::instrument;
 
-use gradient_types::CachedPathInfo;
 use gradient_proto::messages::QueryMode;
+use gradient_types::CachedPathInfo;
 
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
 use crate::nix::store::LocalNixStore;
@@ -225,7 +225,14 @@ pub(crate) async fn upload_one_nar(
             path,
             upload_url: None,
         } => {
-            nar::push_direct(&updater.job_id, path, &updater.writer, &updater.nar_recv, Some(store)).await
+            nar::push_direct(
+                &updater.job_id,
+                path,
+                &updater.writer,
+                &updater.nar_recv,
+                Some(store),
+            )
+            .await
         }
     }
 }
@@ -323,7 +330,9 @@ impl JobExecutor {
                         upload_one_nar(updater, cp, &self.store).await?;
                     }
 
-                    updater.report_fetch_result(outcome.flake_source.clone())?;
+                    updater
+                        .report_fetch_result(outcome.flake_source.clone())
+                        .await?;
                     local_flake_path = Some(outcome.local_flake_path);
                 }
                 FlakeTask::EvaluateFlake => eval::evaluate_flake(&job, updater).await?,
@@ -385,7 +394,7 @@ impl JobExecutor {
             // `JobFailed` would arrive at the server while the build is
             // still `Queued`, the transition would be rejected, and the UI
             // would show the build hanging in `Queued` forever.
-            updater.report_building(build_task.build_id.clone())?;
+            updater.report_building(build_task.build_id.clone()).await?;
 
             if build_task.external_cached {
                 // Substitute attempt: the output is on an upstream cache (flagged
@@ -396,12 +405,10 @@ impl JobExecutor {
                 // is mirrored by each member's own anchor). There is no local-build
                 // fallback (this worker may be the wrong arch); on a miss fail with
                 // `SubstituteUnavailable` and let the scheduler re-dispatch/escalate.
-                let outputs = crate::proto::nar_import::relay_external_cached_outputs(
-                    build_task,
-                    updater,
-                )
-                .await
-                .map_err(|e| classify_substitute_failure(&build_task.build_id, e))?;
+                let outputs =
+                    crate::proto::nar_import::relay_external_cached_outputs(build_task, updater)
+                        .await
+                        .map_err(|e| classify_substitute_failure(&build_task.build_id, e))?;
 
                 let reported: Vec<gradient_proto::messages::BuildOutput> = outputs
                     .iter()
@@ -420,7 +427,9 @@ impl JobExecutor {
                 // The relay already pushed each NAR (NarUploaded), and nothing
                 // landed in the local store, so no GC roots and no post-loop
                 // compress_and_push for these outputs.
-                updater.report_build_output(build_task.build_id.clone(), reported, None, false)?;
+                updater
+                    .report_build_output(build_task.build_id.clone(), reported, None, false)
+                    .await?;
                 continue;
             }
 
@@ -455,10 +464,9 @@ impl JobExecutor {
                     // it. Every other prefetch error is infrastructure-transient.
                     if let Some(mi) = e.downcast_ref::<crate::proto::nar_import::MissingInputs>() {
                         crate::executor::build::BuildError::inputs_unavailable(mi.0.clone(), e)
-                    } else if let Some(corrupt) = e
-                        .chain()
-                        .find_map(|s| s.downcast_ref::<crate::proto::nar_import::CorruptCachedNar>())
-                    {
+                    } else if let Some(corrupt) = e.chain().find_map(|s| {
+                        s.downcast_ref::<crate::proto::nar_import::CorruptCachedNar>()
+                    }) {
                         crate::executor::build::BuildError::inputs_unavailable(
                             vec![corrupt.0.clone()],
                             e,
@@ -529,14 +537,20 @@ mod tests {
             "b",
             anyhow::Error::new(SubstituteNotOnUpstream("/nix/store/p".into())),
         );
-        assert!(matches!(genuine.kind, BuildFailureKind::SubstituteUnavailable));
+        assert!(matches!(
+            genuine.kind,
+            BuildFailureKind::SubstituteUnavailable
+        ));
 
         // wrapped in context is still recognized via the error chain
         let wrapped = classify_substitute_failure(
             "b",
             anyhow::Error::new(SubstituteNotOnUpstream("/nix/store/p".into())).context("relay"),
         );
-        assert!(matches!(wrapped.kind, BuildFailureKind::SubstituteUnavailable));
+        assert!(matches!(
+            wrapped.kind,
+            BuildFailureKind::SubstituteUnavailable
+        ));
 
         let timeout = classify_substitute_failure("b", anyhow::anyhow!("operation timed out"));
         assert!(matches!(timeout.kind, BuildFailureKind::Transient));

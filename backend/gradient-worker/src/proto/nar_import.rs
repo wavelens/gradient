@@ -775,8 +775,9 @@ pub async fn prefetch_inputs(
     let result = InputPrefetcher::new(store, task, updater).run().await;
     if let Err(e) = &result {
         let summary = format!("input prefetch failed for {}: {:#}", drv, e);
-        if let Err(send_err) =
-            updater.send_eval_message(EvalMessageLevel::Error, "build-prefetch", summary)
+        if let Err(send_err) = updater
+            .send_eval_message(EvalMessageLevel::Error, "build-prefetch", summary)
+            .await
         {
             warn!(error = %send_err, "failed to surface prefetch error as EvalMessage");
         }

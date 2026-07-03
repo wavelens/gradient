@@ -6,25 +6,49 @@
 
 //! Protocol handshake: `InitConnection` → `InitAck` / `Reject`.
 //!
-//! After a successful handshake the server has validated our token and
-//! negotiated capabilities.  The negotiated [`GradientCapabilities`] may be a
-//! strict subset of what we advertised - the server may disable capabilities
-//! it is not configured to accept.
+//! The wire sequence is driven by gradient-proto's shared
+//! [`as_peer`](gradient_proto::session::handshake::as_peer) FSM; this module
+//! only supplies the worker's identity (persistent UUID plus the peer tokens
+//! from `GRADIENT_WORKER_PEERS`, wildcards expanded per challenge) and its
+//! advertised capabilities. The negotiated [`GradientCapabilities`] may be a
+//! strict subset of what we advertised.
 
-use anyhow::{Context, Result, bail};
-use gradient_proto::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
-use tracing::{debug, info};
+use anyhow::Result;
+use async_trait::async_trait;
+use gradient_proto::messages::{GradientCapabilities, PROTO_VERSION};
+use gradient_proto::session::handshake::{HandshakeResult, as_peer};
+use gradient_proto::traits::{CapabilitiesProvider, PeerIdentity};
+use tracing::info;
 
 use crate::config::WorkerConfig;
 use crate::connection::ProtoConnection;
 
-/// Result of a successful handshake.
-#[derive(Debug)]
-pub struct HandshakeResult {
-    /// Capabilities negotiated with the server (AND of client offer + server accept).
-    pub negotiated: GradientCapabilities,
-    /// Protocol version the server reported in `InitAck`.
-    pub server_version: u16,
+struct WorkerIdentity {
+    peer_id: String,
+    peer_tokens: Vec<(String, String)>,
+}
+
+#[async_trait]
+impl PeerIdentity for WorkerIdentity {
+    fn peer_id(&self) -> String {
+        self.peer_id.clone()
+    }
+
+    async fn tokens_for(&self, peers: &[String]) -> Result<Vec<(String, String)>> {
+        Ok(WorkerConfig::resolve_tokens_for_challenge(
+            &self.peer_tokens,
+            peers,
+        ))
+    }
+}
+
+struct StaticCapabilities(GradientCapabilities);
+
+#[async_trait]
+impl CapabilitiesProvider for StaticCapabilities {
+    async fn capabilities(&self) -> GradientCapabilities {
+        self.0.clone()
+    }
 }
 
 /// Perform the full challenge-response handshake.
@@ -38,81 +62,29 @@ pub async fn perform_handshake(
     peer_tokens: Vec<(String, String)>,
     capabilities: GradientCapabilities,
 ) -> Result<HandshakeResult> {
-    debug!("sending InitConnection");
-    conn.send(ClientMessage::InitConnection {
-        version: PROTO_VERSION,
-        capabilities,
-        id: peer_id,
-    })
-    .await
-    .context("failed to send InitConnection")?;
-
-    // Expect AuthChallenge.
-    let challenge = conn
-        .recv()
-        .await
-        .context("connection closed before AuthChallenge")?
-        .context("server closed the connection without responding")?;
-
-    let challenge_peers = match challenge {
-        ServerMessage::AuthChallenge { peers } => peers,
-        ServerMessage::Reject { code, reason } => {
-            bail!("server rejected connection (code {code}): {reason}");
-        }
-        other => bail!("expected AuthChallenge, got: {other:?}"),
+    let identity = WorkerIdentity {
+        peer_id,
+        peer_tokens,
     };
-
-    debug!(peers = ?challenge_peers, "received AuthChallenge");
-
-    // Reply with tokens for the peers the server challenged us about.
-    // Wildcard entries (`*:token`) are expanded here.
-    let tokens = WorkerConfig::resolve_tokens_for_challenge(&peer_tokens, &challenge_peers);
-
-    conn.send(ClientMessage::AuthResponse { tokens })
-        .await
-        .context("failed to send AuthResponse")?;
-
-    // Expect InitAck.
-    let ack = conn
-        .recv()
-        .await
-        .context("connection closed before InitAck")?
-        .context("server closed the connection without responding")?;
-
-    match ack {
-        ServerMessage::InitAck {
-            version,
-            capabilities: negotiated,
-            authorized_peers,
-            failed_peers,
-        } => {
-            info!(
-                server_version = version,
-                client_version = PROTO_VERSION,
-                authorized = authorized_peers.len(),
-                failed = failed_peers.len(),
-                "handshake successful"
-            );
-            if !failed_peers.is_empty() {
-                for fp in &failed_peers {
-                    tracing::warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
-                }
-            }
-            Ok(HandshakeResult {
-                negotiated,
-                server_version: version,
-            })
-        }
-        ServerMessage::Reject { code, reason } => {
-            bail!("server rejected connection (code {code}): {reason}");
-        }
-        other => bail!("unexpected message during handshake: {other:?}"),
+    let capabilities = StaticCapabilities(capabilities);
+    let result = as_peer(conn.socket_mut(), &identity, &capabilities).await?;
+    info!(
+        server_version = result.server_version,
+        client_version = PROTO_VERSION,
+        authorized = result.authorized_peers.len(),
+        failed = result.failed_peers.len(),
+        "handshake successful"
+    );
+    for fp in &result.failed_peers {
+        tracing::warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
     }
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_proto::messages::{ClientMessage, ServerMessage};
     use gradient_test_support::prelude::{MockProtoServer, MockServerConn};
 
     fn all_caps() -> GradientCapabilities {

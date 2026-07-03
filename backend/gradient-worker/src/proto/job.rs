@@ -93,10 +93,12 @@ impl JobUpdater {
     /// Best-effort: returns `Ok(None)` on miss; `Err` only on transport failure.
     pub async fn pull_eval_cache(&self, fingerprint: &str) -> Result<Option<Vec<u8>>> {
         let mut pending = self.eval_cache_recv.register_pull(&self.job_id);
-        self.writer.send(ClientMessage::EvalCachePull {
-            job_id: self.job_id.clone(),
-            fingerprint: fingerprint.to_owned(),
-        })?;
+        self.writer
+            .send(ClientMessage::EvalCachePull {
+                job_id: self.job_id.clone(),
+                fingerprint: fingerprint.to_owned(),
+            })
+            .await?;
 
         match pending.await_outcome().await? {
             EvalCachePullOutcome::Miss => Ok(None),
@@ -125,11 +127,13 @@ impl JobUpdater {
     pub async fn push_eval_cache(&self, fingerprint: &str, bytes: Vec<u8>) -> Result<()> {
         let size_bytes = bytes.len() as u64;
         let mut pending = self.eval_cache_recv.register_push(&self.job_id);
-        self.writer.send(ClientMessage::EvalCachePush {
-            job_id: self.job_id.clone(),
-            fingerprint: fingerprint.to_owned(),
-            size_bytes,
-        })?;
+        self.writer
+            .send(ClientMessage::EvalCachePush {
+                job_id: self.job_id.clone(),
+                fingerprint: fingerprint.to_owned(),
+                size_bytes,
+            })
+            .await?;
 
         match pending.await_grant().await? {
             EvalCachePushMode::Skip => Ok(()),
@@ -142,33 +146,39 @@ impl JobUpdater {
                     .with_context(|| format!("eval-cache PUT {url}"))?
                     .error_for_status()
                     .with_context(|| format!("eval-cache PUT {url} returned non-2xx"))?;
-                self.writer.send(ClientMessage::EvalCachePushDone {
-                    job_id: self.job_id.clone(),
-                    fingerprint: fingerprint.to_owned(),
-                    size_bytes,
-                })?;
+                self.writer
+                    .send(ClientMessage::EvalCachePushDone {
+                        job_id: self.job_id.clone(),
+                        fingerprint: fingerprint.to_owned(),
+                        size_bytes,
+                    })
+                    .await?;
                 Ok(())
             }
             EvalCachePushMode::Inline { .. } => {
                 let mut offset: u64 = 0;
                 let mut chunks = bytes.chunks(EVAL_CACHE_CHUNK_SIZE).peekable();
                 if chunks.peek().is_none() {
-                    self.writer.send(ClientMessage::EvalCacheChunk {
-                        job_id: self.job_id.clone(),
-                        data: Vec::new(),
-                        offset: 0,
-                        is_final: true,
-                    })?;
+                    self.writer
+                        .send(ClientMessage::EvalCacheChunk {
+                            job_id: self.job_id.clone(),
+                            data: Vec::new(),
+                            offset: 0,
+                            is_final: true,
+                        })
+                        .await?;
                 }
 
                 while let Some(chunk) = chunks.next() {
                     let is_final = chunks.peek().is_none();
-                    self.writer.send(ClientMessage::EvalCacheChunk {
-                        job_id: self.job_id.clone(),
-                        data: chunk.to_vec(),
-                        offset,
-                        is_final,
-                    })?;
+                    self.writer
+                        .send(ClientMessage::EvalCacheChunk {
+                            job_id: self.job_id.clone(),
+                            data: chunk.to_vec(),
+                            offset,
+                            is_final,
+                        })
+                        .await?;
                     offset += chunk.len() as u64;
                 }
 
@@ -223,21 +233,25 @@ impl JobUpdater {
         for p in &paths {
             match self.nar_recv.resumable(&self.job_id, p) {
                 (received, Some(token)) if received > 0 => {
-                    self.writer.send(ClientMessage::NarRequestResume {
-                        job_id: self.job_id.clone(),
-                        store_path: p.clone(),
-                        received_bytes: received,
-                        stream_token: token,
-                    })?;
+                    self.writer
+                        .send(ClientMessage::NarRequestResume {
+                            job_id: self.job_id.clone(),
+                            store_path: p.clone(),
+                            received_bytes: received,
+                            stream_token: token,
+                        })
+                        .await?;
                 }
                 _ => fresh.push(p.clone()),
             }
         }
         if !fresh.is_empty() {
-            self.writer.send(ClientMessage::NarRequest {
-                job_id: self.job_id.clone(),
-                paths: fresh,
-            })?;
+            self.writer
+                .send(ClientMessage::NarRequest {
+                    job_id: self.job_id.clone(),
+                    paths: fresh,
+                })
+                .await?;
         }
 
         let waits = pendings.into_iter().map(|pending| {
@@ -268,24 +282,25 @@ impl JobUpdater {
         Ok(out)
     }
 
-    pub fn report_fetch_result(&self, flake_source: Option<String>) -> Result<()> {
+    pub async fn report_fetch_result(&self, flake_source: Option<String>) -> Result<()> {
         self.send_update(JobUpdateKind::FetchResult { flake_source })
+            .await
     }
 
-    pub fn report_evaluating_flake(&self) -> Result<()> {
-        self.send_update(JobUpdateKind::EvaluatingFlake)
+    pub async fn report_evaluating_flake(&self) -> Result<()> {
+        self.send_update(JobUpdateKind::EvaluatingFlake).await
     }
 
     /// Send the per-eval stats + walked flake-output graph at eval completion.
-    pub fn report_eval_stats(&self, report: EvalStatsReport) -> Result<()> {
-        self.send_update(JobUpdateKind::EvalStats(report))
+    pub async fn report_eval_stats(&self, report: EvalStatsReport) -> Result<()> {
+        self.send_update(JobUpdateKind::EvalStats(report)).await
     }
 
-    pub fn report_building(&self, build_id: String) -> Result<()> {
-        self.send_update(JobUpdateKind::Building { build_id })
+    pub async fn report_building(&self, build_id: String) -> Result<()> {
+        self.send_update(JobUpdateKind::Building { build_id }).await
     }
 
-    pub fn report_build_output(
+    pub async fn report_build_output(
         &self,
         build_id: String,
         outputs: Vec<BuildOutput>,
@@ -298,45 +313,51 @@ impl JobUpdater {
             metrics,
             substituted,
         })
+        .await
     }
 
-    pub fn report_compressing(&self) -> Result<()> {
-        self.send_update(JobUpdateKind::Compressing)
+    pub async fn report_compressing(&self) -> Result<()> {
+        self.send_update(JobUpdateKind::Compressing).await
     }
 
     /// Report an infrastructure-level message that should surface on the
     /// evaluation page. Use only for transport / prefetch / cache problems -
     /// not for compile failures (those are implicit in `JobFailed`).
-    pub fn send_eval_message(
+    pub async fn send_eval_message(
         &self,
         level: EvalMessageLevel,
         source: impl Into<String>,
         message: impl Into<String>,
     ) -> Result<()> {
-        self.writer.send(ClientMessage::EvalMessage {
-            job_id: self.job_id.clone(),
-            level,
-            source: source.into(),
-            message: message.into(),
-        })
+        self.writer
+            .send(ClientMessage::EvalMessage {
+                job_id: self.job_id.clone(),
+                level,
+                source: source.into(),
+                message: message.into(),
+            })
+            .await
     }
 
-    /// Forward a chunk of build log output to the server. Sync - returns
-    /// immediately after the message is enqueued in the writer's mpsc channel.
-    pub fn send_log_chunk(&self, task_index: u32, data: Vec<u8>) -> Result<()> {
-        self.writer.send(ClientMessage::LogChunk {
-            job_id: self.job_id.clone(),
-            task_index,
-            data,
-        })
+    /// Forward a chunk of build log output to the server.
+    pub async fn send_log_chunk(&self, task_index: u32, data: Vec<u8>) -> Result<()> {
+        self.writer
+            .send(ClientMessage::LogChunk {
+                job_id: self.job_id.clone(),
+                task_index,
+                data,
+            })
+            .await
     }
 
-    fn send_update(&self, update: JobUpdateKind) -> Result<()> {
+    async fn send_update(&self, update: JobUpdateKind) -> Result<()> {
         debug!(job_id = %self.job_id, ?update, "sending job update");
-        self.writer.send(ClientMessage::JobUpdate {
-            job_id: self.job_id.clone(),
-            update,
-        })
+        self.writer
+            .send(ClientMessage::JobUpdate {
+                job_id: self.job_id.clone(),
+                update,
+            })
+            .await
     }
 }
 
@@ -351,10 +372,12 @@ async fn known_derivations_with_timeout(
     let path_count = drv_paths.len();
     let (tx, rx) = oneshot::channel();
     waiters.lock().unwrap().insert(job_id.to_owned(), tx);
-    writer.send(ClientMessage::QueryKnownDerivations {
-        job_id: job_id.to_owned(),
-        drv_paths,
-    })?;
+    writer
+        .send(ClientMessage::QueryKnownDerivations {
+            job_id: job_id.to_owned(),
+            drv_paths,
+        })
+        .await?;
     match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
         Ok(Ok(known)) => Ok(known),
         Ok(Err(_)) => Err(anyhow::anyhow!(
@@ -386,11 +409,13 @@ async fn cache_query_with_timeout(
     // Re-using the same key drops any stale sender; the previous waiter then
     // sees `RecvError` and bails out instead of blocking forever.
     cache_waiters.lock().unwrap().insert(job_id.to_owned(), tx);
-    writer.send(ClientMessage::CacheQuery {
-        job_id: job_id.to_owned(),
-        paths,
-        mode,
-    })?;
+    writer
+        .send(ClientMessage::CacheQuery {
+            job_id: job_id.to_owned(),
+            paths,
+            mode,
+        })
+        .await?;
     match tokio::time::timeout(CACHE_QUERY_TIMEOUT, rx).await {
         // Server could determine cache state: authoritative cached/uncached list.
         Ok(Ok(Ok(cached))) => Ok(cached),
@@ -436,11 +461,12 @@ impl JobReporter for JobUpdater {
     }
 
     async fn report_fetching(&mut self) -> Result<()> {
-        self.send_update(JobUpdateKind::Fetching)
+        self.send_update(JobUpdateKind::Fetching).await
     }
 
     async fn report_fetch_result(&mut self, flake_source: Option<String>) -> Result<()> {
         self.send_update(JobUpdateKind::FetchResult { flake_source })
+            .await
     }
 
     async fn report_input_update(
@@ -452,14 +478,15 @@ impl JobReporter for JobUpdater {
             candidate_lock,
             bumped,
         })
+        .await
     }
 
     async fn report_evaluating_flake(&mut self) -> Result<()> {
-        self.send_update(JobUpdateKind::EvaluatingFlake)
+        self.send_update(JobUpdateKind::EvaluatingFlake).await
     }
 
     async fn report_evaluating_derivations(&mut self) -> Result<()> {
-        self.send_update(JobUpdateKind::EvaluatingDerivations)
+        self.send_update(JobUpdateKind::EvaluatingDerivations).await
     }
 
     async fn report_eval_result(
@@ -473,6 +500,7 @@ impl JobReporter for JobUpdater {
             warnings,
             errors,
         })
+        .await
     }
 
     async fn push_drv_closure(&mut self, drv_paths: &[String]) -> Result<()> {
@@ -484,7 +512,7 @@ impl JobReporter for JobUpdater {
     }
 
     async fn report_building(&mut self, build_id: String) -> Result<()> {
-        self.send_update(JobUpdateKind::Building { build_id })
+        self.send_update(JobUpdateKind::Building { build_id }).await
     }
 
     async fn report_build_output(
@@ -500,18 +528,21 @@ impl JobReporter for JobUpdater {
             metrics,
             substituted,
         })
+        .await
     }
 
     async fn report_compressing(&mut self) -> Result<()> {
-        self.send_update(JobUpdateKind::Compressing)
+        self.send_update(JobUpdateKind::Compressing).await
     }
 
     async fn send_log_chunk(&mut self, task_index: u32, data: Vec<u8>) -> Result<()> {
-        self.writer.send(ClientMessage::LogChunk {
-            job_id: self.job_id.clone(),
-            task_index,
-            data,
-        })
+        self.writer
+            .send(ClientMessage::LogChunk {
+                job_id: self.job_id.clone(),
+                task_index,
+                data,
+            })
+            .await
     }
 
     async fn send_eval_message(
@@ -520,12 +551,14 @@ impl JobReporter for JobUpdater {
         source: &str,
         message: &str,
     ) -> Result<()> {
-        self.writer.send(ClientMessage::EvalMessage {
-            job_id: self.job_id.clone(),
-            level,
-            source: source.to_owned(),
-            message: message.to_owned(),
-        })
+        self.writer
+            .send(ClientMessage::EvalMessage {
+                job_id: self.job_id.clone(),
+                level,
+                source: source.to_owned(),
+                message: message.to_owned(),
+            })
+            .await
     }
 }
 
@@ -594,6 +627,7 @@ mod tests {
                 job_id: updater.job_id.clone(),
                 update: JobUpdateKind::Fetching,
             })
+            .await
             .unwrap();
         server_task.await.unwrap();
     }
@@ -631,6 +665,7 @@ mod tests {
                     errors: vec![],
                 },
             })
+            .await
             .unwrap();
         server_task.await.unwrap();
     }
@@ -661,6 +696,7 @@ mod tests {
                 task_index: 3,
                 data: b"hello log".to_vec(),
             })
+            .await
             .unwrap();
         server_task.await.unwrap();
     }
@@ -682,6 +718,7 @@ mod tests {
             .send(ClientMessage::JobCompleted {
                 job_id: updater.job_id.clone(),
             })
+            .await
             .unwrap();
         server_task.await.unwrap();
     }
@@ -707,6 +744,7 @@ mod tests {
                 kind: gradient_proto::messages::BuildFailureKind::Permanent,
                 missing_paths: vec![],
             })
+            .await
             .unwrap();
         server_task.await.unwrap();
     }
