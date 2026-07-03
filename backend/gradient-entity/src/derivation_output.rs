@@ -4,6 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+//! Narinfo-metadata ownership: `cached_path` is authoritative for anything in
+//! OUR cache (every local serve path reads it, via the `cached_path` FK or by
+//! hash). The narinfo fields here (`nar_hash`/`file_hash`/`file_size`/
+//! `references`/`deriver`) are an UPSTREAM-resolution snapshot only, written
+//! with `external_url` when an output resolves on an org upstream before any
+//! `cached_path` row exists; `nar_size` is additionally written at build
+//! report. A demote clears the whole upstream snapshot together.
+
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};

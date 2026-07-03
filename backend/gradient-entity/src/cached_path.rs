@@ -15,7 +15,11 @@ use crate::ids::CachedPathId;
 /// Represents any store path whose NAR is stored in the cache - sources,
 /// build outputs, or anything else. The NAR data is stored once (keyed by
 /// `hash`). Association with specific caches and their signatures is via
-/// `cached_path_signature`.
+/// `cached_path_signature`. This row is the AUTHORITATIVE narinfo source for
+/// anything in our cache; `derivation_output`'s narinfo fields are only an
+/// upstream-resolution snapshot for paths not yet pulled. `closure_complete`
+/// is derived (references ground truth) and maintained by
+/// `reconcile_cached_path_closure_complete`.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cached_path")]
 pub struct Model {

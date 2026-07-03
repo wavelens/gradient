@@ -21,7 +21,6 @@ use sea_orm::{
     ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait,
 };
 use std::sync::Arc;
-use tracing::error;
 
 /// Extracts HTTP Basic Auth credentials and resolves them to a user.
 /// The password field is treated as a JWT or API key (the username is ignored).
@@ -437,16 +436,14 @@ pub(super) async fn delete_nar_from_cache(
         .await?;
     let ref_counted_others = remaining > 0;
 
+    // Last cache dropped the path: demote through the shared helper so the
+    // producer anchor, gate flags, and referrer closures reset symmetrically
+    // (a bare is_cached clear leaves a Completed producer with no backing NAR,
+    // the exact stale-flag dead zone the reconciler exists to prevent).
     if !ref_counted_others {
-        EDerivationOutput::update_many()
-            .col_expr(
-                CDerivationOutput::IsCached,
-                sea_orm::sea_query::Expr::value(false),
-            )
-            .filter(CDerivationOutput::Hash.eq(hash))
-            .exec(&tx)
-            .await?;
-        ECachedPath::delete_by_id(cached_path.id).exec(&tx).await?;
+        gradient_db::cache_storage::demote_cached_output(&tx, &state.nar_storage, hash).await?;
+        gradient_db::cache_storage::clear_gate_flags_for_hashes(&tx, &[hash.to_string()]).await?;
+        gradient_db::cache_storage::clear_closure_complete_for_referrers(&tx, hash).await?;
     }
 
     tx.commit().await?;
@@ -454,16 +451,6 @@ pub(super) async fn delete_nar_from_cache(
     let _ = state
         .board_events
         .send(gradient_types::BoardEvent::CacheChanged);
-
-    if !ref_counted_others {
-        let state_bg = Arc::clone(state);
-        let h = hash.to_string();
-        state.shutdown.spawn(async move {
-            if let Err(e) = state_bg.nar_storage.delete(&h).await {
-                error!(error = %e, hash = %h, "Failed to remove NAR from storage");
-            }
-        });
-    }
 
     Ok((cached_path, DeleteOutcome { ref_counted_others }))
 }
