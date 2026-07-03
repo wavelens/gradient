@@ -5,36 +5,34 @@
  */
 
 //! WebSocket connection management: client connections, handshake, and listener.
+//!
+//! Framing rides gradient-proto's shared [`ProtoSocket`]/peer-split types; the
+//! thin wrappers here only pin the peer role (send `ClientMessage`, receive
+//! `ServerMessage`) and remember the server's negotiated protocol version.
 
 pub mod handshake;
 pub mod listener;
 
 use anyhow::{Context, Result};
-use futures::SinkExt;
-use futures::StreamExt;
-use gradient_proto::messages::{ClientMessage, ServerMessage, decode_server_message};
-use rkyv::rancor::Error as RkyvError;
+use gradient_proto::messages::{ClientMessage, ServerMessage};
+use gradient_proto::session::frame::{ClientWriter, ProtoSocket, ServerReader, accept_tungstenite};
+use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungstenite::Message};
-use tracing::{instrument, trace, warn};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use tracing::instrument;
 
-/// Internal enum to abstract over client-initiated and server-accepted sockets.
-enum ProtoStream {
-    /// Outbound: worker connected to a server URL.
-    /// Boxed so the TLS state (≈1.4 KB) doesn't pad the `Accepted` variant.
-    Client(Box<WebSocketStream<MaybeTlsStream<TcpStream>>>),
-    /// Inbound: server connected to our listener. Boxed for symmetry so the
-    /// enum stays a single pointer regardless of which transport is in play.
-    Accepted(Box<WebSocketStream<TcpStream>>),
-}
+/// Producer-side ceiling for one queued send once the bounded writer queue is
+/// full. Exceeding it means the server's TCP receive side stalled; the send
+/// fails and the job-level error handling takes over instead of the queue
+/// buffering a whole NAR in RAM.
+const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A live WebSocket connection to the server.
 pub struct ProtoConnection {
     /// Protocol version the server reported in `InitAck`. Set to 0 before the
     /// handshake completes; updated via [`Self::set_server_version`] afterwards.
     pub(crate) server_version: u16,
-    socket: ProtoStream,
+    socket: ProtoSocket,
 }
 
 impl ProtoConnection {
@@ -43,20 +41,20 @@ impl ProtoConnection {
     /// [`crate::connection::handshake::perform_handshake`].
     #[instrument(skip_all, fields(%url))]
     pub async fn open(url: &str) -> Result<Self> {
-        let (socket, _) = connect_async(url)
+        let socket = gradient_proto::client::dial(url)
             .await
             .with_context(|| format!("failed to connect to {url}"))?;
         Ok(Self {
             server_version: 0,
-            socket: ProtoStream::Client(Box::new(socket)),
+            socket,
         })
     }
 
     /// Wrap an already-accepted WebSocket stream (server connected to us).
-    pub fn from_accepted(socket: WebSocketStream<TcpStream>) -> Self {
+    pub fn from_accepted(socket: WebSocketStream<MaybeTlsStream<TcpStream>>) -> Self {
         Self {
             server_version: 0,
-            socket: ProtoStream::Accepted(Box::new(socket)),
+            socket: accept_tungstenite(socket),
         }
     }
 
@@ -71,170 +69,53 @@ impl ProtoConnection {
         self.server_version
     }
 
+    /// Pre-split socket handle for the handshake driver.
+    pub(crate) fn socket_mut(&mut self) -> &mut ProtoSocket {
+        &mut self.socket
+    }
+
     /// Send a typed [`ClientMessage`] to the server.
     pub async fn send(&mut self, msg: ClientMessage) -> Result<()> {
-        let bytes =
-            rkyv::to_bytes::<RkyvError>(&msg).context("failed to serialise ClientMessage")?;
-        let frame = Message::Binary(bytes.to_vec().into());
-        match &mut self.socket {
-            ProtoStream::Client(ws) => ws.send(frame).await.context("WebSocket send failed")?,
-            ProtoStream::Accepted(ws) => ws.send(frame).await.context("WebSocket send failed")?,
-        }
-        trace!(?msg, bytes = bytes.len(), "send ClientMessage");
-        Ok(())
+        self.socket
+            .send_client_msg(&msg)
+            .await
+            .map_err(|_| anyhow::anyhow!("WebSocket send failed"))
     }
 
-    /// Receive the next [`ServerMessage`] from the server.
-    /// Returns `None` on clean close; errors on protocol violations.
-    pub async fn recv(&mut self) -> Result<Option<ServerMessage>> {
-        loop {
-            let frame = match &mut self.socket {
-                ProtoStream::Client(ws) => ws.next().await,
-                ProtoStream::Accepted(ws) => ws.next().await,
-            };
-            match frame {
-                None => return Ok(None),
-                Some(Err(e)) => return Err(e.into()),
-                Some(Ok(Message::Binary(bytes))) => {
-                    let msg = decode_server_message(&bytes)
-                        .context("failed to deserialise ServerMessage")?;
-                    trace!(?msg, bytes = bytes.len(), "recv ServerMessage");
-                    return Ok(Some(msg));
-                }
-                Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
-                Some(Ok(Message::Close(_))) => return Ok(None),
-                Some(Ok(other)) => {
-                    warn!(?other, "unexpected WebSocket frame type; ignoring");
-                }
-            }
-        }
-    }
-
-    /// Split into a cloneable [`ProtoWriter`] and a [`ProtoReader`].
-    ///
-    /// Spawns a background task that drains the writer channel and forwards
-    /// messages to the underlying WebSocket sink.  The `ProtoConnection` is
-    /// consumed - only the reader half is returned (for `recv` calls).
+    /// Split into a cloneable [`ProtoWriter`] and a [`ProtoReader`], backed by
+    /// the shared frame layer's bounded, batch-draining writer task.
     pub fn split(self) -> (ProtoWriter, ProtoReader) {
-        type BoxSink = std::pin::Pin<
-            Box<dyn futures::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Send>,
-        >;
-        type BoxStream = std::pin::Pin<
-            Box<
-                dyn futures::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
-                    + Send,
-            >,
-        >;
-
-        let (sink, stream): (BoxSink, BoxStream) = match self.socket {
-            ProtoStream::Client(ws) => {
-                let (s, r) = (*ws).split();
-                (Box::pin(s), Box::pin(r))
-            }
-            ProtoStream::Accepted(ws) => {
-                let (s, r) = (*ws).split();
-                (Box::pin(s), Box::pin(r))
-            }
-        };
-
-        let (tx, mut rx) = mpsc::unbounded_channel::<ClientMessage>();
-
-        tokio::spawn(async move {
-            let mut sink = sink;
-            // Drain the channel in batches so consecutive messages (e.g.
-            // 64+ KiB NarPush chunks) coalesce into one TCP write+flush
-            // instead of one syscall per chunk.
-            const WRITE_BATCH: usize = 32;
-            let mut batch: Vec<ClientMessage> = Vec::with_capacity(WRITE_BATCH);
-            'drain: loop {
-                batch.clear();
-                let n = rx.recv_many(&mut batch, WRITE_BATCH).await;
-                if n == 0 {
-                    break;
-                }
-                for msg in batch.drain(..) {
-                    let bytes = match rkyv::to_bytes::<RkyvError>(&msg) {
-                        Ok(b) => b,
-                        Err(e) => {
-                            tracing::warn!(error = %e, "serialisation error");
-                            continue;
-                        }
-                    };
-                    let len = bytes.len();
-                    if let Err(e) =
-                        SinkExt::feed(&mut sink, Message::Binary(bytes.to_vec().into())).await
-                    {
-                        tracing::warn!(error = %e, "WebSocket write error");
-                        break 'drain;
-                    }
-                    tracing::trace!(?msg, bytes = len, "send ClientMessage (split)");
-                }
-                if let Err(e) = SinkExt::flush(&mut sink).await {
-                    tracing::warn!(error = %e, "WebSocket flush error");
-                    break;
-                }
-            }
-        });
-
-        (
-            ProtoWriter { tx },
-            ProtoReader {
-                stream: Box::pin(stream),
-            },
-        )
+        let (reader, writer) = self.socket.split_peer(SEND_TIMEOUT);
+        (ProtoWriter { inner: writer }, ProtoReader { inner: reader })
     }
 }
 
-/// Cloneable write handle backed by an unbounded mpsc channel.
-/// The drain task is spawned by [`ProtoConnection::split`].
+/// Cloneable write handle over the shared bounded writer queue.
 #[derive(Clone)]
 pub struct ProtoWriter {
-    tx: mpsc::UnboundedSender<ClientMessage>,
+    inner: ClientWriter,
 }
 
 impl ProtoWriter {
-    /// Enqueue a message for sending. Returns Err only if the writer
-    /// task has exited (connection closed).
-    pub fn send(&self, msg: ClientMessage) -> anyhow::Result<()> {
-        self.tx
-            .send(msg)
-            .map_err(|_| anyhow::anyhow!("writer channel closed"))
+    /// Enqueue a message for sending. Fails when the writer task has exited
+    /// (connection closed) or the queue stayed full past [`SEND_TIMEOUT`]
+    /// (server TCP stalled).
+    pub async fn send(&self, msg: ClientMessage) -> Result<()> {
+        self.inner
+            .send_msg(&msg)
+            .await
+            .map_err(|_| anyhow::anyhow!("writer channel closed or send timed out"))
     }
 }
 
 /// Read-only half produced by [`ProtoConnection::split`].
 pub struct ProtoReader {
-    stream: std::pin::Pin<
-        Box<
-            dyn futures::Stream<
-                    Item = Result<
-                        tokio_tungstenite::tungstenite::Message,
-                        tokio_tungstenite::tungstenite::Error,
-                    >,
-                > + Send,
-        >,
-    >,
+    inner: ServerReader,
 }
 
 impl ProtoReader {
-    pub async fn recv(&mut self) -> anyhow::Result<Option<ServerMessage>> {
-        loop {
-            match self.stream.next().await {
-                None => return Ok(None),
-                Some(Err(e)) => return Err(e.into()),
-                Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(bytes))) => {
-                    let msg = decode_server_message(&bytes)
-                        .context("failed to deserialise ServerMessage")?;
-                    tracing::trace!(?msg, bytes = bytes.len(), "recv ServerMessage (reader)");
-                    return Ok(Some(msg));
-                }
-                Some(Ok(tokio_tungstenite::tungstenite::Message::Ping(_)))
-                | Some(Ok(tokio_tungstenite::tungstenite::Message::Pong(_))) => continue,
-                Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))) => return Ok(None),
-                Some(Ok(other)) => {
-                    warn!(?other, "unexpected WebSocket frame type; ignoring");
-                }
-            }
-        }
+    /// Next inbound [`ServerMessage`]; `None` on close or malformed frame.
+    pub async fn recv(&mut self) -> Option<ServerMessage> {
+        self.inner.recv_msg().await
     }
 }

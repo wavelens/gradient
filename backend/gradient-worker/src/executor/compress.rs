@@ -41,7 +41,7 @@ pub async fn compress_and_push_paths(
         return Ok(());
     }
 
-    updater.report_compressing()?;
+    updater.report_compressing().await?;
 
     // Push each output's full runtime closure, not just the output itself: the
     // gradient cache must be closure-complete so a downstream build can fetch

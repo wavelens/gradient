@@ -134,8 +134,7 @@ impl WorkerEvaluator {
         // `max_eval_rss` only recycles between calls; the reaper is the peak
         // guard that kills a runaway eval before the host OOMs (issue: OOM
         // kills not registered by the server).
-        let min_free_bytes =
-            crate::worker_pool::memory_guard_bytes(min_free_ram_mb, total_ram);
+        let min_free_bytes = crate::worker_pool::memory_guard_bytes(min_free_ram_mb, total_ram);
         let resolver = Arc::new(WorkerPoolResolver::new(
             pool_size,
             max_eval_rss,
@@ -172,7 +171,7 @@ pub async fn evaluate_flake(_job: &FlakeJob, updater: &mut JobUpdater) -> Result
     // Rebind as &JobUpdater so the inherent &self method wins over the &mut self
     // trait method that async_trait generates.
     let updater: &JobUpdater = updater;
-    updater.report_evaluating_flake()
+    updater.report_evaluating_flake().await
 }
 
 /// For a `Cached` source, the store path that must be present locally before
@@ -260,7 +259,7 @@ pub async fn evaluate_derivations(
     if totals.total_thunks > 0 || !totals.per_entry_point.is_empty() {
         let report =
             build_eval_stats_report(totals, flake_nodes, start.elapsed().as_millis() as u64);
-        if let Err(e) = updater.report_eval_stats(report) {
+        if let Err(e) = updater.report_eval_stats(report).await {
             warn!(error = %e, "failed to send eval stats report");
         }
     }
@@ -892,8 +891,14 @@ mod tests {
         ]);
 
         assert!(set.contains("packages.x86_64-linux.hello"));
-        assert!(set.contains("checks.py.3.unit"), "quoted dots collapse to the discovered path form");
-        assert!(!set.contains("packages.x86_64-linux.broken"), "exclusions are not explicit requests");
+        assert!(
+            set.contains("checks.py.3.unit"),
+            "quoted dots collapse to the discovered path form"
+        );
+        assert!(
+            !set.contains("packages.x86_64-linux.broken"),
+            "exclusions are not explicit requests"
+        );
         assert_eq!(set.len(), 2, "wildcard patterns contribute nothing");
     }
 

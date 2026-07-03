@@ -91,7 +91,9 @@ impl Worker<Connected> {
 
     /// Accept an incoming server-initiated WebSocket connection.
     pub async fn from_accepted(
-        ws: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
+        ws: tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
         config: WorkerConfig,
     ) -> Result<Self> {
         let mut conn = ProtoConnection::from_accepted(ws);
