@@ -29,8 +29,14 @@ use tracing::{error, info};
 /// What slice of the graph to heal.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ReconcileScope {
-    /// The periodic backstop (dispatch tick): global flag fixpoints, the
-    /// unbacked-output demote, the dependency-failed sweep, and promotion.
+    /// Every dispatch tick: the anchor-side flag fixpoints (they gate dispatch,
+    /// so mid-eval progression rides their cadence) and promotion. Skips the
+    /// `cached_path`-side fixpoint, the unbacked-output demote, and the
+    /// dependency-failed sweep - those are backstops whose full-table scans
+    /// saturated Postgres when re-run every 5s on a large graph.
+    Tick,
+    /// The periodic backstop (every Nth dispatch tick): global flag fixpoints,
+    /// the unbacked-output demote, the dependency-failed sweep, and promotion.
     Global,
     /// An evaluation just flushed its graph: mark its edges complete, heal
     /// cache-trust across its closure, then the fixpoints and promotion.
@@ -43,7 +49,7 @@ pub enum ReconcileScope {
 impl ReconcileScope {
     fn evaluation(&self) -> Option<EvaluationId> {
         match self {
-            ReconcileScope::Global => None,
+            ReconcileScope::Tick | ReconcileScope::Global => None,
             ReconcileScope::Eval(id) | ReconcileScope::Unstick(id) => Some(*id),
         }
     }
@@ -122,7 +128,9 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         }
     }
 
-    if let Err(e) = crate::cache_storage::reconcile_cached_path_closure_complete(db).await {
+    if !matches!(scope, ReconcileScope::Tick)
+        && let Err(e) = crate::cache_storage::reconcile_cached_path_closure_complete(db).await
+    {
         error!(error = %e, "reconcile: reconcile_cached_path_closure_complete failed");
     }
     if let Err(e) = crate::promotion::reconcile_drv_closure_cached(db).await {

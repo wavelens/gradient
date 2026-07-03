@@ -5665,6 +5665,15 @@ the 151 pre-globalization migrations were squashed into one guarded baseline.
   an already-provisioned database upgrades with a pruned `seaql_migrations`
   table and an untouched schema.
 
+## Reconcile and sweep load is bounded (Postgres saturation)
+
+Two always-on scans saturated Postgres on a large graph (observed live at 100% CPU: the `cache_derivation` INSERT SELECT at 1-3 minutes per pass and the `cached_path` closure fixpoint at 11-40s per pass, re-launched every 5s so the DB never idled, starving the pool for everything else):
+
+- The dispatch tick now alternates scopes: `ReconcileScope::Tick` every 5s runs only the anchor-side fixpoints (`drv_closure_cached` / `closure_complete` - they gate dispatch, so mid-eval progression rides their cadence) plus promotion; the full backstop (`Global`: `cached_path`-side fixpoint, unbacked-output demote, dependency-failed sweep) runs every `GLOBAL_RECONCILE_TICKS` = 6th tick (30s). GC still invalidates `cached_path` flags transactionally at deletion (`clear_gate_flags_for_hashes`), so the slower fixpoint cadence only delays the ripple, not the invalidation.
+- `record_newly_completed_derivations` (sign sweep) re-scanned every derivation every subscribed org ever built, per sweep. It is now seeded: the sweep collects the hashes it just signed, resolves them to derivations, and walks dependents layer-by-layer to a fixpoint (`d.id = ANY($frontier)` + `RETURNING derivation`); the unseeded full scan survives as an hourly backfill (`FULL_BACKFILL_SECS`) for fresh cache subscriptions and rows a crashed sweep missed.
+
+Both are load-shape changes with unchanged semantics; covered by E2E CI (no MockDatabase harness for recursive SQL or timing).
+
 ## Action execution is bounded and convoy-free
 
 A mass status-transition wave (promotion, thaw, requeue after a worker reconnect) fires one `build.*`/`evaluation.*` event per anchor, and `dispatch_event` spawned an unbounded task per matching action. Hundreds of concurrent `execute_action`s each held a DB pool connection for their report loads and forge HTTP, then all converged on `UPDATE project_action SET last_fired_at` for the same row - a single-row lock convoy (observed live: 14 backends stacked on that UPDATE at 15-17s each, pool exhausted, CacheQuery replies missing the worker's 75s deadline, workers false-declared dead past the heartbeat). Two changes: `ACTION_PERMITS` (process-wide semaphore, 8) bounds concurrent action executions, and the `last_fired_at` stamp is now `FOR UPDATE SKIP LOCKED` - it is bookkeeping, and a concurrent writer is stamping an equivalent timestamp, so skipping beats queueing a pool connection behind the row lock. The delivery audit row is unaffected (fresh row per firing, no contention). Not unit-testable against MockDatabase (raw locking semantics); covered by E2E CI.

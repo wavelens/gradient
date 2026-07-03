@@ -27,9 +27,13 @@ use gradient_types::proto::{
 
 use super::DISPATCH_TICK_SECS;
 
+/// Full-backstop (Global) reconcile cadence, in dispatch ticks: 6 x 5s = 30s.
+const GLOBAL_RECONCILE_TICKS: u64 = 6;
+
 pub(super) async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
     let mut interval = tokio::time::interval(Duration::from_secs(DISPATCH_TICK_SECS));
     let cancel = scheduler.state.shutdown.token();
+    let mut tick_count: u64 = 0;
     info!("build dispatch loop started");
     loop {
         let timer_tick = tokio::select! {
@@ -46,14 +50,18 @@ pub(super) async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
         if timer_tick {
             scheduler.job_tracker.write().await.bump_rescore_counts();
 
-            // The periodic self-heal backstop: flag fixpoints, unbacked-output
-            // demote, failure sweep, promotion - one canonical pipeline (see
-            // `gradient_db::reconcile`), bounded to the 5s timer (not kicks).
-            gradient_db::reconcile_build_graph(
-                &scheduler.state.db(),
-                gradient_db::ReconcileScope::Global,
-            )
-            .await;
+            // Every timer tick runs the dispatch-gating anchor fixpoints and
+            // promotion (Tick); the full backstop with the cached_path-side
+            // fixpoint, unbacked-output demote, and failure sweep (Global) runs
+            // every GLOBAL_RECONCILE_TICKS - its full-table scans saturated
+            // Postgres when re-run every 5s on a large graph.
+            tick_count = tick_count.wrapping_add(1);
+            let scope = if tick_count.is_multiple_of(GLOBAL_RECONCILE_TICKS) {
+                gradient_db::ReconcileScope::Global
+            } else {
+                gradient_db::ReconcileScope::Tick
+            };
+            gradient_db::reconcile_build_graph(&scheduler.state.db(), scope).await;
         }
 
         if let Err(e) = requeue_transient_failures(&scheduler).await {

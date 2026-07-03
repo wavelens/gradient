@@ -112,6 +112,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
     }
 
     let mut touched_caches: HashSet<CacheId> = HashSet::new();
+    let mut signed_hashes: Vec<String> = Vec::new();
     let mut signed = 0usize;
 
     for row in pending {
@@ -158,6 +159,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
         debug!(cache_name = %cache.name, store_path = %store_path, "sign sweep: signed");
         touched_caches.insert(cache.id);
+        signed_hashes.push(cp.hash.clone());
         signed += 1;
     }
 
@@ -165,11 +167,26 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         tracing::info!(count = signed, "sign sweep: signatures filled");
     }
 
-    // Update cache_derivation for every (cache, derivation) pair whose
-    // closure is now fully cached. Broad but cheap: only caches touched
-    // this pass can have changed state.
+    // Update cache_derivation where this pass's newly signed paths complete a
+    // derivation closure. Seeded by the signed outputs and walked up through
+    // dependents; the unseeded full scan of every org derivation runs hourly
+    // as the backfill (fresh subscriptions, rows a crashed sweep missed).
+    let seed: Vec<uuid::Uuid> = if signed_hashes.is_empty() {
+        vec![]
+    } else {
+        EDerivationOutput::find()
+            .filter(CDerivationOutput::Hash.is_in(signed_hashes))
+            .all(&state.worker_db)
+            .await?
+            .into_iter()
+            .map(|o| o.derivation.into_inner())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect()
+    };
+    let full = full_backfill_due();
     for cache_id in touched_caches {
-        if let Err(e) = record_newly_completed_derivations(&state, cache_id).await {
+        if let Err(e) = record_newly_completed_derivations(&state, cache_id, &seed, full).await {
             warn!(cache = %cache_id, error = %e, "sign sweep: cache_derivation update failed");
         }
     }
@@ -177,56 +194,119 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
     Ok(())
 }
 
+/// The full backfill scans every derivation of every subscribed org (minutes
+/// on a large DB), so it runs at most once per hour; the per-sweep frontier
+/// walk covers everything the sweep itself changed.
+const FULL_BACKFILL_SECS: u64 = 3600;
+
+fn full_backfill_due() -> bool {
+    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap();
+    match *last {
+        Some(t) if t.elapsed().as_secs() < FULL_BACKFILL_SECS => false,
+        _ => {
+            *last = Some(std::time::Instant::now());
+            true
+        }
+    }
+}
+
 /// For every derivation built by an organization subscribed to `cache_id`
 /// whose outputs are all cached and whose dependency closure is already
-/// recorded, insert a `cache_derivation` row. One set-based statement instead
-/// of a per-derivation query cascade (org scoping mirrors
+/// recorded, insert a `cache_derivation` row (org scoping mirrors
 /// `gradient_db::derivation_ids_for_org`: project -> evaluation -> build_job).
-/// Idempotent.
+/// Idempotent. `full = false` restricts the walk to `seed` and its dependents,
+/// layer by layer to a fixpoint; `full = true` is the unseeded hourly backfill.
 async fn record_newly_completed_derivations(
     state: &ServerState,
     cache_id: CacheId,
+    seed: &[uuid::Uuid],
+    full: bool,
 ) -> anyhow::Result<()> {
     use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
-    let inserted = state
-        .worker_db
-        .execute(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"
-            INSERT INTO cache_derivation (id, cache, derivation, cached_at)
-            SELECT uuidv7(), $1, d.id, $2
-            FROM derivation d
-            WHERE d.id IN (
-                SELECT bj.derivation
-                FROM build_job bj
-                JOIN evaluation ev ON ev.id = bj.evaluation
-                JOIN project p ON p.id = ev.project
-                JOIN organization_cache oc ON oc.organization = p.organization
-                WHERE oc.cache = $1)
+    const INSERT_LAYER: &str = r#"
+        INSERT INTO cache_derivation (id, cache, derivation, cached_at)
+        SELECT uuidv7(), $1, d.id, $2
+        FROM derivation d
+        WHERE {candidates}
+          AND d.id IN (
+            SELECT bj.derivation
+            FROM build_job bj
+            JOIN evaluation ev ON ev.id = bj.evaluation
+            JOIN project p ON p.id = ev.project
+            JOIN organization_cache oc ON oc.organization = p.organization
+            WHERE oc.cache = $1)
+          AND NOT EXISTS (
+            SELECT 1 FROM derivation_output o
+            WHERE o.derivation = d.id AND o.is_cached = false)
+          AND NOT EXISTS (
+            SELECT 1 FROM derivation_dependency e
+            WHERE e.derivation = d.id
               AND NOT EXISTS (
-                SELECT 1 FROM derivation_output o
-                WHERE o.derivation = d.id AND o.is_cached = false)
-              AND NOT EXISTS (
-                SELECT 1 FROM derivation_dependency e
-                WHERE e.derivation = d.id
-                  AND NOT EXISTS (
-                    SELECT 1 FROM cache_derivation cd
-                    WHERE cd.cache = $1 AND cd.derivation = e.dependency))
-              AND NOT EXISTS (
-                SELECT 1 FROM cache_derivation cd2
-                WHERE cd2.cache = $1 AND cd2.derivation = d.id)
-            "#,
-            [
-                cache_id.into_inner().into(),
-                gradient_types::now().into(),
-            ],
-        ))
-        .await?
-        .rows_affected();
+                SELECT 1 FROM cache_derivation cd
+                WHERE cd.cache = $1 AND cd.derivation = e.dependency))
+          AND NOT EXISTS (
+            SELECT 1 FROM cache_derivation cd2
+            WHERE cd2.cache = $1 AND cd2.derivation = d.id)
+        RETURNING derivation
+    "#;
 
-    if inserted > 0 {
-        debug!(cache = %cache_id, inserted, "recorded newly closure-complete derivations");
+    if full {
+        let inserted = state
+            .worker_db
+            .execute(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                INSERT_LAYER.replace("{candidates}", "TRUE"),
+                [cache_id.into_inner().into(), gradient_types::now().into()],
+            ))
+            .await?
+            .rows_affected();
+        if inserted > 0 {
+            debug!(cache = %cache_id, inserted, "backfilled closure-complete derivations");
+        }
+        return Ok(());
+    }
+
+    let sql = INSERT_LAYER.replace("{candidates}", "d.id = ANY($3)");
+    let mut frontier: Vec<uuid::Uuid> = seed.to_vec();
+    let mut inserted_total = 0usize;
+    while !frontier.is_empty() {
+        let rows = state
+            .worker_db
+            .query_all(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                &sql,
+                [
+                    cache_id.into_inner().into(),
+                    gradient_types::now().into(),
+                    frontier.into(),
+                ],
+            ))
+            .await?;
+        if rows.is_empty() {
+            break;
+        }
+        let inserted: Vec<uuid::Uuid> = rows
+            .iter()
+            .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+            .collect();
+        inserted_total += inserted.len();
+        frontier = state
+            .worker_db
+            .query_all(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = ANY($1)",
+                [inserted.into()],
+            ))
+            .await?
+            .iter()
+            .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
+            .collect();
+    }
+
+    if inserted_total > 0 {
+        debug!(cache = %cache_id, inserted = inserted_total, "recorded newly closure-complete derivations");
     }
     Ok(())
 }
