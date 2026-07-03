@@ -168,14 +168,23 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     Ok(affected)
 }
 
-/// Closure-complete gate for a built anchor `db`: outputs cached, edges flushed,
-/// and every build dependency itself `closure_complete` **or** `substitutable`.
-/// Shared verbatim by the targeted up-ripple (`propagate_closure_complete`) and
-/// the global self-heal fixpoint (`reconcile_closure_complete`).
+/// Closure-complete gate for a terminal-success anchor `db`, shared verbatim by
+/// the targeted up-ripple (`propagate_closure_complete`) and the global
+/// self-heal fixpoint (`reconcile_closure_complete`). Completed arm: outputs
+/// cached, edges flushed, and every build dependency itself `closure_complete`
+/// **or** `substitutable`. Substituted arm: we never held the build closure, so
+/// key on the runtime-closure ground truth instead - every output's
+/// `cached_path` is fully cached AND `closure_complete`, the same check
+/// `compute_truly_substituted` makes before inserting such anchors with the
+/// flag already set. Without this arm the CLEAR pass strips the flag from every
+/// truly-substituted anchor (whose `substitutable` is false - a cache hit, not
+/// an upstream offer) and the readiness predicate can never pass either way:
+/// dependents stall Queued forever. Self-parenthesized: callers embed it as
+/// `AND {gate}`.
 pub(crate) fn closure_complete_gate() -> String {
     format!(
         r#"
-    db.status = {completed}
+    ((db.status = {completed}
     AND db.edges_complete
     AND NOT EXISTS (
         SELECT 1 FROM derivation_output o
@@ -185,9 +194,16 @@ pub(crate) fn closure_complete_gate() -> String {
         SELECT 1 FROM derivation_dependency e
         LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
         WHERE e.derivation = db.derivation
-          AND (dep.derivation IS NULL OR NOT (dep.closure_complete OR dep.substitutable)))
+          AND (dep.derivation IS NULL OR NOT (dep.closure_complete OR dep.substitutable))))
+    OR (db.status = {substituted}
+    AND NOT EXISTS (
+        SELECT 1 FROM derivation_output o
+        LEFT JOIN cached_path cp ON cp.hash = o.hash
+        WHERE o.derivation = db.derivation
+          AND (cp.file_hash IS NULL OR NOT cp.closure_complete))))
 "#,
         completed = status_sql::build(BuildStatus::Completed),
+        substituted = status_sql::build(BuildStatus::Substituted),
     )
 }
 
@@ -195,9 +211,9 @@ pub(crate) fn closure_complete_gate() -> String {
 /// finished `completed` derivation. A built (`Completed`) anchor becomes
 /// `closure_complete` once its outputs are cached, its edges are flushed, and
 /// every build dependency is itself `closure_complete` **or** `substitutable`
-/// (its closure is fetchable from upstream on demand). Substituted anchors are
-/// not marked here - we hold only their output NAR, not their build closure, so
-/// dependents reach them via the `substitutable` arm of the gate instead.
+/// (its closure is fetchable from upstream on demand). A Substituted anchor is
+/// marked through the gate's substituted arm - its outputs' `cached_path` rows
+/// carry the runtime-closure ground truth its missing build closure cannot.
 ///
 /// Marking ripples to dependents: completing one anchor can complete those that
 /// were waiting only on it. This is the missing up-propagation - a dependent that
@@ -207,9 +223,7 @@ pub async fn propagate_closure_complete<C: ConnectionTrait>(
     completed: DerivationId,
 ) -> Result<(), DbErr> {
     // Round-1 candidates: `completed` itself (it may now be closure_complete)
-    // plus its direct dependents - a *substituted* `completed` is never marked
-    // here, but it satisfies its dependents through the `substitutable` arm, so
-    // they must still be re-checked even though `completed` never enters `newly`.
+    // plus its direct dependents, which may have been waiting only on it.
     let mut frontier = returned_derivations(
         db.query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
@@ -789,6 +803,39 @@ mod tests {
         assert!(
             promote.contains("db.substitutable OR (NOT EXISTS"),
             "promotion must not gate on drv_closure_cached (the eval pushes .drvs progressively): {promote}"
+        );
+    }
+
+    /// Truly-substituted anchors are inserted `Substituted + closure_complete`
+    /// with `substitutable = false` (a cache hit, not an upstream offer). The
+    /// gate must accept that state via a substituted arm keyed on the same
+    /// `cached_path` ground truth the eval checked, or the reconcile CLEAR pass
+    /// strips the flag and the readiness predicate (terminal-success AND
+    /// closure_complete, OR substitutable) can never pass - dependents stall
+    /// Queued forever while the eval sits Building.
+    #[test]
+    fn closure_complete_gate_accepts_substituted_anchors_on_cached_ground_truth() {
+        let gate = closure_complete_gate()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let completed = status_sql::build(BuildStatus::Completed);
+        let substituted = status_sql::build(BuildStatus::Substituted);
+        assert!(
+            gate.starts_with("((") && gate.ends_with("))"),
+            "gate must be self-parenthesized (callers embed it as AND {{gate}}): {gate}"
+        );
+        assert!(
+            gate.contains(&format!("((db.status = {completed} AND db.edges_complete")),
+            "completed arm keeps edges + dependency recursion: {gate}"
+        );
+        assert!(
+            gate.contains(&format!("OR (db.status = {substituted}")),
+            "gate must have a substituted arm: {gate}"
+        );
+        assert!(
+            gate.contains("(cp.file_hash IS NULL OR NOT cp.closure_complete)"),
+            "substituted arm keys on fully-cached + closure-complete cached_path rows: {gate}"
         );
     }
 
