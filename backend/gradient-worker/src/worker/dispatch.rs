@@ -7,9 +7,8 @@
 //! Worker dispatch loop: drives `tokio::select!` over the server connection,
 //! job completion, and heartbeats.
 //!
-//! [`run_dispatch_loop`] is the main entry point.  Each inbound
-//! [`ServerMessage`] is routed to a method on [`MessageHandler`], which holds
-//! all per-connection context.
+//! [`run_dispatch_loop`] is the main entry point. It owns one [`DispatchState`]
+//! per connection; every inbound [`ServerMessage`] is routed to a method on it.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -23,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
-use crate::connection::{ProtoConnection, ProtoWriter};
+use crate::connection::{ProtoReader, ProtoWriter};
 use crate::executor::JobExecutor;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::{CacheWaiters, JobUpdater, KnownDerivationWaiters};
@@ -35,42 +34,18 @@ use super::scoring::{send_score_chunks, spawn_scoring_task};
 
 /// Returns the draining flag: `true` if the server sent `Draining` before
 /// closing the connection.
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn run_dispatch_loop(
-    conn: ProtoConnection,
-    config: &WorkerConfig,
-    executor: &JobExecutor,
-    scorer: JobScorer,
-    credentials: &mut CredentialStore,
-    candidates: &Arc<Mutex<HashMap<String, JobCandidate>>>,
-    last_scores: &Arc<Mutex<HashMap<String, gradient_proto::messages::CandidateScore>>>,
+    mut state: DispatchState,
+    mut reader: ProtoReader,
     shutdown: CancellationToken,
 ) -> Result<bool> {
-    let (writer, mut reader) = conn.split();
-
-    let cache_waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
-    let known_derivation_waiters: KnownDerivationWaiters = Arc::new(Mutex::new(HashMap::new()));
-    let mut draining = false;
-    let nar_recv = match gradient_storage::PartialStore::new(
-        config.nar_partial_dir(),
-        std::time::Duration::from_secs(config.nar_partial_ttl_secs),
-    ) {
-        Ok(store) => crate::proto::nar_recv::NarReceiver::with_partial_store(store),
-        Err(e) => {
-            warn!(error = %e, "failed to init NAR partial dir; downloads will not resume");
-            crate::proto::nar_recv::NarReceiver::new()
-        }
-    };
-    let eval_cache_recv = crate::proto::eval_cache_recv::EvalCacheReceiver::new();
-    let mut abort_senders: HashMap<String, watch::Sender<bool>> = HashMap::new();
-    let mut job_kinds: HashMap<String, JobKind> = HashMap::new();
-    let (done_tx, mut done_rx) = mpsc::unbounded_channel::<(String, Result<()>)>();
+    let mut done_rx = state
+        .done_rx
+        .take()
+        .expect("dispatch loop runs once per connection");
 
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
     heartbeat.tick().await;
-
-    let max_eval = config.max_concurrent_evaluations;
-    let max_build = config.max_concurrent_builds;
 
     info!("entering dispatch loop");
 
@@ -84,49 +59,21 @@ pub(super) async fn run_dispatch_loop(
             }
 
             Some((job_id, result)) = done_rx.recv() => {
-                on_job_done(
-                    job_id, result,
-                    &writer, &cache_waiters, &known_derivation_waiters, &nar_recv, &eval_cache_recv,
-                    credentials, &mut job_kinds, &mut abort_senders,
-                    &draining, max_eval, max_build,
-                ).await?;
+                state.on_job_done(job_id, result).await?;
             }
 
             _ = heartbeat.tick() => {
-                on_heartbeat(&writer, &job_kinds, &draining, max_eval, max_build).await;
+                state.on_heartbeat().await;
             }
 
-            msg_result = reader.recv() => {
-                let msg = match msg_result {
-                    Some(m) => m,
-                    None => {
-                        info!("server closed connection");
-                        break;
-                    }
+            msg = reader.recv() => {
+                let Some(msg) = msg else {
+                    info!("server closed connection");
+                    break;
                 };
                 let started = std::time::Instant::now();
                 let kind = msg.variant_name();
-                let result = MessageHandler {
-                    writer: &writer,
-                    cache_waiters: &cache_waiters,
-                    known_derivation_waiters: &known_derivation_waiters,
-                    nar_recv: &nar_recv,
-                    eval_cache_recv: &eval_cache_recv,
-                    abort_senders: &mut abort_senders,
-                    job_kinds: &mut job_kinds,
-                    max_eval,
-                    max_build,
-                    done_tx: &done_tx,
-                    credentials,
-                    candidates,
-                    last_scores,
-                    scorer,
-                    executor,
-                    config,
-                    draining: &mut draining,
-                }
-                .dispatch(msg)
-                .await;
+                let result = state.dispatch(msg).await;
                 let elapsed_ms = started.elapsed().as_millis();
                 if elapsed_ms > 1_000 {
                     warn!(kind, elapsed_ms, "slow message dispatch - loop was blocked");
@@ -140,190 +87,108 @@ pub(super) async fn run_dispatch_loop(
     // and can never report its result over the dead writer. Abort them so they
     // stop instead of double-executing after we reconnect - the server
     // re-queues the orphaned jobs on its side.
-    for (_job_id, abort_tx) in abort_senders.drain() {
+    for (_job_id, abort_tx) in state.jobs.abort_senders.drain() {
         let _ = abort_tx.send(true);
     }
 
-    Ok(draining)
+    Ok(state.draining)
 }
 
-// ── Select arm helpers ────────────────────────────────────────────────────────
+// ── Per-job bookkeeping ───────────────────────────────────────────────────────
 
-/// Handle job completion from the `done_rx` channel.
-///
-/// Cleans up per-job state, reports the result to the server, and requests
-/// a new job if the worker still has capacity.
-#[allow(clippy::too_many_arguments)]
-async fn on_job_done(
-    job_id: String,
-    result: Result<()>,
-    writer: &ProtoWriter,
-    cache_waiters: &CacheWaiters,
-    known_derivation_waiters: &KnownDerivationWaiters,
-    nar_recv: &crate::proto::nar_recv::NarReceiver,
-    eval_cache_recv: &crate::proto::eval_cache_recv::EvalCacheReceiver,
-    credentials: &mut CredentialStore,
-    job_kinds: &mut HashMap<String, JobKind>,
-    abort_senders: &mut HashMap<String, watch::Sender<bool>>,
-    draining: &bool,
+/// Registry of in-flight jobs: abort channels, kinds for capacity accounting,
+/// and the completion channel every spawned job reports back on.
+struct JobRegistry {
+    abort_senders: HashMap<String, watch::Sender<bool>>,
+    job_kinds: HashMap<String, JobKind>,
+    done_tx: mpsc::UnboundedSender<(String, Result<()>)>,
+}
+
+impl JobRegistry {
+    fn active(&self, kind: JobKind) -> u32 {
+        self.job_kinds.values().filter(|k| **k == kind).count() as u32
+    }
+}
+
+// ── Per-connection state ──────────────────────────────────────────────────────
+
+/// Owned per-connection dispatch state. Everything the message handlers need
+/// lives here; the shared caches (`credentials`, `candidates`, `last_scores`)
+/// are cheap `Arc` handles onto state the [`super::Worker`] keeps across
+/// reconnects.
+pub(super) struct DispatchState {
+    writer: ProtoWriter,
+    cache_waiters: CacheWaiters,
+    known_derivation_waiters: KnownDerivationWaiters,
+    nar_recv: crate::proto::nar_recv::NarReceiver,
+    eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver,
+    jobs: JobRegistry,
+    done_rx: Option<mpsc::UnboundedReceiver<(String, Result<()>)>>,
     max_eval: u32,
     max_build: u32,
-) -> Result<()> {
-    abort_senders.remove(&job_id);
-    cache_waiters.lock().unwrap().remove(&job_id);
-    known_derivation_waiters.lock().unwrap().remove(&job_id);
-    nar_recv.forget_job(&job_id);
-    eval_cache_recv.forget_job(&job_id);
-    credentials.clear();
-
-    let completed_kind = job_kinds.remove(&job_id);
-
-    match result {
-        Ok(()) => {
-            info!(%job_id, "job completed");
-            writer.send(ClientMessage::JobCompleted { job_id }).await?;
-        }
-        Err(e) => {
-            let error_chain = format!("{e:#}");
-            let (kind, missing_paths) = e
-                .downcast_ref::<crate::executor::build::BuildError>()
-                .map(|be| (be.kind, be.missing_paths.clone()))
-                .unwrap_or((
-                    gradient_proto::messages::BuildFailureKind::Permanent,
-                    Vec::new(),
-                ));
-            error!(%job_id, error = %error_chain, ?kind, "job failed");
-            writer
-                .send(ClientMessage::JobFailed {
-                    job_id,
-                    error: error_chain,
-                    kind,
-                    missing_paths,
-                })
-                .await?;
-        }
-    }
-
-    if !draining {
-        let kind = completed_kind.unwrap_or(JobKind::Build);
-        let active = job_kinds.values().filter(|k| **k == kind).count() as u32;
-        let max = match &kind {
-            JobKind::Flake => max_eval,
-            JobKind::Build => max_build,
-        };
-        if active < max {
-            writer.send(ClientMessage::RequestJob { kind }).await?;
-        }
-    }
-
-    Ok(())
+    credentials: CredentialStore,
+    candidates: Arc<Mutex<HashMap<String, JobCandidate>>>,
+    last_scores: Arc<Mutex<HashMap<String, gradient_proto::messages::CandidateScore>>>,
+    scorer: JobScorer,
+    executor: JobExecutor,
+    config: WorkerConfig,
+    draining: bool,
 }
 
-/// Heartbeat tick: send live host metrics and request more jobs if the worker
-/// has capacity.
-async fn on_heartbeat(
-    writer: &ProtoWriter,
-    job_kinds: &HashMap<String, JobKind>,
-    draining: &bool,
-    max_eval: u32,
-    max_build: u32,
-) {
-    send_live_metrics(writer);
-    if *draining {
-        return;
-    }
-    let active_eval = job_kinds.values().filter(|k| **k == JobKind::Flake).count() as u32;
-    let active_build = job_kinds.values().filter(|k| **k == JobKind::Build).count() as u32;
-    let want_eval = active_eval < max_eval;
-    let want_build = active_build < max_build;
-    debug!(
-        active_eval,
-        max_eval,
-        active_build,
-        max_build,
-        request_eval = want_eval,
-        request_build = want_build,
-        "heartbeat tick"
-    );
-    if want_eval
-        && let Err(e) = writer
-            .send(ClientMessage::RequestJob {
-                kind: JobKind::Flake,
-            })
-            .await
-    {
-        warn!(error = %e, "heartbeat RequestJob Flake send failed");
-    }
-    if want_build
-        && let Err(e) = writer
-            .send(ClientMessage::RequestJob {
-                kind: JobKind::Build,
-            })
-            .await
-    {
-        warn!(error = %e, "heartbeat RequestJob Build send failed");
-    }
-}
-
-/// Sample live host load off the dispatch thread (the CPU sample blocks for
-/// [`sysinfo::MINIMUM_CPU_UPDATE_INTERVAL`]) and send it to the scheduler.
-/// `disk_speed_mbps` / `network_speed_mbps` come from passive EWMA
-/// accumulators and stay `None` until the first build / NAR transfer. Detached
-/// (not awaited by the heartbeat tick): the blocking sample runs on
-/// `spawn_blocking`, then the async send runs on the runtime once it finishes.
-fn send_live_metrics(writer: &ProtoWriter) {
-    let writer = writer.clone();
-    tokio::spawn(async move {
-        let m = match tokio::task::spawn_blocking(crate::metrics::host_dynamic).await {
-            Ok(m) => m,
+impl DispatchState {
+    pub(super) fn new(
+        writer: ProtoWriter,
+        config: WorkerConfig,
+        executor: JobExecutor,
+        scorer: JobScorer,
+        credentials: CredentialStore,
+        candidates: Arc<Mutex<HashMap<String, JobCandidate>>>,
+        last_scores: Arc<Mutex<HashMap<String, gradient_proto::messages::CandidateScore>>>,
+    ) -> Self {
+        let nar_recv = match gradient_storage::PartialStore::new(
+            config.nar_partial_dir(),
+            std::time::Duration::from_secs(config.nar_partial_ttl_secs),
+        ) {
+            Ok(store) => crate::proto::nar_recv::NarReceiver::with_partial_store(store),
             Err(e) => {
-                debug!(error = %e, "host_dynamic sampling task failed");
-                return;
+                warn!(error = %e, "failed to init NAR partial dir; downloads will not resume");
+                crate::proto::nar_recv::NarReceiver::new()
             }
         };
-        if let Err(e) = writer
-            .send(ClientMessage::WorkerMetrics {
-                cpu_usage_pct: m.cpu_usage_pct,
-                ram_free_mb: m.ram_free_mb,
-                disk_speed_mbps: crate::metrics::throughput::DISK.current(),
-                network_speed_mbps: crate::metrics::throughput::NETWORK.current(),
-            })
-            .await
-        {
-            debug!(error = %e, "heartbeat WorkerMetrics send failed");
+        let (done_tx, done_rx) = mpsc::unbounded_channel();
+        Self {
+            writer,
+            cache_waiters: Arc::new(Mutex::new(HashMap::new())),
+            known_derivation_waiters: Arc::new(Mutex::new(HashMap::new())),
+            nar_recv,
+            eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver::new(),
+            jobs: JobRegistry {
+                abort_senders: HashMap::new(),
+                job_kinds: HashMap::new(),
+                done_tx,
+            },
+            done_rx: Some(done_rx),
+            max_eval: config.max_concurrent_evaluations,
+            max_build: config.max_concurrent_builds,
+            credentials,
+            candidates,
+            last_scores,
+            scorer,
+            executor,
+            config,
+            draining: false,
         }
-    });
-}
+    }
 
-// ── Message handler ───────────────────────────────────────────────────────────
+    fn max_for(&self, kind: JobKind) -> u32 {
+        match kind {
+            JobKind::Flake => self.max_eval,
+            JobKind::Build => self.max_build,
+        }
+    }
 
-/// Holds the per-connection context needed to process a single `ServerMessage`.
-///
-/// Constructed fresh for each message in the dispatch loop so the lifetime
-/// scope is tight.  All fields are borrows - no ownership transfer.
-pub(super) struct MessageHandler<'a> {
-    pub writer: &'a ProtoWriter,
-    pub cache_waiters: &'a CacheWaiters,
-    pub known_derivation_waiters: &'a KnownDerivationWaiters,
-    pub nar_recv: &'a crate::proto::nar_recv::NarReceiver,
-    pub eval_cache_recv: &'a crate::proto::eval_cache_recv::EvalCacheReceiver,
-    pub abort_senders: &'a mut HashMap<String, watch::Sender<bool>>,
-    pub job_kinds: &'a mut HashMap<String, JobKind>,
-    pub max_eval: u32,
-    pub max_build: u32,
-    pub done_tx: &'a mpsc::UnboundedSender<(String, Result<()>)>,
-    pub credentials: &'a mut CredentialStore,
-    pub candidates: &'a Arc<Mutex<HashMap<String, JobCandidate>>>,
-    pub last_scores: &'a Arc<Mutex<HashMap<String, gradient_proto::messages::CandidateScore>>>,
-    pub scorer: JobScorer,
-    pub executor: &'a JobExecutor,
-    pub config: &'a WorkerConfig,
-    pub draining: &'a mut bool,
-}
-
-impl<'a> MessageHandler<'a> {
     /// Route `msg` to the appropriate handler method.
-    pub async fn dispatch(self, msg: ServerMessage) -> Result<()> {
+    async fn dispatch(&mut self, msg: ServerMessage) -> Result<()> {
         match msg {
             ServerMessage::JobListChunk {
                 candidates,
@@ -391,7 +256,7 @@ impl<'a> MessageHandler<'a> {
             }
             ServerMessage::Draining => {
                 info!("server is draining; finishing in-flight work then disconnecting");
-                *self.draining = true;
+                self.draining = true;
             }
             ServerMessage::Error { code, message } => {
                 error!(code, %message, "protocol error from server");
@@ -436,11 +301,109 @@ impl<'a> MessageHandler<'a> {
         Ok(())
     }
 
+    // ── Job completion / heartbeat ────────────────────────────────────────────
+
+    /// Handle job completion from the `done_rx` channel: clean up per-job
+    /// state, report the result to the server, and request a new job if the
+    /// worker still has capacity.
+    async fn on_job_done(&mut self, job_id: String, result: Result<()>) -> Result<()> {
+        self.jobs.abort_senders.remove(&job_id);
+        self.cache_waiters.lock().unwrap().remove(&job_id);
+        self.known_derivation_waiters
+            .lock()
+            .unwrap()
+            .remove(&job_id);
+        self.nar_recv.forget_job(&job_id);
+        self.eval_cache_recv.forget_job(&job_id);
+        self.credentials.clear();
+
+        let completed_kind = self.jobs.job_kinds.remove(&job_id);
+
+        match result {
+            Ok(()) => {
+                info!(%job_id, "job completed");
+                self.writer
+                    .send(ClientMessage::JobCompleted { job_id })
+                    .await?;
+            }
+            Err(e) => {
+                let error_chain = format!("{e:#}");
+                let (kind, missing_paths) = e
+                    .downcast_ref::<crate::executor::build::BuildError>()
+                    .map(|be| (be.kind, be.missing_paths.clone()))
+                    .unwrap_or((
+                        gradient_proto::messages::BuildFailureKind::Permanent,
+                        Vec::new(),
+                    ));
+                error!(%job_id, error = %error_chain, ?kind, "job failed");
+                self.writer
+                    .send(ClientMessage::JobFailed {
+                        job_id,
+                        error: error_chain,
+                        kind,
+                        missing_paths,
+                    })
+                    .await?;
+            }
+        }
+
+        if !self.draining {
+            let kind = completed_kind.unwrap_or(JobKind::Build);
+            if self.jobs.active(kind.clone()) < self.max_for(kind.clone()) {
+                self.writer.send(ClientMessage::RequestJob { kind }).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Heartbeat tick: send live host metrics and request more jobs if the
+    /// worker has capacity.
+    async fn on_heartbeat(&mut self) {
+        send_live_metrics(&self.writer);
+        if self.draining {
+            return;
+        }
+        let active_eval = self.jobs.active(JobKind::Flake);
+        let active_build = self.jobs.active(JobKind::Build);
+        let want_eval = active_eval < self.max_eval;
+        let want_build = active_build < self.max_build;
+        debug!(
+            active_eval,
+            max_eval = self.max_eval,
+            active_build,
+            max_build = self.max_build,
+            request_eval = want_eval,
+            request_build = want_build,
+            "heartbeat tick"
+        );
+        if want_eval
+            && let Err(e) = self
+                .writer
+                .send(ClientMessage::RequestJob {
+                    kind: JobKind::Flake,
+                })
+                .await
+        {
+            warn!(error = %e, "heartbeat RequestJob Flake send failed");
+        }
+        if want_build
+            && let Err(e) = self
+                .writer
+                .send(ClientMessage::RequestJob {
+                    kind: JobKind::Build,
+                })
+                .await
+        {
+            warn!(error = %e, "heartbeat RequestJob Build send failed");
+        }
+    }
+
     // ── Job list / scoring ────────────────────────────────────────────────────
 
-    fn on_job_list_chunk(self, cands: Vec<JobCandidate>, is_final: bool) {
+    fn on_job_list_chunk(&mut self, cands: Vec<JobCandidate>, is_final: bool) {
         debug!(count = cands.len(), is_final, "received job list chunk");
-        if *self.draining {
+        if self.draining {
             return;
         }
         {
@@ -452,7 +415,7 @@ impl<'a> MessageHandler<'a> {
         spawn_scoring_task(
             self.scorer,
             Arc::clone(&self.executor.store),
-            Arc::clone(self.last_scores),
+            Arc::clone(&self.last_scores),
             self.writer.clone(),
             cands,
             false,
@@ -461,9 +424,9 @@ impl<'a> MessageHandler<'a> {
         );
     }
 
-    fn on_job_offer(self, cands: Vec<JobCandidate>) {
+    fn on_job_offer(&mut self, cands: Vec<JobCandidate>) {
         debug!(count = cands.len(), "received job offer");
-        if *self.draining {
+        if self.draining {
             return;
         }
         let new_candidates: Vec<JobCandidate> = {
@@ -480,29 +443,18 @@ impl<'a> MessageHandler<'a> {
                 .collect()
         };
         if !new_candidates.is_empty() {
-            let active_eval = self
-                .job_kinds
-                .values()
-                .filter(|k| **k == JobKind::Flake)
-                .count() as u32;
-            let active_build = self
-                .job_kinds
-                .values()
-                .filter(|k| **k == JobKind::Build)
-                .count() as u32;
             let mut request_after = Vec::new();
-            if active_build < self.max_build {
+            if self.jobs.active(JobKind::Build) < self.max_build {
                 request_after.push(JobKind::Build);
             }
-
-            if active_eval < self.max_eval {
+            if self.jobs.active(JobKind::Flake) < self.max_eval {
                 request_after.push(JobKind::Flake);
             }
 
             spawn_scoring_task(
                 self.scorer,
                 Arc::clone(&self.executor.store),
-                Arc::clone(self.last_scores),
+                Arc::clone(&self.last_scores),
                 self.writer.clone(),
                 new_candidates,
                 true,
@@ -512,7 +464,7 @@ impl<'a> MessageHandler<'a> {
         }
     }
 
-    fn on_revoke_job(self, job_ids: Vec<String>) {
+    fn on_revoke_job(&mut self, job_ids: Vec<String>) {
         debug!(?job_ids, "jobs revoked");
         let mut cands = self.candidates.lock().unwrap();
         let mut scores = self.last_scores.lock().unwrap();
@@ -522,21 +474,21 @@ impl<'a> MessageHandler<'a> {
         }
     }
 
-    async fn on_request_all_scores(self) {
+    async fn on_request_all_scores(&mut self) {
         let all: Vec<JobCandidate> = self.candidates.lock().unwrap().values().cloned().collect();
         debug!(
             count = all.len(),
             "RequestAllScores - re-scoring all cached candidates"
         );
         if all.is_empty() {
-            if let Err(e) = send_score_chunks(self.writer, vec![]).await {
+            if let Err(e) = send_score_chunks(&self.writer, vec![]).await {
                 warn!(error = %e, "send_score_chunks (empty) failed");
             }
         } else {
             spawn_scoring_task(
                 self.scorer,
                 Arc::clone(&self.executor.store),
-                Arc::clone(self.last_scores),
+                Arc::clone(&self.last_scores),
                 self.writer.clone(),
                 all,
                 true,
@@ -556,12 +508,12 @@ impl<'a> MessageHandler<'a> {
         self.last_scores.lock().unwrap().remove(job_id);
     }
 
-    async fn on_assign_job(self, job_id: String, job: Job) -> Result<()> {
+    async fn on_assign_job(&mut self, job_id: String, job: Job) -> Result<()> {
         // Drop the cached candidate + score on any reject too (not just accept):
         // the server re-queues a rejected job and re-offers it, but our delta
         // filter would skip an unchanged cached entry, so it would never be
         // re-scored and would sit unassigned despite free capacity.
-        if *self.draining {
+        if self.draining {
             warn!(%job_id, "rejecting assigned job - draining");
             self.forget_candidate(&job_id);
             self.writer
@@ -578,11 +530,8 @@ impl<'a> MessageHandler<'a> {
             Job::Flake(_) => JobKind::Flake,
             Job::Build(_) => JobKind::Build,
         };
-        let active_count = self.job_kinds.values().filter(|k| **k == kind).count() as u32;
-        let max = match &kind {
-            JobKind::Flake => self.max_eval,
-            JobKind::Build => self.max_build,
-        };
+        let active_count = self.jobs.active(kind.clone());
+        let max = self.max_for(kind.clone());
 
         if active_count >= max {
             warn!(%job_id, ?kind, active = active_count, limit = max, "rejecting assigned job - at capacity");
@@ -606,21 +555,21 @@ impl<'a> MessageHandler<'a> {
             })
             .await?;
 
-        self.job_kinds.insert(job_id.clone(), kind.clone());
+        self.jobs.job_kinds.insert(job_id.clone(), kind.clone());
         self.forget_candidate(&job_id);
 
         let (abort_tx, abort_rx) = watch::channel(false);
-        self.abort_senders.insert(job_id.clone(), abort_tx);
+        self.jobs.abort_senders.insert(job_id.clone(), abort_tx);
 
         let executor = self.executor.clone();
         let job_store = Arc::clone(&executor.store);
         let credentials = self.credentials.clone();
         let job_writer = self.writer.clone();
-        let job_cache_waiters = Arc::clone(self.cache_waiters);
-        let job_known_derivation_waiters = Arc::clone(self.known_derivation_waiters);
+        let job_cache_waiters = Arc::clone(&self.cache_waiters);
+        let job_known_derivation_waiters = Arc::clone(&self.known_derivation_waiters);
         let job_nar_recv = self.nar_recv.clone();
         let job_eval_cache_recv = self.eval_cache_recv.clone();
-        let job_done_tx = self.done_tx.clone();
+        let job_done_tx = self.jobs.done_tx.clone();
         let jid = job_id.clone();
 
         tokio::spawn(async move {
@@ -644,16 +593,16 @@ impl<'a> MessageHandler<'a> {
         Ok(())
     }
 
-    fn on_abort_job(self, job_id: String, reason: String) {
+    fn on_abort_job(&mut self, job_id: String, reason: String) {
         warn!(%job_id, %reason, "job aborted by server");
-        if let Some(tx) = self.abort_senders.get(&job_id) {
+        if let Some(tx) = self.jobs.abort_senders.get(&job_id) {
             let _ = tx.send(true);
         }
     }
 
     // ── Credentials ───────────────────────────────────────────────────────────
 
-    fn on_credential(self, kind: gradient_proto::messages::CredentialKind, data: Vec<u8>) {
+    fn on_credential(&mut self, kind: gradient_proto::messages::CredentialKind, data: Vec<u8>) {
         debug!(?kind, "received credential");
         self.credentials.store(kind, data);
     }
@@ -661,7 +610,7 @@ impl<'a> MessageHandler<'a> {
     // ── NAR transfer ──────────────────────────────────────────────────────────
 
     async fn on_nar_push(
-        self,
+        &mut self,
         job_id: String,
         store_path: String,
         data: Vec<u8>,
@@ -674,7 +623,7 @@ impl<'a> MessageHandler<'a> {
             .await;
     }
 
-    fn on_cache_status(self, job_id: String, cached: Vec<CachedPath>) {
+    fn on_cache_status(&mut self, job_id: String, cached: Vec<CachedPath>) {
         if let Some(tx) = self.cache_waiters.lock().unwrap().remove(&job_id) {
             let _ = tx.send(Ok(cached));
         } else {
@@ -682,7 +631,7 @@ impl<'a> MessageHandler<'a> {
         }
     }
 
-    fn on_cache_error(self, job_id: String, message: String) {
+    fn on_cache_error(&mut self, job_id: String, message: String) {
         if let Some(tx) = self.cache_waiters.lock().unwrap().remove(&job_id) {
             let _ = tx.send(Err(message));
         } else {
@@ -690,7 +639,7 @@ impl<'a> MessageHandler<'a> {
         }
     }
 
-    fn on_known_derivations(self, job_id: String, known: Vec<String>) {
+    fn on_known_derivations(&mut self, job_id: String, known: Vec<String>) {
         if let Some(tx) = self
             .known_derivation_waiters
             .lock()
@@ -705,7 +654,7 @@ impl<'a> MessageHandler<'a> {
 
     // ── Auth ──────────────────────────────────────────────────────────────────
 
-    async fn on_auth_challenge(self, peers: Vec<String>) -> Result<()> {
+    async fn on_auth_challenge(&mut self, peers: Vec<String>) -> Result<()> {
         debug!(
             ?peers,
             "mid-connection AuthChallenge - sending AuthResponse"
@@ -719,7 +668,7 @@ impl<'a> MessageHandler<'a> {
     }
 
     fn on_auth_update(
-        self,
+        &mut self,
         authorized_peers: Vec<String>,
         failed_peers: Vec<gradient_proto::messages::FailedPeer>,
     ) {
@@ -732,6 +681,36 @@ impl<'a> MessageHandler<'a> {
             warn!(peer_id = %fp.peer_id, reason = %fp.reason, "peer auth failed");
         }
     }
+}
+
+/// Sample live host load off the dispatch thread (the CPU sample blocks for
+/// [`sysinfo::MINIMUM_CPU_UPDATE_INTERVAL`]) and send it to the scheduler.
+/// `disk_speed_mbps` / `network_speed_mbps` come from passive EWMA
+/// accumulators and stay `None` until the first build / NAR transfer. Detached
+/// (not awaited by the heartbeat tick): the blocking sample runs on
+/// `spawn_blocking`, then the async send runs on the runtime once it finishes.
+fn send_live_metrics(writer: &ProtoWriter) {
+    let writer = writer.clone();
+    tokio::spawn(async move {
+        let m = match tokio::task::spawn_blocking(crate::metrics::host_dynamic).await {
+            Ok(m) => m,
+            Err(e) => {
+                debug!(error = %e, "host_dynamic sampling task failed");
+                return;
+            }
+        };
+        if let Err(e) = writer
+            .send(ClientMessage::WorkerMetrics {
+                cpu_usage_pct: m.cpu_usage_pct,
+                ram_free_mb: m.ram_free_mb,
+                disk_speed_mbps: crate::metrics::throughput::DISK.current(),
+                network_speed_mbps: crate::metrics::throughput::NETWORK.current(),
+            })
+            .await
+        {
+            debug!(error = %e, "heartbeat WorkerMetrics send failed");
+        }
+    });
 }
 
 // ── Job runner ────────────────────────────────────────────────────────────────
