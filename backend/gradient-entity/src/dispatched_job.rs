@@ -5,17 +5,44 @@
  */
 
 use chrono::NaiveDateTime;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{DispatchedJobId, EvaluationId, OrganizationId, ProjectId};
+
+/// Kind of dispatched work this telemetry row records.
+#[repr(i16)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
+#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
+#[serde(rename_all = "snake_case")]
+pub enum DispatchedJobKind {
+    #[default]
+    #[sea_orm(num_value = 0)]
+    Eval = 0,
+    #[sea_orm(num_value = 1)]
+    Build = 1,
+}
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "dispatched_job")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: DispatchedJobId,
-    pub kind: i16,
+    pub kind: DispatchedJobKind,
     pub evaluation_id: EvaluationId,
     pub organization: OrganizationId,
     pub project: Option<ProjectId>,

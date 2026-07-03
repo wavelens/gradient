@@ -10,33 +10,11 @@
 //! `sec min hour dom mon dow` - not the five-field POSIX form.
 
 use crate::ids::IntegrationId;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[repr(i16)]
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, IntoPrimitive, TryFromPrimitive,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum TriggerType {
-    Polling = 0,
-    ReporterPush = 1,
-    ReporterPullRequest = 2,
-    Time = 3,
-}
-
-#[repr(i16)]
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, IntoPrimitive, TryFromPrimitive,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ConcurrencyPolicy {
-    HardAbort = 0,
-    SoftAbort = 1,
-    All = 2,
-    Skip = 3,
-}
+pub use gradient_entity::project::ConcurrencyPolicy;
+pub use gradient_entity::project_trigger::TriggerType;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -92,8 +70,6 @@ pub enum TriggerConfigError {
     InvalidCron(String),
     #[error("malformed config: {0}")]
     Malformed(#[from] serde_json::Error),
-    #[error("trigger_type {0} does not match config shape")]
-    TypeMismatch(i16),
 }
 
 impl TriggerConfig {
@@ -108,25 +84,12 @@ impl TriggerConfig {
 
     /// Parse a row's `(trigger_type, config_json)` pair into a typed config.
     pub fn parse_row(
-        trigger_type: i16,
+        trigger_type: TriggerType,
         config: &serde_json::Value,
     ) -> Result<Self, TriggerConfigError> {
-        let tag = TriggerType::try_from(trigger_type)
-            .map_err(|_| TriggerConfigError::TypeMismatch(trigger_type))?;
         let mut value = config.clone();
         if let serde_json::Value::Object(ref mut m) = value {
-            m.insert(
-                "type".into(),
-                serde_json::Value::String(
-                    match tag {
-                        TriggerType::Polling => "polling",
-                        TriggerType::ReporterPush => "reporter_push",
-                        TriggerType::ReporterPullRequest => "reporter_pull_request",
-                        TriggerType::Time => "time",
-                    }
-                    .into(),
-                ),
-            );
+            m.insert("type".into(), serde_json::to_value(trigger_type)?);
         }
         let parsed: TriggerConfig = serde_json::from_value(value)?;
         parsed.validate()?;
@@ -172,7 +135,7 @@ mod tests {
             db.get("type").is_none(),
             "db json should not carry the type tag"
         );
-        let parsed = TriggerConfig::parse_row(0, &db).unwrap();
+        let parsed = TriggerConfig::parse_row(TriggerType::Polling, &db).unwrap();
         assert_eq!(parsed, cfg);
     }
 
@@ -184,7 +147,7 @@ mod tests {
         };
         let db = cfg.to_db_json();
         assert_eq!(db["branch"], serde_json::json!("develop"));
-        let parsed = TriggerConfig::parse_row(0, &db).unwrap();
+        let parsed = TriggerConfig::parse_row(TriggerType::Polling, &db).unwrap();
         assert_eq!(parsed, cfg);
     }
 
@@ -224,7 +187,7 @@ mod tests {
     fn type_mismatch_rejected() {
         // Polling-shaped config passed for trigger_type=time (cron field missing).
         let bad = serde_json::json!({"interval_secs": 60});
-        let res = TriggerConfig::parse_row(3, &bad);
+        let res = TriggerConfig::parse_row(TriggerType::Time, &bad);
         assert!(res.is_err(), "expected error, got {res:?}");
     }
 
@@ -266,7 +229,7 @@ mod tests {
             "branches": [],
             "actions": ["opened"],
         });
-        let parsed = TriggerConfig::parse_row(2, &legacy_db).unwrap();
+        let parsed = TriggerConfig::parse_row(TriggerType::ReporterPullRequest, &legacy_db).unwrap();
         let TriggerConfig::ReporterPullRequest {
             require_approval, ..
         } = parsed
@@ -290,7 +253,7 @@ mod tests {
             db.get("type").is_none(),
             "db json should not carry the type tag"
         );
-        let parsed = TriggerConfig::parse_row(1, &db).unwrap();
+        let parsed = TriggerConfig::parse_row(TriggerType::ReporterPush, &db).unwrap();
         assert_eq!(parsed, cfg);
     }
 }

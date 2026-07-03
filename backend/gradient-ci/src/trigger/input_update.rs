@@ -26,7 +26,7 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
     let Some(action) = EProjectAction::find()
         .filter(CProjectAction::Project.eq(project.id))
         .filter(CProjectAction::Active.eq(true))
-        .filter(CProjectAction::ActionType.eq(ActionType::OpenPr.to_i16()))
+        .filter(CProjectAction::ActionType.eq(ActionType::OpenPr))
         .one(db)
         .await?
     else {

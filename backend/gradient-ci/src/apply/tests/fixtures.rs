@@ -13,10 +13,13 @@ use sea_orm::MockDatabase;
 use uuid::Uuid;
 
 pub fn make_project_with_last_eval(last: Option<EvaluationId>) -> MProject {
-    make_project_with_concurrency(last, 3) // Skip
+    make_project_with_concurrency(last, ConcurrencyPolicy::Skip)
 }
 
-pub fn make_project_with_concurrency(last: Option<EvaluationId>, concurrency: i16) -> MProject {
+pub fn make_project_with_concurrency(
+    last: Option<EvaluationId>,
+    concurrency: ConcurrencyPolicy,
+) -> MProject {
     MProject {
         id: ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
         organization: OrganizationId::nil(),

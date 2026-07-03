@@ -363,7 +363,7 @@ async fn ensure_build_request_project<C: ConnectionTrait>(
         created_at: now(),
         managed: true,
         keep_evaluations: 30,
-        concurrency: i16::from(ConcurrencyPolicy::SoftAbort),
+        concurrency: ConcurrencyPolicy::SoftAbort,
         sign_cache: true,
         ..Default::default()
     }

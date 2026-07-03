@@ -80,15 +80,14 @@ async fn replace_log_chunk_index(
     Ok(())
 }
 
-pub const PHASE_SUBJECT_BUILD: i16 = 0;
-pub const PHASE_SUBJECT_EVALUATION: i16 = 1;
+pub use gradient_entity::phase_event::PhaseSubjectKind;
 
 /// Append-only record of a build/evaluation phase transition. Best-effort:
 /// failures are logged, never propagated, so instrumentation can't break a
 /// status transition.
 pub async fn record_phase_event(
     db: &impl ConnectionTrait,
-    subject_kind: i16,
+    subject_kind: PhaseSubjectKind,
     subject_id: uuid::Uuid,
     phase: i16,
     worker_id: Option<String>,
@@ -117,7 +116,7 @@ pub async fn record_phase_event(
 /// of one spawned [`record_phase_event`] per subject. Best-effort.
 pub async fn record_phase_events(
     db: &impl ConnectionTrait,
-    subject_kind: i16,
+    subject_kind: PhaseSubjectKind,
     subject_ids: &[uuid::Uuid],
     phase: i16,
     at: chrono::NaiveDateTime,

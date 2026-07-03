@@ -169,8 +169,7 @@ pub async fn get(
                 last_evaluation_status,
                 force_evaluation: p.force_evaluation,
                 keep_evaluations: p.keep_evaluations,
-                concurrency: ConcurrencyPolicy::try_from(p.concurrency)
-                    .unwrap_or(ConcurrencyPolicy::SoftAbort),
+                concurrency: p.concurrency,
                 created_by: p.created_by,
                 created_at: p.created_at,
                 managed: p.managed,
@@ -256,7 +255,7 @@ pub async fn put(
         created_by: user.id,
         created_at: gradient_types::now(),
         keep_evaluations: 30,
-        concurrency: i16::from(body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort)),
+        concurrency: body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort),
         sign_cache: body.sign_cache.unwrap_or(true),
         ..Default::default()
     }
@@ -272,7 +271,7 @@ pub async fn put(
     MProjectTrigger {
         id: ProjectTriggerId::now_v7(),
         project: project.id,
-        trigger_type: i16::from(TriggerType::Polling),
+        trigger_type: TriggerType::Polling,
         config: default_cfg.to_db_json(),
         active: true,
         created_at: now,
@@ -364,8 +363,7 @@ pub async fn get_project(
         created_at: project.created_at,
         managed: project.managed,
         keep_evaluations: project.keep_evaluations,
-        concurrency: ConcurrencyPolicy::try_from(project.concurrency)
-            .unwrap_or(ConcurrencyPolicy::SoftAbort),
+        concurrency: project.concurrency,
         sign_cache: project.sign_cache,
         can_edit,
         can_trigger,
@@ -504,7 +502,7 @@ impl<'a> ProjectPatcher<'a> {
     }
 
     fn apply_concurrency(&mut self, concurrency: ConcurrencyPolicy) -> WebResult<()> {
-        self.aproject.concurrency = Set(i16::from(concurrency));
+        self.aproject.concurrency = Set(concurrency);
         Ok(())
     }
 

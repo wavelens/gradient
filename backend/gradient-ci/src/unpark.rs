@@ -374,7 +374,7 @@ mod tests {
             wildcard: "*".into(),
             created_by: gradient_types::ids::UserId::nil(),
             keep_evaluations: 10,
-            concurrency: 3,
+            concurrency: ConcurrencyPolicy::Skip,
             sign_cache: true,
             ..Default::default()
         }

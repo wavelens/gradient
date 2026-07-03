@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::logging::{PHASE_SUBJECT_EVALUATION, record_phase_event};
+use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
 use crate::state_machine::EvalStateMachine;
 use gradient_types::*;
@@ -121,7 +121,7 @@ pub async fn update_evaluation_status(
     ctx.shutdown.spawn(async move {
         record_phase_event(
             &pe_ctx.worker_db,
-            PHASE_SUBJECT_EVALUATION,
+            PhaseSubjectKind::Evaluation,
             pe_id,
             i32::from(event_status) as i16,
             None,

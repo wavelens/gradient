@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_types::ids::{
     CommitId, DerivationBuildId, DispatchedJobId, EvaluationId, OrganizationId, ProjectId,
 };
@@ -189,11 +190,10 @@ impl PendingJob {
         }
     }
 
-    /// Wire discriminator matching `dispatched_job.kind`: eval `0`, build `1`.
-    pub fn kind_disc(&self) -> i16 {
+    pub fn kind_disc(&self) -> DispatchedJobKind {
         match self {
-            PendingJob::Eval(_) => 0,
-            PendingJob::Build(_) => 1,
+            PendingJob::Eval(_) => DispatchedJobKind::Eval,
+            PendingJob::Build(_) => DispatchedJobKind::Build,
         }
     }
 
@@ -259,7 +259,7 @@ pub struct Assignment {
 
 /// Owned snapshot of a dispatch decision for the `dispatched_job` table.
 pub struct DispatchRecord {
-    pub kind: i16,
+    pub kind: DispatchedJobKind,
     pub derivation_build: Option<DerivationBuildId>,
     pub evaluation_id: EvaluationId,
     pub organization: OrganizationId,
@@ -350,7 +350,7 @@ pub struct WorkerJobScore {
 
 #[derive(Debug, Clone)]
 pub struct PendingJobInfo {
-    pub kind: i16,
+    pub kind: DispatchedJobKind,
     pub evaluation_id: EvaluationId,
     pub derivation_build: Option<DerivationBuildId>,
     pub organization: OrganizationId,
@@ -718,7 +718,7 @@ impl JobTracker {
                 self.pending.get(id).map(|job| DecisionCandidate {
                     id: DispatchedJobId::now_v7(),
                     job_id: id.clone(),
-                    kind: job.kind_disc(),
+                    kind: i16::from(job.kind_disc()),
                     organization: job.org_id(),
                     derivation_build: job.derivation_build(),
                     evaluation_id: job.evaluation_id(),
@@ -738,10 +738,10 @@ impl JobTracker {
         self.push_decision(DispatchDecision {
             at: gradient_types::now(),
             worker_id: worker_id.to_owned(),
-            kind: match kind {
-                JobKind::Flake => 0,
-                JobKind::Build => 1,
-            },
+            kind: i16::from(match kind {
+                JobKind::Flake => DispatchedJobKind::Eval,
+                JobKind::Build => DispatchedJobKind::Build,
+            }),
             winner: winner.map(str::to_owned),
             worker_context: worker_context.clone(),
             instance_context: instance_context.clone(),
@@ -761,8 +761,8 @@ impl JobTracker {
     ) -> Option<DispatchRecord> {
         let job = self.pending.get(job_id)?;
         let (kind_disc, derivation_build, project) = match job {
-            PendingJob::Build(b) => (1i16, Some(b.derivation_build), None),
-            PendingJob::Eval(e) => (0i16, None, e.project_id),
+            PendingJob::Build(b) => (DispatchedJobKind::Build, Some(b.derivation_build), None),
+            PendingJob::Eval(e) => (DispatchedJobKind::Eval, None, e.project_id),
         };
         Some(DispatchRecord {
             kind: kind_disc,
@@ -936,8 +936,10 @@ impl JobTracker {
             .values()
             .map(|job| {
                 let (kind, derivation_build, pname) = match job {
-                    PendingJob::Build(b) => (1i16, Some(b.derivation_build), b.pname.clone()),
-                    PendingJob::Eval(_) => (0i16, None, None),
+                    PendingJob::Build(b) => {
+                        (DispatchedJobKind::Build, Some(b.derivation_build), b.pname.clone())
+                    }
+                    PendingJob::Eval(_) => (DispatchedJobKind::Eval, None, None),
                 };
                 PendingJobInfo {
                     kind,
@@ -1912,7 +1914,7 @@ mod tests {
         tracker.add_pending("eval:1".into(), eval_job(org));
         let snap = tracker.pending_snapshot();
         assert_eq!(snap.len(), 1);
-        assert_eq!(snap[0].kind, 0);
+        assert_eq!(snap[0].kind, DispatchedJobKind::Eval);
         assert_eq!(snap[0].organization, org);
         assert!(snap[0].derivation_build.is_none());
     }

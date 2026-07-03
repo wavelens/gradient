@@ -11,6 +11,7 @@ use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use chrono::{NaiveDateTime, Timelike};
+use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
@@ -100,23 +101,13 @@ fn build_record_nar_traffic_stmt(
     )
 }
 
-/// Granularity discriminant matching `metric_rollup.granularity`.
-fn gran_code(trunc_unit: &str) -> i16 {
-    match trunc_unit {
-        "hour" => 1,
-        "day" => 2,
-        "week" => 3,
-        _ => 0,
-    }
-}
-
 /// Zero-filled time-series of a cache rollup metric. `count` and `sum` carry
 /// the two values the cache-stats UI needs (requests/bytes or packages/bytes).
 async fn cache_series<C: sea_orm::ConnectionTrait>(
     db: &C,
     cache_id: CacheId,
     metric: &str,
-    trunc_unit: &str,
+    granularity: RollupGranularity,
     back_interval: &str,
 ) -> Result<Vec<(NaiveDateTime, i64, i64)>, WebError> {
     // generate_series keeps every bucket present (zero-filled) up to "now"; the
@@ -137,9 +128,9 @@ async fn cache_series<C: sea_orm::ConnectionTrait>(
               AND (mr.scope->>'cache') = $2
            GROUP BY gs.period
            ORDER BY gs.period"#,
-        unit = trunc_unit,
+        unit = granularity.trunc_unit(),
         back = back_interval,
-        gran = gran_code(trunc_unit),
+        gran = i16::from(granularity),
     );
 
     let rows = db
@@ -168,10 +159,10 @@ async fn cache_series<C: sea_orm::ConnectionTrait>(
 async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
     db: &C,
     cache_id: CacheId,
-    trunc_unit: &str,
+    granularity: RollupGranularity,
     back_interval: &str,
 ) -> Result<Vec<CacheMetricPoint>, WebError> {
-    let series = cache_series(db, cache_id, "cache.bytes_sent", trunc_unit, back_interval).await?;
+    let series = cache_series(db, cache_id, "cache.bytes_sent", granularity, back_interval).await?;
     Ok(series
         .into_iter()
         .map(|(time, requests, bytes)| CacheMetricPoint {
@@ -185,10 +176,10 @@ async fn aggregate_traffic<C: sea_orm::ConnectionTrait>(
 async fn aggregate_storage<C: sea_orm::ConnectionTrait>(
     db: &C,
     cache_id: CacheId,
-    trunc_unit: &str,
+    granularity: RollupGranularity,
     back_interval: &str,
 ) -> Result<Vec<StorageMetricPoint>, WebError> {
-    let series = cache_series(db, cache_id, "cache.bytes_added", trunc_unit, back_interval).await?;
+    let series = cache_series(db, cache_id, "cache.bytes_added", granularity, back_interval).await?;
     Ok(series
         .into_iter()
         .map(|(time, packages, bytes)| StorageMetricPoint {
@@ -247,14 +238,14 @@ pub async fn get_cache_stats(
 
     let (storage_minutes, storage_hours, storage_days, storage_weeks, minutes, hours, days, weeks) =
         tokio::try_join!(
-            aggregate_storage(&state.web_db, cache.id, "minute", "59 minutes"),
-            aggregate_storage(&state.web_db, cache.id, "hour", "23 hours"),
-            aggregate_storage(&state.web_db, cache.id, "day", "29 days"),
-            aggregate_storage(&state.web_db, cache.id, "week", "11 weeks"),
-            aggregate_traffic(&state.web_db, cache.id, "minute", "59 minutes"),
-            aggregate_traffic(&state.web_db, cache.id, "hour", "23 hours"),
-            aggregate_traffic(&state.web_db, cache.id, "day", "29 days"),
-            aggregate_traffic(&state.web_db, cache.id, "week", "11 weeks"),
+            aggregate_storage(&state.web_db, cache.id, RollupGranularity::Minute, "59 minutes"),
+            aggregate_storage(&state.web_db, cache.id, RollupGranularity::Hour, "23 hours"),
+            aggregate_storage(&state.web_db, cache.id, RollupGranularity::Day, "29 days"),
+            aggregate_storage(&state.web_db, cache.id, RollupGranularity::Week, "11 weeks"),
+            aggregate_traffic(&state.web_db, cache.id, RollupGranularity::Minute, "59 minutes"),
+            aggregate_traffic(&state.web_db, cache.id, RollupGranularity::Hour, "23 hours"),
+            aggregate_traffic(&state.web_db, cache.id, RollupGranularity::Day, "29 days"),
+            aggregate_traffic(&state.web_db, cache.id, RollupGranularity::Week, "11 weeks"),
         )?;
 
     Ok(ok_json(CacheStatsResponse {

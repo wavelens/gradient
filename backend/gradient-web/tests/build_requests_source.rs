@@ -14,7 +14,7 @@ use chrono::Utc;
 use gradient_entity::ids::*;
 use gradient_entity::role;
 use gradient_db::permissions::PermissionMask;
-use gradient_types::SessionId;
+use gradient_types::{ConcurrencyPolicy, SessionId};
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
@@ -70,7 +70,7 @@ fn project_row(id: ProjectId) -> gradient_entity::project::Model {
         created_at: Utc::now().naive_utc(),
         managed: true,
         keep_evaluations: 30,
-        concurrency: 1,
+        concurrency: ConcurrencyPolicy::SoftAbort,
         sign_cache: true,
         ..Default::default()
     }

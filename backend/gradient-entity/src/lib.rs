@@ -114,7 +114,7 @@ mod model_default_tests {
     fn phase_event_default_is_empty() {
         let m = phase_event::Model::default();
         assert_eq!(Uuid::from(m.id), Uuid::nil());
-        assert_eq!(m.subject_kind, 0);
+        assert_eq!(m.subject_kind, phase_event::PhaseSubjectKind::Build);
         assert!(m.worker_id.is_none());
         assert!(m.detail.is_none());
     }
@@ -131,7 +131,7 @@ mod model_default_tests {
     fn worker_sample_default_has_zero_counts() {
         let m = worker_sample::Model::default();
         assert_eq!(m.assigned_jobs, 0);
-        assert_eq!(m.state, 0);
+        assert_eq!(m.state, worker_sample::WorkerSampleState::Active);
         assert!(m.cpu_usage_pct.is_none());
     }
 
@@ -146,7 +146,7 @@ mod model_default_tests {
     fn metric_rollup_default_zeroed() {
         let m = metric_rollup::Model::default();
         assert_eq!(m.metric, "");
-        assert_eq!(m.granularity, 0);
+        assert_eq!(m.granularity, metric_rollup::RollupGranularity::Minute);
         assert_eq!(m.count, 0);
         assert_eq!(m.sum, 0.0);
         assert!(m.histogram.is_none());

@@ -13,7 +13,7 @@
 use axum_test::TestServer;
 use gradient_entity::{ids::*, organization_user, project, project_action, project_action_delivery};
 use gradient_storage::{EmailSender, NarStore};
-use gradient_types::{RuntimeConfig, SecretString, SessionId};
+use gradient_types::{ActionType, ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
@@ -46,7 +46,7 @@ fn project_row() -> project::Model {
         created_by: user_id(),
         created_at: test_date(),
         keep_evaluations: 10,
-        concurrency: 3,
+        concurrency: ConcurrencyPolicy::Skip,
         sign_cache: true,
         ..Default::default()
     }
@@ -95,7 +95,7 @@ fn web_request_action_row() -> project_action::Model {
         id: action_id(),
         project: project_id(),
         name: "hook".into(),
-        action_type: 1,
+        action_type: ActionType::SendWebRequest,
         config: json!({
             "type": "send_web_request",
             "url": "https://example.com/hook",

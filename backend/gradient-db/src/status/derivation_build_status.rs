@@ -11,7 +11,7 @@
 //! terminal-success; dependency-failure cascades on terminal-failure.
 
 use super::effects::{TransitionChange, emit_transition_effects};
-use super::logging::{PHASE_SUBJECT_BUILD, finalize_build_log, record_phase_event};
+use super::logging::{PhaseSubjectKind, finalize_build_log, record_phase_event};
 use crate::DbContext;
 use crate::state_machine::BuildStateMachine;
 use gradient_entity::build::BuildStatus;
@@ -113,7 +113,7 @@ pub async fn update_derivation_build_status(
     ctx.shutdown.spawn(async move {
         record_phase_event(
             &pe_ctx.worker_db,
-            PHASE_SUBJECT_BUILD,
+            PhaseSubjectKind::Build,
             pe_id,
             i32::from(status) as i16,
             pe_worker,

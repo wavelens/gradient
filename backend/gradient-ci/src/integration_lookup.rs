@@ -9,20 +9,13 @@
 use gradient_entity::ids::GithubInstallationId;
 use gradient_entity::github_installation;
 use gradient_types::*;
-use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
     sea_query::{Expr, OnConflict},
 };
 use tracing::warn;
 
-/// Numeric encoding of `integration.kind`.
-#[repr(i16)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
-pub enum IntegrationKind {
-    Inbound = 0,
-    Outbound = 1,
-}
+pub use gradient_entity::integration::IntegrationKind;
 
 /// Stable display name shown in dropdowns for the auto-managed GitHub App rows.
 pub const GITHUB_APP_INTEGRATION_DISPLAY_NAME: &str = "GitHub";
@@ -86,8 +79,8 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
     for kind in [IntegrationKind::Inbound, IntegrationKind::Outbound] {
         let existing = EIntegration::find()
             .filter(CIntegration::Organization.eq(org_id))
-            .filter(CIntegration::Kind.eq(i16::from(kind)))
-            .filter(CIntegration::ForgeType.eq(i16::from(ForgeType::GitHub)))
+            .filter(CIntegration::Kind.eq(kind))
+            .filter(CIntegration::ForgeType.eq(ForgeType::GitHub))
             .filter(CIntegration::GithubInstallation.eq(installation))
             .one(db)
             .await?;
@@ -97,7 +90,7 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
 
         let name_clash = EIntegration::find()
             .filter(CIntegration::Organization.eq(org_id))
-            .filter(CIntegration::Kind.eq(i16::from(kind)))
+            .filter(CIntegration::Kind.eq(kind))
             .filter(CIntegration::Name.eq(name))
             .one(db)
             .await?;
@@ -111,8 +104,8 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
             organization: org_id,
             name: name.to_string(),
             display_name: display_name.to_string(),
-            kind: i16::from(kind),
-            forge_type: i16::from(ForgeType::GitHub),
+            kind,
+            forge_type: ForgeType::GitHub,
             github_installation: Some(installation),
             created_by: creator,
             created_at: chrono::Utc::now().naive_utc(),
@@ -163,8 +156,8 @@ mod ensure_tests {
             organization: org(),
             name: "github-acme-corp".into(),
             display_name: GITHUB_APP_INTEGRATION_DISPLAY_NAME.into(),
-            kind: i16::from(kind),
-            forge_type: i16::from(ForgeType::GitHub),
+            kind,
+            forge_type: ForgeType::GitHub,
             github_installation: Some(installation()),
             created_by: user(),
             ..Default::default()

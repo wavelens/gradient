@@ -27,8 +27,7 @@ pub(super) async fn resolve_concurrency<C: ConnectionTrait>(
     project: &MProject,
     in_flight: Option<MEvaluation>,
 ) -> Result<Option<ConcurrencyDecision>, sea_orm::DbErr> {
-    let concurrency =
-        ConcurrencyPolicy::try_from(project.concurrency).unwrap_or(ConcurrencyPolicy::SoftAbort);
+    let concurrency = project.concurrency;
 
     let mut aborted_evaluation: Option<EvaluationId> = None;
     let mut aborted_anchors: Vec<DerivationBuildId> = Vec::new();

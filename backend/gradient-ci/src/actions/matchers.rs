@@ -24,10 +24,10 @@ pub const FORGE_STATUS_EVENTS: &[&str] = &[
 ];
 
 pub fn matches_event(action: &MProjectAction, event: &str) -> bool {
-    if action.action_type == ActionType::ForgeStatusReport.to_i16() {
+    if action.action_type == ActionType::ForgeStatusReport {
         return FORGE_STATUS_EVENTS.contains(&event);
     }
-    if action.action_type == ActionType::OpenPr.to_i16() {
+    if action.action_type == ActionType::OpenPr {
         return open_pr_gate_events(action).is_some_and(|evs| evs.contains(&event));
     }
     action

@@ -16,7 +16,8 @@
 //!   probe credential state.
 
 use gradient_entity::{github_installation, ids::*, integration, organization_user, role};
-use gradient_types::SessionId;
+use gradient_types::{ForgeType, SessionId};
+use gradient_entity::integration::IntegrationKind;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use gradient_test_support::fixtures::{org, org_id, test_date, user, user_id};
@@ -68,7 +69,7 @@ fn github_inbound_row() -> integration::Model {
         organization: org_id(),
         name: "github".into(),
         display_name: "GitHub".into(),
-        forge_type: 3,
+        forge_type: ForgeType::GitHub,
         github_installation: Some(github_installation_id()),
         created_by: user_id(),
         created_at: test_date(),
@@ -93,7 +94,7 @@ fn gitea_outbound_row() -> integration::Model {
         organization: org_id(),
         name: "my-gitea-reporter".into(),
         display_name: "My Gitea CI".into(),
-        kind: 1,
+        kind: IntegrationKind::Outbound,
         endpoint_url: Some("https://gitea.example.com".into()),
         access_token: Some("encrypted-token".into()),
         created_by: user_id(),

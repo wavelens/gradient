@@ -20,10 +20,9 @@ use super::{
     StateOrganization, StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use gradient_ci::IntegrationKind;
-use gradient_types::ForgeType;
 use gradient_db::permissions::{cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec};
 use gradient_types::actions::{ActionConfig, ActionType};
-use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
+use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::ids::*;
 use sea_orm::{ConnectionTrait, DbErr, EntityTrait};
@@ -172,8 +171,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 created_by: name_or_blank(&username, p.created_by),
                 keep_evaluations: p.keep_evaluations,
                 triggers: (!project_triggers.is_empty()).then_some(project_triggers),
-                concurrency: ConcurrencyPolicy::try_from(p.concurrency)
-                    .unwrap_or(ConcurrencyPolicy::SoftAbort),
+                concurrency: p.concurrency,
                 sign_cache: p.sign_cache,
                 flake_input_overrides,
                 actions: project_actions,
@@ -322,12 +320,6 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     }
 
     for i in &integrations {
-        let (Ok(kind), Ok(forge)) = (
-            IntegrationKind::try_from(i.kind),
-            ForgeType::try_from(i.forge_type),
-        ) else {
-            continue;
-        };
         let install = i
             .github_installation
             .and_then(|fk| github_install_by_id.get(&fk));
@@ -338,12 +330,12 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 name: i.name.clone(),
                 display_name: Some(i.display_name.clone()),
                 organization: name_or_blank(&org_name, i.organization),
-                kind: match kind {
+                kind: match i.kind {
                     IntegrationKind::Inbound => "inbound",
                     IntegrationKind::Outbound => "outbound",
                 }
                 .to_string(),
-                forge_type: forge.as_path_segment().to_string(),
+                forge_type: i.forge_type.as_path_segment().to_string(),
                 secret_file: None,
                 endpoint_url: i.endpoint_url.clone(),
                 access_token_file: None,

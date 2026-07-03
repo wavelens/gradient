@@ -101,7 +101,7 @@ fn action_type_to_str(t: ActionType) -> &'static str {
 /// from `send_web_request` configs so secrets never leak past the create
 /// call where the plaintext is returned exactly once.
 fn to_response(m: MProjectAction) -> ActionResponse {
-    let at = ActionType::from_i16(m.action_type).unwrap_or(ActionType::SendMail);
+    let at = m.action_type;
     let mut config = m.config;
     if at == ActionType::SendWebRequest
         && let Some(obj) = config.as_object_mut()
@@ -223,7 +223,7 @@ pub async fn create_action(
             .one(&state.web_db)
             .await?;
         match integration {
-            Some(row) if row.kind == i16::from(IntegrationKind::Outbound) => {}
+            Some(row) if row.kind == IntegrationKind::Outbound => {}
             Some(_) => {
                 return Err(WebError::unprocessable_entity(
                     "integration is not an outbound integration",
@@ -274,7 +274,7 @@ pub async fn create_action(
         id: ProjectActionId::now_v7(),
         project: proj.id,
         name: body.name,
-        action_type: stored_config.action_type().to_i16(),
+        action_type: stored_config.action_type(),
         config: serde_json::to_value(&stored_config)
             .map_err(|e| WebError::internal(e.to_string()))?,
         events: serde_json::to_value(&body.events).map_err(|e| WebError::internal(e.to_string()))?,
@@ -358,7 +358,7 @@ pub async fn update_action(
         .await?
         .or_not_found("Action")?;
 
-    let existing_type = ActionType::from_i16(row.action_type).unwrap_or(ActionType::SendMail);
+    let existing_type = row.action_type;
 
     if let Some(ref new_cfg) = body.config {
         if new_cfg.action_type() != existing_type {
@@ -385,7 +385,7 @@ pub async fn update_action(
                     .one(&state.web_db)
                     .await?;
                 match integration {
-                    Some(r) if r.kind == i16::from(IntegrationKind::Outbound) => {}
+                    Some(r) if r.kind == IntegrationKind::Outbound => {}
                     Some(_) => {
                         return Err(WebError::unprocessable_entity(
                             "integration is not an outbound integration",
@@ -536,7 +536,7 @@ pub async fn test_action(
         .await?
         .or_not_found("Action")?;
 
-    let action_type = ActionType::from_i16(action.action_type).unwrap_or(ActionType::SendMail);
+    let action_type = action.action_type;
 
     // Forge-integration actions can't be test-fired against a synthetic commit
     // (the forge rejects the placeholder owner/repo/sha); probe the
@@ -609,7 +609,7 @@ pub async fn regenerate_token(
         .await?
         .or_not_found("Action")?;
 
-    if ActionType::from_i16(existing.action_type) != Some(ActionType::SendWebRequest) {
+    if existing.action_type != ActionType::SendWebRequest {
         return Err(WebError::unprocessable_entity(
             "regenerate-token is only valid for send_web_request actions",
         ));

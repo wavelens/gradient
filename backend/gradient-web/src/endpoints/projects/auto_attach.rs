@@ -58,9 +58,7 @@ fn infer_forge(host: &str, integrations: &[MIntegration]) -> Option<ForgeType> {
     public_forge_for_host(host).or_else(|| {
         integrations.iter().find_map(|i| {
             let endpoint = i.endpoint_url.as_deref()?;
-            (url_host(endpoint).as_deref() == Some(host))
-                .then(|| ForgeType::try_from(i.forge_type).ok())
-                .flatten()
+            (url_host(endpoint).as_deref() == Some(host)).then_some(i.forge_type)
         })
     })
 }
@@ -72,7 +70,7 @@ fn integration_matches(i: &MIntegration, host: &str, inferred: Option<ForgeType>
         return url_host(endpoint).as_deref() == Some(host);
     }
 
-    inferred.is_some_and(|f| i16::from(f) == i.forge_type)
+    inferred.is_some_and(|f| f == i.forge_type)
 }
 
 /// The single integration of `kind` matching the repo, or `None` when zero or
@@ -85,7 +83,7 @@ fn pick_one(
 ) -> Option<MIntegration> {
     let mut matched = integrations
         .iter()
-        .filter(|i| i.kind == i16::from(kind) && integration_matches(i, host, inferred));
+        .filter(|i| i.kind == kind && integration_matches(i, host, inferred));
     let first = matched.next()?;
     matched.next().is_none().then(|| first.clone())
 }
@@ -122,7 +120,7 @@ pub(super) async fn apply<C: ConnectionTrait>(
         MProjectTrigger {
             id: ProjectTriggerId::now_v7(),
             project: project.id,
-            trigger_type: i16::from(TriggerType::ReporterPush),
+            trigger_type: TriggerType::ReporterPush,
             config: cfg.to_db_json(),
             active: true,
             created_at: now,
@@ -142,7 +140,7 @@ pub(super) async fn apply<C: ConnectionTrait>(
             id: ProjectActionId::now_v7(),
             project: project.id,
             name: "Report status to forge".into(),
-            action_type: cfg.action_type().to_i16(),
+            action_type: cfg.action_type(),
             config: serde_json::to_value(&cfg).unwrap_or_default(),
             events: serde_json::json!([]),
             active: true,
@@ -165,8 +163,8 @@ mod tests {
 
     fn integ(kind: IntegrationKind, forge: ForgeType, endpoint: Option<&str>) -> MIntegration {
         MIntegration {
-            kind: i16::from(kind),
-            forge_type: i16::from(forge),
+            kind,
+            forge_type: forge,
             endpoint_url: endpoint.map(str::to_string),
             ..Default::default()
         }

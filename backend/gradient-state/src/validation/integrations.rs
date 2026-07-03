@@ -5,6 +5,16 @@
  */
 
 use super::helpers::{EntityLookup, ErrorCollector};
+use gradient_ci::integration_lookup::IntegrationKind;
+use gradient_types::forge::ForgeType;
+
+fn parse_integration_kind(s: &str) -> Option<IntegrationKind> {
+    match s {
+        "inbound" => Some(IntegrationKind::Inbound),
+        "outbound" => Some(IntegrationKind::Outbound),
+        _ => None,
+    }
+}
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     for integration in lookup.config.integrations.values() {
@@ -20,7 +30,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 format!("User '{}' does not exist", integration.created_by),
             );
         }
-        if !matches!(integration.kind.as_str(), "inbound" | "outbound") {
+        if parse_integration_kind(&integration.kind).is_none() {
             errors.push(
                 format!("integrations.{}.kind", integration.name),
                 format!(
@@ -29,10 +39,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 ),
             );
         }
-        if !matches!(
-            integration.forge_type.as_str(),
-            "gitea" | "forgejo" | "gitlab" | "github"
-        ) {
+        if ForgeType::from_path_segment(&integration.forge_type).is_none() {
             errors.push(
                 format!("integrations.{}.forge_type", integration.name),
                 format!(

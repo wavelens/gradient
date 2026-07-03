@@ -17,6 +17,7 @@ use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
+use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
 use gradient_core::ServerState;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, Value};
@@ -70,16 +71,6 @@ pub struct MetricPoint {
     pub avg: f64,
 }
 
-fn granularity_code(g: Option<&str>) -> i16 {
-    match g {
-        Some("minute") => 0,
-        Some("hour") => 1,
-        Some("week") => 3,
-        Some("day") | None => 2,
-        _ => 2,
-    }
-}
-
 pub async fn get_metrics_query(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -89,7 +80,7 @@ pub async fn get_metrics_query(
         return Err(WebError::not_found("Metric"));
     }
 
-    let gran = granularity_code(params.granularity.as_deref());
+    let gran = RollupGranularity::from_query_param(params.granularity.as_deref());
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
     // org filter: an explicit org must be inside the caller's scope.
@@ -119,7 +110,8 @@ pub async fn get_metrics_query(
          FROM metric_rollup WHERE metric = $1 AND granularity = $2",
     );
 
-    let mut values: Vec<Value> = vec![Value::from(params.metric.clone()), Value::from(gran)];
+    let mut values: Vec<Value> =
+        vec![Value::from(params.metric.clone()), Value::from(i16::from(gran))];
     if let Some(orgs) = &org_filter {
         // DB-sourced UUID strings, safe to inline as a quoted IN list.
         let list = orgs

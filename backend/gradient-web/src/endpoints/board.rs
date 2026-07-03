@@ -82,7 +82,7 @@ pub async fn get_pending_jobs(
     for j in snapshot {
         if scope.allows(&Uuid::from(j.organization)) {
             jobs.push(PendingJobSummary {
-                kind: j.kind,
+                kind: i16::from(j.kind),
                 organization: j.organization.into(),
                 evaluation_id: j.evaluation_id.into(),
                 build_id: j.derivation_build.map(Into::into),
@@ -145,7 +145,7 @@ pub async fn get_dispatched_jobs(
 
             jobs.push(DispatchedJobSummary {
                 id: j.id.into(),
-                kind: j.kind,
+                kind: i16::from(j.kind),
                 organization: j.organization.into(),
                 worker_id: j.worker_id,
                 score: j.score,
@@ -364,7 +364,7 @@ pub async fn get_dispatched_job(
 
     Ok(ok_json(DispatchedJobDetail {
         id: j.id.into(),
-        kind: j.kind,
+        kind: i16::from(j.kind),
         organization: j.organization.into(),
         organization_name,
         worker_id: j.worker_id,

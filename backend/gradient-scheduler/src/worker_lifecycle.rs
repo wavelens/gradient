@@ -41,7 +41,7 @@ pub(crate) async fn record_worker_sample(
         network_speed_mbps: info.network_speed_mbps,
         assigned_jobs: info.assigned_job_count as i32,
         max_concurrent_builds: info.max_concurrent_builds as i32,
-        state: i16::from(info.draining),
+        state: info.draining.into(),
         capabilities: serde_json::to_value(&info.capabilities).unwrap_or(serde_json::Value::Null),
     }
     .into_active_model();

@@ -5,10 +5,41 @@
  */
 
 use chrono::NaiveDateTime;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ProjectActionId, ProjectId, UserId};
+
+/// What an action does when its trigger events fire. Tags the polymorphic
+/// `config` jsonb column.
+#[repr(i16)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
+#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
+pub enum ActionType {
+    #[default]
+    #[sea_orm(num_value = 0)]
+    SendMail = 0,
+    #[sea_orm(num_value = 1)]
+    SendWebRequest = 1,
+    #[sea_orm(num_value = 2)]
+    ForgeStatusReport = 2,
+    #[sea_orm(num_value = 3)]
+    OpenPr = 3,
+}
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "project_action")]
@@ -17,10 +48,9 @@ pub struct Model {
     pub id: ProjectActionId,
     pub project: ProjectId,
     pub name: String,
-    /// Discriminant matching `ActionType` enum: 0 = webhook, 1 = email.
-    pub action_type: i16,
-    pub config: serde_json::Value,
-    pub events: serde_json::Value,
+    pub action_type: ActionType,
+    pub config: Json,
+    pub events: Json,
     pub active: bool,
     pub last_fired_at: Option<NaiveDateTime>,
     pub created_by: UserId,

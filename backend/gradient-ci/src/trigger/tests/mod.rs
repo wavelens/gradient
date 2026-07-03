@@ -316,7 +316,7 @@ fn open_pr_action(project_id: ProjectId) -> MProjectAction {
         id: ProjectActionId::now_v7(),
         project: project_id,
         name: "updater".into(),
-        action_type: ActionType::OpenPr.to_i16(),
+        action_type: ActionType::OpenPr,
         config: serde_json::to_value(ActionConfig::OpenPr {
             integration_id: IntegrationId::now_v7(),
             generator: PatchGeneratorKind::FlakeLock,

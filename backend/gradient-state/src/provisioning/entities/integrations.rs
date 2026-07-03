@@ -104,7 +104,7 @@ impl<'a> StateApplicator<'a> {
 
             let existing = integration::Entity::find()
                 .filter(integration::Column::Organization.eq(org_id))
-                .filter(integration::Column::Kind.eq(i16::from(kind)))
+                .filter(integration::Column::Kind.eq(kind))
                 .filter(integration::Column::Name.eq(&state_int.name))
                 .one(self.db)
                 .await?;
@@ -117,7 +117,7 @@ impl<'a> StateApplicator<'a> {
             if let Some(existing) = existing {
                 let mut active: integration::ActiveModel = existing.into();
                 active.display_name = Set(display_name);
-                active.forge_type = Set(i16::from(forge));
+                active.forge_type = Set(forge);
                 active.endpoint_url = Set(endpoint);
                 active.secret = Set(encrypted_secret);
                 active.access_token = Set(encrypted_token);
@@ -131,8 +131,8 @@ impl<'a> StateApplicator<'a> {
                     organization: org_id,
                     name: state_int.name.clone(),
                     display_name,
-                    kind: i16::from(kind),
-                    forge_type: i16::from(forge),
+                    kind,
+                    forge_type: forge,
                     secret: encrypted_secret,
                     endpoint_url: endpoint,
                     access_token: encrypted_token,

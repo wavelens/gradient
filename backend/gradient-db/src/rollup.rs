@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+use gradient_entity::metric_rollup::RollupGranularity;
 use sea_orm::ConnectionTrait;
 use tracing::{debug, warn};
 
@@ -110,20 +111,21 @@ fn eval_counts() -> Vec<EvalCount> {
     ]
 }
 
-/// (target_granularity, source_granularity, date_trunc unit, trailing window).
-const CASCADES: &[(i16, i16, &str, &str)] = &[
-    (1, 0, "hour", "3 hours"),
-    (2, 1, "day", "2 days"),
-    (3, 2, "week", "2 weeks"),
+/// (target granularity, source granularity, trailing window).
+const CASCADES: &[(RollupGranularity, RollupGranularity, &str)] = &[
+    (RollupGranularity::Hour, RollupGranularity::Minute, "3 hours"),
+    (RollupGranularity::Day, RollupGranularity::Hour, "2 days"),
+    (RollupGranularity::Week, RollupGranularity::Day, "2 weeks"),
 ];
 
 const MINUTE_WINDOW: &str = "15 minutes";
 
 /// Cache traffic per minute per cache (scope `{cache}`): `count` = requests,
 /// `sum` = bytes served. Source is the already-minute-bucketed `cache_metric`.
-const CACHE_TRAFFIC_SQL: &str = "INSERT INTO metric_rollup \
+fn cache_traffic_sql() -> String {
+    format!("INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-    SELECT uuidv7(), 'cache.bytes_sent', 0, cm.bucket_time, \
+    SELECT uuidv7(), 'cache.bytes_sent', {minute}, cm.bucket_time, \
            jsonb_build_object('cache', cm.cache::text), hashtextextended(cm.cache::text, 0), \
            sum(cm.nar_count)::bigint, sum(cm.bytes_sent), \
            min(cm.bytes_sent), max(cm.bytes_sent), sum(power(cm.bytes_sent, 2)), NULL \
@@ -132,57 +134,76 @@ const CACHE_TRAFFIC_SQL: &str = "INSERT INTO metric_rollup \
     GROUP BY cm.bucket_time, cm.cache \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
     DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum, \
-                  min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq";
+                  min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
+        minute = i16::from(RollupGranularity::Minute)
+    )
+}
 
 /// Cache storage added per minute per cache (scope `{cache}`): `count` =
 /// packages added, `sum` = compressed bytes added.
-const CACHE_STORAGE_SQL: &str = "INSERT INTO metric_rollup \
+fn cache_storage_sql() -> String {
+    format!("INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-    SELECT uuidv7(), 'cache.bytes_added', 0, date_trunc('minute', cps.created_at), \
+    SELECT uuidv7(), 'cache.bytes_added', {minute}, date_trunc('minute', cps.created_at), \
            jsonb_build_object('cache', cps.cache::text), hashtextextended(cps.cache::text, 0), \
            count(*)::bigint, sum(coalesce(cp.file_size, 0)), 0, 0, 0, NULL \
     FROM cached_path_signature cps JOIN cached_path cp ON cp.id = cps.cached_path \
     WHERE cps.created_at >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
     GROUP BY date_trunc('minute', cps.created_at), cps.cache \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum";
+    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
+        minute = i16::from(RollupGranularity::Minute)
+    )
+}
 
 /// Upstream narinfo latency per minute per upstream (scope `{upstream}`):
 /// `count` = completed requests, `sum` = summed latency ms (avg = sum/count).
-const UPSTREAM_LATENCY_SQL: &str = "INSERT INTO metric_rollup \
+fn upstream_latency_sql() -> String {
+    format!("INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-    SELECT uuidv7(), 'upstream.latency_ms', 0, um.bucket_time, \
+    SELECT uuidv7(), 'upstream.latency_ms', {minute}, um.bucket_time, \
            jsonb_build_object('upstream', um.upstream::text), hashtextextended(um.upstream::text, 0), \
            sum(um.request_count)::bigint, sum(um.latency_ms_sum), 0, 0, 0, NULL \
     FROM upstream_metric um \
     WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
     GROUP BY um.bucket_time, um.upstream \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum";
+    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
+        minute = i16::from(RollupGranularity::Minute)
+    )
+}
 
 /// Upstream narinfo hits per minute per upstream (scope `{upstream}`).
-const UPSTREAM_HITS_SQL: &str = "INSERT INTO metric_rollup \
+fn upstream_hits_sql() -> String {
+    format!("INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-    SELECT uuidv7(), 'upstream.narinfo_hits', 0, um.bucket_time, \
+    SELECT uuidv7(), 'upstream.narinfo_hits', {minute}, um.bucket_time, \
            jsonb_build_object('upstream', um.upstream::text), hashtextextended(um.upstream::text, 0), \
            sum(um.request_count)::bigint, sum(um.narinfo_hits), 0, 0, 0, NULL \
     FROM upstream_metric um \
     WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
     GROUP BY um.bucket_time, um.upstream \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum";
+    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
+        minute = i16::from(RollupGranularity::Minute)
+    )
+}
 
 /// Upstream narinfo misses per minute per upstream (scope `{upstream}`).
-const UPSTREAM_MISSES_SQL: &str = "INSERT INTO metric_rollup \
+fn upstream_misses_sql() -> String {
+    format!("INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
-    SELECT uuidv7(), 'upstream.narinfo_misses', 0, um.bucket_time, \
+    SELECT uuidv7(), 'upstream.narinfo_misses', {minute}, um.bucket_time, \
            jsonb_build_object('upstream', um.upstream::text), hashtextextended(um.upstream::text, 0), \
            sum(um.request_count)::bigint, sum(um.narinfo_misses), 0, 0, 0, NULL \
     FROM upstream_metric um \
     WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
     GROUP BY um.bucket_time, um.upstream \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum";
+    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
+        minute = i16::from(RollupGranularity::Minute)
+    )
+}
 
 pub fn start_rollup_loop(ctx: DbContext) {
     let shutdown = ctx.shutdown.clone();
@@ -222,30 +243,30 @@ async fn run_rollup(ctx: &DbContext) {
         }
     }
 
-    if let Err(e) = db.execute_unprepared(CACHE_TRAFFIC_SQL).await {
+    if let Err(e) = db.execute_unprepared(&cache_traffic_sql()).await {
         warn!(error = %e, "rollup cache-traffic failed");
     }
 
-    if let Err(e) = db.execute_unprepared(CACHE_STORAGE_SQL).await {
+    if let Err(e) = db.execute_unprepared(&cache_storage_sql()).await {
         warn!(error = %e, "rollup cache-storage failed");
     }
 
     for (sql, label) in [
-        (UPSTREAM_LATENCY_SQL, "upstream.latency_ms"),
-        (UPSTREAM_HITS_SQL, "upstream.narinfo_hits"),
-        (UPSTREAM_MISSES_SQL, "upstream.narinfo_misses"),
+        (upstream_latency_sql(), "upstream.latency_ms"),
+        (upstream_hits_sql(), "upstream.narinfo_hits"),
+        (upstream_misses_sql(), "upstream.narinfo_misses"),
     ] {
-        if let Err(e) = db.execute_unprepared(sql).await {
+        if let Err(e) = db.execute_unprepared(&sql).await {
             warn!(metric = label, error = %e, "rollup upstream metric failed");
         }
     }
 
-    for (target, source, unit, window) in CASCADES {
+    for (target, source, window) in CASCADES {
         if let Err(e) = db
-            .execute_unprepared(&cascade_sql(*target, *source, unit, window))
+            .execute_unprepared(&cascade_sql(*target, *source, window))
             .await
         {
-            warn!(target, error = %e, "rollup cascade failed");
+            warn!(target = target.trunc_unit(), error = %e, "rollup cascade failed");
         }
     }
 
@@ -364,7 +385,10 @@ fn eval_count_sql(m: &EvalCount) -> String {
     )
 }
 
-fn cascade_sql(target: i16, source: i16, unit: &str, window: &str) -> String {
+fn cascade_sql(target: RollupGranularity, source: RollupGranularity, window: &str) -> String {
+    let unit = target.trunc_unit();
+    let target = i16::from(target);
+    let source = i16::from(source);
     format!(
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
