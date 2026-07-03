@@ -15,22 +15,18 @@
 //! (`Miss` / `Skip`) rather than tearing down the connection.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
+use gradient_core::ServerState;
 use gradient_entity::eval_cache_store;
 use gradient_types::ids::EvalCacheStoreId;
 use gradient_types::proto::{EvalCachePullOutcome, EvalCachePushMode};
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, warn};
 
 use super::socket::{NAR_PUSH_CHUNK_SIZE, ProtoWriter, send_server_msg};
-use crate::messages::ServerMessage;
-
-/// Presigned-URL / inline-stream validity window. Matches the NAR cache TTL.
-const PRESIGN_TTL: Duration = Duration::from_secs(3600);
+use crate::messages::{PRESIGN_TTL, ServerMessage};
 
 /// Storage key for a fingerprint's eval-cache blob. Kept here (not just in
 /// `NarStore`) so the convention is visible at the call site and unit-testable.
@@ -115,7 +111,8 @@ impl EvalCacheReceiveStore {
     }
 
     fn open(&mut self, fingerprint: &str) {
-        self.active.insert(fingerprint.to_owned(), StagedBlob::default());
+        self.active
+            .insert(fingerprint.to_owned(), StagedBlob::default());
     }
 
     /// Append a contiguous chunk for `fingerprint`. Returns `false` (and drops
@@ -180,9 +177,7 @@ pub(super) async fn handle_eval_cache_pull(
     )
     .await;
 
-    if inline
-        && let Err(e) = stream_blob_inline(state, writer, &job_id, &key).await
-    {
+    if inline && let Err(e) = stream_blob_inline(state, writer, &job_id, &key).await {
         warn!(%fingerprint, error = %e, "inline eval-cache stream failed");
     }
 }
@@ -219,11 +214,7 @@ pub(super) async fn handle_eval_cache_push(
         eval_cache.open(&fingerprint);
     }
 
-    let _ = send_server_msg(
-        writer,
-        &ServerMessage::EvalCachePushGrant { job_id, mode },
-    )
-    .await;
+    let _ = send_server_msg(writer, &ServerMessage::EvalCachePushGrant { job_id, mode }).await;
 }
 
 /// `EvalCacheChunk` (worker→server, inline push body): stage the chunk and, on
@@ -343,7 +334,9 @@ async fn stream_blob_inline(
     let fingerprint = key.strip_prefix("eval-cache/").unwrap_or(key);
     let Some((_size, mut stream)) = state.nar_storage.get_eval_cache_stream(fingerprint).await?
     else {
-        return Err(anyhow::anyhow!("eval-cache blob {key} vanished before stream"));
+        return Err(anyhow::anyhow!(
+            "eval-cache blob {key} vanished before stream"
+        ));
     };
 
     let mut buf: Vec<u8> = Vec::with_capacity(NAR_PUSH_CHUNK_SIZE);
@@ -371,7 +364,9 @@ async fn stream_blob_inline(
                 .await
                 .is_err()
                 {
-                    return Err(anyhow::anyhow!("eval-cache send stalled at offset {offset}"));
+                    return Err(anyhow::anyhow!(
+                        "eval-cache send stalled at offset {offset}"
+                    ));
                 }
 
                 offset += len;
@@ -560,6 +555,9 @@ mod tests {
         s.open("fp");
         assert_eq!(fingerprint_for_chunk(&s).as_deref(), Some("fp"));
         s.open("fp2");
-        assert!(fingerprint_for_chunk(&s).is_none(), "ambiguous when 2 active");
+        assert!(
+            fingerprint_for_chunk(&s).is_none(),
+            "ambiguous when 2 active"
+        );
     }
 }

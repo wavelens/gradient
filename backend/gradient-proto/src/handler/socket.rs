@@ -16,9 +16,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
+use gradient_core::ServerState;
 use gradient_types::ids::OrganizationId;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::EntityTrait;
 use tracing::{debug, error, warn};
 
@@ -91,8 +91,11 @@ pub(super) async fn serve_nar_request(
     };
 
     let open = |offset: u64| async move {
-        tokio::time::timeout(storage_open_timeout, state.nar_storage.get_stream_from(hash, offset))
-            .await
+        tokio::time::timeout(
+            storage_open_timeout,
+            state.nar_storage.get_stream_from(hash, offset),
+        )
+        .await
     };
 
     let (size, mut stream) = match open(resume_from).await {
@@ -286,7 +289,9 @@ async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path
             %store_path,
             "self-heal: NAR missing from storage; cached_path demoted so the path will be rebuilt"
         ),
-        Err(e) => warn!(%hash, %store_path, error = %e, "self-heal: failed to demote cached output"),
+        Err(e) => {
+            warn!(%hash, %store_path, error = %e, "self-heal: failed to demote cached output")
+        }
     }
 }
 
@@ -374,8 +379,8 @@ async fn send_ssh_key_credential(
 mod serve_nar_tests {
     use super::*;
     use crate::messages::decode_server_message;
-    use sea_orm::{DatabaseBackend, MockDatabase};
     use gradient_test_support::state::test_state;
+    use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::sync::mpsc;
 
     /// Spy writer: records every message the server attempted to send so the
@@ -387,6 +392,7 @@ mod serve_nar_tests {
             ProtoWriter {
                 tx,
                 send_chunk_timeout: timeout,
+                _direction: std::marker::PhantomData,
             },
             rx,
         )
@@ -394,16 +400,6 @@ mod serve_nar_tests {
 
     fn decode(bytes: &[u8]) -> ServerMessage {
         decode_server_message(bytes).expect("decode ServerMessage")
-    }
-
-    fn variant_of(msg: &ServerMessage) -> &'static str {
-        match msg {
-            ServerMessage::NarStreamHeader { .. } => "NarStreamHeader",
-            ServerMessage::NarPush { .. } => "NarPush",
-            ServerMessage::NarUnavailable { .. } => "NarUnavailable",
-            ServerMessage::NarAbort { .. } => "NarAbort",
-            _ => "other",
-        }
     }
 
     /// Streamed payload arrives as one or more `NarPush` frames whose
@@ -444,7 +440,7 @@ mod serve_nar_tests {
                     }
                     nar_push_frames += 1;
                 }
-                other => panic!("unexpected frame: {}", variant_of(&other)),
+                other => panic!("unexpected frame: {}", other.variant_name()),
             }
         }
         assert!(saw_header, "a NarStreamHeader must precede the chunks");
@@ -480,7 +476,7 @@ mod serve_nar_tests {
 
         let bytes = rx.try_recv().expect("expect one frame");
         let msg = decode(&bytes);
-        assert_eq!(variant_of(&msg), "NarUnavailable");
+        assert_eq!(msg.variant_name(), "NarUnavailable");
         assert!(
             rx.try_recv().is_err(),
             "no further frames after NarUnavailable"

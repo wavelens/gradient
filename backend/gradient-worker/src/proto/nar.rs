@@ -6,23 +6,22 @@
 
 //! NAR transfer - send built store paths to the server.
 //!
-//! Two modes depending on server configuration:
+//! Two modes, both driven by the worker rather than a server-pushed message:
 //! - **Direct**: chunked [`ClientMessage::NarPush`] frames over the WebSocket
 //!   (zstd-compressed, 4 MiB chunks).  Initiated by the worker after a build;
-//!   this mirrors [`crate::executor::compress`] but is triggered by a server
-//!   `PresignedUpload` message that includes no URL (direct mode sentinel).
-//! - **S3**: server sends a [`ServerMessage::PresignedUpload`] with a URL;
-//!   worker compresses the NAR, HTTP-PUTs it to S3, then confirms with
-//!   [`ClientMessage::NarUploaded`].
+//!   this mirrors [`crate::executor::compress`].
+//! - **S3**: the presigned PUT URL arrives on the `CacheQuery{Push}` reply's
+//!   `CachedPath.url`; the worker compresses the NAR, HTTP-PUTs it to S3, then
+//!   confirms with [`ClientMessage::NarUploaded`].
 
 use std::io::Write as _;
 
 use anyhow::{Context, Result};
 use futures::StreamExt;
+use gradient_proto::messages::{ClientMessage, NAR_ZSTD_LEVEL};
 use gradient_util::nix_hash::nix32_encode;
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
-use gradient_proto::messages::ClientMessage;
 use sha2::{Digest, Sha256};
 use tracing::{debug, warn};
 
@@ -190,7 +189,7 @@ pub async fn push_direct(
     // the server already holds, so a reconnect re-sends only the tail. The
     // stream token guards against a non-identical regenerated prefix; on
     // mismatch the server replies 0 and we restart from the beginning.
-    let token = push_stream_token(6);
+    let token = push_stream_token(NAR_ZSTD_LEVEL);
     let gate = nar_recv.register_push(job_id, store_path);
     writer.send(ClientMessage::NarStreamHeader {
         job_id: job_id.to_owned(),
@@ -201,8 +200,9 @@ pub async fn push_direct(
     let resume_from = gate.await_resume().await;
 
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
-    let mut encoder = zstd::stream::Encoder::new(Vec::with_capacity(NAR_CHUNK_SIZE * 2), 6)
-        .context("failed to create zstd encoder")?;
+    let mut encoder =
+        zstd::stream::Encoder::new(Vec::with_capacity(NAR_CHUNK_SIZE * 2), NAR_ZSTD_LEVEL)
+            .context("failed to create zstd encoder")?;
     let mut file_hasher = Sha256::new();
     let mut nar_hasher = Sha256::new();
     let mut produced: u64 = 0;
@@ -297,17 +297,21 @@ pub struct CompressedNarMeta {
     pub nar_size: u64,
 }
 
-/// Zstd-compress a raw in-memory NAR at level 6 and return the compressed bytes
-/// plus their [`CompressedNarMeta`] (`file_*` describe the compressed object,
-/// `nar_*` the uncompressed NAR). Shared by the presigned and direct relay
-/// paths so a substituted output is stored identically over either transport.
+/// Zstd-compress a raw in-memory NAR at [`NAR_ZSTD_LEVEL`] and return the
+/// compressed bytes plus their [`CompressedNarMeta`] (`file_*` describe the
+/// compressed object, `nar_*` the uncompressed NAR). Shared by the presigned
+/// and direct relay paths so a substituted output is stored identically over
+/// either transport.
 pub fn compress_nar(raw_nar: &[u8]) -> Result<(Vec<u8>, CompressedNarMeta)> {
     let nar_size = raw_nar.len() as u64;
     let nar_hash = format!("sha256:{}", nix32_encode(&Sha256::digest(raw_nar)));
 
-    let mut encoder = zstd::stream::Encoder::new(Vec::with_capacity(raw_nar.len() / 2), 6)
-        .context("failed to create zstd encoder")?;
-    encoder.write_all(raw_nar).context("zstd compression failed")?;
+    let mut encoder =
+        zstd::stream::Encoder::new(Vec::with_capacity(raw_nar.len() / 2), NAR_ZSTD_LEVEL)
+            .context("failed to create zstd encoder")?;
+    encoder
+        .write_all(raw_nar)
+        .context("zstd compression failed")?;
     let compressed = encoder.finish().context("failed to finish zstd encoder")?;
 
     let file_size = compressed.len() as u64;
@@ -405,9 +409,13 @@ pub async fn push_compressed_direct(
 ) -> Result<()> {
     let store_path = nix_store_path(store_path);
     let store_path = store_path.as_str();
-    debug!(store_path, bytes = compressed.len(), "compressed NAR direct push");
+    debug!(
+        store_path,
+        bytes = compressed.len(),
+        "compressed NAR direct push"
+    );
 
-    let token = push_stream_token(6);
+    let token = push_stream_token(NAR_ZSTD_LEVEL);
     let gate = nar_recv.register_push(job_id, store_path);
     writer.send(ClientMessage::NarStreamHeader {
         job_id: job_id.to_owned(),
@@ -486,8 +494,8 @@ pub async fn upload_presigned(
 
     // --- 1. Pack + compress the NAR into memory ---
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
-    let mut encoder =
-        zstd::stream::Encoder::new(Vec::new(), 6).context("failed to create zstd encoder")?;
+    let mut encoder = zstd::stream::Encoder::new(Vec::new(), NAR_ZSTD_LEVEL)
+        .context("failed to create zstd encoder")?;
     let mut nar_hasher = Sha256::new();
     let mut nar_size: u64 = 0;
 
@@ -630,9 +638,8 @@ mod tests {
         let recv = NarReceiver::new();
         let recv2 = recv.clone();
         let sp = store_path_str.clone();
-        let push = tokio::spawn(async move {
-            push_direct("job-123", &sp, &writer, &recv2, None).await
-        });
+        let push =
+            tokio::spawn(async move { push_direct("job-123", &sp, &writer, &recv2, None).await });
         // Stand in for the server's NarPushResume: a fresh upload from 0.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         recv.resolve_push("job-123", &store_path_str, 0);
@@ -677,9 +684,8 @@ mod tests {
         let recv = NarReceiver::new();
         let recv2 = recv.clone();
         let sp = store_path_str.clone();
-        let push = tokio::spawn(async move {
-            push_direct("job-123", &sp, &writer, &recv2, None).await
-        });
+        let push =
+            tokio::spawn(async move { push_direct("job-123", &sp, &writer, &recv2, None).await });
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         recv.resolve_push("job-123", &store_path_str, 0);
         push.await.unwrap().unwrap();
@@ -826,9 +832,15 @@ mod tests {
         let (writer, _reader) = conn.split();
 
         let recv = NarReceiver::new();
-        let err = push_direct("job-meta-fail", &store_path_str, &writer, &recv, Some(&store))
-            .await
-            .expect_err("push_direct must fail when gather_path_meta returns None");
+        let err = push_direct(
+            "job-meta-fail",
+            &store_path_str,
+            &writer,
+            &recv,
+            Some(&store),
+        )
+        .await
+        .expect_err("push_direct must fail when gather_path_meta returns None");
         assert!(
             err.to_string().contains("path metadata"),
             "error should explain the abort reason, got: {err}"
@@ -916,12 +928,18 @@ mod tests {
                         references,
                         ..
                     } => {
-                        assert_eq!(data, expected_bytes, "streamed bytes must reconstruct the compressed NAR");
+                        assert_eq!(
+                            data, expected_bytes,
+                            "streamed bytes must reconstruct the compressed NAR"
+                        );
                         assert_eq!(sp, store_path);
                         assert_eq!(file_hash, expected_file_hash);
                         assert_eq!(file_size, expected_bytes.len() as u64);
                         assert_eq!(nar_size, raw.len() as u64);
-                        assert_eq!(references, vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()]);
+                        assert_eq!(
+                            references,
+                            vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()]
+                        );
                         break;
                     }
                     msg => panic!("unexpected {msg:?}"),
@@ -929,7 +947,9 @@ mod tests {
             }
         });
 
-        let conn = crate::connection::ProtoConnection::open(&url).await.unwrap();
+        let conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
         let (writer, _reader) = conn.split();
         let recv = NarReceiver::new();
         let recv2 = recv.clone();

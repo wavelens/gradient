@@ -11,14 +11,13 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use gradient_proto::messages::{
-    BuildMetrics, BuildOutput, CachedPath, ClientMessage, DiscoveredDerivation,
-    EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel, EvalStatsReport, JobUpdateKind,
-    QueryMode,
+    BuildMetrics, BuildOutput, CACHE_QUERY_TIMEOUT, CachedPath, ClientMessage,
+    DiscoveredDerivation, EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel,
+    EvalStatsReport, JobUpdateKind, QueryMode,
 };
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -41,13 +40,6 @@ pub(crate) type CacheWaiters =
 /// Shared map from job-id to a oneshot sender that delivers `KnownDerivations`
 /// responses back to the waiting job task.
 pub(crate) type KnownDerivationWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<Vec<String>>>>>;
-
-/// Backstop for how long a single `CacheQuery` waits for its reply. The server
-/// bounds its own handler well under this (see `CACHE_QUERY_BUDGET`) and replies
-/// `CacheError` rather than stalling, so this only fires on a genuinely lost
-/// message - kept well above the server budget + network margin, far below the
-/// old 120s so a dropped reply recovers (transient retry) quickly.
-const CACHE_QUERY_TIMEOUT: Duration = Duration::from_secs(75);
 
 /// Typed sender for reporting job progress back to the server.
 ///
@@ -196,7 +188,7 @@ impl JobUpdater {
     /// Send `NarRequest { paths }` and wait for every requested path to
     /// arrive via chunked `NarPush` frames. Returns the assembled (still
     /// zstd-compressed) NAR bytes per path in the order requested. Each path
-    /// has its own [`NAR_RECV_TIMEOUT`].
+    /// has its own [`gradient_proto::messages::TRANSFER_TIMEOUT`].
     ///
     /// All waiters are registered **before** the `NarRequest` goes on the
     /// wire so every server response (`NarPush` / `NarUnavailable` /

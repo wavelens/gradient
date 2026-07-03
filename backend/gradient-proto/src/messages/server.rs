@@ -76,12 +76,7 @@ pub enum ServerMessage {
     /// Assign a job to this worker.  Worker must respond with
     /// [`super::client::ClientMessage::AssignJobResponse`] before starting
     /// work.
-    AssignJob {
-        job_id: String,
-        job: Job,
-        /// Wall-clock limit in seconds.  `None` = no timeout.
-        timeout_secs: Option<u64>,
-    },
+    AssignJob { job_id: String, job: Job },
 
     /// Cancel an in-progress job.  Worker stops, cleans up, and responds
     /// with [`super::client::ClientMessage::JobFailed`].
@@ -169,23 +164,6 @@ pub enum ServerMessage {
         mode: EvalCachePushMode,
     },
 
-    /// Presigned S3 upload URL for a build output.  Worker uploads directly
-    /// then confirms with [`super::client::ClientMessage::NarUploaded`].
-    PresignedUpload {
-        job_id: String,
-        store_path: String,
-        url: String,
-        method: String,
-        headers: Vec<(String, String)>,
-    },
-
-    /// Presigned S3 download URL for a required store path.
-    PresignedDownload {
-        job_id: String,
-        store_path: String,
-        url: String,
-    },
-
     /// Ask a newly connected worker to send its full candidate score set.
     /// Sent once by the server during the initial handshake completion so it
     /// can populate its in-memory score table.  After startup all score
@@ -214,4 +192,38 @@ pub enum ServerMessage {
     /// uncached: the worker must treat this as a retryable transport failure,
     /// never as "inputs missing", so a server-side hiccup cannot poison a build.
     CacheError { job_id: String, message: String },
+}
+
+impl ServerMessage {
+    /// Static name of the variant. Used for log messages where dumping the
+    /// full Debug-formatted message would be unsafe (e.g. `NarPush` carries
+    /// megabytes of binary chunk data).
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            ServerMessage::AuthChallenge { .. } => "AuthChallenge",
+            ServerMessage::InitAck { .. } => "InitAck",
+            ServerMessage::AuthUpdate { .. } => "AuthUpdate",
+            ServerMessage::Reject { .. } => "Reject",
+            ServerMessage::Error { .. } => "Error",
+            ServerMessage::Draining => "Draining",
+            ServerMessage::JobListChunk { .. } => "JobListChunk",
+            ServerMessage::JobOffer { .. } => "JobOffer",
+            ServerMessage::RevokeJob { .. } => "RevokeJob",
+            ServerMessage::AssignJob { .. } => "AssignJob",
+            ServerMessage::AbortJob { .. } => "AbortJob",
+            ServerMessage::Credential { .. } => "Credential",
+            ServerMessage::NarPush { .. } => "NarPush",
+            ServerMessage::NarUnavailable { .. } => "NarUnavailable",
+            ServerMessage::NarAbort { .. } => "NarAbort",
+            ServerMessage::NarStreamHeader { .. } => "NarStreamHeader",
+            ServerMessage::NarPushResume { .. } => "NarPushResume",
+            ServerMessage::EvalCachePullResult { .. } => "EvalCachePullResult",
+            ServerMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
+            ServerMessage::EvalCachePushGrant { .. } => "EvalCachePushGrant",
+            ServerMessage::RequestAllScores => "RequestAllScores",
+            ServerMessage::CacheStatus { .. } => "CacheStatus",
+            ServerMessage::KnownDerivations { .. } => "KnownDerivations",
+            ServerMessage::CacheError { .. } => "CacheError",
+        }
+    }
 }

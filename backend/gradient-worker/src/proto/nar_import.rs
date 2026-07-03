@@ -33,6 +33,9 @@ use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_db::parse_drv;
 use gradient_exec::path_utils::nix_store_path;
+use gradient_proto::messages::{
+    BuildTask, CachedPath, EvalMessageLevel, QueryMode, TRANSFER_TIMEOUT,
+};
 use gradient_types::CachedPathInfo;
 use harmonia_protocol::valid_path_info::{UnkeyedValidPathInfo, ValidPathInfo};
 use harmonia_store_path::{StoreDir, StorePath};
@@ -40,17 +43,11 @@ use harmonia_store_remote::DaemonStore as _;
 use harmonia_utils_hash::fmt::Any;
 use harmonia_utils_hash::{Hash, HashView as _};
 use harmonia_utils_signature::Signature;
-use gradient_proto::messages::{BuildTask, CachedPath, EvalMessageLevel, QueryMode};
 use sha2::{Digest as _, Sha256};
 use tracing::{debug, error, warn};
 
 use crate::nix::store::LocalNixStore;
 use crate::proto::job::JobUpdater;
-
-/// Time budget for a single HTTP NAR download (presigned-URL path). Keep in
-/// the same ballpark as the WS `NarRequest` waiter timeout so the slowest
-/// import path is bounded the same way.
-const HTTP_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// How many missing inputs to download + import in parallel before invoking
 /// the build. Conservative - each one streams a NAR into the local daemon
@@ -118,7 +115,11 @@ pub struct SubstituteNotOnUpstream(pub String);
 
 impl std::fmt::Display for SubstituteNotOnUpstream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "substitute {}: not available on any upstream cache", self.0)
+        write!(
+            f,
+            "substitute {}: not available on any upstream cache",
+            self.0
+        )
     }
 }
 
@@ -148,16 +149,13 @@ type PresignedFetch = (String, Option<(Vec<u8>, CachedPath)>);
 /// claims the NAR but the bucket lost it - the `InputsUnavailable` self-heal
 /// demotes and rebuilds it, #410). Transport errors and retryable statuses are
 /// retried with exponential backoff before surfacing as a transient `Err`.
-async fn download_one_presigned(
-    http: &reqwest::Client,
-    cp: CachedPath,
-) -> Result<PresignedFetch> {
+async fn download_one_presigned(http: &reqwest::Client, cp: CachedPath) -> Result<PresignedFetch> {
     let url = cp.url.clone().expect("by_url entries have a URL");
     let path = cp.path.clone();
     let mut backoff = PRESIGNED_RETRY_BASE;
 
     for attempt in 1..=PRESIGNED_DOWNLOAD_MAX_ATTEMPTS {
-        let attempt_err = match http.get(&url).timeout(HTTP_DOWNLOAD_TIMEOUT).send().await {
+        let attempt_err = match http.get(&url).timeout(TRANSFER_TIMEOUT).send().await {
             Ok(resp) => {
                 let status = resp.status().as_u16();
                 if presigned_status_is_missing(status) {
@@ -860,10 +858,15 @@ pub async fn relay_external_cached_outputs(
         let (_, fetched) = download_one_presigned(http, upstream.clone())
             .await
             .with_context(|| format!("download upstream NAR for {path}"))?;
-        let (compressed, meta) = fetched
-            .ok_or_else(|| anyhow::anyhow!("upstream reported {path} but the NAR object is missing"))?;
+        let (compressed, meta) = fetched.ok_or_else(|| {
+            anyhow::anyhow!("upstream reported {path} but the NAR object is missing")
+        })?;
 
-        let kind = meta.url.as_deref().map(detect_compression).unwrap_or(Compression::Zstd);
+        let kind = meta
+            .url
+            .as_deref()
+            .map(detect_compression)
+            .unwrap_or(Compression::Zstd);
 
         // Upstream references arrive as full /nix/store paths; NarUploaded wants
         // hash-name tokens.
@@ -872,7 +875,11 @@ pub async fn relay_external_cached_outputs(
             .clone()
             .unwrap_or_default()
             .into_iter()
-            .map(|r| r.strip_prefix("/nix/store/").unwrap_or(r.as_str()).to_string())
+            .map(|r| {
+                r.strip_prefix("/nix/store/")
+                    .unwrap_or(r.as_str())
+                    .to_string()
+            })
             .collect();
 
         // Pure relay: the upstream NAR is already zstd with a window at our
@@ -880,14 +887,25 @@ pub async fn relay_external_cached_outputs(
         // bytes verbatim - no decompress, no recompress, no rehash.
         let verbatim = (kind == Compression::Zstd
             && zstd_window_size(&compressed).is_some_and(|w| w >= LEVEL6_WINDOW_BYTES))
-            .then(|| Some((meta.file_hash.clone()?, meta.nar_hash.clone()?, meta.nar_size?)))
-            .flatten();
+        .then(|| {
+            Some((
+                meta.file_hash.clone()?,
+                meta.nar_hash.clone()?,
+                meta.nar_size?,
+            ))
+        })
+        .flatten();
 
         let (bytes, cmeta) = if let Some((file_hash, nar_hash, nar_size)) = verbatim {
             let file_size = compressed.len() as u64;
             (
                 compressed,
-                crate::proto::nar::CompressedNarMeta { file_hash, file_size, nar_hash, nar_size },
+                crate::proto::nar::CompressedNarMeta {
+                    file_hash,
+                    file_size,
+                    nar_hash,
+                    nar_size,
+                },
             )
         } else {
             // Weaker/absent upstream compression: decompress (verifying against
@@ -909,30 +927,34 @@ pub async fn relay_external_cached_outputs(
         // Transport: S3-backed caches expose a presigned PUT URL; local-disk
         // caches return none and accept the bytes via direct NarPush frames.
         match push.get(path).and_then(|c| c.url.clone()) {
-            Some(put_url) => crate::proto::nar::upload_presigned_compressed(
-                &updater.job_id,
-                path,
-                &bytes,
-                cmeta,
-                references,
-                meta.deriver.clone(),
-                &put_url,
-                "PUT",
-                &[],
-                &updater.writer,
-            )
-            .await,
-            None => crate::proto::nar::push_compressed_direct(
-                &updater.job_id,
-                path,
-                &bytes,
-                cmeta,
-                references,
-                meta.deriver.clone(),
-                &updater.writer,
-                &updater.nar_recv,
-            )
-            .await,
+            Some(put_url) => {
+                crate::proto::nar::upload_presigned_compressed(
+                    &updater.job_id,
+                    path,
+                    &bytes,
+                    cmeta,
+                    references,
+                    meta.deriver.clone(),
+                    &put_url,
+                    "PUT",
+                    &[],
+                    &updater.writer,
+                )
+                .await
+            }
+            None => {
+                crate::proto::nar::push_compressed_direct(
+                    &updater.job_id,
+                    path,
+                    &bytes,
+                    cmeta,
+                    references,
+                    meta.deriver.clone(),
+                    &updater.writer,
+                    &updater.nar_recv,
+                )
+                .await
+            }
         }
         .with_context(|| format!("relay-push {path} into our cache"))?;
 
@@ -981,14 +1003,14 @@ impl<'a> NarImporter<'a> {
         if let Some(expected) = self.meta.nar_size
             && decompressed.len() as u64 != expected
         {
-            return Err(anyhow::Error::new(CorruptCachedNar(self.store_path.to_owned())).context(
-                format!(
+            return Err(
+                anyhow::Error::new(CorruptCachedNar(self.store_path.to_owned())).context(format!(
                     "NAR size mismatch for {}: expected {}, got {}",
                     self.store_path,
                     expected,
                     decompressed.len()
-                ),
-            ));
+                )),
+            );
         }
 
         Ok(())
@@ -1001,11 +1023,14 @@ impl<'a> NarImporter<'a> {
                 .with_context(|| format!("invalid nar_hash for {}", self.store_path))?;
 
             if actual_nar_hash != claimed {
-                return Err(anyhow::Error::new(CorruptCachedNar(self.store_path.to_owned()))
-                    .context(format!(
-                        "NAR hash mismatch for {}: server said {}, computed sha256:<...>",
-                        self.store_path, claimed_nar_hash
-                    )));
+                return Err(
+                    anyhow::Error::new(CorruptCachedNar(self.store_path.to_owned())).context(
+                        format!(
+                            "NAR hash mismatch for {}: server said {}, computed sha256:<...>",
+                            self.store_path, claimed_nar_hash
+                        ),
+                    ),
+                );
             }
         }
 
@@ -1824,7 +1849,10 @@ mod tests {
         // Genuine misses and terminal client errors must NOT retry: 404/410 are
         // handled as missing inputs, 403/400 are terminal.
         for s in [400, 403, 404, 410] {
-            assert!(!presigned_status_is_retryable(s), "status {s} must not retry");
+            assert!(
+                !presigned_status_is_retryable(s),
+                "status {s} must not retry"
+            );
         }
     }
 }

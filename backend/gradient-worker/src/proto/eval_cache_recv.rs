@@ -22,16 +22,11 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use anyhow::Result;
-use gradient_proto::messages::{EvalCachePullOutcome, EvalCachePushMode};
+use gradient_proto::messages::{EvalCachePullOutcome, EvalCachePushMode, TRANSFER_TIMEOUT};
 use tokio::sync::oneshot;
 use tracing::{debug, warn};
-
-/// Ceiling on a single eval-cache transfer (control message + inline chunk
-/// stream). Matches the NAR pull ceiling - the blob travels the same channel.
-const EVAL_CACHE_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Per-job in-flight transfer state. The executor is sequential so at most one
 /// pull or push is live for a given `job_id` at a time.
@@ -78,9 +73,9 @@ pub struct PendingPush {
 }
 
 impl PendingPull {
-    /// Await the `EvalCachePullResult` outcome, bounded by [`EVAL_CACHE_TIMEOUT`].
+    /// Await the `EvalCachePullResult` outcome, bounded by [`TRANSFER_TIMEOUT`].
     pub async fn await_outcome(&mut self) -> Result<EvalCachePullOutcome> {
-        match tokio::time::timeout(EVAL_CACHE_TIMEOUT, &mut self.result_rx).await {
+        match tokio::time::timeout(TRANSFER_TIMEOUT, &mut self.result_rx).await {
             Ok(Ok(outcome)) => Ok(outcome),
             Ok(Err(_)) => Err(anyhow::anyhow!(
                 "eval-cache pull waiter dropped (job_id={}) - connection closed?",
@@ -91,7 +86,7 @@ impl PendingPull {
                 Err(anyhow::anyhow!(
                     "eval-cache pull for job_id={} timed out after {}s",
                     self.job_id,
-                    EVAL_CACHE_TIMEOUT.as_secs(),
+                    TRANSFER_TIMEOUT.as_secs(),
                 ))
             }
         }
@@ -109,7 +104,7 @@ impl PendingPull {
             },
         );
 
-        match tokio::time::timeout(EVAL_CACHE_TIMEOUT, bytes_rx).await {
+        match tokio::time::timeout(TRANSFER_TIMEOUT, bytes_rx).await {
             Ok(Ok(Ok(bytes))) => {
                 if bytes.len() as u64 != total_bytes {
                     return Err(anyhow::anyhow!(
@@ -131,7 +126,7 @@ impl PendingPull {
                 Err(anyhow::anyhow!(
                     "eval-cache inline pull for job_id={} timed out after {}s",
                     self.job_id,
-                    EVAL_CACHE_TIMEOUT.as_secs(),
+                    TRANSFER_TIMEOUT.as_secs(),
                 ))
             }
         }
@@ -139,9 +134,9 @@ impl PendingPull {
 }
 
 impl PendingPush {
-    /// Await the `EvalCachePushGrant` mode, bounded by [`EVAL_CACHE_TIMEOUT`].
+    /// Await the `EvalCachePushGrant` mode, bounded by [`TRANSFER_TIMEOUT`].
     pub async fn await_grant(&mut self) -> Result<EvalCachePushMode> {
-        match tokio::time::timeout(EVAL_CACHE_TIMEOUT, &mut self.grant_rx).await {
+        match tokio::time::timeout(TRANSFER_TIMEOUT, &mut self.grant_rx).await {
             Ok(Ok(mode)) => Ok(mode),
             Ok(Err(_)) => Err(anyhow::anyhow!(
                 "eval-cache push waiter dropped (job_id={}) - connection closed?",
@@ -152,7 +147,7 @@ impl PendingPush {
                 Err(anyhow::anyhow!(
                     "eval-cache push for job_id={} timed out after {}s",
                     self.job_id,
-                    EVAL_CACHE_TIMEOUT.as_secs(),
+                    TRANSFER_TIMEOUT.as_secs(),
                 ))
             }
         }
