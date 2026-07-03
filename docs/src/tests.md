@@ -3403,7 +3403,9 @@ in #35:
   `gradient_jobs_active`, `gradient_cache_bytes`).
 - `endpoint_reflects_seeded_counts` - the collector renders DB-derived
   counters and gauges with the expected `status` labels (e.g.
-  `gradient_builds_total{status="Completed"} 7`).
+  `gradient_builds_total{status="Completed"} 7`); mock rows stage the
+  status as the enum's integer discriminant, matching the typed
+  `status::int` column the collector decodes in Rust.
 - `endpoint_rate_limited` - five requests succeed in burst, the sixth
   returns 429 (same tier as `auth_sensitive`).
 

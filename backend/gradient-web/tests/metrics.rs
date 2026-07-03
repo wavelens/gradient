@@ -16,6 +16,8 @@ use gradient_storage::{EmailSender, NarStore};
 use gradient_types::{MetricsConfig, RuntimeConfig, SecretString};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
+use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -26,18 +28,15 @@ use gradient_web::create_router;
 
 const TOKEN: &str = "metrics-token-abcdef";
 
-/// Build a mock row matching the `CountRow { kind, label, value }` shape
-/// that the metrics collector queries for. We construct rows as
-/// `BTreeMap<&str, Value>` because `sea_orm` only implements `IntoMockRow`
-/// for entity models (which we don't want to fabricate here) and for that
-/// map type.
-fn count_row(kind: &str, label: Option<&str>, value: i64) -> BTreeMap<&'static str, Value> {
+/// Build a mock row matching the `CountRow { kind, status, value }` shape
+/// that the metrics collector queries for: the status arrives as the enum's
+/// integer discriminant and is decoded to its label in Rust. We construct
+/// rows as `BTreeMap<&str, Value>` because `sea_orm` only implements
+/// `IntoMockRow` for entity models and for that map type.
+fn count_row(kind: &str, status: Option<i32>, value: i64) -> BTreeMap<&'static str, Value> {
     let mut row = BTreeMap::new();
     row.insert("kind", Value::String(Some(Box::new(kind.to_string()))));
-    row.insert(
-        "label",
-        Value::String(label.map(|l| Box::new(l.to_string()))),
-    );
+    row.insert("status", Value::Int(status));
     row.insert("value", Value::BigInt(Some(value)));
     row
 }
@@ -159,101 +158,46 @@ fn endpoint_200_when_bearer_matches() {
     });
 }
 
-// TODO: FIX ERROR:
-// gradient> thread 'endpoint_reflects_seeded_counts' (11578) panicked at gradient-web/tests/metrics.rs:198:13:
-// gradient> missing "gradient_builds_total{status=\"Completed\"} 7" in:
-// gradient> # HELP gradient_cache_bytes Total compressed bytes of all cached NARs.
-// gradient> # TYPE gradient_cache_bytes gauge
-// gradient> gradient_cache_bytes 1024
-// gradient> # HELP gradient_cache_nar_bytes Total uncompressed NAR bytes of all cached packages.
-// gradient> # TYPE gradient_cache_nar_bytes gauge
-// gradient> gradient_cache_nar_bytes 0
-// gradient> # HELP gradient_cache_nar_bytes_sent_total Total compressed bytes served from the NAR cache since first traffic record.
-// gradient> # TYPE gradient_cache_nar_bytes_sent_total counter
-// gradient> gradient_cache_nar_bytes_sent_total 0
-// gradient> # HELP gradient_cache_nar_requests_total Total NAR requests served since first traffic record.
-// gradient> # TYPE gradient_cache_nar_requests_total counter
-// gradient> gradient_cache_nar_requests_total 0
-// gradient> # HELP gradient_cache_packages Total packages (signed build outputs) in caches.
-// gradient> # TYPE gradient_cache_packages gauge
-// gradient> gradient_cache_packages 9
-// gradient> # HELP gradient_info Build/version metadata; value is always 1.
-// gradient> # TYPE gradient_info gauge
-// gradient> gradient_info{version="1.2.0"} 1
-// gradient> # HELP gradient_jobs_active Active jobs in scheduler.
-// gradient> # TYPE gradient_jobs_active gauge
-// gradient> gradient_jobs_active 0
-// gradient> # HELP gradient_jobs_pending Pending jobs in scheduler.
-// gradient> # TYPE gradient_jobs_pending gauge
-// gradient> gradient_jobs_pending 0
-// gradient> # HELP gradient_uptime_seconds Seconds since process start.
-// gradient> # TYPE gradient_uptime_seconds gauge
-// gradient> gradient_uptime_seconds 0.007
-// gradient> # HELP gradient_workers_connected Connected workers.
-// gradient> # TYPE gradient_workers_connected gauge
-// gradient> gradient_workers_connected 0
-// gradient> # HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
-// gradient> # TYPE process_cpu_seconds_total counter
-// gradient> process_cpu_seconds_total 0
-// gradient> # HELP process_max_fds Maximum number of open file descriptors.
-// gradient> # TYPE process_max_fds gauge
-// gradient> process_max_fds 1048576
-// gradient> # HELP process_open_fds Number of open file descriptors.
-// gradient> # TYPE process_open_fds gauge
-// gradient> process_open_fds 14
-// gradient> # HELP process_resident_memory_bytes Resident memory size in bytes.
-// gradient> # TYPE process_resident_memory_bytes gauge
-// gradient> process_resident_memory_bytes 43872256
-// gradient> # HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
-// gradient> # TYPE process_start_time_seconds gauge
-// gradient> process_start_time_seconds 1783090071
-// gradient> # HELP process_threads Number of OS threads in the process.
-// gradient> # TYPE process_threads gauge
-// gradient> process_threads 3
-// gradient> # HELP process_virtual_memory_bytes Virtual memory size in bytes.
-// gradient> # TYPE process_virtual_memory_bytes gauge
-// gradient> process_virtual_memory_bytes 513646592
+#[test]
+fn endpoint_reflects_seeded_counts() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let rows = vec![
+            count_row("build_total", Some(BuildStatus::Completed as i32), 7),
+            count_row("build_total", Some(BuildStatus::FailedPermanent as i32), 2),
+            count_row("build_in_state", Some(BuildStatus::Queued as i32), 5),
+            count_row("evaluation_total", Some(EvaluationStatus::Completed as i32), 3),
+            count_row("cache_bytes", None, 1024),
+            count_row("cache_packages", None, 9),
+        ];
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([rows])
+            .into_connection();
 
-// #[test]
-// fn endpoint_reflects_seeded_counts() {
-//     let rt = tokio::runtime::Builder::new_current_thread()
-//         .enable_all()
-//         .build()
-//         .unwrap();
-//     rt.block_on(async {
-//         let rows = vec![
-//             count_row("build_total", Some("Completed"), 7),
-//             count_row("build_total", Some("Failed"), 2),
-//             count_row("build_in_state", Some("Queued"), 5),
-//             count_row("evaluation_total", Some("Completed"), 3),
-//             count_row("cache_bytes", None, 1024),
-//             count_row("cache_packages", None, 9),
-//         ];
-//         let db = MockDatabase::new(DatabaseBackend::Postgres)
-//             .append_query_results([rows])
-//             .into_connection();
+        let state = state_with_metrics(true, db);
+        let server = TestServer::new(create_router(state));
+        let resp = server
+            .get("/metrics")
+            .add_header("Authorization", &format!("Bearer {TOKEN}"))
+            .await;
+        assert_eq!(resp.status_code(), 200);
 
-//         let state = state_with_metrics(true, db);
-//         let server = TestServer::new(create_router(state));
-//         let resp = server
-//             .get("/metrics")
-//             .add_header("Authorization", &format!("Bearer {TOKEN}"))
-//             .await;
-//         assert_eq!(resp.status_code(), 200);
-
-//         let body = resp.text();
-//         for needle in [
-//             "gradient_builds_total{status=\"Completed\"} 7",
-//             "gradient_builds_total{status=\"Failed\"} 2",
-//             "gradient_builds_in_state{status=\"Queued\"} 5",
-//             "gradient_evaluations_total{status=\"Completed\"} 3",
-//             "gradient_cache_bytes 1024",
-//             "gradient_cache_packages 9",
-//         ] {
-//             assert!(body.contains(needle), "missing {needle:?} in:\n{body}");
-//         }
-//     });
-// }
+        let body = resp.text();
+        for needle in [
+            "gradient_builds_total{status=\"Completed\"} 7",
+            "gradient_builds_total{status=\"FailedPermanent\"} 2",
+            "gradient_builds_in_state{status=\"Queued\"} 5",
+            "gradient_evaluations_total{status=\"Completed\"} 3",
+            "gradient_cache_bytes 1024",
+            "gradient_cache_packages 9",
+        ] {
+            assert!(body.contains(needle), "missing {needle:?} in:\n{body}");
+        }
+    });
+}
 
 #[test]
 fn endpoint_rate_limited() {
