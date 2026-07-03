@@ -53,6 +53,45 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// by the per-message send timeout passed to [`ProtoSocket::split`].
 const WRITER_QUEUE_DEPTH: usize = 16;
 
+/// How many queued messages the writer task drains per `feed`+`flush` cycle,
+/// coalescing bursts (e.g. consecutive `NarPush` chunks) into fewer TCP writes.
+const WRITE_BATCH: usize = 32;
+
+// ── Direction-generic codec ───────────────────────────────────────────────────
+
+/// Wire codec for one direction of the protocol. Implemented by both message
+/// enums so the reader/writer halves are generic over which role owns them:
+/// the authority reads `ClientMessage` and writes `ServerMessage`; a peer
+/// reads `ServerMessage` and writes `ClientMessage`.
+pub trait WireMessage: Sized + std::fmt::Debug + Send + 'static {
+    fn encode(&self) -> Option<Vec<u8>>;
+    fn decode(bytes: &[u8]) -> Result<Self, RkyvError>;
+}
+
+impl WireMessage for ClientMessage {
+    fn encode(&self) -> Option<Vec<u8>> {
+        rkyv::to_bytes::<RkyvError>(self)
+            .map(|b| b.to_vec())
+            .map_err(|e| warn!(error = %e, "failed to serialize client message"))
+            .ok()
+    }
+    fn decode(bytes: &[u8]) -> Result<Self, RkyvError> {
+        decode_client_message(bytes)
+    }
+}
+
+impl WireMessage for ServerMessage {
+    fn encode(&self) -> Option<Vec<u8>> {
+        rkyv::to_bytes::<RkyvError>(self)
+            .map(|b| b.to_vec())
+            .map_err(|e| warn!(error = %e, "failed to serialize server message"))
+            .ok()
+    }
+    fn decode(bytes: &[u8]) -> Result<Self, RkyvError> {
+        decode_server_message(bytes)
+    }
+}
+
 // ── Socket abstraction ────────────────────────────────────────────────────────
 
 /// Wraps both axum and raw tungstenite WebSocket streams so handshake code
@@ -176,55 +215,75 @@ impl ProtoSocket {
         let _ = self.send_msg(&ServerMessage::Reject { code, reason }).await;
     }
 
-    /// Split the socket into a reader half and a cloneable writer half. The
-    /// writer is backed by a bounded mpsc drained by a spawned task that owns
-    /// the WebSocket sink. `send_chunk_timeout` bounds how long each producer
-    /// `send` may wait when the queue is full - exceeding it indicates the
-    /// peer's TCP receive side is stalled.
+    /// Split the socket into the authority-role halves: read `ClientMessage`,
+    /// write `ServerMessage`. The writer is backed by a bounded mpsc drained
+    /// by a spawned task that owns the WebSocket sink. `send_chunk_timeout`
+    /// bounds how long each producer `send` may wait when the queue is full -
+    /// exceeding it indicates the peer's TCP receive side is stalled.
     pub fn split(self, send_chunk_timeout: Duration) -> (ProtoReader, ProtoWriter) {
+        self.split_typed(send_chunk_timeout)
+    }
+
+    /// Peer-role counterpart of [`Self::split`]: read `ServerMessage`, write
+    /// `ClientMessage`. Used by the worker after its handshake.
+    pub fn split_peer(self, send_chunk_timeout: Duration) -> (ServerReader, ClientWriter) {
+        self.split_typed(send_chunk_timeout)
+    }
+
+    fn split_typed<In: WireMessage, Out: WireMessage>(
+        self,
+        send_chunk_timeout: Duration,
+    ) -> (MsgReader<In>, MsgWriter<Out>) {
         let (tx, rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
-        let writer = ProtoWriter {
+        let writer = MsgWriter {
             tx,
             send_chunk_timeout,
+            _direction: std::marker::PhantomData,
         };
-        match self {
+        let inner = match self {
             Self::Axum(ws) => {
                 let (sink, stream) = (*ws).split();
                 tokio::spawn(axum_writer_task(rx, sink));
-                (ProtoReader::Axum(stream), writer)
+                ReaderInner::Axum(stream)
             }
             Self::Tungstenite(ws) => {
                 let (sink, stream) = (*ws).split();
                 tokio::spawn(tungstenite_writer_task(rx, sink));
-                (ProtoReader::Tungstenite(stream), writer)
+                ReaderInner::Tungstenite(stream)
             }
-        }
+        };
+        (
+            MsgReader {
+                inner,
+                _direction: std::marker::PhantomData,
+            },
+            writer,
+        )
     }
 }
 
 // ── Read half ─────────────────────────────────────────────────────────────────
 
-pub enum ProtoReader {
+enum ReaderInner {
     Axum(SplitStream<WebSocket>),
     Tungstenite(SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>),
 }
 
-impl ProtoReader {
-    pub async fn recv_msg(&mut self) -> Option<ClientMessage> {
+impl ReaderInner {
+    async fn recv_bytes(&mut self) -> Option<Vec<u8>> {
         loop {
-            let frame = match self {
-                Self::Axum(s) => s.next().await,
+            match self {
+                Self::Axum(s) => match s.next().await? {
+                    Ok(AxumMessage::Binary(bytes)) => return Some(bytes.to_vec()),
+                    Ok(AxumMessage::Close(_)) => return None,
+                    Ok(_) => continue,
+                    Err(e) => {
+                        debug!(error = %e, "WebSocket recv error");
+                        return None;
+                    }
+                },
                 Self::Tungstenite(s) => match s.next().await? {
-                    Ok(TungsteniteMessage::Binary(bytes)) => match decode_client_message(&bytes) {
-                        Ok(msg) => {
-                            trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
-                            return Some(msg);
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "failed to deserialize client message");
-                            return None;
-                        }
-                    },
+                    Ok(TungsteniteMessage::Binary(bytes)) => return Some(bytes.to_vec()),
                     Ok(TungsteniteMessage::Close(_)) => return None,
                     Ok(TungsteniteMessage::Ping(_) | TungsteniteMessage::Pong(_)) => continue,
                     Ok(_) => continue,
@@ -233,24 +292,34 @@ impl ProtoReader {
                         return None;
                     }
                 },
-            };
-            match frame? {
-                Ok(AxumMessage::Binary(bytes)) => match decode_client_message(&bytes) {
-                    Ok(msg) => {
-                        trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
-                        return Some(msg);
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "failed to deserialize client message");
-                        return None;
-                    }
-                },
-                Ok(AxumMessage::Close(_)) => return None,
-                Ok(_) => continue,
-                Err(e) => {
-                    debug!(error = %e, "WebSocket recv error");
-                    return None;
-                }
+            }
+        }
+    }
+}
+
+/// Single-owner read half of the post-split connection, typed by the
+/// direction's inbound message. A decode failure ends the stream (`None`) -
+/// the read half has no socket handle to reply on, and the dispatch loops
+/// treat it as a peer disconnect.
+pub struct MsgReader<M> {
+    inner: ReaderInner,
+    _direction: std::marker::PhantomData<M>,
+}
+
+pub type ProtoReader = MsgReader<ClientMessage>;
+pub type ServerReader = MsgReader<ServerMessage>;
+
+impl<M: WireMessage> MsgReader<M> {
+    pub async fn recv_msg(&mut self) -> Option<M> {
+        let bytes = self.inner.recv_bytes().await?;
+        match M::decode(&bytes) {
+            Ok(msg) => {
+                trace!(?msg, bytes = bytes.len(), "recv message");
+                Some(msg)
+            }
+            Err(e) => {
+                warn!(error = %e, "failed to deserialize message");
+                None
             }
         }
     }
@@ -258,27 +327,37 @@ impl ProtoReader {
 
 // ── Write half ────────────────────────────────────────────────────────────────
 
-/// Cloneable producer side of the post-split connection. Each send serialises
-/// the message and pushes the bytes into a bounded mpsc; the writer task does
-/// the actual WS write. Producer-observable back-pressure is bounded by
-/// [`Self::send_chunk_timeout`]: queue full for longer than this is treated as
-/// a peer stall and surfaced as an error.
-#[derive(Clone)]
-pub struct ProtoWriter {
+/// Cloneable producer side of the post-split connection, typed by the
+/// direction's outbound message. Each send serialises the message and pushes
+/// the bytes into a bounded mpsc; the writer task does the actual WS write.
+/// Producer-observable back-pressure is bounded by `send_chunk_timeout`:
+/// queue full for longer than this is treated as a peer stall and surfaced
+/// as an error.
+pub struct MsgWriter<M> {
     pub(crate) tx: mpsc::Sender<Vec<u8>>,
     pub(crate) send_chunk_timeout: Duration,
+    pub(crate) _direction: std::marker::PhantomData<M>,
 }
 
-impl ProtoWriter {
-    pub async fn send_msg(&self, msg: &ServerMessage) -> Result<(), ()> {
-        let bytes = match rkyv::to_bytes::<RkyvError>(msg) {
-            Ok(b) => b.to_vec(),
-            Err(e) => {
-                warn!(error = %e, "failed to serialize server message");
-                return Err(());
-            }
+pub type ProtoWriter = MsgWriter<ServerMessage>;
+pub type ClientWriter = MsgWriter<ClientMessage>;
+
+impl<M> Clone for MsgWriter<M> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            send_chunk_timeout: self.send_chunk_timeout,
+            _direction: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<M: WireMessage> MsgWriter<M> {
+    pub async fn send_msg(&self, msg: &M) -> Result<(), ()> {
+        let Some(bytes) = msg.encode() else {
+            return Err(());
         };
-        trace!(?msg, bytes = bytes.len(), "send ServerMessage");
+        trace!(?msg, bytes = bytes.len(), "send message");
         match tokio::time::timeout(self.send_chunk_timeout, self.tx.send(bytes)).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(_)) => Err(()),
@@ -297,10 +376,20 @@ async fn axum_writer_task(
     mut rx: mpsc::Receiver<Vec<u8>>,
     mut sink: futures::stream::SplitSink<WebSocket, AxumMessage>,
 ) {
-    while let Some(bytes) = rx.recv().await {
-        if let Err(e) = sink.send(AxumMessage::Binary(bytes.into())).await {
-            debug!(error = %e, "axum WS writer task: send failed; exiting");
+    let mut batch = Vec::with_capacity(WRITE_BATCH);
+    loop {
+        if rx.recv_many(&mut batch, WRITE_BATCH).await == 0 {
             break;
+        }
+        for bytes in batch.drain(..) {
+            if let Err(e) = sink.feed(AxumMessage::Binary(bytes.into())).await {
+                debug!(error = %e, "axum WS writer task: send failed; exiting");
+                return;
+            }
+        }
+        if let Err(e) = sink.flush().await {
+            debug!(error = %e, "axum WS writer task: flush failed; exiting");
+            return;
         }
     }
 }
@@ -312,10 +401,20 @@ async fn tungstenite_writer_task(
         TungsteniteMessage,
     >,
 ) {
-    while let Some(bytes) = rx.recv().await {
-        if let Err(e) = sink.send(TungsteniteMessage::Binary(bytes.into())).await {
-            debug!(error = %e, "tungstenite WS writer task: send failed; exiting");
+    let mut batch = Vec::with_capacity(WRITE_BATCH);
+    loop {
+        if rx.recv_many(&mut batch, WRITE_BATCH).await == 0 {
             break;
+        }
+        for bytes in batch.drain(..) {
+            if let Err(e) = sink.feed(TungsteniteMessage::Binary(bytes.into())).await {
+                debug!(error = %e, "tungstenite WS writer task: send failed; exiting");
+                return;
+            }
+        }
+        if let Err(e) = sink.flush().await {
+            debug!(error = %e, "tungstenite WS writer task: flush failed; exiting");
+            return;
         }
     }
 }
@@ -393,6 +492,7 @@ mod writer_tests {
             ProtoWriter {
                 tx,
                 send_chunk_timeout: timeout,
+                _direction: std::marker::PhantomData,
             },
             rx,
         )
