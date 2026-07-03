@@ -8,8 +8,8 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
-pub use object_store::{MultipartUpload, WriteMultipart};
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
+pub use object_store::{MultipartUpload, WriteMultipart};
 use std::sync::Arc;
 
 /// Unified NAR file storage abstraction over local disk or an S3-compatible backend.
@@ -73,9 +73,13 @@ impl NarStore {
         let mut builder = object_store::aws::AmazonS3Builder::new()
             .with_bucket_name(bucket)
             .with_region(region)
-            .with_client_options(ClientOptions::new().with_user_agent(
-                gradient_util::http::user_agent().parse().expect("static UA is valid"),
-            ));
+            .with_client_options(
+                ClientOptions::new().with_user_agent(
+                    gradient_util::http::user_agent()
+                        .parse()
+                        .expect("static UA is valid"),
+                ),
+            );
 
         if let Some(ep) = endpoint {
             builder = builder
@@ -370,7 +374,11 @@ impl NarStore {
         };
 
         let url = signer
-            .signed_url(reqwest::Method::GET, &self.eval_cache_path(fingerprint), expires_in)
+            .signed_url(
+                reqwest::Method::GET,
+                &self.eval_cache_path(fingerprint),
+                expires_in,
+            )
             .await
             .context("failed to generate presigned eval-cache GET URL")?;
 
@@ -390,7 +398,11 @@ impl NarStore {
         };
 
         let url = signer
-            .signed_url(reqwest::Method::PUT, &self.eval_cache_path(fingerprint), expires_in)
+            .signed_url(
+                reqwest::Method::PUT,
+                &self.eval_cache_path(fingerprint),
+                expires_in,
+            )
             .await
             .context("failed to generate presigned eval-cache PUT URL")?;
 
