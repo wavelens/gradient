@@ -303,7 +303,7 @@ impl JobExecutor {
                     if local_flake_path.is_none()
                         && let Some(src) = eval::required_local_source(&job.source)
                     {
-                        crate::proto::nar_import::ensure_path(&self.store, src, updater).await?;
+                        crate::proto::prefetch::ensure_path(&self.store, src, updater).await?;
                     }
 
                     // Each batch's `.drv` runtime closure (input_sources + .drvs,
@@ -364,12 +364,11 @@ impl JobExecutor {
                 // is mirrored by each member's own anchor). There is no local-build
                 // fallback (this worker may be the wrong arch); on a miss fail with
                 // `SubstituteUnavailable` and let the scheduler re-dispatch/escalate.
-                let outputs =
-                    crate::proto::nar_import::relay_external_cached_outputs(build_task, updater)
-                        .await
-                        .map_err(|e| {
-                            failure::classify_substitute_failure(&build_task.build_id, e)
-                        })?;
+                let outputs = crate::proto::substitute_relay::relay_external_cached_outputs(
+                    build_task, updater,
+                )
+                .await
+                .map_err(|e| failure::classify_substitute_failure(&build_task.build_id, e))?;
 
                 let reported: Vec<gradient_proto::messages::BuildOutput> = outputs
                     .iter()
@@ -407,7 +406,7 @@ impl JobExecutor {
             // in the store. Other prefetch errors (CacheQuery transport,
             // individual NAR downloads) are logged inside `prefetch_inputs`
             // and don't reach here as `Err`.
-            crate::proto::nar_import::prefetch_inputs(&self.store, build_task, updater)
+            crate::proto::prefetch::prefetch_inputs(&self.store, build_task, updater)
                 .await
                 .map_err(|e| failure::classify_prefetch_error(&build_task.build_id, e))?;
             let outputs = build::build_derivation(

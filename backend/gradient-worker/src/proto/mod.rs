@@ -6,10 +6,13 @@
 
 //! Protocol-level concerns: credentials, job updates, NAR transfer, scoring.
 
+pub(crate) mod compression;
 pub mod credentials;
 pub mod eval_cache_recv;
 pub mod job;
 pub mod nar;
-pub mod nar_import;
+pub(crate) mod nar_daemon_import;
 pub mod nar_recv;
+pub(crate) mod prefetch;
 pub mod scorer;
+pub(crate) mod substitute_relay;

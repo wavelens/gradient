@@ -9,7 +9,7 @@
 
 use gradient_proto::messages::BuildFailureKind;
 
-use crate::proto::nar_import::{CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream};
+use crate::proto::prefetch::{CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream};
 
 // ── BuildError ────────────────────────────────────────────────────────────────
 
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn prefetch_missing_inputs_carries_paths() {
-        let e = anyhow::Error::new(crate::proto::nar_import::MissingInputs(vec![
+        let e = anyhow::Error::new(crate::proto::prefetch::MissingInputs(vec![
             "/nix/store/a-b".into(),
         ]));
         let be = classify_prefetch_error("b1", e);
@@ -206,7 +206,7 @@ mod tests {
 
     #[test]
     fn substitute_relay_404_is_inputs_unavailable() {
-        let e = anyhow::Error::new(crate::proto::nar_import::MissingInputs(vec![
+        let e = anyhow::Error::new(crate::proto::prefetch::MissingInputs(vec![
             "/nix/store/a-b".into(),
         ]))
         .context("download upstream NAR");
@@ -221,7 +221,7 @@ mod tests {
     /// not turn a substitutable build into a from-scratch one.
     #[test]
     fn substitute_wrapped_and_transient_classification() {
-        use crate::proto::nar_import::SubstituteNotOnUpstream;
+        use crate::proto::prefetch::SubstituteNotOnUpstream;
 
         let wrapped = classify_substitute_failure(
             "b",
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn substitute_not_on_upstream_wins() {
-        let e = anyhow::Error::new(crate::proto::nar_import::SubstituteNotOnUpstream(
+        let e = anyhow::Error::new(crate::proto::prefetch::SubstituteNotOnUpstream(
             "/nix/store/a-b".into(),
         ));
         let be = classify_substitute_failure("b1", e);

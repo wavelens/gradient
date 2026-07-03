@@ -49,7 +49,7 @@ use gradient_proto::traits::WorkerStore;
 /// out spuriously even though the pool is making forward progress.
 ///
 /// 10 minutes mirrors the `HTTP_DOWNLOAD_TIMEOUT` for presigned-URL NAR
-/// fetches in `gradient_proto::nar_import` - both bound the absolute longest a
+/// fetches in `crate::proto::prefetch` - both bound the absolute longest a
 /// single import is allowed to take. Any acquire that legitimately needs
 /// more than that points at a stuck connection and is the right thing
 /// to surface as an error.
