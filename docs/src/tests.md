@@ -5605,3 +5605,43 @@ the real transport for the VM test.
   `--eval-driver`, covering spawn, handshake, framing and the streamed resolve
   on both sides of the wire, and asserts the eval-cache lands under the
   configured `GRADIENT_EVAL_CACHE_DIR`.
+
+## DB schema typing, derived-flag boundary and migration baseline (#478)
+
+The status enums and integer discriminants are now the single source of every
+SQL fragment and legend: raw statements compose from
+`gradient_db::status_sql` and the semantic sets on the enums, the eight
+doc-comment discriminants became `DeriveActiveEnum` types, the
+`cached_path.closure_complete` flag gained its missing forward maintainer, and
+the 151 pre-globalization migrations were squashed into one guarded baseline.
+
+- `gradient-entity` `build::tests` / `evaluation::status_tests` -
+  `numbering_is_pinned` (every variant's integer is asserted, so a renumber
+  fails CI instead of silently corrupting sweeps like the historical
+  m20260407 renumber) and `semantic_sets_match_their_predicates` /
+  `active_and_terminal_partition_every_status` (the SQL set constants can
+  never drift from `is_terminal_failure()` and friends).
+- `gradient-db` `status_sql::tests` - `renders_the_pinned_numbers` pins the
+  fragment rendering (`TERMINAL_FAILURE` renders `4, 6, 9` etc.).
+- `gradient-db` `promotion::tests` / `graph_sql::tests` /
+  `cache_storage::tests` - the existing SQL-shape assertions now build their
+  expectations from the same fragments the statements compose from, so a set
+  change updates statement and test together;
+  `cached_path_closure_gate_keys_on_reference_ground_truth` pins the new
+  `cached_path.closure_complete` gate (own NAR backed, every recorded
+  reference backed and complete, self-references excluded).
+- `gradient-db` `consistency::tests` - `total_sums_every_dimension` covers the
+  new `stale_cached_path_closure` invariant counter.
+- `gradient-entity` `store_path::tests` -
+  `sea_orm_value_round_trip_is_prefix_free` (the new sea-orm value type stores
+  the prefix-free base form and still parses legacy full-path rows).
+- `gradient-types` `triggers::tests` and the fixture-based suites across
+  `gradient-web/tests`, `gradient-ci` and `gradient-state` now construct the
+  typed enum variants (`ConcurrencyPolicy::Skip`, `ForgeType::GitHub`,
+  `TriggerType::ReporterPush`, ...) instead of raw integers, keeping the JSON
+  wire strings byte-identical.
+- Migration baseline - verified against scratch PostgreSQL 18 by dump diff:
+  fresh bring-up via `m20241101_000000_baseline` + the 21 post-globalization
+  migrations is schema- and seed-identical to the full historical chain, and
+  an already-provisioned database upgrades with a pruned `seaql_migrations`
+  table and an untouched schema.
