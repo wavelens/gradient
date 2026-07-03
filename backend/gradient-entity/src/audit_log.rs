@@ -19,8 +19,7 @@ pub struct Model {
     pub event: String,
     pub ip: Option<String>,
     pub user_agent: Option<String>,
-    #[sea_orm(column_type = "Json", nullable)]
-    pub metadata: Option<serde_json::Value>,
+    pub metadata: Option<Json>,
     pub created_at: NaiveDateTime,
 }
 

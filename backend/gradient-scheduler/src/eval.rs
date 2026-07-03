@@ -209,7 +209,10 @@ impl<'a> EvalResultProcessor<'a> {
             };
 
             for src in &d.input_sources {
-                let Ok((hash, _)) = get_hash_from_path(src.clone()) else {
+                let (Ok((hash, _)), Ok(store_path)) = (
+                    get_hash_from_path(src.clone()),
+                    gradient_entity::store_path::StorePath::parse(src),
+                ) else {
                     continue;
                 };
 
@@ -221,7 +224,7 @@ impl<'a> EvalResultProcessor<'a> {
                     id: DerivationInputSourceId::now_v7(),
                     derivation: drv_id,
                     hash,
-                    store_path: src.clone(),
+                    store_path,
                     created_at: now,
                 }.into_active_model());
             }
@@ -310,7 +313,6 @@ impl<'a> EvalResultProcessor<'a> {
                 closure_complete: is_truly_substituted,
                 timeout_secs: d.timeout_secs.map(|v| v as i64),
                 max_silent_secs: d.max_silent_secs.map(|v| v as i64),
-                prefer_local_build: d.prefer_local_build,
                 created_at: now,
                 updated_at: now,
                 ..Default::default()
