@@ -9,10 +9,10 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
+use gradient_core::ServerState;
 use gradient_exec::strip_nix_store_prefix;
 use gradient_types::ids::{DerivationId, OrganizationId};
 use gradient_types::*;
-use gradient_core::ServerState;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
@@ -305,8 +305,13 @@ impl<'a> DispatchContext<'a> {
             } => {
                 let rpc = self.rpc();
                 tokio::spawn(async move {
-                    rpc.on_worker_metrics(cpu_usage_pct, ram_free_mb, disk_speed_mbps, network_speed_mbps)
-                        .await;
+                    rpc.on_worker_metrics(
+                        cpu_usage_pct,
+                        ram_free_mb,
+                        disk_speed_mbps,
+                        network_speed_mbps,
+                    )
+                    .await;
                 });
                 true
             }
@@ -400,20 +405,16 @@ impl<'a> DispatchContext<'a> {
                 deriver,
             } => {
                 self.on_nar_uploaded(
-                    job_id,
-                    store_path,
-                    file_hash,
-                    file_size,
-                    nar_size,
-                    nar_hash,
-                    references,
-                    deriver,
-                    nar,
+                    job_id, store_path, file_hash, file_size, nar_size, nar_hash, references,
+                    deriver, nar,
                 )
                 .await;
                 true
             }
-            ClientMessage::EvalCachePull { job_id, fingerprint } => {
+            ClientMessage::EvalCachePull {
+                job_id,
+                fingerprint,
+            } => {
                 handle_eval_cache_pull(self.state, self.writer, job_id, fingerprint).await;
                 true
             }
@@ -462,7 +463,9 @@ impl<'a> DispatchContext<'a> {
             }
             ClientMessage::QueryKnownDerivations { job_id, drv_paths } => {
                 let rpc = self.rpc();
-                tokio::spawn(async move { rpc.on_query_known_derivations(job_id, drv_paths).await });
+                tokio::spawn(
+                    async move { rpc.on_query_known_derivations(job_id, drv_paths).await },
+                );
                 true
             }
             ClientMessage::EvalMessage {
@@ -850,7 +853,8 @@ impl<'a> DispatchContext<'a> {
                     Ok(g) => g,
                     Err(_) => return, // semaphore closed (shutdown)
                 };
-                if let Err(e) = serve_nar_request(&state, &writer, &job_id, &store_path, 0, None).await
+                if let Err(e) =
+                    serve_nar_request(&state, &writer, &job_id, &store_path, 0, None).await
                 {
                     warn!(%peer_id, %job_id, %store_path, error = %e, "NarRequest serve failed");
                 }
@@ -1043,8 +1047,14 @@ impl<'a> DispatchContext<'a> {
             references: &references,
             deriver: deriver.as_deref(),
         };
-        if let Err(e) =
-            mark_nar_stored(self.state, self.scheduler, &job_id, &store_path, &nar_record).await
+        if let Err(e) = mark_nar_stored(
+            self.state,
+            self.scheduler,
+            &job_id,
+            &store_path,
+            &nar_record,
+        )
+        .await
         {
             warn!(%store_path, error = %e, "failed to mark NAR as stored");
         }
@@ -1090,7 +1100,6 @@ impl<'a> DispatchContext<'a> {
             error!(peer_id = %self.peer_id, %job_id, error = %e, "fail_build_transient: handle_job_failed failed");
         }
     }
-
 }
 
 /// Owned handles for the order-independent request/response RPCs, spawned off
@@ -1138,7 +1147,10 @@ impl RpcContext {
             }
             Ok(Err(e)) => {
                 warn!(peer_id = %self.peer_id, %job_id, error = %e, "CacheQuery DB error; replying CacheError");
-                ServerMessage::CacheError { job_id, message: format!("cache lookup failed: {e}") }
+                ServerMessage::CacheError {
+                    job_id,
+                    message: format!("cache lookup failed: {e}"),
+                }
             }
             Err(_) => {
                 warn!(peer_id = %self.peer_id, %job_id, budget_secs = CACHE_QUERY_BUDGET.as_secs(), "CacheQuery exceeded server budget; replying CacheError");
@@ -1161,7 +1173,11 @@ impl RpcContext {
         let hashes: Vec<String> = drv_paths
             .iter()
             .map(|p| strip_nix_store_prefix(p))
-            .filter_map(|p| gradient_sources::parse_drv_hash_name(&p).ok().map(|(h, _)| h))
+            .filter_map(|p| {
+                gradient_sources::parse_drv_hash_name(&p)
+                    .ok()
+                    .map(|(h, _)| h)
+            })
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
@@ -1183,9 +1199,12 @@ impl RpcContext {
             }
         };
         debug!(peer_id = %self.peer_id, %job_id, known = known.len(), "KnownDerivations");
-        if send_server_msg(&self.writer, &ServerMessage::KnownDerivations { job_id, known })
-            .await
-            .is_err()
+        if send_server_msg(
+            &self.writer,
+            &ServerMessage::KnownDerivations { job_id, known },
+        )
+        .await
+        .is_err()
         {
             debug!(peer_id = %self.peer_id, "KnownDerivations send failed; connection closing");
         }
@@ -1224,9 +1243,15 @@ impl RpcContext {
             .map(|b| b.derivation)
             .collect();
 
-        let candidates: Vec<(DerivationId, String)> =
-            candidates.into_iter().map(|d| (d.id, d.store_path())).collect();
-        Ok(prunable_known_derivations(candidates, &outputs, &unresolved))
+        let candidates: Vec<(DerivationId, String)> = candidates
+            .into_iter()
+            .map(|d| (d.id, d.store_path()))
+            .collect();
+        Ok(prunable_known_derivations(
+            candidates,
+            &outputs,
+            &unresolved,
+        ))
     }
 
     async fn on_worker_metrics(
@@ -1238,7 +1263,13 @@ impl RpcContext {
     ) {
         debug!(peer_id = %self.peer_id, cpu_usage_pct, ram_free_mb, ?disk_speed_mbps, ?network_speed_mbps, "WorkerMetrics");
         self.scheduler
-            .update_worker_metrics(&self.peer_id, cpu_usage_pct, ram_free_mb, disk_speed_mbps, network_speed_mbps)
+            .update_worker_metrics(
+                &self.peer_id,
+                cpu_usage_pct,
+                ram_free_mb,
+                disk_speed_mbps,
+                network_speed_mbps,
+            )
             .await;
     }
 }
@@ -1368,9 +1399,13 @@ mod nar_receive_store_tests {
 
     fn store(max_bytes: u64) -> (TempDir, NarReceiveStore) {
         let dir = TempDir::new().unwrap();
-        let s =
-            NarReceiveStore::new(dir.path().to_path_buf(), "peer-1", Duration::from_secs(3600), max_bytes)
-                .unwrap();
+        let s = NarReceiveStore::new(
+            dir.path().to_path_buf(),
+            "peer-1",
+            Duration::from_secs(3600),
+            max_bytes,
+        )
+        .unwrap();
         (dir, s)
     }
 
