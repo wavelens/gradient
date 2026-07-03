@@ -48,10 +48,11 @@ use jobs::JobTracker;
 use worker_pool::WorkerPool;
 
 /// Per-evaluation accumulator of discovered `(drv_path, dependencies)` pairs.
-/// Flushed to `derivation_dependency` edges once the eval stream completes
-/// (every endpoint has a row). Entries drop when the eval completes, fails, or
-/// is aborted.
-type EvalEdgesMap = Arc<RwLock<HashMap<EvaluationId, Vec<(String, Vec<String>)>>>>;
+/// Fully-resolvable pairs flush to `derivation_dependency` edges after each
+/// batch (`eval::flush_ready_edges`, so builds dispatch mid-stream); the
+/// remainder flushes at stream completion. Entries drop when the eval
+/// completes, fails, or is aborted.
+type EvalEdgesMap = Arc<RwLock<HashMap<EvaluationId, eval::EvalEdgeAccumulator>>>;
 
 pub use gradient_types::BoardEvent;
 pub use jobs::{DecisionCandidate, DispatchDecision, PendingJobInfo};

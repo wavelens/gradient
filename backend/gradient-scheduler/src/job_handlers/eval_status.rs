@@ -165,20 +165,25 @@ impl Scheduler {
             }
         }
 
-        // Accumulate this batch's dependency edges; they are flushed to
-        // `derivation_dependency` once the eval stream completes (every endpoint
-        // then has a row). Promotion is graph-driven, not tied to this map.
+        // Accumulate this batch's dependency edges. Whatever is fully
+        // resolvable after the batch persists is flushed immediately below so
+        // builds dispatch mid-stream; the remainder is settled by
+        // `flush_deferred_deps` at stream completion.
         {
             let mut acc = self.eval_edges.write().await;
-            let entry = acc.entry(job.evaluation_id).or_default();
-            for d in &derivations {
-                if !d.dependencies.is_empty() {
-                    entry.push((d.drv_path.clone(), d.dependencies.clone()));
-                }
-            }
+            acc.entry(job.evaluation_id).or_default().add_batch(&derivations);
         }
 
         eval::handle_eval_result(&self.state, &job, derivations, warnings, errors).await?;
+
+        {
+            let mut acc = self.eval_edges.write().await;
+            if let Some(entry) = acc.get_mut(&job.evaluation_id)
+                && let Err(e) = eval::flush_ready_edges(&self.state, job.evaluation_id, entry).await
+            {
+                warn!(error = %e, evaluation_id = %job.evaluation_id, "incremental edge flush failed; deferring to completion flush");
+            }
+        }
 
         Ok(())
     }

@@ -122,14 +122,16 @@ impl Scheduler {
                 }
 
                 // The stream is done, so every endpoint derivation now has a
-                // row: flush the accumulated dependency edges so the graph is
-                // complete for promotion + dispatch.
+                // row: flush the dependency edges still pending after the
+                // incremental per-batch flushes so the graph is complete for
+                // promotion + dispatch.
                 let edges = self
                     .eval_edges
                     .write()
                     .await
                     .remove(&j.evaluation_id)
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+                    .into_pending();
                 if let Err(e) =
                     eval::flush_deferred_deps(&self.state, j.evaluation_id, edges).await
                 {

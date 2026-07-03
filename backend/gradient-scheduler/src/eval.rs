@@ -944,6 +944,190 @@ pub async fn handle_eval_job_completed(
 /// dep_uuid)` edges and insert them (conflict-do-nothing). Called once at
 /// `handle_eval_job_completed` with the evaluation's accumulated edges, when
 /// every endpoint derivation has a row.
+/// Per-evaluation accumulator of discovered dependency edges, resolved
+/// incrementally as batches stream in. A `(src, deps)` pair leaves `pending`
+/// the moment its full edge set is recorded (see [`flush_ready_edges`]); the
+/// remainder is settled by [`flush_deferred_deps`] at stream completion, which
+/// alone may flag `edges_unresolved` - mid-stream, an unknown dep may simply
+/// not have streamed yet.
+#[derive(Default)]
+pub struct EvalEdgeAccumulator {
+    /// Canonical drv_path to recorded derivation id, learned from DB lookups.
+    known: HashMap<String, DerivationId>,
+    /// Paths already queried and absent; re-queried only after their own batch
+    /// arrives (`add_batch` unmarks them), so an absent dep costs one lookup.
+    missing: std::collections::HashSet<String>,
+    /// Pairs whose edge set is not yet fully recorded.
+    pending: EdgePairs,
+    /// This stream's zero-dep drv_paths, trivially `edges_complete` once their
+    /// anchor row exists.
+    leaves: Vec<String>,
+}
+
+impl EvalEdgeAccumulator {
+    pub fn add_batch(&mut self, derivations: &[DiscoveredDerivation]) {
+        for d in derivations {
+            self.missing.remove(&d.drv_path);
+            if d.dependencies.is_empty() {
+                self.leaves.push(d.drv_path.clone());
+            } else {
+                self.pending.push((d.drv_path.clone(), d.dependencies.clone()));
+            }
+        }
+    }
+
+    pub fn into_pending(self) -> EdgePairs {
+        self.pending
+    }
+}
+
+/// Record every dependency edge resolvable right now and mark the fully
+/// resolved sources (plus the stream's zero-dep leaves) `edges_complete`, so
+/// the dispatch tick's promotion pipeline can queue and dispatch them while
+/// the eval stream is still running instead of waiting for the completion
+/// flush. Runs after each persisted batch; safety is unchanged - promotion
+/// still requires the full readiness gate and dispatch additionally gates on
+/// `drv_closure_cached` / cached input sources, so nothing dispatches before
+/// its inputs are importable.
+pub async fn flush_ready_edges(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+    acc: &mut EvalEdgeAccumulator,
+) -> Result<()> {
+    let mut lookup: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (src, deps) in &acc.pending {
+        for p in std::iter::once(src).chain(deps.iter()) {
+            if !acc.known.contains_key(p) && !acc.missing.contains(p) {
+                lookup.insert(p.clone());
+            }
+        }
+    }
+    for p in &acc.leaves {
+        if !acc.known.contains_key(p) && !acc.missing.contains(p) {
+            lookup.insert(p.clone());
+        }
+    }
+
+    if !lookup.is_empty() {
+        let hashes: Vec<String> = lookup
+            .iter()
+            .filter_map(|p| parse_drv_hash_name(p).ok().map(|(h, _)| h))
+            .collect();
+        let db = &state.worker_db;
+        let found: HashMap<String, DerivationId> =
+            gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
+                EDerivation::find()
+                    .filter(CDerivation::Hash.is_in(chunk))
+                    .all(db)
+                    .await
+            })
+            .await
+            .context("flush_ready_edges: query derivations")?
+            .into_iter()
+            .map(|d| (d.drv_path(), d.id))
+            .collect();
+        for p in lookup {
+            match found.get(&p) {
+                Some(&id) => {
+                    acc.known.insert(p, id);
+                }
+                None => {
+                    acc.missing.insert(p);
+                }
+            }
+        }
+    }
+
+    let (ready, still_pending) = partition_ready_edges(std::mem::take(&mut acc.pending), &acc.known);
+    acc.pending = still_pending;
+    let mut complete: Vec<DerivationId> = ready
+        .iter()
+        .map(|(src, _)| acc.known[src])
+        .collect();
+    let mut leaves_left = Vec::new();
+    for p in acc.leaves.drain(..) {
+        match acc.known.get(&p) {
+            Some(&id) => complete.push(id),
+            None => leaves_left.push(p),
+        }
+    }
+    acc.leaves = leaves_left;
+    if ready.is_empty() && complete.is_empty() {
+        return Ok(());
+    }
+
+    let known = &acc.known;
+    let edges: Vec<ADerivationDependency> = ready
+        .iter()
+        .flat_map(|(src, deps)| {
+            let src_id = known[src];
+            deps.iter().map(move |dep| {
+                MDerivationDependency {
+                    id: DerivationDependencyId::now_v7(),
+                    derivation: src_id,
+                    dependency: known[dep],
+                }
+                .into_active_model()
+            })
+        })
+        .collect();
+    for chunk in edges.chunks(BATCH_SIZE) {
+        if let Err(e) = EDerivationDependency::insert_many(chunk.to_vec())
+            .on_conflict(
+                sea_orm::sea_query::OnConflict::columns([
+                    CDerivationDependency::Derivation,
+                    CDerivationDependency::Dependency,
+                ])
+                .do_nothing()
+                .to_owned(),
+            )
+            .do_nothing()
+            .exec(&state.worker_db)
+            .await
+        {
+            // Put the pairs back so the completion flush retries them.
+            error!(error = %e, "flush_ready_edges: failed to insert edges; deferring to completion flush");
+            acc.pending.extend(ready);
+            return Ok(());
+        }
+    }
+
+    let db = &state.worker_db;
+    if let Err(e) = gradient_db::for_each_chunk(&complete, |chunk| async move {
+        EDerivationBuild::update_many()
+            .col_expr(CDerivationBuild::EdgesComplete, sea_orm::sea_query::Expr::value(true))
+            .col_expr(CDerivationBuild::EdgesUnresolved, sea_orm::sea_query::Expr::value(false))
+            .filter(CDerivationBuild::Derivation.is_in(chunk))
+            .exec(db)
+            .await
+    })
+    .await
+    {
+        error!(error = %e, "flush_ready_edges: failed to mark edges_complete");
+    }
+
+    debug!(
+        %evaluation_id,
+        inserted = edges.len(),
+        edges_complete = complete.len(),
+        pending = acc.pending.len(),
+        "flushed ready dependency edges mid-stream"
+    );
+    Ok(())
+}
+
+/// Discovered `(drv_path, dependency drv_paths)` pairs awaiting edge insertion.
+pub type EdgePairs = Vec<(String, Vec<String>)>;
+
+/// Split pending pairs into the fully resolvable (source and every dep known)
+/// and the remainder. Pairs stay as string pairs so a failed insert can push
+/// them back for the completion flush.
+fn partition_ready_edges(pending: EdgePairs, known: &HashMap<String, DerivationId>) -> (EdgePairs, EdgePairs) {
+    pending.into_iter().partition(|(src, deps)| {
+        known.contains_key(src) && deps.iter().all(|d| known.contains_key(d))
+    })
+}
+
 pub async fn flush_deferred_deps(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
@@ -1198,5 +1382,65 @@ mod upstream_substitutable_tests {
     #[test]
     fn no_outputs_is_not_substitutable() {
         assert!(derivations_all_outputs_available(&[], &HashSet::new()).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod incremental_edge_flush_tests {
+    use super::*;
+
+    fn drv(path: &str, deps: &[&str]) -> DiscoveredDerivation {
+        DiscoveredDerivation {
+            attr: String::new(),
+            drv_path: path.to_owned(),
+            outputs: vec![],
+            dependencies: deps.iter().map(|d| (*d).to_owned()).collect(),
+            input_sources: vec![],
+            architecture: "x86_64-linux".to_owned(),
+            required_features: vec![],
+            timeout_secs: None,
+            max_silent_secs: None,
+            prefer_local_build: false,
+            is_fixed_output: false,
+            allow_substitutes: true,
+            pname: None,
+            substituted: false,
+        }
+    }
+
+    /// A pair is only ready when its source AND every dep have recorded rows;
+    /// anything else stays pending for a later batch or the completion flush.
+    /// Mid-stream, an unknown dep must never be treated as unresolvable - it
+    /// may simply not have streamed yet.
+    #[test]
+    fn partition_holds_pairs_with_unknown_paths() {
+        let id_a = DerivationId::now_v7();
+        let id_b = DerivationId::now_v7();
+        let known: HashMap<String, DerivationId> =
+            [("a.drv".to_owned(), id_a), ("b.drv".to_owned(), id_b)].into();
+
+        let pending = vec![
+            ("a.drv".to_owned(), vec!["b.drv".to_owned()]),
+            ("a.drv".to_owned(), vec!["b.drv".to_owned(), "later.drv".to_owned()]),
+            ("unknown-src.drv".to_owned(), vec!["b.drv".to_owned()]),
+        ];
+        let (ready, still) = partition_ready_edges(pending, &known);
+        assert_eq!(ready, vec![("a.drv".to_owned(), vec!["b.drv".to_owned()])]);
+        assert_eq!(still.len(), 2, "unknown src or dep stays pending: {still:?}");
+    }
+
+    /// A dep first queried-and-missing must become resolvable once its own
+    /// batch arrives: `add_batch` unmarks it so the next flush re-queries.
+    #[test]
+    fn add_batch_unmarks_missing_and_splits_leaves() {
+        let mut acc = EvalEdgeAccumulator::default();
+        acc.missing.insert("leaf.drv".to_owned());
+
+        acc.add_batch(&[drv("leaf.drv", &[]), drv("root.drv", &["leaf.drv"])]);
+
+        assert!(!acc.missing.contains("leaf.drv"), "batch arrival must clear the DB-miss memo");
+        assert_eq!(acc.leaves, vec!["leaf.drv".to_owned()]);
+        assert_eq!(acc.pending, vec![("root.drv".to_owned(), vec!["leaf.drv".to_owned()])]);
+        assert_eq!(acc.into_pending(), vec![("root.drv".to_owned(), vec!["leaf.drv".to_owned()])]);
     }
 }

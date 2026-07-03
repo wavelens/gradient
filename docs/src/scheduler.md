@@ -36,15 +36,21 @@ derivations no surviving evaluation needs, leaving the dispatcher unable to
 attribute the build to a driving evaluation.
 
 They are also gated on `derivation_build.edges_complete`. Anchors are created
-per-batch as the evaluation streams, but `derivation_dependency` edges are
-deferred and flushed in one pass at the eval's completion. An anchor with no
-edges is therefore ambiguous: a genuine leaf, or a node whose edges are not
+per-batch as the evaluation streams, and edges flush incrementally:
+after each persisted batch, `flush_ready_edges` records every declared edge
+whose source and dependencies all have derivation rows and marks those sources
+(plus the batch's zero-dep leaves) `edges_complete`, so the dispatch tick can
+promote and dispatch them while the walk is still running. A pair with an
+unrecorded dependency stays pending - mid-stream that is ambiguous (the dep may
+simply not have streamed yet), so only the completion-time `flush_deferred_deps`
+pass settles the remainder and may flag `edges_unresolved`. An anchor with no
+edges is otherwise ambiguous: a genuine leaf, or a node whose edges are not
 written yet. A failed, aborted, or restart-interrupted eval leaves its anchors
 edge-less; promoting them as if they were dependency-free dispatches builds
 without their inputs (`InputsUnavailable`). So an anchor is promotable only once
-the eval that owns it flushes its edges and calls
-`mark_edges_complete_for_eval`, which sets `edges_complete` for every anchor that
-eval's `build_job`s reference. The flag is monotonic and content-addressed:
+its full declared edge set is recorded - incrementally mid-stream, or at
+completion via `mark_edges_complete_for_eval`, which sets `edges_complete` for
+every anchor that eval's `build_job`s reference. The flag is monotonic and content-addressed:
 edges never change once written, so a later requeue keeps the anchor promotable
 without re-evaluation. `promote_ready`, `promote_dependents`, and the dispatch
 readiness query all require it.
