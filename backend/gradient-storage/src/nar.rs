@@ -156,6 +156,18 @@ impl NarStore {
         }
     }
 
+    /// Size in bytes of the stored NAR object for `hash`, or `None` when
+    /// absent. Backs the presigned-upload commit check: the worker PUT the
+    /// bytes directly to object storage, so this HEAD is the only server-side
+    /// evidence the object actually landed with the reported size.
+    pub async fn head_size(&self, hash: &str) -> Result<Option<u64>> {
+        match self.inner.head(&self.object_path(hash)).await {
+            Ok(meta) => Ok(Some(meta.size)),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e).context("Failed to head NAR"),
+        }
+    }
+
     /// Initiate a multipart upload for the NAR identified by `hash`.
     ///
     /// Returns a [`WriteMultipart`] configured with `chunk_size`-byte parts.
@@ -587,6 +599,19 @@ mod tests {
         assert!(!store.exists("ab12cd").await.expect("head"));
         store.put("ab12cd", b"data".to_vec()).await.expect("put");
         assert!(store.exists("ab12cd").await.expect("head"));
+    }
+
+    #[tokio::test]
+    async fn head_size_none_for_missing() {
+        let (_d, store) = local_store();
+        assert_eq!(store.head_size("ab12cd").await.expect("head"), None);
+    }
+
+    #[tokio::test]
+    async fn head_size_reports_object_len() {
+        let (_d, store) = local_store();
+        store.put("ab12cd", vec![7u8; 1234]).await.expect("put");
+        assert_eq!(store.head_size("ab12cd").await.expect("head"), Some(1234));
     }
 
     #[tokio::test]
