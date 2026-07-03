@@ -17,7 +17,8 @@ use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
 use crate::messages::{
-    CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind, JobUpdateKind, ServerMessage,
+    CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind, JobUpdateKind, QueryMode,
+    ServerMessage,
 };
 use gradient_scheduler::Scheduler;
 
@@ -305,16 +306,12 @@ impl<'a> DispatchContext<'a> {
                 disk_speed_mbps,
                 network_speed_mbps,
             } => {
-                let rpc = self.rpc();
-                tokio::spawn(async move {
-                    rpc.on_worker_metrics(
-                        cpu_usage_pct,
-                        ram_free_mb,
-                        disk_speed_mbps,
-                        network_speed_mbps,
-                    )
-                    .await;
-                });
+                self.spawn_worker_metrics(
+                    cpu_usage_pct,
+                    ram_free_mb,
+                    disk_speed_mbps,
+                    network_speed_mbps,
+                );
                 true
             }
             ClientMessage::RequestJobList => self.on_request_job_list().await,
@@ -417,7 +414,7 @@ impl<'a> DispatchContext<'a> {
                 job_id,
                 fingerprint,
             } => {
-                handle_eval_cache_pull(self.state, self.writer, job_id, fingerprint).await;
+                self.on_eval_cache_pull(job_id, fingerprint).await;
                 true
             }
             ClientMessage::EvalCachePush {
@@ -425,15 +422,8 @@ impl<'a> DispatchContext<'a> {
                 fingerprint,
                 size_bytes,
             } => {
-                handle_eval_cache_push(
-                    self.state,
-                    self.writer,
-                    eval_cache,
-                    job_id,
-                    fingerprint,
-                    size_bytes,
-                )
-                .await;
+                self.on_eval_cache_push(job_id, fingerprint, size_bytes, eval_cache)
+                    .await;
                 true
             }
             ClientMessage::EvalCacheChunk {
@@ -442,7 +432,7 @@ impl<'a> DispatchContext<'a> {
                 offset,
                 is_final,
             } => {
-                handle_eval_cache_chunk(self.state, eval_cache, &job_id, data, offset, is_final)
+                self.on_eval_cache_chunk(job_id, data, offset, is_final, eval_cache)
                     .await;
                 true
             }
@@ -451,7 +441,7 @@ impl<'a> DispatchContext<'a> {
                 fingerprint,
                 size_bytes,
             } => {
-                handle_eval_cache_push_done(self.state, fingerprint, size_bytes).await;
+                self.on_eval_cache_push_done(fingerprint, size_bytes).await;
                 true
             }
             ClientMessage::CacheQuery {
@@ -459,15 +449,11 @@ impl<'a> DispatchContext<'a> {
                 paths,
                 mode,
             } => {
-                let rpc = self.rpc();
-                tokio::spawn(async move { rpc.on_cache_query(job_id, paths, mode).await });
+                self.spawn_cache_query(job_id, paths, mode);
                 true
             }
             ClientMessage::QueryKnownDerivations { job_id, drv_paths } => {
-                let rpc = self.rpc();
-                tokio::spawn(
-                    async move { rpc.on_query_known_derivations(job_id, drv_paths).await },
-                );
+                self.spawn_query_known_derivations(job_id, drv_paths);
                 true
             }
             ClientMessage::EvalMessage {
@@ -491,6 +477,71 @@ impl<'a> DispatchContext<'a> {
             writer: self.writer.clone(),
             peer_id: self.peer_id.to_owned(),
         }
+    }
+
+    // ── Order-independent RPCs (run off the dispatch loop) ────────────────────
+
+    fn spawn_worker_metrics(
+        &self,
+        cpu_usage_pct: f32,
+        ram_free_mb: u64,
+        disk_speed_mbps: Option<f32>,
+        network_speed_mbps: Option<f32>,
+    ) {
+        let rpc = self.rpc();
+        tokio::spawn(async move {
+            rpc.on_worker_metrics(cpu_usage_pct, ram_free_mb, disk_speed_mbps, network_speed_mbps)
+                .await;
+        });
+    }
+
+    fn spawn_cache_query(&self, job_id: String, paths: Vec<String>, mode: QueryMode) {
+        let rpc = self.rpc();
+        tokio::spawn(async move { rpc.on_cache_query(job_id, paths, mode).await });
+    }
+
+    fn spawn_query_known_derivations(&self, job_id: String, drv_paths: Vec<String>) {
+        let rpc = self.rpc();
+        tokio::spawn(async move { rpc.on_query_known_derivations(job_id, drv_paths).await });
+    }
+
+    // ── Eval cache ────────────────────────────────────────────────────────────
+
+    async fn on_eval_cache_pull(&mut self, job_id: String, fingerprint: String) {
+        handle_eval_cache_pull(self.state, self.writer, job_id, fingerprint).await;
+    }
+
+    async fn on_eval_cache_push(
+        &mut self,
+        job_id: String,
+        fingerprint: String,
+        size_bytes: u64,
+        eval_cache: &mut EvalCacheReceiveStore,
+    ) {
+        handle_eval_cache_push(
+            self.state,
+            self.writer,
+            eval_cache,
+            job_id,
+            fingerprint,
+            size_bytes,
+        )
+        .await;
+    }
+
+    async fn on_eval_cache_chunk(
+        &mut self,
+        job_id: String,
+        data: Vec<u8>,
+        offset: u64,
+        is_final: bool,
+        eval_cache: &mut EvalCacheReceiveStore,
+    ) {
+        handle_eval_cache_chunk(self.state, eval_cache, &job_id, data, offset, is_final).await;
+    }
+
+    async fn on_eval_cache_push_done(&mut self, fingerprint: String, size_bytes: u64) {
+        handle_eval_cache_push_done(self.state, fingerprint, size_bytes).await;
     }
 
     async fn on_eval_message(
