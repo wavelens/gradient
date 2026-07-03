@@ -437,6 +437,56 @@ pub async fn demote_unbacked_trusted_outputs<C: ConnectionTrait>(
     Ok(reset)
 }
 
+/// Ground truth for `cached_path.closure_complete` on row `cp`: its own NAR is
+/// backed and every recorded reference resolves to a backed, itself
+/// closure-complete `cached_path` row (self-references excluded). References
+/// are recorded at every ingest (`sync_reference_index`), so an empty
+/// reference set genuinely means "no references".
+pub(crate) const CACHED_PATH_CLOSURE_COMPLETE_GATE: &str = r#"
+    cp.file_hash IS NOT NULL
+    AND NOT EXISTS (
+        SELECT 1 FROM cached_path_reference r
+        LEFT JOIN cached_path dep ON dep.hash = r.reference_hash
+        WHERE r.referrer = cp.hash
+          AND r.reference_hash <> cp.hash
+          AND (dep.hash IS NULL OR dep.file_hash IS NULL OR NOT dep.closure_complete))
+"#;
+
+/// Bidirectional CLEAR+SET fixpoint over `cached_path.closure_complete`,
+/// mirroring the anchor-side fixpoints. Before this the flag had no forward
+/// maintainer at all: only the m20260624 backfill ever set it, ingest inserts
+/// rows at `false`, and `clear_closure_complete_for_referrers` only clears - so
+/// every post-migration row could never satisfy the eval-time substituted
+/// gate (`compute_truly_substituted`). CLEAR removes stale-true rows whose
+/// closure regressed (GC, purge), SET marks rows whose full reference closure
+/// is backed, one layer per pass. A converged cache costs two zero-row
+/// statements.
+pub async fn reconcile_cached_path_closure_complete<C: ConnectionTrait>(
+    db: &C,
+) -> Result<(), sea_orm::DbErr> {
+    let clear = format!(
+        "UPDATE cached_path cp SET closure_complete = false \
+         WHERE cp.closure_complete AND NOT ({CACHED_PATH_CLOSURE_COMPLETE_GATE})"
+    );
+    let set = format!(
+        "UPDATE cached_path cp SET closure_complete = true \
+         WHERE NOT cp.closure_complete AND {CACHED_PATH_CLOSURE_COMPLETE_GATE}"
+    );
+    for stmt in [clear, set] {
+        loop {
+            let changed = db
+                .execute(Statement::from_string(DatabaseBackend::Postgres, &stmt))
+                .await?
+                .rows_affected();
+            if changed == 0 {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Clear the dispatch-gate trust flags invalidated by deleting the cache
 /// artifacts behind `hashes`, in the same transaction as the deletion when the
 /// caller runs one. `drv_closure_cached` is cleared on anchors whose own `.drv`
@@ -669,6 +719,35 @@ mod tests {
         assert!(
             sql.contains("NOT EXISTS") && sql.contains("cp.file_hash IS NOT NULL"),
             "must require a missing backing NAR: {sql}"
+        );
+    }
+
+    /// `cached_path.closure_complete` must key on real ground truth: the row's
+    /// own NAR backing plus every recorded reference resolving to a backed,
+    /// itself-complete row, with self-references excluded (or a self-referential
+    /// path could never converge). The eval-time substituted gate trusts this
+    /// flag, so a drift here silently disables output-only substitution.
+    #[test]
+    fn cached_path_closure_gate_keys_on_reference_ground_truth() {
+        let sql = CACHED_PATH_CLOSURE_COMPLETE_GATE
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            sql.starts_with("cp.file_hash IS NOT NULL"),
+            "the row's own NAR must be backed: {sql}"
+        );
+        assert!(
+            sql.contains("FROM cached_path_reference r") && sql.contains("dep.hash = r.reference_hash"),
+            "must resolve every recorded reference: {sql}"
+        );
+        assert!(
+            sql.contains("r.reference_hash <> cp.hash"),
+            "self-references must be excluded: {sql}"
+        );
+        assert!(
+            sql.contains("dep.hash IS NULL OR dep.file_hash IS NULL OR NOT dep.closure_complete"),
+            "a missing, unbacked, or incomplete reference must fail the gate: {sql}"
         );
     }
 

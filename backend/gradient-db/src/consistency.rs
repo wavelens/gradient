@@ -30,6 +30,8 @@ pub struct ConsistencyReport {
     pub unbacked_trusted_outputs: i64,
     /// `Building` evaluations with zero non-terminal anchors left.
     pub wedged_building_evals: i64,
+    /// `cached_path` rows whose `closure_complete` disagrees with its gate.
+    pub stale_cached_path_closure: i64,
 }
 
 impl ConsistencyReport {
@@ -39,6 +41,7 @@ impl ConsistencyReport {
             + self.unpromoted_ready
             + self.unbacked_trusted_outputs
             + self.wedged_building_evals
+            + self.stale_cached_path_closure
     }
 }
 
@@ -112,12 +115,23 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
     )
     .await?;
 
+    let cached_path_gate = crate::cache_storage::CACHED_PATH_CLOSURE_COMPLETE_GATE;
+    let stale_cached_path_closure = count(
+        db,
+        format!(
+            "SELECT count(*) AS n FROM cached_path cp \
+             WHERE cp.closure_complete <> ({cached_path_gate})"
+        ),
+    )
+    .await?;
+
     Ok(ConsistencyReport {
         stale_closure_complete,
         stale_drv_closure_cached,
         unpromoted_ready,
         unbacked_trusted_outputs,
         wedged_building_evals,
+        stale_cached_path_closure,
     })
 }
 
@@ -133,8 +147,9 @@ mod tests {
             unpromoted_ready: 3,
             unbacked_trusted_outputs: 4,
             wedged_building_evals: 5,
+            stale_cached_path_closure: 6,
         };
-        assert_eq!(r.total(), 15);
+        assert_eq!(r.total(), 21);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }

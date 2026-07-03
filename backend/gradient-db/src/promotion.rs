@@ -21,11 +21,13 @@
 //! The gates in this module trust derived flags on `derivation_build`; each has
 //! an explicit discipline, and mixing them up re-opens a dead-zone class:
 //!
-//! | flag                 | discipline                | heal                              |
-//! |----------------------|---------------------------|-----------------------------------|
-//! | `closure_complete`   | bidirectional (CLEAR+SET) | [`reconcile_closure_complete`]    |
-//! | `drv_closure_cached` | bidirectional (CLEAR+SET) | [`reconcile_drv_closure_cached`]  |
-//! | `edges_complete`     | monotonic (set-only)      | none needed - see below           |
+//! | flag                            | discipline                | heal                                                          |
+//! |---------------------------------|---------------------------|---------------------------------------------------------------|
+//! | `closure_complete`              | bidirectional (CLEAR+SET) | [`reconcile_closure_complete`]                                |
+//! | `drv_closure_cached`            | bidirectional (CLEAR+SET) | [`reconcile_drv_closure_cached`]                              |
+//! | `edges_complete`                | monotonic (set-only)      | none needed - see below                                       |
+//! | `derivation_output.is_cached`   | event-driven (set on NAR ingest, cleared by demote) | [`crate::cache_storage::demote_unbacked_trusted_outputs`] keys on ground truth, not this flag |
+//! | `cached_path.closure_complete`  | bidirectional (CLEAR+SET) | [`crate::cache_storage::reconcile_cached_path_closure_complete`] |
 //!
 //! The two closure flags cache ground truth that can REGRESS (GC deletes a NAR,
 //! an output is evicted, an edge is recorded late), so they must be cleared as

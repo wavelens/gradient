@@ -14,10 +14,12 @@
 //!
 //! Ordering rationale: demotes run before the flag fixpoints so a flag cleared
 //! by a demote is re-propagated in the same pass; the cached-anchor reconcile
-//! runs before `closure_complete` so freshly trusted anchors propagate; both
-//! flag fixpoints run before promotion and the failure sweep so their gates
-//! read sound flags. Each step is logged-and-continued on error - a failing
-//! heal must never block the remaining heals.
+//! runs before `closure_complete` so freshly trusted anchors propagate; the
+//! `cached_path`-side fixpoint runs before the anchor-side ones (their gates
+//! read cache rows); all flag fixpoints run before promotion and the failure
+//! sweep so their gates read sound flags. Each step is logged-and-continued on
+//! error - a failing heal must never block the remaining heals. The full
+//! derived-flag contract table lives in the `promotion` module doc.
 
 use crate::DbContext;
 use crate::status::{TransitionChange, emit_transition_effects};
@@ -120,6 +122,9 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         }
     }
 
+    if let Err(e) = crate::cache_storage::reconcile_cached_path_closure_complete(db).await {
+        error!(error = %e, "reconcile: reconcile_cached_path_closure_complete failed");
+    }
     if let Err(e) = crate::promotion::reconcile_drv_closure_cached(db).await {
         error!(error = %e, "reconcile: reconcile_drv_closure_cached failed");
     }
