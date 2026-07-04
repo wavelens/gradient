@@ -6,10 +6,9 @@
 
 use chrono::Timelike;
 use crate::ingest::{IngestInput, SignTargets, ingest_metadata_only};
-use gradient_types::ids::{CacheId, CacheMetricId};
+use gradient_types::ids::{CacheId, CacheMetricId, OrganizationId};
 use gradient_types::*;
 use gradient_core::ServerState;
-use gradient_scheduler::Scheduler;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::debug;
@@ -25,17 +24,17 @@ pub(super) struct NarUploadRecord<'a> {
     pub deriver: Option<&'a str>,
 }
 
-/// Resolves `job_id → org → cache` and increments the traffic counter.
+/// Resolves the org's cache and increments the traffic counter. `org_id` is
+/// resolved on the session read loop before the commit detaches, so it stays
+/// valid even after the job is evicted from the tracker on completion.
 pub(super) async fn record_nar_push_metric(
     state: &ServerState,
-    scheduler: &Scheduler,
-    job_id: &str,
+    org_id: Option<OrganizationId>,
     bytes: i64,
 ) -> anyhow::Result<()> {
-    let org_id = scheduler
-        .org_for_job(job_id)
-        .await
-        .ok_or_else(|| anyhow::anyhow!("no peer for job {}", job_id))?;
+    let Some(org_id) = org_id else {
+        return Ok(());
+    };
 
     let org_cache = EOrganizationCache::find()
         .filter(COrganizationCache::Organization.eq(org_id))
@@ -90,8 +89,7 @@ async fn upsert_cache_metric(
 
 pub(super) async fn mark_nar_stored(
     state: &ServerState,
-    scheduler: &Scheduler,
-    job_id: &str,
+    org_id: Option<OrganizationId>,
     store_path: &str,
     record: &NarUploadRecord<'_>,
 ) -> anyhow::Result<()> {
@@ -102,7 +100,7 @@ pub(super) async fn mark_nar_stored(
         return Ok(());
     }
 
-    let targets = match scheduler.org_for_job(job_id).await {
+    let targets = match org_id {
         Some(org_id) => SignTargets::OrgCaches(org_id),
         None => SignTargets::None,
     };

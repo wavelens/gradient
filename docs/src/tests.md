@@ -830,6 +830,27 @@ Backend:
   returns 404 rather than serving an unsigned narinfo. The whole privacy
   guarantee depends on this and we lock it in here.
 
+## Detached NAR commit resolves the sign target before the job is evicted
+
+Regression from detaching the `NarUploaded` commit off the session read loop
+(`781dfd2f`): the commit task called `scheduler.org_for_job(job_id)` to pick
+the caches to sign for, but the read loop had already moved on to the next
+frame - `JobComplete`, which evicts the job from the tracker. So the resolve
+raced to `None`, `SignTargets` collapsed to `None`, and no
+`cached_path_signature` placeholder was written. `derivation_output.is_cached`
+was still set, so the narinfo handler found the path but 404'd forever on the
+missing signature - the `nix/tests/gradient/cache` VM test failed at Phase 7.
+Fix: `on_nar_uploaded` resolves the org on the read loop (a cheap in-memory
+tracker read that doesn't reintroduce the head-of-line stall the detach cured)
+and threads it into the commit, so `mark_nar_stored` / `record_nar_push_metric`
+never re-resolve from the evicted tracker.
+
+Backend (`cargo test -p proto --lib ingest::tests`):
+- `org_target_enqueues_signature_placeholder` - `SignTargets::OrgCaches`
+  inserts a `cached_path_signature` placeholder for every subscribed cache.
+- `none_target_enqueues_no_signature` - `SignTargets::None` (the pre-fix race
+  state) records the path but touches no `cached_path_signature` row.
+
 ## `mark_nar_stored` filters derivation_output by hash
 
 `proto::handler::nar::mark_nar_stored` previously located the

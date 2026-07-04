@@ -390,4 +390,70 @@ mod tests {
         assert!(wrote, "a zombie row whose object is gone must re-write");
         assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
     }
+
+    const SP: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";
+
+    fn org() -> OrganizationId {
+        OrganizationId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000003").unwrap())
+    }
+
+    fn org_cache_row() -> gradient_entity::organization_cache::Model {
+        gradient_entity::organization_cache::Model {
+            organization: org(),
+            cache: cache_id(),
+            ..Default::default()
+        }
+    }
+
+    fn log_has_signature_insert(db: sea_orm::DatabaseConnection) -> bool {
+        db.into_transaction_log()
+            .iter()
+            .any(|t| format!("{t:?}").contains("cached_path_signature"))
+    }
+
+    /// A resolved org enqueues a `cached_path_signature` placeholder for every
+    /// subscribed cache. Regression guard: the detached NAR commit must resolve
+    /// the org on the read loop *before* the job is evicted from the tracker -
+    /// otherwise `SignTargets` collapses to `None`, no placeholder is written,
+    /// the sign sweep has nothing to sign, and the narinfo 404s forever.
+    #[tokio::test]
+    async fn org_target_enqueues_signature_placeholder() {
+        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .append_query_results([vec![returned_cached_path(hash)]])
+            .append_query_results([vec![org_cache_row()]])
+            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .into_connection();
+
+        ingest_metadata_only(&db, input(SP), SignTargets::OrgCaches(org()))
+            .await
+            .expect("ingest");
+
+        assert!(
+            log_has_signature_insert(db),
+            "OrgCaches target must insert a cached_path_signature placeholder"
+        );
+    }
+
+    /// No resolvable org (the exact state the pre-fix race produced) records the
+    /// path but enqueues no signature - so the endpoint can distinguish "not yet
+    /// signed" from "will never be signed".
+    #[tokio::test]
+    async fn none_target_enqueues_no_signature() {
+        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .append_query_results([vec![returned_cached_path(hash)]])
+            .into_connection();
+
+        ingest_metadata_only(&db, input(SP), SignTargets::None)
+            .await
+            .expect("ingest");
+
+        assert!(
+            !log_has_signature_insert(db),
+            "None target must not touch cached_path_signature"
+        );
+    }
 }
