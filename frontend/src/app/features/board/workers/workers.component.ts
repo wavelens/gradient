@@ -53,23 +53,25 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
         [categories]="archLoad().cats"
         [colors]="['#28a745']"
       ></app-metric-chart>
-      <app-metric-chart
-        title="Load by feature (busy %)"
-        type="radar"
-        [height]="300"
-        [series]="featLoad().series"
-        [categories]="featLoad().cats"
-        [colors]="['#e83e8c']"
-      ></app-metric-chart>
-      <app-metric-chart
-        title="Slot utilisation per worker (%)"
-        type="bar"
-        [height]="300"
-        [series]="utilSeries()"
-        [categories]="workerCats()"
-        [colors]="['#6f42c1']"
-      ></app-metric-chart>
     </div>
+
+    <app-metric-chart
+      title="Load by feature (busy %)"
+      type="bar"
+      [height]="300"
+      [series]="featLoad().series"
+      [categories]="featLoad().cats"
+      [colors]="['#e83e8c']"
+    ></app-metric-chart>
+
+    <app-metric-chart
+      title="Slot utilisation per worker (%)"
+      type="bar"
+      [height]="300"
+      [series]="utilSeries()"
+      [categories]="workerCats()"
+      [colors]="['#6f42c1']"
+    ></app-metric-chart>
 
     <table class="workers">
       <thead>
