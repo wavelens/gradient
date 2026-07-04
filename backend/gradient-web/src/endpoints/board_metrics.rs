@@ -131,6 +131,14 @@ pub async fn get_board_cache(
     }))
 }
 
+/// Host of an upstream URL, used as the merged series' display name
+/// (per-instance custom names cannot survive a by-URL merge).
+fn upstream_host(url: &str) -> String {
+    let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let host = after_scheme.split('/').next().unwrap_or(after_scheme);
+    if host.is_empty() { url.to_string() } else { host.to_string() }
+}
+
 pub async fn get_board_upstreams(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -140,7 +148,7 @@ pub async fn get_board_upstreams(
     let window = window_clause(&params);
 
     let sql = format!(
-        "SELECT mr.scope->>'upstream' AS upstream_id, mr.metric AS metric, \
+        "SELECT mr.scope->>'upstream_url' AS upstream_url, mr.metric AS metric, \
                 mr.bucket_start AS bucket_start, mr.count AS c, mr.sum AS s \
          FROM metric_rollup mr \
          WHERE mr.metric IN ('upstream.latency_ms','upstream.narinfo_hits','upstream.narinfo_misses') \
@@ -173,7 +181,7 @@ pub async fn get_board_upstreams(
 
     let mut by_upstream: HashMap<String, Agg> = HashMap::new();
     for r in rows {
-        let Ok(uid) = r.try_get::<String>("", "upstream_id") else {
+        let Ok(uid) = r.try_get::<String>("", "upstream_url") else {
             continue;
         };
         let metric: String = r.try_get("", "metric").unwrap_or_default();
@@ -221,28 +229,9 @@ pub async fn get_board_upstreams(
             return Ok(ok_json(BoardUpstreamStats { upstreams: vec![] }));
         }
 
-        let allowed_sql = format!(
-            "SELECT DISTINCT cu.id::text AS id FROM cache_upstream cu \
-             JOIN organization_cache oc ON oc.cache = cu.cache \
-             WHERE oc.organization IN ({list})"
-        );
-        let allowed: std::collections::HashSet<String> = state
-            .web_db
-            .query_all(Statement::from_string(DatabaseBackend::Postgres, allowed_sql))
-            .await?
-            .into_iter()
-            .filter_map(|r| r.try_get::<String>("", "id").ok())
-            .collect();
-
-        by_upstream.retain(|id, _| allowed.contains(id));
+        let allowed = gradient_db::upstream_urls_for_orgs(&state.web_db, &list).await?;
+        by_upstream.retain(|url, _| allowed.contains(url));
     }
-
-    let names = gradient_db::upstream_display_for_ids(
-        &state.web_db,
-        by_upstream.keys().cloned().collect(),
-    )
-    .await
-    .unwrap_or_default();
 
     let mut upstreams = Vec::new();
     for (uid, agg) in by_upstream {
@@ -268,13 +257,14 @@ pub async fn get_board_upstreams(
         };
         let denom = (agg.hits_total + agg.misses_total) as f64;
         let hit_rate = if denom > 0.0 { Some(agg.hits_total as f64 / denom) } else { None };
-        let (display_name, url) = names.get(&uid).cloned().unwrap_or_default();
-        let url = if scope.is_all() { url } else { String::new() };
+        // Rows are already scoped to URLs the caller's org uses (or all, for
+        // superusers), so the URL is the caller's own - no cross-org mask needed.
+        let display_name = upstream_host(&uid);
 
         upstreams.push(BoardUpstream {
-            upstream_id: uid,
+            upstream_id: uid.clone(),
             display_name,
-            url,
+            url: uid,
             avg_latency_ms,
             hit_rate,
             requests_total: agg.latency_count,
@@ -561,4 +551,16 @@ pub async fn get_board_health(
         latest_rollup_bucket: latest.map(|t| t.and_utc().to_rfc3339()),
         draining: scheduler.draining.load(std::sync::atomic::Ordering::Relaxed),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::upstream_host;
+
+    #[test]
+    fn upstream_host_strips_scheme_and_path() {
+        assert_eq!(upstream_host("https://cache.nixos.org/foo?x=1"), "cache.nixos.org");
+        assert_eq!(upstream_host("http://10.0.0.1:5000/"), "10.0.0.1:5000");
+        assert_eq!(upstream_host("cache.example.com"), "cache.example.com");
+    }
 }

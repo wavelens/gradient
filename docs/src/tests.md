@@ -243,6 +243,20 @@ status-report action on project creation.
 `github_push_without_head_commit_has_no_message`, and `gitlab_push_picks_commit_matching_after`
 cover push webhooks now writing the commit subject + author (previously only Pull/PR triggers did).
 
+## Worker load metrics + by-URL upstream merge (#417)
+
+`backend/gradient-web/src/endpoints/board.rs`: `worker_load_diverges_per_capability_and_architecture`
+builds a fixture of an all-round worker plus a build-only worker with several
+in-flight build/eval/fetch jobs and asserts `aggregate_worker_load` reports
+divergent per-capability busy % (heavy build, light eval/fetch) and correct
+per-architecture in-flight/capacity attribution - the bug where every capability
+showed the same busy %. `worker_load_ignores_builtin_arch_and_shows_empty_capacity`
+asserts `builtin` builds create no phantom architecture bucket and the capability
+radar keeps all three axes even at zero capacity.
+
+`backend/gradient-web/src/endpoints/board_metrics.rs`: `upstream_host_strips_scheme_and_path`
+covers the merged-series display name derived from the upstream URL host.
+
 ## Draining server + board fixes (#411)
 
 `backend/gradient-types/src/waiting_reason.rs`: `draining_round_trip` asserts the
@@ -802,11 +816,21 @@ Frontend (`pnpm --dir frontend exec ng test --include='**/github-app.component.s
 
 Backend (`cargo test -p web --tests narinfo`):
 - `narinfo_served_from_db_without_daemon_probe` - verifies the `.narinfo`
-  response is assembled from DB rows (no nix-daemon probe) and now also asserts
-  that the optional `Deriver:` line is emitted when `cached_path.deriver` is
-  populated. Worker-supplied deriver metadata arrives via `NarUploaded.deriver`
-  and is persisted in `mark_nar_stored`.
+  response is assembled from DB rows (no nix-daemon probe). Asserts the
+  `Deriver:` line is emitted as a store-path basename (the `cached_path.deriver`
+  column keeps the `/nix/store/` prefix; the serializer strips it because nix
+  narinfo `Deriver`/`References` are basenames), that the empty `References`
+  line is omitted, and that the response carries `X-Cache: HIT`. Worker-supplied
+  deriver metadata arrives via `NarUploaded.deriver` and is persisted in
+  `mark_nar_stored`.
 - `shows a friendly error when credentials are no longer available`
+
+Serializer (`cargo test -p gradient-types nix_cache`):
+- `nix_path_info_no_refs_omits_line` - `to_nix_string` drops the `References:`
+  line entirely when there are no references.
+- `nix_path_info_references_are_basenames` / `nix_path_info_deriver_appears_only_when_set`
+  - `References` and `Deriver` are emitted as store-path basenames even when the
+  in-memory value carries a `/nix/store/` prefix.
 
 ## Per-project `sign_cache` option (#125)
 

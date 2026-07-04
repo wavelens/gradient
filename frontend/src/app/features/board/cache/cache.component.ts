@@ -8,7 +8,12 @@ import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular
 import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
-import { BoardService, BoardCacheStats, BoardUpstreamStats } from '@core/services/board.service';
+import {
+  BoardService,
+  BoardCacheStats,
+  BoardUpstream,
+  BoardUpstreamStats,
+} from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 
@@ -52,28 +57,15 @@ const GIB = 1024 ** 3;
     ></app-metric-chart>
 
     <h3 class="upstreams-title">Upstreams</h3>
-    <div class="upstreams">
-      @for (u of upstreams()?.upstreams ?? []; track u.upstream_id) {
-        <div class="upstream">
-          <div class="head">
-            <span class="name">{{ u.display_name }}</span>
-            <span class="meta">
-              {{ u.avg_latency_ms !== null ? (u.avg_latency_ms | number: '1.0-0') + ' ms' : 'n/a' }}
-              &middot;
-              {{ u.hit_rate !== null ? (u.hit_rate * 100 | number: '1.0-0') + '% hit' : 'n/a' }}
-              &middot; {{ u.requests_total }} req
-            </span>
-          </div>
-          <app-metric-chart
-            [title]="'Latency (ms) - ' + u.display_name"
-            type="line"
-            [series]="[{ name: 'latency', data: u.latency.map((p) => p.sum) }]"
-            [categories]="u.latency.map((p) => p.bucket_start.slice(11, 16))"
-            [colors]="['#fd7e14']"
-          ></app-metric-chart>
-        </div>
-      }
-    </div>
+    @for (u of upstreams()?.upstreams ?? []; track u.upstream_id) {
+      <app-metric-chart
+        [title]="upstreamTitle(u)"
+        type="line"
+        [series]="[{ name: 'latency', data: u.latency.map((p) => p.sum) }]"
+        [categories]="u.latency.map((p) => p.bucket_start.slice(11, 16))"
+        [colors]="['#fd7e14']"
+      ></app-metric-chart>
+    }
   `,
   styles: [
     `
@@ -85,11 +77,6 @@ const GIB = 1024 ** 3;
     `,
     `
       .upstreams-title { color: #fff; margin: 1.5rem 0 0.75rem; }
-      .upstreams { display: flex; flex-direction: column; gap: 1rem; }
-      .upstream { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 1rem; }
-      .upstream .head { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
-      .upstream .name { color: #fff; font-weight: 600; }
-      .upstream .meta { color: #abb0b4; font-size: 0.85rem; }
     `,
   ],
 })
@@ -114,6 +101,12 @@ export class BoardCacheComponent implements OnInit, OnDestroy {
 
   gib(bytes: number | undefined): string {
     return ((bytes ?? 0) / GIB).toFixed(2);
+  }
+
+  upstreamTitle(u: BoardUpstream): string {
+    const lat = u.avg_latency_ms !== null ? `${Math.round(u.avg_latency_ms)} ms` : 'n/a';
+    const hit = u.hit_rate !== null ? `${Math.round(u.hit_rate * 100)}% hit` : 'n/a';
+    return `${u.display_name} latency (ms) · ${lat} · ${hit} · ${u.requests_total} req`;
   }
 
   ngOnInit(): void {

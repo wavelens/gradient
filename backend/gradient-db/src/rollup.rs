@@ -156,49 +156,49 @@ fn cache_storage_sql() -> String {
     )
 }
 
-/// Upstream narinfo latency per minute per upstream (scope `{upstream}`):
+/// Upstream narinfo latency per minute per URL (scope `{upstream_url}`):
 /// `count` = completed requests, `sum` = summed latency ms (avg = sum/count).
 fn upstream_latency_sql() -> String {
     format!("INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
     SELECT uuidv7(), 'upstream.latency_ms', {minute}, um.bucket_time, \
-           jsonb_build_object('upstream', um.upstream::text), hashtextextended(um.upstream::text, 0), \
+           jsonb_build_object('upstream_url', um.upstream_url), hashtextextended(um.upstream_url, 0), \
            sum(um.request_count)::bigint, sum(um.latency_ms_sum), 0, 0, 0, NULL \
     FROM upstream_metric um \
     WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
-    GROUP BY um.bucket_time, um.upstream \
+    GROUP BY um.bucket_time, um.upstream_url \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
     DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
         minute = i16::from(RollupGranularity::Minute)
     )
 }
 
-/// Upstream narinfo hits per minute per upstream (scope `{upstream}`).
+/// Upstream narinfo hits per minute per URL (scope `{upstream_url}`).
 fn upstream_hits_sql() -> String {
     format!("INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
     SELECT uuidv7(), 'upstream.narinfo_hits', {minute}, um.bucket_time, \
-           jsonb_build_object('upstream', um.upstream::text), hashtextextended(um.upstream::text, 0), \
+           jsonb_build_object('upstream_url', um.upstream_url), hashtextextended(um.upstream_url, 0), \
            sum(um.request_count)::bigint, sum(um.narinfo_hits), 0, 0, 0, NULL \
     FROM upstream_metric um \
     WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
-    GROUP BY um.bucket_time, um.upstream \
+    GROUP BY um.bucket_time, um.upstream_url \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
     DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
         minute = i16::from(RollupGranularity::Minute)
     )
 }
 
-/// Upstream narinfo misses per minute per upstream (scope `{upstream}`).
+/// Upstream narinfo misses per minute per URL (scope `{upstream_url}`).
 fn upstream_misses_sql() -> String {
     format!("INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
     SELECT uuidv7(), 'upstream.narinfo_misses', {minute}, um.bucket_time, \
-           jsonb_build_object('upstream', um.upstream::text), hashtextextended(um.upstream::text, 0), \
+           jsonb_build_object('upstream_url', um.upstream_url), hashtextextended(um.upstream_url, 0), \
            sum(um.request_count)::bigint, sum(um.narinfo_misses), 0, 0, 0, NULL \
     FROM upstream_metric um \
     WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
-    GROUP BY um.bucket_time, um.upstream \
+    GROUP BY um.bucket_time, um.upstream_url \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
     DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
         minute = i16::from(RollupGranularity::Minute)

@@ -578,6 +578,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(board_metrics::get_board_durations_heatmap),
         )
         .route("/board/workers", get(board::get_board_workers))
+        .route("/board/workers/load", get(board::get_board_worker_load))
         .route("/board/live", get(board::board_live_ws))
         .route("/board/cache/live", get(live::cache_live_ws))
         .route(

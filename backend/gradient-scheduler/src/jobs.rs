@@ -359,6 +359,21 @@ pub struct PendingJobInfo {
     pub pname: Option<String>,
 }
 
+/// One in-flight job reduced to the dimensions the worker-load radar needs:
+/// its owning worker/org and which capability, architecture, and features it
+/// consumes. Build jobs carry an `architecture` + `required_features`; flake
+/// jobs set `fetch_task`/`eval_task` from their `FlakeTask`s.
+#[derive(Debug, Clone)]
+pub struct BoardActiveJob {
+    pub worker_id: String,
+    pub organization: OrganizationId,
+    pub kind: DispatchedJobKind,
+    pub architecture: Option<String>,
+    pub required_features: Vec<String>,
+    pub fetch_task: bool,
+    pub eval_task: bool,
+}
+
 /// One scored candidate weighed in a dispatch decision. Captured for every
 /// candidate, including those that scored below the dispatch floor, so the Live
 /// Jobs "all scores" view can surface negative scores for rule tuning (#419).
@@ -910,6 +925,37 @@ impl JobTracker {
         self.active
             .iter()
             .map(|(job_id, (worker_id, job))| (job_id.as_str(), worker_id.as_str(), job))
+    }
+
+    /// Per-capability / per-architecture / per-feature classification of every
+    /// in-flight job, consumed by the Job Board worker-load radar (#417).
+    pub fn board_active_jobs(&self) -> Vec<BoardActiveJob> {
+        self.active_jobs()
+            .map(|(_, worker_id, job)| {
+                let (architecture, required_features, fetch_task, eval_task) = match job {
+                    PendingJob::Build(b) => {
+                        (Some(b.architecture.clone()), b.required_features.clone(), false, false)
+                    }
+                    PendingJob::Eval(e) => {
+                        let fetch = e.job.tasks.contains(&FlakeTask::FetchFlake);
+                        let eval = e.job.tasks.iter().any(|t| {
+                            matches!(t, FlakeTask::EvaluateFlake | FlakeTask::EvaluateDerivations)
+                        });
+                        (None, Vec::new(), fetch, eval)
+                    }
+                };
+
+                BoardActiveJob {
+                    worker_id: worker_id.to_owned(),
+                    organization: job.org_id(),
+                    kind: job.kind_disc(),
+                    architecture,
+                    required_features,
+                    fetch_task,
+                    eval_task,
+                }
+            })
+            .collect()
     }
 
     /// Remove all pending (unassigned) jobs belonging to a given evaluation,

@@ -6,7 +6,13 @@
 
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { BoardService, BoardWorker, BoardFleetPoint } from '@core/services/board.service';
+import {
+  BoardService,
+  BoardWorker,
+  BoardFleetPoint,
+  LoadBucket,
+  WorkerLoad,
+} from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 
 @Component({
@@ -35,9 +41,25 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
         title="Load by capability (busy %)"
         type="radar"
         [height]="300"
-        [series]="loadRadar()"
-        [categories]="['eval', 'fetch', 'build']"
+        [series]="capLoad().series"
+        [categories]="capLoad().cats"
         [colors]="['#17a2b8']"
+      ></app-metric-chart>
+      <app-metric-chart
+        title="Load by architecture (busy %)"
+        type="radar"
+        [height]="300"
+        [series]="archLoad().series"
+        [categories]="archLoad().cats"
+        [colors]="['#28a745']"
+      ></app-metric-chart>
+      <app-metric-chart
+        title="Load by feature (busy %)"
+        type="radar"
+        [height]="300"
+        [series]="featLoad().series"
+        [categories]="featLoad().cats"
+        [colors]="['#e83e8c']"
       ></app-metric-chart>
       <app-metric-chart
         title="Slot utilisation per worker (%)"
@@ -86,6 +108,7 @@ export class BoardWorkersComponent implements OnInit {
   private board = inject(BoardService);
   workers = signal<BoardWorker[]>([]);
   fleet = signal<BoardFleetPoint[]>([]);
+  load = signal<WorkerLoad | null>(null);
 
   fleetCats = computed(() => this.fleet().map((p) => p.bucket_start.slice(11, 16)));
   fleetSeries = computed(() => [
@@ -98,16 +121,23 @@ export class BoardWorkersComponent implements OnInit {
     { name: 'build', data: this.fleet().map((p) => p.build) },
   ]);
 
-  loadRadar = computed(() => {
-    const w = this.workers();
-    const busy = (pred: (x: BoardWorker) => boolean) => {
-      const sel = w.filter(pred);
-      const max = sel.reduce((a, x) => a + x.max_concurrent_builds, 0);
-      const used = sel.reduce((a, x) => a + x.assigned_jobs, 0);
-      return max > 0 ? Math.round((used / max) * 100) : 0;
+  private radar(buckets: LoadBucket[]) {
+    return {
+      cats: buckets.map((b) => b.key),
+      series: [
+        {
+          name: 'busy %',
+          data: buckets.map((b) =>
+            b.capacity > 0 ? Math.round((b.in_flight / b.capacity) * 100) : 0
+          ),
+        },
+      ],
     };
-    return [{ name: 'busy %', data: [busy((x) => x.eval), busy((x) => x.fetch), busy((x) => x.build)] }];
-  });
+  }
+
+  capLoad = computed(() => this.radar(this.load()?.by_capability ?? []));
+  archLoad = computed(() => this.radar(this.load()?.by_architecture ?? []));
+  featLoad = computed(() => this.radar(this.load()?.by_feature ?? []));
 
   workerCats = computed(() =>
     this.workers().filter((w) => w.id !== null).map((w) => (w.id ?? '').slice(0, 12))
@@ -128,5 +158,6 @@ export class BoardWorkersComponent implements OnInit {
   ngOnInit(): void {
     this.board.getWorkers().subscribe((w) => this.workers.set(w));
     this.board.getFleet(24).subscribe((f) => this.fleet.set(f));
+    this.board.getWorkerLoad().subscribe((l) => this.load.set(l));
   }
 }

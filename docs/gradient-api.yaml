@@ -6239,6 +6239,23 @@ paths:
         '200':
           description: Connected workers
 
+  /board/workers/load:
+    get:
+      tags: [board]
+      summary: Fleet load by capability, architecture, and feature
+      description: >-
+        Real per-dimension fleet load: for each capability (eval/fetch/build),
+        architecture, and system feature, the in-flight job count against the
+        summed slot capacity of the workers that can serve it. Answers whether
+        the fleet is eval-, build-, or architecture-bound rather than showing one
+        blended busy %. Scoped to the caller's orgs (superusers see the whole
+        fleet). Each bucket carries `{ key, in_flight, capacity, workers }`;
+        busy % = in_flight / capacity.
+      operationId: getBoardWorkerLoad
+      responses:
+        '200':
+          description: Fleet load breakdowns
+
   /board/cache:
     get:
       tags: [board]
@@ -6254,8 +6271,8 @@ paths:
   /board/cache/upstreams:
     get:
       tags: [board]
-      summary: Per-upstream cache latency and narinfo hit-rate
-      description: Per-upstream trailing latency, narinfo hit-rate, and request counts with hourly series. Org-scoped: superusers see all upstreams including url; members see their orgs plus public; url is blank for non-superusers.
+      summary: Per-URL cache latency and narinfo hit-rate
+      description: Per-upstream-URL trailing latency, narinfo hit-rate, and request counts with hourly series. Metrics are keyed by URL, so the same URL registered under several caches/orgs contributes to one series; `display_name` is the URL host. Org-scoped: superusers see all URLs; members see the URLs used by their orgs plus public orgs. Each series' `url` is the caller's own upstream, so it is returned unmasked.
       operationId: getBoardUpstreams
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }

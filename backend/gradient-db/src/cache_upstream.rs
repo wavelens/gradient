@@ -46,6 +46,13 @@ impl UpstreamAccum {
         self.latency_ms_sum += latency_ms;
         self.request_count += 1;
     }
+
+    pub fn merge(&mut self, other: &UpstreamAccum) {
+        self.latency_ms_sum += other.latency_ms_sum;
+        self.request_count += other.request_count;
+        self.narinfo_hits += other.narinfo_hits;
+        self.narinfo_misses += other.narinfo_misses;
+    }
 }
 
 pub async fn upstream_urls_for_org<C: ConnectionTrait>(
@@ -141,7 +148,7 @@ pub async fn upstream_endpoints_for_org<C: ConnectionTrait>(
                   / NULLIF(SUM(um.narinfo_hits + um.narinfo_misses), 0) AS hit_rate \
          FROM cache_upstream cu \
          JOIN organization_cache oc ON oc.cache = cu.cache \
-         LEFT JOIN upstream_metric um ON um.upstream = cu.id \
+         LEFT JOIN upstream_metric um ON um.upstream_url = cu.url \
               AND um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '{window_minutes} minutes' \
          WHERE oc.organization = $1 AND oc.mode <> 2 AND cu.kind = 2 \
                AND cu.mode <> 2 AND cu.url IS NOT NULL \
@@ -177,9 +184,9 @@ pub async fn upstream_endpoints_for_org<C: ConnectionTrait>(
 pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
     db: &C,
     bucket: chrono::NaiveDateTime,
-    accum: &std::collections::HashMap<CacheUpstreamId, UpstreamAccum>,
+    accum: &std::collections::HashMap<String, UpstreamAccum>,
 ) -> Result<()> {
-    for (upstream, a) in accum {
+    for (url, a) in accum {
         if a.request_count == 0 {
             continue;
         }
@@ -187,15 +194,15 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
         db.execute(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             "INSERT INTO upstream_metric \
-                 (id, upstream, bucket_time, latency_ms_sum, request_count, narinfo_hits, narinfo_misses) \
+                 (id, upstream_url, bucket_time, latency_ms_sum, request_count, narinfo_hits, narinfo_misses) \
              VALUES (uuidv7(), $1, $2, $3, $4, $5, $6) \
-             ON CONFLICT (upstream, bucket_time) DO UPDATE SET \
+             ON CONFLICT (upstream_url, bucket_time) DO UPDATE SET \
                  latency_ms_sum = upstream_metric.latency_ms_sum + EXCLUDED.latency_ms_sum, \
                  request_count  = upstream_metric.request_count  + EXCLUDED.request_count, \
                  narinfo_hits   = upstream_metric.narinfo_hits   + EXCLUDED.narinfo_hits, \
                  narinfo_misses = upstream_metric.narinfo_misses + EXCLUDED.narinfo_misses",
             [
-                upstream.into_inner().into(),
+                url.clone().into(),
                 bucket.into(),
                 a.latency_ms_sum.into(),
                 (a.request_count as i32).into(),
@@ -209,35 +216,24 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
     Ok(())
 }
 
-pub async fn upstream_display_for_ids<C: ConnectionTrait>(
+/// Distinct upstream URLs reachable by any of `org_ids` (their subscribed
+/// caches' HTTP upstreams). Scopes the by-URL board metrics to the caller.
+pub async fn upstream_urls_for_orgs<C: ConnectionTrait>(
     db: &C,
-    ids: Vec<String>,
-) -> Result<std::collections::HashMap<String, (String, String)>> {
-    use std::collections::HashMap;
-    let mut out = HashMap::new();
-    if ids.is_empty() {
-        return Ok(out);
-    }
+    org_list: &str,
+) -> Result<std::collections::HashSet<String>> {
+    let sql = format!(
+        "SELECT DISTINCT cu.url AS url FROM cache_upstream cu \
+         JOIN organization_cache oc ON oc.cache = cu.cache \
+         WHERE oc.organization IN ({org_list}) AND cu.url IS NOT NULL"
+    );
 
-    let parsed: Vec<CacheUpstreamId> = ids
-        .iter()
-        .filter_map(|s| s.parse::<uuid::Uuid>().ok().map(CacheUpstreamId::new))
-        .collect();
-
-    if parsed.is_empty() {
-        return Ok(out);
-    }
-
-    let rows = ECacheUpstream::find()
-        .filter(CCacheUpstream::Id.is_in(parsed))
-        .all(db)
-        .await?;
-
-    for r in rows {
-        out.insert(r.id.to_string(), (r.display_name, r.url.unwrap_or_default()));
-    }
-
-    Ok(out)
+    Ok(db
+        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .await?
+        .into_iter()
+        .filter_map(|r| r.try_get::<String>("", "url").ok())
+        .collect())
 }
 
 #[cfg(test)]
