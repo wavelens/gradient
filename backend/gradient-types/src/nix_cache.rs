@@ -54,10 +54,17 @@ pub struct NixPathInfo {
     pub ca: Option<String>,
 }
 
+/// The store-path *name* (`hash-name`) of a value that may be a full
+/// `/nix/store/…` path. Narinfo `References` and `Deriver` are basenames,
+/// never absolute paths; idempotent for values already in name form.
+fn store_path_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
 impl NixPathInfo {
     pub fn to_nix_string(&self) -> String {
-        format!(
-            "StorePath: {}\nURL: {}\nCompression: {}\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\nReferences: {}{}\nSig: {}{}\n",
+        let mut out = format!(
+            "StorePath: {}\nURL: {}\nCompression: {}\nFileHash: {}\nFileSize: {}\nNarHash: {}\nNarSize: {}\n",
             self.store_path,
             self.url,
             self.compression,
@@ -65,17 +72,24 @@ impl NixPathInfo {
             self.file_size,
             self.nar_hash,
             self.nar_size,
-            self.references.join(" "),
-            self.deriver
-                .as_ref()
-                .map(|deriver| format!("\nDeriver: {}", deriver))
-                .unwrap_or_default(),
-            self.sig,
-            self.ca
-                .as_ref()
-                .map(|ca| format!("\nCA: {}", ca))
-                .unwrap_or_default()
-        )
+        );
+        if !self.references.is_empty() {
+            let refs = self
+                .references
+                .iter()
+                .map(|r| store_path_name(r))
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.push_str(&format!("References: {}\n", refs));
+        }
+        if let Some(deriver) = &self.deriver {
+            out.push_str(&format!("Deriver: {}\n", store_path_name(deriver)));
+        }
+        out.push_str(&format!("Sig: {}\n", self.sig));
+        if let Some(ca) = &self.ca {
+            out.push_str(&format!("CA: {}\n", ca));
+        }
+        out
     }
 }
 
@@ -239,17 +253,18 @@ mod tests {
     }
 
     #[test]
-    fn nix_path_info_references_space_joined() {
+    fn nix_path_info_references_are_basenames() {
         let s = path_info().to_nix_string();
-        assert!(s.contains("References: /nix/store/x-a /nix/store/y-b"));
+        assert!(s.contains("References: x-a y-b"));
+        assert!(!s.contains("/nix/store/x-a"));
     }
 
     #[test]
-    fn nix_path_info_no_refs_empty_line() {
+    fn nix_path_info_no_refs_omits_line() {
         let mut pi = path_info();
         pi.references = vec![];
         let s = pi.to_nix_string();
-        assert!(s.contains("References: \n") || s.contains("References: "));
+        assert!(!s.contains("References:"), "empty references must omit the line:\n{s}");
     }
 
     #[test]
@@ -258,7 +273,8 @@ mod tests {
         assert!(!pi.to_nix_string().contains("Deriver:"));
         pi.deriver = Some("/nix/store/drv-path.drv".into());
         let s = pi.to_nix_string();
-        assert!(s.contains("Deriver: /nix/store/drv-path.drv"));
+        assert!(s.contains("Deriver: drv-path.drv"));
+        assert!(!s.contains("Deriver: /nix/store/"));
     }
 
     #[test]
@@ -310,9 +326,9 @@ mod tests {
             file_size: 1234,
             nar_hash: "sha256:bbbb".into(),
             nar_size: 5678,
-            references: vec!["/nix/store/dep1-foo".into(), "/nix/store/dep2-bar".into()],
+            references: vec!["dep1-foo".into(), "dep2-bar".into()],
             sig: "cache.example:abcdef".into(),
-            deriver: Some("/nix/store/zzz-foo.drv".into()),
+            deriver: Some("zzz-foo.drv".into()),
             ca: None,
         };
         let text = original.to_nix_string();
