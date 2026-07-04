@@ -78,12 +78,23 @@ pub async fn put_nar_idempotent<C: ConnectionTrait>(
     nar_bytes: Vec<u8>,
 ) -> anyhow::Result<bool> {
     let incoming = normalize_nar_hash(file_hash);
-    let recorded_match = ECachedPath::find()
+    // The idempotency lookup is a best-effort optimization that skips a
+    // redundant write. A transient DB error here (e.g. a worker_db pool timeout
+    // under an eval's input-.drv push storm) must NOT propagate: it would abort
+    // the commit and terminally fail an eval whose evaluation actually
+    // succeeded. Degrade to "not recorded" and fall through to the write, which
+    // is always safe (re-storing identical bytes is a no-op on the store side).
+    let recorded_match = match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
         .one(db)
-        .await?
-        .and_then(|row| row.file_hash)
-        .is_some_and(|fh| fh == incoming);
+        .await
+    {
+        Ok(row) => row.and_then(|r| r.file_hash).is_some_and(|fh| fh == incoming),
+        Err(e) => {
+            warn!(%hash, error = %e, "idempotency lookup failed; writing NAR unconditionally");
+            false
+        }
+    };
 
     if recorded_match && nar_storage.exists(hash).await? {
         debug!(%hash, "NAR already stored with matching file_hash; skipping re-upload");
@@ -388,6 +399,26 @@ mod tests {
             .await
             .unwrap();
         assert!(wrote, "a zombie row whose object is gone must re-write");
+        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
+    }
+
+    /// A transient DB error on the idempotency lookup (pool timeout under an
+    /// eval's .drv push storm) must degrade to an unconditional write, never
+    /// propagate - propagation aborts the commit and terminally fails the eval.
+    #[tokio::test]
+    async fn idempotent_writes_when_lookup_errors() {
+        use sea_orm::{DbErr, RuntimeErr};
+        let store = temp_store();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_errors(vec![DbErr::Conn(RuntimeErr::Internal(
+                "Connection pool timed out".to_string(),
+            ))])
+            .into_connection();
+
+        let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
+            .await
+            .expect("a transient lookup error must not fail the commit");
+        assert!(wrote, "must write the NAR when the idempotency lookup errors");
         assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
     }
 

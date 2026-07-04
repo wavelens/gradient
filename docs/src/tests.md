@@ -851,6 +851,23 @@ Backend (`cargo test -p proto --lib ingest::tests`):
 - `none_target_enqueues_no_signature` - `SignTargets::None` (the pre-fix race
   state) records the path but touches no `cached_path_signature` row.
 
+## Transient DB error in the NAR idempotency check does not fail the eval
+
+`put_nar_idempotent` reads `cached_path` first, purely to skip a redundant
+write when identical bytes are already stored. That read propagated its error,
+so a transient `worker_db` pool timeout - the pool momentarily exhausted under
+an eval's input-`.drv` push storm on a small CI VM - aborted the commit,
+`fail_build_transient` fired, and `handle_eval_job_failed` marked the whole
+evaluation terminally `Failed` (it ignores the transient/permanent kind). The
+evaluation itself had succeeded; only a best-effort cache write hit a momentary
+DB blip. Fix: the idempotency lookup degrades to "not recorded" on a DB error
+and falls through to the write (always safe), instead of propagating.
+
+Backend (`cargo test -p proto --lib ingest::tests`):
+- `idempotent_writes_when_lookup_errors` - a `DbErr::Conn` ("Connection pool
+  timed out") on the lookup still writes the NAR and returns `Ok(true)`, never
+  surfacing the error.
+
 ## `mark_nar_stored` filters derivation_output by hash
 
 `proto::handler::nar::mark_nar_stored` previously located the
