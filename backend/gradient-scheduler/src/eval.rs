@@ -633,6 +633,9 @@ impl<'a> EvalResultProcessor<'a> {
             .into_iter()
             .collect();
 
+        let id_to_url: HashMap<_, String> =
+            endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
+
         let (found, stats) = gradient_core::upstream::probe_batch(
             self.state.http.clone(),
             endpoints,
@@ -641,6 +644,14 @@ impl<'a> EvalResultProcessor<'a> {
         )
         .await;
 
+        // Same URL under different upstream ids folds into one metric series (#417).
+        let mut by_url: HashMap<String, gradient_db::UpstreamAccum> = HashMap::new();
+        for (id, accum) in &stats {
+            if let Some(url) = id_to_url.get(id) {
+                by_url.entry(url.clone()).or_default().merge(accum);
+            }
+        }
+
         let bucket = {
             use chrono::Timelike as _;
             let now = gradient_types::now();
@@ -648,7 +659,7 @@ impl<'a> EvalResultProcessor<'a> {
                 .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
                 .unwrap_or(now)
         };
-        if let Err(e) = gradient_db::upsert_upstream_metrics(db, bucket, &stats).await {
+        if let Err(e) = gradient_db::upsert_upstream_metrics(db, bucket, &by_url).await {
             warn!(error = %e, "failed to flush upstream metrics");
         }
 

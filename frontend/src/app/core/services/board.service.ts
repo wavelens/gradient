@@ -160,6 +160,19 @@ export interface BoardWorker {
   ram_total_mb: number | null;
 }
 
+export interface LoadBucket {
+  key: string;
+  in_flight: number;
+  capacity: number;
+  workers: number;
+}
+
+export interface WorkerLoad {
+  by_capability: LoadBucket[];
+  by_architecture: LoadBucket[];
+  by_feature: LoadBucket[];
+}
+
 export interface ExpensiveBuild {
   build_id: string;
   organization: string;
@@ -360,6 +373,10 @@ export class BoardService {
 
   getWorkers(): Observable<BoardWorker[]> {
     return this.api.get<BoardWorker[]>('board/workers');
+  }
+
+  getWorkerLoad(): Observable<WorkerLoad> {
+    return this.api.get<WorkerLoad>('board/workers/load');
   }
 
   getExpensive(windowDays = 30): Observable<ExpensiveBuild[]> {

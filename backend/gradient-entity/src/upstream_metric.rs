@@ -7,14 +7,14 @@
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 
-use crate::ids::{CacheUpstreamId, UpstreamMetricId};
+use crate::ids::UpstreamMetricId;
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel)]
 #[sea_orm(table_name = "upstream_metric")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: UpstreamMetricId,
-    pub upstream: CacheUpstreamId,
+    pub upstream_url: String,
     pub bucket_time: NaiveDateTime,
     pub latency_ms_sum: f64,
     pub request_count: i32,
@@ -23,13 +23,6 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::cache_upstream::Entity",
-        from = "Column::Upstream",
-        to = "super::cache_upstream::Column::Id"
-    )]
-    Upstream,
-}
+pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}

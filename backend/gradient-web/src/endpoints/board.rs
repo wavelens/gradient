@@ -438,6 +438,142 @@ pub async fn get_board_workers(
     Ok(ok_json(out))
 }
 
+/// One axis of a worker-load radar: `in_flight` jobs of this kind against the
+/// `capacity` (summed `max_concurrent_builds`) of the `workers` that can serve
+/// it. Busy % is `in_flight / capacity`, computed by the client.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct LoadBucket {
+    pub key: String,
+    pub in_flight: u32,
+    pub capacity: u32,
+    pub workers: u32,
+}
+
+/// Real per-capability / per-architecture / per-feature fleet load (#417).
+/// Each breakdown answers "of the capacity that can serve this, how much is
+/// running it" - so an operator can tell whether they are eval-, build-, or
+/// architecture-bound rather than seeing one blended busy %.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct WorkerLoad {
+    pub by_capability: Vec<LoadBucket>,
+    pub by_architecture: Vec<LoadBucket>,
+    pub by_feature: Vec<LoadBucket>,
+}
+
+type LoadAcc = std::collections::HashMap<String, (u32, u32, u32)>;
+
+fn bump_capacity(acc: &mut LoadAcc, key: &str, slots: u32) {
+    let e = acc.entry(key.to_owned()).or_default();
+    e.1 += slots;
+    e.2 += 1;
+}
+
+fn bump_in_flight(acc: &mut LoadAcc, key: &str) {
+    acc.entry(key.to_owned()).or_default().0 += 1;
+}
+
+fn buckets_sorted(acc: LoadAcc) -> Vec<LoadBucket> {
+    let mut out: Vec<LoadBucket> = acc
+        .into_iter()
+        .map(|(key, (in_flight, capacity, workers))| LoadBucket { key, in_flight, capacity, workers })
+        .collect();
+    out.sort_by(|a, b| a.key.cmp(&b.key));
+    out
+}
+
+/// Aggregate already scope-filtered workers and in-flight jobs into the three
+/// load breakdowns. Pure so it can be unit-tested without a scheduler or DB.
+fn aggregate_worker_load(
+    workers: &[&gradient_scheduler::WorkerInfo],
+    jobs: &[&gradient_scheduler::BoardActiveJob],
+) -> WorkerLoad {
+    use gradient_entity::dispatched_job::DispatchedJobKind;
+
+    let mut cap: LoadAcc = LoadAcc::new();
+    let mut arch: LoadAcc = LoadAcc::new();
+    let mut feat: LoadAcc = LoadAcc::new();
+
+    for w in workers {
+        let slots = w.max_concurrent_builds;
+        if w.capabilities.eval {
+            bump_capacity(&mut cap, "eval", slots);
+        }
+        if w.capabilities.fetch {
+            bump_capacity(&mut cap, "fetch", slots);
+        }
+        if w.capabilities.build {
+            bump_capacity(&mut cap, "build", slots);
+        }
+        for a in &w.architectures {
+            bump_capacity(&mut arch, a, slots);
+        }
+        for f in &w.system_features {
+            bump_capacity(&mut feat, f, slots);
+        }
+    }
+
+    for j in jobs {
+        match j.kind {
+            DispatchedJobKind::Build => bump_in_flight(&mut cap, "build"),
+            DispatchedJobKind::Eval => {
+                if j.eval_task {
+                    bump_in_flight(&mut cap, "eval");
+                }
+                if j.fetch_task {
+                    bump_in_flight(&mut cap, "fetch");
+                }
+            }
+        }
+        if let Some(a) = &j.architecture
+            && a != BUILTIN_ARCH
+        {
+            bump_in_flight(&mut arch, a);
+        }
+        for f in &j.required_features {
+            bump_in_flight(&mut feat, f);
+        }
+    }
+
+    let by_capability = ["eval", "fetch", "build"]
+        .into_iter()
+        .map(|k| {
+            let (in_flight, capacity, workers) = cap.get(k).copied().unwrap_or_default();
+            LoadBucket { key: k.to_owned(), in_flight, capacity, workers }
+        })
+        .collect();
+
+    WorkerLoad {
+        by_capability,
+        by_architecture: buckets_sorted(arch),
+        by_feature: buckets_sorted(feat),
+    }
+}
+
+pub async fn get_board_worker_load(
+    State(state): State<Arc<ServerState>>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
+) -> WebResult<Json<BaseResponse<WorkerLoad>>> {
+    let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
+    let workers = scheduler.board_workers().await;
+    let jobs = scheduler.board_active_jobs().await;
+
+    let visible_workers: Vec<&gradient_scheduler::WorkerInfo> = workers
+        .iter()
+        .filter(|w| {
+            w.organization
+                .map(|o| scope.allows(&Uuid::from(o)))
+                .unwrap_or_else(|| scope.is_all())
+        })
+        .collect();
+    let visible_jobs: Vec<&gradient_scheduler::BoardActiveJob> = jobs
+        .iter()
+        .filter(|j| scope.allows(&Uuid::from(j.organization)))
+        .collect();
+
+    Ok(ok_json(aggregate_worker_load(&visible_workers, &visible_jobs)))
+}
+
 #[derive(Deserialize)]
 pub struct ExpensiveParams {
     pub window_days: Option<i64>,
@@ -1008,6 +1144,112 @@ pub async fn get_eval_flake_graph(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_entity::dispatched_job::DispatchedJobKind;
+    use gradient_scheduler::{BoardActiveJob, WorkerInfo};
+    use gradient_types::ids::OrganizationId;
+    use gradient_types::proto::GradientCapabilities;
+
+    fn worker(
+        eval: bool,
+        fetch: bool,
+        build: bool,
+        arch: &[&str],
+        features: &[&str],
+        slots: u32,
+    ) -> WorkerInfo {
+        WorkerInfo {
+            id: "w".into(),
+            capabilities: GradientCapabilities { eval, fetch, build, ..Default::default() },
+            architectures: arch.iter().map(|s| s.to_string()).collect(),
+            system_features: features.iter().map(|s| s.to_string()).collect(),
+            max_concurrent_builds: slots,
+            assigned_job_count: 0,
+            draining: false,
+            authorized_peers: None,
+            organization: None,
+            cpu_usage_pct: None,
+            ram_free_mb: None,
+            ram_total_mb: 0,
+            disk_speed_mbps: None,
+            network_speed_mbps: None,
+        }
+    }
+
+    fn build_job(arch: &str, features: &[&str]) -> BoardActiveJob {
+        BoardActiveJob {
+            worker_id: "w".into(),
+            organization: OrganizationId::now_v7(),
+            kind: DispatchedJobKind::Build,
+            architecture: Some(arch.into()),
+            required_features: features.iter().map(|s| s.to_string()).collect(),
+            fetch_task: false,
+            eval_task: false,
+        }
+    }
+
+    fn flake_job(eval_task: bool, fetch_task: bool) -> BoardActiveJob {
+        BoardActiveJob {
+            worker_id: "w".into(),
+            organization: OrganizationId::now_v7(),
+            kind: DispatchedJobKind::Eval,
+            architecture: None,
+            required_features: vec![],
+            fetch_task,
+            eval_task,
+        }
+    }
+
+    fn bucket<'a>(load: &'a [LoadBucket], key: &str) -> &'a LoadBucket {
+        load.iter().find(|b| b.key == key).expect("bucket present")
+    }
+
+    #[test]
+    fn worker_load_diverges_per_capability_and_architecture() {
+        // One all-round worker (8 slots) and one build-only worker (4 slots):
+        // heavy on builds, light on eval/fetch - the build-bound case from #417.
+        let all_round = worker(true, true, true, &["x86_64-linux"], &["kvm"], 8);
+        let build_only = worker(false, false, true, &["aarch64-linux"], &[], 4);
+        let workers: Vec<&WorkerInfo> = vec![&all_round, &build_only];
+
+        let mut jobs = Vec::new();
+        for i in 0..6 {
+            jobs.push(build_job("x86_64-linux", if i < 3 { &["kvm"] } else { &[] }));
+        }
+        jobs.push(build_job("aarch64-linux", &[]));
+        jobs.push(build_job("aarch64-linux", &[]));
+        jobs.push(flake_job(true, false));
+        jobs.push(flake_job(false, true));
+        let job_refs: Vec<&BoardActiveJob> = jobs.iter().collect();
+
+        let load = aggregate_worker_load(&workers, &job_refs);
+
+        let cap = &load.by_capability;
+        assert_eq!(cap.iter().map(|b| b.key.as_str()).collect::<Vec<_>>(), ["eval", "fetch", "build"]);
+        assert_eq!(*bucket(cap, "eval"), LoadBucket { key: "eval".into(), in_flight: 1, capacity: 8, workers: 1 });
+        assert_eq!(*bucket(cap, "fetch"), LoadBucket { key: "fetch".into(), in_flight: 1, capacity: 8, workers: 1 });
+        assert_eq!(*bucket(cap, "build"), LoadBucket { key: "build".into(), in_flight: 8, capacity: 12, workers: 2 });
+
+        let arch = &load.by_architecture;
+        assert_eq!(*bucket(arch, "x86_64-linux"), LoadBucket { key: "x86_64-linux".into(), in_flight: 6, capacity: 8, workers: 1 });
+        assert_eq!(*bucket(arch, "aarch64-linux"), LoadBucket { key: "aarch64-linux".into(), in_flight: 2, capacity: 4, workers: 1 });
+
+        let feat = &load.by_feature;
+        assert_eq!(*bucket(feat, "kvm"), LoadBucket { key: "kvm".into(), in_flight: 3, capacity: 8, workers: 1 });
+    }
+
+    #[test]
+    fn worker_load_ignores_builtin_arch_and_shows_empty_capacity() {
+        let w = worker(true, false, true, &["x86_64-linux"], &[], 2);
+        let workers: Vec<&WorkerInfo> = vec![&w];
+        // A builtin build must not create a phantom architecture bucket.
+        let jobs = [build_job(BUILTIN_ARCH, &[])];
+        let job_refs: Vec<&BoardActiveJob> = jobs.iter().collect();
+
+        let load = aggregate_worker_load(&workers, &job_refs);
+        assert!(load.by_architecture.iter().all(|b| b.key != BUILTIN_ARCH));
+        // fetch axis stays present with zero capacity so the radar keeps 3 axes.
+        assert_eq!(*bucket(&load.by_capability, "fetch"), LoadBucket { key: "fetch".into(), in_flight: 0, capacity: 0, workers: 0 });
+    }
 
     #[test]
     fn eval_metric_expr_known_keys_have_units() {

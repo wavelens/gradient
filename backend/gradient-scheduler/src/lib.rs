@@ -55,7 +55,7 @@ use worker_pool::WorkerPool;
 type EvalEdgesMap = Arc<RwLock<HashMap<EvaluationId, eval::EvalEdgeAccumulator>>>;
 
 pub use gradient_types::BoardEvent;
-pub use jobs::{DecisionCandidate, DispatchDecision, PendingJobInfo};
+pub use jobs::{BoardActiveJob, DecisionCandidate, DispatchDecision, PendingJobInfo};
 pub use worker_pool::WorkerInfo;
 
 #[cfg(test)]
@@ -158,6 +158,11 @@ impl Scheduler {
 
     pub async fn pending_jobs_snapshot(&self) -> Vec<jobs::PendingJobInfo> {
         self.job_tracker.read().await.pending_snapshot()
+    }
+
+    /// Per-dimension classification of in-flight jobs for the worker-load radar.
+    pub async fn board_active_jobs(&self) -> Vec<jobs::BoardActiveJob> {
+        self.job_tracker.read().await.board_active_jobs()
     }
 
     pub async fn recent_decisions(&self) -> Vec<jobs::DispatchDecision> {
