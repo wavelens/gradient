@@ -26,6 +26,19 @@ fn text_response(content_type: &'static str, body: String) -> WebResult<Response
         .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 
+/// Attach cache-observability headers to a narinfo response: `X-Cache` reports
+/// whether it was served from our store (`HIT`) or proxied from an upstream
+/// (`MISS`), and CORS is opened for browser-based Nix tooling.
+fn with_narinfo_headers(mut response: Response, cache_status: &'static str) -> Response {
+    let headers = response.headers_mut();
+    headers.insert("x-cache", HeaderValue::from_static(cache_status));
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
+    response
+}
+
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 pub async fn nix_cache_info(
@@ -114,21 +127,25 @@ pub async fn path(
     if let Ok(path_info) =
         get_nar_by_hash(Arc::clone(&state), ctx.cache.clone(), path_hash.clone()).await
     {
-        if flag.is_set() {
-            return Ok(axum::Json(path_info).into_response());
-        }
-        return Ok(text_response("text/x-nix-narinfo", path_info.to_nix_string())?.into_response());
+        let response = if flag.is_set() {
+            axum::Json(path_info).into_response()
+        } else {
+            text_response("text/x-nix-narinfo", path_info.to_nix_string())?.into_response()
+        };
+        return Ok(with_narinfo_headers(response, "HIT"));
     }
 
     let rewritten = fetch_from_upstream(&state, &ctx.cache, &path_hash).await;
     if let Some(body) = rewritten {
-        if flag.is_set() {
-            return match gradient_types::parse_narinfo_body(&body) {
-                Ok(parsed) => Ok(axum::Json(parsed).into_response()),
-                Err(_) => Err(WebError::internal("Upstream narinfo malformed")),
-            };
-        }
-        return Ok(text_response("text/x-nix-narinfo", body)?.into_response());
+        let response = if flag.is_set() {
+            match gradient_types::parse_narinfo_body(&body) {
+                Ok(parsed) => axum::Json(parsed).into_response(),
+                Err(_) => return Err(WebError::internal("Upstream narinfo malformed")),
+            }
+        } else {
+            text_response("text/x-nix-narinfo", body)?.into_response()
+        };
+        return Ok(with_narinfo_headers(response, "MISS"));
     }
 
     Err(WebError::not_found("Path"))

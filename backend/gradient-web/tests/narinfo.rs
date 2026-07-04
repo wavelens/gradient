@@ -180,6 +180,11 @@ async fn narinfo_served_from_db_inner() {
 
     // ── Assertions ────────────────────────────────────────────────────────
     response.assert_status_ok();
+    assert_eq!(
+        response.header("x-cache").to_str().unwrap(),
+        "HIT",
+        "narinfo served from our store must report X-Cache: HIT"
+    );
     let body = response.text();
 
     assert!(
@@ -195,8 +200,16 @@ async fn narinfo_served_from_db_inner() {
         "narinfo body missing Sig field:\n{body}"
     );
     assert!(
-        body.contains(&format!("Deriver: /nix/store/{FIXTURE_HASH}-hello.drv")),
-        "narinfo body missing Deriver field from cached_path row:\n{body}"
+        body.contains(&format!("Deriver: {FIXTURE_HASH}-hello.drv")),
+        "narinfo Deriver must be a store-path basename:\n{body}"
+    );
+    assert!(
+        !body.contains("Deriver: /nix/store/"),
+        "narinfo Deriver must not carry the /nix/store/ prefix:\n{body}"
+    );
+    assert!(
+        !body.contains("References:"),
+        "narinfo with no references must omit the References line:\n{body}"
     );
 }
 
