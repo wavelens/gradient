@@ -868,6 +868,29 @@ Backend (`cargo test -p proto --lib ingest::tests`):
   timed out") on the lookup still writes the NAR and returns `Ok(true)`, never
   surfacing the error.
 
+## Detached NAR commit claims its staged partial before a same-hash re-push resets it
+
+Another regression from detaching the commit (`781dfd2f`). The staged upload is
+a disk partial keyed by `{peer_id}/{hash}` (content-addressed), and the commit
+was detached but bounded to two concurrent per connection, so under an eval's
+input-`.drv` push storm the commit queued seconds behind the read loop. The
+same `.drv` hash is pushed repeatedly across a closure walk; the next push's
+`NarStreamHeader` (new `stream_token`) discards the shared partial
+(`received_len` truncates on token mismatch) and its `offset==0` append
+truncates it. The queued commit then read `received_len` = 0 and aborted the
+job (`staged NAR size 0 does not match reported file_size N`), which for an eval
+is terminal. Fix: `PartialStore::detach` atomically renames the finished
+partial + token sidecar to a process-unique claim key, and `take_staged` calls
+it synchronously on the read loop (an O(1) rename, so the head-of-line stall the
+detach cured stays cured) - so a later same-hash push starts fresh on the shared
+key and the queued commit reads its own untouched snapshot.
+
+Backend (`cargo test -p storage --lib partial::tests`):
+- `detach_isolates_claim_from_reset` - after `detach`, a same-key push with a
+  new token resets the shared key while the claim keeps its original token and
+  bytes.
+- `detach_absent_is_none` - `detach` of a key with nothing staged returns `None`.
+
 ## `mark_nar_stored` filters derivation_output by hash
 
 `proto::handler::nar::mark_nar_stored` previously located the

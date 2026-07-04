@@ -23,6 +23,10 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
 
+/// Process-local sequence giving each [`PartialStore::detach`] claim a unique
+/// key, so concurrent claims of the same content-addressed hash never collide.
+static CLAIM_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[derive(Clone, Debug)]
 pub struct PartialStore {
     root: PathBuf,
@@ -139,6 +143,34 @@ impl PartialStore {
             .read_to_end(&mut buf)
             .context("read partial")?;
         Ok(buf)
+    }
+
+    /// Atomically claim the completed partial (and its token sidecar) for `key`
+    /// under a fresh, process-unique key, returning that claim key. A detached
+    /// commit reads the claim while a later push of the same content-addressed
+    /// hash resets the shared `{key}` partial - a token mismatch on the next
+    /// header discards it ([`Self::received_len`]) and an `offset == 0` append
+    /// truncates it - so without the claim the queued commit would read 0 bytes.
+    /// Returns `None` when nothing is staged. The rename is O(1) and safe on the
+    /// read loop; only the byte copy/upload stays detached.
+    pub fn detach(&self, key: &str) -> Result<Option<String>> {
+        let src = self.partial_path(key);
+        match fs::metadata(&src) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e).context("stat partial to claim"),
+        }
+
+        let seq = CLAIM_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let claim = format!("{key}.{seq}.claim");
+        self.ensure_parent(&claim)?;
+        fs::rename(&src, self.partial_path(&claim)).context("claim partial")?;
+        match fs::rename(self.token_path(key), self.token_path(&claim)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).context("claim partial token"),
+        }
+        Ok(Some(claim))
     }
 
     /// Remove the partial and its token sidecar (idempotent).
@@ -287,5 +319,32 @@ mod tests {
         s.append("a", "t", 0, b"123").unwrap();
         assert_eq!(s.gc().unwrap(), 0);
         assert_eq!(s.received_len("a", "t").unwrap(), 3);
+    }
+
+    /// A claimed partial survives a later push that resets the shared key: the
+    /// claim keeps the original token+bytes while the re-push starts fresh on
+    /// the shared key. Regression: the detached commit read 0 bytes when a
+    /// same-hash re-push discarded/truncated the shared `{peer}/{hash}` partial.
+    #[test]
+    fn detach_isolates_claim_from_reset() {
+        let (_d, s) = store(3600);
+        s.append("peer/abc", "tok1", 0, b"hello").unwrap();
+
+        let claim = s.detach("peer/abc").unwrap().expect("something staged");
+        assert_ne!(claim, "peer/abc");
+
+        // A later same-hash push resets the shared key (new token discards).
+        assert_eq!(s.received_len("peer/abc", "tok2").unwrap(), 0);
+        s.append("peer/abc", "tok2", 0, b"world!!").unwrap();
+
+        // The claim is untouched: original token still validates, bytes intact.
+        assert_eq!(s.received_len(&claim, "tok1").unwrap(), 5);
+        assert_eq!(s.read_all(&claim).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn detach_absent_is_none() {
+        let (_d, s) = store(3600);
+        assert!(s.detach("peer/missing").unwrap().is_none());
     }
 }

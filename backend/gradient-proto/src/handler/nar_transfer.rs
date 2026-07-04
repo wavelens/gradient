@@ -170,14 +170,28 @@ impl NarReceiveStore {
     /// Detach the staged stream for `store_path` so a spawned task can commit
     /// it without borrowing the session's receive store. Returns `None` when no
     /// direct-mode stream is open (a presigned upload). The per-path state is
-    /// removed here, synchronously, so a later header for the same path starts
-    /// a fresh stream instead of racing the in-flight commit.
+    /// removed and the finished partial is *claimed* under a unique key here,
+    /// synchronously on the read loop: the commit runs detached and can lag
+    /// behind the commit semaphore, and the same content-addressed `.drv` is
+    /// pushed repeatedly across an eval's closure walk. A later push of the same
+    /// hash resets the shared `{peer}/{hash}` partial (token-mismatch discard /
+    /// `offset==0` truncate), so a bare shared key would leave the queued commit
+    /// reading 0 bytes ("staged NAR size 0 does not match reported file_size").
     pub(super) fn take_staged(&mut self, store_path: &str) -> Option<StagedNar> {
         let state = self.active.remove(store_path)?;
         let hash = store_hash(store_path)?;
+        let base_key = self.key(hash);
+        let key = match self.store.detach(&base_key) {
+            Ok(Some(claim)) => claim,
+            Ok(None) => base_key,
+            Err(e) => {
+                warn!(%store_path, error = %e, "failed to claim staged partial; using shared key");
+                base_key
+            }
+        };
         Some(StagedNar {
             store: self.store.clone(),
-            key: self.key(hash),
+            key,
             token: state.token,
         })
     }
