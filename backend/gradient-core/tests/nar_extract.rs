@@ -232,15 +232,17 @@ fn directory_tarball_preserves_symlinks() {
         TestNarEvent::StartDirectory {
             name: Bytes::from_static(b"out"),
         },
+        // NAR directory entries must be name-sorted (`link` < `real`), matching
+        // Nix's parser, which rejects out-of-order entries.
+        TestNarEvent::Symlink {
+            name: Bytes::from_static(b"link"),
+            target: Bytes::from_static(b"real"),
+        },
         TestNarEvent::File {
             name: Bytes::from_static(b"real"),
             executable: false,
             size: body.len() as u64,
             reader: std::io::Cursor::new(body.clone()),
-        },
-        TestNarEvent::Symlink {
-            name: Bytes::from_static(b"link"),
-            target: Bytes::from_static(b"real"),
         },
         TestNarEvent::EndDirectory,
         TestNarEvent::EndDirectory,

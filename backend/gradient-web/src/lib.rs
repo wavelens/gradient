@@ -351,6 +351,15 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             post(build_requests::source::post_source)
                 .layer(DefaultBodyLimit::max(state.config.limits.max_source_upload_size)),
         )
+        .route(
+            "/build-requests/source/{upload}/chunk",
+            put(build_requests::source::source_chunk)
+                .layer(DefaultBodyLimit::max(NAR_UPLOAD_CHUNK_LIMIT)),
+        )
+        .route(
+            "/build-requests/source/{upload}/finalize",
+            post(build_requests::source::source_finalize),
+        )
         .route("/caches", get(caches::get).put(caches::put))
         .route("/caches/available", get(caches::get_cache_name_available))
         .route(

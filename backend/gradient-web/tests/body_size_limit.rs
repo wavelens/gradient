@@ -201,3 +201,33 @@ fn source_upload_route_uses_configurable_source_limit() {
         );
     });
 }
+
+/// `PUT /api/v1/build-requests/source/{upload}/chunk` gets the per-request
+/// `NAR_UPLOAD_CHUNK_LIMIT` override, so a chunk far larger than the global
+/// `max_request_size` is not 413'd - which is what lets a source of any size
+/// upload as a sequence of bounded chunks.
+#[test]
+fn source_chunk_route_uses_chunk_limit() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = make_state_with_limits(1024);
+        let router = create_router(state);
+        let server = TestServer::new(router);
+
+        let body = vec![b'x'; 64 * 1024];
+        let response = server
+            .put("/api/v1/build-requests/source/testupload/chunk?offset=0")
+            .add_header("Content-Type", "application/octet-stream")
+            .bytes(body.into())
+            .await;
+        assert_ne!(
+            response.status_code(),
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+            "chunk route must not enforce the smaller global limit, got {}",
+            response.status_code()
+        );
+    });
+}
