@@ -106,6 +106,31 @@
   user-select: none;
 }
 
+.builds-scope-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: $spacing-sm;
+  padding: $spacing-xs $spacing-md;
+  font-size: $font-size-xs;
+  color: $text-secondary;
+  border-bottom: 1px solid $color-border;
+}
+
+.builds-scope-clear {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: $font-size-xs;
+  font-weight: 600;
+  color: $color-primary;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
 .builds-list {
   flex: 1;
   overflow-y: auto;

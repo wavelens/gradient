@@ -26,6 +26,16 @@ pub struct LimitsArgs {
         default_value_t = 512 * 1024 * 1024,
     )]
     pub max_nar_upload_size: usize,
+
+    /// Maximum size in bytes of a source upload to `POST /build-requests/source`
+    /// (single-shot NAR) and the chunked manifest total (default 512 MiB).
+    #[arg(
+        long,
+        env = "GRADIENT_MAX_SOURCE_UPLOAD_SIZE",
+        value_parser = greater_than_zero::<usize>,
+        default_value_t = 512 * 1024 * 1024,
+    )]
+    pub max_source_upload_size: usize,
 }
 
 impl Default for LimitsArgs {
@@ -33,6 +43,7 @@ impl Default for LimitsArgs {
         Self {
             max_request_size: 2 * 1024 * 1024,
             max_nar_upload_size: 512 * 1024 * 1024,
+            max_source_upload_size: 512 * 1024 * 1024,
         }
     }
 }

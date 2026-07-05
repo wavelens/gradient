@@ -6,7 +6,8 @@
 
 use crate::config::*;
 use crate::input::client_from_config;
-use crate::output::{Output, to_exit_kind};
+use crate::output::{ExitKind, Output, to_exit_kind};
+use connector::ConnectorError;
 use connector::build_requests::DispatchResponse;
 use connector::evals::{ArtefactTree, EntryPointArtefacts, EvaluationResponse};
 use futures::StreamExt;
@@ -190,6 +191,17 @@ async fn upload_and_dispatch(
     quiet: bool,
     out: Output,
 ) -> DispatchResponse {
+    // Fail fast on a missing or expired session before packing and streaming a
+    // potentially large source NAR (#493). A cheap authenticated probe surfaces
+    // the auth problem clearly instead of as a confusing upload/multipart error.
+    if let Err(ConnectorError::Unauthorized) = client.user().get().await {
+        out.err(
+            ExitKind::Unauthorized,
+            "Not authenticated: your gradient session is missing or expired. \
+             Run `gradient login` and try again.",
+        );
+    }
+
     #[cfg(feature = "nix")]
     {
         crate::commands::build_nix::dispatch_via_nar(

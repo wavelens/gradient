@@ -348,9 +348,8 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route(
             "/build-requests/source",
-            post(build_requests::source::post_source).layer(DefaultBodyLimit::max(
-                gradient_types::constants::MAX_BUILD_REQUEST_SIZE,
-            )),
+            post(build_requests::source::post_source)
+                .layer(DefaultBodyLimit::max(state.config.limits.max_source_upload_size)),
         )
         .route("/caches", get(caches::get).put(caches::put))
         .route("/caches/available", get(caches::get_cache_name_available))

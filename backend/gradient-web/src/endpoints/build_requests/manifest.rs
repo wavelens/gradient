@@ -20,7 +20,7 @@ use crate::permissions::Permission;
 use axum::Extension;
 use axum::extract::{Json, State};
 use chrono::Duration;
-use gradient_types::constants::{MAX_BUILD_REQUEST_SIZE, UPLOAD_SESSION_TTL};
+use gradient_types::constants::UPLOAD_SESSION_TTL;
 use gradient_types::ids::UploadSessionId;
 use gradient_types::{
     ABuildRequestBlob, BaseResponse, CBuildRequestBlob, EBuildRequestBlob, MUploadSession, MUser,
@@ -71,6 +71,7 @@ pub async fn post_manifest(
         ));
     }
 
+    let max_source_upload_size = state.0.config.limits.max_source_upload_size;
     let mut total: i64 = 0;
     let mut seen_paths: HashSet<&str> = HashSet::with_capacity(body.files.len());
     let mut hashes: Vec<Vec<u8>> = Vec::with_capacity(body.files.len());
@@ -92,10 +93,9 @@ pub async fn post_manifest(
         total = total.checked_add(entry.size).ok_or_else(|| {
             WebError::payload_too_large("Manifest total size overflows i64".to_string())
         })?;
-        if (total as u128) > MAX_BUILD_REQUEST_SIZE as u128 {
+        if (total as u128) > max_source_upload_size as u128 {
             return Err(WebError::payload_too_large(format!(
-                "Manifest total size exceeds limit of {} bytes",
-                MAX_BUILD_REQUEST_SIZE
+                "Manifest total size exceeds limit of {max_source_upload_size} bytes"
             )));
         }
         hashes.push(decode_blake3_hex(&entry.hash)?);

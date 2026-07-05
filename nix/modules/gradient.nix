@@ -8,6 +8,11 @@
   cfg = config.services.gradient;
   logLevelType = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
 
+  # Reverse-proxy body cap tracks the largest configured backend upload limit
+  # so the proxy is never the bottleneck for source/NAR uploads.
+  proxyMaxBodyBytes = lib.max cfg.settings.maxRequestSize
+    (lib.max cfg.settings.maxNarUploadSize cfg.settings.maxSourceUploadSize);
+
   augmentedIntegrations = lib.mapAttrs (_: int: int // {
     has_secret_file = int.secret_file != null;
     has_access_token_file = int.access_token_file != null;
@@ -605,6 +610,16 @@ in {
           default = 512 * 1024 * 1024;
         };
 
+        maxSourceUploadSize = lib.mkOption {
+          description = ''
+            Maximum size in bytes of a source upload to `POST /build-requests/source`
+            (what `gradient build` sends) and the chunked manifest total. The
+            built-in reverse proxy's `client_max_body_size` is raised to fit this.
+          '';
+          type = lib.types.ints.positive;
+          default = 512 * 1024 * 1024;
+        };
+
         trustedProxies = lib.mkOption {
           description = ''
             CIDR allowlist of peers permitted to set `X-Forwarded-For`.
@@ -937,6 +952,7 @@ in {
         GRADIENT_SCHEDULER_SCORING_POLICY = cfg.settings.schedulerScoringPolicy;
         GRADIENT_MAX_REQUEST_SIZE = toString cfg.settings.maxRequestSize;
         GRADIENT_MAX_NAR_UPLOAD_SIZE = toString cfg.settings.maxNarUploadSize;
+        GRADIENT_MAX_SOURCE_UPLOAD_SIZE = toString cfg.settings.maxSourceUploadSize;
         GRADIENT_MAX_PROTO_CONNECTIONS = toString cfg.settings.maxProtoConnections;
         GRADIENT_UPSTREAM_QUERY_CONCURRENCY = toString cfg.settings.upstreamQueryConcurrency;
         GRADIENT_LOG_LEVEL = cfg.settings.logLevel.default;
@@ -1035,7 +1051,7 @@ in {
               proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
               extraConfig = ''
-                client_max_body_size 100M;
+                client_max_body_size ${toString proxyMaxBodyBytes};
                 proxy_connect_timeout 1h;
                 proxy_send_timeout 1h;
                 proxy_read_timeout 1h;
@@ -1056,7 +1072,7 @@ in {
               proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
               extraConfig = ''
-                client_max_body_size 100M;
+                client_max_body_size ${toString proxyMaxBodyBytes};
                 proxy_connect_timeout 1h;
                 proxy_send_timeout 1h;
                 proxy_read_timeout 1h;
@@ -1072,7 +1088,7 @@ in {
           inherit (cfg.reverseProxy.caddy) useACMEHost;
           extraConfig = ''
             request_body {
-              max_size 100MB
+              max_size ${toString proxyMaxBodyBytes}
             }
             handle /api/* {
               reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}

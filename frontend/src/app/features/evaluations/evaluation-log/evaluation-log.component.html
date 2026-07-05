@@ -65,6 +65,13 @@
 
       <div class="builds-list-header">Builds</div>
 
+      @if (scopeBuildId()) {
+        <div class="builds-scope-note">
+          <span>Only this package's builds</span>
+          <button type="button" class="builds-scope-clear" (click)="clearScope()">Show all</button>
+        </div>
+      }
+
       @if (sidebarSearchOpen()) {
         <div class="sidebar-search">
           <input
