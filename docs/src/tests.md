@@ -2279,20 +2279,20 @@ Tests (`cargo test -p web --test body_size_limit`):
   `POST /api/v1/build-requests/{session}/blobs` with
   `max_request_size = 1024` is *not* rejected with 413, proving the
   per-route override to `MAX_BUILD_REQUEST_SIZE` is wired up.
-- `source_upload_route_uses_configurable_source_limit` - regression for #492
-  (413 on large `gradient build` source uploads) and #491. The single-shot `POST
-  /api/v1/build-requests/source` honours the configurable `max_source_upload_size`
-  (`GRADIENT_MAX_SOURCE_UPLOAD_SIZE`), not a fixed constant: with
-  `max_source_upload_size = 32 KiB`, a 16 KiB body reaches the handler while a
-  64 KiB body is rejected with 413. The built-in reverse proxy's
-  `client_max_body_size` is derived from the largest configured upload limit.
-- `source_chunk_route_uses_chunk_limit` - `PUT
-  /api/v1/build-requests/source/{upload}/chunk` gets the per-request
-  `NAR_UPLOAD_CHUNK_LIMIT` override, so a 64 KiB chunk is not 413'd under a
-  1 KiB global limit. This is what lets `gradient build` upload a source of any
-  size as a sequence of bounded chunks (finalised by
-  `POST .../source/{upload}/finalize`), sidestepping the single-request body
-  limit and the 502-on-mid-stream-close it caused (#491, #492, #493).
+- `source_chunk_over_source_limit_returns_413` - regression for #491/#492/#493.
+  An *authenticated* `PUT /api/v1/build-requests/source/{upload}/chunk` whose
+  bytes would push the staged total past the configurable `max_source_upload_size`
+  (`GRADIENT_MAX_SOURCE_UPLOAD_SIZE`) is rejected with 413: with the limit at
+  32 KiB, a 64 KiB chunk is refused. The request must carry a token - the
+  `/build-requests/*` tier's `authorize` middleware 403s an anonymous request
+  before the body limit is evaluated, so this is what lets `gradient build` stream
+  a source of any size as bounded chunks (finalised by `POST .../finalize`),
+  sidestepping the single-request 413/502. The proxy's `client_max_body_size` is
+  derived from the largest configured upload limit.
+- `build_requests::source::tests::upload_id_rejects_path_traversal`
+  (`cargo test -p gradient-web --lib`) - the client-chosen chunk `upload` id is
+  rejected when empty or containing `/` or `..`, so it can't escape the staging
+  root.
 
 Regression for the build-request rework
 (`cargo test -p web --test old_direct_build_gone`):

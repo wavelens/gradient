@@ -203,3 +203,17 @@ pub async fn source_finalize(
 
     Ok(ok_json(response))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::require_safe_upload_id;
+
+    #[test]
+    fn upload_id_rejects_path_traversal() {
+        assert!(require_safe_upload_id("a1b2c3deadbeef").is_ok());
+        assert!(require_safe_upload_id("").is_err());
+        assert!(require_safe_upload_id("a/b").is_err());
+        assert!(require_safe_upload_id("..").is_err());
+        assert!(require_safe_upload_id("../../etc/passwd").is_err());
+    }
+}

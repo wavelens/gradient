@@ -22,19 +22,17 @@ use gradient_db::{WebDb, WorkerDb};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
+use gradient_test_support::fixtures::user;
 use gradient_test_support::log_storage::NoopLogStorage;
 use gradient_test_support::prelude::test_cli;
+use gradient_test_support::web::{live_session, make_test_server_configured, make_token};
+use gradient_types::SessionId;
 use uuid::Uuid;
 use gradient_web::create_router;
 
 fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
-    make_state(max_request_size, 512 * 1024 * 1024)
-}
-
-fn make_state(max_request_size: usize, max_source_upload_size: usize) -> Arc<ServerState> {
     let mut cli = test_cli();
     cli.limits.max_request_size = max_request_size;
-    cli.limits.max_source_upload_size = max_source_upload_size;
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
@@ -159,74 +157,49 @@ fn blob_upload_route_uses_higher_limit() {
     });
 }
 
-/// `POST /api/v1/build-requests/source` (what `gradient build` uploads) honours
-/// the configurable `max_source_upload_size`, not a fixed constant: a body over
-/// the global `max_request_size` but within the source limit reaches the handler,
-/// while one past the source limit is rejected with 413 before the handler runs.
+/// Auth queries the `authorize` middleware runs before any handler on the
+/// authenticated tier: the session (looked up twice) then the user.
+fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
+    let session = live_session(session_id);
+    db.append_query_results([vec![session.clone()]])
+        .append_query_results([vec![session]])
+        .append_query_results([vec![user()]])
+}
+
+/// `PUT /api/v1/build-requests/source/{upload}/chunk` enforces the configurable
+/// `max_source_upload_size` as the staged total: an authenticated chunk that
+/// would push the total past the limit is rejected with 413. This is the guard
+/// that bounds a chunked source upload (the per-request body cap is the larger
+/// `NAR_UPLOAD_CHUNK_LIMIT`). Regression for #491/#492/#493.
+///
+/// It must be authenticated: `/build-requests/*` is on the authenticated tier,
+/// so the `authorize` middleware 403s an anonymous request before the body
+/// limit is ever evaluated.
 #[test]
-fn source_upload_route_uses_configurable_source_limit() {
+fn source_chunk_over_source_limit_returns_413() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
     rt.block_on(async {
-        let state = make_state(1024, 32 * 1024);
-        let router = create_router(state);
-        let server = TestServer::new(router);
-
-        let within = vec![b'x'; 16 * 1024];
-        let response = server
-            .post("/api/v1/build-requests/source?organization=test")
-            .add_header("Content-Type", "multipart/form-data; boundary=----abc")
-            .bytes(within.into())
-            .await;
-        assert_ne!(
-            response.status_code(),
-            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
-            "source body within max_source_upload_size must not be 413'd, got {}",
-            response.status_code()
-        );
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id);
+        let server = make_test_server_configured(db.into_connection(), |cli| {
+            cli.limits.max_source_upload_size = 32 * 1024;
+        });
 
         let over = vec![b'x'; 64 * 1024];
         let response = server
-            .post("/api/v1/build-requests/source?organization=test")
-            .add_header("Content-Type", "multipart/form-data; boundary=----abc")
+            .put("/api/v1/build-requests/source/testupload/chunk?offset=0")
+            .add_header("authorization", format!("Bearer {}", token))
+            .add_header("Content-Type", "application/octet-stream")
             .bytes(over.into())
             .await;
         assert_eq!(
             response.status_code(),
             axum::http::StatusCode::PAYLOAD_TOO_LARGE,
-            "source body over max_source_upload_size must be 413'd, got {}",
-            response.status_code()
-        );
-    });
-}
-
-/// `PUT /api/v1/build-requests/source/{upload}/chunk` gets the per-request
-/// `NAR_UPLOAD_CHUNK_LIMIT` override, so a chunk far larger than the global
-/// `max_request_size` is not 413'd - which is what lets a source of any size
-/// upload as a sequence of bounded chunks.
-#[test]
-fn source_chunk_route_uses_chunk_limit() {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    rt.block_on(async {
-        let state = make_state_with_limits(1024);
-        let router = create_router(state);
-        let server = TestServer::new(router);
-
-        let body = vec![b'x'; 64 * 1024];
-        let response = server
-            .put("/api/v1/build-requests/source/testupload/chunk?offset=0")
-            .add_header("Content-Type", "application/octet-stream")
-            .bytes(body.into())
-            .await;
-        assert_ne!(
-            response.status_code(),
-            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
-            "chunk route must not enforce the smaller global limit, got {}",
+            "chunk over max_source_upload_size must be 413'd, got {}",
             response.status_code()
         );
     });
