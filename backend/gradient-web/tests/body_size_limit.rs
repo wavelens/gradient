@@ -28,8 +28,13 @@ use uuid::Uuid;
 use gradient_web::create_router;
 
 fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
+    make_state(max_request_size, 512 * 1024 * 1024)
+}
+
+fn make_state(max_request_size: usize, max_source_upload_size: usize) -> Arc<ServerState> {
     let mut cli = test_cli();
     cli.limits.max_request_size = max_request_size;
+    cli.limits.max_source_upload_size = max_source_upload_size;
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
@@ -149,6 +154,49 @@ fn blob_upload_route_uses_higher_limit() {
             response.status_code(),
             axum::http::StatusCode::PAYLOAD_TOO_LARGE,
             "blob-upload route must not enforce the smaller global limit, got {}",
+            response.status_code()
+        );
+    });
+}
+
+/// `POST /api/v1/build-requests/source` (what `gradient build` uploads) honours
+/// the configurable `max_source_upload_size`, not a fixed constant: a body over
+/// the global `max_request_size` but within the source limit reaches the handler,
+/// while one past the source limit is rejected with 413 before the handler runs.
+#[test]
+fn source_upload_route_uses_configurable_source_limit() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = make_state(1024, 32 * 1024);
+        let router = create_router(state);
+        let server = TestServer::new(router);
+
+        let within = vec![b'x'; 16 * 1024];
+        let response = server
+            .post("/api/v1/build-requests/source?organization=test")
+            .add_header("Content-Type", "multipart/form-data; boundary=----abc")
+            .bytes(within.into())
+            .await;
+        assert_ne!(
+            response.status_code(),
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+            "source body within max_source_upload_size must not be 413'd, got {}",
+            response.status_code()
+        );
+
+        let over = vec![b'x'; 64 * 1024];
+        let response = server
+            .post("/api/v1/build-requests/source?organization=test")
+            .add_header("Content-Type", "multipart/form-data; boundary=----abc")
+            .bytes(over.into())
+            .await;
+        assert_eq!(
+            response.status_code(),
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+            "source body over max_source_upload_size must be 413'd, got {}",
             response.status_code()
         );
     });

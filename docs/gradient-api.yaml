@@ -2903,7 +2903,8 @@ paths:
         Returns `.drv` builds associated with the evaluation, sorted by status
         (Building → Queued → FailedTransient/FailedPermanent/FailedTimeout → Aborted/DependencyFailed → Completed/Substituted),
         then by display name. Supports optional `limit` and `offset` query parameters
-        for pagination.
+        for pagination, and an optional `scope` to restrict the list to one
+        package's build-time dependency closure.
 
         Each item is a per-evaluation `build_job`; its `id` is used for log,
         downloads, and dependency-graph endpoints. The build *state* (status,
@@ -2927,6 +2928,18 @@ paths:
             minimum: 0
             default: 0
           description: Number of builds to skip (after sorting).
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: |-
+            Restrict the result to the build-time dependency closure of this
+            build's package (the build itself plus its transitive deps), so a
+            failed top-level package shows only the failures that caused it
+            rather than every failure in the evaluation. Must be a build in this
+            evaluation.
       responses:
         '200':
           description: Paginated build list

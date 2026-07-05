@@ -231,6 +231,24 @@ unreachable. This backs the Actions Test button, which now probes connectivity
 for `forge_status_report` / `open_pr` instead of posting a status against a
 placeholder commit (which the forge always rejects).
 
+## Package build-failure scoping (#489)
+
+Clicking a failed top-level package in the evaluation log used to show *every*
+failed build in the evaluation, so the build that actually caused the selected
+package to fail was indistinguishable from unrelated failures. `GET
+/evals/{evaluation}/builds` now takes an optional `scope=<build_job>` that
+restricts the result to that build's package: its own `build_job` plus the
+`derivation_closure` of its derivation (the transitive build-time closure). The
+frontend passes the clicked package's `build_id` as `scope` (threaded through
+the initial load and pagination) and offers a "Show all" affordance to drop the
+scope.
+
+This handler fans out across several dependent queries (access load, jobs,
+closure, anchors, derivations, artefacts, attempts), so it is covered by the API
+contract in `docs/gradient-api.yaml` and the evaluation-log E2E rather than a
+brittle per-query `MockDatabase` unit test; the closure-filter itself is a plain
+`HashSet::contains` over `derivation_closure ∪ {root}`.
+
 ## Minor frontend issues (#401)
 
 `backend/gradient-web/src/endpoints/projects/auto_attach.rs`: `host_parsing_covers_url_shapes`,
@@ -2261,6 +2279,13 @@ Tests (`cargo test -p web --test body_size_limit`):
   `POST /api/v1/build-requests/{session}/blobs` with
   `max_request_size = 1024` is *not* rejected with 413, proving the
   per-route override to `MAX_BUILD_REQUEST_SIZE` is wired up.
+- `source_upload_route_uses_configurable_source_limit` - regression for #492
+  (413 on large `gradient build` source uploads) and #491. `POST
+  /api/v1/build-requests/source` honours the configurable `max_source_upload_size`
+  (`GRADIENT_MAX_SOURCE_UPLOAD_SIZE`), not a fixed constant: with
+  `max_source_upload_size = 32 KiB`, a 16 KiB body reaches the handler while a
+  64 KiB body is rejected with 413. The built-in reverse proxy's
+  `client_max_body_size` is derived from the largest configured upload limit.
 
 Regression for the build-request rework
 (`cargo test -p web --test old_direct_build_gone`):
@@ -2279,8 +2304,8 @@ migration). Tests:
 
 - `backend/web/tests/build_requests_manifest.rs` - manifest validation:
   path syntax checks (`.` / `..` / `/absolute` / null bytes / duplicates),
-  per-file hex hash decoding, total-size cap (`MAX_BUILD_REQUEST_SIZE`,
-  20 MiB → 413), and happy-path session creation that surfaces the
+  per-file hex hash decoding, total-size cap (`max_source_upload_size`,
+  default 512 MiB → 413), and happy-path session creation that surfaces the
   missing-blob hex list.
 - `backend/web/tests/build_requests_blobs.rs` - multipart blob upload:
   hash-mismatch and foreign-hash rejection (both 400), already-dispatched
@@ -4408,6 +4433,27 @@ Run with: `cargo test -p connector nar_upload`
 - `nar_upload_posts_multipart` - the connector assembles the correct multipart
   form (a `narinfo` JSON part and a `nar` binary part) and maps a 200 response
   to success.
+
+### CLI source-upload error messages (#491, #493)
+
+Run with: `cargo test -p gradient-cli --features nix build_nix`
+
+- `human_bytes_scales` - byte counts render as a human-readable size with the
+  exact byte count in parentheses (e.g. `199.0 MiB (208685264 bytes)`), small
+  values stay in bytes.
+- `upload_error_413_is_actionable_and_hides_proxy_html` - a 413 upload failure
+  reports the attempted size and file count and points at
+  `GRADIENT_MAX_SOURCE_UPLOAD_SIZE`, and does *not* echo the raw reverse-proxy
+  HTML error page.
+- `upload_error_400_includes_server_message` - a 400 failure keeps the server's
+  parse-error message (e.g. `multipart/form-data`) so the cause is visible.
+- `upload_error_unauthorized_suggests_login` - a 401/unauthenticated upload
+  failure tells the user to run `gradient login` (#493).
+
+`gradient build` also pre-flights a cheap authenticated probe (`GET /user`)
+before packing and streaming the source NAR, so a missing or expired session
+fails fast with the `gradient login` hint instead of surfacing as a confusing
+413/400 after a large upload (#493).
 
 ### CLI narinfo parser
 

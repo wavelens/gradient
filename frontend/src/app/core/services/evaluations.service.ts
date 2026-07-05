@@ -110,10 +110,11 @@ export class EvaluationsService {
     return this.api.post<string>(`evals/${id}`, { method: 'abort' });
   }
 
-  getBuilds(evaluationId: string, limit?: number, offset?: number): Observable<PaginatedBuilds> {
+  getBuilds(evaluationId: string, limit?: number, offset?: number, scope?: string): Observable<PaginatedBuilds> {
     const params: string[] = [];
     if (limit !== undefined) params.push(`limit=${limit}`);
     if (offset !== undefined) params.push(`offset=${offset}`);
+    if (scope) params.push(`scope=${encodeURIComponent(scope)}`);
     const query = params.length > 0 ? `?${params.join('&')}` : '';
     return this.api.get<PaginatedBuilds>(`evals/${evaluationId}/builds${query}`);
   }

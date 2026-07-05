@@ -86,6 +86,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   orgDisplayName = signal('');
   evaluationId = '';
   private initialBuildId: string | null = null;
+  // #489: when set, the build list is scoped to this build's package closure.
+  scopeBuildId = signal<string | null>(null);
   private initialShowEval = false;
   private fetchingInitialBuild = false;
 
@@ -159,6 +161,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
     this.initialBuildId = this.route.snapshot.queryParamMap.get('build');
+    this.scopeBuildId.set(this.initialBuildId);
     this.initialShowEval = this.route.snapshot.queryParamMap.get('eval') !== null;
     this.pendingDeepLink = parseLineFragment(this.route.snapshot.fragment);
     if (!this.evaluationId) {
@@ -293,7 +296,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     const limit = this.isInitialBuildsLoad
       ? this.PAGE_SIZE
       : Math.max(this.PAGE_SIZE, this.totalBuilds, this.activeBuildsCount());
-    this.evalService.getBuilds(this.evaluationId, limit, 0).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.evalService.getBuilds(this.evaluationId, limit, 0, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.totalBuilds = result.total;
         this.totalBuildsCount.set(result.total);
@@ -410,7 +413,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.loadingMore = true;
     const offset = this.builds().length;
 
-    this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, offset).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.evalService.getBuilds(this.evaluationId, this.PAGE_SIZE, offset, this.scopeBuildId() ?? undefined).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         // Do NOT update totalBuildsCount / activeBuildsCount here - those metric signals
         // are owned exclusively by loadBuilds() to avoid jumps from concurrent responses.
@@ -1345,5 +1348,23 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.evaluationId = id;
     this.router.navigate(['/organization', this.orgName, 'log', id]);
     this.loadEvaluation();
+  }
+
+  // #489: drop the package scope and reload the full evaluation build list.
+  clearScope(): void {
+    if (!this.scopeBuildId()) return;
+    this.scopeBuildId.set(null);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { build: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+    this.builds.set([]);
+    this.visibleBuilds.set([]);
+    this.pendingBuilds = [];
+    this.isInitialBuildsLoad = true;
+    this.totalBuilds = 0;
+    this.loadBuilds();
   }
 }

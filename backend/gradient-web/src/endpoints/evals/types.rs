@@ -38,6 +38,11 @@ pub struct PaginatedBuilds {
 pub struct BuildsQuery {
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+    /// When set, restrict results to the build-time dependency closure of this
+    /// build's package (the build itself plus its transitive deps), so a failed
+    /// top-level package shows only the failures that caused it, not the whole
+    /// evaluation's failures.
+    pub scope: Option<BuildJobId>,
 }
 
 #[derive(Serialize, Debug)]

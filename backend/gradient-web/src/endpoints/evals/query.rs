@@ -5,7 +5,7 @@
  */
 
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::error::WebResult;
+use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
@@ -190,6 +190,31 @@ pub async fn get_evaluation_builds(
         .filter(CBuildJob::Evaluation.eq(evaluation.id))
         .all(&state.web_db)
         .await?;
+
+    // #489: scope to one package's build-time closure (the build plus its
+    // transitive deps) so a failed top-level package shows only the failures
+    // that caused it, not every failure in the evaluation.
+    let jobs = if let Some(scope) = query.scope {
+        let root = EBuildJob::find_by_id(scope)
+            .filter(CBuildJob::Evaluation.eq(evaluation.id))
+            .one(&state.web_db)
+            .await?
+            .ok_or_else(|| WebError::not_found("build"))?
+            .derivation;
+        let mut allowed: HashSet<DerivationId> = EDerivationClosure::find()
+            .filter(CDerivationClosure::RootDerivation.eq(root))
+            .all(&state.web_db)
+            .await?
+            .into_iter()
+            .map(|c| c.dep_derivation)
+            .collect();
+        allowed.insert(root);
+        jobs.into_iter()
+            .filter(|j| allowed.contains(&j.derivation))
+            .collect()
+    } else {
+        jobs
+    };
 
     let anchor_ids: Vec<DerivationBuildId> = jobs
         .iter()
