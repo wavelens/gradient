@@ -742,7 +742,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
             }
         }
     }
-    info!(
+    debug!(
         enqueued,
         elapsed_ms = started.elapsed().as_millis() as u64,
         "dispatch_ready_builds completed"

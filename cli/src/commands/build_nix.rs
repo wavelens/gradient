@@ -17,6 +17,11 @@ use connector::evals::ArtefactTree;
 use futures::StreamExt as _;
 use harmonia_file_nar::NarByteStream;
 
+/// Source-NAR slice size per chunked-upload request. Small enough to clear the
+/// server's per-chunk body limit and any reverse proxy, so source size is
+/// unbounded by a single request.
+const SOURCE_UPLOAD_CHUNK_SIZE: usize = 32 * 1024 * 1024;
+
 /// Stage the git-tracked files into a temp dir, NAR-pack them with the same
 /// serialiser the server uses (so the store path matches), and upload the NAR.
 pub async fn dispatch_via_nar(
@@ -60,9 +65,30 @@ pub async fn dispatch_via_nar(
         ));
     }
 
-    match client
-        .build_requests()
-        .upload_source_nar(organization, target.as_deref(), system.as_deref(), nar)
+    // Content-addressed upload id: a filesystem-safe hex string that also lets
+    // the server resume a half-staged source on a retry of the same tree.
+    let upload = blake3::hash(&nar).to_hex().to_string();
+    let requests = client.build_requests();
+    let total = nar.len() as u64;
+    let mut offset = 0u64;
+    while offset < total {
+        let end = (offset as usize + SOURCE_UPLOAD_CHUNK_SIZE).min(nar.len());
+        let chunk = nar[offset as usize..end].to_vec();
+        match requests.upload_source_chunk(&upload, offset, chunk).await {
+            Ok(received) if received > offset => offset = received,
+            Ok(received) => out.err(
+                ExitKind::Api,
+                format!("Source upload stalled: server stayed at {received} of {total} bytes"),
+            ),
+            Err(e) => out.err(
+                to_exit_kind(&e),
+                upload_error_message(&e, nar_len, file_count, organization),
+            ),
+        }
+    }
+
+    match requests
+        .finalize_source(&upload, organization, target.as_deref(), system.as_deref())
         .await
     {
         Ok(d) => d,
@@ -112,6 +138,14 @@ fn upload_error_message(
         ConnectorError::Api { status, message } if status.as_u16() == 400 => format!(
             "Failed to upload {what}: the server could not read the upload (HTTP 400): {message}. \
              A reverse proxy may have truncated or rewritten the request body."
+        ),
+        ConnectorError::Api { status, .. } if matches!(status.as_u16(), 502..=504) => format!(
+            "Failed to upload {what}: the server closed the connection mid-upload (HTTP {}). \
+             The source most likely exceeds the server's upload limit, which drops the \
+             connection instead of returning a clean error - raise it \
+             (GRADIENT_MAX_SOURCE_UPLOAD_SIZE, or services.gradient.settings.maxSourceUploadSize \
+             on NixOS); otherwise the server may be down.",
+            status.as_u16()
         ),
         ConnectorError::Unauthorized => format!(
             "Failed to upload {what}: not authenticated. Run `gradient login` and try again."

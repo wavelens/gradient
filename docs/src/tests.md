@@ -2280,12 +2280,19 @@ Tests (`cargo test -p web --test body_size_limit`):
   `max_request_size = 1024` is *not* rejected with 413, proving the
   per-route override to `MAX_BUILD_REQUEST_SIZE` is wired up.
 - `source_upload_route_uses_configurable_source_limit` - regression for #492
-  (413 on large `gradient build` source uploads) and #491. `POST
+  (413 on large `gradient build` source uploads) and #491. The single-shot `POST
   /api/v1/build-requests/source` honours the configurable `max_source_upload_size`
   (`GRADIENT_MAX_SOURCE_UPLOAD_SIZE`), not a fixed constant: with
   `max_source_upload_size = 32 KiB`, a 16 KiB body reaches the handler while a
   64 KiB body is rejected with 413. The built-in reverse proxy's
   `client_max_body_size` is derived from the largest configured upload limit.
+- `source_chunk_route_uses_chunk_limit` - `PUT
+  /api/v1/build-requests/source/{upload}/chunk` gets the per-request
+  `NAR_UPLOAD_CHUNK_LIMIT` override, so a 64 KiB chunk is not 413'd under a
+  1 KiB global limit. This is what lets `gradient build` upload a source of any
+  size as a sequence of bounded chunks (finalised by
+  `POST .../source/{upload}/finalize`), sidestepping the single-request body
+  limit and the 502-on-mid-stream-close it caused (#491, #492, #493).
 
 Regression for the build-request rework
 (`cargo test -p web --test old_direct_build_gone`):
@@ -4454,6 +4461,14 @@ Run with: `cargo test -p gradient-cli --features nix build_nix`
 before packing and streaming the source NAR, so a missing or expired session
 fails fast with the `gradient login` hint instead of surfacing as a confusing
 413/400 after a large upload (#493).
+
+The source NAR is uploaded in bounded 32 MiB chunks (`build-requests/source/{upload}/chunk`
+then `finalize`), keyed by the NAR's blake3 content hash so a retry resumes from
+the server's staged offset. No single request carries the whole source, so the
+upload no longer depends on `max_source_upload_size` fitting one request or on the
+reverse proxy's body limit - `max_source_upload_size` now only bounds the staged
+total server-side. This removes the single-shot failure modes (413/502) entirely
+for the batched path.
 
 ### CLI narinfo parser
 

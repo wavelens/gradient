@@ -24,7 +24,7 @@
 use crate::DbContext;
 use crate::status::{TransitionChange, emit_transition_effects};
 use gradient_types::EvaluationId;
-use tracing::{error, info};
+use tracing::{debug, error};
 
 /// What slice of the graph to heal.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -175,7 +175,7 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     }
 
     if !report.is_noop() {
-        info!(
+        debug!(
             ?scope,
             edges_marked = report.edges_marked,
             thawed = report.thawed,

@@ -3290,14 +3290,15 @@ paths:
   /build-requests/source:
     post:
       tags: [build-requests]
-      summary: Upload a pre-packed source NAR and queue an evaluation
+      summary: Upload a pre-packed source NAR and queue an evaluation (single-shot)
       description: |-
         One-shot alternative to the manifest/blob flow for clients built with
         the `nix` feature. The client NAR-packs the git-tracked source itself
         and uploads it here; the server computes the `/nix/store/<hash>-source`
         path, signs it, lazily creates the per-org `build-request` project, and
-        queues an evaluation. Bounded by the same per-request size limit as blob
-        upload.
+        queues an evaluation. The whole NAR is one request, bounded by
+        `max_source_upload_size`; large sources should use the chunked
+        `POST /build-requests/source/{upload}/chunk` + `finalize` flow instead.
       operationId: postBuildRequestSource
       parameters:
         - name: organization
@@ -3338,6 +3339,120 @@ paths:
                         $ref: '#/components/schemas/DispatchResponse'
         '400':
           description: Missing or empty `nar` field.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /build-requests/source/{upload}/chunk:
+    put:
+      tags: [build-requests]
+      summary: Append a chunk of a source NAR to a staged upload
+      description: |-
+        Streams a large source NAR to the server in slices so no single request
+        hits a body limit. `upload` is a client-chosen id (the CLI uses the NAR's
+        content hash, which makes a retry resumable). `offset` must equal the
+        bytes already received (`0` starts fresh); a mismatch appends nothing and
+        returns the authoritative `received` so the client resumes. The staged
+        total is bounded by `max_source_upload_size`. Finalise with
+        `POST /build-requests/source/{upload}/finalize`.
+      operationId: putBuildRequestSourceChunk
+      parameters:
+        - name: upload
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Client-chosen upload id (must not contain `/` or `..`).
+        - name: offset
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+          description: Byte offset this chunk starts at; must equal bytes already received.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Chunk staged; returns total bytes received so far.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          received:
+                            type: integer
+                            format: int64
+        '413':
+          description: Staged total would exceed `max_source_upload_size`.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /build-requests/source/{upload}/finalize:
+    post:
+      tags: [build-requests]
+      summary: Finalise a chunked source upload and queue an evaluation
+      description: |-
+        Reassembles the staged source NAR for `upload`, computes its
+        `/nix/store/<hash>-source` path, signs it, lazily creates the per-org
+        `build-request` project, queues an evaluation, and drops the partial.
+      operationId: postBuildRequestSourceFinalize
+      parameters:
+        - name: upload
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The upload id whose chunks were staged.
+        - name: organization
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Organization name.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                target:
+                  type: string
+                  description: Eval target attribute path (defaults to the project wildcard).
+                system:
+                  type: string
+                  description: Target system.
+      responses:
+        '200':
+          description: Evaluation queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/DispatchResponse'
+        '400':
+          description: No staged upload for this id, or the staged NAR is empty.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

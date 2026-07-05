@@ -2,6 +2,19 @@ use crate::{Client, ConnectorError, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
+#[derive(Deserialize)]
+struct ChunkReceived {
+    received: u64,
+}
+
+#[derive(Serialize)]
+struct SourceFinalizeBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ManifestFile {
     pub path: String,
@@ -107,6 +120,49 @@ impl BuildRequestsApi<'_> {
             true,
         )?
         .multipart(form);
+        http::decode(req.send().await?).await
+    }
+
+    pub async fn upload_source_chunk(
+        &self,
+        upload: &str,
+        offset: u64,
+        chunk: Vec<u8>,
+    ) -> Result<u64, ConnectorError> {
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::PUT,
+            &format!("build-requests/source/{upload}/chunk?offset={offset}"),
+            true,
+        )?
+        .header("Content-Type", "application/octet-stream")
+        .body(chunk);
+        let received: ChunkReceived = http::decode(req.send().await?).await?;
+        Ok(received.received)
+    }
+
+    pub async fn finalize_source(
+        &self,
+        upload: &str,
+        organization: &str,
+        target: Option<&str>,
+        system: Option<&str>,
+    ) -> Result<DispatchResponse, ConnectorError> {
+        let body = SourceFinalizeBody {
+            target: target.map(str::to_owned),
+            system: system.map(str::to_owned),
+        };
+        let req = http::request(
+            self.0.http(),
+            self.0.base_url(),
+            self.0.token(),
+            Method::POST,
+            &format!("build-requests/source/{upload}/finalize?organization={organization}"),
+            true,
+        )?
+        .json(&body);
         http::decode(req.send().await?).await
     }
 
