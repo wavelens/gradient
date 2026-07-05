@@ -89,7 +89,7 @@ in
 craneLib.buildPackage (commonArgs // {
   inherit cargoArtifacts;
   pname = "gradient";
-  version = "1.2.0";
+  version = "1.3.0";
   separateDebugInfo = true;
 
   nativeCheckInputs = [ git ];

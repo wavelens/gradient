@@ -27,7 +27,7 @@ use gradient_exec::path_utils::{nix_store_path, strip_store_prefix};
 use gradient_proto::messages::{BuildOutput, BuildProduct, BuildTask};
 use gradient_sources::get_hash_from_path;
 use gradient_util::hydra::parse_hydra_product_line;
-use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResultInner};
+use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResult, BuildResultInner};
 use harmonia_protocol::log::{Field, LogMessage, ResultType, Verbosity};
 use harmonia_protocol::types::ClientOptions;
 use harmonia_store_derivation::derivation::BasicDerivation;
@@ -105,7 +105,7 @@ impl ParsedDerivation {
         log_limits: crate::executor::log_limit::LogRateLimits,
         log_fetch_from_store: bool,
     ) -> Result<(Vec<BuildOutput>, bool, Option<u64>), BuildError> {
-        let mut guard = store.scoped().await.map_err(BuildError::transient)?;
+        let mut guard = store.acquire().await.map_err(BuildError::transient)?;
 
         debug!(
             drv = %drv_path,
@@ -124,58 +124,67 @@ impl ParsedDerivation {
         opts.use_substitutes = false;
         opts.build_cores = 0;
 
-        if let Err(e) = guard.client().set_options(&opts).await {
-            warn!(error = %e, "set_options failed; discarding daemon connection");
-            return Err(BuildError::transient(anyhow::anyhow!(
-                "set_options failed for {}: {}",
-                drv_path,
-                e
-            )));
-        }
-
-        // `build_derivation` returns `impl ResultLog = Stream<Item=LogMessage> + Future`.
-        // Drain the stream first, then await the future for the BuildResult.
-        //
-        // On abort we return early *without* `mark_ok`: dropping `logs` and
-        // then `guard` discards the daemon connection (see `ScopedGuard`),
-        // which closes the socket and makes the nix-daemon kill the in-flight
-        // build instead of leaving it compiling after the server cancelled.
-        let silent = max_silent_secs.map(std::time::Duration::from_secs);
-        let outcome = {
-            let logs = guard.client().build_derivation(
-                &self.harmonia_path,
-                &self.basic_drv,
-                BuildMode::Normal,
-            );
-            let mut logs = pin!(logs);
-            match drain_build_logs_with_timeout(
-                logs.as_mut(),
-                updater,
-                task_index,
-                silent,
-                abort,
-                log_limits,
-            )
+        guard
+            .execute(|client| async move { client.set_options(&opts).await })
             .await
-            {
-                Ok(DrainOutcome::Completed(stats)) => log_stream_summary(&stats, drv_path),
-                Ok(DrainOutcome::Aborted) => return Err(BuildError::aborted(drv_path)),
-                Err(e) => return Err(BuildError::timeout(e)),
-            }
-            logs.await
-        };
+            .map_err(|e| {
+                BuildError::transient(anyhow::anyhow!("set_options failed for {}: {}", drv_path, e))
+            })?;
 
-        let result = match outcome {
-            Ok(r) => {
-                guard.mark_ok();
-                r
-            }
-            Err(e) => {
-                return Err(BuildError::transient(anyhow::anyhow!(
+        // `build_derivation` is a `Stream<Item=LogMessage> + Future<BuildResult>`,
+        // drained inside `execute` so a protocol error discards the connection.
+        // On abort or timeout we `mark_broken` explicitly: closing the socket
+        // makes the nix-daemon kill the in-flight build.
+        let silent = max_silent_secs.map(std::time::Duration::from_secs);
+        enum Drained {
+            Completed(BuildResult),
+            Aborted,
+            Timeout(anyhow::Error),
+        }
+        let harmonia_path = &self.harmonia_path;
+        let basic_drv = &self.basic_drv;
+        let updater_ref = &mut *updater;
+        let abort_ref = &mut *abort;
+        let drained = guard
+            .execute(|client| async move {
+                let logs = client.build_derivation(harmonia_path, basic_drv, BuildMode::Normal);
+                let mut logs = pin!(logs);
+                match drain_build_logs_with_timeout(
+                    logs.as_mut(),
+                    updater_ref,
+                    task_index,
+                    silent,
+                    abort_ref,
+                    log_limits,
+                )
+                .await
+                {
+                    Ok(DrainOutcome::Completed(stats)) => {
+                        log_stream_summary(&stats, drv_path);
+                        Ok(Drained::Completed(logs.await?))
+                    }
+                    Ok(DrainOutcome::Aborted) => Ok(Drained::Aborted),
+                    Err(e) => Ok(Drained::Timeout(e)),
+                }
+            })
+            .await
+            .map_err(|e| {
+                BuildError::transient(anyhow::anyhow!(
                     "build_derivation failed for {}: {}",
                     drv_path,
                     e
-                )));
+                ))
+            })?;
+
+        let result = match drained {
+            Drained::Completed(r) => r,
+            Drained::Aborted => {
+                guard.mark_broken();
+                return Err(BuildError::aborted(drv_path));
+            }
+            Drained::Timeout(e) => {
+                guard.mark_broken();
+                return Err(BuildError::timeout(e));
             }
         };
 

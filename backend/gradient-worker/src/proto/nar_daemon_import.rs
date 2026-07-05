@@ -68,35 +68,24 @@ impl<'a> NarImporter<'a> {
         decompressed: &[u8],
         valid_info: &ValidPathInfo,
     ) -> Result<()> {
-        let mut guard = self.store.scoped().await?;
+        let mut guard = self.store.acquire().await?;
 
-        let outcome = {
-            let logs = guard.client().add_to_store_nar(
-                valid_info,
-                decompressed,
-                false, // repair
-                true,  // dont_check_sigs - we trust the authenticated WS transport
-            );
-
-            let mut logs = pin!(logs);
-            while let Some(_msg) = logs.next().await {
-                // Daemon log frames during import are noisy and not user-facing - drop them.
-            }
-
-            logs.await
-        };
-
-        match outcome {
-            Ok(()) => {
-                guard.mark_ok();
-                Ok(())
-            }
-            Err(e) => Err(anyhow::anyhow!(
-                "daemon add_to_store_nar({}) failed: {}",
-                self.store_path,
-                e
-            )),
-        }
+        guard
+            .execute(|client| async move {
+                let logs = client.add_to_store_nar(
+                    valid_info,
+                    decompressed,
+                    false, // repair
+                    true,  // dont_check_sigs - we trust the authenticated WS transport
+                );
+                let mut logs = pin!(logs);
+                while let Some(_msg) = logs.next().await {}
+                logs.await
+            })
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!("daemon add_to_store_nar({}) failed: {}", self.store_path, e)
+            })
     }
 
     async fn import(&self, compressed_nar: Vec<u8>) -> Result<()> {

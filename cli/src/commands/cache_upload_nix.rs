@@ -11,7 +11,8 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
-use harmonia_store_remote::pool::{ConnectionPool, PoolConfig, PooledConnectionGuard};
+use harmonia_store_remote::UnkeyedValidPathInfo;
+use harmonia_store_remote::pool::{ConnectionPool, PoolConfig};
 use harmonia_utils_hash::fmt::HashFormat as _;
 
 use crate::commands::cache_upload::{UploadArgs, upload_one_owned};
@@ -23,7 +24,7 @@ const DEFAULT_SOCKET: &str = "/nix/var/nix/daemon-socket/socket";
 fn pool_config() -> PoolConfig {
     PoolConfig {
         max_size: 1,
-        acquire_timeout: Duration::from_secs(600),
+        connection_timeout: Duration::from_secs(600),
         ..Default::default()
     }
 }
@@ -40,45 +41,23 @@ fn canonicalize(path: &str) -> String {
     }
 }
 
-struct ScopedGuard {
-    inner: Option<PooledConnectionGuard>,
-    ok: bool,
-}
+async fn query_path_info(
+    pool: &ConnectionPool,
+    store_path: &str,
+) -> anyhow::Result<UnkeyedValidPathInfo> {
+    let sp = StorePath::from_base_path(strip_store_prefix(store_path))
+        .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
 
-impl ScopedGuard {
-    fn client(
-        &mut self,
-    ) -> &mut harmonia_store_remote::DaemonClient<
-        tokio::net::unix::OwnedReadHalf,
-        tokio::net::unix::OwnedWriteHalf,
-    > {
-        self.inner.as_mut().expect("guard already dropped").client()
-    }
-
-    fn mark_ok(&mut self) {
-        self.ok = true;
-    }
-}
-
-impl Drop for ScopedGuard {
-    fn drop(&mut self) {
-        if let Some(inner) = self.inner.take()
-            && !self.ok
-        {
-            inner.mark_broken();
-        }
-    }
-}
-
-async fn scoped(pool: &ConnectionPool) -> anyhow::Result<ScopedGuard> {
-    let inner = pool
+    let mut guard = pool
         .acquire()
         .await
         .map_err(|e| anyhow::anyhow!("acquire daemon connection: {e}"))?;
-    Ok(ScopedGuard {
-        inner: Some(inner),
-        ok: false,
-    })
+
+    guard
+        .execute(|client| async move { client.query_path_info(&sp).await })
+        .await
+        .map_err(|e| anyhow::anyhow!("query_path_info failed for {store_path}: {e}"))?
+        .ok_or_else(|| anyhow::anyhow!("path not in local store: {store_path}"))
 }
 
 struct PathMeta {
@@ -88,21 +67,7 @@ struct PathMeta {
 }
 
 async fn gather_path_meta(pool: &ConnectionPool, store_path: &str) -> anyhow::Result<PathMeta> {
-    let sp = StorePath::from_base_path(strip_store_prefix(store_path))
-        .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
-
-    let mut guard = scoped(pool).await?;
-    let pi = match guard.client().query_path_info(&sp).await {
-        Ok(Some(pi)) => {
-            guard.mark_ok();
-            pi
-        }
-        Ok(None) => {
-            guard.mark_ok();
-            anyhow::bail!("path not in local store: {store_path}");
-        }
-        Err(e) => anyhow::bail!("query_path_info failed for {store_path}: {e}"),
-    };
+    let pi = query_path_info(pool, store_path).await?;
 
     let references: Vec<String> = pi
         .references
@@ -121,21 +86,7 @@ async fn gather_path_meta(pool: &ConnectionPool, store_path: &str) -> anyhow::Re
 }
 
 async fn query_refs(pool: &ConnectionPool, store_path: &str) -> anyhow::Result<Vec<String>> {
-    let sp = StorePath::from_base_path(strip_store_prefix(store_path))
-        .map_err(|e| anyhow::anyhow!("invalid store path {store_path}: {e}"))?;
-
-    let mut guard = scoped(pool).await?;
-    let pi = match guard.client().query_path_info(&sp).await {
-        Ok(Some(pi)) => {
-            guard.mark_ok();
-            pi
-        }
-        Ok(None) => {
-            guard.mark_ok();
-            anyhow::bail!("path not in local store: {store_path}");
-        }
-        Err(e) => anyhow::bail!("query_path_info failed for {store_path}: {e}"),
-    };
+    let pi = query_path_info(pool, store_path).await?;
 
     Ok(pi
         .references

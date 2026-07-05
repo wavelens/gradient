@@ -48,7 +48,7 @@ pub async fn get_missing_builds(pool: &ConnectionPool, paths: Vec<String>) -> Re
                     .await
                     .map_err(|e| anyhow::anyhow!("acquire store for output map: {}", e))?;
                 let full_path = nix_store_path(&path);
-                let output_map = get_output_paths_internal(full_path.clone(), guard.client())
+                let output_map = get_output_paths_internal(full_path.clone(), &mut guard)
                     .await
                     .with_context(|| format!("Failed to get output path for {}", full_path))?;
                 anyhow::Ok((path, output_map))
@@ -74,8 +74,7 @@ pub async fn get_missing_builds(pool: &ConnectionPool, paths: Vec<String>) -> Re
         .collect();
 
     let valid_paths = guard
-        .client()
-        .query_valid_paths(&store_paths, true)
+        .execute(|client| async move { client.query_valid_paths(&store_paths, true).await })
         .await
         .map_err(|e| anyhow::anyhow!("Failed to query valid paths: {}", e))?;
 
@@ -93,18 +92,14 @@ pub async fn get_missing_builds(pool: &ConnectionPool, paths: Vec<String>) -> Re
     Ok(missing)
 }
 
-async fn get_output_paths_internal<R, W>(
+async fn get_output_paths_internal(
     path: String,
-    store: &mut harmonia_store_remote::DaemonClient<R, W>,
-) -> Result<HashMap<String, String>>
-where
-    R: tokio::io::AsyncRead + std::fmt::Debug + Unpin + Send + 'static,
-    W: tokio::io::AsyncWrite + std::fmt::Debug + Unpin + Send + 'static,
-{
+    guard: &mut PooledConnectionGuard,
+) -> Result<HashMap<String, String>> {
     let store_path = StorePath::from_base_path(strip_store_prefix(&path))
         .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", path, e))?;
-    let output_map = store
-        .query_derivation_output_map(&store_path)
+    let output_map = guard
+        .execute(|client| async move { client.query_derivation_output_map(&store_path).await })
         .await
         .map_err(|e| anyhow::anyhow!("query_derivation_output_map failed: {}", e))?;
     Ok(output_map
@@ -122,8 +117,7 @@ pub async fn get_pathinfo(
     let store_path = StorePath::from_base_path(strip_store_prefix(&path))
         .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", path, e))?;
     let info = guard
-        .client()
-        .query_path_info(&store_path)
+        .execute(|client| async move { client.query_path_info(&store_path).await })
         .await
         .map_err(|e| anyhow::anyhow!("query_path_info failed: {}", e))?;
     Ok(info.map(|vi| convert_valid_path_info(&vi)))
@@ -136,8 +130,7 @@ pub async fn get_build_outputs_from_derivation(
     let drv_store_path = StorePath::from_base_path(strip_store_prefix(&derivation_path))
         .map_err(|e| anyhow::anyhow!("Invalid store path {}: {}", derivation_path, e))?;
     let output_map = guard
-        .client()
-        .query_derivation_output_map(&drv_store_path)
+        .execute(|client| async move { client.query_derivation_output_map(&drv_store_path).await })
         .await
         .map_err(|e| anyhow::anyhow!("query_derivation_output_map failed: {}", e))?;
 
@@ -148,8 +141,7 @@ pub async fn get_build_outputs_from_derivation(
         };
         let output_path_str = format!("/nix/store/{}", output_store_path);
         if let Some(vi) = guard
-            .client()
-            .query_path_info(output_store_path)
+            .execute(|client| async move { client.query_path_info(output_store_path).await })
             .await
             .map_err(|e| anyhow::anyhow!("query_path_info failed: {}", e))?
         {

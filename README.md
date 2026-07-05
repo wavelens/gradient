@@ -9,6 +9,8 @@
   •
   <a href="https://petstore.swagger.io/?url=https://raw.githubusercontent.com/wavelens/gradient/master/docs/gradient-api.yaml">🛠️ API Docs</a>
   •
+  <a href="https://matrix.to/#/#gradient-ci:matrix.org">💬 Matrix Chat</a>
+  •
   <sup><a href="https://public.gradient.ci/organization/gradient/project/main">
     <img src="https://public.gradient.ci/api/v1/projects/gradient/main/badge" alt="Gradient Badge" align="middle">
   </a></sup>

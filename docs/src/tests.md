@@ -1359,19 +1359,20 @@ Postgres, so it is covered by the migration apply + the per-project eval-GC E2E 
 rather than a `MockDatabase` test.
 
 Backend (`cargo test -p worker --tests`):
-- `nix::store::tests::scoped_guard_discards_inner_when_not_marked_ok` -
-  every daemon op in the worker runs against a `ScopedGuard`. If the guard
-  is dropped without an explicit `mark_ok()` call - the path taken on `Err`
-  returns, panics, and `await` cancellation (e.g. `FuturesUnordered` being
-  dropped on the first prefetch import failure) - `Drop` discards the
-  pooled connection so the next acquirer doesn't inherit a possibly
-  out-of-phase protocol stream. Without this, a cancelled `add_to_store_nar`
-  would silently recycle a mid-frame connection and the next caller would
-  surface as `"serialised integer N is too large for type 'j'"` or as
+- Connection poisoning (discard a mid-protocol socket on error, cancellation,
+  or panic rather than recycling it) now lives in harmonia's
+  `PooledConnectionGuard::execute`, so the worker runs every daemon op inside
+  an `execute` closure instead of a local `ScopedGuard`. The drop-policy unit
+  tests are retired with the wrapper; without the policy a cancelled
+  `add_to_store_nar` would recycle a mid-frame connection and the next caller
+  would surface as `"serialised integer N is too large for type 'j'"` or as
   `query_path_info` returning `Ok(None)` on a path that exists.
-- `nix::store::tests::scoped_guard_preserves_inner_when_marked_ok` - the
-  symmetric success path: a daemon op that completes cleanly calls
-  `mark_ok()` and the connection is recycled, preserving pool warmth.
+- `nix::store::tests::pool_config_max_size_and_acquire_timeout` - harmonia's
+  `acquire` now blocks indefinitely for a free slot, so `LocalNixStore::acquire`
+  bounds the wait with `POOL_ACQUIRE_TIMEOUT`, which must stay generous
+  (>= 10 min): under `max_concurrent_builds * PREFETCH_CONCURRENCY` queued
+  imports a short deadline fires while the pool is still making forward
+  progress and surfaces as `acquire daemon connection: timed out` mid-build.
 - `proto::nar_import::tests::classify_splits_cached_by_url_presence` - cached
   entries with a presigned `download_url` go to the S3 bucket, those without
   go to the WebSocket `NarRequest` bucket.
@@ -1386,8 +1387,8 @@ Backend (`cargo test -p worker --tests`):
   cache responses produce empty buckets.
 - `nix::store::tests::pool_config_connection_timeout_is_generous` - regression
   for `acquire daemon connection: timeout: connecting to daemon`. The worker's
-  pool config must override harmonia's 10 s `connection_timeout` default, not
-  just `acquire_timeout`. Under a high daemon connection count the handshake
+  pool config must override harmonia's 10 s `connection_timeout` default.
+  Under a high daemon connection count the handshake
   for a fresh pooled connection routinely outlasts 10 s, so the build failed an
   otherwise-healthy prefetch import; the config now grants connection
   establishment the same 10 min ceiling as the acquire wait.
@@ -2962,10 +2963,10 @@ streaming - while the server already showed no running build.
 Fix in `worker/src/executor/build.rs`: the build log drain races the daemon's
 log stream against the `abort` watch (`next_log_event`). When the server
 signals `AbortJob`, `drain_build_logs_with_timeout` returns
-`DrainOutcome::Aborted` and `realize` returns early *without* `mark_ok`.
-Dropping the `ScopedGuard` discards the daemon connection (closes the socket),
-which makes the nix-daemon kill the in-flight build. Because the build errors
-out before the compress/push stage, no NAR is uploaded for a cancelled build.
+`DrainOutcome::Aborted` and `realize` calls `guard.mark_broken()`, discarding
+the daemon connection (closes the socket), which makes the nix-daemon kill the
+in-flight build. Because the build errors out before the compress/push stage,
+no NAR is uploaded for a cancelled build.
 
 Tests (`cargo test -p worker executor::build::tests`):
 
