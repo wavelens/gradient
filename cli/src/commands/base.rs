@@ -31,6 +31,7 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum MainCommands {
     /// Generate shell completions
+    #[command(hide = true)]
     Completion {
         /// The shell to generate completions for
         #[arg(value_enum)]
