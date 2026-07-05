@@ -19,7 +19,9 @@ use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
 use gradient_test_support::fixtures::{org, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_test_support::web::{
+    live_session, make_test_server, make_test_server_configured, make_token,
+};
 use uuid::Uuid;
 
 const URL: &str = "/api/v1/build-requests/manifest";
@@ -83,7 +85,11 @@ fn rejects_oversized_total() {
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));
-        let server = make_test_server(db.into_connection());
+        // Cap the source upload at 20 MiB so the manifest total trips it; the
+        // cap is `max_source_upload_size`, not the fixed constant it once was.
+        let server = make_test_server_configured(db.into_connection(), |cli| {
+            cli.limits.max_source_upload_size = 20 * 1024 * 1024;
+        });
 
         // 20 MiB + 1 byte triggers the cap.
         let body = json!({
