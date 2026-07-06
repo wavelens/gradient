@@ -39,6 +39,17 @@ pub async fn handle_build(
 
     let client = client_from_config(out);
 
+    // Accept `nix build`-style installables (`.#uxc`) and translate them into
+    // gradient's attr-path wildcard language before dispatch and result linking.
+    let target = target.map(|raw| {
+        let system = system.clone().unwrap_or_else(default_nix_system);
+        let normalized = normalize_target(&raw, &system);
+        if !quiet && normalized != raw {
+            out.progress(format!("Building '{}' (from '{}')", normalized, raw));
+        }
+        normalized
+    });
+
     let cwd = std::env::current_dir().unwrap_or_else(|e| {
         if !quiet {
             out.progress(format!("Failed to read current directory: {}", e));
@@ -366,6 +377,68 @@ async fn wait_for_terminal(
     }
 }
 
+/// Flake-output categories that are already gradient attr-path syntax; a target
+/// under one of these passes through, anything else is treated as a bare package.
+const OUTPUT_CATEGORIES: &[&str] = &[
+    "packages",
+    "legacyPackages",
+    "checks",
+    "devShells",
+    "apps",
+    "nixosConfigurations",
+    "darwinConfigurations",
+    "homeConfigurations",
+    "hydraJobs",
+    "formatter",
+    "bundlers",
+];
+
+/// The host's Nix system double (`x86_64-linux`, `aarch64-darwin`, ...), used to
+/// qualify a bare `.#uxc` as `packages.<system>.uxc` the way `nix build` does.
+fn default_nix_system() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        other => other,
+    };
+    format!("{}-{}", std::env::consts::ARCH, os)
+}
+
+/// Translate a `nix build`-style installable into gradient's `.`-separated
+/// attr-path wildcard language. `gradient build .#uxc` mirrors `nix build .#uxc`:
+/// the flake ref is always the uploaded repo, so drop a leading local ref
+/// (`.`/empty) before `#` and qualify a bare attr as `packages.<system>.<attr>`.
+/// Fully-qualified paths and `*`/`#` wildcards (`packages.x86_64-linux.#`) and
+/// exclusions pass through untouched.
+fn normalize_target(raw: &str, system: &str) -> String {
+    raw.split(',')
+        .map(|pat| normalize_installable(pat.trim(), system))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn normalize_installable(pat: &str, system: &str) -> String {
+    let (excl, body) = pat
+        .strip_prefix('!')
+        .map(|r| ("!", r))
+        .unwrap_or(("", pat));
+
+    let attr = match body.split_once('#') {
+        Some(("" | "." | "./", attr)) => attr,
+        _ => return pat.to_string(),
+    };
+
+    if attr.is_empty() {
+        return format!("{excl}packages.{system}.#");
+    }
+
+    let head = attr.split('.').next().unwrap_or("");
+    if head == "*" || head == "#" || OUTPUT_CATEGORIES.contains(&head) {
+        format!("{excl}{attr}")
+    } else {
+        format!("{excl}packages.{system}.{attr}")
+    }
+}
+
 /// Pick the entry point matching `target` (exact or suffix), else the first.
 pub(crate) fn select_primary_entry_point<'a>(
     tree: &'a ArtefactTree,
@@ -448,4 +521,64 @@ fn hash_file(path: &Path) -> std::io::Result<(String, i64)> {
         size += n as i64;
     }
     Ok((hasher.finalize().to_hex().to_string(), size))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_installable, normalize_target};
+
+    #[test]
+    fn bare_installable_qualifies_to_packages() {
+        assert_eq!(
+            normalize_installable(".#uxc", "x86_64-linux"),
+            "packages.x86_64-linux.uxc"
+        );
+        assert_eq!(
+            normalize_installable("#uxc", "aarch64-darwin"),
+            "packages.aarch64-darwin.uxc"
+        );
+        // `.#` alone builds every package, like `nix build .#` picks the default.
+        assert_eq!(
+            normalize_installable(".#", "x86_64-linux"),
+            "packages.x86_64-linux.#"
+        );
+    }
+
+    #[test]
+    fn qualified_and_wildcard_targets_pass_through() {
+        // gradient's own trailing `#` wildcard segment must survive untouched.
+        assert_eq!(
+            normalize_installable("packages.x86_64-linux.#", "x86_64-linux"),
+            "packages.x86_64-linux.#"
+        );
+        assert_eq!(
+            normalize_installable("checks.x86_64-linux.*", "x86_64-linux"),
+            "checks.x86_64-linux.*"
+        );
+        assert_eq!(normalize_installable("*", "x86_64-linux"), "*");
+        assert_eq!(
+            normalize_installable(".#packages.aarch64-linux.uxc", "x86_64-linux"),
+            "packages.aarch64-linux.uxc"
+        );
+        assert_eq!(
+            normalize_installable(".#nixosConfigurations.foo", "x86_64-linux"),
+            "nixosConfigurations.foo"
+        );
+    }
+
+    #[test]
+    fn exclusions_and_comma_lists_preserved() {
+        assert_eq!(
+            normalize_installable("!.#uxc", "x86_64-linux"),
+            "!packages.x86_64-linux.uxc"
+        );
+        assert_eq!(
+            normalize_installable("!nixosConfigurations.foo", "x86_64-linux"),
+            "!nixosConfigurations.foo"
+        );
+        assert_eq!(
+            normalize_target(".#uxc,.#cli", "x86_64-linux"),
+            "packages.x86_64-linux.uxc,packages.x86_64-linux.cli"
+        );
+    }
 }

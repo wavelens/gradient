@@ -149,17 +149,28 @@ an evaluation under a per-org reserved `build-request` project.
 ```sh
 # Inside a git working tree
 gradient build                          # eval the project's wildcard target
+gradient build .#foo                    # nix-style installable -> packages.<system>.foo
 gradient build checks.x86_64-linux.foo  # eval a specific attribute path
-gradient build --system x86_64-linux    # override target system (default: org preference)
+gradient build --system x86_64-linux    # system used to expand a bare `.#foo` target
 gradient build -b                       # dispatch and print the evaluation UUID, then exit
 gradient build --no-link                # skip producing a result symlink/folder
 ```
+
+The target accepts either gradient's attr-path wildcard syntax (`.`-separated,
+with `*`/`#` wildcard segments and `!`-prefixed exclusions, e.g.
+`packages.x86_64-linux.#`) or a `nix build`-style installable (`.#foo`). An
+installable's flake ref is always the uploaded repo, so `.#foo` is expanded to
+`packages.<system>.foo` (`<system>` from `--system` or the host). A pinpointed
+target that matches no derivation fails the evaluation with a clear message
+instead of completing empty.
 
 Requirements and limits:
 
 - Run from inside a git working tree (bare repos are not supported).
 - Only files git tracks are uploaded; untracked files and `.git/` are skipped.
-- Combined upload size must not exceed **20 MiB** (`MAX_BUILD_REQUEST_SIZE`).
+- Total source size is capped by `settings.maxSourceUploadSize` (512 MiB
+  default); the source is streamed in bounded chunks, so no single request
+  hits the reverse proxy's body limit.
 - The default flow streams logs from all queued builds until they complete;
   pass `-b`/`--background` to print only the evaluation UUID and return
   immediately. Pair it with [`gradient watch`](#watching-an-evaluation) to
