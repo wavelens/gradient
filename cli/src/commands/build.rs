@@ -198,7 +198,7 @@ pub async fn handle_build(
     };
 
     #[cfg(feature = "nix")]
-    crate::commands::build_nix::link_result(&dispatch, &tree, target.as_deref(), out).await;
+    crate::commands::build_nix::link_result(&client, &dispatch, &tree, target.as_deref(), out).await;
     #[cfg(not(feature = "nix"))]
     download_result_dir(&client, &tree, target.as_deref(), out).await;
 }

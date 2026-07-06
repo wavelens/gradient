@@ -9,6 +9,7 @@
 //! into the local store as a `result` symlink (instead of downloading products).
 
 use crate::commands::build::{TrackedFile, select_primary_entry_point};
+use crate::config::{ConfigKey, load_config};
 use crate::input::server_base;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use connector::ConnectorError;
@@ -154,35 +155,21 @@ fn upload_error_message(
     }
 }
 
-/// Substitute every built output from the gradient cache and create a single
-/// GC-rooted `result` symlink to the primary output.
+/// Materialise the primary output locally and create a GC-rooted `result`
+/// symlink to it. The organisation's cache is wired into the realise as an extra
+/// substituter - carrying its signing key (so gradient-built paths verify even
+/// when the user has not configured the key) and a temp netrc for a private
+/// cache - so a single realise draws from the gradient cache and the user's own
+/// substituters alike. Paths already local, or reachable only from the user's
+/// substituters, resolve without the cache; only a genuinely unreachable output
+/// errors, with the raw nix diagnostic instead of a bare warning.
 pub async fn link_result(
+    client: &connector::Client,
     dispatch: &DispatchResponse,
     tree: &ArtefactTree,
     target: Option<&str>,
     out: Output,
 ) {
-    let Some(cache) = dispatch.cache.as_deref() else {
-        out.human("Organization has no cache; skipping output substitution.");
-        return;
-    };
-
-    let base = server_base(out);
-    let cache_url = format!("{}/cache/{}", base.trim_end_matches('/'), cache);
-
-    for ep in &tree.entry_points {
-        for output in &ep.outputs {
-            let store_path = output.full_store_path();
-            let status = tokio::process::Command::new("nix")
-                .args(["copy", "--from", &cache_url, "--no-check-sigs", &store_path])
-                .status()
-                .await;
-            if !matches!(status, Ok(s) if s.success()) {
-                out.progress(format!("warning: nix copy failed for {store_path}"));
-            }
-        }
-    }
-
     let Some(primary) = select_primary_entry_point(tree, target) else {
         out.human("No outputs to link.");
         return;
@@ -196,16 +183,84 @@ pub async fn link_result(
     else {
         return;
     };
-
     let realise_path = out_path.full_store_path();
-    let status = tokio::process::Command::new("nix-store")
-        .args(["--realise", &realise_path, "--add-root", "result", "--indirect"])
-        .status()
-        .await;
-    match status {
-        Ok(s) if s.success() => out.human(format!("result -> {realise_path}")),
-        _ => out.progress("warning: could not create result symlink"),
+
+    let (cache_opts, _netrc) = cache_substituter_opts(client, dispatch, out).await;
+
+    let mut cmd = tokio::process::Command::new("nix-store");
+    cmd.args(["--realise", &realise_path, "--add-root", "result", "--indirect"]);
+    cmd.args(&cache_opts);
+    match cmd.output().await {
+        Ok(o) if o.status.success() => out.human(format!("result -> {realise_path}")),
+        Ok(o) => out.err(
+            ExitKind::Api,
+            format!(
+                "Could not materialise {realise_path}: neither the gradient cache nor your \
+                 configured substituters can provide it.\n{}",
+                String::from_utf8_lossy(&o.stderr).trim_end()
+            ),
+        ),
+        Err(e) => out.err(ExitKind::Api, format!("Failed to run nix-store: {e}")),
     }
+}
+
+/// nix `--option` flags that add the organisation's cache as a substituter for
+/// the realise: its URL, its signing key (so gradient-built paths verify without
+/// the user configuring the key), and - for a private cache - a temp netrc
+/// carrying the CLI token. Returns the flags plus the netrc guard, which must
+/// outlive the nix process. Missing pieces are omitted: no cache, a public cache,
+/// or a failed key fetch simply yields fewer flags.
+async fn cache_substituter_opts(
+    client: &connector::Client,
+    dispatch: &DispatchResponse,
+    out: Output,
+) -> (Vec<String>, Option<tempfile::NamedTempFile>) {
+    let Some(cache) = dispatch.cache.as_deref() else {
+        out.human("Organization has no cache; using local substituters only.");
+        return (Vec::new(), None);
+    };
+
+    let base = server_base(out);
+    let cache_url = format!("{}/cache/{}", base.trim_end_matches('/'), cache);
+    let mut opts = vec!["--option".into(), "extra-substituters".into(), cache_url];
+
+    if let Ok(public_key) = client.caches().public_key(cache).await {
+        opts.push("--option".into());
+        opts.push("extra-trusted-public-keys".into());
+        opts.push(public_key);
+    }
+
+    let netrc = private_cache_netrc(client, cache, &base, out).await;
+    if let Some(file) = &netrc {
+        opts.push("--option".into());
+        opts.push("netrc-file".into());
+        opts.push(file.path().to_string_lossy().into_owned());
+    }
+
+    (opts, netrc)
+}
+
+/// A 0600 netrc authorising nix to fetch from a private gradient cache. Public
+/// caches need no credentials, so this returns `None` and keeps the token off
+/// disk. The server ignores the netrc login and treats the password as the
+/// caller's API token.
+async fn private_cache_netrc(
+    client: &connector::Client,
+    cache: &str,
+    server: &str,
+    out: Output,
+) -> Option<tempfile::NamedTempFile> {
+    if client.caches().public(cache).await.unwrap_or(false) {
+        return None;
+    }
+    let token = load_config()
+        .get(&ConfigKey::AuthToken)
+        .and_then(|v| v.clone())
+        .filter(|t| !t.is_empty())?;
+    let host = crate::netrc::machine_host(server);
+    let file = crate::netrc::temp_file(&host, &token)
+        .unwrap_or_else(|e| out.err(ExitKind::Api, format!("Failed to write netrc: {e}")));
+    Some(file)
 }
 
 #[cfg(test)]

@@ -63,7 +63,7 @@ pub enum Commands {
         #[arg(short, long)]
         token: Option<String>,
         /// Name of the cache (used purely as a label in the netrc entry)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
         /// Path to the netrc file to update (default: /etc/nix/netrc)
         #[arg(short = 'f', long, default_value = "/etc/nix/netrc")]
@@ -232,25 +232,15 @@ pub async fn handle(cmd: Commands, out: Output) {
                 }
             };
 
-            let machine_host = server
-                .trim()
-                .trim_start_matches("https://")
-                .trim_start_matches("http://")
-                .split('/')
-                .next()
-                .unwrap_or("")
-                .to_string();
+            let machine_host = crate::netrc::machine_host(&server);
             if machine_host.is_empty() {
                 out.err(ExitKind::Usage, format!("Invalid server URL: '{}'", server));
             }
 
-            let new_entry = format!(
-                "machine {}\nlogin gradient\npassword {}\n",
-                machine_host, token
-            );
+            let new_entry = crate::netrc::entry(&machine_host, &token);
 
             let existing = fs::read_to_string(&netrc_file).unwrap_or_default();
-            let filtered = remove_netrc_entry(&existing, &machine_host);
+            let filtered = crate::netrc::remove_entry(&existing, &machine_host);
 
             let updated = if filtered.ends_with('\n') || filtered.is_empty() {
                 format!("{}{}", filtered, new_entry)
@@ -296,23 +286,3 @@ fn parse_max_storage_gb(raw: &str, out: Output) -> i32 {
     }
 }
 
-fn remove_netrc_entry(contents: &str, host: &str) -> String {
-    if host.is_empty() {
-        return contents.to_string();
-    }
-
-    let mut result = String::new();
-    let mut skip = false;
-
-    for line in contents.lines() {
-        if line.starts_with("machine ") {
-            skip = line.split_whitespace().nth(1) == Some(host);
-        }
-        if !skip {
-            result.push_str(line);
-            result.push('\n');
-        }
-    }
-
-    result
-}
