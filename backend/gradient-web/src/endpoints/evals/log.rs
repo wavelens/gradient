@@ -117,9 +117,21 @@ pub async fn post_evaluation_builds(
                 let any_pending = current
                     .iter()
                     .any(|(a, _)| matches!(a.status, BuildStatus::Building | BuildStatus::Queued));
+                // No builds are running or queued. Only end the stream once the
+                // evaluation itself has finished: at the very start it is still
+                // evaluating and has not created any build_job yet, so breaking
+                // here ended the stream before a single line ever streamed.
                 if !any_pending {
-                    yield "".to_string();
-                    break;
+                    let still_active = EEvaluation::find_by_id(evaluation.id)
+                        .one(&state.web_db)
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some_and(|e| e.status.is_active());
+                    if !still_active {
+                        yield "".to_string();
+                        break;
+                    }
                 }
 
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
