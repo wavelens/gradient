@@ -128,6 +128,11 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_MAX_CONCURRENT_BUILDS", default_value_t = 1)]
     pub max_concurrent_builds: u32,
 
+    /// Cap on CPU cores a single build may use (nix `--cores` / `NIX_BUILD_CORES`).
+    /// Unset (the default) passes `0` to the daemon, meaning all available cores.
+    #[arg(long, env = "GRADIENT_WORKER_MAX_BUILD_CORES")]
+    pub max_build_cores: Option<u32>,
+
     /// Maximum number of simultaneous connections in the local nix-daemon
     /// pool. Each in-flight `add_to_store_nar` (NAR import during prefetch)
     /// holds one connection for the duration of the upload, so the pool
@@ -381,6 +386,12 @@ impl WorkerConfig {
             .unwrap_or_else(|| format!("{}/eval-cache", self.data_dir))
     }
 
+    /// Resolve the nix `--cores` value for a build: the configured cap, or `0`
+    /// (all available cores) when unset.
+    pub fn build_cores(&self) -> u32 {
+        self.max_build_cores.unwrap_or(0)
+    }
+
     /// Build the `GradientCapabilities` struct from the CLI flags.
     pub fn capabilities(&self) -> GradientCapabilities {
         GradientCapabilities {
@@ -420,6 +431,7 @@ mod tests {
             eval_cache_share: true,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
+            max_build_cores: None,
             max_nixdaemon_connections: 4,
             nar_partial_ttl_secs: 86400,
             log_level: "info".to_owned(),
@@ -457,6 +469,20 @@ mod tests {
         let cli = config_with_peers("");
         assert!(cli.eval_fork_workers >= 1);
         assert_eq!(cli.max_eval_rss, 8 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn build_cores_defaults_to_all_cores() {
+        let cfg = config_with_peers("");
+        assert_eq!(cfg.max_build_cores, None);
+        assert_eq!(cfg.build_cores(), 0);
+    }
+
+    #[test]
+    fn build_cores_uses_configured_cap() {
+        let mut cfg = config_with_peers("");
+        cfg.max_build_cores = Some(4);
+        assert_eq!(cfg.build_cores(), 4);
     }
 
     // ── peer_tokens() ─────────────────────────────────────────────────────────
@@ -518,6 +544,7 @@ mod tests {
             eval_cache_share: true,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
+            max_build_cores: None,
             max_nixdaemon_connections: 4,
             nar_partial_ttl_secs: 86400,
             log_level: "info".to_owned(),
@@ -593,6 +620,7 @@ mod tests {
             eval_cache_share: true,
             max_concurrent_evaluations: 1,
             max_concurrent_builds: 1,
+            max_build_cores: None,
             max_nixdaemon_connections: 4,
             nar_partial_ttl_secs: 86400,
             log_level: "info".to_owned(),

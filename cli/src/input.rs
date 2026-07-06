@@ -22,7 +22,7 @@ pub fn client_from_config(out: Output) -> Client {
         .unwrap_or_else(|| {
             out.err(
                 ExitKind::Usage,
-                "Server URL not set. Use `gradient config server <url>`.",
+                "Server URL not set. Run `gradient login <url>` to set the server and authenticate.",
             );
         });
     let token = cfg
@@ -45,7 +45,7 @@ pub fn server_base(out: Output) -> String {
         .unwrap_or_else(|| {
             out.err(
                 ExitKind::Usage,
-                "Server URL not set. Use `gradient config server <url>`.",
+                "Server URL not set. Run `gradient login <url>` to set the server and authenticate.",
             );
         })
 }

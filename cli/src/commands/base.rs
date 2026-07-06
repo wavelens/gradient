@@ -54,6 +54,9 @@ enum MainCommands {
     },
     /// Login to the server
     Login {
+        /// Server URL to log in to; sets it as the configured server so a
+        /// separate `gradient config server` is not needed.
+        server: Option<String>,
         /// Use basic username/password instead of the default web flow
         #[arg(short, long)]
         username: Option<String>,
@@ -231,7 +234,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             if server_url.is_none() {
                 out.err(
                     ExitKind::Usage,
-                    "Server URL not set. Use `gradient config server <url>`.",
+                    "Server URL not set. Run `gradient login <url>` to set the server and authenticate.",
                 );
             }
 
@@ -263,10 +266,15 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         }
 
         MainCommands::Login {
+            server,
             username,
             password,
             no_browser,
         } => {
+            if let Some(url) = server {
+                set_get_value(ConfigKey::Server, Some(url), true).unwrap();
+            }
+
             let server_url = set_get_value(ConfigKey::Server, None, true);
             if server_url.is_none() {
                 set_get_value(ConfigKey::Server, Some(ask_for_input("Server URL")), true).unwrap();
@@ -291,6 +299,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                         set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
                         out.ok(&serde_json::json!({"logged_in": true}));
                         out.human("Logged in.");
+                        organization::post_login_org_setup(&client_from_config(out), out).await;
                     }
                     Err(e) => out.err(to_exit_kind(&e), e),
                 }
@@ -403,6 +412,7 @@ async fn run_web_login(out: Output, no_browser: bool) {
                 set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
                 out.ok(&serde_json::json!({"logged_in": true}));
                 out.human("Logged in.");
+                organization::post_login_org_setup(&client_from_config(out), out).await;
                 return;
             }
             Err(e) => out.err(to_exit_kind(&e), e),

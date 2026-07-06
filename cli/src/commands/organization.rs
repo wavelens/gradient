@@ -13,6 +13,7 @@ use clap_complete::engine::ArgValueCompleter;
 use connector::orgs::{
     AddUserRequest, MakeOrganizationRequest, PatchOrganizationRequest, RemoveUserRequest,
 };
+use connector::{Client, ConnectorError};
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -85,6 +86,21 @@ pub enum CacheCommands {
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Select { organization } => {
+            let memberships = membership_names(out).await;
+            if !memberships.iter().any(|o| o == &organization) {
+                out.err(
+                    ExitKind::Usage,
+                    format!(
+                        "You are not a member of organization '{}'. Your organizations: {}",
+                        organization,
+                        if memberships.is_empty() {
+                            "(none)".to_string()
+                        } else {
+                            memberships.join(", ")
+                        }
+                    ),
+                );
+            }
             set_get_value(ConfigKey::SelectedOrganization, Some(organization), true).unwrap();
             out.human("Organization selected.");
         }
@@ -369,5 +385,121 @@ pub async fn handle(cmd: Commands, out: Output) {
                 }
             }
         }
+    }
+}
+
+/// Names of the organizations the current user belongs to, exiting with a clear
+/// login hint when no session is configured or the server rejects it.
+async fn membership_names(out: Output) -> Vec<String> {
+    if set_get_value(ConfigKey::AuthToken, None, true).is_none() {
+        out.err(
+            ExitKind::Unauthorized,
+            "Not logged in. Run `gradient login <url>` first.",
+        );
+    }
+    let client = client_from_config(out);
+    match client.orgs().list().await {
+        Ok(res) => res.items.into_iter().map(|i| i.name).collect(),
+        Err(ConnectorError::Unauthorized) => out.err(
+            ExitKind::Unauthorized,
+            "Not logged in. Run `gradient login <url>` first.",
+        ),
+        Err(e) => out.err(to_exit_kind(&e), e),
+    }
+}
+
+/// After a successful login, select the user's organization when it is
+/// unambiguous, otherwise guide them. Never blocks login on a list failure.
+pub async fn post_login_org_setup(client: &Client, out: Output) {
+    let orgs: Vec<String> = match client.orgs().list().await {
+        Ok(res) => res.items.into_iter().map(|i| i.name).collect(),
+        Err(_) => return,
+    };
+    let current = set_get_value(ConfigKey::SelectedOrganization, None, true);
+    match decide_org_onboarding(&orgs, current.as_deref()) {
+        OrgOnboarding::Keep(_) => {}
+        OrgOnboarding::AutoSelect(name) => {
+            set_get_value(ConfigKey::SelectedOrganization, Some(name.clone()), true);
+            out.human(format!("Selected organization {name}."));
+        }
+        OrgOnboarding::Choose(names) => {
+            out.human("You belong to multiple organizations:");
+            for n in &names {
+                out.human(format!("  {n}"));
+            }
+            out.human("Select one with `gradient organization select <name>`.");
+        }
+        OrgOnboarding::None => out.human(
+            "You are not a member of any organization yet. Create one with `gradient organization create`.",
+        ),
+    }
+}
+
+/// Post-login org handling derived from the user's memberships and any current
+/// selection. Pure so the decision is testable without a server.
+#[derive(Debug, PartialEq, Eq)]
+pub enum OrgOnboarding {
+    Keep(String),
+    AutoSelect(String),
+    Choose(Vec<String>),
+    None,
+}
+
+pub fn decide_org_onboarding(orgs: &[String], current: Option<&str>) -> OrgOnboarding {
+    if let Some(sel) = current
+        && orgs.iter().any(|o| o == sel)
+    {
+        return OrgOnboarding::Keep(sel.to_string());
+    }
+    match orgs {
+        [] => OrgOnboarding::None,
+        [one] => OrgOnboarding::AutoSelect(one.clone()),
+        _ => OrgOnboarding::Choose(orgs.to_vec()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OrgOnboarding, decide_org_onboarding};
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn no_orgs_yields_none() {
+        assert_eq!(decide_org_onboarding(&[], None), OrgOnboarding::None);
+    }
+
+    #[test]
+    fn single_org_auto_selects() {
+        assert_eq!(
+            decide_org_onboarding(&v(&["solo"]), None),
+            OrgOnboarding::AutoSelect("solo".into())
+        );
+    }
+
+    #[test]
+    fn multiple_orgs_prompt_choice() {
+        assert_eq!(
+            decide_org_onboarding(&v(&["a", "b"]), None),
+            OrgOnboarding::Choose(v(&["a", "b"]))
+        );
+    }
+
+    #[test]
+    fn valid_current_selection_is_kept() {
+        assert_eq!(
+            decide_org_onboarding(&v(&["a", "b"]), Some("b")),
+            OrgOnboarding::Keep("b".into())
+        );
+    }
+
+    #[test]
+    fn stale_current_selection_falls_through() {
+        assert_eq!(
+            decide_org_onboarding(&v(&["a"]), Some("c")),
+            OrgOnboarding::AutoSelect("a".into())
+        );
     }
 }
