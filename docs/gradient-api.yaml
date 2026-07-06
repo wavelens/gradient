@@ -2968,10 +2968,13 @@ paths:
       tags: [evals]
       summary: Stream evaluation logs
       description: |-
-        Opens a streaming NDJSON response that emits log lines from all currently
-        building derivations. Each line is prefixed with the derivation name.
-        The stream terminates when all builds are no longer in the `Building` or
-        `Queued` state.
+        Opens a streaming NDJSON response that first replays every build's stored
+        log, then follows the actively building derivations. Each line is prefixed
+        with the derivation name. The stream stays open until the evaluation
+        itself reaches a terminal state (Completed/Failed/Aborted) - not merely
+        until no build is pending - so it does not end before the evaluation has
+        created any builds. Evaluation-level messages are not included here; fetch
+        them from `GET /evals/{evaluation}/messages`.
       operationId: streamEvaluationLogs
       responses:
         '200':
