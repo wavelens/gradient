@@ -119,27 +119,17 @@ in {
 
           API_KEY=$(cat ${cfg.apiKeyFile})
 
-          PROJECT_DETAILS=$(curl --silent --fail --max-time 10 \
+          # Entry points of the project's latest evaluation are the candidate deployments.
+          ENTRY_POINTS=$(curl --silent --fail --max-time 10 \
             --header "Authorization: Bearer $API_KEY" \
-            "${cfg.server}/api/v1/projects/${cfg.project}/details"
+            "${cfg.server}/api/v1/projects/${cfg.project}/entry-points"
             )
 
-          if [ -z "$PROJECT_DETAILS" ]; then
-            echo "Error: No project details received"
-            exit 1
-          fi
-
-          PROJECT_LAST_EVAL=$(echo "$PROJECT_DETAILS" | jq -r '.message.latest_evaluation.id // empty')
-          if [ -z "$PROJECT_LAST_EVAL" ]; then
-            echo "Error: No latest_evaluation found for project ${cfg.project}"
-            exit 1
-          fi
-
-          # Entry-point build IDs are the candidate deployments for this project.
-          BUILD_IDS=$(echo "$PROJECT_DETAILS" | jq -r '.message.entry_points[].build_id')
+          BUILD_IDS=$(echo "$ENTRY_POINTS" | jq -r \
+            '.message[] | select(.build_status == "Completed" or .build_status == "Substituted") | .build_id')
           if [ -z "$BUILD_IDS" ]; then
-            echo "Error: No entry points found for evaluation $PROJECT_LAST_EVAL"
-            exit 1
+            echo "No successfully built entry points for project ${cfg.project}"
+            exit 0
           fi
 
           DEPLOYMENT_STORE_PATH=""
@@ -149,17 +139,16 @@ in {
               --header "Authorization: Bearer $API_KEY" \
               "${cfg.server}/api/v1/builds/$BUILD_ID"
               )
+            [ -n "$BUILD_INFO" ] || continue
 
-            if [ -n "$BUILD_INFO" ]; then
-              BUILD_STATUS=$(echo "$BUILD_INFO" | jq -r '.message.status')
-              if [ "$BUILD_STATUS" != "Succeeded" ]; then
-                continue
-              fi
-              STORE_PATH=$(echo "$BUILD_INFO" | jq -r '.message.output.out // empty')
-              if echo "$STORE_PATH" | grep -qE "^/nix/store/[a-z0-9]{32}-nixos-system-${cfg.deployFor}-[0-9]{2}\.[0-9]{2}(\.[0-9]{8}\.[a-f0-9]+)?$"; then
-                DEPLOYMENT_STORE_PATH="$STORE_PATH"
-                break
-              fi
+            # The API returns prefix-free `<hash>-<name>` output paths.
+            OUT_BASE=$(echo "$BUILD_INFO" | jq -r '.message.output.out // empty')
+            [ -n "$OUT_BASE" ] || continue
+            STORE_PATH="/nix/store/$OUT_BASE"
+
+            if echo "$STORE_PATH" | grep -qE "^/nix/store/[a-z0-9]{32}-nixos-system-${cfg.deployFor}-[0-9]{2}\.[0-9]{2}(\.[0-9]{8}\.[a-f0-9]+)?$"; then
+              DEPLOYMENT_STORE_PATH="$STORE_PATH"
+              break
             fi
           done
 
