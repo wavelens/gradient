@@ -7,6 +7,7 @@
 mod commands;
 mod config;
 mod input;
+mod logfmt;
 mod narinfo;
 mod netrc;
 pub mod output;

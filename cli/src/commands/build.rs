@@ -6,12 +6,10 @@
 
 use crate::config::*;
 use crate::input::client_from_config;
-use crate::output::{ExitKind, Output, to_exit_kind};
+use crate::output::{ExitKind, Output};
 use connector::ConnectorError;
 use connector::build_requests::DispatchResponse;
 use connector::evals::{ArtefactTree, EntryPointArtefacts, EvaluationResponse};
-use futures::StreamExt;
-use futures::pin_mut;
 #[cfg(not(feature = "nix"))]
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -138,31 +136,7 @@ pub async fn handle_build(
         out.human("Streaming evaluation logs...");
     }
 
-    let evals = client.evals();
-    let stream = match evals.stream_builds(&dispatch.evaluation).await {
-        Ok(s) => s,
-        Err(e) => {
-            if !quiet {
-                out.progress(format!("Failed to stream evaluation logs: {}", e));
-            }
-            return;
-        }
-    };
-
-    pin_mut!(stream);
-    while let Some(item) = stream.next().await {
-        match item {
-            Ok(line) => {
-                if out.is_json() {
-                    let env = serde_json::json!({"error": false, "message": line});
-                    println!("{}", env);
-                } else {
-                    print!("{}", line);
-                }
-            }
-            Err(e) => out.err(to_exit_kind(&e), e),
-        }
-    }
+    crate::commands::logstream::stream_eval_logs(&client, &dispatch.evaluation, out).await;
 
     if no_link {
         return;

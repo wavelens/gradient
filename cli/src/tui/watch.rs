@@ -85,6 +85,78 @@ fn build_style(status: &str) -> Style {
     Style::default().fg(color)
 }
 
+/// Convert a log line carrying nix's ANSI SGR sequences into a styled ratatui
+/// line - ratatui does not interpret escape codes itself. Unknown sequences are
+/// dropped; the colour set mirrors the web log viewer.
+fn ansi_to_line(s: &str) -> ratatui::text::Line<'static> {
+    use ratatui::text::{Line, Span};
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut style = Style::default();
+    let mut buf = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            if !buf.is_empty() {
+                spans.push(Span::styled(std::mem::take(&mut buf), style));
+            }
+            let mut code = String::new();
+            let mut final_byte = None;
+            for n in chars.by_ref() {
+                if n.is_ascii_alphabetic() {
+                    final_byte = Some(n);
+                    break;
+                }
+                code.push(n);
+            }
+            if final_byte == Some('m') {
+                style = apply_sgr(style, &code);
+            }
+        } else {
+            buf.push(c);
+        }
+    }
+    if !buf.is_empty() {
+        spans.push(Span::styled(buf, style));
+    }
+    Line::from(spans)
+}
+
+/// Fold one SGR parameter string (e.g. `1;31`) into `style`. Empty resets.
+fn apply_sgr(mut style: Style, code: &str) -> Style {
+    if code.is_empty() {
+        return Style::default();
+    }
+    for part in code.split(';') {
+        style = match part {
+            "0" => Style::default(),
+            "1" => style.add_modifier(Modifier::BOLD),
+            "2" => style.add_modifier(Modifier::DIM),
+            "3" => style.add_modifier(Modifier::ITALIC),
+            "4" => style.add_modifier(Modifier::UNDERLINED),
+            "30" => style.fg(Color::Black),
+            "31" => style.fg(Color::Red),
+            "32" => style.fg(Color::Green),
+            "33" => style.fg(Color::Yellow),
+            "34" => style.fg(Color::Blue),
+            "35" => style.fg(Color::Magenta),
+            "36" => style.fg(Color::Cyan),
+            "37" => style.fg(Color::Gray),
+            "39" => style.fg(Color::Reset),
+            "90" => style.fg(Color::DarkGray),
+            "91" => style.fg(Color::LightRed),
+            "92" => style.fg(Color::LightGreen),
+            "93" => style.fg(Color::LightYellow),
+            "94" => style.fg(Color::LightBlue),
+            "95" => style.fg(Color::LightMagenta),
+            "96" => style.fg(Color::LightCyan),
+            "97" => style.fg(Color::White),
+            _ => style,
+        };
+    }
+    style
+}
+
 pub fn eval_is_terminal(status: &str) -> bool {
     matches!(status, "Completed" | "Failed" | "Aborted")
 }
@@ -169,7 +241,7 @@ impl Dashboard {
     }
 
     fn push_chunk(&mut self, chunk: String) {
-        self.pending.push_str(&chunk);
+        self.pending.push_str(&crate::logfmt::decode_escapes(&chunk));
         while let Some(nl) = self.pending.find('\n') {
             let line: String = self.pending.drain(..=nl).collect();
             self.push_line(line.trim_end_matches('\n').to_string());
@@ -311,13 +383,19 @@ impl View for Dashboard {
             self.scroll_to_bottom();
         }
         let end = (self.offset + self.viewport).min(self.log.len());
-        let body = self.log.get(self.offset..end).unwrap_or(&[]).join("\n");
+        let body: Vec<Line> = self
+            .log
+            .get(self.offset..end)
+            .unwrap_or(&[])
+            .iter()
+            .map(|l| ansi_to_line(l))
+            .collect();
         let log_title = format!(
             "Logs ({} lines){}  [↑/↓ scroll, f follow, q quit]",
             self.log.len(),
             if self.follow { " FOLLOW" } else { "" }
         );
-        let log_widget = Paragraph::new(Text::raw(body))
+        let log_widget = Paragraph::new(Text::from(body))
             .block(Block::default().borders(Borders::ALL).title(log_title));
         frame.render_widget(log_widget, chunks[2]);
     }
@@ -415,6 +493,15 @@ mod tests {
         assert!(eval_is_terminal("Aborted"));
         assert!(!eval_is_terminal("Building"));
         assert!(!eval_is_terminal("EvaluatingFlake"));
+    }
+
+    #[test]
+    fn ansi_line_splits_styled_and_plain_spans() {
+        let line = ansi_to_line("plain \u{1b}[31mred\u{1b}[0m tail");
+        assert_eq!(line.spans.len(), 3);
+        assert_eq!(line.spans[1].content, "red");
+        assert_eq!(line.spans[1].style.fg, Some(Color::Red));
+        assert_eq!(line.spans[2].style.fg, None);
     }
 
     #[test]
