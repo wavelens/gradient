@@ -8,6 +8,7 @@ mod commands;
 mod config;
 mod input;
 mod narinfo;
+mod netrc;
 pub mod output;
 mod tui;
 
