@@ -59,7 +59,10 @@ pub enum AttemptFailureReason {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: BuildAttemptId,
-    pub build_job: BuildJobId,
+    /// The eval that drove this attempt's dispatch. `None` once that evaluation
+    /// is GC'd: the attempt (and its log) live on with the `derivation_build`
+    /// anchor, its true owner, until the derivation itself is reclaimed.
+    pub build_job: Option<BuildJobId>,
     pub derivation_build: DerivationBuildId,
     pub dispatched_job: DispatchedJobId,
     pub substitute: bool,
@@ -87,7 +90,7 @@ pub enum Relation {
         belongs_to = "super::build_job::Entity",
         from = "Column::BuildJob",
         to = "super::build_job::Column::Id",
-        on_delete = "Cascade"
+        on_delete = "SetNull"
     )]
     BuildJob,
     #[sea_orm(
