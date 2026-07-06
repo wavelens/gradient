@@ -175,11 +175,14 @@ Requirements and limits:
 After a foreground build completes, the CLI produces a `result` for the primary
 output (use `--no-link` to skip it):
 
-- A CLI built with the `nix` feature substitutes every output from the org cache
-  into the local Nix store via `nix copy` and creates a single GC-rooted `result`
-  symlink to the primary output (like `nix build`). It also packs the source NAR
-  locally and uploads it in one shot (`POST /build-requests/source`), skipping the
-  per-file blob manifest.
+- A CLI built with the `nix` feature realises the primary output into the local
+  Nix store and creates a single GC-rooted `result` symlink to it (like
+  `nix build`). The realise wires the org cache in as an extra substituter -
+  carrying its signing key, and a temporary `netrc` with the CLI token when the
+  cache is private - alongside the user's own substituters, so an output the org
+  cache serves and one already reachable locally both resolve. It also packs the
+  source NAR locally and uploads it in one shot (`POST /build-requests/source`),
+  skipping the per-file blob manifest.
 - A CLI without the `nix` feature downloads the primary entry point's build
   products into a `result/` folder (only declared `hydra-build-products` are
   included).
@@ -258,9 +261,16 @@ in its own line (`{"attr": ..., "error": ...}`) and does not abort the run.
 
 ```sh
 gradient eval 'packages.x86_64-linux.*'                # current flake (.)
-gradient eval --flake github:NixOS/patchelf 'hydraJobs.*'
-gradient eval --flake . 'checks.*.*' 'packages.*.*'    # multiple wildcard patterns
+gradient eval .#packages.x86_64-linux.hello            # installable syntax sets the flake
+gradient eval 'github:NixOS/patchelf#hydraJobs.*'      # any flake ref before the '#'
+gradient eval 'checks.*.*' 'packages.*.*'              # multiple wildcard patterns
 ```
+
+The flake to evaluate is taken from the part before `#` in a pattern (default:
+the current directory); every pattern shares one flake. A local flake ref (`.`,
+`./sub`, a relative dir) is resolved to an absolute path, since the Nix C API -
+unlike the CLI - only accepts absolute flake paths; a scheme ref (`github:`,
+`path:`, `git+…`) is passed through unchanged.
 
 This subcommand is gated behind the `nix` and `eval` cargo features (it pulls in
 libnix) and is therefore only shipped by the `gradient-cli-full` package, not the
