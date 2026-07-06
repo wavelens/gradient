@@ -19,7 +19,7 @@ pub mod reporter;
 pub mod webhook;
 
 pub use github_app::*;
-pub use pr::{BranchCommit, CommitFile, PrRef};
+pub use pr::{BranchCommit, CommitFile, CommitIdent, PrRef};
 pub use provider::ForgeProvider;
 pub use registry::ForgeRegistry;
 pub use reporter::*;

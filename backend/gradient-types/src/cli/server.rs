@@ -46,12 +46,14 @@ pub struct ServerArgs {
     /// flag on session cookies. Set to `false` for plain HTTP deployments.
     #[arg(long, env = "GRADIENT_USE_TLS", default_value = "true")]
     pub use_tls: bool,
-    /// Author/committer name for commits the `OpenPr` action pushes.
-    #[arg(long, env = "GRADIENT_PR_COMMIT_NAME", default_value = "Gradient")]
-    pub pr_commit_name: String,
-    /// Author/committer email for commits the `OpenPr` action pushes.
-    #[arg(long, env = "GRADIENT_PR_COMMIT_EMAIL", default_value = "gradient@localhost")]
-    pub pr_commit_email: String,
+    /// Author/committer name for commits the `OpenPr` action pushes. Unset (the
+    /// default) lets the forge attribute the commit to the authenticated
+    /// app/token: GitHub credits the App bot and signs it verified.
+    #[arg(long, env = "GRADIENT_PR_COMMIT_NAME")]
+    pub pr_commit_name: Option<String>,
+    /// Author/committer email for `OpenPr` commits; see `pr_commit_name`.
+    #[arg(long, env = "GRADIENT_PR_COMMIT_EMAIL")]
+    pub pr_commit_email: Option<String>,
     /// Who may create organizations through the API.
     #[arg(long, value_enum, env = "GRADIENT_CREATE_ORG", default_value_t = CreatePermission::Everyone)]
     pub create_org: CreatePermission,
@@ -68,8 +70,8 @@ impl Default for ServerArgs {
             serve_url: "http://127.0.0.1:8000".into(),
             frontend_url: "http://127.0.0.1:8000".into(),
             use_tls: true,
-            pr_commit_name: "Gradient".into(),
-            pr_commit_email: "gradient@localhost".into(),
+            pr_commit_name: None,
+            pr_commit_email: None,
             create_org: CreatePermission::default(),
             create_cache: CreatePermission::default(),
         }

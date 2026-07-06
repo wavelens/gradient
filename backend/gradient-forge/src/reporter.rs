@@ -605,13 +605,23 @@ impl CiReporter for GiteaReporter {
     ) -> Result<String> {
         // Force-push: the Gitea/Forgejo REST API cannot force-update a ref, so
         // the contents API would stack commits on a never-rebased branch.
+        // libgit2 needs an explicit signature, so resolve the token owner when
+        // no identity was configured.
+        let mut commit = commit.clone();
+        if commit.author.is_none() {
+            commit.author = Some(
+                crate::pr::gitea::authenticated_user(&self.client, &self.base_url, &self.token)
+                    .await
+                    .context("resolving Gitea commit author")?,
+            );
+        }
         crate::git_push::force_push_lock_commit(
             format!("{}/{}/{}.git", self.base_url, owner, repo),
             self.token.clone(),
             String::new(),
             branch.to_owned(),
             base.to_owned(),
-            commit.clone(),
+            commit,
         )
         .await
     }
@@ -944,14 +954,23 @@ impl CiReporter for GitlabReporter {
         commit: &BranchCommit,
     ) -> Result<String> {
         // Force-push: the GitLab commits API stacks onto a never-rebased branch,
-        // so push a single clean commit on the current base instead.
+        // so push a single clean commit on the current base instead. libgit2 needs
+        // an explicit signature, so resolve the token owner when none was set.
+        let mut commit = commit.clone();
+        if commit.author.is_none() {
+            commit.author = Some(
+                crate::pr::gitlab::authenticated_user(&self.client, &self.base_url, &self.token)
+                    .await
+                    .context("resolving GitLab commit author")?,
+            );
+        }
         crate::git_push::force_push_lock_commit(
             format!("{}/{}/{}.git", self.base_url, owner, repo),
             "oauth2".to_owned(),
             self.token.clone(),
             branch.to_owned(),
             base.to_owned(),
-            commit.clone(),
+            commit,
         )
         .await
     }

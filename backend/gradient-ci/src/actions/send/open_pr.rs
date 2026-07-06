@@ -13,7 +13,7 @@ use crate::actions::ExecutorOk;
 use crate::context::CiContext;
 use anyhow::{Context, Result, anyhow};
 use gradient_forge::reporter::parse_owner_repo;
-use gradient_forge::{BranchCommit, CommitFile};
+use gradient_forge::{BranchCommit, CommitFile, CommitIdent};
 use gradient_types::{
     AOpenPrState, COpenPrState, CEvaluationInputUpdate, ECommit, EEvaluation,
     EEvaluationInputUpdate, EOpenPrState, EProject, EvaluationId, IntegrationId, OpenPrStateId,
@@ -108,8 +108,10 @@ pub(crate) async fn execute_open_pr(
 
     let commit = BranchCommit {
         message: title.clone(),
-        author_name: ctx.db.config.server.pr_commit_name.clone(),
-        author_email: ctx.db.config.server.pr_commit_email.clone(),
+        author: configured_commit_ident(
+            &ctx.db.config.server.pr_commit_name,
+            &ctx.db.config.server.pr_commit_email,
+        ),
         files: vec![CommitFile { path: "flake.lock".into(), contents: candidate_lock.into_bytes() }],
     };
 
@@ -137,6 +139,18 @@ pub(crate) async fn execute_open_pr(
 
 fn no_op() -> ExecutorOk {
     ExecutorOk { status_code: Some(204), response_body: None }
+}
+
+/// The identity to force onto the commit, or `None` to let the forge attribute
+/// it to the authenticated app/token. Both fields must be set; a half-configured
+/// identity falls back to `None`.
+fn configured_commit_ident(name: &Option<String>, email: &Option<String>) -> Option<CommitIdent> {
+    match (name.as_deref(), email.as_deref()) {
+        (Some(n), Some(e)) if !n.is_empty() && !e.is_empty() => {
+            Some(CommitIdent { name: n.to_owned(), email: e.to_owned() })
+        }
+        _ => None,
+    }
 }
 
 async fn upsert_open_pr_state(
@@ -213,7 +227,13 @@ async fn point_eval_at_pushed_commit(
     let mut am = commit.into_active_model();
     am.hash = Set(hash);
     am.message = Set(message.to_owned());
-    am.author_name = Set(ctx.db.config.server.pr_commit_name.clone());
+    am.author_name = Set(ctx
+        .db
+        .config
+        .server
+        .pr_commit_name
+        .clone()
+        .unwrap_or_else(|| "Gradient".to_owned()));
     am.update(&ctx.db.worker_db).await.context("updating evaluation commit")?;
 
     Ok(())
@@ -250,4 +270,25 @@ fn render_template(template: Option<&str>, bumps: &[BumpRow]) -> Option<String> 
 
 fn short_rev(rev: &str) -> &str {
     &rev[..rev.len().min(12)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commit_ident_needs_both_fields() {
+        assert_eq!(configured_commit_ident(&None, &None), None);
+        assert_eq!(configured_commit_ident(&Some("Bot".into()), &None), None);
+        assert_eq!(configured_commit_ident(&None, &Some("b@x".into())), None);
+        assert_eq!(configured_commit_ident(&Some(String::new()), &Some("b@x".into())), None);
+    }
+
+    #[test]
+    fn commit_ident_set_when_both_present() {
+        assert_eq!(
+            configured_commit_ident(&Some("Bot".into()), &Some("b@x".into())),
+            Some(CommitIdent { name: "Bot".into(), email: "b@x".into() })
+        );
+    }
 }

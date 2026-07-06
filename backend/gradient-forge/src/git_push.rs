@@ -62,7 +62,11 @@ fn force_push_blocking(
         tree = repo.find_tree(oid).context("reloading tree")?;
     }
 
-    let sig = Signature::now(&commit.author_name, &commit.author_email).context("commit signature")?;
+    let author = commit
+        .author
+        .as_ref()
+        .context("force-push commit requires a resolved author identity")?;
+    let sig = Signature::now(&author.name, &author.email).context("commit signature")?;
     let new_commit = repo
         .commit(None, &sig, &sig, &commit.message, &tree, &[&base_commit])
         .context("creating commit")?;

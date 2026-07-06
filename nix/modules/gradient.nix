@@ -808,15 +808,15 @@ in {
         };
 
         prCommitName = lib.mkOption {
-          description = "Git author and committer name used for the bot commits Gradient creates when opening pull requests via an `open_pr` action.";
-          type = lib.types.str;
-          default = "Gradient";
+          description = "Git author/committer name for the commits Gradient's `open_pr` action pushes. `null` (the default) lets the forge attribute the commit to the authenticated app/token: GitHub credits the App bot and signs it verified.";
+          type = lib.types.nullOr lib.types.str;
+          default = null;
         };
 
         prCommitEmail = lib.mkOption {
-          description = "Git author and committer email used for the bot commits Gradient creates when opening pull requests via an `open_pr` action.";
-          type = lib.types.str;
-          default = "gradient@localhost";
+          description = "Git author/committer email for `open_pr` commits. See `prCommitName`; leave `null` for forge-default attribution.";
+          type = lib.types.nullOr lib.types.str;
+          default = null;
         };
 
         createOrg = lib.mkOption {
@@ -974,14 +974,16 @@ in {
         GRADIENT_WORKER_HEARTBEAT_TIMEOUT_SECS = toString cfg.settings.workerHeartbeatTimeoutSecs;
         GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE = lib.boolToString cfg.settings.allowAnonymousCache;
         GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP = toString cfg.settings.anonMaxConnectionsPerIp;
-        GRADIENT_PR_COMMIT_NAME = cfg.settings.prCommitName;
-        GRADIENT_PR_COMMIT_EMAIL = cfg.settings.prCommitEmail;
         GRADIENT_CREATE_ORG = cfg.settings.createOrg;
         GRADIENT_CREATE_CACHE = cfg.settings.createCache;
         GRADIENT_LOCAL_IPS = builtins.concatStringsSep "," cfg.settings.localIps;
         GRADIENT_TRUSTED_PROXIES = builtins.concatStringsSep "," cfg.settings.trustedProxies;
         GRADIENT_STATE_FILE = "%d/gradient_state";
         GRADIENT_CREDENTIALS_DIR = "%d";
+      } // lib.optionalAttrs (cfg.settings.prCommitName != null) {
+        GRADIENT_PR_COMMIT_NAME = cfg.settings.prCommitName;
+      } // lib.optionalAttrs (cfg.settings.prCommitEmail != null) {
+        GRADIENT_PR_COMMIT_EMAIL = cfg.settings.prCommitEmail;
       } // lib.optionalAttrs (cfg.settings.sentryDsn != null) {
         GRADIENT_SENTRY_DSN = cfg.settings.sentryDsn;
       } // lib.optionalAttrs (cfg.settings.logLevel.cache != null) {
