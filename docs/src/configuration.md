@@ -77,7 +77,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.deleteState` | `true` | Remove entities no longer in `state` (see below) |
 | `settings.cacheTtlHours` | `336` | TTL in hours for cached NARs not fetched recently (0 = disabled) |
 | `settings.cacheMaintenanceIntervalSecs` | `3600` | Interval in seconds between cache maintenance GC passes. (`GRADIENT_CACHE_MAINTENANCE_INTERVAL_SECS`) |
-| `settings.signSweepIntervalSecs` | `60` | Interval in seconds between NAR signature backfill sweeps. (`GRADIENT_SIGN_SWEEP_INTERVAL_SECS`) |
+| `settings.signSweepIntervalSecs` | `3600` | Fallback interval between NAR signature backfill sweeps; NARs are signed on arrival, so this only covers subscription placeholders and periodic backfill. (`GRADIENT_SIGN_SWEEP_INTERVAL_SECS`) |
 | `settings.narUploadGraceHours` | `24` | Grace before the orphan-files GC reclaims a NAR object no DB row references (covers the upload commit window). (`GRADIENT_NAR_UPLOAD_GRACE_HOURS`) |
 | `settings.gcWedgedEvalHours` | `24` | Hours after which an untouched active evaluation is presumed wedged and stops blocking evaluation GC; the wedged eval itself is never deleted (0 = block forever). (`GRADIENT_GC_WEDGED_EVAL_HOURS`) |
 | `settings.narStorageOpenTimeoutSecs` | `60` | Max seconds the server will wait to open a NAR object stream (e.g. an S3 GET) before emitting `NarUnavailable`. Caps how long a stalled storage backend can block a `NarRequest`. |

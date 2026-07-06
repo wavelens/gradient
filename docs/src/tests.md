@@ -2394,6 +2394,20 @@ Backend tests (`cargo test -p proto --lib handler::auth`):
 - The pre-existing `validate_tokens_*` tests using `sha256_hex` continue
   to cover the legacy-format compatibility path.
 
+## Sign NARs on arrival, hourly sweep fallback
+
+`mark_nar_stored` (`backend/gradient-proto/src/handler/nar.rs`) wakes
+`ServerState::sign_signal` after committing a NAR, and the sign-sweep loop
+(`cacher::mod::run_sweep`) `select!`s on that `Notify` alongside its interval, so
+a newly cached path is signed within a tick of arrival rather than up to the
+(now hourly, `GRADIENT_SIGN_SWEEP_INTERVAL_SECS` default 3600) periodic sweep. A
+full batch re-arms the signal so backlogs drain immediately. `compute_skipped_cached_paths`
+tests still gate skipping to paths whose every producing project has
+`sign_cache=false`; `load_producing_project_flags` now treats the reserved
+`build-request` project as always-signable (`p.name = 'build-request'`, not
+`p.managed`, which also marks nix-state-declared projects). Wiring + skip
+behaviour are E2E-covered; the DB-less crate has no unit harness for the sweep.
+
 ## Sign sweep - batched, bounded, single crypt-secret read (#105)
 
 `sign_missing_signatures` (in `backend/cache/src/cacher/sign_sweep.rs`)
