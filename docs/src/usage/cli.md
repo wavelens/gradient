@@ -202,6 +202,23 @@ Key bindings: `↑`/`↓` scroll the log, `f` toggle follow-tail, `q`/`Esc` quit
 In `--json` mode the dashboard is skipped and the merged build logs are streamed
 as JSON envelopes to stdout instead.
 
+### Full evaluation logs
+
+`gradient logs <evaluation>` streams an evaluation's full log to the terminal:
+the server replays every build's stored log, then follows the active ones, so it
+works both live and on a finished evaluation. It also surfaces evaluation-level
+messages (warnings/errors) that the build-log stream alone omits - so a purely
+substituted build still shows output. `gradient project log` does the same for
+the selected project's latest evaluation.
+
+```sh
+gradient logs 0190f3c2-...    # stream the whole evaluation's log
+gradient project log          # latest evaluation of the selected project
+```
+
+Nix's own ANSI colours render on a TTY (control bytes are decoded, and stripped
+when piped); `error:`/`warning:` message lines are colour-coded to match.
+
 ### Builds
 
 `gradient builds` is a top-level command group for inspecting build metadata

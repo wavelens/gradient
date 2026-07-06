@@ -5972,6 +5972,25 @@ output errors with the raw nix diagnostic instead of a bare "nix copy failed".
   flake path is canonicalised to an absolute path (the Nix C API rejects a
   relative `.`), while a `github:`/`path:` ref passes through unchanged.
 
+## Evaluation log streaming + colouring
+
+Server (`backend/gradient-web/src/endpoints/evals/log.rs`): the `POST
+/evals/{id}/builds` stream now ends only once the *evaluation* is terminal, not
+the instant no build is pending - previously it broke at eval start (no
+`build_job` rows yet) so `gradient build` streamed nothing. Covered by E2E; the
+DB-less crate has no unit harness for the streaming handler.
+
+CLI shares one streamer (`cli/src/commands/logstream.rs`) across `gradient
+build`, `gradient logs <eval>`, and `gradient project log`: it streams the full
+build log and concurrently polls `/messages`, so substituted/eval-only runs
+still show the eval warnings the build-log stream omits.
+
+- `cli/src/logfmt.rs` `tests`: `decode_turns_literal_escape_into_real_esc`
+  (double-escaped `` -> ESC so nix colours render), `strip_removes_color_sequences`
+  (ANSI dropped when piped), `message_line_labels_by_level`.
+- `cli/src/tui/watch.rs` `ansi_line_splits_styled_and_plain_spans`: `watch` parses
+  nix's ANSI SGR into styled ratatui spans (ratatui does not interpret escapes).
+
 ## Worker build-log line filtering
 
 `backend/gradient-worker/src/executor/build.rs` `tests` cover
