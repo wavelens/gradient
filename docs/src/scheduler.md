@@ -12,7 +12,10 @@ A derivation is built exactly once, globally. Build state lives on a
 (UNIQUE on `derivation`, so the database itself enforces build-once). Every
 evaluation that needs a derivation gets a per-eval `build_job` linking it to
 that anchor; each execution attempt and its log live on `build_attempt` under
-the anchor.
+the anchor. `build_attempt.build_job` is `ON DELETE SET NULL`, so an attempt
+outlives the evaluation that drove it - its true owner is the build-once anchor,
+and a `Completed` anchor reused by a later evaluation keeps a retrievable log
+until the derivation itself is GC'd.
 
 When two evaluations - in the same or different organisations - need the same
 derivation, they share the one anchor: whichever is dispatched first builds
@@ -268,7 +271,11 @@ re-pushes them), so a terminal-failed anchor a later eval requeues must still fi
 its `.drv`; gating that clause on status purged the `.drv` of a failed-but-requeueable
 build and dead-ended its retry on `InputsUnavailable`. Outputs stay status-gated (they
 are rebuildable, TTL-evicted), and `gc_orphan_derivations` reclaims a derivation's
-`.drv`/sources once it leaves the live closure.
+`.drv`/sources once it leaves the live closure. Because attempts now outlive their
+evaluations (set-null'd onto the anchor), the same pass also deletes the
+`log_storage` files of every reclaimed derivation's attempts - the DB rows cascade,
+but the log objects live outside the database, so they are reclaimed by hand like
+the NARs. `pass_logs` in the deep GC is the backstop for any log object left behind.
 
 The keep-set is built from committed DB rows, so it cannot reference a NAR that is
 already on disk but whose `derivation`/`cached_path` rows have not been written yet

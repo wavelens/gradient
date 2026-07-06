@@ -30,6 +30,7 @@ mod m20260703_000000_drop_derivation_build_prefer_local_build;
 mod m20260703_000001_terminal_failed_partial_index;
 mod m20260704_000000_flag_partial_indexes;
 mod m20260705_000000_upstream_metric_by_url;
+mod m20260706_000000_build_attempt_build_job_set_null;
 
 pub struct Migrator;
 
@@ -61,6 +62,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260703_000001_terminal_failed_partial_index::Migration),
             Box::new(m20260704_000000_flag_partial_indexes::Migration),
             Box::new(m20260705_000000_upstream_metric_by_url::Migration),
+            Box::new(m20260706_000000_build_attempt_build_job_set_null::Migration),
         ]
     }
 }

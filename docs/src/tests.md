@@ -143,6 +143,18 @@ started skipping the whole project while any evaluation is active. Previously GC
 preferentially deleted failed/aborted evaluations (dropping the completed NARs
 they held) and could race an in-flight run.
 
+## Build logs outlive their evaluation, anchored to the build
+
+`backend/gradient-db/src/gc.rs`: `reclaims_attempt_logs_only_for_deleted_derivations`
+covers `attempt_logs_to_reclaim`, which selects an attempt's log for deletion
+only once its derivation is actually reclaimed by the orphan-derivation GC.
+`build_attempt.build_job` is now `ON DELETE SET NULL` (migration
+`m20260706_000000_build_attempt_build_job_set_null`), so evaluation GC orphans an
+attempt onto its surviving `derivation_build` anchor instead of cascade-deleting
+it - a `Completed` anchor reused by a later evaluation keeps a retrievable log.
+`gradient-cache/src/cacher/deep_gc.rs`: `pass_logs_removes_orphan_log` remains the
+backstop, deleting any `log_storage` object whose `build_attempt` row is gone.
+
 ## GitHub App installation org-binding
 
 `backend/gradient-web/src/endpoints/forge_hooks/trigger.rs`:

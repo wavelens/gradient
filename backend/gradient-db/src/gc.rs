@@ -10,7 +10,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
-    QueryFilter, QueryOrder, QuerySelect, Statement,
+    QueryFilter, QueryOrder, Statement,
 };
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -88,33 +88,11 @@ pub async fn gc_project_evaluations(
     }
 
     for eval in &to_delete {
-        // Remove the log of every attempt attributed to this eval's build_jobs
-        // (logs are keyed by attempt id). DB rows cascade with the eval; NAR
-        // files and GC roots are owned by `derivation_output` / `cache_derivation`
-        // and are cleaned up by the derivation GC pass.
-        let job_ids: Vec<gradient_types::ids::BuildJobId> = EBuildJob::find()
-            .select_only()
-            .column(CBuildJob::Id)
-            .filter(CBuildJob::Evaluation.eq(eval.id))
-            .into_tuple::<gradient_types::ids::BuildJobId>()
-            .all(&ctx.worker_db)
-            .await
-            .context("GC: failed to query build_jobs")?;
-
-        let attempts = crate::fetch_in_chunks(&job_ids, |chunk| async move {
-            gradient_entity::build_attempt::Entity::find()
-                .filter(gradient_entity::build_attempt::Column::BuildJob.is_in(chunk))
-                .all(&ctx.worker_db)
-                .await
-        })
-        .await
-        .context("GC: failed to query build attempts")?;
-
-        for att in &attempts {
-            if let Err(e) = ctx.storage.log_storage.delete(att.id).await {
-                warn!(error = %e, attempt_id = %att.id, "GC: failed to remove build log");
-            }
-        }
+        // The eval's `build_job` rows cascade away, but its `build_attempt` rows
+        // (and their logs) are set-null'd onto the surviving `derivation_build`
+        // anchor - their true, build-once owner - and reclaimed only when the
+        // derivation GC deletes that anchor. NAR files and GC roots are likewise
+        // owned by `derivation_output` / `cache_derivation` and cleaned up there.
 
         // Collect commit ID before deletion (not cascaded).
         let commit_id = eval.commit;
@@ -271,6 +249,35 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     .await
     .context("GC: failed to query orphan derivation outputs")?;
 
+    // Snapshot each candidate derivation's build-attempt logs before the delete
+    // cascades the attempt rows away: their log files live in `log_storage`
+    // (keyed by attempt id), outside the DB, so they must be reclaimed by hand
+    // like the NARs. `pass_logs` in the deep GC is the backstop for any missed.
+    let candidate_anchors = crate::fetch_in_chunks(&candidate_ids, |chunk| async move {
+        EDerivationBuild::find()
+            .filter(CDerivationBuild::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .context("GC: failed to query orphan derivation anchors")?;
+    let anchor_derivation: std::collections::HashMap<DerivationBuildId, DerivationId> =
+        candidate_anchors.iter().map(|a| (a.id, a.derivation)).collect();
+    let anchor_ids: Vec<DerivationBuildId> = anchor_derivation.keys().copied().collect();
+
+    let candidate_attempts = crate::fetch_in_chunks(&anchor_ids, |chunk| async move {
+        EBuildAttempt::find()
+            .filter(CBuildAttempt::DerivationBuild.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .context("GC: failed to query orphan derivation build attempts")?;
+    let attempt_snapshot: Vec<(DerivationId, BuildAttemptId)> = candidate_attempts
+        .iter()
+        .filter_map(|a| anchor_derivation.get(&a.derivation_build).map(|d| (*d, a.id)))
+        .collect();
+
     let delete_sql = format!(
         "{reachable}
          DELETE FROM derivation d
@@ -300,6 +307,14 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
 
     if deleted.is_empty() {
         return Ok(());
+    }
+
+    // Reclaim the log files of every attempt whose derivation was just deleted;
+    // their `build_attempt`/`build_log_chunk` rows already cascaded away.
+    for attempt_id in attempt_logs_to_reclaim(&attempt_snapshot, &deleted) {
+        if let Err(e) = ctx.storage.log_storage.delete(attempt_id).await {
+            warn!(error = %e, %attempt_id, "GC: failed to remove orphan build log");
+        }
     }
 
     let deleted_hashes: HashSet<String> = candidate_outputs
@@ -426,6 +441,21 @@ fn reclaimable_after_delete(
     out
 }
 
+/// From a pre-delete `(derivation, attempt)` snapshot, the attempt ids whose
+/// derivation was actually reclaimed - their `log_storage` files can now be
+/// deleted. Attempts of derivations that survived the delete re-check (a
+/// concurrent eval re-attached a `build_job`) keep their logs.
+fn attempt_logs_to_reclaim(
+    snapshot: &[(DerivationId, BuildAttemptId)],
+    deleted: &std::collections::HashSet<DerivationId>,
+) -> Vec<BuildAttemptId> {
+    snapshot
+        .iter()
+        .filter(|(derivation, _)| deleted.contains(derivation))
+        .map(|(_, attempt)| *attempt)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,6 +493,19 @@ mod tests {
     #[test]
     fn reclaims_nothing_when_all_hashes_survive() {
         assert!(reclaimable_hashes(set(&["a", "b"]), &set(&["a", "b"])).is_empty());
+    }
+
+    #[test]
+    fn reclaims_attempt_logs_only_for_deleted_derivations() {
+        // `d_kept` survived the delete re-check (a concurrent eval re-attached a
+        // build_job), so its attempt's log is retained; `d_gone`'s is reclaimed.
+        let d_gone = DerivationId::now_v7();
+        let d_kept = DerivationId::now_v7();
+        let a_gone = BuildAttemptId::now_v7();
+        let a_kept = BuildAttemptId::now_v7();
+        let snapshot = vec![(d_gone, a_gone), (d_kept, a_kept)];
+        let deleted: HashSet<DerivationId> = [d_gone].into_iter().collect();
+        assert_eq!(attempt_logs_to_reclaim(&snapshot, &deleted), vec![a_gone]);
     }
 
     #[test]

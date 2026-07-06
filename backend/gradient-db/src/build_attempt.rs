@@ -6,7 +6,8 @@
 
 //! Attempt helpers, keyed on the global `derivation_build` anchor (the actual
 //! build work). Each attempt is attributed to one `build_job` (the eval that
-//! drove the dispatch) and owns its log under its own id.
+//! drove the dispatch, `None` after that eval is GC'd) and owns its log under
+//! its own id.
 
 use chrono::NaiveDateTime;
 use gradient_entity::build_attempt::{
@@ -34,7 +35,7 @@ pub async fn open_attempt<C: ConnectionTrait>(
 ) -> Result<Model, DbErr> {
     Model {
         id: BuildAttemptId::now_v7(),
-        build_job,
+        build_job: Some(build_job),
         derivation_build,
         dispatched_job,
         substitute,
@@ -53,7 +54,8 @@ pub async fn open_attempt<C: ConnectionTrait>(
 /// the attempt's `build_job`) rather than the anchor's whole history, so a new
 /// evaluation retries substitution from zero instead of inheriting a previous
 /// eval's exhausted budget and escalating straight to a build. Pairs with zero
-/// misses are absent from the map.
+/// misses are absent from the map. Attempts orphaned by a GC'd eval
+/// (`build_job IS NULL`) drop out of the inner join, as intended.
 pub async fn substitute_miss_counts<C: ConnectionTrait>(
     db: &C,
     anchors: &[DerivationBuildId],
