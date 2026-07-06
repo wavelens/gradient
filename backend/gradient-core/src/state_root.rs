@@ -74,6 +74,10 @@ pub struct AppState {
     /// into forge events and PR-comment reactions. Tests and worker-side flows
     /// use [`gradient_db::NoReactor`].
     pub reactor: Arc<dyn StatusReactor>,
+    /// Wakes the signature sweep the moment a NAR is committed, so newly cached
+    /// paths are signed on arrival instead of waiting for the periodic tick. The
+    /// tick stays as an hourly fallback (subscription placeholders, backfill).
+    pub sign_signal: Arc<tokio::sync::Notify>,
 }
 
 /// Kept as an alias so handler signatures and `Arc<ServerState>` call sites in

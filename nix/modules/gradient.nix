@@ -701,9 +701,9 @@ in {
         };
 
         signSweepIntervalSecs = lib.mkOption {
-          description = "Interval in seconds between NAR signature backfill sweeps.";
+          description = "Interval in seconds between NAR signature backfill sweeps. NARs are signed on arrival (the sweep is woken the moment one is committed), so this is only a fallback for subscription placeholders and periodic backfill.";
           type = lib.types.ints.positive;
-          default = 60;
+          default = 3600;
         };
 
         narUploadGraceHours = lib.mkOption {

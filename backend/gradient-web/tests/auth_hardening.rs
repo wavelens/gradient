@@ -93,6 +93,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        sign_signal: std::sync::Arc::new(tokio::sync::Notify::new()),
     });
     TestServer::new(create_router(state))
 }

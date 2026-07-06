@@ -93,6 +93,7 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        sign_signal: std::sync::Arc::new(tokio::sync::Notify::new()),
     });
     TestServer::new(create_router(state))
 }

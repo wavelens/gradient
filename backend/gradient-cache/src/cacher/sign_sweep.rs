@@ -55,6 +55,9 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
     if pending.is_empty() {
         return Ok(());
     }
+    // A full batch likely means more rows are waiting; re-arm the trigger at the
+    // end so the next batch runs immediately instead of waiting for the tick.
+    let batch_full = pending.len() as u64 >= SIGN_SWEEP_BATCH;
 
     let cache_ids: Vec<CacheId> = pending
         .iter()
@@ -189,6 +192,10 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         if let Err(e) = record_newly_completed_derivations(&state, cache_id, &seed, full).await {
             warn!(cache = %cache_id, error = %e, "sign sweep: cache_derivation update failed");
         }
+    }
+
+    if batch_full {
+        state.sign_signal.notify_one();
     }
 
     Ok(())
@@ -373,8 +380,14 @@ async fn load_producing_project_flags(
     let backend = state.worker_db.get_database_backend();
     let stmt = Statement::from_sql_and_values(
         backend,
+        // The reserved per-org `build-request` project backing `gradient build`
+        // is always signable regardless of its `sign_cache` flag - its outputs
+        // must be substitutable by the submitting client. Keyed on the reserved
+        // name (BUILD_REQUEST_PROJECT_NAME), not `managed`, which also marks
+        // nix-state-declared projects that may legitimately set sign_cache=false.
         r#"
-            SELECT do_.hash AS hash, p.sign_cache AS sign_cache
+            SELECT do_.hash AS hash,
+                   (p.sign_cache OR p.name = 'build-request') AS sign_cache
             FROM derivation_output do_
             JOIN derivation d   ON d.id = do_.derivation
             JOIN build_job b    ON b.derivation = d.id

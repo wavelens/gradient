@@ -41,6 +41,9 @@ use tracing::{error, info};
 struct Sweep {
     name: &'static str,
     interval_secs: u64,
+    /// When set, the loop also runs a pass the moment this is notified - used to
+    /// sign NARs on arrival rather than waiting for the (now hourly) tick.
+    trigger: Option<Arc<tokio::sync::Notify>>,
     run: Box<dyn Fn(Arc<ServerState>) -> BoxFuture<'static, anyhow::Result<()>> + Send + Sync>,
 }
 
@@ -53,8 +56,14 @@ impl Sweep {
         Sweep {
             name,
             interval_secs,
+            trigger: None,
             run: Box::new(move |state| Box::pin(run(state))),
         }
+    }
+
+    fn triggered_by(mut self, notify: Arc<tokio::sync::Notify>) -> Self {
+        self.trigger = Some(notify);
+        self
     }
 }
 
@@ -75,8 +84,18 @@ fn sweeps(state: &ServerState) -> Vec<Sweep> {
             "sign-sweep",
             state.config.storage.sign_sweep_interval_secs.max(1),
             |state| Box::pin(sign_missing_signatures(state)),
-        ),
+        )
+        .triggered_by(Arc::clone(&state.sign_signal)),
     ]
+}
+
+/// Await a sweep's on-demand trigger, or never resolve when it has none - so the
+/// `select!` arm stays inert for untriggered sweeps.
+async fn wait_trigger(trigger: Option<&tokio::sync::Notify>) {
+    match trigger {
+        Some(n) => n.notified().await,
+        None => std::future::pending::<()>().await,
+    }
 }
 
 /// Drives one [`Sweep`] on its own interval until shutdown. Errors from a
@@ -100,6 +119,7 @@ async fn run_sweep(state: Arc<ServerState>, sweep: Sweep) {
                 return;
             }
             _ = interval.tick() => {}
+            _ = wait_trigger(sweep.trigger.as_deref()) => {}
         }
 
         let started = Instant::now();

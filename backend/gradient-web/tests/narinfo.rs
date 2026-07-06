@@ -168,6 +168,7 @@ async fn narinfo_served_from_db_inner() {
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        sign_signal: std::sync::Arc::new(tokio::sync::Notify::new()),
     });
 
     let router = create_router(state);
@@ -309,6 +310,7 @@ async fn narinfo_unsigned_inner() {
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        sign_signal: std::sync::Arc::new(tokio::sync::Notify::new()),
     });
 
     let router = create_router(state);

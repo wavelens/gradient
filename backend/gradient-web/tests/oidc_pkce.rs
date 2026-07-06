@@ -115,6 +115,7 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        sign_signal: std::sync::Arc::new(tokio::sync::Notify::new()),
     });
 
     let server = axum_test::TestServer::new(create_router(state));
