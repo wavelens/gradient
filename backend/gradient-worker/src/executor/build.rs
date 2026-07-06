@@ -28,7 +28,7 @@ use gradient_proto::messages::{BuildOutput, BuildProduct, BuildTask};
 use gradient_sources::get_hash_from_path;
 use gradient_util::hydra::parse_hydra_product_line;
 use harmonia_protocol::daemon_wire::types2::{BuildMode, BuildResult, BuildResultInner};
-use harmonia_protocol::log::{Field, LogMessage, ResultType, Verbosity};
+use harmonia_protocol::log::{ActivityType, Field, LogMessage, ResultType, Verbosity};
 use harmonia_protocol::types::ClientOptions;
 use harmonia_store_derivation::derivation::BasicDerivation;
 use harmonia_store_path::StorePath;
@@ -583,14 +583,27 @@ fn log_stream_summary(stats: &LogStreamStats, drv_path: &str) {
     }
 }
 
+/// Nix build-orchestration activities that are not the builder's own output:
+/// the "building '/nix/store/…drv'" announcement and the "querying info about
+/// missing paths" summary, both emitted on every build. `Unknown` is overloaded
+/// (it also carries useful "copying '…' to the store" lines for in-daemon
+/// builtins), so only its fixed missing-paths summary is dropped.
+fn is_orchestration_activity(activity_type: ActivityType, text: &str) -> bool {
+    match activity_type {
+        ActivityType::Build | ActivityType::Builds => true,
+        ActivityType::Unknown => text.starts_with("querying info about missing paths"),
+        _ => false,
+    }
+}
+
 /// Extract a forwardable log line from a harmonia daemon log message.
 ///
 /// Captures:
 /// - `Message`: high-level messages (errors, warnings, status notes).
-/// - `StartActivity`: activity descriptions ("building '/nix/store/…'",
-///   "copying '/nix/store/…'" etc.). Useful for builtins (fetchurl, path)
-///   that run inside the daemon rather than in a sandbox and therefore never
-///   produce `BuildLogLine` results.
+/// - `StartActivity`: activity descriptions ("copying '/nix/store/…'" etc.),
+///   minus the build orchestration filtered by [`is_orchestration_activity`].
+///   Kept for builtins (fetchurl, path) that run inside the daemon rather than
+///   in a sandbox and therefore never produce `BuildLogLine` results.
 /// - `BuildLogLine`/`PostBuildLogLine` results: the raw stdout/stderr lines
 ///   from the build sandbox or post-build hook (the actual build log).
 ///
@@ -609,7 +622,7 @@ fn log_message_to_text(msg: &LogMessage) -> Option<String> {
 
         LogMessage::StartActivity(a) => {
             let s = String::from_utf8_lossy(&a.text);
-            if s.is_empty() {
+            if s.is_empty() || is_orchestration_activity(a.activity_type, &s) {
                 return None;
             }
             Some(format!("{s}\n"))
@@ -640,6 +653,64 @@ fn log_message_to_text(msg: &LogMessage) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harmonia_protocol::log::{Activity, ActivityResult, Message};
+
+    fn start_activity(activity_type: ActivityType, text: &'static str) -> LogMessage {
+        LogMessage::StartActivity(Activity {
+            fields: vec![],
+            id: 1,
+            level: Verbosity::Info,
+            parent: 0,
+            text: text.into(),
+            activity_type,
+        })
+    }
+
+    #[test]
+    fn drops_build_announcement_activity() {
+        let msg = start_activity(ActivityType::Build, "building '/nix/store/xxxx-foo.drv'");
+        assert_eq!(log_message_to_text(&msg), None);
+    }
+
+    #[test]
+    fn drops_missing_paths_query_summary() {
+        let msg = start_activity(ActivityType::Unknown, "querying info about missing paths");
+        assert_eq!(log_message_to_text(&msg), None);
+    }
+
+    #[test]
+    fn keeps_copy_to_store_activity() {
+        let msg = start_activity(ActivityType::Unknown, "copying '/nix/store/xxxx' to the store");
+        assert_eq!(
+            log_message_to_text(&msg).as_deref(),
+            Some("copying '/nix/store/xxxx' to the store\n")
+        );
+    }
+
+    #[test]
+    fn keeps_builder_output_line() {
+        let msg = LogMessage::Result(ActivityResult {
+            fields: vec![Field::String("hello from builder".into())],
+            id: 1,
+            result_type: ResultType::BuildLogLine,
+        });
+        assert_eq!(
+            log_message_to_text(&msg).as_deref(),
+            Some("hello from builder\n")
+        );
+    }
+
+    #[test]
+    fn keeps_error_messages() {
+        let msg = LogMessage::Message(Message {
+            level: Verbosity::Error,
+            text: "error: build failed".into(),
+        });
+        assert_eq!(
+            log_message_to_text(&msg).as_deref(),
+            Some("error: build failed\n")
+        );
+    }
 
     fn drv_with_outputs(outputs: Vec<(&str, &str)>) -> gradient_db::Derivation {
         gradient_db::Derivation {

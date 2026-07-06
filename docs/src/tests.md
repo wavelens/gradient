@@ -5971,3 +5971,17 @@ output errors with the raw nix diagnostic instead of a bare "nix copy failed".
 - `local_path_is_made_absolute` / `scheme_refs_pass_through_unresolved` - a local
   flake path is canonicalised to an absolute path (the Nix C API rejects a
   relative `.`), while a `github:`/`path:` ref passes through unchanged.
+
+## Worker build-log line filtering
+
+`backend/gradient-worker/src/executor/build.rs` `tests` cover
+`log_message_to_text`, which forwards only the builder's own output and drops
+nix's build orchestration:
+- `drops_build_announcement_activity` - the per-build `building '/nix/store/…drv'`
+  activity (`ActivityType::Build`) is not streamed.
+- `drops_missing_paths_query_summary` - the `querying info about missing paths`
+  summary (`ActivityType::Unknown`) is dropped.
+- `keeps_copy_to_store_activity` - `Unknown` is overloaded, so real builtin
+  output like `copying '…' to the store` still streams.
+- `keeps_builder_output_line` / `keeps_error_messages` - `BuildLogLine` results
+  and error/warning messages are always forwarded.
