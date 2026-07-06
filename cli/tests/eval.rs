@@ -21,7 +21,10 @@ fn eval_help_describes_nix_eval_jobs_like_output() {
         text.contains("nix-eval-jobs"),
         "help should reference nix-eval-jobs:\n{text}"
     );
-    assert!(text.contains("--flake"), "missing --flake flag:\n{text}");
+    assert!(
+        text.contains("installable syntax"),
+        "help should describe installable-syntax patterns:\n{text}"
+    );
 }
 
 #[test]
