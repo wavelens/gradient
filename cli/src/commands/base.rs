@@ -9,6 +9,7 @@ use crate::config::*;
 use crate::input::*;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::engine::ArgValueCompleter;
 use clap_complete::{CompleteEnv, Shell};
 use connector::auth::{
     CliDevicePollRequest, CliPollOutcome, MakeLoginRequest, MakeUserRequest,
@@ -97,7 +98,7 @@ enum MainCommands {
         /// Target system (default: organization preference)
         #[arg(long)]
         system: Option<String>,
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(completion::complete_orgs))]
         organization: Option<String>,
         /// Dispatch and return the evaluation UUID without streaming logs
         #[arg(short, long)]
@@ -121,7 +122,7 @@ enum MainCommands {
         #[arg(long)]
         evaluation: Option<String>,
         /// Restrict latest-eval lookup to a project (accepts `name` or `org/name`)
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(completion::complete_projects))]
         project: Option<String>,
         /// Skip the product picker; comma-separated 1-based indices, ranges (`1-3`), or `all`
         #[arg(long, conflicts_with = "flake_ref")]

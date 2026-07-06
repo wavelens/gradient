@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::completion;
 use crate::input::client_from_config;
 use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCompleter;
 use connector::caches::NarListQuery;
 use std::io::{BufRead, Write};
 
@@ -14,6 +16,7 @@ use std::io::{BufRead, Write};
 pub enum Commands {
     /// List NARs in a cache
     List {
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
         #[arg(long)]
         hash: Option<String>,
@@ -31,16 +34,24 @@ pub enum Commands {
         interactive: bool,
     },
     /// Show a NAR's full metadata
-    Show { cache: String, hash: String },
+    Show {
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        cache: String,
+        hash: String,
+    },
     /// Delete a NAR from a cache
     Delete {
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
         cache: String,
         hash: String,
         #[arg(short = 'y', long)]
         yes: bool,
     },
     /// Aggregate stats for a cache's NARs
-    Stats { cache: String },
+    Stats {
+        #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
+        cache: String,
+    },
 }
 
 pub async fn handle(cmd: Commands, out: Output) {
