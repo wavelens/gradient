@@ -4,15 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::completion;
 use crate::input::client_from_config;
 use crate::narinfo::Narinfo;
 use crate::output::{ExitKind, Output, to_exit_kind};
+use clap_complete::engine::ArgValueCompleter;
 use connector::caches::NarinfoUpload;
 use std::path::PathBuf;
 
 #[derive(clap::Args, Debug)]
 pub struct UploadArgs {
     /// Cache name to upload into.
+    #[arg(add = ArgValueCompleter::new(completion::complete_caches))]
     pub cache: String,
     /// Store paths to upload (requires the CLI built with the `nix` feature).
     pub paths: Vec<String>,
@@ -54,20 +57,6 @@ pub async fn handle(args: UploadArgs, out: Output) {
 
     #[cfg(feature = "nix")]
     crate::commands::cache_upload_nix::upload_paths(&args, out).await;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::store_hash_of;
-
-    #[test]
-    fn extracts_hash_from_full_path_and_name_with_specials() {
-        assert_eq!(
-            store_hash_of("/nix/store/bnq5n76hrfr50l5s2hbbg9vw32fvcrbc-linux-rpi-6.12.75-1+rpt1"),
-            "bnq5n76hrfr50l5s2hbbg9vw32fvcrbc"
-        );
-        assert_eq!(store_hash_of("bnq5n76hrfr50l5s2hbbg9vw32fvcrbc-hello"), "bnq5n76hrfr50l5s2hbbg9vw32fvcrbc");
-    }
 }
 
 /// NAR slice size per chunked-upload request. Comfortably below the bundled
@@ -117,5 +106,19 @@ pub(crate) async fn upload_one_owned(cache: &str, ni: Narinfo, bytes: Vec<u8>, o
             out.human(format!("Uploaded {store_path}"));
         }
         Err(e) => out.err(to_exit_kind(&e), e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::store_hash_of;
+
+    #[test]
+    fn extracts_hash_from_full_path_and_name_with_specials() {
+        assert_eq!(
+            store_hash_of("/nix/store/bnq5n76hrfr50l5s2hbbg9vw32fvcrbc-linux-rpi-6.12.75-1+rpt1"),
+            "bnq5n76hrfr50l5s2hbbg9vw32fvcrbc"
+        );
+        assert_eq!(store_hash_of("bnq5n76hrfr50l5s2hbbg9vw32fvcrbc-hello"), "bnq5n76hrfr50l5s2hbbg9vw32fvcrbc");
     }
 }
