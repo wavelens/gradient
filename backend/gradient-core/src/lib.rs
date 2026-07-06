@@ -207,5 +207,6 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         scim_group_roles,
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor,
+        sign_signal: Arc::new(tokio::sync::Notify::new()),
     }))
 }

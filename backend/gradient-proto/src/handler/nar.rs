@@ -136,5 +136,12 @@ pub(super) async fn mark_nar_stored(
     }
 
     debug!(store_path, "cached_path metadata recorded after NarUploaded");
+
+    // Wake the signature sweep so this freshly cached path is signed on arrival
+    // rather than waiting for the periodic tick. Only when a cache actually took
+    // it (OrgCaches inserted placeholder rows); the sweep coalesces the nudges.
+    if org_id.is_some() {
+        state.sign_signal.notify_one();
+    }
     Ok(())
 }
