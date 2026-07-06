@@ -6004,3 +6004,17 @@ nix's build orchestration:
   output like `copying '…' to the store` still streams.
 - `keeps_builder_output_line` / `keeps_error_messages` - `BuildLogLine` results
   and error/warning messages are always forwarded.
+
+## OpenPr commit author attribution
+
+`backend/gradient-forge/src/pr.rs` `github::tests` and
+`backend/gradient-ci/src/actions/send/open_pr.rs` `tests` cover how the `open_pr`
+commit identity is chosen:
+- `omits_author_when_unset` / `includes_author_when_set` - the GitHub
+  create-commit request drops `author`/`committer` when no identity is
+  configured (so GitHub credits the App bot and signs it verified) and only
+  sends them when set.
+- `commit_ident_needs_both_fields` / `commit_ident_set_when_both_present` - a
+  configured identity is used only when both `GRADIENT_PR_COMMIT_NAME` and
+  `GRADIENT_PR_COMMIT_EMAIL` are non-empty; otherwise it falls back to
+  forge-default attribution.

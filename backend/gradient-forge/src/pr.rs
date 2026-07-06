@@ -22,13 +22,31 @@ pub struct CommitFile {
     pub contents: Vec<u8>,
 }
 
-/// A commit to upsert onto a branch: the message, bot identity, and file edits.
+/// Explicit author/committer for a branch commit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitIdent {
+    pub name: String,
+    pub email: String,
+}
+
+/// A commit to upsert onto a branch: the message, optional identity, and edits.
+///
+/// `author == None` lets the forge attribute the commit to the authenticated
+/// app/token: GitHub then credits the App bot and signs the commit (verified),
+/// which is why we omit the identity by default instead of inventing one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchCommit {
     pub message: String,
-    pub author_name: String,
-    pub author_email: String,
+    pub author: Option<CommitIdent>,
     pub files: Vec<CommitFile>,
+}
+
+/// Bare host of a base URL, for a noreply commit email when a forge hides the
+/// authenticated user's address.
+fn host_of(base_url: &str) -> &str {
+    let after_scheme = base_url.split_once("://").map_or(base_url, |(_, r)| r);
+    let host = after_scheme.split('/').next().unwrap_or(after_scheme);
+    host.split(':').next().unwrap_or(host)
 }
 
 /// A reference to an opened or updated pull/merge request.
@@ -122,7 +140,9 @@ pub(crate) mod github {
         )
         .await?;
 
-        let ident = Ident { name: &commit.author_name, email: &commit.author_email };
+        // Omitting author/committer lets GitHub attribute the commit to the App
+        // bot (or token user) and sign it verified; only override when configured.
+        let ident = commit.author.as_ref().map(|a| Ident { name: &a.name, email: &a.email });
         let new_commit: Sha = send_json(
             gh.req(reqwest::Method::POST, &format!("{api}/repos/{owner}/{repo}/git/commits"))
                 .json(&CommitReq {
@@ -261,8 +281,10 @@ pub(crate) mod github {
         message: &'a str,
         tree: String,
         parents: Vec<String>,
-        author: Ident<'a>,
-        committer: Ident<'a>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        author: Option<Ident<'a>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        committer: Option<Ident<'a>>,
     }
     #[derive(Serialize)]
     struct UpdateRefReq<'a> {
@@ -285,6 +307,36 @@ pub(crate) mod github {
     struct UpdatePullReq<'a> {
         title: &'a str,
         body: &'a str,
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn commit_req(author: Option<Ident<'_>>) -> serde_json::Value {
+            serde_json::to_value(CommitReq {
+                message: "m",
+                tree: "t".into(),
+                parents: vec!["p".into()],
+                author,
+                committer: author,
+            })
+            .unwrap()
+        }
+
+        #[test]
+        fn omits_author_when_unset() {
+            let v = commit_req(None);
+            assert!(v.get("author").is_none());
+            assert!(v.get("committer").is_none());
+        }
+
+        #[test]
+        fn includes_author_when_set() {
+            let v = commit_req(Some(Ident { name: "gradient[bot]", email: "bot@example.com" }));
+            assert_eq!(v["author"]["name"], "gradient[bot]");
+            assert_eq!(v["committer"]["email"], "bot@example.com");
+        }
     }
 }
 
@@ -351,9 +403,35 @@ pub(crate) mod gitea {
         Ok(info.default_branch)
     }
 
+    /// The token owner, used as the commit identity libgit2 requires for the
+    /// force-push path (Gitea has no App-bot attribution to fall back on).
+    pub async fn authenticated_user(
+        client: &reqwest::Client,
+        base_url: &str,
+        token: &str,
+    ) -> Result<super::CommitIdent> {
+        let user: User =
+            send_json(auth(client.get(format!("{base_url}/api/v1/user")), token), "gitea get user")
+                .await?;
+        let name = Some(user.full_name).filter(|n| !n.trim().is_empty()).unwrap_or(user.login.clone());
+        let email = user
+            .email
+            .filter(|e| !e.trim().is_empty())
+            .unwrap_or_else(|| format!("{}@users.noreply.{}", user.login, super::host_of(base_url)));
+
+        Ok(super::CommitIdent { name, email })
+    }
+
     #[derive(Deserialize)]
     struct RepoInfo {
         default_branch: String,
+    }
+    #[derive(Deserialize)]
+    struct User {
+        login: String,
+        #[serde(default)]
+        full_name: String,
+        email: Option<String>,
     }
     #[derive(Deserialize)]
     struct Pull {
@@ -454,9 +532,35 @@ pub(crate) mod gitlab {
         Ok(info.default_branch)
     }
 
+    /// The token owner, used as the commit identity libgit2 requires for the
+    /// force-push path (GitLab has no App-bot attribution to fall back on).
+    pub async fn authenticated_user(
+        client: &reqwest::Client,
+        base_url: &str,
+        token: &str,
+    ) -> Result<super::CommitIdent> {
+        let user: User =
+            send_json(auth(client.get(format!("{base_url}/api/v4/user")), token), "gitlab get user")
+                .await?;
+        let name = Some(user.name).filter(|n| !n.trim().is_empty()).unwrap_or(user.username.clone());
+        let email = user
+            .email
+            .filter(|e| !e.trim().is_empty())
+            .unwrap_or_else(|| format!("{}@users.noreply.{}", user.username, super::host_of(base_url)));
+
+        Ok(super::CommitIdent { name, email })
+    }
+
     #[derive(Deserialize)]
     struct ProjectInfo {
         default_branch: String,
+    }
+    #[derive(Deserialize)]
+    struct User {
+        username: String,
+        #[serde(default)]
+        name: String,
+        email: Option<String>,
     }
     #[derive(Deserialize)]
     struct Mr {
