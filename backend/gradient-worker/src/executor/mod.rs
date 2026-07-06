@@ -217,6 +217,7 @@ pub struct JobExecutor {
     pub(crate) build_cgroup_state_dir: String,
     pub(crate) log_limits: crate::executor::log_limit::LogRateLimits,
     pub(crate) log_fetch_from_store: bool,
+    pub(crate) build_cores: u32,
 }
 
 impl JobExecutor {
@@ -232,6 +233,7 @@ impl JobExecutor {
         build_cgroup_state_dir: String,
         log_limits: crate::executor::log_limit::LogRateLimits,
         log_fetch_from_store: bool,
+        build_cores: u32,
     ) -> Self {
         Self {
             store: Arc::new(store),
@@ -244,6 +246,7 @@ impl JobExecutor {
             build_cgroup_state_dir,
             log_limits,
             log_fetch_from_store,
+            build_cores,
         }
     }
 
@@ -422,6 +425,7 @@ impl JobExecutor {
                 &self.build_cgroup_state_dir,
                 self.log_limits,
                 self.log_fetch_from_store,
+                self.build_cores,
             )
             .await?;
             for o in &outputs {

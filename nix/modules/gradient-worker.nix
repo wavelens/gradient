@@ -174,6 +174,15 @@ in {
         default = 8;
       };
 
+      maxBuildCores = lib.mkOption {
+        description = ''
+          Cap on CPU cores a single build may use (nix `--cores` /
+          `NIX_BUILD_CORES`). Null (the default) means all available cores.
+        '';
+        type = lib.types.nullOr lib.types.ints.positive;
+        default = null;
+      };
+
       maxNixdaemonConnections = lib.mkOption {
         description = ''
           Maximum number of simultaneous local Nix daemon connections in
@@ -464,6 +473,8 @@ in {
           GRADIENT_WORKER_ARCHITECTURES = lib.concatStringsSep "," cfg.settings.architectures;
         } // lib.optionalAttrs (cfg.settings.systemFeatures != []) {
           GRADIENT_WORKER_SYSTEM_FEATURES = lib.concatStringsSep "," cfg.settings.systemFeatures;
+        } // lib.optionalAttrs (cfg.settings.maxBuildCores != null) {
+          GRADIENT_WORKER_MAX_BUILD_CORES = toString cfg.settings.maxBuildCores;
         } // lib.optionalAttrs (cfg.settings.cpuCoreScore != null) {
           GRADIENT_WORKER_CPU_CORE_SCORE = toString cfg.settings.cpuCoreScore;
         } // lib.optionalAttrs (cfg.settings.evalCacheDir != null) {

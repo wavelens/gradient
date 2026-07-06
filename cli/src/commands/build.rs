@@ -26,18 +26,28 @@ pub async fn handle_build(
     no_link: bool,
     out: Output,
 ) {
+    // Surface a missing server / session before the org check so an unconfigured
+    // first run points at `gradient login` rather than org selection (#498).
+    let client = client_from_config(out);
+    if let Err(ConnectorError::Unauthorized) = client.user().get().await {
+        out.err(
+            ExitKind::Unauthorized,
+            "Not authenticated: your gradient session is missing or expired. \
+             Run `gradient login <url>` and try again.",
+        );
+    }
+
     let organization = organization
         .or_else(|| set_get_value(ConfigKey::SelectedOrganization, None, true))
         .unwrap_or_else(|| {
             if !quiet {
                 out.progress(
-                    "Organization must be set for build command. Use 'gradient organization select <name>' to set one.",
+                    "Organization must be set for build command. Use 'gradient organization select <name>' \
+                     (it is selected automatically on `gradient login`).",
                 );
             }
             exit(1);
         });
-
-    let client = client_from_config(out);
 
     // Accept `nix build`-style installables (`.#uxc`) and translate them into
     // gradient's attr-path wildcard language before dispatch and result linking.
@@ -202,17 +212,6 @@ async fn upload_and_dispatch(
     quiet: bool,
     out: Output,
 ) -> DispatchResponse {
-    // Fail fast on a missing or expired session before packing and streaming a
-    // potentially large source NAR (#493). A cheap authenticated probe surfaces
-    // the auth problem clearly instead of as a confusing upload/multipart error.
-    if let Err(ConnectorError::Unauthorized) = client.user().get().await {
-        out.err(
-            ExitKind::Unauthorized,
-            "Not authenticated: your gradient session is missing or expired. \
-             Run `gradient login` and try again.",
-        );
-    }
-
     #[cfg(feature = "nix")]
     {
         crate::commands::build_nix::dispatch_via_nar(

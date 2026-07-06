@@ -36,27 +36,23 @@ nix run github:wavelens/gradient#gradient-cli -- --help
 
 ## Configuration
 
-Before using the CLI, point it at your Gradient server:
+Log in and point the CLI at your Gradient server in one step:
 
 ```sh
-gradient config server https://gradient.example.com
+gradient login https://gradient.example.com
 ```
 
-Then log in:
-
-```sh
-gradient login
-```
+Passing the URL sets it as the configured server, so a separate `gradient config server` is no longer needed. On a successful first login the CLI selects your organization automatically when you belong to exactly one, and otherwise lists them so you can pick with `gradient organization select <name>`.
 
 By default this opens your browser to authorize the CLI session, which is what you want for interactive use and works the same when the Gradient server is configured for OIDC-only login. Pass `--no-browser` to print the URL instead - useful when running over SSH on a headless machine, where you can open the URL on your laptop. The browser flow asks you to confirm a short code that the CLI also prints, then issues a 30-day session token.
 
 For unattended scripts you can still pass credentials directly:
 
 ```sh
-gradient login --username alice --password "$PASSWORD"
+gradient login https://gradient.example.com --username alice --password "$PASSWORD"
 ```
 
-Either way, the resulting token is stored in the local configuration file (`~/.config/gradient/config`).
+The server URL can also be set on its own with `gradient config server <url>`, and `gradient organization select` requires a valid login and only accepts an organization you belong to. Either way, the resulting token is stored in the local configuration file (`~/.config/gradient/config`).
 
 ### Self-signed certificates
 

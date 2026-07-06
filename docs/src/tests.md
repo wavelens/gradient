@@ -5913,3 +5913,27 @@ nothing instead of silently completing.
   error (recorded as an error-level `evaluation_message`, which
   `check_evaluation_done` turns into `Failed`), while a wildcard pattern that
   spans no buildable attrs stays silent.
+
+## Worker max build cores (#497)
+
+`backend/gradient-worker/src/config.rs` `tests`:
+- `build_cores_defaults_to_all_cores` - an unset `max_build_cores` resolves to
+  `0` (nix `--cores` for "all available cores"), preserving prior behavior.
+- `build_cores_uses_configured_cap` - a configured cap is passed through to the
+  daemon verbatim.
+
+## CLI onboarding (#498)
+
+`cli/src/commands/organization.rs` `tests` - the pure `decide_org_onboarding`
+that drives post-login org selection:
+- `no_orgs_yields_none`, `single_org_auto_selects`, `multiple_orgs_prompt_choice`
+  cover the zero / one / many membership cases.
+- `valid_current_selection_is_kept` leaves an already-selected org untouched;
+  `stale_current_selection_falls_through` re-selects when the stored org is no
+  longer a membership.
+
+`cli/tests/onboarding.rs` (`assert_cmd` + `wiremock`):
+- `organization_select_without_login_is_rejected` - selecting an org with no
+  stored token exits `Unauthorized` and points at `gradient login <url>`.
+- `organization_select_rejects_non_member` / `organization_select_accepts_member`
+  - selection is validated against the caller's `/orgs` memberships.

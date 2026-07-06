@@ -104,6 +104,7 @@ impl ParsedDerivation {
         abort: &mut watch::Receiver<bool>,
         log_limits: crate::executor::log_limit::LogRateLimits,
         log_fetch_from_store: bool,
+        build_cores: u32,
     ) -> Result<(Vec<BuildOutput>, bool, Option<u64>), BuildError> {
         let mut guard = store.acquire().await.map_err(BuildError::transient)?;
 
@@ -122,7 +123,7 @@ impl ParsedDerivation {
         opts.verbose_build = Verbosity::Talkative;
         opts.verbosity = Verbosity::Notice;
         opts.use_substitutes = false;
-        opts.build_cores = 0;
+        opts.build_cores = build_cores;
 
         guard
             .execute(|client| async move { client.set_options(&opts).await })
@@ -333,6 +334,7 @@ pub async fn build_derivation(
     cgroup_state_dir: &str,
     log_limits: crate::executor::log_limit::LogRateLimits,
     log_fetch_from_store: bool,
+    build_cores: u32,
 ) -> Result<Vec<BuildOutput>, BuildError> {
     // `report_building` is sent by the caller (`execute_build_job`) before the
     // prefetch step, so a `JobFailed` after a prefetch error finds the build
@@ -351,6 +353,7 @@ pub async fn build_derivation(
         abort,
         log_limits,
         log_fetch_from_store,
+        build_cores,
     );
 
     let net_sampler = build_metrics.then(NetworkPeakSampler::start);

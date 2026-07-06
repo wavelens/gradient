@@ -276,6 +276,7 @@ impl Worker<Connected> {
                 sustained_bytes_per_hour: config.log_sustained_bytes_per_hour,
             },
             config.log_fetch_from_store,
+            config.build_cores(),
         );
         if config.build_metrics {
             tracing::info!(
