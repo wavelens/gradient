@@ -21,6 +21,8 @@ pub mod download;
 #[cfg(feature = "eval")]
 pub mod eval;
 pub mod generate;
+pub mod logs;
+pub mod logstream;
 pub mod organization;
 pub mod project;
 pub mod watch;

@@ -12,8 +12,6 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCompleter;
 use colored::*;
 use connector::projects::{MakeProjectRequest, PatchProjectRequest};
-use futures::StreamExt;
-use futures::pin_mut;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
@@ -139,33 +137,29 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             if eval.status != "Aborted" {
                 out.human("===== Log =====");
-                let evals_api = client.evals();
-                match evals_api.stream_builds(&eval.id).await {
-                    Ok(stream) => {
-                        pin_mut!(stream);
-                        while let Some(item) = stream.next().await {
-                            match item {
-                                Ok(line) => {
-                                    if out.is_json() {
-                                        println!(
-                                            "{}",
-                                            serde_json::json!({"error": false, "message": line})
-                                        );
-                                    } else {
-                                        print!("{}", line);
-                                    }
-                                }
-                                Err(e) => out.err(to_exit_kind(&e), e),
-                            }
-                        }
-                    }
-                    Err(e) => out.err(to_exit_kind(&e), e),
-                }
+                crate::commands::logstream::stream_eval_logs(&client, &eval.id, out).await;
             }
         }
 
         Commands::Log => {
-            todo!();
+            let (organization, project) =
+                match set_get_value(ConfigKey::SelectedProject, None, true) {
+                    Some(id) => {
+                        let parts: Vec<&str> = id.split('/').collect();
+                        (parts[0].to_string(), parts[1].to_string())
+                    }
+                    _ => out.err(ExitKind::Usage, "Project is required for command."),
+                };
+
+            let client = client_from_config(out);
+            let details = match client.projects().details(&organization, &project).await {
+                Ok(d) => d,
+                Err(e) => out.err(to_exit_kind(&e), e),
+            };
+            let Some(latest) = details.last_evaluations.first() else {
+                out.err(ExitKind::Api, "Project has no evaluations yet.");
+            };
+            crate::commands::logstream::stream_eval_logs(&client, &latest.id, out).await;
         }
 
         Commands::Create {

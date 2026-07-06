@@ -114,6 +114,11 @@ enum MainCommands {
         /// Evaluation UUID to watch
         evaluation: String,
     },
+    /// Print the full logs of every build in an evaluation
+    Logs {
+        /// Evaluation UUID
+        evaluation: String,
+    },
     /// Download evaluation artefacts
     Download {
         /// Flake-output attribute spec, e.g. '#packages.x86_64-linux.my-app'. Comma-separated for multiple.
@@ -340,6 +345,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             build::handle_build(target, system, organization, background, quiet, no_link, out).await
         }
         MainCommands::Watch { evaluation } => watch::handle_watch(&evaluation, out).await,
+        MainCommands::Logs { evaluation } => logs::handle_logs(&evaluation, out).await,
         MainCommands::Download {
             flake_ref,
             evaluation,
