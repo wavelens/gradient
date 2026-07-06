@@ -55,6 +55,19 @@ fn explicit_attr_set(wildcards: &[String]) -> HashSet<String> {
         .collect()
 }
 
+/// Errors for explicitly requested attrs that discovery matched to nothing.
+/// Empty when every pattern was a wildcard (a wildcard legitimately spans attrs
+/// that aren't buildable), so only a pinpointed target fails the eval instead of
+/// silently completing with no outputs.
+fn unmatched_target_errors(wildcards: &[String]) -> Vec<String> {
+    let mut errors: Vec<String> = explicit_attr_set(wildcards)
+        .into_iter()
+        .map(|attr| format!("target '{attr}' matched no derivations in the flake"))
+        .collect();
+    errors.sort_unstable();
+    errors
+}
+
 /// How many `.drv` files to read+parse concurrently inside a single BFS wave.
 /// Reading a `.drv` is async filesystem IO, so the sequential walk would only
 /// keep one in-flight read at a time and bottleneck on round-trip latency.
@@ -759,7 +772,8 @@ pub async fn evaluate_derivations_with(
 
     if attrs.is_empty() {
         warn!("no derivations found for evaluation");
-        updater.report_eval_result(vec![], warnings, vec![]).await?;
+        let errors = unmatched_target_errors(&job.wildcards);
+        updater.report_eval_result(vec![], warnings, errors).await?;
         return Ok(EvalOutcome {
             flake_nodes: Vec::new(),
         });
@@ -854,6 +868,17 @@ mod tests {
             .parent()
             .unwrap()
             .join("test-store")
+    }
+
+    #[test]
+    fn unmatched_explicit_target_errors_but_wildcard_is_silent() {
+        assert_eq!(
+            unmatched_target_errors(&["packages.x86_64-linux.uxc".to_string()]),
+            vec!["target 'packages.x86_64-linux.uxc' matched no derivations in the flake".to_string()]
+        );
+        assert!(unmatched_target_errors(&["packages.x86_64-linux.#".to_string()]).is_empty());
+        assert!(unmatched_target_errors(&["packages.x86_64-linux.*".to_string()]).is_empty());
+        assert!(unmatched_target_errors(&["!nixosConfigurations.foo".to_string()]).is_empty());
     }
 
     fn make_flake_job(repo: &str) -> FlakeJob {

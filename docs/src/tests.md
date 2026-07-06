@@ -5878,3 +5878,26 @@ the bounded attempt budget instead of poisoning the build-once anchor.
   advertised-but-missing 404 now carries the typed self-heal signal instead
   of a plain string) and `substitute_not_on_upstream_wins` cover the
   classifier precedence.
+
+## `gradient build` accepts nix-style installables; empty targets fail loudly
+
+`gradient build .#uxc` used to complete green with "No outputs to link": the
+target was stored verbatim as the eval wildcard, but gradient's wildcard
+language is a `.`-separated attr path where `*`/`#` are their own segments, so
+`.#uxc` parsed to `["", "#uxc"]` and matched nothing - then the eval reported
+success with zero derivations. Two fixes: the CLI translates nix installables
+into wildcard syntax, and the eval fails a pinpointed target that matches
+nothing instead of silently completing.
+
+- `gradient-cli` `commands::build::tests` - `bare_installable_qualifies_to_packages`
+  (`.#uxc` -> `packages.<system>.uxc`, `.#` -> `packages.<system>.#`),
+  `qualified_and_wildcard_targets_pass_through` (gradient's own trailing `#`
+  segment, `*`, and already-qualified `.#packages...`/`.#nixosConfigurations...`
+  are untouched), and `exclusions_and_comma_lists_preserved` (`!`-prefixes and
+  comma-separated multi-patterns each normalise independently).
+- `gradient-worker` `executor::eval::tests` -
+  `unmatched_explicit_target_errors_but_wildcard_is_silent`: an explicit attr
+  (no `*`/`#`) with no matches yields a `target '...' matched no derivations`
+  error (recorded as an error-level `evaluation_message`, which
+  `check_evaluation_done` turns into `Failed`), while a wildcard pattern that
+  spans no buildable attrs stays silent.

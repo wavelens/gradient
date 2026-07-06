@@ -3321,7 +3321,11 @@ paths:
                   description: The packed source NAR.
                 target:
                   type: string
-                  description: Eval target attribute path (defaults to the project wildcard).
+                  description: >-
+                    Eval target: a gradient attr-path wildcard
+                    (`packages.x86_64-linux.#`) or a nix-style installable
+                    (`.#foo`, expanded client-side to `packages.<system>.foo`).
+                    Defaults to the project wildcard.
                 system:
                   type: string
                   description: Target system.
@@ -3435,7 +3439,11 @@ paths:
               properties:
                 target:
                   type: string
-                  description: Eval target attribute path (defaults to the project wildcard).
+                  description: >-
+                    Eval target: a gradient attr-path wildcard
+                    (`packages.x86_64-linux.#`) or a nix-style installable
+                    (`.#foo`, expanded client-side to `packages.<system>.foo`).
+                    Defaults to the project wildcard.
                 system:
                   type: string
                   description: Target system.
