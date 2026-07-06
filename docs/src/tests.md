@@ -5937,3 +5937,37 @@ that drives post-login org selection:
   stored token exits `Unauthorized` and points at `gradient login <url>`.
 - `organization_select_rejects_non_member` / `organization_select_accepts_member`
   - selection is validated against the caller's `/orgs` memberships.
+
+## Private-cache auth + result linking on `gradient build`
+
+`cli/src/netrc.rs` `tests` cover the shared netrc plumbing used by both
+`cache install-netrc` and the build path's output substitution:
+- `machine_host_strips_scheme_port_and_path` - the `machine` host is the server
+  URL host only; scheme, port and path are dropped, matching how curl (and thus
+  nix) keys netrc lookups.
+- `entry_uses_token_as_password` - the entry is `machine <host>` / `login
+  gradient` / `password <token>` (nix Basic auth where the password is the
+  JWT/API key the server accepts).
+- `remove_entry_drops_matching_machine_block` keeps a re-install idempotent.
+
+`link_result` (`cli/src/commands/build_nix.rs`, `nix` feature) now realises the
+primary output with a single `nix-store --realise` that wires the org cache in
+as an `extra-substituters` (its signing key via `extra-trusted-public-keys`, and
+a 0600 temp `netrc` from the logged-in session when the cache is private),
+alongside the user's own substituters. An output already local or reachable only
+from the user's substituters resolves without the cache; a genuinely unreachable
+output errors with the raw nix diagnostic instead of a bare "nix copy failed".
+`human_bytes_scales` / `upload_error_*` still cover the source-upload messaging.
+
+## `gradient eval` installable syntax + local flake ref
+
+`cli/src/commands/eval.rs` `tests` (feature `eval`):
+- `splits_installable_flake_and_attr` / `installable_flake_overrides_default` -
+  a `<ref>#<attr>` pattern sets the flake and yields the bare attr wildcard, so
+  `gradient eval .#packages.x86_64-linux.hello` works like `gradient build`
+  (there is no separate `--flake` flag).
+- `bare_patterns_default_to_current_dir` - patterns without `#` keep their form
+  and evaluate the current directory.
+- `local_path_is_made_absolute` / `scheme_refs_pass_through_unresolved` - a local
+  flake path is canonicalised to an absolute path (the Nix C API rejects a
+  relative `.`), while a `github:`/`path:` ref passes through unchanged.
