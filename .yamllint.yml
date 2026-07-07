@@ -1,0 +1,8 @@
+extends: relaxed
+
+ignore: |
+  frontend/node_modules/
+  pnpm-lock.yaml
+
+rules:
+  line-length: disable

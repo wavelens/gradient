@@ -6411,7 +6411,13 @@ paths:
     get:
       tags: [board]
       summary: Per-URL cache latency and narinfo hit-rate
-      description: Per-upstream-URL trailing latency, narinfo hit-rate, and request counts with hourly series. Metrics are keyed by URL, so the same URL registered under several caches/orgs contributes to one series; `display_name` is the URL host. Org-scoped: superusers see all URLs; members see the URLs used by their orgs plus public orgs. Each series' `url` is the caller's own upstream, so it is returned unmasked.
+      description: >-
+        Per-upstream-URL trailing latency, narinfo hit-rate, and request counts
+        with hourly series. Metrics are keyed by URL, so the same URL registered
+        under several caches/orgs contributes to one series; `display_name` is
+        the URL host. Org-scoped: superusers see all URLs; members see the URLs
+        used by their orgs plus public orgs. Each series' `url` is the caller's
+        own upstream, so it is returned unmasked.
       operationId: getBoardUpstreams
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }

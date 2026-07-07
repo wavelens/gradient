@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: "YAML"
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "**/*.yml"
+      - "**/*.yaml"
+  pull_request:
+    paths:
+      - "**/*.yml"
+      - "**/*.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: "yamllint"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "yamllint"
+        run: pipx run yamllint --strict .
