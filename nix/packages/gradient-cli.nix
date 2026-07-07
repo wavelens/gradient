@@ -7,7 +7,6 @@
 { lib
 , craneLib
 , git
-, glibc
 , installShellFiles
 , llvmPackages
 , gradient-nix
@@ -68,9 +67,6 @@ let
     nativeBuildInputs = [
       installShellFiles
       pkg-config
-    ] ++ lib.optionals withEval [
-      (lib.getDev gradient-nix)
-      (lib.getDev glibc)
     ];
 
     buildInputs = [
@@ -78,10 +74,11 @@ let
       gradient-nix
       openssl
     ];
-  } // lib.optionalAttrs withEval {
+  } // (lib.optionalAttrs withEval {
     LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
-    BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${glibc.dev}";
-  };
+  } // lib.optionalAttrs stdenv.hostPlatform.isLinux {
+    BINDGEN_EXTRA_CLANG_ARGS = "--sysroot=${stdenv.cc.libc.dev}";
+  });
 in
 # Deps and crate build in one pass: the `eval` feature pulls gradient-eval from
 # backend/, so the cli workspace lives in a subdirectory of the source tree, and
