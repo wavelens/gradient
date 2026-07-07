@@ -54,19 +54,28 @@ pub(super) struct StagedNar {
 }
 
 /// Disk-backed receiver for inbound `NarPush` chunks. Each push is staged to a
-/// `*.partial` file under `<base_path>/nar-partial/<peer_id>/<hash>` so an
-/// interrupted upload can resume from a byte offset (issue #225) and a large
+/// `*.partial` file under `<base_path>/nar-partial/<peer_id>/<job_id>/<hash>` so
+/// an interrupted upload can resume from a byte offset (issue #225) and a large
 /// NAR no longer pins RAM. A per-session byte budget plus a poison set preserve
 /// the #109 protection against a rogue worker opening many un-finalized streams
-/// (the budget now bounds staged **disk**, not RAM). Keying by `peer_id` lets a
-/// reconnecting worker resume its own partial without colliding with another
-/// worker pushing the same content-addressed path.
+/// (the budget now bounds staged **disk**, not RAM). Keying by `peer_id` isolates
+/// workers; keying by `job_id` isolates two jobs on one worker that push the
+/// *same* content-addressed path concurrently - without it their interleaved
+/// appends to a shared hash-keyed partial trip the contiguity check and poison a
+/// valid transfer (mirrors the worker-pull `{job_id}/{hash}` namespacing).
 pub(super) struct NarReceiveStore {
     store: gradient_storage::PartialStore,
     peer_id: String,
     max_bytes: u64,
     active: HashMap<String, PathState>,
     poisoned: BTreeSet<String>,
+}
+
+/// In-memory key isolating a path's staging state per job, so two jobs pushing
+/// the same store path never share an `active`/`poisoned` entry. The unit
+/// separator can appear in neither a job id nor a store path.
+fn state_key(job_id: &str, store_path: &str) -> String {
+    format!("{job_id}\u{1f}{store_path}")
 }
 
 impl NarReceiveStore {
@@ -85,18 +94,20 @@ impl NarReceiveStore {
         })
     }
 
-    fn key(&self, hash: &str) -> String {
-        format!("{}/{}", self.peer_id, hash)
+    fn key(&self, job_id: &str, hash: &str) -> String {
+        format!("{}/{}/{}", self.peer_id, job_id, hash)
     }
 
     /// Record the push stream's token and return how many bytes are already
     /// staged for it (0 on token mismatch / nothing on disk). Clears any stale
     /// poison so a fresh attempt can proceed.
-    pub(super) async fn note_header(&mut self, store_path: &str, token: &str) -> u64 {
-        self.poisoned.remove(store_path);
+    pub(super) async fn note_header(&mut self, job_id: &str, store_path: &str, token: &str) -> u64 {
+        let sk = state_key(job_id, store_path);
+        self.poisoned.remove(&sk);
         let received = match store_hash(store_path) {
             Some(h) => {
-                let (store, key, token) = (self.store.clone(), self.key(h), token.to_owned());
+                let (store, key, token) =
+                    (self.store.clone(), self.key(job_id, h), token.to_owned());
                 tokio::task::spawn_blocking(move || store.received_len(&key, &token).unwrap_or(0))
                     .await
                     .unwrap_or(0)
@@ -104,7 +115,7 @@ impl NarReceiveStore {
             None => 0,
         };
         self.active.insert(
-            store_path.to_owned(),
+            sk,
             PathState {
                 token: token.to_owned(),
                 staged: received,
@@ -118,11 +129,13 @@ impl NarReceiveStore {
     /// runs on the blocking pool so the async socket task is never stalled.
     pub(super) async fn append(
         &mut self,
+        job_id: &str,
         store_path: &str,
         offset: u64,
         data: &[u8],
     ) -> AppendOutcome {
-        if self.poisoned.contains(store_path) {
+        let sk = state_key(job_id, store_path);
+        if self.poisoned.contains(&sk) {
             return AppendOutcome::Poisoned;
         }
 
@@ -130,41 +143,42 @@ impl NarReceiveStore {
             return AppendOutcome::Poisoned;
         };
 
-        self.active.entry(store_path.to_owned()).or_default();
+        self.active.entry(sk.clone()).or_default();
         let total: u64 = self.active.values().map(|s| s.staged).sum();
         if total.saturating_add(data.len() as u64) > self.max_bytes {
-            self.poison(store_path, hash).await;
+            self.poison(job_id, store_path, hash).await;
             return AppendOutcome::Overflow;
         }
 
-        let token = self.active[store_path].token.clone();
-        let (store, key, data) = (self.store.clone(), self.key(hash), data.to_vec());
+        let token = self.active[&sk].token.clone();
+        let (store, key, data) = (self.store.clone(), self.key(job_id, hash), data.to_vec());
         let len = data.len() as u64;
         match tokio::task::spawn_blocking(move || store.append(&key, &token, offset, &data)).await {
             Ok(Ok(())) => {
-                if let Some(s) = self.active.get_mut(store_path) {
+                if let Some(s) = self.active.get_mut(&sk) {
                     s.staged += len;
                 }
                 AppendOutcome::Ok
             }
             Ok(Err(e)) => {
                 warn!(%store_path, error = %e, "partial append failed; poisoning path");
-                self.poison(store_path, hash).await;
+                self.poison(job_id, store_path, hash).await;
                 AppendOutcome::Overflow
             }
             Err(e) => {
                 warn!(%store_path, error = %e, "partial append task panicked; poisoning path");
-                self.poison(store_path, hash).await;
+                self.poison(job_id, store_path, hash).await;
                 AppendOutcome::Overflow
             }
         }
     }
 
-    async fn poison(&mut self, store_path: &str, hash: &str) {
-        let (store, key) = (self.store.clone(), self.key(hash));
+    async fn poison(&mut self, job_id: &str, store_path: &str, hash: &str) {
+        let (store, key) = (self.store.clone(), self.key(job_id, hash));
         let _ = tokio::task::spawn_blocking(move || store.discard(&key)).await;
-        self.active.remove(store_path);
-        self.poisoned.insert(store_path.to_owned());
+        let sk = state_key(job_id, store_path);
+        self.active.remove(&sk);
+        self.poisoned.insert(sk);
     }
 
     /// Detach the staged stream for `store_path` so a spawned task can commit
@@ -177,10 +191,10 @@ impl NarReceiveStore {
     /// hash resets the shared `{peer}/{hash}` partial (token-mismatch discard /
     /// `offset==0` truncate), so a bare shared key would leave the queued commit
     /// reading 0 bytes ("staged NAR size 0 does not match reported file_size").
-    pub(super) fn take_staged(&mut self, store_path: &str) -> Option<StagedNar> {
-        let state = self.active.remove(store_path)?;
+    pub(super) fn take_staged(&mut self, job_id: &str, store_path: &str) -> Option<StagedNar> {
+        let state = self.active.remove(&state_key(job_id, store_path))?;
         let hash = store_hash(store_path)?;
-        let base_key = self.key(hash);
+        let base_key = self.key(job_id, hash);
         let key = match self.store.detach(&base_key) {
             Ok(Some(claim)) => claim,
             Ok(None) => base_key,
@@ -197,24 +211,24 @@ impl NarReceiveStore {
     }
 
     /// Drop the staged partial and per-path state after a successful commit.
-    pub(super) async fn finish(&mut self, store_path: &str) {
-        self.active.remove(store_path);
+    pub(super) async fn finish(&mut self, job_id: &str, store_path: &str) {
+        self.active.remove(&state_key(job_id, store_path));
         if let Some(hash) = store_hash(store_path) {
-            let (store, key) = (self.store.clone(), self.key(hash));
+            let (store, key) = (self.store.clone(), self.key(job_id, hash));
             let _ = tokio::task::spawn_blocking(move || store.discard(&key)).await;
         }
     }
 
     /// Has this path been poisoned by a prior overflow on the same session?
-    pub(super) fn is_poisoned(&self, store_path: &str) -> bool {
-        self.poisoned.contains(store_path)
+    pub(super) fn is_poisoned(&self, job_id: &str, store_path: &str) -> bool {
+        self.poisoned.contains(&state_key(job_id, store_path))
     }
 
     /// Forget the poison flag and discard any partial for `store_path` so a
     /// later, well-formed retry of the same path can proceed.
-    pub(super) async fn clear_poison(&mut self, store_path: &str) {
-        self.poisoned.remove(store_path);
-        self.finish(store_path).await;
+    pub(super) async fn clear_poison(&mut self, job_id: &str, store_path: &str) {
+        self.poisoned.remove(&state_key(job_id, store_path));
+        self.finish(job_id, store_path).await;
     }
 
     pub(super) fn max_bytes(&self) -> u64 {
@@ -246,7 +260,7 @@ impl<'a> DispatchContext<'a> {
         stream_token: String,
         nar: &mut NarReceiveStore,
     ) {
-        let received = nar.note_header(&store_path, &stream_token).await;
+        let received = nar.note_header(&job_id, &store_path, &stream_token).await;
         debug!(peer_id = %self.peer_id, %job_id, %store_path, received, "NarStreamHeader (push)");
         let _ = send_server_msg(
             self.writer,
@@ -272,7 +286,7 @@ impl<'a> DispatchContext<'a> {
         if data.is_empty() {
             return;
         }
-        match nar.append(&store_path, offset, &data).await {
+        match nar.append(&job_id, &store_path, offset, &data).await {
             AppendOutcome::Ok => {}
             AppendOutcome::Overflow => {
                 let reason = format!(
@@ -328,8 +342,8 @@ impl<'a> DispatchContext<'a> {
         // mid-stream. Without this guard `mark_nar_stored` would record a
         // `cached_path` row whose bytes never reached `nar_storage` - leaving
         // the path "cached" in the DB and undeliverable on the next download.
-        if nar.is_poisoned(&store_path) {
-            nar.clear_poison(&store_path).await;
+        if nar.is_poisoned(&job_id, &store_path) {
+            nar.clear_poison(&job_id, &store_path).await;
             let reason = format!(
                 "NarUploaded for {store_path} rejected: prior NarPush chunk \
                  exceeded the staged-partial budget or arrived out of order"
@@ -361,7 +375,7 @@ impl<'a> DispatchContext<'a> {
         // transfer on the connection stalled into its send timeout
         // ("WebSocket send stalled on final NarPush"). Detach the staged
         // stream synchronously, then commit on a bounded spawned task.
-        let staged = nar.take_staged(&store_path);
+        let staged = nar.take_staged(&job_id, &store_path);
         let writer = self.writer.clone();
         let state = Arc::clone(self.state);
         let scheduler = Arc::clone(self.scheduler);
@@ -895,14 +909,16 @@ mod nar_receive_store_tests {
         format!("/nix/store/{}-name", c.to_string().repeat(32))
     }
 
+    const JOB: &str = "build:job-1";
+
     #[tokio::test]
     async fn append_below_budget_stages_and_reads_back() {
         let (_d, mut s) = store(1024);
         let a = path('a');
-        assert_ok(s.append(&a, 0, &[0u8; 256]).await);
-        assert_ok(s.append(&a, 256, &[1u8; 256]).await);
-        let staged = s.take_staged(&a).expect("direct stream is active");
-        assert!(s.take_staged(&a).is_none(), "take_staged must detach the stream");
+        assert_ok(s.append(JOB, &a, 0, &[0u8; 256]).await);
+        assert_ok(s.append(JOB, &a, 256, &[1u8; 256]).await);
+        let staged = s.take_staged(JOB, &a).expect("direct stream is active");
+        assert!(s.take_staged(JOB, &a).is_none(), "take_staged must detach the stream");
         assert_eq!(staged.store.received_len(&staged.key, &staged.token).unwrap(), 512);
         assert_eq!(staged.store.read_all(&staged.key).unwrap().len(), 512);
     }
@@ -911,14 +927,14 @@ mod nar_receive_store_tests {
     async fn non_contiguous_offset_poisons_path() {
         let (_d, mut s) = store(1024);
         let a = path('a');
-        assert_ok(s.append(&a, 0, &[0u8; 100]).await);
+        assert_ok(s.append(JOB, &a, 0, &[0u8; 100]).await);
         assert!(matches!(
-            s.append(&a, 999, &[0u8; 10]).await,
+            s.append(JOB, &a, 999, &[0u8; 10]).await,
             AppendOutcome::Overflow
         ));
-        assert!(s.is_poisoned(&a));
+        assert!(s.is_poisoned(JOB, &a));
         assert!(matches!(
-            s.append(&a, 0, &[0u8; 10]).await,
+            s.append(JOB, &a, 0, &[0u8; 10]).await,
             AppendOutcome::Poisoned
         ));
     }
@@ -927,14 +943,14 @@ mod nar_receive_store_tests {
     async fn append_overflow_poisons_path() {
         let (_d, mut s) = store(1024);
         let a = path('a');
-        assert_ok(s.append(&a, 0, &[0u8; 1000]).await);
+        assert_ok(s.append(JOB, &a, 0, &[0u8; 1000]).await);
         assert!(matches!(
-            s.append(&a, 1000, &[0u8; 100]).await,
+            s.append(JOB, &a, 1000, &[0u8; 100]).await,
             AppendOutcome::Overflow
         ));
-        assert!(s.is_poisoned(&a));
+        assert!(s.is_poisoned(JOB, &a));
         assert!(matches!(
-            s.append(&a, 0, &[0u8; 50]).await,
+            s.append(JOB, &a, 0, &[0u8; 50]).await,
             AppendOutcome::Poisoned
         ));
     }
@@ -942,31 +958,58 @@ mod nar_receive_store_tests {
     #[tokio::test]
     async fn overflow_across_keys_is_caught() {
         let (_d, mut s) = store(800);
-        assert_ok(s.append(&path('a'), 0, &[0u8; 400]).await);
-        assert_ok(s.append(&path('b'), 0, &[0u8; 400]).await);
+        assert_ok(s.append(JOB, &path('a'), 0, &[0u8; 400]).await);
+        assert_ok(s.append(JOB, &path('b'), 0, &[0u8; 400]).await);
         assert!(matches!(
-            s.append(&path('c'), 0, &[42u8]).await,
+            s.append(JOB, &path('c'), 0, &[42u8]).await,
             AppendOutcome::Overflow
         ));
-        assert!(s.is_poisoned(&path('c')));
+        assert!(s.is_poisoned(JOB, &path('c')));
     }
 
     #[tokio::test]
     async fn note_header_reports_resumable_prefix() {
         let (_d, mut s) = store(10_000);
         let a = path('a');
-        s.note_header(&a, "tok-v1").await;
-        assert_ok(s.append(&a, 0, b"hello").await);
+        s.note_header(JOB, &a, "tok-v1").await;
+        assert_ok(s.append(JOB, &a, 0, b"hello").await);
         // Simulated reconnect: same token resumes; a different token restarts.
-        assert_eq!(s.note_header(&a, "tok-v1").await, 5);
-        assert_eq!(s.note_header(&a, "tok-v2").await, 0);
+        assert_eq!(s.note_header(JOB, &a, "tok-v1").await, 5);
+        assert_eq!(s.note_header(JOB, &a, "tok-v2").await, 0);
+    }
+
+    /// Two jobs on one worker pushing the SAME store path concurrently must not
+    /// share staging state: job B's mismatched-token header must not discard
+    /// job A's in-flight partial, or job A's next chunk lands non-contiguous and
+    /// a valid transfer is poisoned (the #502 cache-test stall).
+    #[tokio::test]
+    async fn concurrent_jobs_same_path_do_not_collide() {
+        let (_d, mut s) = store(1_000_000);
+        let p = path('a');
+
+        s.note_header("build:job-a", &p, "tok-a").await;
+        assert_ok(s.append("build:job-a", &p, 0, &[0u8; 100]).await);
+
+        // Job B opens the same path with a different token, then writes its own
+        // first chunk - this must not touch job A's partial.
+        s.note_header("build:job-b", &p, "tok-b").await;
+        assert_ok(s.append("build:job-b", &p, 0, &[1u8; 100]).await);
+
+        // Job A resumes contiguously from its own 100 bytes.
+        assert_ok(s.append("build:job-a", &p, 100, &[0u8; 100]).await);
+        assert!(!s.is_poisoned("build:job-a", &p));
+
+        let sa = s.take_staged("build:job-a", &p).expect("job-a staged");
+        let sb = s.take_staged("build:job-b", &p).expect("job-b staged");
+        assert_eq!(sa.store.received_len(&sa.key, &sa.token).unwrap(), 200);
+        assert_eq!(sb.store.received_len(&sb.key, &sb.token).unwrap(), 100);
     }
 
     #[test]
     fn presigned_mode_has_no_active_stream() {
         let (_d, mut s) = store(1024);
         assert!(
-            s.take_staged(&path('a')).is_none(),
+            s.take_staged(JOB, &path('a')).is_none(),
             "a path with no header/push must not be treated as direct mode"
         );
     }
@@ -976,23 +1019,23 @@ mod nar_receive_store_tests {
         let (_d, mut s) = store(100);
         let a = path('a');
         assert!(matches!(
-            s.append(&a, 0, &[0u8; 200]).await,
+            s.append(JOB, &a, 0, &[0u8; 200]).await,
             AppendOutcome::Overflow
         ));
-        assert!(s.is_poisoned(&a));
-        s.clear_poison(&a).await;
-        assert!(!s.is_poisoned(&a));
-        assert_ok(s.append(&a, 0, &[0u8; 50]).await);
+        assert!(s.is_poisoned(JOB, &a));
+        s.clear_poison(JOB, &a).await;
+        assert!(!s.is_poisoned(JOB, &a));
+        assert_ok(s.append(JOB, &a, 0, &[0u8; 50]).await);
     }
 
     #[tokio::test]
     async fn finish_discards_staged_partial() {
         let (_d, mut s) = store(10_000);
         let a = path('a');
-        assert_ok(s.append(&a, 0, b"hello").await);
-        s.finish(&a).await;
-        assert!(s.take_staged(&a).is_none());
-        assert_eq!(s.note_header(&a, "").await, 0, "partial must be gone from disk");
+        assert_ok(s.append(JOB, &a, 0, b"hello").await);
+        s.finish(JOB, &a).await;
+        assert!(s.take_staged(JOB, &a).is_none());
+        assert_eq!(s.note_header(JOB, &a, "").await, 0, "partial must be gone from disk");
     }
 }
 

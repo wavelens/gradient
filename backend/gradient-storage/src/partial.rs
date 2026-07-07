@@ -12,9 +12,10 @@
 //! the sender seeks to it. A `stream_token` mismatch (e.g. a worker upgrade
 //! changed zstd output) truncates the partial so the transfer restarts from 0.
 //!
-//! Keys must be filesystem-safe. Callers use the NAR hash (worker pull) or
-//! `{peer_id}/{hash}` (server push, namespaced so two workers pushing the same
-//! content never share a file). Appends enforce contiguous offsets.
+//! Keys must be filesystem-safe. Callers use `{job_id}/{hash}` (worker pull) or
+//! `{peer_id}/{job_id}/{hash}` (server push), namespaced by job so two concurrent
+//! transfers of the same content-addressed path never share a file. Appends
+//! enforce contiguous offsets.
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};

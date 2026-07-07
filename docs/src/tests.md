@@ -640,7 +640,11 @@ Both are shape/pure-function tests (no SQL execution): MockDatabase can't run th
 
 ## Concurrent same-path NAR pulls don't share a partial file
 
-On a local-storage (non-S3) server, NARs stream to the worker as chunked `NarPush` frames staged to a `.partial` file. The worker keyed that file by the bare store-path hash, so two builds on one worker pulling the *same* input (e.g. `glibc-locales`, `docbook-xsl`) appended to one shared file: interleaved offsets failed `partial append failed: non-contiguous … offset 8388608 != len …` and corrupted the staged NAR (S3 pulls bypass staging via presigned HTTP, so they were unaffected). The pull partial is now keyed `{job_id}/{hash}`, mirroring the server-push `{peer_id}/{hash}` namespacing. `backend/gradient-worker/src/proto/nar_recv.rs`: `concurrent_jobs_same_path_do_not_collide` interleaves two jobs' chunks for one path and asserts both assemble correctly; `partial_store_resumes_across_reconnect` still covers per-job resume. No protocol change (`NarRequest`/`NarPush`/`NarRequestResume` are unchanged).
+On a local-storage (non-S3) server, NARs stream to the worker as chunked `NarPush` frames staged to a `.partial` file. The worker keyed that file by the bare store-path hash, so two builds on one worker pulling the *same* input (e.g. `glibc-locales`, `docbook-xsl`) appended to one shared file: interleaved offsets failed `partial append failed: non-contiguous … offset 8388608 != len …` and corrupted the staged NAR (S3 pulls bypass staging via presigned HTTP, so they were unaffected). The pull partial is now keyed `{job_id}/{hash}`, matching the server-push `{peer_id}/{job_id}/{hash}` namespacing. `backend/gradient-worker/src/proto/nar_recv.rs`: `concurrent_jobs_same_path_do_not_collide` interleaves two jobs' chunks for one path and asserts both assemble correctly; `partial_store_resumes_across_reconnect` still covers per-job resume. No protocol change (`NarRequest`/`NarPush`/`NarRequestResume` are unchanged).
+
+## Concurrent same-path NAR pushes don't share a staged partial
+
+The mirror bug on the server's inbound (push) path. The receiver (`NarReceiveStore`) keyed each in-flight `.partial` by `{peer_id}/{hash}` and its `active`/`poisoned` maps by store-path alone, so when one worker pushed the *same* content-addressed path for two jobs concurrently (a shared source like `glibc-2.42.tar.xz` lives in many closures, multiplexed over one connection), job B's `NarStreamHeader` (different `stream_token`) discarded job A's partial via the token-mismatch reset, and job A's next chunk failed `non-contiguous partial append … offset 16777216 != len 0`. The path was poisoned, the build aborted and transiently re-queued, and large multi-chunk paths never uploaded - stranding an eval `Waiting` with dependents stuck `Queued` (the #502 `gradient-cache` integration test timed out at 900 s). The push partial is now keyed `{peer_id}/{job_id}/{hash}` and staging state by `(job_id, store_path)`, isolating concurrent same-path transfers. `backend/gradient-proto/src/handler/nar_transfer.rs`: `concurrent_jobs_same_path_do_not_collide` interleaves two jobs' headers+chunks for one path and asserts neither poisons and both assemble. No protocol change.
 
 ## Orphan-files GC spares freshly-written NARs (upload-vs-GC race)
 
@@ -1059,11 +1063,12 @@ Proto (`cargo test -p gradient-proto`):
   round-trip of the four additive resume messages.
 - `handler::socket::serve_nar_tests::serve_streams_full_payload_in_chunks` - the
   server now emits a leading `NarStreamHeader` before the `NarPush` chunks.
-- `handler::dispatch::nar_receive_store_tests` - the disk-backed push receiver
+- `handler::nar_transfer::nar_receive_store_tests` - the disk-backed push receiver
   (now `async`, offloading disk ops to `spawn_blocking`): contiguous append,
   non-contiguous/overflow poisoning, cross-key budget, `note_header` resumable
-  prefix + token mismatch, presigned-mode detection, poison-clear retry, and
-  `finish` discard.
+  prefix + token mismatch, `concurrent_jobs_same_path_do_not_collide` (per-job
+  `{peer_id}/{job_id}/{hash}` isolation), presigned-mode detection, poison-clear
+  retry, and `finish` discard.
 
 Worker (`cargo test -p gradient-worker`):
 - `proto::nar_recv::tests::partial_store_resumes_across_reconnect` - a fresh
