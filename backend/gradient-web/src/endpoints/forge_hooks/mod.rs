@@ -14,8 +14,12 @@
 //! | `POST /hooks/github`                                  | GitHub App     | `X-Hub-Signature-256`   |
 //! | `POST /hooks/{forge}/{org}/{integration_name}`        | Gitea/Forgejo/GitLab | per-integration secret |
 
+mod approval;
+mod commands;
+mod fanout;
+mod installation;
+mod payloads;
 mod response;
-mod trigger;
 
 pub use response::{QueuedEvaluation, SkippedProject, WebhookResponse, WebhookTriggerOutcome};
 
@@ -42,11 +46,12 @@ use crate::client_ip::{OptionalPeer, resolve_client_ip};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::ok_json;
 
-use gradient_forge::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome};
-use trigger::{
-    PushRefKind, handle_github_installation, resolve_github_app_targets,
-    trigger_pr_for_integration, trigger_push_for_integration, trigger_release_for_integration,
+use fanout::{
+    PushRefKind, trigger_pr_for_integration, trigger_push_for_integration,
+    trigger_release_for_integration,
 };
+use gradient_forge::{ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome};
+use installation::{handle_github_installation, resolve_github_app_targets};
 
 // ── GitHub App webhook ─────────────────────────────────────────────────────
 
@@ -151,11 +156,11 @@ pub async fn github_app_webhook(
             WebhookResponse::empty(&event)
         }
         "check_run" => {
-            trigger::handle_github_check_run(&state, &scheduler, &body).await;
+            approval::handle_github_check_run(&state, &scheduler, &body).await;
             WebhookResponse::empty(&event)
         }
         "issue_comment" => {
-            trigger::handle_issue_comment(
+            commands::handle_issue_comment(
                 &state,
                 &scheduler,
                 ForgeType::GitHub,
@@ -167,7 +172,7 @@ pub async fn github_app_webhook(
             WebhookResponse::empty(&event)
         }
         "pull_request_review" => {
-            trigger::handle_pull_request_review(&state, ForgeType::GitHub, None, &body, client_ip)
+            approval::handle_pull_request_review(&state, ForgeType::GitHub, None, &body, client_ip)
                 .await;
             WebhookResponse::empty(&event)
         }
@@ -294,8 +299,8 @@ async fn dispatch_github_app_pr(
     combined
 }
 
-fn approval_context_from(parsed: &ParsedPullRequestEvent) -> trigger::PullRequestApprovalContext {
-    trigger::PullRequestApprovalContext {
+fn approval_context_from(parsed: &ParsedPullRequestEvent) -> approval::PullRequestApprovalContext {
+    approval::PullRequestApprovalContext {
         pr_number: parsed.pr_number,
         pr_author: parsed.pr_author.clone(),
         is_fork: parsed.is_fork,
@@ -535,7 +540,7 @@ pub async fn forge_webhook(
                 .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
             let client_ip =
                 resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
-            trigger::handle_issue_comment(
+            commands::handle_issue_comment(
                 &state,
                 &scheduler,
                 forge_type,
@@ -552,7 +557,7 @@ pub async fn forge_webhook(
                 .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
             let client_ip =
                 resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
-            trigger::handle_pull_request_review(
+            approval::handle_pull_request_review(
                 &state,
                 forge_type,
                 Some(integration_id),
