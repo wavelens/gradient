@@ -59,8 +59,6 @@ let
     nativeBuildInputs = [
       installShellFiles
       pkg-config
-      (lib.getDev gradient-nix)
-      (lib.getDev glibc)
     ];
 
     buildInputs = [
