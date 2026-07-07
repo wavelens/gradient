@@ -35,7 +35,9 @@
     ];
   in
   {
-    checks = import ./nix/tests { inherit self inputs system pkgs; };
+    checks = (import ./nix/tests { inherit self inputs system pkgs; }) // {
+      clippy = self.packages.${system}.gradient.clippy;
+    };
     apps = import ./nix/vms { inherit inputs system pkgs; };
     packages = rec {
       inherit (pkgs) gradient-nix;
@@ -62,6 +64,7 @@
 
       packages = [
         cargo
+        cargo-deny
         cargo-llvm-cov
         cargo-nextest
         pkg-config

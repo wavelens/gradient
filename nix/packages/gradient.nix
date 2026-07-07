@@ -92,6 +92,12 @@ craneLib.buildPackage (commonArgs // {
   version = "1.3.0";
   separateDebugInfo = true;
 
+  # Reuses cargoArtifacts so clippy only recompiles workspace crates.
+  passthru.clippy = craneLib.cargoClippy (commonArgs // {
+    inherit cargoArtifacts;
+    cargoClippyExtraArgs = "--workspace --all-targets -- -D warnings";
+  });
+
   nativeCheckInputs = [ git ];
   preCheck = ''
     ln -s ${testStore} ./test-store

@@ -24,10 +24,13 @@ REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 # ── Cargo crates ──────────────────────────────────────────────────────────────
 # Only files that define a literal `version = "X.Y.Z"` are listed. Backend
-# sub-crates use `version.workspace = true` and inherit from backend/Cargo.toml.
+# sub-crates inherit `version.workspace = true` from backend/Cargo.toml, except
+# gradient-eval, which is self-contained so the separate cli workspace can path-
+# depend on it without the backend workspace root.
 
 CARGO_FILES=(
     backend/Cargo.toml
+    backend/gradient-eval/Cargo.toml
     cli/Cargo.toml
     cli/connector/Cargo.toml
 )

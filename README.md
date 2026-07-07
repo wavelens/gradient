@@ -190,9 +190,9 @@ We welcome contributions to this project. Please read the [Contributing Guidelin
 
 ## License
 
-This project is under the **GNU Affero General Public License v3.0** (AGPL-3.0; as published by the Free Software Foundation):
+This project is under the **GNU Affero General Public License v3.0** (AGPL-3.0-only; as published by the Free Software Foundation):
 
-The [GNU Affero General Public License v3.0 (AGPL-3.0)](./LICENSE) is a free software license that ensures your freedom to use, modify, and distribute the software, with the condition that any modified versions of the software must also be distributed under the same license.
+The [GNU Affero General Public License v3.0 (AGPL-3.0-only)](./LICENSE) is a free software license that ensures your freedom to use, modify, and distribute the software, with the condition that any modified versions of the software must also be distributed under the same license.
 
 The license notice follows the [REUSE guidelines](https://reuse.software/) to ensure clarity and consistency.
 

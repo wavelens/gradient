@@ -8,7 +8,7 @@ All participants are expected to follow the [Code of Conduct](https://github.com
 
 ## Licensing
 
-Gradient is licensed under **AGPL-3.0**. By submitting a contribution you agree that your work will be released under the same license. All files must carry an SPDX header:
+Gradient is licensed under **AGPL-3.0-only**. By submitting a contribution you agree that your work will be released under the same license. All files must carry an SPDX header:
 
 ```rust
 // SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
@@ -76,6 +76,31 @@ nix build .#checks.x86_64-linux.gradient-remote    -L
 - Log with `tracing::{info, debug, warn, error}`, not `println!`. Add `#[instrument]` to significant async functions.
 - Update `docs/gradient-api.yaml` whenever an API endpoint is added or changed.
 - Update environment variable documentation and the corresponding `nix/modules/` files when configuration options change.
+
+#### Toolchain, formatting and lints
+
+The toolchain is pinned in `rust-toolchain.toml` (rustup) and mirrored by the nix devShell
+(`flake.lock`), which stays the source of truth. Formatting is pinned via `backend/rustfmt.toml`
+(`style_edition = "2024"`), so `cargo fmt` is reproducible across rustfmt versions.
+
+Run before pushing (matches CI):
+
+```sh
+cd backend
+cargo fmt --all --check
+cargo deny check                            # license/advisory policy - GPL-family deps are banned
+nix build .#checks.x86_64-linux.clippy -L   # cargo clippy --workspace --all-targets -- -D warnings
+```
+
+`#[allow]` policy:
+
+- `#[allow(unused_imports)]`, `#[allow(unused)]` and `#[allow(dead_code)]` are **forbidden**
+  (CI grep-gate) - fix the underlying warning instead of silencing it.
+- Every other `#[allow(...)]` must carry a `reason = "..."` (`clippy::allow_attributes_without_reason`).
+  `clippy::too_many_arguments` allows are temporary and tracked in #503.
+
+CI (`.github/workflows/rust.yml`) runs fmt, the grep-gate and cargo-deny; clippy runs as the
+`checks.clippy` flake check.
 
 ### Angular / TypeScript
 
