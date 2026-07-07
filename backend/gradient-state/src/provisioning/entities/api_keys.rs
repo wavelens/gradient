@@ -8,9 +8,9 @@ use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{parse_api_key_hash, read_credential};
 use crate::config::*;
-use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;
+use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashMap;
 
@@ -38,12 +38,14 @@ impl<'a> StateApplicator<'a> {
 
             let mut perms = Vec::with_capacity(state_api_key.permissions.len());
             for wire in &state_api_key.permissions {
-                let p = gradient_db::permissions::Permission::from_wire_name(wire).ok_or_else(|| {
-                    format!(
-                        "API key '{}' references unknown permission '{}'",
-                        state_api_key.name, wire
-                    )
-                })?;
+                let p = gradient_db::permissions::Permission::from_wire_name(wire).ok_or_else(
+                    || {
+                        format!(
+                            "API key '{}' references unknown permission '{}'",
+                            state_api_key.name, wire
+                        )
+                    },
+                )?;
                 perms.push(p);
             }
             if perms.is_empty() {

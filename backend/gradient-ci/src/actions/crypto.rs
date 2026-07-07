@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::input::load_secret_bytes;
 use anyhow::{Result, anyhow};
+use gradient_types::input::load_secret_bytes;
 
 pub fn encrypt_action_secret(plaintext: &str, crypt_key: &[u8]) -> Result<String> {
     crate::action_crypto::encrypt(plaintext, crypt_key)

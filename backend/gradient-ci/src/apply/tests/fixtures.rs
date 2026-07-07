@@ -5,10 +5,10 @@
  */
 
 use super::super::ApplyInput;
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::ids::{CacheId, OrganizationCacheId, UserId, WorkerRegistrationId};
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
-use gradient_entity::evaluation::EvaluationStatus;
 use sea_orm::MockDatabase;
 use uuid::Uuid;
 

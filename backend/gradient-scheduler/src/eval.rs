@@ -10,17 +10,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::evaluation_message::MessageLevel;
+use gradient_core::ServerState;
 use gradient_db::{
     record_evaluation_message, update_evaluation_status, update_evaluation_status_with_error,
 };
+use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation_message::MessageLevel;
 use gradient_exec::strip_nix_store_prefix;
 use gradient_sources::{get_hash_from_path, parse_drv_hash_name};
 use gradient_types::*;
-use gradient_core::ServerState;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
 use tracing::{debug, error, info, warn};
 
 use super::jobs::PendingEvalJob;
@@ -56,30 +58,36 @@ impl DerivationInsertBatch {
             drv_path_to_id.insert(d.drv_path.clone(), id);
             let (drv_hash, drv_name) = parse_drv_hash_name(&d.drv_path)
                 .unwrap_or_else(|_| ("unknown".to_owned(), d.drv_path.clone()));
-            new_derivations.push(MDerivation {
-                id,
-                hash: drv_hash,
-                name: drv_name,
-                architecture: d.architecture.clone(),
-                pname: d.pname.clone(),
-                prefer_local_build: d.prefer_local_build,
-                is_fixed_output: d.is_fixed_output,
-                allow_substitutes: d.allow_substitutes,
-                created_at: now,
-                ..Default::default()
-            }.into_active_model());
+            new_derivations.push(
+                MDerivation {
+                    id,
+                    hash: drv_hash,
+                    name: drv_name,
+                    architecture: d.architecture.clone(),
+                    pname: d.pname.clone(),
+                    prefer_local_build: d.prefer_local_build,
+                    is_fixed_output: d.is_fixed_output,
+                    allow_substitutes: d.allow_substitutes,
+                    created_at: now,
+                    ..Default::default()
+                }
+                .into_active_model(),
+            );
             for output in &d.outputs {
                 let (hash, package) = get_hash_from_path(output.path.clone())
                     .unwrap_or_else(|_| ("unknown".to_owned(), output.name.clone()));
-                new_outputs.push(MDerivationOutput {
-                    id: DerivationOutputId::now_v7(),
-                    derivation: id,
-                    name: output.name.clone(),
-                    hash,
-                    package,
-                    created_at: now,
-                    ..Default::default()
-                }.into_active_model());
+                new_outputs.push(
+                    MDerivationOutput {
+                        id: DerivationOutputId::now_v7(),
+                        derivation: id,
+                        name: output.name.clone(),
+                        hash,
+                        package,
+                        created_at: now,
+                        ..Default::default()
+                    }
+                    .into_active_model(),
+                );
             }
         }
 
@@ -220,13 +228,16 @@ impl<'a> EvalResultProcessor<'a> {
                     continue;
                 }
 
-                rows.push(MDerivationInputSource {
-                    id: DerivationInputSourceId::now_v7(),
-                    derivation: drv_id,
-                    hash,
-                    store_path,
-                    created_at: now,
-                }.into_active_model());
+                rows.push(
+                    MDerivationInputSource {
+                        id: DerivationInputSourceId::now_v7(),
+                        derivation: drv_id,
+                        hash,
+                        store_path,
+                        created_at: now,
+                    }
+                    .into_active_model(),
+                );
             }
         }
 
@@ -301,22 +312,25 @@ impl<'a> EvalResultProcessor<'a> {
                 (BuildStatus::Created, d.substituted)
             };
 
-            anchors.push(MDerivationBuild {
-                id: DerivationBuildId::now_v7(),
-                derivation: drv_id,
-                status,
-                substitutable,
-                substituted: matches!(status, BuildStatus::Substituted),
-                // truly-substituted means every output is already closure-complete
-                // in our cache (`compute_truly_substituted` checks it), so this
-                // anchor satisfies the dispatch gate for its dependents immediately.
-                closure_complete: is_truly_substituted,
-                timeout_secs: d.timeout_secs.map(|v| v as i64),
-                max_silent_secs: d.max_silent_secs.map(|v| v as i64),
-                created_at: now,
-                updated_at: now,
-                ..Default::default()
-            }.into_active_model());
+            anchors.push(
+                MDerivationBuild {
+                    id: DerivationBuildId::now_v7(),
+                    derivation: drv_id,
+                    status,
+                    substitutable,
+                    substituted: matches!(status, BuildStatus::Substituted),
+                    // truly-substituted means every output is already closure-complete
+                    // in our cache (`compute_truly_substituted` checks it), so this
+                    // anchor satisfies the dispatch gate for its dependents immediately.
+                    closure_complete: is_truly_substituted,
+                    timeout_secs: d.timeout_secs.map(|v| v as i64),
+                    max_silent_secs: d.max_silent_secs.map(|v| v as i64),
+                    created_at: now,
+                    updated_at: now,
+                    ..Default::default()
+                }
+                .into_active_model(),
+            );
         }
 
         for chunk in anchors.chunks(BATCH_SIZE) {
@@ -412,7 +426,10 @@ impl<'a> EvalResultProcessor<'a> {
             let ids: Vec<DerivationId> = upstream_substitutable.iter().copied().collect();
             if let Err(e) = gradient_db::for_each_chunk(&ids, |chunk| async move {
                 EDerivationBuild::update_many()
-                    .col_expr(CDerivationBuild::Substitutable, sea_orm::sea_query::Expr::value(true))
+                    .col_expr(
+                        CDerivationBuild::Substitutable,
+                        sea_orm::sea_query::Expr::value(true),
+                    )
                     .filter(CDerivationBuild::Derivation.is_in(chunk))
                     .filter(CDerivationBuild::Status.is_not_in([
                         i32::from(BuildStatus::Completed),
@@ -440,7 +457,10 @@ impl<'a> EvalResultProcessor<'a> {
         if !not_upstream.is_empty()
             && let Err(e) = gradient_db::for_each_chunk(&not_upstream, |chunk| async move {
                 EDerivationBuild::update_many()
-                    .col_expr(CDerivationBuild::Substitutable, sea_orm::sea_query::Expr::value(false))
+                    .col_expr(
+                        CDerivationBuild::Substitutable,
+                        sea_orm::sea_query::Expr::value(false),
+                    )
                     .filter(CDerivationBuild::Derivation.is_in(chunk))
                     .filter(CDerivationBuild::Substitutable.eq(true))
                     .filter(CDerivationBuild::Status.is_not_in([
@@ -605,9 +625,10 @@ impl<'a> EvalResultProcessor<'a> {
             return Ok(HashSet::new());
         };
         const UPSTREAM_WINDOW_MINUTES: i64 = 60;
-        let endpoints = gradient_db::upstream_endpoints_for_org(db, org_id, UPSTREAM_WINDOW_MINUTES)
-            .await
-            .unwrap_or_default();
+        let endpoints =
+            gradient_db::upstream_endpoints_for_org(db, org_id, UPSTREAM_WINDOW_MINUTES)
+                .await
+                .unwrap_or_default();
         if endpoints.is_empty() {
             return Ok(HashSet::new());
         }
@@ -628,7 +649,12 @@ impl<'a> EvalResultProcessor<'a> {
         let to_probe: Vec<(String, String)> = outputs
             .iter()
             .filter(|o| !o.is_cached_anywhere())
-            .map(|o| (o.hash.clone(), format!("/nix/store/{}-{}", o.hash, o.package)))
+            .map(|o| {
+                (
+                    o.hash.clone(),
+                    format!("/nix/store/{}-{}", o.hash, o.package),
+                )
+            })
             .collect::<HashMap<_, _>>()
             .into_iter()
             .collect();
@@ -770,15 +796,18 @@ impl<'a> EvalResultProcessor<'a> {
                 continue;
             }
             if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) {
-                active_entry_points.push(MEntryPoint {
-                    id: EntryPointId::now_v7(),
-                    project: project_id,
-                    evaluation: self.evaluation_id,
-                    derivation: drv_id,
-                    eval: d.attr.clone(),
-                    created_at: now,
-                    ..Default::default()
-                }.into_active_model());
+                active_entry_points.push(
+                    MEntryPoint {
+                        id: EntryPointId::now_v7(),
+                        project: project_id,
+                        evaluation: self.evaluation_id,
+                        derivation: drv_id,
+                        eval: d.attr.clone(),
+                        created_at: now,
+                        ..Default::default()
+                    }
+                    .into_active_model(),
+                );
             }
         }
 
@@ -861,15 +890,15 @@ pub async fn handle_eval_result(
     let batch = DerivationInsertBatch::prepare(&derivations, &existing);
     let drv_path_to_id = batch.insert(state, &proc.evaluation).await?;
 
-    proc.persist_input_sources(&derivations, &drv_path_to_id).await;
+    proc.persist_input_sources(&derivations, &drv_path_to_id)
+        .await;
 
     // Dependency edges are NOT created here. The BFS walks roots→leaves, so
     // batch N may contain derivation A whose dep B lands in batch N+1. Edges are
     // accumulated per eval and flushed by `flush_deferred_deps` once the stream
     // completes (`handle_eval_job_completed`), when every endpoint has a row.
 
-    proc.resolve_anchors(&derivations, &drv_path_to_id)
-        .await?;
+    proc.resolve_anchors(&derivations, &drv_path_to_id).await?;
 
     proc.add_system_features(&derivations, &drv_path_to_id)
         .await;
@@ -917,7 +946,8 @@ pub async fn handle_eval_job_completed(
 ) -> Result<()> {
     // The build graph is now complete: materialise each entry point's closure
     // and seed the per-entry-point dependency counts (#383).
-    if let Err(e) = gradient_db::seed_entry_point_dep_counts(&state.worker_db, evaluation_id).await {
+    if let Err(e) = gradient_db::seed_entry_point_dep_counts(&state.worker_db, evaluation_id).await
+    {
         error!(error = %e, %evaluation_id, "seed_entry_point_dep_counts failed (non-fatal)");
     }
 
@@ -982,7 +1012,8 @@ impl EvalEdgeAccumulator {
             if d.dependencies.is_empty() {
                 self.leaves.push(d.drv_path.clone());
             } else {
-                self.pending.push((d.drv_path.clone(), d.dependencies.clone()));
+                self.pending
+                    .push((d.drv_path.clone(), d.dependencies.clone()));
             }
         }
     }
@@ -1049,12 +1080,10 @@ pub async fn flush_ready_edges(
         }
     }
 
-    let (ready, still_pending) = partition_ready_edges(std::mem::take(&mut acc.pending), &acc.known);
+    let (ready, still_pending) =
+        partition_ready_edges(std::mem::take(&mut acc.pending), &acc.known);
     acc.pending = still_pending;
-    let mut complete: Vec<DerivationId> = ready
-        .iter()
-        .map(|(src, _)| acc.known[src])
-        .collect();
+    let mut complete: Vec<DerivationId> = ready.iter().map(|(src, _)| acc.known[src]).collect();
     let mut leaves_left = Vec::new();
     for p in acc.leaves.drain(..) {
         match acc.known.get(&p) {
@@ -1106,8 +1135,14 @@ pub async fn flush_ready_edges(
     let db = &state.worker_db;
     if let Err(e) = gradient_db::for_each_chunk(&complete, |chunk| async move {
         EDerivationBuild::update_many()
-            .col_expr(CDerivationBuild::EdgesComplete, sea_orm::sea_query::Expr::value(true))
-            .col_expr(CDerivationBuild::EdgesUnresolved, sea_orm::sea_query::Expr::value(false))
+            .col_expr(
+                CDerivationBuild::EdgesComplete,
+                sea_orm::sea_query::Expr::value(true),
+            )
+            .col_expr(
+                CDerivationBuild::EdgesUnresolved,
+                sea_orm::sea_query::Expr::value(false),
+            )
             .filter(CDerivationBuild::Derivation.is_in(chunk))
             .exec(db)
             .await
@@ -1133,7 +1168,10 @@ pub type EdgePairs = Vec<(String, Vec<String>)>;
 /// Split pending pairs into the fully resolvable (source and every dep known)
 /// and the remainder. Pairs stay as string pairs so a failed insert can push
 /// them back for the completion flush.
-fn partition_ready_edges(pending: EdgePairs, known: &HashMap<String, DerivationId>) -> (EdgePairs, EdgePairs) {
+fn partition_ready_edges(
+    pending: EdgePairs,
+    known: &HashMap<String, DerivationId>,
+) -> (EdgePairs, EdgePairs) {
     pending.into_iter().partition(|(src, deps)| {
         known.contains_key(src) && deps.iter().all(|d| known.contains_key(d))
     })
@@ -1277,7 +1315,10 @@ async fn set_edges_unresolved(
     let ids: Vec<DerivationId> = ids.iter().copied().collect();
     if let Err(e) = gradient_db::for_each_chunk(&ids, |chunk| async move {
         EDerivationBuild::update_many()
-            .col_expr(CDerivationBuild::EdgesUnresolved, sea_orm::sea_query::Expr::value(value))
+            .col_expr(
+                CDerivationBuild::EdgesUnresolved,
+                sea_orm::sea_query::Expr::value(value),
+            )
             .filter(CDerivationBuild::Derivation.is_in(chunk))
             .exec(db)
             .await
@@ -1382,12 +1423,14 @@ mod upstream_substitutable_tests {
             output(b, "h3"),
             output(b, "h4"),
         ];
-        let available: HashSet<String> =
-            ["h1", "h2", "h3"].iter().map(|s| s.to_string()).collect();
+        let available: HashSet<String> = ["h1", "h2", "h3"].iter().map(|s| s.to_string()).collect();
 
         let got = derivations_all_outputs_available(&outputs, &available);
         assert!(got.contains(&a), "all of a's outputs are available");
-        assert!(!got.contains(&b), "b has an output (h4) not cached anywhere");
+        assert!(
+            !got.contains(&b),
+            "b has an output (h4) not cached anywhere"
+        );
     }
 
     #[test]
@@ -1432,12 +1475,19 @@ mod incremental_edge_flush_tests {
 
         let pending = vec![
             ("a.drv".to_owned(), vec!["b.drv".to_owned()]),
-            ("a.drv".to_owned(), vec!["b.drv".to_owned(), "later.drv".to_owned()]),
+            (
+                "a.drv".to_owned(),
+                vec!["b.drv".to_owned(), "later.drv".to_owned()],
+            ),
             ("unknown-src.drv".to_owned(), vec!["b.drv".to_owned()]),
         ];
         let (ready, still) = partition_ready_edges(pending, &known);
         assert_eq!(ready, vec![("a.drv".to_owned(), vec!["b.drv".to_owned()])]);
-        assert_eq!(still.len(), 2, "unknown src or dep stays pending: {still:?}");
+        assert_eq!(
+            still.len(),
+            2,
+            "unknown src or dep stays pending: {still:?}"
+        );
     }
 
     /// A dep first queried-and-missing must become resolvable once its own
@@ -1449,9 +1499,18 @@ mod incremental_edge_flush_tests {
 
         acc.add_batch(&[drv("leaf.drv", &[]), drv("root.drv", &["leaf.drv"])]);
 
-        assert!(!acc.missing.contains("leaf.drv"), "batch arrival must clear the DB-miss memo");
+        assert!(
+            !acc.missing.contains("leaf.drv"),
+            "batch arrival must clear the DB-miss memo"
+        );
         assert_eq!(acc.leaves, vec!["leaf.drv".to_owned()]);
-        assert_eq!(acc.pending, vec![("root.drv".to_owned(), vec!["leaf.drv".to_owned()])]);
-        assert_eq!(acc.into_pending(), vec![("root.drv".to_owned(), vec!["leaf.drv".to_owned()])]);
+        assert_eq!(
+            acc.pending,
+            vec![("root.drv".to_owned(), vec!["leaf.drv".to_owned()])]
+        );
+        assert_eq!(
+            acc.into_pending(),
+            vec![("root.drv".to_owned(), vec!["leaf.drv".to_owned()])]
+        );
     }
 }

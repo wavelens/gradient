@@ -13,9 +13,9 @@ use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use axum_streams::StreamBodyAs;
+use gradient_core::ServerState;
 use gradient_storage::sgr::SgrState;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -33,8 +33,8 @@ async fn load_chunk_rows(state: &ServerState, log_key: BuildAttemptId) -> WebRes
 }
 
 fn decode_chunk(raw: &[u8]) -> WebResult<String> {
-    let bytes = zstd::stream::decode_all(raw)
-        .map_err(|e| WebError::Internal(anyhow::Error::new(e)))?;
+    let bytes =
+        zstd::stream::decode_all(raw).map_err(|e| WebError::Internal(anyhow::Error::new(e)))?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
@@ -142,7 +142,11 @@ pub async fn get_build_log_lines(
 ) -> Result<Response, WebError> {
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
     let Some(log_key) = super::effective_log_id(&state, &ctx.anchor).await else {
-        return Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], String::new()).into_response());
+        return Ok((
+            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            String::new(),
+        )
+            .into_response());
     };
     let rows = load_chunk_rows(&state, log_key).await?;
 
@@ -213,7 +217,12 @@ pub async fn get_build_log_search(
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
     let (log_key, rows) = match super::effective_log_id(&state, &ctx.anchor).await {
         Some(key) => (key, load_chunk_rows(&state, key).await?),
-        None => return Ok(StreamBodyAs::json_nl(futures::stream::empty::<serde_json::Value>()).into_response()),
+        None => {
+            return Ok(
+                StreamBodyAs::json_nl(futures::stream::empty::<serde_json::Value>())
+                    .into_response(),
+            );
+        }
     };
     let state = Arc::clone(&state);
 
@@ -263,7 +272,7 @@ pub async fn get_build_log_search(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_line_range, LineRangeQuery};
+    use super::{LineRangeQuery, parse_line_range};
 
     fn q(start: Option<u64>, end: Option<u64>, range: Option<&str>) -> LineRangeQuery {
         LineRangeQuery {
@@ -275,7 +284,10 @@ mod tests {
 
     #[test]
     fn parses_start_end() {
-        assert_eq!(parse_line_range(&q(Some(5), Some(9), None)).unwrap(), (5, Some(9)));
+        assert_eq!(
+            parse_line_range(&q(Some(5), Some(9), None)).unwrap(),
+            (5, Some(9))
+        );
     }
 
     #[test]

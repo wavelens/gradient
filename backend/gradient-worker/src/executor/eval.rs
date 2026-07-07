@@ -870,7 +870,10 @@ mod tests {
     fn unmatched_explicit_target_errors_but_wildcard_is_silent() {
         assert_eq!(
             unmatched_target_errors(&["packages.x86_64-linux.uxc".to_string()]),
-            vec!["target 'packages.x86_64-linux.uxc' matched no derivations in the flake".to_string()]
+            vec![
+                "target 'packages.x86_64-linux.uxc' matched no derivations in the flake"
+                    .to_string()
+            ]
         );
         assert!(unmatched_target_errors(&["packages.x86_64-linux.#".to_string()]).is_empty());
         assert!(unmatched_target_errors(&["packages.x86_64-linux.*".to_string()]).is_empty());
@@ -1247,9 +1250,16 @@ mod tests {
         let job = make_flake_job(repo); // wildcards: ["*"]
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
-            .await
-            .unwrap();
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
 
         let ReportedEvent::EvalResult { errors, .. } = reporter.last_eval_result().unwrap() else {
             panic!("expected an EvalResult");
@@ -1264,15 +1274,22 @@ mod tests {
     async fn discovery_errors_reach_eval_result() {
         let repo = "https://example.com/repo";
         // No attrs discovered, but discovery recorded a thrown-attr diagnostic.
-        let resolver =
-            FakeDerivationResolver::new().with_flake_errors(repo, vec!["failed to evaluate 'x': boom".into()]);
+        let resolver = FakeDerivationResolver::new()
+            .with_flake_errors(repo, vec!["failed to evaluate 'x': boom".into()]);
         let drv_reader = FakeDrvReader::new();
         let job = make_flake_job(repo); // wildcard job, no unmatched-target noise
         let mut reporter = RecordingJobReporter::new();
 
-        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
-            .await
-            .unwrap();
+        evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .unwrap();
 
         let ReportedEvent::EvalResult { errors, .. } = reporter.last_eval_result().unwrap() else {
             panic!("expected an EvalResult");

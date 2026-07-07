@@ -10,8 +10,8 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 
-use gradient_types::*;
 use gradient_core::ServerState;
+use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
@@ -158,7 +158,15 @@ pub async fn authorize(
     };
 
     if !current_user.active {
-        audit_deny(&state, Some(user_id), info, method, path, "Account deactivated").await;
+        audit_deny(
+            &state,
+            Some(user_id),
+            info,
+            method,
+            path,
+            "Account deactivated",
+        )
+        .await;
         return Err(WebError::forbidden("account is deactivated"));
     }
 
@@ -185,8 +193,7 @@ pub async fn authorize_optional(
         .get::<ConnectInfo<SocketAddr>>()
         .map(|c| c.0.ip())
         .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-    let client_ip =
-        resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
+    let client_ip = resolve_client_ip(req.headers(), peer, &state.config.network.trusted_proxies);
 
     if let Some(token_str) = extract_bearer_or_cookie(req.headers())
         && let Ok(decoded) = decode_jwt(State(Arc::clone(&state)), token_str).await

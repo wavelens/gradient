@@ -11,9 +11,9 @@ use async_stream::stream;
 use axum::Extension;
 use axum::extract::{Path, State};
 use axum_streams::StreamBodyAs;
+use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -46,7 +46,10 @@ async fn eval_anchor_jobs(
         let Some(anchor) = anchors.get(&job.derivation_build).cloned() else {
             continue;
         };
-        let name = match EDerivation::find_by_id(job.derivation).one(&state.web_db).await {
+        let name = match EDerivation::find_by_id(job.derivation)
+            .one(&state.web_db)
+            .await
+        {
             Ok(Some(d)) => d.name,
             _ => String::new(),
         };

@@ -13,25 +13,23 @@
 
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
-use gradient_entity::{cli_device_authorization, session};
-use gradient_storage::{EmailSender, NarStore};
-use gradient_types::{
-    CliDeviceAuthorizationId, RuntimeConfig, SecretString, SessionId, UserId,
-};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
+use gradient_entity::{cli_device_authorization, session};
+use gradient_storage::{EmailSender, NarStore};
+use gradient_test_support::cli::test_cli;
+use gradient_test_support::fakes::email::InMemoryEmailSender;
+use gradient_test_support::fixtures::{user, user_id};
+use gradient_test_support::log_storage::NoopLogStorage;
+use gradient_types::{CliDeviceAuthorizationId, RuntimeConfig, SecretString, SessionId, UserId};
+use gradient_web::create_router;
 use jsonwebtoken::{EncodingKey, Header, encode};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use gradient_test_support::cli::test_cli;
-use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::fixtures::{user, user_id};
-use gradient_test_support::log_storage::NoopLogStorage;
 use uuid::Uuid;
-use gradient_web::create_router;
 
 const JWT_SECRET: &str = "test-jwt-secret";
 
@@ -99,7 +97,9 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
     let db = web_db_setup(MockDatabase::new(DatabaseBackend::Postgres));
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db.into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
@@ -256,7 +256,9 @@ fn poll_authorized_returns_token_once() {
 fn poll_unknown_device_code_returns_404() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        let s = server_with(|db| db.append_query_results([Vec::<cli_device_authorization::Model>::new()]));
+        let s = server_with(|db| {
+            db.append_query_results([Vec::<cli_device_authorization::Model>::new()])
+        });
 
         let res = s
             .post("/api/v1/auth/cli/poll")

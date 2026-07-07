@@ -262,7 +262,10 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     .await
     .context("GC: failed to query orphan derivation anchors")?;
     let anchor_derivation: std::collections::HashMap<DerivationBuildId, DerivationId> =
-        candidate_anchors.iter().map(|a| (a.id, a.derivation)).collect();
+        candidate_anchors
+            .iter()
+            .map(|a| (a.id, a.derivation))
+            .collect();
     let anchor_ids: Vec<DerivationBuildId> = anchor_derivation.keys().copied().collect();
 
     let candidate_attempts = crate::fetch_in_chunks(&anchor_ids, |chunk| async move {
@@ -275,7 +278,11 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     .context("GC: failed to query orphan derivation build attempts")?;
     let attempt_snapshot: Vec<(DerivationId, BuildAttemptId)> = candidate_attempts
         .iter()
-        .filter_map(|a| anchor_derivation.get(&a.derivation_build).map(|d| (*d, a.id)))
+        .filter_map(|a| {
+            anchor_derivation
+                .get(&a.derivation_build)
+                .map(|d| (*d, a.id))
+        })
         .collect();
 
     let delete_sql = format!(
@@ -459,8 +466,8 @@ fn attempt_logs_to_reclaim(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
     use EvaluationStatus::*;
+    use std::collections::HashSet;
 
     fn set(items: &[&str]) -> HashSet<String> {
         items.iter().map(|s| s.to_string()).collect()
@@ -480,12 +487,8 @@ mod tests {
         // A deleted derivation's own `.drv` hash is reclaimed alongside its
         // outputs, but `d2` was re-created by a concurrent eval (surviving
         // `derivation` row shares the hash) so it must be kept.
-        let mut got = reclaimable_after_delete(
-            set(&["o1"]),
-            &set(&[]),
-            set(&["d1", "d2"]),
-            &set(&["d2"]),
-        );
+        let mut got =
+            reclaimable_after_delete(set(&["o1"]), &set(&[]), set(&["d1", "d2"]), &set(&["d2"]));
         got.sort();
         assert_eq!(got, vec!["d1".to_string(), "o1".to_string()]);
     }
@@ -517,7 +520,10 @@ mod tests {
 
     const WEDGED_HOURS: i64 = 24;
 
-    fn at(statuses: &[EvaluationStatus], age_hours: i64) -> Vec<(EvaluationStatus, chrono::NaiveDateTime)> {
+    fn at(
+        statuses: &[EvaluationStatus],
+        age_hours: i64,
+    ) -> Vec<(EvaluationStatus, chrono::NaiveDateTime)> {
         let updated = gradient_types::now() - ChronoDuration::hours(age_hours);
         statuses.iter().map(|s| (*s, updated)).collect()
     }

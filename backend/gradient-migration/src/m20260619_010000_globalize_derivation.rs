@@ -28,11 +28,31 @@ const REPOINTS: &[(&str, &str)] = &[
 ];
 
 const UNIQUE_PAIRS: &[(&str, &str, &str)] = &[
-    ("idx-derivation_output-derivation-name", "derivation_output", "derivation, name"),
-    ("idx-derivation_dependency-pair", "derivation_dependency", "derivation, dependency"),
-    ("idx-derivation_closure-pair", "derivation_closure", "root_derivation, dep_derivation"),
-    ("idx-derivation_feature-pair", "derivation_feature", "derivation, feature"),
-    ("idx-cache_derivation-pair", "cache_derivation", "cache, derivation"),
+    (
+        "idx-derivation_output-derivation-name",
+        "derivation_output",
+        "derivation, name",
+    ),
+    (
+        "idx-derivation_dependency-pair",
+        "derivation_dependency",
+        "derivation, dependency",
+    ),
+    (
+        "idx-derivation_closure-pair",
+        "derivation_closure",
+        "root_derivation, dep_derivation",
+    ),
+    (
+        "idx-derivation_feature-pair",
+        "derivation_feature",
+        "derivation, feature",
+    ),
+    (
+        "idx-cache_derivation-pair",
+        "cache_derivation",
+        "cache, derivation",
+    ),
 ];
 
 #[async_trait::async_trait]
@@ -55,7 +75,8 @@ impl MigrationTrait for Migration {
 
         // Drop the unique indexes that re-pointing would transiently violate.
         for (idx, ..) in UNIQUE_PAIRS {
-            db.execute(exec(format!("DROP INDEX IF EXISTS \"{idx}\""))).await?;
+            db.execute(exec(format!("DROP INDEX IF EXISTS \"{idx}\"")))
+                .await?;
         }
 
         // Re-point every FK to the surviving derivation row.
@@ -95,17 +116,25 @@ impl MigrationTrait for Migration {
         .await?;
 
         // Swap the unique index to the global (hash, name) and drop org.
-        db.execute(exec("DROP INDEX IF EXISTS \"idx-derivation-org-hash-name\"".into())).await?;
+        db.execute(exec(
+            "DROP INDEX IF EXISTS \"idx-derivation-org-hash-name\"".into(),
+        ))
+        .await?;
         db.execute(exec(
             "CREATE UNIQUE INDEX \"idx-derivation-hash-name\" ON derivation (hash, name)".into(),
         ))
         .await?;
         db.execute(exec(
-            "ALTER TABLE derivation DROP CONSTRAINT IF EXISTS \"fk-derivation-organization\"".into(),
+            "ALTER TABLE derivation DROP CONSTRAINT IF EXISTS \"fk-derivation-organization\""
+                .into(),
         ))
         .await?;
-        db.execute(exec("ALTER TABLE derivation DROP COLUMN IF EXISTS organization".into())).await?;
-        db.execute(exec("DROP TABLE IF EXISTS derivation_dedup".into())).await?;
+        db.execute(exec(
+            "ALTER TABLE derivation DROP COLUMN IF EXISTS organization".into(),
+        ))
+        .await?;
+        db.execute(exec("DROP TABLE IF EXISTS derivation_dedup".into()))
+            .await?;
         Ok(())
     }
 

@@ -264,7 +264,10 @@ mod tests {
         let mut pi = path_info();
         pi.references = vec![];
         let s = pi.to_nix_string();
-        assert!(!s.contains("References:"), "empty references must omit the line:\n{s}");
+        assert!(
+            !s.contains("References:"),
+            "empty references must omit the line:\n{s}"
+        );
     }
 
     #[test]

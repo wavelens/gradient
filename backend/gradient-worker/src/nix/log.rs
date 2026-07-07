@@ -18,7 +18,10 @@ pub fn store_log_path(log_dir: &Path, drv_path: &str) -> PathBuf {
     let base = drv_path.rsplit('/').next().unwrap_or(drv_path);
     let split = 2.min(base.len());
     let (first2, rest) = base.split_at(split);
-    log_dir.join("drvs").join(first2).join(format!("{rest}.bz2"))
+    log_dir
+        .join("drvs")
+        .join(first2)
+        .join(format!("{rest}.bz2"))
 }
 
 /// Read and decompress the nix-store build log for `drv_path`, if present.

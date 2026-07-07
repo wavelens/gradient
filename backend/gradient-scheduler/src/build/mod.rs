@@ -17,9 +17,11 @@
 mod lifecycle;
 mod self_heal;
 
+pub use crate::waiting_state::reconcile_waiting_state;
 #[allow(unused_imports)]
-pub(crate) use lifecycle::{FailureOutcome, decide_failure_outcome, retry_backoff_elapsed, terminal_success_status};
+pub(crate) use lifecycle::{
+    FailureOutcome, decide_failure_outcome, retry_backoff_elapsed, terminal_success_status,
+};
 pub use lifecycle::{
     handle_build_job_completed, handle_build_job_failed, handle_build_output, requeue_orphaned_jobs,
 };
-pub use crate::waiting_state::reconcile_waiting_state;

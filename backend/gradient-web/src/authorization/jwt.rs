@@ -8,8 +8,8 @@ use super::api_key::{ApiKeyContext, DecodedRequest};
 use axum::extract::State;
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
-use gradient_types::*;
 use gradient_core::ServerState;
+use gradient_types::*;
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rand::distr::{Alphanumeric, SampleString};
 use sea_orm::{
@@ -217,7 +217,12 @@ pub fn encode_download_token(
     let now = Utc::now();
     let exp = (now + Duration::hours(1)).timestamp() as usize;
     let iat = now.timestamp() as usize;
-    let claim = DownloadClaims { iat, exp, derivation, evaluation };
+    let claim = DownloadClaims {
+        iat,
+        exp,
+        derivation,
+        evaluation,
+    };
     encode(
         &Header::default(),
         &claim,

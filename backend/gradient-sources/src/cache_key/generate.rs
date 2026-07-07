@@ -12,10 +12,11 @@ use ed25519_compact::KeyPair;
 /// The private key is the full 64-byte ed25519 keypair encrypted and base64-encoded.
 /// The public key is the last 32 bytes of the keypair, base64-encoded in plaintext.
 pub fn generate_signing_key(secret_file: &str) -> Result<(String, String), SourceError> {
-    let secret =
-        gradient_types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
+    let secret = gradient_types::input::load_secret_bytes(secret_file).map_err(|e| {
+        SourceError::FileRead {
             reason: e.to_string(),
-        })?;
+        }
+    })?;
 
     let keypair = KeyPair::generate();
     // Base64-encode the full 64-byte keypair (seed || public key)

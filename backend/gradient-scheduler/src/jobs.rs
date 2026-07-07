@@ -47,8 +47,13 @@ impl PendingEvalJob {
     pub fn cached_followup(&self, store_path: String) -> PendingEvalJob {
         let mut follow = self.clone();
         follow.job.tasks = vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations];
-        follow.job.source = FlakeSource::Cached { store_path: store_path.clone() };
-        follow.required_paths = vec![RequiredPath { path: store_path, cache_info: None }];
+        follow.job.source = FlakeSource::Cached {
+            store_path: store_path.clone(),
+        };
+        follow.required_paths = vec![RequiredPath {
+            path: store_path,
+            cache_info: None,
+        }];
         follow
     }
 }
@@ -121,8 +126,8 @@ impl WorkerCaps {
     /// `architecture` and `required_features`. `"builtin"` derivations
     /// (`builtin:fetchurl` etc.) run on any architecture.
     pub fn can_build(&self, architecture: &str, required_features: &[String]) -> bool {
-        let arch_ok =
-            architecture == gradient_types::BUILTIN_ARCH || self.architectures.iter().any(|a| a == architecture);
+        let arch_ok = architecture == gradient_types::BUILTIN_ARCH
+            || self.architectures.iter().any(|a| a == architecture);
         let features_ok = required_features
             .iter()
             .all(|f| self.system_features.iter().any(|sf| sf == f));
@@ -315,7 +320,12 @@ fn worker_context_of(caps: Option<&WorkerCaps>) -> WorkerContext<'_> {
             fetch: c.fetch,
             metrics: c.metrics,
         },
-        None => WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None },
+        None => WorkerContext {
+            architectures: &[],
+            system_features: &[],
+            fetch: false,
+            metrics: None,
+        },
     }
 }
 
@@ -575,9 +585,19 @@ impl JobTracker {
         instance: &gradient_score::InstanceContext,
     ) -> Option<Assignment> {
         let worker_ctx = worker_context_of(caps);
-        let scored =
-            self.score_candidates(worker_id, authorized, caps, kind, policy, instance, &worker_ctx);
-        let winner_id = scored.first().filter(|(_, sc)| wins(sc)).map(|(id, _)| id.clone());
+        let scored = self.score_candidates(
+            worker_id,
+            authorized,
+            caps,
+            kind,
+            policy,
+            instance,
+            &worker_ctx,
+        );
+        let winner_id = scored
+            .first()
+            .filter(|(_, sc)| wins(sc))
+            .map(|(id, _)| id.clone());
 
         // Worker and instance context are identical for every candidate, so they
         // are computed once and shared across the decision and the winner record.
@@ -598,8 +618,10 @@ impl JobTracker {
         );
 
         let job_id = winner_id?;
-        let (_, winner_sc) =
-            scored.into_iter().next().expect("a winner implies a first candidate");
+        let (_, winner_sc) = scored
+            .into_iter()
+            .next()
+            .expect("a winner implies a first candidate");
         let dispatch_record =
             self.dispatch_record_for(&job_id, &winner_sc, worker_context, instance_context);
         let mut assignment = self.assign_pending(worker_id, &job_id)?;
@@ -933,9 +955,12 @@ impl JobTracker {
         self.active_jobs()
             .map(|(_, worker_id, job)| {
                 let (architecture, required_features, fetch_task, eval_task) = match job {
-                    PendingJob::Build(b) => {
-                        (Some(b.architecture.clone()), b.required_features.clone(), false, false)
-                    }
+                    PendingJob::Build(b) => (
+                        Some(b.architecture.clone()),
+                        b.required_features.clone(),
+                        false,
+                        false,
+                    ),
                     PendingJob::Eval(e) => {
                         let fetch = e.job.tasks.contains(&FlakeTask::FetchFlake);
                         let eval = e.job.tasks.iter().any(|t| {
@@ -982,9 +1007,11 @@ impl JobTracker {
             .values()
             .map(|job| {
                 let (kind, derivation_build, pname) = match job {
-                    PendingJob::Build(b) => {
-                        (DispatchedJobKind::Build, Some(b.derivation_build), b.pname.clone())
-                    }
+                    PendingJob::Build(b) => (
+                        DispatchedJobKind::Build,
+                        Some(b.derivation_build),
+                        b.pname.clone(),
+                    ),
                     PendingJob::Eval(_) => (DispatchedJobKind::Eval, None, None),
                 };
                 PendingJobInfo {
@@ -1035,7 +1062,10 @@ impl JobTracker {
 
     #[cfg(test)]
     pub fn rescore_count_of(&self, job_id: &str) -> u32 {
-        self.pending.get(job_id).map(|j| j.rescore_count()).unwrap_or(0)
+        self.pending
+            .get(job_id)
+            .map(|j| j.rescore_count())
+            .unwrap_or(0)
     }
 }
 
@@ -1178,7 +1208,9 @@ mod tests {
     fn flake_job(tasks: Vec<FlakeTask>) -> FlakeJob {
         FlakeJob {
             tasks,
-            source: FlakeSource::Cached { store_path: "/nix/store/abc-source".into() },
+            source: FlakeSource::Cached {
+                store_path: "/nix/store/abc-source".into(),
+            },
             wildcards: vec!["*".into()],
             timeout_secs: None,
             input_overrides: vec![],
@@ -1191,17 +1223,27 @@ mod tests {
         // A FetchFlake task needs `fetch`; any evaluation task needs `eval`.
         let fetch_only = WorkerCaps {
             fetch: true,
-            capabilities: GradientCapabilities { fetch: true, ..Default::default() },
+            capabilities: GradientCapabilities {
+                fetch: true,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let eval_only = WorkerCaps {
             fetch: false,
-            capabilities: GradientCapabilities { eval: true, ..Default::default() },
+            capabilities: GradientCapabilities {
+                eval: true,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let both = WorkerCaps {
             fetch: true,
-            capabilities: GradientCapabilities { fetch: true, eval: true, ..Default::default() },
+            capabilities: GradientCapabilities {
+                fetch: true,
+                eval: true,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let bundled = flake_job(vec![
@@ -1239,7 +1281,11 @@ mod tests {
         assert_eq!(tracker.active_count(), 1);
 
         tracker.add_pending("build:1".into(), build_job(peer, vec![]));
-        assert_eq!(tracker.pending_count(), 0, "active job must not be re-queued");
+        assert_eq!(
+            tracker.pending_count(),
+            0,
+            "active job must not be re-queued"
+        );
         assert_eq!(tracker.active_count(), 1);
     }
 
@@ -1335,7 +1381,11 @@ mod tests {
             fetch: true,
             architectures: vec!["x86_64-linux".into()],
             system_features: vec![],
-            capabilities: GradientCapabilities { fetch: true, eval: true, ..Default::default() },
+            capabilities: GradientCapabilities {
+                fetch: true,
+                eval: true,
+                ..Default::default()
+            },
             ..Default::default()
         };
         assert!(
@@ -1359,14 +1409,24 @@ mod tests {
             fetch: false,
             architectures: vec![],
             system_features: vec![],
-            capabilities: GradientCapabilities { eval: true, ..Default::default() },
+            capabilities: GradientCapabilities {
+                eval: true,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let p = gradient_score::policy_by_name("simple");
         let inst = gradient_score::InstanceContext::default();
         assert!(
             tracker
-                .take_best_of_kind("w1", None, Some(&eval_no_fetch), &JobKind::Flake, &*p, &inst)
+                .take_best_of_kind(
+                    "w1",
+                    None,
+                    Some(&eval_no_fetch),
+                    &JobKind::Flake,
+                    &*p,
+                    &inst
+                )
                 .is_some(),
             "cached eval job must run on an eval-capable worker without fetch"
         );
@@ -1450,7 +1510,11 @@ mod tests {
         for w in ["w1", "w2"] {
             tracker.record_scores(
                 w,
-                vec![CandidateScore { job_id: "kvm".into(), missing_count: 0, missing_nar_size: 0 }],
+                vec![CandidateScore {
+                    job_id: "kvm".into(),
+                    missing_count: 0,
+                    missing_nar_size: 0,
+                }],
             );
         }
         let p = gradient_score::policy_by_name("simple");
@@ -1535,7 +1599,11 @@ mod tests {
         // Caching a score lets it dispatch; the newer decision records the winner.
         tracker.record_scores(
             "w1",
-            vec![CandidateScore { job_id: "j1".into(), missing_count: 0, missing_nar_size: 0 }],
+            vec![CandidateScore {
+                job_id: "j1".into(),
+                missing_count: 0,
+                missing_nar_size: 0,
+            }],
         );
         assert!(
             tracker
@@ -1559,7 +1627,10 @@ mod tests {
 
         let decisions = tracker.recent_decisions();
         let cand = &decisions[0].candidates[0];
-        assert!(!cand.won, "an uncached candidate is passed over, not dispatched");
+        assert!(
+            !cand.won,
+            "an uncached candidate is passed over, not dispatched"
+        );
         assert!(
             cand.score_breakdown.get("rules").is_some(),
             "candidate must carry its per-rule breakdown for the detail page"
@@ -1575,7 +1646,11 @@ mod tests {
         assert!(detail.worker_context.is_object());
 
         // An unknown id resolves to nothing rather than erroring.
-        assert!(tracker.candidate_detail(DispatchedJobId::now_v7()).is_none());
+        assert!(
+            tracker
+                .candidate_detail(DispatchedJobId::now_v7())
+                .is_none()
+        );
     }
 
     #[test]
@@ -1591,7 +1666,11 @@ mod tests {
         for w in ["w1", "w2"] {
             tracker.record_scores(
                 w,
-                vec![CandidateScore { job_id: "build:j1".into(), missing_count: 0, missing_nar_size: 0 }],
+                vec![CandidateScore {
+                    job_id: "build:j1".into(),
+                    missing_count: 0,
+                    missing_nar_size: 0,
+                }],
             );
         }
         tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
@@ -1599,7 +1678,10 @@ mod tests {
         // Completing the job must leave no score entry behind on any worker.
         tracker.remove_active("build:j1");
         assert!(
-            tracker.scores.values().all(|ws| !ws.contains_key("build:j1")),
+            tracker
+                .scores
+                .values()
+                .all(|ws| !ws.contains_key("build:j1")),
             "a completed job must not leak score entries"
         );
 
@@ -1607,11 +1689,18 @@ mod tests {
         tracker.add_pending("build:j2".into(), build_job(peer, vec![]));
         tracker.record_scores(
             "w1",
-            vec![CandidateScore { job_id: "build:j2".into(), missing_count: 0, missing_nar_size: 0 }],
+            vec![CandidateScore {
+                job_id: "build:j2".into(),
+                missing_count: 0,
+                missing_nar_size: 0,
+            }],
         );
         tracker.remove_job("build:j2");
         assert!(
-            tracker.scores.values().all(|ws| !ws.contains_key("build:j2")),
+            tracker
+                .scores
+                .values()
+                .all(|ws| !ws.contains_key("build:j2")),
             "an aborted job must not leak score entries"
         );
     }
@@ -1626,11 +1715,18 @@ mod tests {
         tracker.add_pending("build:j1".into(), job);
         tracker.record_scores(
             "w1",
-            vec![CandidateScore { job_id: "build:j1".into(), missing_count: 0, missing_nar_size: 0 }],
+            vec![CandidateScore {
+                job_id: "build:j1".into(),
+                missing_count: 0,
+                missing_nar_size: 0,
+            }],
         );
         tracker.remove_pending_for_evaluation(eval_id);
         assert!(
-            tracker.scores.values().all(|ws| !ws.contains_key("build:j1")),
+            tracker
+                .scores
+                .values()
+                .all(|ws| !ws.contains_key("build:j1")),
             "aborting an evaluation must not leak its pending jobs' score entries"
         );
     }
@@ -1692,7 +1788,10 @@ mod tests {
             "j1".into(),
             build_job(
                 peer,
-                vec![RequiredPath { path: "/nix/store/foo".into(), cache_info: None }],
+                vec![RequiredPath {
+                    path: "/nix/store/foo".into(),
+                    cache_info: None,
+                }],
             ),
         );
 
@@ -1701,13 +1800,21 @@ mod tests {
 
         // No scores yet: the build's total is negative (RescoreWaitRule), so the
         // negative-total gate idles the worker and leaves the job pending.
-        assert!(tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst).is_none());
+        assert!(
+            tracker
+                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
+                .is_none()
+        );
         assert_eq!(tracker.pending_count(), 1);
 
         // Once the worker reports it is fully cached, the build clears the gate.
         tracker.record_scores(
             "w1",
-            vec![CandidateScore { job_id: "j1".into(), missing_count: 0, missing_nar_size: 0 }],
+            vec![CandidateScore {
+                job_id: "j1".into(),
+                missing_count: 0,
+                missing_nar_size: 0,
+            }],
         );
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
         assert_eq!(assignment.unwrap().job_id, "j1");
@@ -1726,7 +1833,11 @@ mod tests {
 
         let p = gradient_score::policy_by_name("simple");
         let inst = gradient_score::InstanceContext::default();
-        assert!(tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst).is_none());
+        assert!(
+            tracker
+                .take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst)
+                .is_none()
+        );
         assert_eq!(tracker.pending_count(), 1);
         assert_eq!(tracker.active_count(), 0);
     }
@@ -1741,13 +1852,20 @@ mod tests {
         tracker.add_pending("j1".into(), build_job(peer, vec![]));
         tracker.record_scores(
             "w1",
-            vec![CandidateScore { job_id: "j1".into(), missing_count: 0, missing_nar_size: 0 }],
+            vec![CandidateScore {
+                job_id: "j1".into(),
+                missing_count: 0,
+                missing_nar_size: 0,
+            }],
         );
 
         let p = gradient_score::policy_by_name("simple");
         let inst = gradient_score::InstanceContext::default();
         let assignment = tracker.take_best_of_kind("w1", None, None, &JobKind::Build, &*p, &inst);
-        assert_eq!(assignment.expect("non-negative build must dispatch").job_id, "j1");
+        assert_eq!(
+            assignment.expect("non-negative build must dispatch").job_id,
+            "j1"
+        );
         assert_eq!(tracker.pending_count(), 0);
         assert_eq!(tracker.active_count(), 1);
     }
@@ -1968,7 +2086,9 @@ mod tests {
     #[test]
     fn cached_followup_rewrites_source_and_tasks() {
         let peer = OrganizationId::now_v7();
-        let PendingJob::Eval(original) = fetch_eval_job(peer) else { unreachable!() };
+        let PendingJob::Eval(original) = fetch_eval_job(peer) else {
+            unreachable!()
+        };
 
         let follow = original.cached_followup("/nix/store/abc-source".into());
 
@@ -1984,7 +2104,12 @@ mod tests {
         assert_eq!(follow.org_id, original.org_id);
         assert_eq!(follow.repository, original.repository);
         assert_eq!(follow.required_paths.len(), 1);
-        assert!(follow.required_paths.iter().any(|p| p.path == "/nix/store/abc-source"));
+        assert!(
+            follow
+                .required_paths
+                .iter()
+                .any(|p| p.path == "/nix/store/abc-source")
+        );
     }
 
     #[test]
@@ -1999,14 +2124,21 @@ mod tests {
 
         tracker.assign_pending("worker", "build:1");
         tracker.bump_rescore_counts();
-        assert_eq!(tracker.rescore_count_of("build:1"), 0, "active job not bumped");
+        assert_eq!(
+            tracker.rescore_count_of("build:1"),
+            0,
+            "active job not bumped"
+        );
     }
 
     #[test]
     fn is_fetch_only_true_only_for_fetch_task_alone() {
         let fetch_only = FlakeJob {
             tasks: vec![FlakeTask::FetchFlake],
-            source: FlakeSource::Repository { url: "u".into(), commit: "c".into() },
+            source: FlakeSource::Repository {
+                url: "u".into(),
+                commit: "c".into(),
+            },
             wildcards: vec!["*".into()],
             timeout_secs: None,
             input_overrides: vec![],
@@ -2015,7 +2147,11 @@ mod tests {
         assert!(is_fetch_only(&fetch_only));
 
         let bundled = FlakeJob {
-            tasks: vec![FlakeTask::FetchFlake, FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations],
+            tasks: vec![
+                FlakeTask::FetchFlake,
+                FlakeTask::EvaluateFlake,
+                FlakeTask::EvaluateDerivations,
+            ],
             ..fetch_only.clone()
         };
         assert!(!is_fetch_only(&bundled));

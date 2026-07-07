@@ -165,8 +165,10 @@ pub async fn get_installation(
         bail!("GitHub get-installation API returned {status}: {body}");
     }
 
-    let parsed: InstallationResponse =
-        resp.json().await.context("failed to parse GitHub installation response")?;
+    let parsed: InstallationResponse = resp
+        .json()
+        .await
+        .context("failed to parse GitHub installation response")?;
 
     Ok(parsed.account.login)
 }

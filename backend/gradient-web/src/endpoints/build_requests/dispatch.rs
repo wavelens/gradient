@@ -20,7 +20,7 @@ use crate::permissions::Permission;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
-use gradient_util::nix_hash::normalize_nar_hash;
+use gradient_core::ServerState;
 use gradient_storage::source_nar::{SourceNar, materialise_source_nar};
 use gradient_types::ConcurrencyPolicy;
 use gradient_types::ids::{
@@ -32,7 +32,7 @@ use gradient_types::{
     EProject, EUploadSession, MCachedPath, MCachedPathSignature, MCommit, MEvaluation, MProject,
     MUser, NULL_TIME, now,
 };
-use gradient_core::ServerState;
+use gradient_util::nix_hash::normalize_nar_hash;
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
@@ -119,9 +119,15 @@ pub async fn post_dispatch(
         .await
         .map_err(|e| WebError::internal(format!("Failed to materialise source NAR: {}", e)))?;
 
-    let response =
-        finalize_build_request(&state, session.organization, &user, &nar, body.target, body.system)
-            .await?;
+    let response = finalize_build_request(
+        &state,
+        session.organization,
+        &user,
+        &nar,
+        body.target,
+        body.system,
+    )
+    .await?;
 
     let mut active: AUploadSession = session.into();
     active.dispatched_at = Set(Some(now()));

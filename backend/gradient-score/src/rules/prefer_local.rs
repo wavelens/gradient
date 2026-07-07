@@ -15,7 +15,10 @@ pub struct PreferLocalBuildRule {
 
 impl Default for PreferLocalBuildRule {
     fn default() -> Self {
-        Self { local_bonus: crate::weights::PREFER_LOCAL_BONUS, miss_penalty: crate::weights::PREFER_LOCAL_MISS_PENALTY }
+        Self {
+            local_bonus: crate::weights::PREFER_LOCAL_BONUS,
+            miss_penalty: crate::weights::PREFER_LOCAL_MISS_PENALTY,
+        }
     }
 }
 
@@ -36,7 +39,11 @@ impl ScoreRule for PreferLocalBuildRule {
         }
 
         let knee = 2.0 * instance.missing_paths.w1h.unwrap_or(0.0);
-        let slope = if knee > 0.0 { self.local_bonus / knee } else { self.miss_penalty };
+        let slope = if knee > 0.0 {
+            self.local_bonus / knee
+        } else {
+            self.miss_penalty
+        };
         match job.missing_count {
             Some(0) => self.local_bonus,
             Some(n) => (self.local_bonus - n as f64 * slope).max(0.0),
@@ -69,18 +76,36 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>, missing_count: Option<u32>) -> JobContext<'a> {
-        JobContext { job, missing_count, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now: gradient_types::now() }
+        JobContext {
+            job,
+            missing_count,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: gradient_types::now(),
+            ready_at: gradient_types::now(),
+            org_work_share: None,
+            rescore_count: 0,
+            now: gradient_types::now(),
+        }
     }
 
     fn worker() -> WorkerContext<'static> {
-        WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None }
+        WorkerContext {
+            architectures: &[],
+            system_features: &[],
+            fetch: false,
+            metrics: None,
+        }
     }
 
     #[test]
     fn local_worker_with_full_cache_gets_full_bonus() {
         let rule = PreferLocalBuildRule::default();
         let j = job(true);
-        assert_eq!(rule.score(&ctx(&j, Some(0)), &worker(), &InstanceContext::default()), rule.local_bonus);
+        assert_eq!(
+            rule.score(&ctx(&j, Some(0)), &worker(), &InstanceContext::default()),
+            rule.local_bonus
+        );
     }
 
     #[test]
@@ -98,16 +123,28 @@ mod tests {
     fn unknown_missing_count_is_zero() {
         let rule = PreferLocalBuildRule::default();
         let j = job(true);
-        assert_eq!(rule.score(&ctx(&j, None), &worker(), &InstanceContext::default()), 0.0);
+        assert_eq!(
+            rule.score(&ctx(&j, None), &worker(), &InstanceContext::default()),
+            0.0
+        );
     }
 
     #[test]
     fn not_prefer_local_is_zero_regardless_of_missing_count() {
         let rule = PreferLocalBuildRule::default();
         let j = job(false);
-        assert_eq!(rule.score(&ctx(&j, Some(0)), &worker(), &InstanceContext::default()), 0.0);
-        assert_eq!(rule.score(&ctx(&j, Some(5)), &worker(), &InstanceContext::default()), 0.0);
-        assert_eq!(rule.score(&ctx(&j, None), &worker(), &InstanceContext::default()), 0.0);
+        assert_eq!(
+            rule.score(&ctx(&j, Some(0)), &worker(), &InstanceContext::default()),
+            0.0
+        );
+        assert_eq!(
+            rule.score(&ctx(&j, Some(5)), &worker(), &InstanceContext::default()),
+            0.0
+        );
+        assert_eq!(
+            rule.score(&ctx(&j, None), &worker(), &InstanceContext::default()),
+            0.0
+        );
     }
 
     #[test]

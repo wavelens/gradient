@@ -13,9 +13,14 @@ pub use gradient_eval::stats::{StatsDelta, metrics_enabled};
 /// libnixexpr's `Counter`s are no-ops unless `NIX_SHOW_STATS` is set (otherwise
 /// `total_thunks`/`fn_calls` always report 0); the stats dump it would print is
 /// routed to `/dev/null` so it cannot pollute the worker's stderr.
-pub(crate) fn eval_worker_stats_env(metrics_enabled: bool) -> &'static [(&'static str, &'static str)] {
+pub(crate) fn eval_worker_stats_env(
+    metrics_enabled: bool,
+) -> &'static [(&'static str, &'static str)] {
     if metrics_enabled {
-        &[("NIX_SHOW_STATS", "1"), ("NIX_SHOW_STATS_PATH", "/dev/null")]
+        &[
+            ("NIX_SHOW_STATS", "1"),
+            ("NIX_SHOW_STATS_PATH", "/dev/null"),
+        ]
     } else {
         &[]
     }
@@ -124,8 +129,22 @@ mod tests {
     #[test]
     fn heap_peak_is_max_gauge_not_sum() {
         let mut acc = EvalStatsAccumulator::default();
-        acc.observe("a", StatsDelta { gc_heap_size: 900, ..d(0, 0, 0) }, 0);
-        acc.observe("a", StatsDelta { gc_heap_size: 300, ..d(0, 0, 0) }, 0);
+        acc.observe(
+            "a",
+            StatsDelta {
+                gc_heap_size: 900,
+                ..d(0, 0, 0)
+            },
+            0,
+        );
+        acc.observe(
+            "a",
+            StatsDelta {
+                gc_heap_size: 300,
+                ..d(0, 0, 0)
+            },
+            0,
+        );
         assert_eq!(acc.finish().peak_heap_bytes, 900);
     }
 
@@ -133,7 +152,11 @@ mod tests {
     fn stats_env_enables_nix_show_stats_only_when_metrics_on() {
         assert_eq!(
             eval_worker_stats_env(true),
-            [("NIX_SHOW_STATS", "1"), ("NIX_SHOW_STATS_PATH", "/dev/null")].as_slice()
+            [
+                ("NIX_SHOW_STATS", "1"),
+                ("NIX_SHOW_STATS_PATH", "/dev/null")
+            ]
+            .as_slice()
         );
         assert!(eval_worker_stats_env(false).is_empty());
     }

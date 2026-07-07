@@ -101,7 +101,9 @@ async fn org_for_derivation(
         .await
         .ok()?;
     for job in jobs {
-        if let Ok(Some(eval)) = EEvaluation::find_by_id(job.evaluation).one(&state.worker_db).await
+        if let Ok(Some(eval)) = EEvaluation::find_by_id(job.evaluation)
+            .one(&state.worker_db)
+            .await
             && let Some(org) = crate::dispatch::organization_id_for_eval(state, &eval).await
         {
             return Some(org);

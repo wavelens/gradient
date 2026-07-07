@@ -115,9 +115,7 @@ pub fn derive_pname(env_pname: Option<&str>, name: &str) -> Option<String> {
         return None;
     }
     match name.rsplit_once('-') {
-        Some((prefix, version))
-            if version.chars().next().is_some_and(|c| c.is_ascii_digit()) =>
-        {
+        Some((prefix, version)) if version.chars().next().is_some_and(|c| c.is_ascii_digit()) => {
             Some(prefix.to_owned())
         }
         _ => Some(name.to_owned()),
@@ -411,10 +409,16 @@ mod tests {
 
     #[test]
     fn pname_prefers_env_then_strips_version() {
-        assert_eq!(derive_pname(Some("hello"), "hello-2.12.1"), Some("hello".into()));
+        assert_eq!(
+            derive_pname(Some("hello"), "hello-2.12.1"),
+            Some("hello".into())
+        );
         assert_eq!(derive_pname(None, "hello-2.12.1"), Some("hello".into()));
         assert_eq!(derive_pname(None, "hello"), Some("hello".into()));
-        assert_eq!(derive_pname(None, "gcc-wrapper-13.2.0"), Some("gcc-wrapper".into()));
+        assert_eq!(
+            derive_pname(None, "gcc-wrapper-13.2.0"),
+            Some("gcc-wrapper".into())
+        );
         assert_eq!(derive_pname(Some(""), "hello-1.0"), Some("hello".into()));
     }
 

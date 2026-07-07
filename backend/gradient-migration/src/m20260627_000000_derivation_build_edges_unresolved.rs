@@ -36,7 +36,9 @@ impl MigrationTrait for Migration {
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .get_connection()
-            .execute_unprepared("ALTER TABLE derivation_build DROP COLUMN IF EXISTS edges_unresolved")
+            .execute_unprepared(
+                "ALTER TABLE derivation_build DROP COLUMN IF EXISTS edges_unresolved",
+            )
             .await?;
         Ok(())
     }

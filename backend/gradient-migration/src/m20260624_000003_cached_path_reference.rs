@@ -75,8 +75,10 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let db = manager.get_connection();
-        db.execute_unprepared(r#"ALTER TABLE cached_path ADD COLUMN IF NOT EXISTS "references" TEXT"#)
-            .await?;
+        db.execute_unprepared(
+            r#"ALTER TABLE cached_path ADD COLUMN IF NOT EXISTS "references" TEXT"#,
+        )
+        .await?;
 
         db.execute_unprepared(
             r#"

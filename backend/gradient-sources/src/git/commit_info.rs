@@ -8,8 +8,8 @@ use super::context::ProjectGitContext;
 use super::remote::accept_cert;
 use super::url::git_transport_url;
 use crate::SourceError;
-use gradient_types::input::vec_to_hex;
 use git2::RemoteCallbacks;
+use gradient_types::input::vec_to_hex;
 use tracing::{debug, instrument};
 
 impl ProjectGitContext<'_> {

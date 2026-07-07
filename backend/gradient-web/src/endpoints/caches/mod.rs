@@ -14,9 +14,9 @@ mod narinfo;
 mod narlist;
 mod nars;
 mod proto;
-mod upload;
 pub mod roles;
 mod serve;
+mod upload;
 mod upstreams;
 
 pub use self::build_log::log;
@@ -29,13 +29,13 @@ pub use self::management::{
 pub use self::nar::{nar, upstream_nar};
 pub use self::narinfo::{gradient_cache_info, nix_cache_info, path};
 pub use self::narlist::ls;
-pub use self::proto::cache_proto;
 pub use self::nars::{
     available as nars_available, delete as nars_delete, list as nars_list, show as nars_show,
     stats as nars_stats,
 };
-pub use self::upload::{nar_chunk, nar_finalize, nars_upload};
+pub use self::proto::cache_proto;
 pub use self::serve::serve;
+pub use self::upload::{nar_chunk, nar_finalize, nars_upload};
 pub use self::upstreams::{
     delete_cache_upstream, get_cache_upstreams, patch_cache_upstream, put_cache_upstream,
 };

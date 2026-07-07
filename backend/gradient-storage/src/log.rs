@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::ids::BuildAttemptId;
 use anyhow::Result;
 use futures::future::BoxFuture;
+use gradient_types::ids::BuildAttemptId;
 use object_store::{ObjectStore, ObjectStoreExt as _, PutPayload, path::Path as ObjectPath};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,7 +21,8 @@ use tracing::warn;
 /// (e.g. S3) do that work in `finalize`.
 pub trait LogStorage: Send + Sync + std::fmt::Debug {
     /// Append `text` to the log for `attempt_id`.
-    fn append<'a>(&'a self, attempt_id: BuildAttemptId, text: &'a str) -> BoxFuture<'a, Result<()>>;
+    fn append<'a>(&'a self, attempt_id: BuildAttemptId, text: &'a str)
+    -> BoxFuture<'a, Result<()>>;
 
     /// Read the full log for `attempt_id`. Returns an empty string when no log exists yet.
     fn read<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>>;
@@ -48,7 +49,11 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
     ) -> BoxFuture<'a, Result<()>>;
 
     /// Read one compressed log chunk object's bytes.
-    fn read_chunk<'a>(&'a self, attempt_id: BuildAttemptId, index: u32) -> BoxFuture<'a, Result<Vec<u8>>>;
+    fn read_chunk<'a>(
+        &'a self,
+        attempt_id: BuildAttemptId,
+        index: u32,
+    ) -> BoxFuture<'a, Result<Vec<u8>>>;
 
     /// Delete all chunk objects for `attempt_id`.
     fn delete_chunks<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>>;
@@ -63,7 +68,10 @@ pub trait LogStorage: Send + Sync + std::fmt::Debug {
     /// Concatenate the decompressed chunk objects in order. Used as a fallback
     /// by `read` once the inline log has been dropped. Stops at the first
     /// missing chunk index.
-    fn reassemble_chunks<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
+    fn reassemble_chunks<'a>(
+        &'a self,
+        attempt_id: BuildAttemptId,
+    ) -> BoxFuture<'a, Result<String>> {
         Box::pin(async move {
             let mut out = String::new();
             let mut index = 0u32;
@@ -102,7 +110,8 @@ impl FileLogStorage {
     }
 
     pub fn log_path(&self, attempt_id: BuildAttemptId) -> PathBuf {
-        self.shard_dir(attempt_id).join(format!("{}.log", attempt_id))
+        self.shard_dir(attempt_id)
+            .join(format!("{}.log", attempt_id))
     }
 
     fn chunk_dir(&self, attempt_id: BuildAttemptId) -> PathBuf {
@@ -146,7 +155,11 @@ impl FileLogStorage {
 }
 
 impl LogStorage for FileLogStorage {
-    fn append<'a>(&'a self, attempt_id: BuildAttemptId, text: &'a str) -> BoxFuture<'a, Result<()>> {
+    fn append<'a>(
+        &'a self,
+        attempt_id: BuildAttemptId,
+        text: &'a str,
+    ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let path = self.log_path(attempt_id);
             fs::create_dir_all(self.shard_dir(attempt_id)).await?;
@@ -232,7 +245,11 @@ impl LogStorage for FileLogStorage {
         })
     }
 
-    fn read_chunk<'a>(&'a self, attempt_id: BuildAttemptId, index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+    fn read_chunk<'a>(
+        &'a self,
+        attempt_id: BuildAttemptId,
+        index: u32,
+    ) -> BoxFuture<'a, Result<Vec<u8>>> {
         Box::pin(async move { Ok(fs::read(self.chunk_path(attempt_id, index)).await?) })
     }
 
@@ -304,7 +321,11 @@ impl S3LogStorage {
 }
 
 impl LogStorage for S3LogStorage {
-    fn append<'a>(&'a self, attempt_id: BuildAttemptId, text: &'a str) -> BoxFuture<'a, Result<()>> {
+    fn append<'a>(
+        &'a self,
+        attempt_id: BuildAttemptId,
+        text: &'a str,
+    ) -> BoxFuture<'a, Result<()>> {
         self.local.append(attempt_id, text)
     }
 
@@ -350,7 +371,11 @@ impl LogStorage for S3LogStorage {
             if let Err(e) = self.local.delete(attempt_id).await {
                 warn!(error = %e, attempt_id = %attempt_id, "Failed to delete local build log");
             }
-            match self.object_store.delete(&self.object_path(attempt_id)).await {
+            match self
+                .object_store
+                .delete(&self.object_path(attempt_id))
+                .await
+            {
                 Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
                 Err(e) => Err(e.into()),
             }
@@ -363,7 +388,8 @@ impl LogStorage for S3LogStorage {
             let mut local = self.local.list_logs().await?;
             let prefix = ObjectPath::from(format!("{}logs", self.prefix));
             let mut stream = self.object_store.list(Some(&prefix));
-            let mut seen: std::collections::HashSet<BuildAttemptId> = local.iter().copied().collect();
+            let mut seen: std::collections::HashSet<BuildAttemptId> =
+                local.iter().copied().collect();
             while let Some(item) = stream.next().await {
                 let meta = item?;
                 let p = meta.location.to_string();
@@ -404,7 +430,11 @@ impl LogStorage for S3LogStorage {
         })
     }
 
-    fn read_chunk<'a>(&'a self, attempt_id: BuildAttemptId, index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+    fn read_chunk<'a>(
+        &'a self,
+        attempt_id: BuildAttemptId,
+        index: u32,
+    ) -> BoxFuture<'a, Result<Vec<u8>>> {
         Box::pin(async move {
             if let Ok(bytes) = self.local.read_chunk(attempt_id, index).await {
                 return Ok(bytes);
@@ -436,7 +466,11 @@ impl LogStorage for S3LogStorage {
     fn delete_inline_log<'a>(&'a self, attempt_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let _ = self.local.delete_inline_log(attempt_id).await;
-            match self.object_store.delete(&self.object_path(attempt_id)).await {
+            match self
+                .object_store
+                .delete(&self.object_path(attempt_id))
+                .await
+            {
                 Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
                 Err(e) => Err(e.into()),
             }
@@ -500,7 +534,11 @@ mod shard_tests {
         let id = sample_id();
         storage.append(id, "hello").await.unwrap();
 
-        let expected = dir.path().join("logs").join("fe").join(format!("{SAMPLE}.log"));
+        let expected = dir
+            .path()
+            .join("logs")
+            .join("fe")
+            .join(format!("{SAMPLE}.log"));
         assert!(expected.exists(), "log not sharded to logs/fe/{SAMPLE}.log");
         assert_eq!(storage.read(id).await.unwrap(), "hello");
         assert_eq!(storage.list_logs().await.unwrap(), vec![id]);
@@ -512,15 +550,24 @@ mod shard_tests {
         let logs = dir.path().join("logs");
         let chunk_dir = logs.join(SAMPLE);
         fs::create_dir_all(&chunk_dir).await.unwrap();
-        fs::write(logs.join(format!("{SAMPLE}.log")), "legacy").await.unwrap();
-        fs::write(chunk_dir.join("chunk_00000000.zst"), b"z").await.unwrap();
+        fs::write(logs.join(format!("{SAMPLE}.log")), "legacy")
+            .await
+            .unwrap();
+        fs::write(chunk_dir.join("chunk_00000000.zst"), b"z")
+            .await
+            .unwrap();
 
         let storage = FileLogStorage::new(dir.path()).await.unwrap();
         let id = sample_id();
 
         assert!(!logs.join(format!("{SAMPLE}.log")).exists());
         assert!(logs.join("fe").join(format!("{SAMPLE}.log")).exists());
-        assert!(logs.join("fe").join(SAMPLE).join("chunk_00000000.zst").exists());
+        assert!(
+            logs.join("fe")
+                .join(SAMPLE)
+                .join("chunk_00000000.zst")
+                .exists()
+        );
         assert_eq!(storage.read(id).await.unwrap(), "legacy");
         assert_eq!(storage.list_logs().await.unwrap(), vec![id]);
     }

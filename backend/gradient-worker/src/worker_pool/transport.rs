@@ -301,7 +301,10 @@ impl EvalWorker {
             },
             "Plan",
             |resp| match resp {
-                EvalResponse::PlanOk { sub_patterns, errors } => Ok((sub_patterns, errors)),
+                EvalResponse::PlanOk {
+                    sub_patterns,
+                    errors,
+                } => Ok((sub_patterns, errors)),
                 other => Err(Box::new(other)),
             },
         )
@@ -364,10 +367,7 @@ impl EvalWorker {
         &mut self,
         repository: String,
         attrs: Vec<String>,
-    ) -> (
-        Vec<ResolvedItem>,
-        Result<(Vec<String>, Option<StatsDelta>)>,
-    ) {
+    ) -> (Vec<ResolvedItem>, Result<(Vec<String>, Option<StatsDelta>)>) {
         let mut items = Vec::new();
         let end = self.resolve_inner(repository, attrs, &mut items).await;
         (items, end)

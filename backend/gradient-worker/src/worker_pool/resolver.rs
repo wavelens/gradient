@@ -461,7 +461,11 @@ impl DerivationResolver for WorkerPoolResolver {
             errors.extend(plan_errors);
             errors.sort_unstable();
             errors.dedup();
-            return Ok(FlakeDiscovery { attrs, warnings, errors });
+            return Ok(FlakeDiscovery {
+                attrs,
+                warnings,
+                errors,
+            });
         }
 
         // Exact-path exclusions ride every shard; the final dedup mops up any
@@ -502,7 +506,11 @@ impl DerivationResolver for WorkerPoolResolver {
         errors.sort_unstable();
         errors.dedup();
 
-        Ok(FlakeDiscovery { attrs, warnings, errors })
+        Ok(FlakeDiscovery {
+            attrs,
+            warnings,
+            errors,
+        })
     }
 
     async fn resolve_derivation_paths(
@@ -536,10 +544,9 @@ impl DerivationResolver for WorkerPoolResolver {
         let indexed = Mutex::new(Vec::<IndexedDerivation>::new());
         {
             let repo = repository.as_str();
-            let resolve_batch =
-                move |attrs: Vec<String>| -> BoxFuture<'_, Result<BatchCall>> {
-                    Box::pin(self.resolve_once(repo, attrs))
-                };
+            let resolve_batch = move |attrs: Vec<String>| -> BoxFuture<'_, Result<BatchCall>> {
+                Box::pin(self.resolve_once(repo, attrs))
+            };
 
             let (indexed, resolve_batch) = (&indexed, &resolve_batch);
             pooled_fan_out(n_workers, batches, |batch| async move {
@@ -724,11 +731,7 @@ mod tests {
     async fn transient_crash_succeeds_on_retry() {
         // The single-attr chunk crashes on the first call (attempt 0) and
         // resolves on the one retry (attempt 1) - no per-attr error recorded.
-        let (out, calls) = run(
-            Stub::new(|_attrs, call| (call == 0).then_some(0)),
-            &["a"],
-        )
-        .await;
+        let (out, calls) = run(Stub::new(|_attrs, call| (call == 0).then_some(0)), &["a"]).await;
         assert_eq!(out, vec![("a".into(), true)]);
         assert_eq!(calls, 2, "one crash + one successful retry");
     }

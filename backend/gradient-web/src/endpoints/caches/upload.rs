@@ -14,10 +14,10 @@ use axum::body::Bytes;
 use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use gradient_core::ServerState;
 use gradient_proto::ingest::{IngestInput, SignTargets, ingest_nar};
 use gradient_storage::PartialStore;
 use gradient_types::*;
-use gradient_core::ServerState;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -66,10 +66,9 @@ pub async fn nars_upload(
     {
         match field.name() {
             Some("narinfo") => {
-                let text = field
-                    .text()
-                    .await
-                    .map_err(|e| WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string()))?;
+                let text = field.text().await.map_err(|e| {
+                    WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string())
+                })?;
                 let parsed: NarinfoPart = serde_json::from_str(&text).map_err(|e| {
                     WebError::BadRequest(
                         ErrorCode::INPUT_VALIDATION,
@@ -79,10 +78,9 @@ pub async fn nars_upload(
                 narinfo = Some(parsed);
             }
             Some("nar") => {
-                let bytes = field
-                    .bytes()
-                    .await
-                    .map_err(|e| WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string()))?;
+                let bytes = field.bytes().await.map_err(|e| {
+                    WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string())
+                })?;
                 nar_bytes = Some(bytes.to_vec());
             }
             _ => {}

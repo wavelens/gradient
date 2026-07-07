@@ -11,21 +11,25 @@
 //!   can swap in an `InMemoryEmailSender::disabled()`.
 
 use axum_test::TestServer;
-use gradient_entity::{ids::*, organization_user, project, project_action, project_action_delivery};
-use gradient_storage::{EmailSender, NarStore};
-use gradient_types::{ActionType, ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use sea_orm::{DatabaseBackend, MockDatabase};
-use serde_json::{Value, json};
-use std::sync::Arc;
+use gradient_entity::{
+    ids::*, organization_user, project, project_action, project_action_delivery,
+};
+use gradient_storage::{EmailSender, NarStore};
 use gradient_test_support::cli::{test_cli, test_cli_with_crypt};
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
 use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_test_support::web::{TEST_JWT_SECRET, live_session, make_test_server_with, make_token};
-use uuid::Uuid;
+use gradient_test_support::web::{
+    TEST_JWT_SECRET, live_session, make_test_server_with, make_token,
+};
+use gradient_types::{ActionType, ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId};
 use gradient_web::create_router;
+use sea_orm::{DatabaseBackend, MockDatabase};
+use serde_json::{Value, json};
+use std::sync::Arc;
+use uuid::Uuid;
 
 // ── Fixture helpers ────────────────────────────────────────────────────────────
 
@@ -151,7 +155,9 @@ fn server_with_email(
     let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),

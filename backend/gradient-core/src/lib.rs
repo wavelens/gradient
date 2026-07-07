@@ -10,17 +10,17 @@ pub mod upstream;
 pub use state_root::{AppState, ServerState};
 
 use gradient_db::{CacheDb, WebDb, WorkerDb, connect_cache_db, connect_db, connect_web_db};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
-use gradient_util::shutdown::Shutdown;
 use gradient_state::load_and_apply_state;
-use std::path::Path;
-use std::sync::Arc;
 use gradient_storage::EmailService;
 use gradient_storage::NarStore;
 use gradient_storage::{FileLogStorage, S3LogStorage};
 use gradient_types::*;
+use gradient_util::shutdown::Shutdown;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
+use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
 pub enum InitError {
@@ -68,7 +68,9 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
 
     let db = connect_db(&cli).await.map_err(InitError::Database)?;
     let web_db = connect_web_db(&cli).await.map_err(InitError::WebDatabase)?;
-    let cache_db = connect_cache_db(&cli).await.map_err(InitError::CacheDatabase)?;
+    let cache_db = connect_cache_db(&cli)
+        .await
+        .map_err(InitError::CacheDatabase)?;
 
     let state_result = load_and_apply_state(
         &db,
@@ -116,8 +118,8 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
 
     let http = gradient_util::http::build_client().map_err(|e| InitError::HttpClient(e.into()))?;
 
-    let jwt_secret =
-        gradient_types::input::load_secret(&cli.secrets.jwt_secret_file).map_err(InitError::JwtSecret)?;
+    let jwt_secret = gradient_types::input::load_secret(&cli.secrets.jwt_secret_file)
+        .map_err(InitError::JwtSecret)?;
 
     let email_service = EmailService::new(cli.email_config())
         .await

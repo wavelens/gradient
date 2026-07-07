@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::{ids::OrganizationId};
 use gradient_core::ServerState;
+use gradient_types::ids::OrganizationId;
 use std::collections::HashSet;
 use tracing::warn;
 use uuid::Uuid;
@@ -129,10 +129,11 @@ pub(super) async fn lookup_base_worker_challenge(
     state: &ServerState,
     worker_id: &str,
 ) -> Option<BaseWorkerChallenge> {
-    let bw = gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.worker_db, worker_id)
-        .await
-        .ok()
-        .flatten()?;
+    let bw =
+        gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.worker_db, worker_id)
+            .await
+            .ok()
+            .flatten()?;
 
     let enabled_orgs: Vec<String> =
         gradient_db::base_workers::orgs_enabling_base_worker(&state.worker_db, bw.id)
@@ -222,7 +223,8 @@ pub(super) async fn aggregate_enabled_caps(
 
     if rows.is_empty() {
         if let Ok(Some(bw)) =
-            gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.worker_db, worker_id).await
+            gradient_db::base_workers::enabled_base_worker_by_worker_id(&state.worker_db, worker_id)
+                .await
         {
             return EnabledCapsAggregate {
                 enable_fetch: bw.enable_fetch,
@@ -572,7 +574,10 @@ mod tests {
 
     fn base_challenge(authorize_against: Option<&str>, enabled: &[&str]) -> BaseWorkerChallenge {
         BaseWorkerChallenge {
-            challenge: enabled.iter().map(|o| ((*o).into(), "hash".into())).collect(),
+            challenge: enabled
+                .iter()
+                .map(|o| ((*o).into(), "hash".into()))
+                .collect(),
             authorize_against: authorize_against.map(|s| s.into()),
             enabled_orgs: enabled.iter().map(|o| (*o).into()).collect(),
         }
@@ -629,10 +634,7 @@ mod tests {
         }
     }
 
-    fn org_cache_row(
-        org: OrganizationId,
-        cache: gradient_types::ids::CacheId,
-    ) -> OrgCacheModel {
+    fn org_cache_row(org: OrganizationId, cache: gradient_types::ids::CacheId) -> OrgCacheModel {
         OrgCacheModel {
             id: gradient_types::ids::OrganizationCacheId::now_v7(),
             organization: org,

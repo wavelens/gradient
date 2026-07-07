@@ -7,9 +7,9 @@
 use super::logging::{PhaseSubjectKind, record_phase_event};
 use crate::DbContext;
 use crate::state_machine::EvalStateMachine;
-use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::{Condition, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use gradient_types::*;
+use sea_orm::{ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, error, warn};
 
 pub async fn update_evaluation_status(

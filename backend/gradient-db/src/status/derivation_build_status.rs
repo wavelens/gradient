@@ -73,7 +73,11 @@ pub async fn update_derivation_build_status(
     // feed - so the reactive and proactive models can never drift apart.
     emit_transition_effects(
         ctx,
-        &[TransitionChange { derivation: updated.derivation, from: prev_status, to: status }],
+        &[TransitionChange {
+            derivation: updated.derivation,
+            from: prev_status,
+            to: status,
+        }],
     )
     .await;
 
@@ -84,7 +88,9 @@ pub async fn update_derivation_build_status(
         // ripples to dependents that were waiting only on this one. Doing it before
         // `promote_dependents` is essential - otherwise the last dep to land
         // strands its dependents behind a flag that flips only afterward.
-        if let Err(e) = crate::promotion::propagate_closure_complete(&ctx.worker_db, updated.derivation).await {
+        if let Err(e) =
+            crate::promotion::propagate_closure_complete(&ctx.worker_db, updated.derivation).await
+        {
             error!(error = %e, "failed to propagate closure_complete");
         }
 
@@ -98,7 +104,8 @@ pub async fn update_derivation_build_status(
         status,
         BuildStatus::FailedPermanent | BuildStatus::FailedTimeout | BuildStatus::DependencyFailed
     ) {
-        match crate::promotion::cascade_dependency_failed(&ctx.worker_db, updated.derivation).await {
+        match crate::promotion::cascade_dependency_failed(&ctx.worker_db, updated.derivation).await
+        {
             Ok(changes) => emit_transition_effects(ctx, &changes).await,
             Err(e) => error!(error = %e, "failed to cascade dependency failure"),
         }

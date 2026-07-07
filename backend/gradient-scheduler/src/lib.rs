@@ -40,8 +40,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use gradient_types::*;
 use gradient_core::ServerState;
+use gradient_types::*;
 use tokio::sync::RwLock;
 
 use jobs::JobTracker;
@@ -92,8 +92,14 @@ pub struct Scheduler {
     pub(crate) instance: Arc<arc_swap::ArcSwap<gradient_score::InstanceContext>>,
     /// Per-project eval-RAM prediction (p95 peak RSS), refreshed by
     /// `instance_metrics_loop`, consumed by eval scoring.
-    pub(crate) eval_history:
-        Arc<arc_swap::ArcSwap<std::collections::HashMap<gradient_types::ids::ProjectId, gradient_score::HistoryPrediction>>>,
+    pub(crate) eval_history: Arc<
+        arc_swap::ArcSwap<
+            std::collections::HashMap<
+                gradient_types::ids::ProjectId,
+                gradient_score::HistoryPrediction,
+            >,
+        >,
+    >,
     /// Instance draining toggle (superuser): when set, dispatch is paused and
     /// in-flight evaluations are parked so the server can be stopped safely.
     /// In-memory only, so it auto-clears on the next startup.
@@ -117,8 +123,12 @@ impl Scheduler {
             dispatch_kick: Arc::new(tokio::sync::Notify::new()),
             eval_edges: Arc::new(RwLock::new(HashMap::new())),
             policy,
-            instance: Arc::new(arc_swap::ArcSwap::from_pointee(gradient_score::InstanceContext::default())),
-            eval_history: Arc::new(arc_swap::ArcSwap::from_pointee(std::collections::HashMap::new())),
+            instance: Arc::new(arc_swap::ArcSwap::from_pointee(
+                gradient_score::InstanceContext::default(),
+            )),
+            eval_history: Arc::new(arc_swap::ArcSwap::from_pointee(
+                std::collections::HashMap::new(),
+            )),
             draining: Arc::new(AtomicBool::new(false)),
         }
     }

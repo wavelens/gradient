@@ -9,7 +9,9 @@ use crate::ids::{CacheId, CacheUpstreamId};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, DeriveActiveEnum, EnumIter, Deserialize, Serialize,
+)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum CacheUpstreamKind {
     #[sea_orm(num_value = 0)]

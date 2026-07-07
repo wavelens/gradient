@@ -41,7 +41,10 @@ pub async fn eval_anchor_statuses<C: ConnectionTrait>(
     })
     .await?;
 
-    Ok(raw.into_iter().filter_map(|s| BuildStatus::try_from(s).ok()).collect())
+    Ok(raw
+        .into_iter()
+        .filter_map(|s| BuildStatus::try_from(s).ok())
+        .collect())
 }
 
 /// Evaluations that reference `derivation` (via a `build_job`). Drives status

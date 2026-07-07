@@ -50,14 +50,21 @@ impl ScoreRule for ResourceFitRule {
             && free > 0
             && h.predicted_peak_ram_mb > free
         {
-            let overshoot = ((h.predicted_peak_ram_mb - free) as f64 / free as f64).min(self.max_overshoot);
+            let overshoot =
+                ((h.predicted_peak_ram_mb - free) as f64 / free as f64).min(self.max_overshoot);
             // bounded so WaitTime can overcome it; scaled by per-job and instance-wide oom trend
-            s -= self.ram_overshoot_penalty * overshoot * (1.0 + h.oom_rate as f64) * (1.0 + instance.oom_rate.w1h.unwrap_or(0.0));
+            s -= self.ram_overshoot_penalty
+                * overshoot
+                * (1.0 + h.oom_rate as f64)
+                * (1.0 + instance.oom_rate.w1h.unwrap_or(0.0));
         }
 
-        let cpu_threshold = instance.cpu_time_ms.w1h_or(self.cpu_heavy_threshold_ms as f64);
+        let cpu_threshold = instance
+            .cpu_time_ms
+            .w1h_or(self.cpu_heavy_threshold_ms as f64);
         if (h.avg_cpu_time_ms as f64) > cpu_threshold {
-            s += self.cpu_affinity_bonus * ((m.cpu_core_score as f64 / 1000.0).min(self.cpu_bonus_cap));
+            s += self.cpu_affinity_bonus
+                * ((m.cpu_core_score as f64 / 1000.0).min(self.cpu_bonus_cap));
         }
         s
     }
@@ -120,8 +127,9 @@ impl ScoreRule for ResourceSaturationRule {
         // count as saturated - only measured values do.
         let cpu_saturated = m.cpu_usage_pct.is_some_and(|c| c >= cpu_saturated_pct);
         let ram_saturated = m.ram_total_mb > 0
-            && m.ram_free_mb
-                .is_some_and(|f| (f as f64 / m.ram_total_mb as f64) <= self.ram_saturated_free_frac);
+            && m.ram_free_mb.is_some_and(|f| {
+                (f as f64 / m.ram_total_mb as f64) <= self.ram_saturated_free_frac
+            });
         if cpu_saturated || ram_saturated {
             s -= self.penalty;
         }
@@ -168,99 +176,219 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
-        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now: gradient_types::now() }
+        JobContext {
+            job,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: gradient_types::now(),
+            ready_at: gradient_types::now(),
+            org_work_share: None,
+            rescore_count: 0,
+            now: gradient_types::now(),
+        }
     }
 
     fn worker_with(metrics: WorkerMetricsView) -> WorkerContext<'static> {
-        WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: Some(metrics) }
+        WorkerContext {
+            architectures: &[],
+            system_features: &[],
+            fetch: false,
+            metrics: Some(metrics),
+        }
     }
 
     #[test]
     fn ram_overshoot_is_negative_and_scales_with_overshoot() {
         let rule = ResourceFitRule::default();
-        let m = WorkerMetricsView { ram_free_mb: Some(1000), ..Default::default() };
+        let m = WorkerMetricsView {
+            ram_free_mb: Some(1000),
+            ..Default::default()
+        };
         let w = worker_with(m);
 
-        let small = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 1500, samples: 5, ..Default::default() });
-        let large = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 3000, samples: 5, ..Default::default() });
+        let small = job_with_history(HistoryPrediction {
+            predicted_peak_ram_mb: 1500,
+            samples: 5,
+            ..Default::default()
+        });
+        let large = job_with_history(HistoryPrediction {
+            predicted_peak_ram_mb: 3000,
+            samples: 5,
+            ..Default::default()
+        });
 
         let s_small = rule.score(&ctx(&small), &w, &InstanceContext::default());
         let s_large = rule.score(&ctx(&large), &w, &InstanceContext::default());
         assert!(s_small < 0.0);
-        assert!(s_large < s_small, "larger overshoot must be more negative: {s_large} vs {s_small}");
+        assert!(
+            s_large < s_small,
+            "larger overshoot must be more negative: {s_large} vs {s_small}"
+        );
     }
 
     #[test]
     fn ram_overshoot_penalty_is_bounded() {
         let rule = ResourceFitRule::default();
-        let w = worker_with(WorkerMetricsView { ram_free_mb: Some(100), ..Default::default() });
-        let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 1_000_000, oom_rate: 1.0, samples: 5, ..Default::default() });
-        let inst = InstanceContext { oom_rate: Windowed { w1h: Some(1.0), ..Default::default() }, ..Default::default() };
+        let w = worker_with(WorkerMetricsView {
+            ram_free_mb: Some(100),
+            ..Default::default()
+        });
+        let job = job_with_history(HistoryPrediction {
+            predicted_peak_ram_mb: 1_000_000,
+            oom_rate: 1.0,
+            samples: 5,
+            ..Default::default()
+        });
+        let inst = InstanceContext {
+            oom_rate: Windowed {
+                w1h: Some(1.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         let s = rule.score(&ctx(&job), &w, &inst);
-        assert!(s >= -(rule.ram_overshoot_penalty * rule.max_overshoot * 4.0) - 0.001, "penalty must be bounded by clamp, got {s}");
-        assert!(s > -4000.0, "penalty must stay below WaitTimeRule cap so wait can overcome it, got {s}");
+        assert!(
+            s >= -(rule.ram_overshoot_penalty * rule.max_overshoot * 4.0) - 0.001,
+            "penalty must be bounded by clamp, got {s}"
+        );
+        assert!(
+            s > -4000.0,
+            "penalty must stay below WaitTimeRule cap so wait can overcome it, got {s}"
+        );
     }
 
     #[test]
     fn higher_oom_rate_is_more_negative_for_same_overshoot() {
         let rule = ResourceFitRule::default();
-        let w = worker_with(WorkerMetricsView { ram_free_mb: Some(1000), ..Default::default() });
+        let w = worker_with(WorkerMetricsView {
+            ram_free_mb: Some(1000),
+            ..Default::default()
+        });
 
-        let low = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 2000, oom_rate: 0.0, samples: 5, ..Default::default() });
-        let high = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 2000, oom_rate: 0.5, samples: 5, ..Default::default() });
+        let low = job_with_history(HistoryPrediction {
+            predicted_peak_ram_mb: 2000,
+            oom_rate: 0.0,
+            samples: 5,
+            ..Default::default()
+        });
+        let high = job_with_history(HistoryPrediction {
+            predicted_peak_ram_mb: 2000,
+            oom_rate: 0.5,
+            samples: 5,
+            ..Default::default()
+        });
 
-        assert!(rule.score(&ctx(&high), &w, &InstanceContext::default()) < rule.score(&ctx(&low), &w, &InstanceContext::default()));
+        assert!(
+            rule.score(&ctx(&high), &w, &InstanceContext::default())
+                < rule.score(&ctx(&low), &w, &InstanceContext::default())
+        );
     }
 
     #[test]
     fn cpu_heavy_on_strong_worker_is_positive_and_capped() {
         let rule = ResourceFitRule::default();
-        let heavy = job_with_history(HistoryPrediction { avg_cpu_time_ms: 120_000, samples: 5, ..Default::default() });
+        let heavy = job_with_history(HistoryPrediction {
+            avg_cpu_time_ms: 120_000,
+            samples: 5,
+            ..Default::default()
+        });
 
-        let strong = worker_with(WorkerMetricsView { cpu_core_score: 1500, ..Default::default() });
-        let monster = worker_with(WorkerMetricsView { cpu_core_score: 100_000, ..Default::default() });
+        let strong = worker_with(WorkerMetricsView {
+            cpu_core_score: 1500,
+            ..Default::default()
+        });
+        let monster = worker_with(WorkerMetricsView {
+            cpu_core_score: 100_000,
+            ..Default::default()
+        });
 
         let s_strong = rule.score(&ctx(&heavy), &strong, &InstanceContext::default());
         let s_monster = rule.score(&ctx(&heavy), &monster, &InstanceContext::default());
         assert!(s_strong > 0.0);
         let cap = rule.cpu_affinity_bonus * rule.cpu_bonus_cap;
-        assert!((s_monster - cap).abs() < 0.001, "cpu bonus must cap at {cap}, got {s_monster}");
+        assert!(
+            (s_monster - cap).abs() < 0.001,
+            "cpu bonus must cap at {cap}, got {s_monster}"
+        );
     }
 
     #[test]
     fn eval_ram_overshoot_routes_to_big_ram_worker() {
         let rule = ResourceFitRule::default();
-        let job = || eval_job_with_history(HistoryPrediction { predicted_peak_ram_mb: 40_000, samples: 5, ..Default::default() });
-        let small = worker_with(WorkerMetricsView { ram_free_mb: Some(16_000), ..Default::default() });
-        let big = worker_with(WorkerMetricsView { ram_free_mb: Some(64_000), ..Default::default() });
+        let job = || {
+            eval_job_with_history(HistoryPrediction {
+                predicted_peak_ram_mb: 40_000,
+                samples: 5,
+                ..Default::default()
+            })
+        };
+        let small = worker_with(WorkerMetricsView {
+            ram_free_mb: Some(16_000),
+            ..Default::default()
+        });
+        let big = worker_with(WorkerMetricsView {
+            ram_free_mb: Some(64_000),
+            ..Default::default()
+        });
         assert!(rule.score(&ctx(&job()), &small, &InstanceContext::default()) < 0.0);
-        assert_eq!(rule.score(&ctx(&job()), &big, &InstanceContext::default()), 0.0);
+        assert_eq!(
+            rule.score(&ctx(&job()), &big, &InstanceContext::default()),
+            0.0
+        );
     }
 
     #[test]
     fn no_samples_is_zero() {
         let rule = ResourceFitRule::default();
-        let w = worker_with(WorkerMetricsView { ram_free_mb: Some(100), ..Default::default() });
-        let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 9000, avg_cpu_time_ms: 999_999, samples: 0, ..Default::default() });
+        let w = worker_with(WorkerMetricsView {
+            ram_free_mb: Some(100),
+            ..Default::default()
+        });
+        let job = job_with_history(HistoryPrediction {
+            predicted_peak_ram_mb: 9000,
+            avg_cpu_time_ms: 999_999,
+            samples: 0,
+            ..Default::default()
+        });
         assert_eq!(rule.score(&ctx(&job), &w, &InstanceContext::default()), 0.0);
     }
 
     #[test]
     fn no_metrics_is_zero() {
         let rule = ResourceFitRule::default();
-        let w = WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None };
-        let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 9000, samples: 5, ..Default::default() });
+        let w = WorkerContext {
+            architectures: &[],
+            system_features: &[],
+            fetch: false,
+            metrics: None,
+        };
+        let job = job_with_history(HistoryPrediction {
+            predicted_peak_ram_mb: 9000,
+            samples: 5,
+            ..Default::default()
+        });
         assert_eq!(rule.score(&ctx(&job), &w, &InstanceContext::default()), 0.0);
     }
 
     #[test]
     fn cpu_bonus_triggers_below_fixed_threshold_when_instance_avg_low() {
         let rule = ResourceFitRule::default();
-        let strong = worker_with(WorkerMetricsView { cpu_core_score: 1500, ..Default::default() });
-        let job = job_with_history(HistoryPrediction { avg_cpu_time_ms: 30_000, samples: 5, ..Default::default() });
+        let strong = worker_with(WorkerMetricsView {
+            cpu_core_score: 1500,
+            ..Default::default()
+        });
+        let job = job_with_history(HistoryPrediction {
+            avg_cpu_time_ms: 30_000,
+            samples: 5,
+            ..Default::default()
+        });
 
-        assert_eq!(rule.score(&ctx(&job), &strong, &InstanceContext::default()), 0.0);
+        assert_eq!(
+            rule.score(&ctx(&job), &strong, &InstanceContext::default()),
+            0.0
+        );
 
         let mut inst = InstanceContext::default();
         inst.cpu_time_ms.w1h = Some(10_000.0);
@@ -304,9 +432,18 @@ mod tests {
             ..Default::default()
         });
 
-        assert_eq!(rule.score(&ctx(&job), &cpu_hot, &InstanceContext::default()), -1000.0);
-        assert_eq!(rule.score(&ctx(&job), &ram_hot, &InstanceContext::default()), -1000.0);
-        assert_eq!(rule.score(&ctx(&job), &idle, &InstanceContext::default()), 0.0);
+        assert_eq!(
+            rule.score(&ctx(&job), &cpu_hot, &InstanceContext::default()),
+            -1000.0
+        );
+        assert_eq!(
+            rule.score(&ctx(&job), &ram_hot, &InstanceContext::default()),
+            -1000.0
+        );
+        assert_eq!(
+            rule.score(&ctx(&job), &idle, &InstanceContext::default()),
+            0.0
+        );
     }
 
     #[test]
@@ -321,9 +458,19 @@ mod tests {
             ram_free_mb: Some(8_000),
             ..Default::default()
         };
-        assert_eq!(rule.score(&ctx(&builtin_job()), &worker_with(warm), &InstanceContext::default()), 0.0);
+        assert_eq!(
+            rule.score(
+                &ctx(&builtin_job()),
+                &worker_with(warm),
+                &InstanceContext::default()
+            ),
+            0.0
+        );
         let real = job_with_history(HistoryPrediction::default());
-        assert_eq!(rule.score(&ctx(&real), &worker_with(warm), &InstanceContext::default()), -1000.0);
+        assert_eq!(
+            rule.score(&ctx(&real), &worker_with(warm), &InstanceContext::default()),
+            -1000.0
+        );
 
         // Evals (no architecture) and no-metrics workers are fully exempt even on a hot worker.
         let hot = WorkerMetricsView {
@@ -333,11 +480,21 @@ mod tests {
             ..Default::default()
         };
         let eval = eval_job_with_history(HistoryPrediction::default());
-        assert_eq!(rule.score(&ctx(&eval), &worker_with(hot), &InstanceContext::default()), 0.0);
+        assert_eq!(
+            rule.score(&ctx(&eval), &worker_with(hot), &InstanceContext::default()),
+            0.0
+        );
 
-        let no_metrics =
-            WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None };
-        assert_eq!(rule.score(&ctx(&real), &no_metrics, &InstanceContext::default()), 0.0);
+        let no_metrics = WorkerContext {
+            architectures: &[],
+            system_features: &[],
+            fetch: false,
+            metrics: None,
+        };
+        assert_eq!(
+            rule.score(&ctx(&real), &no_metrics, &InstanceContext::default()),
+            0.0
+        );
     }
 
     /// A worker that has static caps but no live heartbeat yet must score
@@ -358,8 +515,14 @@ mod tests {
         });
         let sat = ResourceSaturationRule::default();
         let fit = ResourceFitRule::default();
-        assert_eq!(sat.score(&ctx(&job), &worker_with(cold), &InstanceContext::default()), 0.0);
-        assert_eq!(fit.score(&ctx(&job), &worker_with(cold), &InstanceContext::default()), 0.0);
+        assert_eq!(
+            sat.score(&ctx(&job), &worker_with(cold), &InstanceContext::default()),
+            0.0
+        );
+        assert_eq!(
+            fit.score(&ctx(&job), &worker_with(cold), &InstanceContext::default()),
+            0.0
+        );
 
         // A MEASURED zero free RAM is honored: max-bounded overshoot penalty.
         let starved = WorkerMetricsView {
@@ -368,14 +531,23 @@ mod tests {
             ram_free_mb: Some(0),
             ..Default::default()
         };
-        assert!(sat.score(&ctx(&job), &worker_with(starved), &InstanceContext::default()) < 0.0);
+        assert!(
+            sat.score(
+                &ctx(&job),
+                &worker_with(starved),
+                &InstanceContext::default()
+            ) < 0.0
+        );
     }
 
     #[test]
     fn ram_prediction_exceeding_free_penalizes_and_stacks_with_saturation() {
         let rule = ResourceSaturationRule::default();
-        let job =
-            job_with_history(HistoryPrediction { predicted_peak_ram_mb: 10_000, samples: 5, ..Default::default() });
+        let job = job_with_history(HistoryPrediction {
+            predicted_peak_ram_mb: 10_000,
+            samples: 5,
+            ..Default::default()
+        });
 
         // Not saturated, but 10_000 * 1.1 = 11_000 > 8_000 free -> RAM won't fit.
         let tight = worker_with(WorkerMetricsView {
@@ -384,7 +556,10 @@ mod tests {
             ram_free_mb: Some(8_000),
             ..Default::default()
         });
-        assert_eq!(rule.score(&ctx(&job), &tight, &InstanceContext::default()), -1000.0);
+        assert_eq!(
+            rule.score(&ctx(&job), &tight, &InstanceContext::default()),
+            -1000.0
+        );
 
         // 12_000 free >= 11_000 needed and not saturated -> no penalty.
         let roomy = worker_with(WorkerMetricsView {
@@ -393,7 +568,10 @@ mod tests {
             ram_free_mb: Some(12_000),
             ..Default::default()
         });
-        assert_eq!(rule.score(&ctx(&job), &roomy, &InstanceContext::default()), 0.0);
+        assert_eq!(
+            rule.score(&ctx(&job), &roomy, &InstanceContext::default()),
+            0.0
+        );
 
         // Saturated CPU AND RAM won't fit -> both -1000 penalties stack.
         let hot_and_tight = worker_with(WorkerMetricsView {
@@ -402,14 +580,24 @@ mod tests {
             ram_free_mb: Some(8_000),
             ..Default::default()
         });
-        assert_eq!(rule.score(&ctx(&job), &hot_and_tight, &InstanceContext::default()), -2000.0);
+        assert_eq!(
+            rule.score(&ctx(&job), &hot_and_tight, &InstanceContext::default()),
+            -2000.0
+        );
     }
 
     #[test]
     fn ram_overshoot_more_negative_with_high_instance_oom() {
         let rule = ResourceFitRule::default();
-        let w = worker_with(WorkerMetricsView { ram_free_mb: Some(1000), ..Default::default() });
-        let job = job_with_history(HistoryPrediction { predicted_peak_ram_mb: 2000, samples: 5, ..Default::default() });
+        let w = worker_with(WorkerMetricsView {
+            ram_free_mb: Some(1000),
+            ..Default::default()
+        });
+        let job = job_with_history(HistoryPrediction {
+            predicted_peak_ram_mb: 2000,
+            samples: 5,
+            ..Default::default()
+        });
 
         let mut low = InstanceContext::default();
         low.oom_rate.w1h = Some(0.0);

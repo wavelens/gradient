@@ -6,8 +6,8 @@
 
 //! Resolve named forge integrations for organizations.
 
-use gradient_entity::ids::GithubInstallationId;
 use gradient_entity::github_installation;
+use gradient_entity::ids::GithubInstallationId;
 use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -125,7 +125,10 @@ mod name_tests {
 
     #[test]
     fn uses_account_login_when_present() {
-        assert_eq!(github_integration_name(Some("Acme-Corp"), 42), "github-acme-corp");
+        assert_eq!(
+            github_integration_name(Some("Acme-Corp"), 42),
+            "github-acme-corp"
+        );
     }
 
     #[test]

@@ -93,7 +93,11 @@ pub struct StorageArgs {
     /// uploaded NAR is signed in place by the upload handler, so this tick is
     /// only a fallback for subscription placeholders and any row left unsigned.
     /// Defaults to 3600.
-    #[arg(long, env = "GRADIENT_SIGN_SWEEP_INTERVAL_SECS", default_value_t = 3600)]
+    #[arg(
+        long,
+        env = "GRADIENT_SIGN_SWEEP_INTERVAL_SECS",
+        default_value_t = 3600
+    )]
     pub sign_sweep_interval_secs: u64,
 }
 

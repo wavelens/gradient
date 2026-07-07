@@ -18,11 +18,11 @@ use axum::{Extension, Json, Router};
 use chrono::Utc;
 use gradient_ci::IntegrationKind;
 use gradient_ci::actions::encrypt_action_secret;
-use gradient_util::http_validation::validate_webhook_url;
+use gradient_core::ServerState;
 use gradient_types::actions::{ActionConfig, ActionType};
 use gradient_types::input::load_secret_bytes;
 use gradient_types::*;
-use gradient_core::ServerState;
+use gradient_util::http_validation::validate_webhook_url;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, Order, QueryFilter, QueryOrder,
@@ -277,7 +277,8 @@ pub async fn create_action(
         action_type: stored_config.action_type(),
         config: serde_json::to_value(&stored_config)
             .map_err(|e| WebError::internal(e.to_string()))?,
-        events: serde_json::to_value(&body.events).map_err(|e| WebError::internal(e.to_string()))?,
+        events: serde_json::to_value(&body.events)
+            .map_err(|e| WebError::internal(e.to_string()))?,
         active: body.active,
         created_by: user.id,
         created_at: now,
@@ -541,7 +542,10 @@ pub async fn test_action(
     // Forge-integration actions can't be test-fired against a synthetic commit
     // (the forge rejects the placeholder owner/repo/sha); probe the
     // integration's connectivity to the project repo instead.
-    if matches!(action_type, ActionType::ForgeStatusReport | ActionType::OpenPr) {
+    if matches!(
+        action_type,
+        ActionType::ForgeStatusReport | ActionType::OpenPr
+    ) {
         gradient_ci::actions::verify_forge_action(&state.ci(), &action, &proj.repository)
             .await
             .map_err(|e| WebError::internal(format!("test fire failed: {}", e)))?;

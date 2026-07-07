@@ -5,7 +5,9 @@
  */
 
 use anyhow::Result;
-use gradient_entity::cache_upstream::{CacheUpstreamKind, Column as CCacheUpstream, Entity as ECacheUpstream};
+use gradient_entity::cache_upstream::{
+    CacheUpstreamKind, Column as CCacheUpstream, Entity as ECacheUpstream,
+};
 use gradient_entity::organization_cache::{
     CacheSubscriptionMode, Column as COrganizationCache, Entity as EOrganizationCache,
 };
@@ -257,7 +259,11 @@ mod tests {
         }
     }
 
-    fn upstream_row(cache: CacheId, kind: CacheUpstreamKind, url: Option<&str>) -> cache_upstream::Model {
+    fn upstream_row(
+        cache: CacheId,
+        kind: CacheUpstreamKind,
+        url: Option<&str>,
+    ) -> cache_upstream::Model {
         cache_upstream::Model {
             id: gradient_types::ids::CacheUpstreamId::now_v7(),
             cache,
@@ -281,8 +287,16 @@ mod tests {
                 org_cache_row(org, cache_b, CacheSubscriptionMode::ReadWrite),
             ]])
             .append_query_results([vec![
-                upstream_row(cache_a, CacheUpstreamKind::Http, Some("https://cache-a.example/")),
-                upstream_row(cache_b, CacheUpstreamKind::Http, Some("https://cache-b.example/")),
+                upstream_row(
+                    cache_a,
+                    CacheUpstreamKind::Http,
+                    Some("https://cache-a.example/"),
+                ),
+                upstream_row(
+                    cache_b,
+                    CacheUpstreamKind::Http,
+                    Some("https://cache-b.example/"),
+                ),
             ]])
             .into_connection();
 
@@ -317,10 +331,16 @@ mod tests {
         let org = OrganizationId::new(Uuid::now_v7());
         let cache_a = CacheId::new(Uuid::now_v7());
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![org_cache_row(org, cache_a, CacheSubscriptionMode::ReadOnly)]])
-            .append_query_results([vec![
-                upstream_row(cache_a, CacheUpstreamKind::Http, Some("https://http.example/")),
-            ]])
+            .append_query_results([vec![org_cache_row(
+                org,
+                cache_a,
+                CacheSubscriptionMode::ReadOnly,
+            )]])
+            .append_query_results([vec![upstream_row(
+                cache_a,
+                CacheUpstreamKind::Http,
+                Some("https://http.example/"),
+            )]])
             .into_connection();
         let urls = upstream_urls_for_org(&db, org).await.expect("ok");
         assert_eq!(urls, vec!["https://http.example/".to_string()]);

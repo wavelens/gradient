@@ -12,9 +12,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
+use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::dispatch_mode::{BuildDispatchMode, arch_available, decide_dispatch_mode};
@@ -60,11 +60,16 @@ impl BuildabilityChecker {
             .await
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|((anchor, eval), misses)| (eval == evaluation_id).then_some((anchor, misses)))
+            .filter_map(|((anchor, eval), misses)| {
+                (eval == evaluation_id).then_some((anchor, misses))
+            })
             .collect();
 
         let drvs = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-            EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
+            EDerivation::find()
+                .filter(CDerivation::Id.is_in(chunk))
+                .all(db)
+                .await
         })
         .await
         .context("fetch derivations for pending builds")?;
@@ -89,7 +94,10 @@ impl BuildabilityChecker {
 
         let feature_ids: Vec<FeatureId> = edges.iter().map(|e| e.feature).collect();
         let feature_rows = gradient_db::fetch_in_chunks(&feature_ids, |chunk| async move {
-            EFeature::find().filter(CFeature::Id.is_in(chunk)).all(db).await
+            EFeature::find()
+                .filter(CFeature::Id.is_in(chunk))
+                .all(db)
+                .await
         })
         .await
         .context("fetch feature names")?;
@@ -102,7 +110,8 @@ impl BuildabilityChecker {
             substitute_miss_escalation_threshold: state
                 .config
                 .eval
-                .substitute_miss_escalation_threshold as i64,
+                .substitute_miss_escalation_threshold
+                as i64,
             features_by_drv,
             feature_name,
             connected_architectures,
@@ -114,7 +123,11 @@ impl BuildabilityChecker {
     /// (the promotion invariant), so it is dispatchable; a `Created` anchor is
     /// still blocked on deps. Substitutable anchors run anywhere until they
     /// exhaust the miss budget.
-    pub(crate) fn any_buildable(&self, anchors: &[MDerivationBuild], worker_caps: &[(Vec<String>, Vec<String>)]) -> bool {
+    pub(crate) fn any_buildable(
+        &self,
+        anchors: &[MDerivationBuild],
+        worker_caps: &[(Vec<String>, Vec<String>)],
+    ) -> bool {
         anchors.iter().any(|a| {
             if a.status == BuildStatus::Building {
                 return true;
@@ -181,7 +194,12 @@ impl BuildabilityChecker {
                 .map(|d| arch_available(&self.connected_architectures, &d.architecture))
                 .unwrap_or(false);
             if matches!(
-                decide_dispatch_mode(a.substitutable, miss, self.substitute_miss_escalation_threshold, arch_has_worker),
+                decide_dispatch_mode(
+                    a.substitutable,
+                    miss,
+                    self.substitute_miss_escalation_threshold,
+                    arch_has_worker
+                ),
                 BuildDispatchMode::SubstituteBuiltin
             ) {
                 continue;
@@ -195,8 +213,8 @@ impl BuildabilityChecker {
                 .map(str::to_owned)
                 .collect();
             let satisfied = worker_caps.iter().any(|(arch, feats)| {
-                let arch_ok =
-                    drv.architecture == gradient_types::BUILTIN_ARCH || arch.iter().any(|a| a == &drv.architecture);
+                let arch_ok = drv.architecture == gradient_types::BUILTIN_ARCH
+                    || arch.iter().any(|a| a == &drv.architecture);
                 let feats_ok = required_owned
                     .iter()
                     .all(|f| feats.iter().any(|sf| sf == f));
@@ -444,7 +462,9 @@ mod tests {
         b.substitutable = true;
         let mut checker = checker_with(vec![d.clone()], vec![]);
         checker.substitute_misses.insert(b.id, 2);
-        checker.connected_architectures.insert("x86_64-linux".into());
+        checker
+            .connected_architectures
+            .insert("x86_64-linux".into());
         let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
         assert!(!checker.any_buildable(&[b.clone()], &caps));
         let reason = checker.compute_waiting_reason(&[b], &caps);
@@ -462,7 +482,9 @@ mod tests {
         let mut b = build_for(d.id, eval_id);
         b.status = BuildStatus::Created;
         let mut checker = checker_with(vec![d], vec![]);
-        checker.connected_architectures.insert("x86_64-linux".into());
+        checker
+            .connected_architectures
+            .insert("x86_64-linux".into());
         let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
         assert!(!checker.any_buildable(&[b], &caps));
     }

@@ -11,12 +11,12 @@
 use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
+use axum::Extension;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::response::Response;
-use axum::Extension;
-use gradient_types::*;
 use gradient_core::ServerState;
+use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -86,7 +86,9 @@ pub async fn project_live_ws(
 
     let rx = state.board_events.subscribe();
     Ok(ws.on_upgrade(move |socket| {
-        live_stream(socket, rx, move |ev| project_frame(ev, project_id, &mut known))
+        live_stream(socket, rx, move |ev| {
+            project_frame(ev, project_id, &mut known)
+        })
     }))
 }
 
@@ -158,7 +160,10 @@ fn eval_frame(ev: &BoardEvent, eval_id: Uuid) -> Option<String> {
 
 /// `GET /board/cache/live` - content-free pings when cache contents or stats
 /// change. Subscribers refetch their own scope-filtered cache view.
-pub async fn cache_live_ws(State(state): State<Arc<ServerState>>, ws: WebSocketUpgrade) -> Response {
+pub async fn cache_live_ws(
+    State(state): State<Arc<ServerState>>,
+    ws: WebSocketUpgrade,
+) -> Response {
     let rx = state.board_events.subscribe();
     ws.on_upgrade(move |socket| {
         live_stream(socket, rx, |ev| match ev {
@@ -219,7 +224,14 @@ mod tests {
         assert!(project_frame(&build_changed(eval), project, &mut known).is_some());
         // Another project's evaluation is ignored.
         let foreign = Uuid::from_u128(99);
-        assert!(project_frame(&eval_changed(foreign, Some(Uuid::from_u128(5))), project, &mut known).is_none());
+        assert!(
+            project_frame(
+                &eval_changed(foreign, Some(Uuid::from_u128(5))),
+                project,
+                &mut known
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -241,11 +253,21 @@ mod tests {
         assert!(project_frame(&progress(eval, Some(project)), project, &mut known).is_some());
         assert!(project_frame(&build_changed(eval), project, &mut known).is_some());
         // Another project's progress is ignored.
-        assert!(project_frame(&progress(eval, Some(Uuid::from_u128(5))), project, &mut HashSet::new()).is_none());
+        assert!(
+            project_frame(
+                &progress(eval, Some(Uuid::from_u128(5))),
+                project,
+                &mut HashSet::new()
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn cache_changed_serializes_as_a_tagged_ping() {
-        assert_eq!(frame(&BoardEvent::CacheChanged).unwrap(), r#"{"type":"cache_changed"}"#);
+        assert_eq!(
+            frame(&BoardEvent::CacheChanged).unwrap(),
+            r#"{"type":"cache_changed"}"#
+        );
     }
 }

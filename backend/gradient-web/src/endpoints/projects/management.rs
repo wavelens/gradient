@@ -15,6 +15,7 @@ use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 
+use gradient_core::ServerState;
 use gradient_db::get_any_organization_by_name;
 use gradient_nix::RepositoryUrl;
 use gradient_sources::check_project_updates;
@@ -23,7 +24,6 @@ use gradient_types::input::{check_project_name, validate_display_name, vec_to_he
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig, TriggerType};
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, PaginatorTrait,
@@ -288,7 +288,10 @@ pub async fn put(
         .await
         .unwrap_or_default();
     if let Err(e) = auto_attach::apply(&state.web_db, &project, &integrations).await {
-        tracing::warn!("auto-attaching integrations to project {} failed: {e}", project.id);
+        tracing::warn!(
+            "auto-attaching integrations to project {} failed: {e}",
+            project.id
+        );
     }
 
     let res = BaseResponse {

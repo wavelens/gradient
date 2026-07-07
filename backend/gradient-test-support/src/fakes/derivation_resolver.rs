@@ -36,7 +36,10 @@ impl FakeDerivationResolver {
     }
 
     pub fn with_flake_errors(self, flake: impl Into<String>, errors: Vec<String>) -> Self {
-        self.flake_errors.lock().unwrap().insert(flake.into(), errors);
+        self.flake_errors
+            .lock()
+            .unwrap()
+            .insert(flake.into(), errors);
         self
     }
 

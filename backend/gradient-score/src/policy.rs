@@ -8,7 +8,7 @@ use crate::context::InstanceContext;
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 use crate::rules::builtin::{
     BuiltinDeprioritizeRule, DependencyCountRule, MissingNarSizeRule, MissingPathsRule,
-    ReserveFetchWorkersRule, RescoreWaitRule, WaitTimeRule,
+    RescoreWaitRule, ReserveFetchWorkersRule, WaitTimeRule,
 };
 use crate::rules::{
     DiskAffinityRule, FairShareRule, NetworkAffinityRule, PreferLocalBuildRule, ResourceFitRule,
@@ -56,7 +56,12 @@ pub struct RulePolicy {
 impl RulePolicy {
     pub fn new(name: &'static str, rules: Vec<Box<dyn ScoreRule>>, uses_history: bool) -> Self {
         let uses_org_work_share = rules.iter().any(|r| r.uses_org_work_share());
-        Self { name, rules, uses_history, uses_org_work_share }
+        Self {
+            name,
+            rules,
+            uses_history,
+            uses_org_work_share,
+        }
     }
 }
 
@@ -71,7 +76,10 @@ impl ScoringPolicy for RulePolicy {
         worker: &WorkerContext<'_>,
         instance: &InstanceContext,
     ) -> f64 {
-        self.rules.iter().map(|r| r.score(job, worker, instance)).sum()
+        self.rules
+            .iter()
+            .map(|r| r.score(job, worker, instance))
+            .sum()
     }
 
     fn score_detailed(
@@ -91,7 +99,11 @@ impl ScoringPolicy for RulePolicy {
                 vetoes.push(r.name().to_string());
             }
         }
-        crate::ScoreBreakdown { rules, total, vetoes }
+        crate::ScoreBreakdown {
+            rules,
+            total,
+            vetoes,
+        }
     }
 
     fn uses_history(&self) -> bool {
@@ -142,7 +154,11 @@ fn resource_aware_table() -> Vec<RuleSpec> {
 }
 
 fn enabled(table: Vec<RuleSpec>) -> Vec<Box<dyn ScoreRule>> {
-    table.into_iter().filter(|s| s.enabled).map(|s| s.rule).collect()
+    table
+        .into_iter()
+        .filter(|s| s.enabled)
+        .map(|s| s.rule)
+        .collect()
 }
 
 pub fn simple_rules() -> Vec<Box<dyn ScoreRule>> {
@@ -156,8 +172,10 @@ pub fn resource_aware_rules() -> Vec<Box<dyn ScoreRule>> {
 /// `(name, description)` for every known scoring rule, so the board UI can show
 /// what each rule does. Built from the superset policy and deduplicated by name.
 pub fn rule_catalog() -> Vec<(&'static str, &'static str)> {
-    let mut catalog: Vec<(&'static str, &'static str)> =
-        resource_aware_rules().iter().map(|r| (r.name(), r.description())).collect();
+    let mut catalog: Vec<(&'static str, &'static str)> = resource_aware_rules()
+        .iter()
+        .map(|r| (r.name(), r.description()))
+        .collect();
     catalog.sort_by_key(|(name, _)| *name);
     catalog.dedup_by_key(|(name, _)| *name);
     catalog
@@ -166,12 +184,21 @@ pub fn rule_catalog() -> Vec<(&'static str, &'static str)> {
 pub fn policy_by_name(name: &str) -> std::sync::Arc<dyn ScoringPolicy> {
     match name {
         "simple" => std::sync::Arc::new(RulePolicy::new("simple", simple_rules(), false)),
-        "resource-aware" => {
-            std::sync::Arc::new(RulePolicy::new("resource-aware", resource_aware_rules(), true))
-        }
+        "resource-aware" => std::sync::Arc::new(RulePolicy::new(
+            "resource-aware",
+            resource_aware_rules(),
+            true,
+        )),
         other => {
-            tracing::warn!(policy = other, "unknown scoring policy, using \"resource-aware\"");
-            std::sync::Arc::new(RulePolicy::new("resource-aware", resource_aware_rules(), true))
+            tracing::warn!(
+                policy = other,
+                "unknown scoring policy, using \"resource-aware\""
+            );
+            std::sync::Arc::new(RulePolicy::new(
+                "resource-aware",
+                resource_aware_rules(),
+                true,
+            ))
         }
     }
 }
@@ -197,7 +224,12 @@ mod tests {
     }
 
     fn worker_ctx<'a>(archs: &'a [String], feats: &'a [String]) -> WorkerContext<'a> {
-        WorkerContext { architectures: archs, system_features: feats, fetch: false, metrics: None }
+        WorkerContext {
+            architectures: archs,
+            system_features: feats,
+            fetch: false,
+            metrics: None,
+        }
     }
 
     #[test]
@@ -205,7 +237,11 @@ mod tests {
         let catalog = rule_catalog();
         let rules = resource_aware_rules();
 
-        assert_eq!(catalog.len(), rules.len(), "catalog must list every rule once");
+        assert_eq!(
+            catalog.len(),
+            rules.len(),
+            "catalog must list every rule once"
+        );
         for (name, description) in &catalog {
             assert!(!name.is_empty(), "rule name must not be empty");
             assert!(!description.is_empty(), "{name} is missing a description");
@@ -303,13 +339,19 @@ mod tests {
             architectures: &archs,
             system_features: &feats,
             fetch: false,
-            metrics: Some(WorkerMetricsView { network_speed_mbps: Some(100.0), ..Default::default() }),
+            metrics: Some(WorkerMetricsView {
+                network_speed_mbps: Some(100.0),
+                ..Default::default()
+            }),
         };
         let slow = WorkerContext {
             architectures: &archs,
             system_features: &feats,
             fetch: false,
-            metrics: Some(WorkerMetricsView { network_speed_mbps: Some(5.0), ..Default::default() }),
+            metrics: Some(WorkerMetricsView {
+                network_speed_mbps: Some(5.0),
+                ..Default::default()
+            }),
         };
         assert!(
             policy.score(&c, &fast, &InstanceContext::default())
@@ -379,12 +421,18 @@ mod tests {
         let breakdown = policy.score_detailed(&c, &w, &InstanceContext::default());
         let total = policy.score(&c, &w, &InstanceContext::default());
 
-        assert!((breakdown.total - total).abs() < 1e-9, "total must match score()");
+        assert!(
+            (breakdown.total - total).abs() < 1e-9,
+            "total must match score()"
+        );
         assert_eq!(breakdown.rules.len(), 7, "simple policy has 7 rules");
         assert!(breakdown.rules.contains_key("MissingPathsRule"));
         assert!(breakdown.rules.contains_key("WaitTimeRule"));
         let sum: f64 = breakdown.rules.values().sum();
-        assert!((sum - total).abs() < 1e-9, "rule contributions must sum to total");
+        assert!(
+            (sum - total).abs() < 1e-9,
+            "rule contributions must sum to total"
+        );
     }
 
     /// Rule names are persisted in `dispatched_job.score_breakdown` and served

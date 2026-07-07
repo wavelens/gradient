@@ -31,7 +31,10 @@ fn git_transport_url_strips_git_plus_http_and_ssh() {
 fn git_transport_url_passes_through_bare_schemes_and_scp() {
     assert_eq!(git_transport_url("https://h/r"), "https://h/r");
     assert_eq!(git_transport_url("git://h/r"), "git://h/r");
-    assert_eq!(git_transport_url("git@github.com:u/r.git"), "git@github.com:u/r.git");
+    assert_eq!(
+        git_transport_url("git@github.com:u/r.git"),
+        "git@github.com:u/r.git"
+    );
 }
 
 // ── parse_nix_git_url ────────────────────────────────────────────────────

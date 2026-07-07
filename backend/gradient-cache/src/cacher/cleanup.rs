@@ -5,9 +5,9 @@
  */
 
 use anyhow::{Context, Result};
+use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, IntoActiveModel,
     QueryFilter, Statement,
@@ -103,9 +103,7 @@ pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
         if keep == 0 {
             continue;
         }
-        if let Err(e) =
-            gradient_db::gc_project_evaluations(&state.db(), project.id, keep).await
-        {
+        if let Err(e) = gradient_db::gc_project_evaluations(&state.db(), project.id, keep).await {
             warn!(error = %e, project_id = %project.id, "Evaluation GC failed for project");
         }
     }
@@ -364,7 +362,9 @@ async fn purge_zombie_cached_paths(
         .await;
         match deleted {
             Ok(n) => purged += n,
-            Err(e) => warn!(error = %e, batch = chunk.len(), "failed to purge zombie cached_path batch"),
+            Err(e) => {
+                warn!(error = %e, batch = chunk.len(), "failed to purge zombie cached_path batch")
+            }
         }
     }
 

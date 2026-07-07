@@ -5,8 +5,8 @@
  */
 
 use super::SourceError;
-use gradient_types::*;
 use anyhow::Result;
+use gradient_types::*;
 
 pub fn get_hash_from_url(url: String) -> Result<String, SourceError> {
     let path_split = url.split('.').collect::<Vec<&str>>();

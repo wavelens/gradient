@@ -7,13 +7,13 @@
 use super::matchers::requested_actions_for;
 use crate::context::CiContext;
 use crate::{parse_owner_repo, reporting};
+use anyhow::{Context, Result, anyhow};
 use gradient_forge::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
 use gradient_types::{
     BuildJobId, CEntryPoint, EBuildJob, ECommit, EEntryPoint, EEvaluation, EOrganization, EProject,
     EvaluationId,
 };
-use anyhow::{Context, Result, anyhow};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value as JsonValue;
 use tracing::warn;
@@ -191,7 +191,10 @@ pub(super) async fn build_ci_report_from_payload(
             None => return Ok(None),
         },
         Some(reporting::CheckContextKind::Evaluation) | None => {
-            if reporting::suppress_evaluation_failure(&status, evaluation.building_started_at.is_some()) {
+            if reporting::suppress_evaluation_failure(
+                &status,
+                evaluation.building_started_at.is_some(),
+            ) {
                 return Ok(None);
             }
 

@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
-use gradient_types::ForgeType;
 use crate::pr::{BranchCommit, PrRef};
 use crate::registry::ForgeRegistry;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use gradient_types::ForgeType;
+use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::warn;
@@ -581,7 +581,8 @@ impl CiReporter for GiteaReporter {
             .as_ref()
             .and_then(|b| b.repo.as_ref())
             .and_then(|r| r.full_name.clone());
-        let is_fork = matches!((head_full.as_deref(), base_full.as_deref()), (Some(h), Some(b)) if h != b);
+        let is_fork =
+            matches!((head_full.as_deref(), base_full.as_deref()), (Some(h), Some(b)) if h != b);
         let head_clone_url = if is_fork {
             pr.head.repo.as_ref().and_then(|r| r.clone_url.clone())
         } else {
@@ -650,7 +651,8 @@ impl CiReporter for GiteaReporter {
     }
 
     async fn default_branch(&self, owner: &str, repo: &str) -> Result<String> {
-        crate::pr::gitea::default_branch(&self.client, &self.base_url, &self.token, owner, repo).await
+        crate::pr::gitea::default_branch(&self.client, &self.base_url, &self.token, owner, repo)
+            .await
     }
 }
 
@@ -999,7 +1001,8 @@ impl CiReporter for GitlabReporter {
     }
 
     async fn default_branch(&self, owner: &str, repo: &str) -> Result<String> {
-        crate::pr::gitlab::default_branch(&self.client, &self.base_url, &self.token, owner, repo).await
+        crate::pr::gitlab::default_branch(&self.client, &self.base_url, &self.token, owner, repo)
+            .await
     }
 }
 
@@ -1054,7 +1057,10 @@ async fn post_github_approval(
     body: &str,
 ) -> Result<()> {
     let url = github_reviews_url(base_url, owner, repo, pr_number);
-    let payload = GithubReviewPayload { event: "APPROVE", body };
+    let payload = GithubReviewPayload {
+        event: "APPROVE",
+        body,
+    };
 
     let resp = client
         .post(&url)
@@ -1293,7 +1299,12 @@ impl CiReporter for GithubReporter {
     }
 
     async fn add_reaction(&self, target: &ReactionTarget, kind: ReactionKind) -> Result<()> {
-        let url = github_reaction_url(&self.base_url, &target.owner, &target.repo, target.comment_id);
+        let url = github_reaction_url(
+            &self.base_url,
+            &target.owner,
+            &target.repo,
+            target.comment_id,
+        );
         post_github_reaction(&self.client, &url, &self.token, kind).await
     }
 
@@ -1342,7 +1353,8 @@ impl CiReporter for GithubReporter {
     }
 
     async fn default_branch(&self, owner: &str, repo: &str) -> Result<String> {
-        crate::pr::github::default_branch(&self.client, &self.base_url, &self.token, owner, repo).await
+        crate::pr::github::default_branch(&self.client, &self.base_url, &self.token, owner, repo)
+            .await
     }
 }
 
@@ -1424,7 +1436,8 @@ fn github_pr_response_to_snapshot(pr: GithubPrResponse) -> PullRequestSnapshot {
         .as_ref()
         .and_then(|b| b.repo.as_ref())
         .and_then(|r| r.full_name.clone());
-    let is_fork = matches!((head_full.as_deref(), base_full.as_deref()), (Some(h), Some(b)) if h != b);
+    let is_fork =
+        matches!((head_full.as_deref(), base_full.as_deref()), (Some(h), Some(b)) if h != b);
     let head_clone_url = if is_fork {
         pr.head.repo.as_ref().and_then(|r| r.clone_url.clone())
     } else {
@@ -1899,7 +1912,8 @@ impl CiReporter for GithubAppReporter {
 
     async fn default_branch(&self, owner: &str, repo: &str) -> Result<String> {
         let token = self.installation_token().await?;
-        crate::pr::github::default_branch(&self.client, &self.api_base_url, &token, owner, repo).await
+        crate::pr::github::default_branch(&self.client, &self.api_base_url, &token, owner, repo)
+            .await
     }
 }
 
@@ -2360,12 +2374,7 @@ mod tests {
 
     #[test]
     fn gitlab_comment_url_url_encodes_owner_repo() {
-        let url = gitlab_comment_url(
-            "https://gitlab.example.com",
-            "group/subgroup",
-            "demo",
-            7,
-        );
+        let url = gitlab_comment_url("https://gitlab.example.com", "group/subgroup", "demo", 7);
         assert_eq!(
             url,
             "https://gitlab.example.com/api/v4/projects/group%2Fsubgroup%2Fdemo/merge_requests/7/notes"

@@ -5,8 +5,8 @@
  */
 
 use crate::trigger::TriggerError;
-use gradient_types::*;
 use chrono::NaiveDateTime;
+use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 
 /// Copies the previous evaluation's entry points onto `new_eval_id`, carrying

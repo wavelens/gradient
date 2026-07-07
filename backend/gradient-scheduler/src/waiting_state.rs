@@ -12,11 +12,11 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
+use gradient_core::ServerState;
+use gradient_db::update_evaluation_status;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_db::update_evaluation_status;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{info, warn};
 
@@ -64,7 +64,10 @@ pub async fn reconcile_waiting_state(
     // draining is disabled (recovered to `Queued` by the branch below).
     if draining {
         for eval in evals {
-            let reason = eval.waiting_reason.as_ref().and_then(WaitingReason::from_json);
+            let reason = eval
+                .waiting_reason
+                .as_ref()
+                .and_then(WaitingReason::from_json);
             if eval.status == EvaluationStatus::Waiting
                 && matches!(
                     reason,
@@ -95,7 +98,10 @@ pub async fn reconcile_waiting_state(
     let connected_workers = worker_caps.len() as u32;
 
     for eval in evals {
-        let reason = eval.waiting_reason.as_ref().and_then(WaitingReason::from_json);
+        let reason = eval
+            .waiting_reason
+            .as_ref()
+            .and_then(WaitingReason::from_json);
 
         // Approval, no-cache and storage-full parks are owned by webhook +
         // cache hooks; an Aborting park is owned by the abort path. The
@@ -147,9 +153,7 @@ pub async fn reconcile_waiting_state(
                 fetch_capable_workers,
                 connected_workers,
             ),
-            EvaluationStatus::Building => {
-                build_phase_decision(state, eval.id, worker_caps).await?
-            }
+            EvaluationStatus::Building => build_phase_decision(state, eval.id, worker_caps).await?,
             _ => None,
         };
 
@@ -169,13 +173,7 @@ pub async fn reconcile_waiting_state(
             );
         }
 
-        persist_waiting_reason(
-            state,
-            eval.id,
-            &eval.waiting_reason,
-            new_reason.as_ref(),
-        )
-        .await;
+        persist_waiting_reason(state, eval.id, &eval.waiting_reason, new_reason.as_ref()).await;
 
         if eval.status != target {
             update_evaluation_status(&state.db(), eval, target).await;
@@ -202,11 +200,12 @@ async fn build_phase_decision(
 ) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
     let outcome = assess_buildability(state, evaluation_id, worker_caps).await?;
 
-    if let Some((EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. }))) =
-        &outcome
+    if let Some((EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. }))) = &outcome
         && unmet.is_empty()
     {
-        return Ok(Some(attempt_graph_unstick(state, evaluation_id, worker_caps).await?));
+        return Ok(Some(
+            attempt_graph_unstick(state, evaluation_id, worker_caps).await?,
+        ));
     }
 
     Ok(outcome)
@@ -224,8 +223,10 @@ async fn assess_buildability(
         return Ok(None);
     }
 
-    let arches: std::collections::HashSet<String> =
-        worker_caps.iter().flat_map(|(a, _)| a.iter().cloned()).collect();
+    let arches: std::collections::HashSet<String> = worker_caps
+        .iter()
+        .flat_map(|(a, _)| a.iter().cloned())
+        .collect();
     let checker = BuildabilityChecker::load(state, &pending, arches, evaluation_id).await?;
     let target = if checker.any_buildable(&pending, worker_caps) {
         EvaluationStatus::Building
@@ -269,7 +270,10 @@ async fn attempt_graph_unstick(
 
     let blocked = eval_pending_anchors(state, evaluation_id).await?.len() as u32;
 
-    Ok((EvaluationStatus::Waiting, Some(WaitingReason::graph_stuck(blocked))))
+    Ok((
+        EvaluationStatus::Waiting,
+        Some(WaitingReason::graph_stuck(blocked)),
+    ))
 }
 
 /// The non-terminal `derivation_build` anchors an evaluation still needs:

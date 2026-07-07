@@ -9,10 +9,10 @@
 //! bytes): per-cache via the `cached_path_signature` join, instance-wide as a
 //! global sum. Backend-agnostic (works for local FS and S3).
 
-use gradient_types::ids::{CacheId, DerivationId, OrganizationId};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::cache::Model as MCache;
 use gradient_entity::organization_cache::CacheSubscriptionMode;
+use gradient_types::ids::{CacheId, DerivationId, OrganizationId};
 use sea_orm::sea_query::{Alias, SimpleExpr};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QuerySelect, Statement,
@@ -297,7 +297,10 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
         .await?;
     }
 
-    ECP::delete_many().filter(CCP::Hash.eq(hash)).exec(db).await?;
+    ECP::delete_many()
+        .filter(CCP::Hash.eq(hash))
+        .exec(db)
+        .await?;
 
     if let Err(e) = nar_storage.delete(hash).await {
         warn!(%hash, error = %e, "demote: failed to delete NAR object from storage");
@@ -570,7 +573,11 @@ pub async fn clear_closure_complete_for_referrers<C: ConnectionTrait>(
         }
 
         for referrer_hash in referrers_of_hash(db, &hash).await? {
-            let Some(cp) = ECP::find().filter(CCP::Hash.eq(&referrer_hash)).one(db).await? else {
+            let Some(cp) = ECP::find()
+                .filter(CCP::Hash.eq(&referrer_hash))
+                .one(db)
+                .await?
+            else {
                 continue;
             };
             if !cp.closure_complete {
@@ -669,7 +676,10 @@ mod tests {
         let producers = demote_cached_output(&db, &nar_storage, hash).await.unwrap();
 
         assert!(producers.is_empty(), "a .drv has no producing derivation");
-        assert!(!file.exists(), "demote must delete the NAR object from storage");
+        assert!(
+            !file.exists(),
+            "demote must delete the NAR object from storage"
+        );
     }
 
     /// Demote must clear `external_url` too, not just `is_cached` - otherwise the
@@ -692,7 +702,11 @@ mod tests {
         let am = demoted_output(o);
         assert_eq!(am.is_cached, Set(false));
         assert_eq!(am.cached_path, Set(None));
-        assert_eq!(am.external_url, Set(None), "external_url must be cleared so the node is no longer prune-eligible");
+        assert_eq!(
+            am.external_url,
+            Set(None),
+            "external_url must be cleared so the node is no longer prune-eligible"
+        );
         assert_eq!(am.nar_hash, Set(None));
         assert_eq!(am.file_hash, Set(None));
         assert_eq!(am.file_size, Set(None));
@@ -708,7 +722,10 @@ mod tests {
             .build(DatabaseBackend::Postgres)
             .to_string();
         assert!(sql.to_uppercase().contains("CAST"), "missing cast: {sql}");
-        assert!(sql.to_lowercase().contains("bigint"), "missing bigint: {sql}");
+        assert!(
+            sql.to_lowercase().contains("bigint"),
+            "missing bigint: {sql}"
+        );
     }
 
     /// The reconciler enforces the row-vs-object invariant on terminal-success
@@ -736,7 +753,10 @@ mod tests {
             !sql.contains("db.closure_complete"),
             "must NOT gate on closure_complete (it is false for the dead-zone anchors): {sql}"
         );
-        assert!(sql.contains("o.external_url IS NULL"), "must skip upstream-served outputs: {sql}");
+        assert!(
+            sql.contains("o.external_url IS NULL"),
+            "must skip upstream-served outputs: {sql}"
+        );
         assert!(
             sql.contains("NOT EXISTS") && sql.contains("cp.file_hash IS NOT NULL"),
             "must require a missing backing NAR: {sql}"
@@ -759,7 +779,8 @@ mod tests {
             "the row's own NAR must be backed: {sql}"
         );
         assert!(
-            sql.contains("FROM cached_path_reference r") && sql.contains("dep.hash = r.reference_hash"),
+            sql.contains("FROM cached_path_reference r")
+                && sql.contains("dep.hash = r.reference_hash"),
             "must resolve every recorded reference: {sql}"
         );
         assert!(

@@ -54,7 +54,10 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             if !role_names_seen.insert(role.name.as_str()) {
                 errors.push(
                     format!("caches.{}.roles.{}.name", cache.name, role.name),
-                    format!("Duplicate role name '{}' in cache '{}'", role.name, cache.name),
+                    format!(
+                        "Duplicate role name '{}' in cache '{}'",
+                        role.name, cache.name
+                    ),
                 );
             }
         }

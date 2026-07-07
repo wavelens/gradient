@@ -11,16 +11,18 @@
 //! process stats are superuser-only.
 
 use crate::authorization::MaybeUser;
-use crate::endpoints::metrics::{HttpRouteStat, ProcessStat, collect, http_snapshot, process_snapshot};
+use crate::endpoints::metrics::{
+    HttpRouteStat, ProcessStat, collect, http_snapshot, process_snapshot,
+};
 use crate::error::{WebResult, require_superuser};
 use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
-use gradient_entity::metric_rollup::RollupGranularity;
-use gradient_types::*;
 use gradient_core::ServerState;
+use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_scheduler::Scheduler;
+use gradient_types::*;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -136,7 +138,11 @@ pub async fn get_board_cache(
 fn upstream_host(url: &str) -> String {
     let after_scheme = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
     let host = after_scheme.split('/').next().unwrap_or(after_scheme);
-    if host.is_empty() { url.to_string() } else { host.to_string() }
+    if host.is_empty() {
+        url.to_string()
+    } else {
+        host.to_string()
+    }
 }
 
 pub async fn get_board_upstreams(
@@ -204,7 +210,11 @@ pub async fn get_board_upstreams(
         match metric.as_str() {
             "upstream.latency_ms" => {
                 let avg = if c > 0 { s / c as f64 } else { 0.0 };
-                agg.latency.push(SeriesPoint { bucket_start: bucket_s.clone(), count: c, sum: avg });
+                agg.latency.push(SeriesPoint {
+                    bucket_start: bucket_s.clone(),
+                    count: c,
+                    sum: avg,
+                });
                 if !agg.buckets.contains(&bucket_s) {
                     agg.buckets.push(bucket_s);
                 }
@@ -256,7 +266,11 @@ pub async fn get_board_upstreams(
             None
         };
         let denom = (agg.hits_total + agg.misses_total) as f64;
-        let hit_rate = if denom > 0.0 { Some(agg.hits_total as f64 / denom) } else { None };
+        let hit_rate = if denom > 0.0 {
+            Some(agg.hits_total as f64 / denom)
+        } else {
+            None
+        };
         // Rows are already scoped to URLs the caller's org uses (or all, for
         // superusers), so the URL is the caller's own - no cross-org mask needed.
         let display_name = upstream_host(&uid);
@@ -310,7 +324,11 @@ pub async fn get_board_network(
 
     if let Some(list) = scope.org_in_list() {
         if list.is_empty() {
-            return Ok(ok_json(BoardNetworkStats { nar_egress, workers: vec![], http: vec![] }));
+            return Ok(ok_json(BoardNetworkStats {
+                nar_egress,
+                workers: vec![],
+                http: vec![],
+            }));
         }
 
         sql.push_str(&format!(" AND organization IN ({list})"));
@@ -331,8 +349,16 @@ pub async fn get_board_network(
         })
         .collect();
 
-    let http = if scope.is_all() { http_snapshot() } else { vec![] };
-    Ok(ok_json(BoardNetworkStats { nar_egress, workers, http }))
+    let http = if scope.is_all() {
+        http_snapshot()
+    } else {
+        vec![]
+    };
+    Ok(ok_json(BoardNetworkStats {
+        nar_egress,
+        workers,
+        http,
+    }))
 }
 
 #[derive(Serialize)]
@@ -396,7 +422,9 @@ pub async fn get_board_fleet(
     Ok(ok_json(out))
 }
 
-const DURATION_BANDS: &[&str] = &["<10s", "10-30s", "30-60s", "1-3m", "3-10m", "10-30m", ">30m"];
+const DURATION_BANDS: &[&str] = &[
+    "<10s", "10-30s", "30-60s", "1-3m", "3-10m", "10-30m", ">30m",
+];
 
 #[derive(Serialize)]
 pub struct HeatmapBand {
@@ -432,7 +460,10 @@ pub async fn get_board_durations_heatmap(
 
     if let Some(list) = scope.org_in_list() {
         if list.is_empty() {
-            return Ok(ok_json(DurationsHeatmap { times: vec![], bands: vec![] }));
+            return Ok(ok_json(DurationsHeatmap {
+                times: vec![],
+                bands: vec![],
+            }));
         }
 
         clauses.push(format!("pr.organization IN ({list})"));
@@ -465,7 +496,8 @@ pub async fn get_board_durations_heatmap(
     let mut cells: Vec<(chrono::NaiveDateTime, usize, i64)> = Vec::new();
     for r in &rows {
         let t: chrono::NaiveDateTime = r.try_get("", "t").unwrap_or_default();
-        let band = (r.try_get::<i32>("", "band").unwrap_or(0) as usize).min(DURATION_BANDS.len() - 1);
+        let band =
+            (r.try_get::<i32>("", "band").unwrap_or(0) as usize).min(DURATION_BANDS.len() - 1);
         let c: i64 = r.try_get("", "c").unwrap_or(0);
         if !times.contains(&t) {
             times.push(t);
@@ -489,12 +521,18 @@ pub async fn get_board_durations_heatmap(
                 })
                 .collect();
 
-            HeatmapBand { band: label, counts }
+            HeatmapBand {
+                band: label,
+                counts,
+            }
         })
         .collect();
 
     Ok(ok_json(DurationsHeatmap {
-        times: times.into_iter().map(|t| t.and_utc().to_rfc3339()).collect(),
+        times: times
+            .into_iter()
+            .map(|t| t.and_utc().to_rfc3339())
+            .collect(),
         bands,
     }))
 }
@@ -549,7 +587,9 @@ pub async fn get_board_health(
         http: http_snapshot(),
         rollup_lag_seconds,
         latest_rollup_bucket: latest.map(|t| t.and_utc().to_rfc3339()),
-        draining: scheduler.draining.load(std::sync::atomic::Ordering::Relaxed),
+        draining: scheduler
+            .draining
+            .load(std::sync::atomic::Ordering::Relaxed),
     }))
 }
 
@@ -559,7 +599,10 @@ mod tests {
 
     #[test]
     fn upstream_host_strips_scheme_and_path() {
-        assert_eq!(upstream_host("https://cache.nixos.org/foo?x=1"), "cache.nixos.org");
+        assert_eq!(
+            upstream_host("https://cache.nixos.org/foo?x=1"),
+            "cache.nixos.org"
+        );
         assert_eq!(upstream_host("http://10.0.0.1:5000/"), "10.0.0.1:5000");
         assert_eq!(upstream_host("cache.example.com"), "cache.example.com");
     }

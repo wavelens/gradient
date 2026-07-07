@@ -8,9 +8,9 @@
 
 use super::DynError;
 use super::StateApplicator;
-use gradient_types::input::load_secret_bytes;
 use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose};
+use gradient_types::input::load_secret_bytes;
 use ssh_key::PrivateKey;
 use std::fs;
 

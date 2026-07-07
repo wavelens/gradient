@@ -9,16 +9,16 @@
 
 use axum::extract::connect_info::MockConnectInfo;
 use axum_test::TestServer;
-use gradient_storage::{EmailSender, NarStore};
-use gradient_types::ids::*;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use sea_orm::{DatabaseBackend, MockDatabase};
-use std::net::SocketAddr;
-use std::sync::Arc;
+use gradient_storage::{EmailSender, NarStore};
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::log_storage::NoopLogStorage;
 use gradient_test_support::prelude::test_cli;
+use gradient_types::ids::*;
+use sea_orm::{DatabaseBackend, MockDatabase};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use uuid::Uuid;
 
 fn cache_id() -> CacheId {
@@ -63,11 +63,11 @@ fn build_server(cache: gradient_entity::cache::Model, peer: &str) -> TestServer 
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
-        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        config: Arc::new(
-            gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
         ),
+        worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+        config: Arc::new(gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config")),
         log_storage: Arc::new(NoopLogStorage),
         email: Arc::new(InMemoryEmailSender::new()) as Arc<dyn EmailSender>,
         nar_storage,

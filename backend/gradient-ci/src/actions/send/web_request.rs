@@ -7,8 +7,8 @@
 use crate::actions::crypto::decrypt_action_secret;
 use crate::actions::{ExecutorOk, MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
-use gradient_types::input::load_secret_bytes;
 use anyhow::{Context, Result, anyhow};
+use gradient_types::input::load_secret_bytes;
 use serde_json::Value as JsonValue;
 
 pub(crate) async fn execute_send_web_request(

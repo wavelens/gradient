@@ -30,7 +30,10 @@ pub async fn nar_hash_of_dir(path: &Path) -> Result<String> {
 
     let digest = hasher.finalize();
 
-    Ok(format!("sha256-{}", base64::engine::general_purpose::STANDARD.encode(digest)))
+    Ok(format!(
+        "sha256-{}",
+        base64::engine::general_purpose::STANDARD.encode(digest)
+    ))
 }
 
 /// Fetch a `.tar.gz` source archive via `req`, unpack it with its single
@@ -42,7 +45,11 @@ pub async fn tarball_source_nar_hash(req: reqwest::RequestBuilder) -> Result<Str
         .context("fetching source tarball")?
         .error_for_status()
         .context("source tarball request failed")?;
-    let bytes = resp.bytes().await.context("reading source tarball body")?.to_vec();
+    let bytes = resp
+        .bytes()
+        .await
+        .context("reading source tarball body")?
+        .to_vec();
 
     let tmp = tempfile::tempdir().context("creating extraction temp dir")?;
     let dest = tmp.path().to_path_buf();
@@ -75,10 +82,13 @@ fn extract_targz_stripped(bytes: &[u8], dest: &Path) -> Result<()> {
 
         let out = dest.join(&stripped);
         if let Some(parent) = out.parent() {
-            std::fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("mkdir {}", parent.display()))?;
         }
 
-        entry.unpack(&out).with_context(|| format!("unpacking {}", out.display()))?;
+        entry
+            .unpack(&out)
+            .with_context(|| format!("unpacking {}", out.display()))?;
     }
 
     Ok(())

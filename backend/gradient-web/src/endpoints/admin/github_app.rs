@@ -12,8 +12,8 @@ use crate::helpers::ok_json;
 use axum::extract::{Query, State};
 use axum::response::Redirect;
 use axum::{Extension, Json};
-use gradient_types::{BaseResponse, MUser};
 use gradient_core::ServerState;
+use gradient_types::{BaseResponse, MUser};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::warn;
@@ -67,8 +67,7 @@ pub async fn request_manifest(
     let host = body.host.unwrap_or_else(default_host);
     validate_host(&host)?;
 
-    let manifest =
-        gradient_ci::github_app_manifest::build_manifest(&state.config.server.serve_url);
+    let manifest = gradient_ci::github_app_manifest::build_manifest(&state.config.server.serve_url);
     let token = gradient_ci::manifest_state::issue_state(&state.manifest_state, user.id);
     let post_url = gradient_ci::github_app_manifest::manifest_post_url(&host, &token);
 
@@ -108,11 +107,7 @@ pub async fn callback(
             WebError::internal(format!("github exchange failed: {e}"))
         })?;
 
-    gradient_ci::manifest_state::store_credentials(
-        &state.pending_credentials,
-        user_id,
-        creds,
-    );
+    gradient_ci::manifest_state::store_credentials(&state.pending_credentials, user_id, creds);
 
     Ok(Redirect::to("/admin/github-app?ready=1"))
 }
@@ -123,9 +118,8 @@ pub async fn credentials(
 ) -> WebResult<Json<BaseResponse<gradient_ci::github_app_manifest::ManifestResult>>> {
     require_superuser(&user)?;
 
-    let creds =
-        gradient_ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
-            .ok_or_else(|| WebError::not_found_msg("Pending credentials"))?;
+    let creds = gradient_ci::manifest_state::take_credentials(&state.pending_credentials, user.id)
+        .ok_or_else(|| WebError::not_found_msg("Pending credentials"))?;
 
     Ok(ok_json(creds))
 }

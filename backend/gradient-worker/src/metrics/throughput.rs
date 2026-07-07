@@ -23,7 +23,9 @@ pub struct ThroughputEwma {
 
 impl ThroughputEwma {
     pub const fn new() -> Self {
-        Self { bits: AtomicU64::new(0) }
+        Self {
+            bits: AtomicU64::new(0),
+        }
     }
 
     /// Fold one positive observation into the EWMA. Non-positive values are ignored.

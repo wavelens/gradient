@@ -12,11 +12,9 @@
 
 use std::sync::Arc;
 
-use gradient_types::ForgeType;
 use crate::reporter::CiReporter;
-use crate::webhook::{
-    ParsedPullRequestEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind,
-};
+use crate::webhook::{ParsedPullRequestEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind};
+use gradient_types::ForgeType;
 
 pub trait ForgeProvider: Send + Sync + std::fmt::Debug {
     /// The forge variant this provider serves.

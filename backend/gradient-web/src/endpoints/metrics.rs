@@ -20,13 +20,13 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use gradient_core::ServerState;
+use gradient_entity::build::BuildStatus;
+use gradient_entity::evaluation::EvaluationStatus;
+use gradient_scheduler::Scheduler;
 use prometheus::{
     Encoder, Gauge, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
     Opts, Registry, TextEncoder,
 };
-use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::EvaluationStatus;
-use gradient_scheduler::Scheduler;
 use sea_orm::{DatabaseBackend, FromQueryResult, Iterable, Statement};
 use subtle::ConstantTimeEq;
 
@@ -242,7 +242,11 @@ static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(|| {
         .register(Box::new(requests.clone()))
         .expect("register http requests");
 
-    HttpMetrics { registry, duration, requests }
+    HttpMetrics {
+        registry,
+        duration,
+        requests,
+    }
 });
 
 fn gather_http() -> String {
@@ -289,7 +293,9 @@ pub(crate) fn http_snapshot() -> Vec<HttpRouteStat> {
                 for m in mf.get_metric() {
                     let status = label(m, "status");
                     let v = m.get_counter().get_value() as u64;
-                    let e = req.entry((label(m, "method"), label(m, "route"))).or_insert((0, 0));
+                    let e = req
+                        .entry((label(m, "method"), label(m, "route")))
+                        .or_insert((0, 0));
                     e.0 += v;
                     if status.starts_with('4') || status.starts_with('5') {
                         e.1 += v;
@@ -303,12 +309,19 @@ pub(crate) fn http_snapshot() -> Vec<HttpRouteStat> {
     let mut out: Vec<HttpRouteStat> = dur
         .into_iter()
         .map(|((method, route), (count, sum))| {
-            let (total, errors) = req.get(&(method.clone(), route.clone())).copied().unwrap_or((count, 0));
+            let (total, errors) = req
+                .get(&(method.clone(), route.clone()))
+                .copied()
+                .unwrap_or((count, 0));
             HttpRouteStat {
                 method,
                 route,
                 count: total.max(count),
-                avg_ms: if count > 0 { sum / count as f64 * 1000.0 } else { 0.0 },
+                avg_ms: if count > 0 {
+                    sum / count as f64 * 1000.0
+                } else {
+                    0.0
+                },
                 errors,
             }
         })
@@ -338,7 +351,9 @@ pub(crate) fn process_snapshot() -> ProcessStat {
         let pc = prometheus::process_collector::ProcessCollector::for_self();
         let _ = registry.register(Box::new(pc));
         for mf in registry.gather() {
-            let Some(m) = mf.get_metric().first() else { continue };
+            let Some(m) = mf.get_metric().first() else {
+                continue;
+            };
             let val = if mf.name() == "process_cpu_seconds_total" {
                 m.get_counter().get_value()
             } else {
@@ -422,7 +437,9 @@ pub(crate) async fn collect(
     // Status sets and label names come from the enums (decoded in Rust below),
     // so a new or renumbered variant can never silently vanish from a series.
     let build_terminal: Vec<BuildStatus> = BuildStatus::iter()
-        .filter(|s| s.is_terminal_success() || s.is_terminal_failure() || *s == BuildStatus::Aborted)
+        .filter(|s| {
+            s.is_terminal_success() || s.is_terminal_failure() || *s == BuildStatus::Aborted
+        })
         .collect();
     let build_live: Vec<BuildStatus> = BuildStatus::iter()
         .filter(|s| !build_terminal.contains(s))
@@ -500,8 +517,14 @@ pub(crate) async fn collect(
         ..Default::default()
     };
 
-    let build_label = |s: Option<i32>| s.and_then(|n| BuildStatus::try_from(n).ok()).map(|v| format!("{v:?}"));
-    let eval_label = |s: Option<i32>| s.and_then(|n| EvaluationStatus::try_from(n).ok()).map(|v| format!("{v:?}"));
+    let build_label = |s: Option<i32>| {
+        s.and_then(|n| BuildStatus::try_from(n).ok())
+            .map(|v| format!("{v:?}"))
+    };
+    let eval_label = |s: Option<i32>| {
+        s.and_then(|n| EvaluationStatus::try_from(n).ok())
+            .map(|v| format!("{v:?}"))
+    };
     for row in rows {
         match row.kind.as_str() {
             "build_total" => {

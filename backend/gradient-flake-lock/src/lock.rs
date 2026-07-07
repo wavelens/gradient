@@ -51,13 +51,34 @@ pub enum InputRef {
 /// fail explicitly at resolution time.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LockedRef {
-    Github { owner: String, repo: String, ref_: Option<String> },
-    Gitlab { owner: String, repo: String, ref_: Option<String> },
-    Sourcehut { owner: String, repo: String, ref_: Option<String> },
-    Git { url: String, ref_: Option<String> },
-    Tarball { url: String },
-    Path { path: String },
-    Indirect { id: String },
+    Github {
+        owner: String,
+        repo: String,
+        ref_: Option<String>,
+    },
+    Gitlab {
+        owner: String,
+        repo: String,
+        ref_: Option<String>,
+    },
+    Sourcehut {
+        owner: String,
+        repo: String,
+        ref_: Option<String>,
+    },
+    Git {
+        url: String,
+        ref_: Option<String>,
+    },
+    Tarball {
+        url: String,
+    },
+    Path {
+        path: String,
+    },
+    Indirect {
+        id: String,
+    },
     Other(String),
 }
 
@@ -66,7 +87,10 @@ impl FlakeLock {
     pub fn parse(bytes: &[u8]) -> Result<Self> {
         let lock: FlakeLock = serde_json::from_slice(bytes).context("parsing flake.lock")?;
         if lock.version != 7 {
-            bail!("unsupported flake.lock version {} (only 7 is supported)", lock.version);
+            bail!(
+                "unsupported flake.lock version {} (only 7 is supported)",
+                lock.version
+            );
         }
 
         Ok(lock)
@@ -99,7 +123,10 @@ impl Node {
 
     /// Parse the `original` block into a typed [`LockedRef`].
     pub fn original_ref(&self) -> Result<LockedRef> {
-        let map = self.original.as_ref().context("node has no `original` block")?;
+        let map = self
+            .original
+            .as_ref()
+            .context("node has no `original` block")?;
         LockedRef::from_map(map)
     }
 }
@@ -114,17 +141,33 @@ impl LockedRef {
 
     /// Parse a typed reference from a `locked`/`original` block.
     pub fn from_map(map: &Map<String, Value>) -> Result<Self> {
-        let ty = map.get("type").and_then(Value::as_str).context("ref has no `type`")?;
+        let ty = map
+            .get("type")
+            .and_then(Value::as_str)
+            .context("ref has no `type`")?;
         let s = |k: &str| map.get(k).and_then(Value::as_str).map(str::to_owned);
         let req = |k: &str| s(k).with_context(|| format!("{ty} ref missing `{k}`"));
 
         Ok(match ty {
-            "github" => Self::Github { owner: req("owner")?, repo: req("repo")?, ref_: s("ref") },
-            "gitlab" => Self::Gitlab { owner: req("owner")?, repo: req("repo")?, ref_: s("ref") },
-            "sourcehut" => {
-                Self::Sourcehut { owner: req("owner")?, repo: req("repo")?, ref_: s("ref") }
-            }
-            "git" => Self::Git { url: req("url")?, ref_: s("ref") },
+            "github" => Self::Github {
+                owner: req("owner")?,
+                repo: req("repo")?,
+                ref_: s("ref"),
+            },
+            "gitlab" => Self::Gitlab {
+                owner: req("owner")?,
+                repo: req("repo")?,
+                ref_: s("ref"),
+            },
+            "sourcehut" => Self::Sourcehut {
+                owner: req("owner")?,
+                repo: req("repo")?,
+                ref_: s("ref"),
+            },
+            "git" => Self::Git {
+                url: req("url")?,
+                ref_: s("ref"),
+            },
             "tarball" => Self::Tarball { url: req("url")? },
             "path" => Self::Path { path: req("path")? },
             "indirect" => Self::Indirect { id: req("id")? },
@@ -170,7 +213,10 @@ mod tests {
     fn parses_and_round_trips_byte_stable() {
         let lock = FlakeLock::parse(FIXTURE).unwrap();
         let bytes = lock.to_bytes().unwrap();
-        assert_eq!(bytes, FIXTURE, "serialization must be byte-identical to the fixture");
+        assert_eq!(
+            bytes, FIXTURE,
+            "serialization must be byte-identical to the fixture"
+        );
 
         let again = FlakeLock::parse(&bytes).unwrap();
         assert_eq!(lock, again, "re-parse must be structurally equal");
@@ -191,7 +237,10 @@ mod tests {
         assert_eq!(node_name, "nixpkgs");
 
         let node = &lock.nodes[node_name];
-        assert_eq!(node.locked_rev().unwrap(), "1111111111111111111111111111111111111111");
+        assert_eq!(
+            node.locked_rev().unwrap(),
+            "1111111111111111111111111111111111111111"
+        );
         assert_eq!(
             node.original_ref().unwrap(),
             LockedRef::Github {
@@ -204,14 +253,28 @@ mod tests {
 
     #[test]
     fn only_git_keeps_ref_in_locked() {
-        assert!(LockedRef::Git { url: "u".into(), ref_: Some("main".into()) }.locked_keeps_ref());
         assert!(
-            !LockedRef::Github { owner: "o".into(), repo: "r".into(), ref_: Some("main".into()) }
-                .locked_keeps_ref()
+            LockedRef::Git {
+                url: "u".into(),
+                ref_: Some("main".into())
+            }
+            .locked_keeps_ref()
         );
         assert!(
-            !LockedRef::Gitlab { owner: "o".into(), repo: "r".into(), ref_: None }
-                .locked_keeps_ref()
+            !LockedRef::Github {
+                owner: "o".into(),
+                repo: "r".into(),
+                ref_: Some("main".into())
+            }
+            .locked_keeps_ref()
+        );
+        assert!(
+            !LockedRef::Gitlab {
+                owner: "o".into(),
+                repo: "r".into(),
+                ref_: None
+            }
+            .locked_keeps_ref()
         );
     }
 

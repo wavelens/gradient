@@ -10,9 +10,11 @@
 //! anything to bump and short-circuits empty runs.
 
 use super::TriggerError;
-use gradient_types::*;
 use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter};
+use gradient_types::*;
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+};
 
 /// When the condition holds, create one `input_update` evaluation per the
 /// `OpenPr` action's granularity. Best-effort: returns the created evaluation
@@ -53,7 +55,11 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         return Ok(Vec::new());
     }
 
-    let active_codes: Vec<i32> = EvaluationStatus::ACTIVE.iter().copied().map(i32::from).collect();
+    let active_codes: Vec<i32> = EvaluationStatus::ACTIVE
+        .iter()
+        .copied()
+        .map(i32::from)
+        .collect();
     let already_running = EEvaluation::find()
         .filter(CEvaluation::Project.eq(project.id))
         .filter(CEvaluation::Kind.eq(EvaluationKind::InputUpdate))
@@ -69,7 +75,10 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         PrGranularity::PerInput => tracked.into_iter().map(|n| vec![n]).collect(),
     };
 
-    let base_commit: String = base_commit_hash.iter().map(|b| format!("{b:02x}")).collect();
+    let base_commit: String = base_commit_hash
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     let now = gradient_types::now();
     let mut created = Vec::with_capacity(target_sets.len());
 

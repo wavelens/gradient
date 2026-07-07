@@ -23,14 +23,16 @@ use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 
-use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_ci::IntegrationKind;
+use gradient_ci::actions::encrypt_secret_with_file;
+use gradient_core::ServerState;
 use gradient_types::ForgeType;
 use gradient_types::input::check_index_name;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -78,7 +80,11 @@ async fn integration_response(
     m: MIntegration,
 ) -> Result<IntegrationResponse, WebError> {
     let install = match m.github_installation {
-        Some(fk) => gradient_entity::github_installation::Entity::find_by_id(fk).one(db).await?,
+        Some(fk) => {
+            gradient_entity::github_installation::Entity::find_by_id(fk)
+                .one(db)
+                .await?
+        }
         None => None,
     };
     Ok(IntegrationResponse {
@@ -305,21 +311,26 @@ pub async fn put_integration(
             .await
             .map_err(|e| WebError::internal(format!("reading github app key: {e}")))?;
         let account = gradient_forge::github_app::get_installation(
-            &state.http, app.app_id, &pem, installation_id,
+            &state.http,
+            app.app_id,
+            &pem,
+            installation_id,
         )
         .await
         .map_err(|e| WebError::bad_request(format!("invalid installation_id: {e}")))?;
 
         let txn = state.web_db.inner().begin().await?;
         let inst = gradient_ci::upsert_github_installation(
-            &txn, org.id, installation_id, Some(&account), user.id,
+            &txn,
+            org.id,
+            installation_id,
+            Some(&account),
+            user.id,
         )
         .await?;
         let name = gradient_ci::github_integration_name(Some(&account), installation_id);
-        gradient_ci::ensure_github_app_integrations(
-            &txn, org.id, inst, &name, "GitHub", user.id,
-        )
-        .await?;
+        gradient_ci::ensure_github_app_integrations(&txn, org.id, inst, &name, "GitHub", user.id)
+            .await?;
 
         let created = EIntegration::find()
             .filter(CIntegration::Organization.eq(org.id))
@@ -401,7 +412,9 @@ pub async fn put_integration(
 
     let integration = integration.insert(&state.web_db).await?;
 
-    Ok(ok_json(integration_response(&state.web_db, integration).await?))
+    Ok(ok_json(
+        integration_response(&state.web_db, integration).await?,
+    ))
 }
 
 /// `GET /orgs/{organization}/integrations/{id}` - fetch a single integration.
@@ -423,7 +436,9 @@ pub async fn get_integration(
     )
     .await?;
     let integration = load_integration_in_org(&state, org.id, integration_id).await?;
-    Ok(ok_json(integration_response(&state.web_db, integration).await?))
+    Ok(ok_json(
+        integration_response(&state.web_db, integration).await?,
+    ))
 }
 
 /// `PATCH /orgs/{organization}/integrations/{id}` - update an integration.

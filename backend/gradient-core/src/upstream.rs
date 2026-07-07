@@ -99,7 +99,11 @@ async fn probe_one(
     let _permit = match tokio::time::timeout(PERMIT_ACQUIRE_TIMEOUT, pool.acquire()).await {
         Ok(Ok(permit)) => permit,
         Ok(Err(_)) | Err(_) => {
-            return (permit_wait.elapsed().as_secs_f64() * 1000.0, SampleKind::Error, None);
+            return (
+                permit_wait.elapsed().as_secs_f64() * 1000.0,
+                SampleKind::Error,
+                None,
+            );
         }
     };
     let narinfo_url = format!("{}/{}.narinfo", ep.url.trim_end_matches('/'), hash);
@@ -154,7 +158,11 @@ pub async fn lookup_upstream_narinfo(
 
         let mut results = Vec::new();
         while let Some((id, latency, kind, cp)) = futs.next().await {
-            samples.push(ProbeSample { upstream: id, latency_ms: latency, kind });
+            samples.push(ProbeSample {
+                upstream: id,
+                latency_ms: latency,
+                kind,
+            });
             results.push((id, latency, cp));
         }
 
@@ -165,7 +173,11 @@ pub async fn lookup_upstream_narinfo(
     for ep in endpoints.iter() {
         let (latency, kind, cp) = probe_one(&http, &pool, ep, &hash, &store_path).await;
         let is_hit = matches!(kind, SampleKind::Hit);
-        samples.push(ProbeSample { upstream: ep.id, latency_ms: latency, kind });
+        samples.push(ProbeSample {
+            upstream: ep.id,
+            latency_ms: latency,
+            kind,
+        });
         if is_hit && let Some(cp) = cp {
             return ProbeResult {
                 best: Some((ep.id, cp)),
@@ -174,7 +186,10 @@ pub async fn lookup_upstream_narinfo(
         }
     }
 
-    ProbeResult { best: None, samples }
+    ProbeResult {
+        best: None,
+        samples,
+    }
 }
 
 pub async fn probe_batch(
@@ -232,11 +247,7 @@ pub async fn probe_batch(
 
 /// Parse a narinfo `body` into a [`CachedPath`]. The `URL:` field is resolved
 /// against `base_url` into an absolute NAR URL; `None` if the body has no `URL:`.
-pub fn parse_upstream_narinfo(
-    base_url: &str,
-    store_path: &str,
-    body: &str,
-) -> Option<CachedPath> {
+pub fn parse_upstream_narinfo(base_url: &str, store_path: &str, body: &str) -> Option<CachedPath> {
     let mut nar_path: Option<&str> = None;
     let mut nar_hash: Option<String> = None;
     let mut file_hash: Option<String> = None;
@@ -470,9 +481,21 @@ mod tests {
     fn fold_samples_aggregates_per_upstream() {
         let a = CacheUpstreamId::now_v7();
         let samples = vec![
-            ProbeSample { upstream: a, latency_ms: 10.0, kind: SampleKind::Hit },
-            ProbeSample { upstream: a, latency_ms: 20.0, kind: SampleKind::Miss },
-            ProbeSample { upstream: a, latency_ms: 5000.0, kind: SampleKind::Error },
+            ProbeSample {
+                upstream: a,
+                latency_ms: 10.0,
+                kind: SampleKind::Hit,
+            },
+            ProbeSample {
+                upstream: a,
+                latency_ms: 20.0,
+                kind: SampleKind::Miss,
+            },
+            ProbeSample {
+                upstream: a,
+                latency_ms: 5000.0,
+                kind: SampleKind::Error,
+            },
         ];
         let mut map = HashMap::new();
         fold_samples(&samples, &mut map);

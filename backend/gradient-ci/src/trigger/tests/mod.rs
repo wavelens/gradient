@@ -7,10 +7,10 @@
 mod fixtures;
 
 use super::*;
-use gradient_types::*;
 use fixtures::{make_anchor, make_entry_point, make_eval, make_project};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{self, EvaluationStatus};
+use gradient_types::*;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
 #[tokio::test]
@@ -41,8 +41,20 @@ async fn trigger_creates_queued_eval() {
         }])
         .into_connection();
 
-    let result =
-        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None, None).await;
+    let result = trigger_evaluation(
+        &db,
+        &project,
+        vec![0u8; 20],
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     assert_eq!(result.unwrap().status, EvaluationStatus::Queued);
 }
@@ -80,8 +92,20 @@ async fn trigger_drops_dangling_last_evaluation_pointer() {
         }])
         .into_connection();
 
-    let result =
-        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None, None).await;
+    let result = trigger_evaluation(
+        &db,
+        &project,
+        vec![0u8; 20],
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await;
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
@@ -95,8 +119,20 @@ async fn trigger_already_in_progress() {
         .append_query_results([vec![existing_eval]])
         .into_connection();
 
-    let result =
-        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None, None).await;
+    let result = trigger_evaluation(
+        &db,
+        &project,
+        vec![0u8; 20],
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await;
     assert!(matches!(result, Err(TriggerError::AlreadyInProgress)));
 }
 
@@ -115,9 +151,20 @@ async fn trigger_each_active_status_blocks() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![make_eval(EvaluationId::now_v7(), status)]])
             .into_connection();
-        let result =
-            trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None, None)
-                .await;
+        let result = trigger_evaluation(
+            &db,
+            &project,
+            vec![0u8; 20],
+            None,
+            None,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
         assert!(
             matches!(result, Err(TriggerError::AlreadyInProgress)),
             "{status:?} should block trigger"
@@ -149,8 +196,20 @@ async fn trigger_terminal_does_not_block() {
         }])
         .into_connection();
 
-    let result =
-        trigger_evaluation(&db, &project, vec![0u8; 20], None, None, None, false, None, None, None, None).await;
+    let result = trigger_evaluation(
+        &db,
+        &project,
+        vec![0u8; 20],
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await;
     assert!(result.is_ok(), "terminal eval should not block new trigger");
 }
 

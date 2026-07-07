@@ -16,7 +16,11 @@ pub struct Migration;
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .drop_table(Table::drop().table(AcknowledgedDerivation::Table).to_owned())
+            .drop_table(
+                Table::drop()
+                    .table(AcknowledgedDerivation::Table)
+                    .to_owned(),
+            )
             .await
     }
 

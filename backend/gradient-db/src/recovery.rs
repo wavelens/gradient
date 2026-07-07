@@ -7,8 +7,10 @@
 use gradient_entity::build::BuildStatus;
 use gradient_entity::build_attempt::AttemptOutcome;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::{ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, QueryFilter, Statement};
 use sea_orm::sea_query::Expr;
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, QueryFilter, Statement,
+};
 
 use gradient_types::*;
 
@@ -37,9 +39,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
             gradient_entity::build_attempt::Column::BuildFinishedAt,
             Expr::value(now),
         )
-        .filter(
-            gradient_entity::build_attempt::Column::Outcome.eq(AttemptOutcome::Running),
-        )
+        .filter(gradient_entity::build_attempt::Column::Outcome.eq(AttemptOutcome::Running))
         .exec(conn)
         .await?;
     report.attempts_aborted = res.rows_affected;
@@ -68,10 +68,7 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     let eval_ids: Vec<EvaluationId> = inflight_evals.iter().map(|e| e.id).collect();
     if !eval_ids.is_empty() {
         let res = EEvaluation::update_many()
-            .col_expr(
-                CEvaluation::Status,
-                Expr::value(EvaluationStatus::Aborted),
-            )
+            .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Aborted))
             .col_expr(CEvaluation::UpdatedAt, Expr::value(now))
             .filter(CEvaluation::Id.is_in(eval_ids.clone()))
             .exec(conn)
@@ -178,17 +175,32 @@ mod tests {
         let project_id = ProjectId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // 1. abort orphaned attempts
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 3 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 3,
+            }])
             // 2. re-queue Building builds
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 2 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 2,
+            }])
             // 3a. SELECT pre-build inflight evals
             .append_query_results([vec![eval_row(EvaluationStatus::Fetching, Some(project_id))]])
             // 3b. abort those evals
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             // 3c. abort their anchors
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 4 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 4,
+            }])
             // 3d. force-eval their projects
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
 
         let report = recover_interrupted_work(&db).await.unwrap();
@@ -204,9 +216,15 @@ mod tests {
     async fn project_force_step_skipped_when_no_pre_build_evals() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // 1. abort orphaned attempts (none)
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 0 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             // 2. re-queue Building builds (none)
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 0 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             // 3a. SELECT pre-build evals → empty (steps 3b/3c/3d are skipped)
             .append_query_results([Vec::<MEval>::new()])
             .into_connection();
@@ -219,5 +237,4 @@ mod tests {
         assert_eq!(report.evals_aborted, 0);
         assert_eq!(report.projects_forced, 0);
     }
-
 }

@@ -18,11 +18,11 @@ use std::sync::Arc;
 
 use axum::extract::Extension;
 use axum_test::TestServer;
-use http::header;
 use gradient_proto::{ProtoLimiter, proto_router};
 use gradient_scheduler::Scheduler;
-use sea_orm::{DatabaseBackend, MockDatabase};
 use gradient_test_support::state::test_state;
+use http::header;
+use sea_orm::{DatabaseBackend, MockDatabase};
 
 fn upgrade_request(server: &TestServer) -> axum_test::TestRequest {
     server

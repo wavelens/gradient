@@ -49,7 +49,9 @@ async fn count<C: ConnectionTrait>(db: &C, sql: String) -> Result<i64, DbErr> {
     let row = db
         .query_one(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
-    Ok(row.and_then(|r| r.try_get::<i64>("", "n").ok()).unwrap_or(0))
+    Ok(row
+        .and_then(|r| r.try_get::<i64>("", "n").ok())
+        .unwrap_or(0))
 }
 
 /// Count every invariant violation the gates could act on right now.

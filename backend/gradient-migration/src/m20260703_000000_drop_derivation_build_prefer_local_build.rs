@@ -19,7 +19,9 @@ impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
             .get_connection()
-            .execute_unprepared("ALTER TABLE derivation_build DROP COLUMN IF EXISTS prefer_local_build")
+            .execute_unprepared(
+                "ALTER TABLE derivation_build DROP COLUMN IF EXISTS prefer_local_build",
+            )
             .await?;
         Ok(())
     }

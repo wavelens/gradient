@@ -76,7 +76,12 @@ pub async fn list(
             Some((attr, val)) if attr == "externalid" => {
                 query = query.filter(UserColumn::ScimExternalId.eq(val));
             }
-            _ => return Err(ScimError::bad_request("invalidFilter", "unsupported filter")),
+            _ => {
+                return Err(ScimError::bad_request(
+                    "invalidFilter",
+                    "unsupported filter",
+                ));
+            }
         }
     }
 

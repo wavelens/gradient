@@ -128,7 +128,8 @@ mod tests {
     #[test]
     fn build_sm_building_to_failed() {
         assert!(
-            BuildStateMachine::validate(BuildStatus::Building, BuildStatus::FailedPermanent).is_ok()
+            BuildStateMachine::validate(BuildStatus::Building, BuildStatus::FailedPermanent)
+                .is_ok()
         );
     }
 
@@ -254,7 +255,8 @@ mod tests {
     #[test]
     fn build_sm_building_to_failed_transient() {
         assert!(
-            BuildStateMachine::validate(BuildStatus::Building, BuildStatus::FailedTransient).is_ok()
+            BuildStateMachine::validate(BuildStatus::Building, BuildStatus::FailedTransient)
+                .is_ok()
         );
     }
 
@@ -280,12 +282,16 @@ mod tests {
 
     #[test]
     fn build_sm_failed_transient_is_not_terminal() {
-        assert!(!BuildStateMachine::is_terminal(&BuildStatus::FailedTransient));
+        assert!(!BuildStateMachine::is_terminal(
+            &BuildStatus::FailedTransient
+        ));
     }
 
     #[test]
     fn build_sm_failed_permanent_and_timeout_are_terminal() {
-        assert!(BuildStateMachine::is_terminal(&BuildStatus::FailedPermanent));
+        assert!(BuildStateMachine::is_terminal(
+            &BuildStatus::FailedPermanent
+        ));
         assert!(BuildStateMachine::is_terminal(&BuildStatus::FailedTimeout));
     }
 

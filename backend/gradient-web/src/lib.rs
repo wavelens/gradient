@@ -214,10 +214,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         // Superuser-only: needs MUser, so it lives on the authenticated tier
         // (the optional-auth tier only provides MaybeUser).
-        .route(
-            "/board/jobs/decisions",
-            get(board::get_dispatch_decisions),
-        )
+        .route("/board/jobs/decisions", get(board::get_dispatch_decisions))
         .route(
             "/orgs/{organization}",
             patch(orgs::patch_organization).delete(orgs::delete_organization),
@@ -348,8 +345,9 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route(
             "/build-requests/source",
-            post(build_requests::source::post_source)
-                .layer(DefaultBodyLimit::max(state.config.limits.max_source_upload_size)),
+            post(build_requests::source::post_source).layer(DefaultBodyLimit::max(
+                state.config.limits.max_source_upload_size,
+            )),
         )
         .route(
             "/build-requests/source/{upload}/chunk",
@@ -368,8 +366,9 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         )
         .route(
             "/caches/{cache}/nars",
-            post(caches::nars_upload)
-                .layer(DefaultBodyLimit::max(state.config.limits.max_nar_upload_size)),
+            post(caches::nars_upload).layer(DefaultBodyLimit::max(
+                state.config.limits.max_nar_upload_size,
+            )),
         )
         .route(
             "/caches/{cache}/nars/{hash}/chunk",
@@ -516,7 +515,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/builds/{build}/log/chunk/{index}",
             get(builds::get_build_log_chunk),
         )
-        .route("/builds/{build}/log/lines", get(builds::get_build_log_lines))
+        .route(
+            "/builds/{build}/log/lines",
+            get(builds::get_build_log_lines),
+        )
         .route(
             "/builds/{build}/log/search",
             get(builds::get_build_log_search),
@@ -578,7 +580,10 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/board/scoring/summary", get(board::get_scoring_summary))
         .route("/board/scoring/rules", get(board::get_scoring_rules))
         .route("/board/cache", get(board_metrics::get_board_cache))
-        .route("/board/cache/upstreams", get(board_metrics::get_board_upstreams))
+        .route(
+            "/board/cache/upstreams",
+            get(board_metrics::get_board_upstreams),
+        )
         .route("/board/network", get(board_metrics::get_board_network))
         .route("/board/fleet", get(board_metrics::get_board_fleet))
         .route(
@@ -798,7 +803,13 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     }
 
     match gradient_db::recover_interrupted_work(&state.worker_db).await {
-        Ok(r) if r.attempts_aborted > 0 || r.builds_requeued > 0 || r.builds_aborted > 0 || r.evals_aborted > 0 || r.projects_forced > 0 => {
+        Ok(r)
+            if r.attempts_aborted > 0
+                || r.builds_requeued > 0
+                || r.builds_aborted > 0
+                || r.evals_aborted > 0
+                || r.projects_forced > 0 =>
+        {
             tracing::warn!(
                 attempts_aborted = r.attempts_aborted,
                 builds_requeued = r.builds_requeued,
@@ -815,7 +826,9 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     // Draining is in-memory and auto-clears on startup, so recover any
     // evaluations a previous process parked under it back to the queue.
     match gradient_db::unpark_draining_evals(&state.worker_db).await {
-        Ok(n) if n > 0 => tracing::warn!(evaluations = n, "recovered evaluations parked by draining"),
+        Ok(n) if n > 0 => {
+            tracing::warn!(evaluations = n, "recovered evaluations parked by draining")
+        }
         Ok(_) => {}
         Err(e) => tracing::error!(error = ?e, "failed to recover draining-parked evaluations"),
     }

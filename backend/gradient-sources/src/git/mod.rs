@@ -18,11 +18,11 @@ mod remote;
 mod update_check;
 mod url;
 
-use gradient_db::DbContext;
 use crate::SourceError;
+use context::ProjectGitContext;
+use gradient_db::DbContext;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
-use context::ProjectGitContext;
 use tracing::instrument;
 
 pub use prefetch::Libgit2Prefetcher;

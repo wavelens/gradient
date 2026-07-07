@@ -91,7 +91,9 @@ pub enum EvalResponse {
         stats: Option<StatsDelta>,
     },
     /// One resolved attr of an in-flight `Resolve`, streamed in request order.
-    ResolveItem { item: ResolvedItem },
+    ResolveItem {
+        item: ResolvedItem,
+    },
     /// Terminates a `Resolve` stream, carrying the batch-wide leftovers.
     ResolveEnd {
         warnings: Vec<String>,

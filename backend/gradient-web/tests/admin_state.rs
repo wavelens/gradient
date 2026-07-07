@@ -11,11 +11,11 @@
 //! for both formats. A full round-trip against real data lives in the nix api
 //! integration test (`nix/tests/gradient/api`).
 
+use gradient_test_support::fixtures::user;
+use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
-use gradient_test_support::fixtures::user;
-use gradient_test_support::web::{live_session, make_test_server, make_token};
 
 fn run<F: std::future::Future>(fut: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
@@ -34,7 +34,11 @@ fn superuser() -> gradient_entity::user::Model {
 
 /// Append the two session lookups plus the caller's user row consumed by the
 /// auth middleware.
-fn with_user(db: MockDatabase, session_id: SessionId, caller: gradient_entity::user::Model) -> MockDatabase {
+fn with_user(
+    db: MockDatabase,
+    session_id: SessionId,
+    caller: gradient_entity::user::Model,
+) -> MockDatabase {
     let session = live_session(session_id);
     db.append_query_results([vec![session.clone()]])
         .append_query_results([vec![session]])
@@ -69,7 +73,11 @@ fn export_state_rejects_non_superuser() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
-        let db = with_user(MockDatabase::new(DatabaseBackend::Postgres), session_id, user());
+        let db = with_user(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+            user(),
+        );
 
         let server = make_test_server(db.into_connection());
         let res = server

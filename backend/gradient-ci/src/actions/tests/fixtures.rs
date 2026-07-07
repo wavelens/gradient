@@ -34,10 +34,10 @@ pub fn run<F: std::future::Future>(fut: F) -> F::Output {
 
 pub fn make_ctx() -> crate::CiContext {
     use crate::CiContext;
+    use futures::future::BoxFuture;
     use gradient_db::{DbContext, NoReactor, WebDb, WorkerDb};
     use gradient_storage::{EmailSender, LogStorage, NarStore, StorageCtx};
     use gradient_types::RuntimeConfig;
-    use futures::future::BoxFuture;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     #[derive(Debug)]

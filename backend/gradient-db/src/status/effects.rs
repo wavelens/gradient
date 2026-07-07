@@ -32,7 +32,11 @@ impl TransitionChange {
     /// CI state without shifting dep-count histograms. Used when only the
     /// derivation set is known, not the transition that produced it.
     pub fn unchanged(derivation: DerivationId, status: BuildStatus) -> Self {
-        Self { derivation, from: status, to: status }
+        Self {
+            derivation,
+            from: status,
+            to: status,
+        }
     }
 }
 
@@ -126,10 +130,9 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
         }
     }
 
-    if changes
-        .iter()
-        .any(|c| matches!(c.to, BuildStatus::Completed | BuildStatus::Substituted) && c.from != c.to)
-    {
+    if changes.iter().any(|c| {
+        matches!(c.to, BuildStatus::Completed | BuildStatus::Substituted) && c.from != c.to
+    }) {
         let _ = ctx
             .board_events
             .send(gradient_types::BoardEvent::CacheChanged);

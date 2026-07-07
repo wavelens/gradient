@@ -14,8 +14,8 @@ mod dedup;
 mod gates;
 
 use super::trigger::{TriggerError, trigger_evaluation};
-use gradient_types::*;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 pub use gates::{

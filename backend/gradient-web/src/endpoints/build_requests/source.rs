@@ -84,8 +84,7 @@ pub async fn post_source(
         .await
         .map_err(|e| WebError::internal(format!("Failed to read source NAR: {}", e)))?;
 
-    let response =
-        finalize_build_request(&state, org.id, &user, &nar, target, system).await?;
+    let response = finalize_build_request(&state, org.id, &user, &nar, target, system).await?;
 
     Ok(ok_json(response))
 }

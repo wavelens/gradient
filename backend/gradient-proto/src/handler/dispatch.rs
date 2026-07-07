@@ -1022,7 +1022,13 @@ mod prunable_known_derivations_tests {
         complete_anchors: &HashSet<DerivationId>,
         closure_cached: &HashSet<String>,
     ) -> Vec<String> {
-        prunable_known_derivations(candidates, outputs, unresolved, complete_anchors, closure_cached)
+        prunable_known_derivations(
+            candidates,
+            outputs,
+            unresolved,
+            complete_anchors,
+            closure_cached,
+        )
     }
 
     #[test]
@@ -1055,7 +1061,13 @@ mod prunable_known_derivations_tests {
             (unknown, "/nix/store/ggg-unknown".to_string()),
         ];
 
-        let prunable = prune(candidates, &outputs, &HashSet::new(), &HashSet::new(), &HashSet::new());
+        let prunable = prune(
+            candidates,
+            &outputs,
+            &HashSet::new(),
+            &HashSet::new(),
+            &HashSet::new(),
+        );
         assert_eq!(prunable, vec!["/nix/store/bbb-upstream".to_string()]);
     }
 
@@ -1083,10 +1095,18 @@ mod prunable_known_derivations_tests {
             (half_cached, "/nix/store/ccc-half".to_string()),
         ];
         let complete_anchors = HashSet::from([complete, half_cached]);
-        let closure_cached: HashSet<String> =
-            ["aaa", "bbb", "ccc"].iter().map(|s| s.to_string()).collect();
+        let closure_cached: HashSet<String> = ["aaa", "bbb", "ccc"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
-        let prunable = prune(candidates, &outputs, &HashSet::new(), &complete_anchors, &closure_cached);
+        let prunable = prune(
+            candidates,
+            &outputs,
+            &HashSet::new(),
+            &complete_anchors,
+            &closure_cached,
+        );
         assert_eq!(prunable, vec!["/nix/store/aaa-complete".to_string()]);
     }
 
@@ -1107,7 +1127,14 @@ mod prunable_known_derivations_tests {
         let closure_cached: HashSet<String> = HashSet::from(["bbb".to_string()]);
 
         assert!(
-            prune(candidates, &[o], &unresolved, &complete_anchors, &closure_cached).is_empty(),
+            prune(
+                candidates,
+                &[o],
+                &unresolved,
+                &complete_anchors,
+                &closure_cached
+            )
+            .is_empty(),
             "an edges_unresolved anchor must be re-walked, not pruned"
         );
     }

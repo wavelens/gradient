@@ -129,7 +129,11 @@ impl ParsedDerivation {
             .execute(|client| async move { client.set_options(&opts).await })
             .await
             .map_err(|e| {
-                BuildError::transient(anyhow::anyhow!("set_options failed for {}: {}", drv_path, e))
+                BuildError::transient(anyhow::anyhow!(
+                    "set_options failed for {}: {}",
+                    drv_path,
+                    e
+                ))
             })?;
 
         // `build_derivation` is a `Stream<Item=LogMessage> + Future<BuildResult>`,
@@ -680,7 +684,10 @@ mod tests {
 
     #[test]
     fn keeps_copy_to_store_activity() {
-        let msg = start_activity(ActivityType::Unknown, "copying '/nix/store/xxxx' to the store");
+        let msg = start_activity(
+            ActivityType::Unknown,
+            "copying '/nix/store/xxxx' to the store",
+        );
         assert_eq!(
             log_message_to_text(&msg).as_deref(),
             Some("copying '/nix/store/xxxx' to the store\n")

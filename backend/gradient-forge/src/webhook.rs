@@ -522,7 +522,9 @@ impl ParsedPushEvent {
             commit_hash: pc.hash,
             repository_urls: vec![payload.repository.clone_url, payload.repository.ssh_url],
             commit_message: head.and_then(commit_subject),
-            author_name: head.and_then(|c| c.author.as_ref()).and_then(|a| a.name.clone()),
+            author_name: head
+                .and_then(|c| c.author.as_ref())
+                .and_then(|a| a.name.clone()),
             ref_name: pc.ref_name,
             is_tag: pc.is_tag,
         }))
@@ -549,7 +551,9 @@ impl ParsedPushEvent {
             commit_hash: pc.hash,
             repository_urls: urls,
             commit_message: head.and_then(commit_subject),
-            author_name: head.and_then(|c| c.author.as_ref()).and_then(|a| a.name.clone()),
+            author_name: head
+                .and_then(|c| c.author.as_ref())
+                .and_then(|a| a.name.clone()),
             ref_name: pc.ref_name,
             is_tag: pc.is_tag,
         }))
@@ -580,7 +584,9 @@ impl ParsedPushEvent {
             commit_hash: pc.hash,
             repository_urls: urls,
             commit_message: head.and_then(commit_subject),
-            author_name: head.and_then(|c| c.author.as_ref()).and_then(|a| a.name.clone()),
+            author_name: head
+                .and_then(|c| c.author.as_ref())
+                .and_then(|a| a.name.clone()),
             ref_name: pc.ref_name,
             is_tag: pc.is_tag,
         }))

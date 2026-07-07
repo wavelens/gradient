@@ -7,11 +7,11 @@ use crate::cli::test_cli;
 use crate::fakes::email::InMemoryEmailSender;
 use crate::log_storage::{InMemoryLogStorage, NoopLogStorage};
 use futures::TryStreamExt as _;
+use gradient_core::ServerState;
+use gradient_db::{WebDb, WorkerDb};
 use gradient_storage::{EmailSender, NarStore};
 use gradient_types::ids::*;
 use gradient_types::{RuntimeConfig, SecretString};
-use gradient_core::ServerState;
-use gradient_db::{WebDb, WorkerDb};
 use harmonia_file_nar::NarByteStream;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use std::sync::Arc;
@@ -129,7 +129,9 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
 
     Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
@@ -179,7 +181,9 @@ pub async fn public_cache_state() -> Arc<ServerState> {
 
     Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
@@ -234,7 +238,9 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
 
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
@@ -318,7 +324,9 @@ fn cache_derivation_row() -> gradient_entity::cache_derivation::Model {
     }
 }
 
-fn anchor_row(status: gradient_entity::build::BuildStatus) -> gradient_entity::derivation_build::Model {
+fn anchor_row(
+    status: gradient_entity::build::BuildStatus,
+) -> gradient_entity::derivation_build::Model {
     gradient_entity::derivation_build::Model {
         id: anchor_id(),
         derivation: deriv_id(),
@@ -347,7 +355,9 @@ fn make_state(
     let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage,
@@ -381,7 +391,9 @@ pub async fn cache_with_completed_build_in_cache() -> (Arc<ServerState>, String)
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
         .append_query_results([vec![cache_derivation_row()]])
-        .append_query_results([vec![anchor_row(gradient_entity::build::BuildStatus::Completed)]])
+        .append_query_results([vec![anchor_row(
+            gradient_entity::build::BuildStatus::Completed,
+        )]])
         .append_query_results([vec![attempt_row()]])
         .into_connection();
 
@@ -426,7 +438,9 @@ pub async fn private_cache_state() -> Arc<ServerState> {
 
     Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
@@ -470,7 +484,9 @@ pub async fn cache_with_two_completed_builds() -> (Arc<ServerState>, String) {
         .append_query_results([vec![cache_row()]])
         .append_query_results([vec![derivation_row()]])
         .append_query_results([vec![cache_derivation_row()]])
-        .append_query_results([vec![anchor_row(gradient_entity::build::BuildStatus::Completed)]])
+        .append_query_results([vec![anchor_row(
+            gradient_entity::build::BuildStatus::Completed,
+        )]])
         .append_query_results([vec![attempt_row()]])
         .into_connection();
 
@@ -490,7 +506,9 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
 
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),

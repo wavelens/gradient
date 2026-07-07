@@ -38,12 +38,7 @@ impl Scheduler {
             .await
         {
             Ok(Some(eval)) => {
-                gradient_db::update_evaluation_status(
-                    &self.state.db(),
-                    eval,
-                    new_status,
-                )
-                .await;
+                gradient_db::update_evaluation_status(&self.state.db(), eval, new_status).await;
             }
             Ok(None) => warn!(%evaluation_id, "evaluation not found for status update"),
             Err(e) => {
@@ -85,7 +80,9 @@ impl Scheduler {
         bumped: Vec<gradient_types::proto::BumpedInputWire>,
     ) {
         use gradient_entity::evaluation_input_update as eiu;
-        use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+        use sea_orm::{
+            ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
+        };
 
         let evaluation_id = {
             let tracker = self.job_tracker.read().await;
@@ -171,7 +168,9 @@ impl Scheduler {
         // `flush_deferred_deps` at stream completion.
         {
             let mut acc = self.eval_edges.write().await;
-            acc.entry(job.evaluation_id).or_default().add_batch(&derivations);
+            acc.entry(job.evaluation_id)
+                .or_default()
+                .add_batch(&derivations);
         }
 
         eval::handle_eval_result(&self.state, &job, derivations, warnings, errors).await?;

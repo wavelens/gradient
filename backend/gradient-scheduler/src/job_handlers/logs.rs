@@ -45,7 +45,9 @@ impl Scheduler {
             }
         };
 
-        let derivation_build: DerivationBuildId = match build_id_str.and_then(|s| s.parse::<DerivationBuildId>().ok()) {
+        let derivation_build: DerivationBuildId = match build_id_str
+            .and_then(|s| s.parse::<DerivationBuildId>().ok())
+        {
             Some(id) => id,
             None => {
                 warn!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: build_task index out of range or derivation_build unparseable");

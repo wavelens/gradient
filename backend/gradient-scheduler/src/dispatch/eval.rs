@@ -9,11 +9,11 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use gradient_core::ServerState;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::input::vec_to_hex;
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use tracing::{debug, error, info};
@@ -68,7 +68,11 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
     }
 
     let maps = EvalDispatchMaps::load(state, &evals).await?;
-    let split_fetch = scheduler.worker_pool.read().await.has_idle_eval_only_worker();
+    let split_fetch = scheduler
+        .worker_pool
+        .read()
+        .await
+        .has_idle_eval_only_worker();
     let eval_history = scheduler.eval_history.load();
 
     for eval in evals {
@@ -94,7 +98,11 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             inputs: s
                 .target_inputs
                 .as_array()
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default(),
         });
 
@@ -154,14 +162,15 @@ struct EvalDispatchMaps {
 }
 
 impl EvalDispatchMaps {
-    async fn load(
-        state: &Arc<ServerState>,
-        evals: &[MEvaluation],
-    ) -> Result<Self, sea_orm::DbErr> {
+    async fn load(state: &Arc<ServerState>, evals: &[MEvaluation]) -> Result<Self, sea_orm::DbErr> {
         use sea_orm::QueryOrder;
 
-        let commit_ids: Vec<CommitId> =
-            evals.iter().map(|e| e.commit).collect::<HashSet<_>>().into_iter().collect();
+        let commit_ids: Vec<CommitId> = evals
+            .iter()
+            .map(|e| e.commit)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
         let commits = gradient_db::fetch_in_chunks(&commit_ids, |chunk| async move {
             ECommit::find()
                 .filter(CCommit::Id.is_in(chunk))
@@ -203,13 +212,12 @@ impl EvalDispatchMaps {
         })
         .await?
         {
-            overrides
-                .entry(r.evaluation)
-                .or_default()
-                .push(gradient_types::proto::FlakeInputOverride {
+            overrides.entry(r.evaluation).or_default().push(
+                gradient_types::proto::FlakeInputOverride {
                     input_name: r.input_name,
                     url: r.url,
-                });
+                },
+            );
         }
 
         let project_ids: Vec<ProjectId> = evals
@@ -229,7 +237,12 @@ impl EvalDispatchMaps {
         .map(|p| (p.id, p.organization))
         .collect();
 
-        Ok(Self { commits, sidecars, overrides, orgs })
+        Ok(Self {
+            commits,
+            sidecars,
+            overrides,
+            orgs,
+        })
     }
 }
 

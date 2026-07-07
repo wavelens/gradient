@@ -12,15 +12,19 @@
 //! name-taken pre-check (409) with the gate satisfied.
 
 use axum::http::StatusCode;
-use gradient_entity::{cache, organization};
 use gradient_entity::ids::*;
+use gradient_entity::{cache, organization};
+use gradient_test_support::fixtures::{superuser_user, test_date, user, user_id};
+use gradient_test_support::web::{live_session, make_test_server_configured, make_token};
 use gradient_types::{CreatePermission, SessionId};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::{Value, json};
-use gradient_test_support::fixtures::{superuser_user, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server_configured, make_token};
 
-fn with_auth(db: MockDatabase, session_id: SessionId, actor: gradient_entity::user::Model) -> MockDatabase {
+fn with_auth(
+    db: MockDatabase,
+    session_id: SessionId,
+    actor: gradient_entity::user::Model,
+) -> MockDatabase {
     let session = live_session(session_id);
     db.append_query_results([vec![session.clone()]])
         .append_query_results([vec![session]])
@@ -73,7 +77,11 @@ fn create_org_superusers_rejects_regular_user() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id, user());
+        let db = with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+            user(),
+        );
         let server = make_test_server_configured(db.into_connection(), |cli| {
             cli.server.create_org = CreatePermission::Superusers;
         });
@@ -148,7 +156,11 @@ fn create_cache_superusers_rejects_regular_user() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id, user());
+        let db = with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+            user(),
+        );
         let server = make_test_server_configured(db.into_connection(), |cli| {
             cli.server.create_cache = CreatePermission::Superusers;
         });
@@ -196,8 +208,12 @@ fn create_cache_everyone_allows_regular_user_past_gate() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id, user())
-            .append_query_results([vec![cache_row("acme")]]);
+        let db = with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+            user(),
+        )
+        .append_query_results([vec![cache_row("acme")]]);
         let server = make_test_server_configured(db.into_connection(), |cli| {
             cli.server.create_cache = CreatePermission::Everyone;
         });

@@ -8,9 +8,9 @@ use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::lookup_id;
 use crate::config::*;
-use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;
+use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashMap;
 
@@ -29,12 +29,14 @@ impl<'a> StateApplicator<'a> {
 
             let mut perms = Vec::with_capacity(state_role.permissions.len());
             for wire in &state_role.permissions {
-                let p = gradient_db::permissions::Permission::from_wire_name(wire).ok_or_else(|| {
-                    format!(
-                        "Role '{}' references unknown permission '{}'",
-                        state_role.name, wire
-                    )
-                })?;
+                let p = gradient_db::permissions::Permission::from_wire_name(wire).ok_or_else(
+                    || {
+                        format!(
+                            "Role '{}' references unknown permission '{}'",
+                            state_role.name, wire
+                        )
+                    },
+                )?;
                 perms.push(p);
             }
             if perms.is_empty() {

@@ -120,7 +120,14 @@ impl WorkerPool {
             abort_tx,
         );
         self.workers.insert(id.clone(), WorkerSlot::Active(worker));
-        if let Some((architectures, system_features, max_concurrent_builds, cpu_count, ram_total_mb, cpu_core_score)) = prior
+        if let Some((
+            architectures,
+            system_features,
+            max_concurrent_builds,
+            cpu_count,
+            ram_total_mb,
+            cpu_core_score,
+        )) = prior
             && let Some(slot) = self.workers.get_mut(&id)
         {
             let s = slot.shared_mut();
@@ -452,20 +459,33 @@ mod tests {
     }
 
     fn caps_ef(eval: bool, fetch: bool) -> GradientCapabilities {
-        GradientCapabilities { eval, fetch, ..GradientCapabilities::default() }
+        GradientCapabilities {
+            eval,
+            fetch,
+            ..GradientCapabilities::default()
+        }
     }
 
     #[test]
     fn idle_eval_only_worker_detected() {
         let mut pool = WorkerPool::new();
         pool.register("f1".into(), caps_ef(true, true), HashSet::new());
-        assert!(!pool.has_idle_eval_only_worker(), "only a fetch worker present");
+        assert!(
+            !pool.has_idle_eval_only_worker(),
+            "only a fetch worker present"
+        );
 
         pool.register("e1".into(), caps_ef(true, false), HashSet::new());
-        assert!(pool.has_idle_eval_only_worker(), "idle eval-only worker present");
+        assert!(
+            pool.has_idle_eval_only_worker(),
+            "idle eval-only worker present"
+        );
 
         pool.assign_job("e1", "j1");
-        assert!(!pool.has_idle_eval_only_worker(), "eval-only worker is busy");
+        assert!(
+            !pool.has_idle_eval_only_worker(),
+            "eval-only worker is busy"
+        );
     }
 
     #[test]
@@ -473,7 +493,10 @@ mod tests {
         let mut pool = WorkerPool::new();
         pool.register("e1".into(), caps_ef(true, false), HashSet::new());
         pool.mark_draining("e1");
-        assert!(!pool.has_idle_eval_only_worker(), "draining worker excluded");
+        assert!(
+            !pool.has_idle_eval_only_worker(),
+            "draining worker excluded"
+        );
     }
 
     #[test]
@@ -509,7 +532,15 @@ mod tests {
     fn test_update_capabilities() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new());
-        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec!["kvm".into()], 4, 8, 16384, 1200);
+        pool.update_capabilities(
+            "w1",
+            vec!["x86_64-linux".into()],
+            vec!["kvm".into()],
+            4,
+            8,
+            16384,
+            1200,
+        );
 
         let workers = pool.all_workers();
         assert_eq!(workers.len(), 1);
@@ -527,7 +558,15 @@ mod tests {
     fn reregister_preserves_reported_capabilities() {
         let mut pool = WorkerPool::new();
         pool.register("w1".into(), caps(), HashSet::new());
-        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec!["kvm".into()], 4, 8, 16384, 1200);
+        pool.update_capabilities(
+            "w1",
+            vec!["x86_64-linux".into()],
+            vec!["kvm".into()],
+            4,
+            8,
+            16384,
+            1200,
+        );
 
         // A reconnect/re-auth re-registers without the worker re-sending caps;
         // architectures and sizing must survive so the worker stays matchable.
@@ -573,10 +612,22 @@ mod tests {
         let mut pool = WorkerPool::new();
         pool.register(
             "w1".into(),
-            GradientCapabilities { fetch: true, eval: true, ..Default::default() },
+            GradientCapabilities {
+                fetch: true,
+                eval: true,
+                ..Default::default()
+            },
             HashSet::new(),
         );
-        pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec!["kvm".into()], 4, 8, 16384, 1200);
+        pool.update_capabilities(
+            "w1",
+            vec!["x86_64-linux".into()],
+            vec!["kvm".into()],
+            4,
+            8,
+            16384,
+            1200,
+        );
         pool.update_metrics("w1", 12.5, 9000, None, None);
 
         let caps = pool.worker_caps("w1").unwrap();
@@ -814,12 +865,19 @@ mod tests {
 
         // One millisecond past the deadline: stale.
         handle.store(now_ms - timeout_ms - 1, Ordering::Relaxed);
-        assert_eq!(pool.stale_worker_ids(now_ms, timeout_ms), vec!["w1".to_string()]);
+        assert_eq!(
+            pool.stale_worker_ids(now_ms, timeout_ms),
+            vec!["w1".to_string()]
+        );
 
         // A freshly registered worker is stamped with `now`, so it is never
         // immediately stale against the real clock.
         pool.register("w2".into(), caps(), HashSet::new());
         let real_now = gradient_types::now().and_utc().timestamp_millis();
-        assert!(!pool.stale_worker_ids(real_now, timeout_ms).contains(&"w2".to_string()));
+        assert!(
+            !pool
+                .stale_worker_ids(real_now, timeout_ms)
+                .contains(&"w2".to_string())
+        );
     }
 }

@@ -172,10 +172,22 @@ mod tests {
 
     #[test]
     fn host_parsing_covers_url_shapes() {
-        assert_eq!(url_host("https://github.com/foo/bar").as_deref(), Some("github.com"));
-        assert_eq!(url_host("git@gitea.example.com:foo/bar.git").as_deref(), Some("gitea.example.com"));
-        assert_eq!(url_host("ssh://git@gitlab.com/foo/bar").as_deref(), Some("gitlab.com"));
-        assert_eq!(url_host("git+https://Gitea.Example.com/foo").as_deref(), Some("gitea.example.com"));
+        assert_eq!(
+            url_host("https://github.com/foo/bar").as_deref(),
+            Some("github.com")
+        );
+        assert_eq!(
+            url_host("git@gitea.example.com:foo/bar.git").as_deref(),
+            Some("gitea.example.com")
+        );
+        assert_eq!(
+            url_host("ssh://git@gitlab.com/foo/bar").as_deref(),
+            Some("gitlab.com")
+        );
+        assert_eq!(
+            url_host("git+https://Gitea.Example.com/foo").as_deref(),
+            Some("gitea.example.com")
+        );
         assert_eq!(url_host("not-a-url"), None);
     }
 
@@ -183,7 +195,11 @@ mod tests {
     fn self_hosted_pairs_inbound_and_outbound() {
         let integrations = vec![
             integ(IntegrationKind::Inbound, ForgeType::Gitea, None),
-            integ(IntegrationKind::Outbound, ForgeType::Gitea, Some("https://gitea.example.com")),
+            integ(
+                IntegrationKind::Outbound,
+                ForgeType::Gitea,
+                Some("https://gitea.example.com"),
+            ),
         ];
         let m = match_integrations_for_repo("git@gitea.example.com:foo/bar.git", &integrations);
         assert!(m.inbound.is_some(), "inbound matched via inferred forge");

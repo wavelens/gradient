@@ -11,15 +11,15 @@
 use axum::http::StatusCode;
 use axum_test::multipart::{MultipartForm, Part};
 use chrono::Utc;
+use gradient_db::permissions::PermissionMask;
 use gradient_entity::ids::*;
 use gradient_entity::role;
-use gradient_db::permissions::PermissionMask;
-use gradient_types::{ConcurrencyPolicy, SessionId};
-use gradient_types::consts::BASE_ROLE_WRITE_ID;
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
-use serde_json::Value;
 use gradient_test_support::fixtures::{org_id, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_types::consts::BASE_ROLE_WRITE_ID;
+use gradient_types::{ConcurrencyPolicy, SessionId};
+use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use serde_json::Value;
 use uuid::Uuid;
 
 fn write_role_row() -> role::Model {
@@ -143,36 +143,36 @@ fn source_upload_creates_queued_eval() {
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-            // ensure_cached_path → SELECT (None) then INSERT
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            .append_query_results([vec![cp_row]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            // queue_signature_placeholders → org caches (empty)
-            .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
-            // ensure_build_request_project → SELECT (None) then INSERT
-            .append_query_results([Vec::<gradient_entity::project::Model>::new()])
-            .append_query_results([vec![project_model.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            // INSERT commit
-            .append_query_results([vec![commit_model.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            // INSERT evaluation
-            .append_query_results([vec![eval_model.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            // resolve_org_cache_name → org-cache link lookup (none → cache=null)
-            .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()]);
+        // ensure_cached_path → SELECT (None) then INSERT
+        .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+        .append_query_results([vec![cp_row]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // queue_signature_placeholders → org caches (empty)
+        .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
+        // ensure_build_request_project → SELECT (None) then INSERT
+        .append_query_results([Vec::<gradient_entity::project::Model>::new()])
+        .append_query_results([vec![project_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // INSERT commit
+        .append_query_results([vec![commit_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // INSERT evaluation
+        .append_query_results([vec![eval_model.clone()]])
+        .append_exec_results([MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 1,
+        }])
+        // resolve_org_cache_name → org-cache link lookup (none → cache=null)
+        .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
 

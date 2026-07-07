@@ -17,7 +17,11 @@ use gradient_types::ids::BuildAttemptId;
 pub struct NoopLogStorage;
 
 impl LogStorage for NoopLogStorage {
-    fn append<'a>(&'a self, _build_id: BuildAttemptId, _text: &'a str) -> BoxFuture<'a, Result<()>> {
+    fn append<'a>(
+        &'a self,
+        _build_id: BuildAttemptId,
+        _text: &'a str,
+    ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
     fn read<'a>(&'a self, _build_id: BuildAttemptId) -> BoxFuture<'a, Result<String>> {
@@ -37,7 +41,11 @@ impl LogStorage for NoopLogStorage {
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn read_chunk<'a>(&'a self, _build_id: BuildAttemptId, _index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+    fn read_chunk<'a>(
+        &'a self,
+        _build_id: BuildAttemptId,
+        _index: u32,
+    ) -> BoxFuture<'a, Result<Vec<u8>>> {
         Box::pin(async { anyhow::bail!("no chunk") })
     }
     fn delete_chunks<'a>(&'a self, _build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
@@ -121,7 +129,11 @@ impl LogStorage for RecordingLogStorage {
     ) -> BoxFuture<'a, Result<()>> {
         Box::pin(async { Ok(()) })
     }
-    fn read_chunk<'a>(&'a self, _build_id: BuildAttemptId, _index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+    fn read_chunk<'a>(
+        &'a self,
+        _build_id: BuildAttemptId,
+        _index: u32,
+    ) -> BoxFuture<'a, Result<Vec<u8>>> {
         Box::pin(async { anyhow::bail!("no chunk") })
     }
     fn delete_chunks<'a>(&'a self, _build_id: BuildAttemptId) -> BoxFuture<'a, Result<()>> {
@@ -212,7 +224,11 @@ impl LogStorage for InMemoryLogStorage {
         })
     }
 
-    fn read_chunk<'a>(&'a self, build_id: BuildAttemptId, index: u32) -> BoxFuture<'a, Result<Vec<u8>>> {
+    fn read_chunk<'a>(
+        &'a self,
+        build_id: BuildAttemptId,
+        index: u32,
+    ) -> BoxFuture<'a, Result<Vec<u8>>> {
         Box::pin(async move {
             self.chunks
                 .lock()

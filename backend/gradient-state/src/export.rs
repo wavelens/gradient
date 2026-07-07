@@ -16,15 +16,17 @@
 
 use super::{
     StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry, StateConfiguration,
-    StateFlakeInputOverride, StateIntegration, StateOrgMemberEntry,
-    StateOrganization, StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
+    StateFlakeInputOverride, StateIntegration, StateOrgMemberEntry, StateOrganization,
+    StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use gradient_ci::IntegrationKind;
-use gradient_db::permissions::{cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec};
-use gradient_types::actions::{ActionConfig, ActionType};
-use gradient_types::triggers::{TriggerConfig, TriggerType};
+use gradient_db::permissions::{
+    cache_mask_to_vec, is_builtin_cache_role, is_builtin_role, mask_to_vec,
+};
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::ids::*;
+use gradient_types::actions::{ActionConfig, ActionType};
+use gradient_types::triggers::{TriggerConfig, TriggerType};
 use sea_orm::{ConnectionTrait, DbErr, EntityTrait};
 use std::collections::HashMap;
 
@@ -50,25 +52,44 @@ const SECRET_KEYS: &[&str] = &[
 /// `Admin`/`Write`/`View` roles.
 pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfiguration, DbErr> {
     let users = gradient_entity::user::Entity::find().all(db).await?;
-    let orgs = gradient_entity::organization::Entity::find().all(db).await?;
+    let orgs = gradient_entity::organization::Entity::find()
+        .all(db)
+        .await?;
     let projects = gradient_entity::project::Entity::find().all(db).await?;
     let caches = gradient_entity::cache::Entity::find().all(db).await?;
     let roles = gradient_entity::role::Entity::find().all(db).await?;
     let cache_roles = gradient_entity::cache_role::Entity::find().all(db).await?;
     let api_keys = gradient_entity::api::Entity::find().all(db).await?;
-    let registrations = gradient_entity::worker_registration::Entity::find().all(db).await?;
+    let registrations = gradient_entity::worker_registration::Entity::find()
+        .all(db)
+        .await?;
     let base_workers = gradient_entity::base_worker::Entity::find().all(db).await?;
-    let base_worker_orgs =
-        gradient_entity::organization_base_worker::Entity::find().all(db).await?;
+    let base_worker_orgs = gradient_entity::organization_base_worker::Entity::find()
+        .all(db)
+        .await?;
     let integrations = gradient_entity::integration::Entity::find().all(db).await?;
-    let org_users = gradient_entity::organization_user::Entity::find().all(db).await?;
+    let org_users = gradient_entity::organization_user::Entity::find()
+        .all(db)
+        .await?;
     let cache_users = gradient_entity::cache_user::Entity::find().all(db).await?;
-    let org_caches = gradient_entity::organization_cache::Entity::find().all(db).await?;
-    let upstreams = gradient_entity::cache_upstream::Entity::find().all(db).await?;
-    let triggers = gradient_entity::project_trigger::Entity::find().all(db).await?;
-    let actions = gradient_entity::project_action::Entity::find().all(db).await?;
-    let overrides = gradient_entity::project_flake_input_override::Entity::find().all(db).await?;
-    let github_installs = gradient_entity::github_installation::Entity::find().all(db).await?;
+    let org_caches = gradient_entity::organization_cache::Entity::find()
+        .all(db)
+        .await?;
+    let upstreams = gradient_entity::cache_upstream::Entity::find()
+        .all(db)
+        .await?;
+    let triggers = gradient_entity::project_trigger::Entity::find()
+        .all(db)
+        .await?;
+    let actions = gradient_entity::project_action::Entity::find()
+        .all(db)
+        .await?;
+    let overrides = gradient_entity::project_flake_input_override::Entity::find()
+        .all(db)
+        .await?;
+    let github_installs = gradient_entity::github_installation::Entity::find()
+        .all(db)
+        .await?;
 
     let username = id_name_map(users.iter().map(|u| (u.id, u.username.clone())));
     let org_name = id_name_map(orgs.iter().map(|o| (o.id, o.name.clone())));
@@ -76,8 +97,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let role_name = id_name_map(roles.iter().map(|r| (r.id, r.name.clone())));
     let cache_role_name = id_name_map(cache_roles.iter().map(|r| (r.id, r.name.clone())));
     let integration_name = id_name_map(integrations.iter().map(|i| (i.id, i.name.clone())));
-    let github_install_by_id: HashMap<_, _> =
-        github_installs.iter().map(|g| (g.id, g)).collect();
+    let github_install_by_id: HashMap<_, _> = github_installs.iter().map(|g| (g.id, g)).collect();
 
     let mut config = StateConfiguration {
         users: HashMap::new(),
@@ -314,9 +334,10 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     // Server-level base workers live in their own table; emit them with their
     // pre-enabled orgs so `base_worker = true` entries survive a state round-trip.
     for bw in &base_workers {
-        config
-            .workers
-            .insert(bw.worker_id.clone(), export_base_worker(bw, &base_worker_orgs, &org_name, &username));
+        config.workers.insert(
+            bw.worker_id.clone(),
+            export_base_worker(bw, &base_worker_orgs, &org_name, &username),
+        );
     }
 
     for i in &integrations {
@@ -370,7 +391,10 @@ fn export_base_worker(
         organizations,
         token_file: String::new(),
         display_name: bw.display_name.clone(),
-        created_by: bw.created_by.and_then(|id| username.get(&id).cloned()).unwrap_or_default(),
+        created_by: bw
+            .created_by
+            .and_then(|id| username.get(&id).cloned())
+            .unwrap_or_default(),
         enable_fetch: bw.enable_fetch,
         enable_eval: bw.enable_eval,
         enable_build: bw.enable_build,
@@ -505,11 +529,15 @@ fn export_action(
             c.insert("branch_pattern".into(), branch_pattern.into());
             c.insert(
                 "title_template".into(),
-                title_template.map(Into::into).unwrap_or(serde_json::Value::Null),
+                title_template
+                    .map(Into::into)
+                    .unwrap_or(serde_json::Value::Null),
             );
             c.insert(
                 "body_template".into(),
-                body_template.map(Into::into).unwrap_or(serde_json::Value::Null),
+                body_template
+                    .map(Into::into)
+                    .unwrap_or(serde_json::Value::Null),
             );
             c.insert("update_existing".into(), update_existing.into());
             (ActionType::OpenPr, c)

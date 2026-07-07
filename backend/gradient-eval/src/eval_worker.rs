@@ -136,12 +136,18 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 // shard re-forces it, so they are not captured here; per-attr
                 // eval errors are, because a thrown shard root produces no shard
                 // for any later `List` to re-hit.
-                or_err(walkers.with(ev, &repository, |walker| {
-                    let (shards, errors) = walker.plan_shards(&wildcards)?;
-                    let _ = walker.commit_cache();
-                    Ok((shards, errors))
-                })
-                .map(|(sub_patterns, errors)| EvalResponse::PlanOk { sub_patterns, errors }))
+                or_err(
+                    walkers
+                        .with(ev, &repository, |walker| {
+                            let (shards, errors) = walker.plan_shards(&wildcards)?;
+                            let _ = walker.commit_cache();
+                            Ok((shards, errors))
+                        })
+                        .map(|(sub_patterns, errors)| EvalResponse::PlanOk {
+                            sub_patterns,
+                            errors,
+                        }),
+                )
             }),
             EvalRequest::List {
                 repository,
@@ -188,9 +194,11 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 )
             }),
             EvalRequest::Checkpoint { repository } => with_evaluator(&evaluator, |ev| {
-                or_err(walkers
-                    .with(ev, &repository, |walker| walker.checkpoint_cache())
-                    .map(|()| EvalResponse::CheckpointOk))
+                or_err(
+                    walkers
+                        .with(ev, &repository, |walker| walker.checkpoint_cache())
+                        .map(|()| EvalResponse::CheckpointOk),
+                )
             }),
         };
 
@@ -234,7 +242,10 @@ impl<'ev> WalkerCache<'ev> {
         ev: &'ev NixEvaluator,
         repository: &str,
     ) -> anyhow::Result<&FlakeWalker<'ev>> {
-        let stale = self.entry.as_ref().is_none_or(|(repo, _)| repo != repository);
+        let stale = self
+            .entry
+            .as_ref()
+            .is_none_or(|(repo, _)| repo != repository);
         if stale {
             // Drop the previous walker before locking the next flake.
             self.entry = None;
@@ -330,7 +341,9 @@ fn send<W: Write>(w: &mut W, resp: &EvalResponse) -> std::io::Result<()> {
 
 fn response_kind(resp: &EvalResponse) -> String {
     match resp {
-        EvalResponse::PlanOk { sub_patterns, .. } => format!("PlanOk({} shards)", sub_patterns.len()),
+        EvalResponse::PlanOk { sub_patterns, .. } => {
+            format!("PlanOk({} shards)", sub_patterns.len())
+        }
         EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
         EvalResponse::ResolveItem { item } => format!("ResolveItem({})", item.attr),
         EvalResponse::ResolveEnd { warnings, .. } => {

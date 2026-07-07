@@ -6,7 +6,6 @@
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use std::sync::Arc;
 use gradient_test_support::cache_fixture::{
     FIXTURE_CACHE_NAME, FIXTURE_DRV_FILENAME, cache_with_completed_build_in_cache,
     cache_with_completed_build_not_in_cache, cache_with_failed_build_only,
@@ -14,6 +13,7 @@ use gradient_test_support::cache_fixture::{
     private_cache_with_completed_build_in_cache,
 };
 use gradient_web::create_router;
+use std::sync::Arc;
 
 #[test]
 fn log_returns_text_for_completed_build_in_cache() {

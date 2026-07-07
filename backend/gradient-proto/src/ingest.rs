@@ -5,10 +5,10 @@
  */
 
 use gradient_entity::StorePath;
-use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
 use gradient_storage::nar::NarStore;
 use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
 use gradient_types::*;
+use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
@@ -89,7 +89,9 @@ pub async fn put_nar_idempotent<C: ConnectionTrait>(
         .one(db)
         .await
     {
-        Ok(row) => row.and_then(|r| r.file_hash).is_some_and(|fh| fh == incoming),
+        Ok(row) => row
+            .and_then(|r| r.file_hash)
+            .is_some_and(|fh| fh == incoming),
         Err(e) => {
             warn!(%hash, error = %e, "idempotency lookup failed; writing NAR unconditionally");
             false
@@ -247,7 +249,10 @@ async fn upsert_and_sign<C: ConnectionTrait>(
         }
     }
 
-    Ok(IngestOutcome { cached_path: cached_path_id, created })
+    Ok(IngestOutcome {
+        cached_path: cached_path_id,
+        created,
+    })
 }
 
 #[cfg(test)]
@@ -312,7 +317,10 @@ mod tests {
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .append_query_results([vec![returned_cached_path(hash)]])
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
         let store = temp_store();
         let out = ingest_nar(
@@ -418,7 +426,10 @@ mod tests {
         let wrote = put_nar_idempotent(&db, &store, IDEM_HASH, "sha256:abc", b"NEW".to_vec())
             .await
             .expect("a transient lookup error must not fail the commit");
-        assert!(wrote, "must write the NAR when the idempotency lookup errors");
+        assert!(
+            wrote,
+            "must write the NAR when the idempotency lookup errors"
+        );
         assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
     }
 
@@ -454,7 +465,10 @@ mod tests {
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .append_query_results([vec![returned_cached_path(hash)]])
             .append_query_results([vec![org_cache_row()]])
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
 
         ingest_metadata_only(&db, input(SP), SignTargets::OrgCaches(org()))

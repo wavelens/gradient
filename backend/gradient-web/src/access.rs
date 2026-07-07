@@ -25,16 +25,14 @@ use crate::helpers::OptionExt;
 use crate::permissions::{
     CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants,
 };
-use gradient_db::{
-    get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name,
-};
+use gradient_core::ServerState;
+use gradient_db::{get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name};
 use gradient_types::ids::{CacheId, IntegrationId, OrganizationId, UserId};
 use gradient_types::{
     CCacheUser, CIntegration, COrganizationCache, COrganizationUser, ECacheRole, ECacheUser,
-    EIntegration, EOrganizationCache, EOrganizationUser, ERole, MCache, MIntegration, MOrganization,
-    MOrganizationUser, MProject, MUser,
+    EIntegration, EOrganizationCache, EOrganizationUser, ERole, MCache, MIntegration,
+    MOrganization, MOrganizationUser, MProject, MUser,
 };
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
@@ -467,7 +465,10 @@ async fn is_cache_org_subscriber(
         .collect();
 
     let allowed: Vec<OrganizationId> = match api_key.and_then(|k| k.organization) {
-        Some(pinned) => subscriber_orgs.into_iter().filter(|o| *o == pinned).collect(),
+        Some(pinned) => subscriber_orgs
+            .into_iter()
+            .filter(|o| *o == pinned)
+            .collect(),
         None => subscriber_orgs,
     };
     if allowed.is_empty() {
@@ -557,17 +558,17 @@ mod tests {
     use super::*;
     use crate::authorization::ApiKeyContext;
     use gradient_db::permissions::mask_from;
+    use gradient_db::{WebDb, WorkerDb};
     use gradient_storage::{EmailSender, NarStore};
+    use gradient_test_support::cli::test_cli;
+    use gradient_test_support::fakes::email::InMemoryEmailSender;
+    use gradient_test_support::log_storage::NoopLogStorage;
     use gradient_types::consts::{
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };
     use gradient_types::ids::{OrganizationUserId, ProjectId, RoleId};
     use gradient_types::{ConcurrencyPolicy, RuntimeConfig};
-    use gradient_db::{WebDb, WorkerDb};
     use sea_orm::{DatabaseBackend, MockDatabase};
-    use gradient_test_support::cli::test_cli;
-    use gradient_test_support::fakes::email::InMemoryEmailSender;
-    use gradient_test_support::log_storage::NoopLogStorage;
     use uuid::uuid;
 
     fn fixture_date() -> chrono::NaiveDateTime {
@@ -662,7 +663,9 @@ mod tests {
         let nar_storage = NarStore::local(&config.storage.base_path).expect("nar store");
         Arc::new(ServerState {
             web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+            cache_db: gradient_db::CacheDb::new(
+                sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+            ),
             worker_db: WorkerDb::new(
                 MockDatabase::new(DatabaseBackend::Postgres).into_connection(),
             ),
@@ -1133,9 +1136,7 @@ mod tests {
 
     fn cache_fixture(managed: bool) -> gradient_entity::cache::Model {
         gradient_entity::cache::Model {
-            id: gradient_types::ids::CacheId::new(uuid!(
-                "a0000000-0000-0000-0000-000000000020"
-            )),
+            id: gradient_types::ids::CacheId::new(uuid!("a0000000-0000-0000-0000-000000000020")),
             name: "test-cache".into(),
             display_name: "Test".into(),
             active: true,
@@ -1168,9 +1169,7 @@ mod tests {
             id: gradient_types::ids::CacheUserId::new(uuid!(
                 "a0000000-0000-0000-0000-000000000030"
             )),
-            cache: gradient_types::ids::CacheId::new(uuid!(
-                "a0000000-0000-0000-0000-000000000020"
-            )),
+            cache: gradient_types::ids::CacheId::new(uuid!("a0000000-0000-0000-0000-000000000020")),
             user: UserId::new(uuid!("a0000000-0000-0000-0000-000000000004")),
             role: gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID,
         }
@@ -1405,9 +1404,7 @@ mod tests {
                 "a0000000-0000-0000-0000-000000000040"
             )),
             organization: OrganizationId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
-            cache: gradient_types::ids::CacheId::new(uuid!(
-                "a0000000-0000-0000-0000-000000000020"
-            )),
+            cache: gradient_types::ids::CacheId::new(uuid!("a0000000-0000-0000-0000-000000000020")),
             mode: gradient_entity::organization_cache::CacheSubscriptionMode::ReadOnly,
         }
     }

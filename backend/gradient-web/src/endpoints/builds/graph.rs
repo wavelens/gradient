@@ -9,9 +9,9 @@ use crate::error::WebResult;
 use crate::helpers::{OptionExt, ok_json};
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::EntityTrait;
 use sea_orm::{ColumnTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -144,7 +144,10 @@ async fn process_graph_wave(
     let mut nodes: Vec<DependencyNode> = Vec::new();
     for job in &jobs {
         if let Some(drv) = drv_by_id.get(&job.derivation) {
-            let status = status_by_anchor.get(&job.derivation_build).copied().unwrap_or(BuildStatus::Queued);
+            let status = status_by_anchor
+                .get(&job.derivation_build)
+                .copied()
+                .unwrap_or(BuildStatus::Queued);
             nodes.push(DependencyNode {
                 id: job.id,
                 name: drv.name.clone(),
@@ -225,7 +228,8 @@ pub async fn get_build_dependencies(
 
     let mut nodes: Vec<DependencyNode> = Vec::new();
     if !dep_drv_ids.is_empty() {
-        let dep_jobs = job_nodes_for_derivations(&state, build_job.evaluation, &dep_drv_ids).await?;
+        let dep_jobs =
+            job_nodes_for_derivations(&state, build_job.evaluation, &dep_drv_ids).await?;
         let dep_drvs = EDerivation::find()
             .filter(CDerivation::Id.is_in(dep_drv_ids))
             .all(&state.web_db)

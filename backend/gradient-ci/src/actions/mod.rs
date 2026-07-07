@@ -17,12 +17,13 @@ mod send;
 
 use crate::context::CiContext;
 use gradient_types::{ActionType, CProjectAction, EProjectAction, ProjectId};
-use serde_json::Value as JsonValue;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use serde_json::Value as JsonValue;
 use tracing::{error, warn};
 
 pub use crypto::{
-    decrypt_action_secret, decrypt_secret_with_file, encrypt_action_secret, encrypt_secret_with_file,
+    decrypt_action_secret, decrypt_secret_with_file, encrypt_action_secret,
+    encrypt_secret_with_file,
 };
 pub use executor::execute_action;
 pub use matchers::{FORGE_STATUS_EVENTS, forge_status_for_event, matches_event};
@@ -76,8 +77,8 @@ pub async fn dispatch_evaluation_event(
 /// - `Waiting + Workers` → `evaluation.queued` (Pending, "no eval-capable
 ///   worker" description). Issue #268.
 pub async fn dispatch_evaluation_created(ctx: &CiContext, eval: &gradient_types::MEvaluation) {
-    use gradient_types::waiting_reason::WaitingReason;
     use gradient_entity::evaluation::EvaluationStatus;
+    use gradient_types::waiting_reason::WaitingReason;
 
     let Some(project_id) = eval.project else {
         return;
@@ -177,8 +178,7 @@ async fn dispatch_event(ctx: &CiContext, project_id: ProjectId, event: &str, pay
             // A mass status-transition wave (promotion, thaw, requeue) fires
             // one event per anchor; unbounded execution exhausted the DB pool
             // and convoyed on the per-action bookkeeping row.
-            let Ok(_permit) = std::sync::Arc::clone(&ACTION_PERMITS).acquire_owned().await
-            else {
+            let Ok(_permit) = std::sync::Arc::clone(&ACTION_PERMITS).acquire_owned().await else {
                 return;
             };
             if let Err(e) = execute_action(&ctx, action, &event, payload).await {

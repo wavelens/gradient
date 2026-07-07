@@ -79,7 +79,11 @@ fn returned_transitions(rows: Vec<QueryResult>) -> Vec<TransitionChange> {
             let derivation = r.try_get::<uuid::Uuid>("", "derivation").ok()?;
             let from = BuildStatus::try_from(r.try_get::<i32>("", "from_status").ok()?).ok()?;
             let to = BuildStatus::try_from(r.try_get::<i32>("", "to_status").ok()?).ok()?;
-            Some(TransitionChange { derivation: DerivationId::new(derivation), from, to })
+            Some(TransitionChange {
+                derivation: DerivationId::new(derivation),
+                from,
+                to,
+            })
         })
         .collect()
 }
@@ -93,7 +97,11 @@ fn transitions_from(
 ) -> Vec<TransitionChange> {
     derivations
         .into_iter()
-        .map(|derivation| TransitionChange { derivation, from, to })
+        .map(|derivation| TransitionChange {
+            derivation,
+            from,
+            to,
+        })
         .collect()
 }
 
@@ -396,7 +404,11 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
     db: &C,
     failed_derivation: DerivationId,
 ) -> Result<Vec<TransitionChange>, DbErr> {
-    let cte = dependency_closure_cte("dependents", "SELECT $1::uuid", ClosureDirection::Dependents);
+    let cte = dependency_closure_cte(
+        "dependents",
+        "SELECT $1::uuid",
+        ClosureDirection::Dependents,
+    );
     let rows = db
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
@@ -794,8 +806,14 @@ mod tests {
         let predicate = norm(crate::graph_sql::deps_ready_predicate("db"));
         let promote = norm(promote_ready_sql());
         let dispatch = norm(find_ready_anchors_sql());
-        assert!(promote.contains(&predicate), "promote_ready must embed the shared predicate: {promote}");
-        assert!(dispatch.contains(&predicate), "find_ready_anchors must embed the shared predicate: {dispatch}");
+        assert!(
+            promote.contains(&predicate),
+            "promote_ready must embed the shared predicate: {promote}"
+        );
+        assert!(
+            dispatch.contains(&predicate),
+            "find_ready_anchors must embed the shared predicate: {dispatch}"
+        );
         assert!(
             dispatch.contains("db.substitutable OR (db.drv_closure_cached AND"),
             "dispatch additionally requires an importable .drv closure: {dispatch}"

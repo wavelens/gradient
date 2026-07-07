@@ -4,18 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::actions::ExecutorOk;
 use crate::actions::crypto::decrypt_secret_with_file;
 use crate::actions::matchers::forge_status_for_event;
 use crate::actions::report::{build_ci_report_from_payload, persist_evaluation_check_id};
-use crate::actions::ExecutorOk;
 use crate::context::CiContext;
 use crate::integration_lookup::IntegrationKind;
+use anyhow::{Context, Result, anyhow};
 use gradient_forge::reporter::{CiReporter, GithubAppReporter};
 use gradient_types::{
     ActionConfig, ActionType, CIntegration, CProjectAction, EIntegration, EProjectAction,
     EvaluationId, IntegrationId, ProjectId,
 };
-use anyhow::{Context, Result, anyhow};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
@@ -174,6 +174,12 @@ async fn build_github_app_reporter(
     let pem = tokio::fs::read_to_string(&github_app.private_key_file)
         .await
         .context("reading github app private key")?;
-    let r = GithubAppReporter::new(ctx.http.clone(), "", github_app.app_id, pem, installation_id)?;
+    let r = GithubAppReporter::new(
+        ctx.http.clone(),
+        "",
+        github_app.app_id,
+        pem,
+        installation_id,
+    )?;
     Ok(Some(Arc::new(r)))
 }

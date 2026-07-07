@@ -18,15 +18,15 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::{Extension, Json};
+use gradient_core::ServerState;
+use gradient_entity::{build_attempt, flake_output_node};
+use gradient_scheduler::{BoardEvent, Scheduler};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::*;
-use gradient_core::ServerState;
-use gradient_scheduler::{BoardEvent, Scheduler};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Statement,
 };
-use gradient_entity::{build_attempt, flake_output_node};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -95,7 +95,10 @@ pub async fn get_pending_jobs(
         }
     }
 
-    Ok(ok_json(PendingJobsResponse { jobs, other_pending }))
+    Ok(ok_json(PendingJobsResponse {
+        jobs,
+        other_pending,
+    }))
 }
 
 pub async fn get_dispatched_jobs(
@@ -131,12 +134,14 @@ pub async fn get_dispatched_jobs(
                         .ok()
                         .flatten();
                     match anchor {
-                        Some(anchor) => gradient_entity::derivation::Entity::find_by_id(anchor.derivation)
-                            .one(&state.web_db)
-                            .await
-                            .ok()
-                            .flatten()
-                            .and_then(|d| d.pname),
+                        Some(anchor) => {
+                            gradient_entity::derivation::Entity::find_by_id(anchor.derivation)
+                                .one(&state.web_db)
+                                .await
+                                .ok()
+                                .flatten()
+                                .and_then(|d| d.pname)
+                        }
                         None => None,
                     }
                 }
@@ -159,7 +164,10 @@ pub async fn get_dispatched_jobs(
         }
     }
 
-    Ok(ok_json(DispatchedJobsResponse { jobs, other_running }))
+    Ok(ok_json(DispatchedJobsResponse {
+        jobs,
+        other_running,
+    }))
 }
 
 #[derive(Serialize)]
@@ -332,10 +340,17 @@ pub async fn get_dispatched_job(
     let pname = match anchor_id {
         Some(aid) => {
             let anchor = EDerivationBuild::find_by_id(aid)
-                .one(&state.web_db).await.ok().flatten();
+                .one(&state.web_db)
+                .await
+                .ok()
+                .flatten();
             match anchor {
                 Some(anchor) => gradient_entity::derivation::Entity::find_by_id(anchor.derivation)
-                    .one(&state.web_db).await.ok().flatten().and_then(|d| d.pname),
+                    .one(&state.web_db)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|d| d.pname),
                 None => None,
             }
         }
@@ -429,7 +444,9 @@ pub async fn get_board_workers(
                 build: w.capabilities.build,
                 architectures: if accessible { w.architectures } else { vec![] },
                 cpu_usage_pct: accessible.then_some(w.cpu_usage_pct).flatten(),
-                ram_free_mb: accessible.then_some(w.ram_free_mb.map(|v| v as i64)).flatten(),
+                ram_free_mb: accessible
+                    .then_some(w.ram_free_mb.map(|v| v as i64))
+                    .flatten(),
                 ram_total_mb: accessible.then_some(w.ram_total_mb as i64),
             }
         })
@@ -475,7 +492,12 @@ fn bump_in_flight(acc: &mut LoadAcc, key: &str) {
 fn buckets_sorted(acc: LoadAcc) -> Vec<LoadBucket> {
     let mut out: Vec<LoadBucket> = acc
         .into_iter()
-        .map(|(key, (in_flight, capacity, workers))| LoadBucket { key, in_flight, capacity, workers })
+        .map(|(key, (in_flight, capacity, workers))| LoadBucket {
+            key,
+            in_flight,
+            capacity,
+            workers,
+        })
         .collect();
     out.sort_by(|a, b| a.key.cmp(&b.key));
     out
@@ -538,7 +560,12 @@ fn aggregate_worker_load(
         .into_iter()
         .map(|k| {
             let (in_flight, capacity, workers) = cap.get(k).copied().unwrap_or_default();
-            LoadBucket { key: k.to_owned(), in_flight, capacity, workers }
+            LoadBucket {
+                key: k.to_owned(),
+                in_flight,
+                capacity,
+                workers,
+            }
         })
         .collect();
 
@@ -571,7 +598,10 @@ pub async fn get_board_worker_load(
         .filter(|j| scope.allows(&Uuid::from(j.organization)))
         .collect();
 
-    Ok(ok_json(aggregate_worker_load(&visible_workers, &visible_jobs)))
+    Ok(ok_json(aggregate_worker_load(
+        &visible_workers,
+        &visible_jobs,
+    )))
 }
 
 #[derive(Deserialize)]
@@ -750,7 +780,9 @@ pub async fn get_scoring_summary(
         {
             for (rule, val) in obj {
                 if let Some(v) = val.as_f64() {
-                    let e = rule_acc.entry(rule.clone()).or_insert((0.0, 0, f64::MAX, f64::MIN));
+                    let e = rule_acc
+                        .entry(rule.clone())
+                        .or_insert((0.0, 0, f64::MAX, f64::MIN));
                     e.0 += v;
                     e.1 += 1;
                     e.2 = e.2.min(v);
@@ -797,7 +829,12 @@ pub async fn get_scoring_summary(
         })
         .collect();
 
-    rules.sort_by(|a, b| b.avg.abs().partial_cmp(&a.avg.abs()).unwrap_or(std::cmp::Ordering::Equal));
+    rules.sort_by(|a, b| {
+        b.avg
+            .abs()
+            .partial_cmp(&a.avg.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     Ok(ok_json(ScoringSummary {
         sample_size: scores.len() as i64,
@@ -887,14 +924,26 @@ pub async fn get_expensive_by_resource(
 ) -> WebResult<Json<BaseResponse<Vec<ExpensiveResource>>>> {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
     let (value_expr, unit, not_null): (&str, &'static str, &str) = match params.metric.as_str() {
-        "ram" => ("dm.peak_ram_mb::double precision", "MB", "dm.peak_ram_mb IS NOT NULL"),
-        "cpu" => ("dm.cpu_time_ms::double precision", "ms", "dm.cpu_time_ms IS NOT NULL"),
+        "ram" => (
+            "dm.peak_ram_mb::double precision",
+            "MB",
+            "dm.peak_ram_mb IS NOT NULL",
+        ),
+        "cpu" => (
+            "dm.cpu_time_ms::double precision",
+            "ms",
+            "dm.cpu_time_ms IS NOT NULL",
+        ),
         "disk" => (
             "(coalesce(dm.disk_read_bytes,0) + coalesce(dm.disk_write_bytes,0))::double precision",
             "bytes",
             "(dm.disk_read_bytes IS NOT NULL OR dm.disk_write_bytes IS NOT NULL)",
         ),
-        "network" => ("dm.peak_network_mbps", "Mbps", "dm.peak_network_mbps IS NOT NULL"),
+        "network" => (
+            "dm.peak_network_mbps",
+            "Mbps",
+            "dm.peak_network_mbps IS NOT NULL",
+        ),
         _ => return Err(WebError::not_found("Metric")),
     };
 
@@ -961,7 +1010,11 @@ pub async fn board_live_ws(
     // Subscribe before snapshotting so no event is missed between the two.
     let rx = state.board_events.subscribe();
     let (workers, pending, active) = scheduler.metrics_snapshot().await;
-    let initial = BoardEvent::QueueDepth { workers, pending, active };
+    let initial = BoardEvent::QueueDepth {
+        workers,
+        pending,
+        active,
+    };
     ws.on_upgrade(move |socket| board_live_loop(socket, rx, scope, initial))
 }
 
@@ -1131,7 +1184,8 @@ pub async fn get_eval_flake_graph(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
 ) -> WebResult<Json<BaseResponse<Vec<FlakeGraphNode>>>> {
-    let _ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
+    let _ctx =
+        EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
     let rows = flake_output_node::Entity::find()
         .filter(flake_output_node::Column::Evaluation.eq(evaluation_id))
         .all(&state.web_db)
@@ -1159,7 +1213,12 @@ mod tests {
     ) -> WorkerInfo {
         WorkerInfo {
             id: "w".into(),
-            capabilities: GradientCapabilities { eval, fetch, build, ..Default::default() },
+            capabilities: GradientCapabilities {
+                eval,
+                fetch,
+                build,
+                ..Default::default()
+            },
             architectures: arch.iter().map(|s| s.to_string()).collect(),
             system_features: features.iter().map(|s| s.to_string()).collect(),
             max_concurrent_builds: slots,
@@ -1213,7 +1272,10 @@ mod tests {
 
         let mut jobs = Vec::new();
         for i in 0..6 {
-            jobs.push(build_job("x86_64-linux", if i < 3 { &["kvm"] } else { &[] }));
+            jobs.push(build_job(
+                "x86_64-linux",
+                if i < 3 { &["kvm"] } else { &[] },
+            ));
         }
         jobs.push(build_job("aarch64-linux", &[]));
         jobs.push(build_job("aarch64-linux", &[]));
@@ -1224,17 +1286,68 @@ mod tests {
         let load = aggregate_worker_load(&workers, &job_refs);
 
         let cap = &load.by_capability;
-        assert_eq!(cap.iter().map(|b| b.key.as_str()).collect::<Vec<_>>(), ["eval", "fetch", "build"]);
-        assert_eq!(*bucket(cap, "eval"), LoadBucket { key: "eval".into(), in_flight: 1, capacity: 8, workers: 1 });
-        assert_eq!(*bucket(cap, "fetch"), LoadBucket { key: "fetch".into(), in_flight: 1, capacity: 8, workers: 1 });
-        assert_eq!(*bucket(cap, "build"), LoadBucket { key: "build".into(), in_flight: 8, capacity: 12, workers: 2 });
+        assert_eq!(
+            cap.iter().map(|b| b.key.as_str()).collect::<Vec<_>>(),
+            ["eval", "fetch", "build"]
+        );
+        assert_eq!(
+            *bucket(cap, "eval"),
+            LoadBucket {
+                key: "eval".into(),
+                in_flight: 1,
+                capacity: 8,
+                workers: 1
+            }
+        );
+        assert_eq!(
+            *bucket(cap, "fetch"),
+            LoadBucket {
+                key: "fetch".into(),
+                in_flight: 1,
+                capacity: 8,
+                workers: 1
+            }
+        );
+        assert_eq!(
+            *bucket(cap, "build"),
+            LoadBucket {
+                key: "build".into(),
+                in_flight: 8,
+                capacity: 12,
+                workers: 2
+            }
+        );
 
         let arch = &load.by_architecture;
-        assert_eq!(*bucket(arch, "x86_64-linux"), LoadBucket { key: "x86_64-linux".into(), in_flight: 6, capacity: 8, workers: 1 });
-        assert_eq!(*bucket(arch, "aarch64-linux"), LoadBucket { key: "aarch64-linux".into(), in_flight: 2, capacity: 4, workers: 1 });
+        assert_eq!(
+            *bucket(arch, "x86_64-linux"),
+            LoadBucket {
+                key: "x86_64-linux".into(),
+                in_flight: 6,
+                capacity: 8,
+                workers: 1
+            }
+        );
+        assert_eq!(
+            *bucket(arch, "aarch64-linux"),
+            LoadBucket {
+                key: "aarch64-linux".into(),
+                in_flight: 2,
+                capacity: 4,
+                workers: 1
+            }
+        );
 
         let feat = &load.by_feature;
-        assert_eq!(*bucket(feat, "kvm"), LoadBucket { key: "kvm".into(), in_flight: 3, capacity: 8, workers: 1 });
+        assert_eq!(
+            *bucket(feat, "kvm"),
+            LoadBucket {
+                key: "kvm".into(),
+                in_flight: 3,
+                capacity: 8,
+                workers: 1
+            }
+        );
     }
 
     #[test]
@@ -1248,7 +1361,15 @@ mod tests {
         let load = aggregate_worker_load(&workers, &job_refs);
         assert!(load.by_architecture.iter().all(|b| b.key != BUILTIN_ARCH));
         // fetch axis stays present with zero capacity so the radar keeps 3 axes.
-        assert_eq!(*bucket(&load.by_capability, "fetch"), LoadBucket { key: "fetch".into(), in_flight: 0, capacity: 0, workers: 0 });
+        assert_eq!(
+            *bucket(&load.by_capability, "fetch"),
+            LoadBucket {
+                key: "fetch".into(),
+                in_flight: 0,
+                capacity: 0,
+                workers: 0
+            }
+        );
     }
 
     #[test]

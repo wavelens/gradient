@@ -10,9 +10,9 @@ use tokio::sync::broadcast;
 
 use super::pool::{WebDb, WorkerDb};
 use super::status_reactor::StatusReactor;
-use gradient_util::shutdown::Shutdown;
 use gradient_storage::StorageCtx;
 use gradient_types::{BoardEvent, RuntimeConfig};
+use gradient_util::shutdown::Shutdown;
 
 /// Persistence-layer slice threaded through every `db` function: the two
 /// connection pools, resolved config, storage handles, the shutdown

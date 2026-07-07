@@ -134,7 +134,10 @@ pub async fn transitive_closure_sizes<C: ConnectionTrait>(
         .await?;
         frontier.clear();
         for edge in edges {
-            adjacency.entry(edge.derivation).or_default().push(edge.dependency);
+            adjacency
+                .entry(edge.derivation)
+                .or_default()
+                .push(edge.dependency);
             if reachable.insert(edge.dependency) {
                 frontier.push(edge.dependency);
             }
@@ -173,7 +176,11 @@ mod tests {
         chrono::Utc::now().naive_utc()
     }
 
-    fn out(derivation: DerivationId, hash: &str, nar_size: Option<i64>) -> derivation_output::Model {
+    fn out(
+        derivation: DerivationId,
+        hash: &str,
+        nar_size: Option<i64>,
+    ) -> derivation_output::Model {
         derivation_output::Model {
             id: DerivationOutputId::now_v7(),
             derivation,

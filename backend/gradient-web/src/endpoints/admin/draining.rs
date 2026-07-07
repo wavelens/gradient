@@ -51,5 +51,7 @@ pub async fn set_draining(
 
     info!(enabled = req.enabled, evaluations, "draining toggled");
 
-    Ok(ok_json(DrainingResponse { draining: req.enabled }))
+    Ok(ok_json(DrainingResponse {
+        draining: req.enabled,
+    }))
 }

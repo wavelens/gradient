@@ -10,9 +10,7 @@
 //! its own id.
 
 use chrono::NaiveDateTime;
-use gradient_entity::build_attempt::{
-    AttemptFailureReason, AttemptOutcome, Column, Entity, Model,
-};
+use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome, Column, Entity, Model};
 use gradient_entity::ids::{
     BuildAttemptId, BuildJobId, DerivationBuildId, DispatchedJobId, EvaluationId,
 };
@@ -77,7 +75,10 @@ pub async fn substitute_miss_counts<C: ConnectionTrait>(
                    JOIN build_job bj ON bj.id = ba.build_job
                    WHERE ba.derivation_build = ANY($1) AND ba.reason = $2
                    GROUP BY ba.derivation_build, bj.evaluation"#,
-                [ids.into(), (AttemptFailureReason::SubstituteUnavailable as i32).into()],
+                [
+                    ids.into(),
+                    (AttemptFailureReason::SubstituteUnavailable as i32).into(),
+                ],
             ))
             .await
         }

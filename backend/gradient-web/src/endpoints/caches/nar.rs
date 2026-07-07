@@ -12,9 +12,9 @@ use axum::body::Body;
 use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
+use gradient_core::ServerState;
 use gradient_sources::get_hash_from_url;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -246,7 +246,11 @@ mod tests {
     #[test]
     fn upstream_nar_url_forwards_query_string() {
         assert_eq!(
-            build_upstream_nar_url("https://cache.nixos-cuda.org", "nar/0njia.nar", Some("hash=6713ipl")),
+            build_upstream_nar_url(
+                "https://cache.nixos-cuda.org",
+                "nar/0njia.nar",
+                Some("hash=6713ipl")
+            ),
             "https://cache.nixos-cuda.org/nar/0njia.nar?hash=6713ipl"
         );
         assert_eq!(

@@ -85,7 +85,6 @@ impl LogRateLimiter {
             false
         }
     }
-
 }
 
 #[cfg(test)]

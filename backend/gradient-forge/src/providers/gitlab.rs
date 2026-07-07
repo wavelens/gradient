@@ -12,12 +12,12 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use subtle::ConstantTimeEq;
 
-use gradient_types::ForgeType;
 use crate::provider::ForgeProvider;
 use crate::reporter::{CiReporter, GitlabReporter};
 use crate::webhook::{
     ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind,
 };
+use gradient_types::ForgeType;
 
 #[derive(Debug)]
 pub struct GitlabProvider;

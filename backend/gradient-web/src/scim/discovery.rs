@@ -11,7 +11,12 @@ use serde_json::json;
 use super::error::SCIM_CONTENT_TYPE;
 
 fn scim(body: serde_json::Value) -> Response {
-    (StatusCode::OK, [(header::CONTENT_TYPE, SCIM_CONTENT_TYPE)], axum::Json(body)).into_response()
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, SCIM_CONTENT_TYPE)],
+        axum::Json(body),
+    )
+        .into_response()
 }
 
 pub async fn service_provider_config() -> impl IntoResponse {

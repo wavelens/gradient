@@ -7,22 +7,22 @@
 //! Evaluation triggering from forge webhooks.
 
 use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
-use gradient_entity::project_trigger as ept;
 use gradient_ci::{
     APPROVAL_ACTION_ID, ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger,
     find_approval_gated_eval, parse_owner_repo, set_evaluation_source_comment, unpark_approval,
     unpark_approval_with_wildcard,
 };
+use gradient_core::ServerState;
+use gradient_entity::project_trigger as ept;
+use gradient_forge::ParsedPullRequestReviewEvent;
+use gradient_scheduler::Scheduler;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
-use gradient_core::ServerState;
-use gradient_forge::ParsedPullRequestReviewEvent;
-use gradient_scheduler::Scheduler;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, FromQueryResult, QueryFilter,
-    Statement, Value,
+    ActiveModelTrait, ColumnTrait, DbBackend, EntityTrait, FromQueryResult, QueryFilter, Statement,
+    Value,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -126,7 +126,10 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
     let installed = payload.installed_full_names();
 
     if installed.is_empty() {
-        debug!(installation_id, github_login, "GitHub App install carried no repository list; nothing to bind");
+        debug!(
+            installation_id,
+            github_login, "GitHub App install carried no repository list; nothing to bind"
+        );
         return;
     }
 
@@ -187,8 +190,15 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
 
         info!(installation_id, %org_id, github_login = %github_login, "GitHub App installed on organization");
         let name = gradient_ci::github_integration_name(Some(github_login), installation_id);
-        if let Err(e) =
-            gradient_ci::ensure_github_app_integrations(&state.web_db, org_id, inst, &name, "GitHub", creator).await
+        if let Err(e) = gradient_ci::ensure_github_app_integrations(
+            &state.web_db,
+            org_id,
+            inst,
+            &name,
+            "GitHub",
+            creator,
+        )
+        .await
         {
             warn!(error = %e, %org_id, "Failed to materialise GitHub App integration rows");
         }
@@ -201,8 +211,9 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
 /// `full_name`s carried by a GitHub App installation payload.
 fn github_full_name(repo_url: &str) -> Option<String> {
     let lower = repo_url.to_ascii_lowercase();
-    let is_github =
-        lower.contains("github.com") || lower.starts_with("github:") || lower.starts_with("git+github:");
+    let is_github = lower.contains("github.com")
+        || lower.starts_with("github:")
+        || lower.starts_with("git+github:");
     if !is_github {
         return None;
     }
@@ -242,7 +253,10 @@ fn repo_identity(url: &str) -> Option<String> {
 /// then carry the wrong repo's commit. An empty `event_repo_urls` (the source
 /// repo could not be determined) matches every project, preserving prior fan-out.
 fn event_repo_matches_project(event_repo_urls: &[String], project_repository: &str) -> bool {
-    let mut keys = event_repo_urls.iter().filter_map(|u| repo_identity(u)).peekable();
+    let mut keys = event_repo_urls
+        .iter()
+        .filter_map(|u| repo_identity(u))
+        .peekable();
     if keys.peek().is_none() {
         return true;
     }
@@ -271,8 +285,8 @@ pub(super) async fn resolve_github_app_targets(
     repository_urls: &[String],
     client_ip: std::net::IpAddr,
 ) -> Vec<IntegrationId> {
-    use gradient_ci::IntegrationKind;
     use crate::ip_allowlist::is_allowed as ip_allowed;
+    use gradient_ci::IntegrationKind;
     use std::collections::HashSet;
 
     use gradient_entity::github_installation::{Column as GiCol, Entity as EGi};
@@ -734,10 +748,7 @@ async fn decide_pr_gate(
 /// Pure approval-gate decision given whether the event's actor is a trusted
 /// repo writer. Returns `None` (run immediately) when the PR is same-repo or
 /// the actor is trusted; otherwise `Some(ApprovalInfo)` to park for approval.
-fn gate_decision(
-    ctx: &PullRequestApprovalContext,
-    sender_trusted: bool,
-) -> Option<ApprovalInfo> {
+fn gate_decision(ctx: &PullRequestApprovalContext, sender_trusted: bool) -> Option<ApprovalInfo> {
     if matches!(ctx.is_fork, Some(false)) || sender_trusted {
         return None;
     }
@@ -1102,7 +1113,11 @@ async fn unpark_pr_approval_eval(
 
 /// PR number carried by an approval-gated evaluation's waiting reason.
 fn approval_pr_number(eval: &MEvaluation) -> Option<u64> {
-    match eval.waiting_reason.as_ref().and_then(WaitingReason::from_json)? {
+    match eval
+        .waiting_reason
+        .as_ref()
+        .and_then(WaitingReason::from_json)?
+    {
         WaitingReason::Approval { pr_number, .. } => Some(pr_number),
         _ => None,
     }
@@ -1128,7 +1143,12 @@ async fn submit_pr_approval_review(
     };
 
     if let Err(e) = reporter
-        .approve_pull_request(owner, repo, pr_number, "Approved via Gradient maintainer approval gate.")
+        .approve_pull_request(
+            owner,
+            repo,
+            pr_number,
+            "Approved via Gradient maintainer approval gate.",
+        )
         .await
     {
         warn!(error = %e, %project_id, pr_number, "submitting forge PR approval review failed");
@@ -1164,11 +1184,17 @@ pub(super) async fn handle_pull_request_review(
         return;
     };
     let Some(reviewer) = review.reviewer else {
-        warn!(pr_number, "pull_request_review: approval without a reviewer");
+        warn!(
+            pr_number,
+            "pull_request_review: approval without a reviewer"
+        );
         return;
     };
     let Some(owner_repo) = review.repository_full_name else {
-        warn!(pr_number, "pull_request_review: approval without a repository");
+        warn!(
+            pr_number,
+            "pull_request_review: approval without a repository"
+        );
         return;
     };
     let Some((owner, repo)) = owner_repo.rsplit_once('/') else {
@@ -1708,16 +1734,20 @@ async fn post_wildcard_error_comment(
             }
         };
         for project_id in project_ids {
-            let reporter =
-                match gradient_ci::actions::reporter_for_project(&state.ci(), project_id).await {
-                    Ok(Some(r)) => r,
-                    Ok(None) => continue,
-                    Err(e) => {
-                        warn!(error = %e, %project_id, "/gradient run wildcard: resolving reporter for reply comment");
-                        continue;
-                    }
-                };
-            match reporter.post_pr_comment(owner, repo, pr_number, &body).await {
+            let reporter = match gradient_ci::actions::reporter_for_project(&state.ci(), project_id)
+                .await
+            {
+                Ok(Some(r)) => r,
+                Ok(None) => continue,
+                Err(e) => {
+                    warn!(error = %e, %project_id, "/gradient run wildcard: resolving reporter for reply comment");
+                    continue;
+                }
+            };
+            match reporter
+                .post_pr_comment(owner, repo, pr_number, &body)
+                .await
+            {
                 Ok(()) => return,
                 Err(e) => {
                     warn!(error = %e, %project_id, "/gradient run wildcard: reply comment post failed, trying next project");
@@ -1870,7 +1900,10 @@ mod tests {
 
     #[test]
     fn event_repo_empty_urls_match_every_project() {
-        assert!(event_repo_matches_project(&[], "https://github.com/NuschtOS/search"));
+        assert!(event_repo_matches_project(
+            &[],
+            "https://github.com/NuschtOS/search"
+        ));
     }
 
     #[test]
@@ -1889,14 +1922,21 @@ mod tests {
             "github:NuschtOS/search",
             "git+github:NuschtOS/search",
         ] {
-            assert_eq!(github_full_name(url).as_deref(), Some("nuschtos/search"), "{url}");
+            assert_eq!(
+                github_full_name(url).as_deref(),
+                Some("nuschtos/search"),
+                "{url}"
+            );
         }
     }
 
     #[test]
     fn github_full_name_rejects_non_github_hosts() {
         assert_eq!(github_full_name("https://gitlab.com/NuschtOS/search"), None);
-        assert_eq!(github_full_name("https://gitea.example.com/acme/widgets"), None);
+        assert_eq!(
+            github_full_name("https://gitea.example.com/acme/widgets"),
+            None
+        );
     }
 
     #[test]

@@ -16,25 +16,25 @@
 //! `::gradient_core::…` which clashes with the local `core` crate name.
 
 use axum_test::TestServer;
-use gradient_entity::evaluation::EvaluationStatus;
 use gradient_ci::actions::encrypt_secret_with_file as encrypt_webhook_secret;
-use gradient_storage::{EmailSender, NarStore};
-use gradient_types::ids::*;
-use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig};
-use gradient_types::ForgeType;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
+use gradient_entity::evaluation::EvaluationStatus;
+use gradient_storage::{EmailSender, NarStore};
+use gradient_test_support::cli::test_cli_with_crypt;
+use gradient_test_support::fakes::email::InMemoryEmailSender;
+use gradient_test_support::log_storage::NoopLogStorage;
+use gradient_test_support::prelude::test_cli;
+use gradient_types::ForgeType;
+use gradient_types::ids::*;
+use gradient_types::triggers::{ConcurrencyPolicy, TriggerConfig};
+use gradient_web::create_router;
 use hmac::{Hmac, KeyInit, Mac};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
 use sha2::Sha256;
 use std::sync::Arc;
-use gradient_test_support::cli::test_cli_with_crypt;
-use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_test_support::prelude::test_cli;
 use uuid::Uuid;
-use gradient_web::create_router;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -72,7 +72,9 @@ fn make_state(
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: std::sync::Arc::new(
             gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),

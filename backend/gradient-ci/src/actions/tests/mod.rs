@@ -10,9 +10,9 @@ use super::matchers::{forge_status_for_event, matches_event};
 use super::payload::{forge_status_payload, render_default_body, render_subject};
 use super::report::build_ci_report_from_payload;
 use super::truncate;
+use fixtures::{action_with, make_ctx, run};
 use gradient_forge::reporter::CiStatus;
 use gradient_types::ActionType;
-use fixtures::{action_with, make_ctx, run};
 use serde_json::json;
 
 #[test]
@@ -162,7 +162,15 @@ fn forge_status_payload_includes_required_fields() {
 
 #[test]
 fn forge_status_payload_includes_optional_fields() {
-    let p = forge_status_payload("o", "r", "s", "c", Some("desc"), Some("https://x"), Some(42));
+    let p = forge_status_payload(
+        "o",
+        "r",
+        "s",
+        "c",
+        Some("desc"),
+        Some("https://x"),
+        Some(42),
+    );
     assert_eq!(p["description"], "desc");
     assert_eq!(p["details_url"], "https://x");
     assert_eq!(p["check_run_id"], 42);
@@ -212,10 +220,9 @@ fn build_ci_report_errors_on_invalid_build_id() {
     run(async {
         let ctx = make_ctx();
         let payload = json!({ "build_id": "not-a-uuid" });
-        let err =
-            build_ci_report_from_payload(&ctx, "build.started", &payload, CiStatus::Running)
-                .await
-                .unwrap_err();
+        let err = build_ci_report_from_payload(&ctx, "build.started", &payload, CiStatus::Running)
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("invalid build_id"), "error: {err}");
     });
 }

@@ -9,21 +9,19 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::dispatch_mode::{arch_available, decide_dispatch_mode, BuildDispatchMode};
+use crate::dispatch_mode::{BuildDispatchMode, arch_available, decide_dispatch_mode};
+use gradient_core::ServerState;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use tracing::{debug, error, info};
 
 use crate::Scheduler;
 use crate::jobs::PendingBuildJob;
-use gradient_types::proto::{
-    BuildJob, BuildTask, CacheInfo, DerivationOutput, RequiredPath,
-};
+use gradient_types::proto::{BuildJob, BuildTask, CacheInfo, DerivationOutput, RequiredPath};
 
 use super::DISPATCH_TICK_SECS;
 
@@ -171,7 +169,8 @@ impl DispatchConfig {
             substitute_miss_escalation_threshold: state
                 .config
                 .eval
-                .substitute_miss_escalation_threshold as i64,
+                .substitute_miss_escalation_threshold
+                as i64,
             build_retry_backoff_secs: state.config.eval.build_retry_backoff_secs,
             default_timeout_secs: nonzero(state.config.eval.build_default_timeout_secs),
             default_max_silent_secs: nonzero(state.config.eval.build_default_max_silent_secs),
@@ -218,23 +217,29 @@ impl BuildDispatchMaps {
             .into_iter()
             .collect();
 
-        let derivations: HashMap<DerivationId, MDerivation> = gradient_db::fetch_in_chunks(
-            &drv_ids,
-            |chunk| async move { EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await },
-        )
-        .await?
-        .into_iter()
-        .map(|d| (d.id, d))
-        .collect();
+        let derivations: HashMap<DerivationId, MDerivation> =
+            gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
+                EDerivation::find()
+                    .filter(CDerivation::Id.is_in(chunk))
+                    .all(db)
+                    .await
+            })
+            .await?
+            .into_iter()
+            .map(|d| (d.id, d))
+            .collect();
 
-        let evaluations: HashMap<EvaluationId, MEvaluation> = gradient_db::fetch_in_chunks(
-            &eval_ids,
-            |chunk| async move { EEvaluation::find().filter(CEvaluation::Id.is_in(chunk)).all(db).await },
-        )
-        .await?
-        .into_iter()
-        .map(|e| (e.id, e))
-        .collect();
+        let evaluations: HashMap<EvaluationId, MEvaluation> =
+            gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {
+                EEvaluation::find()
+                    .filter(CEvaluation::Id.is_in(chunk))
+                    .all(db)
+                    .await
+            })
+            .await?
+            .into_iter()
+            .map(|e| (e.id, e))
+            .collect();
 
         // Pick the driving eval per anchor: prefer one whose evaluation is not
         // terminal so dispatch attributes the build to a live eval.
@@ -259,14 +264,17 @@ impl BuildDispatchMaps {
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-        let projects: HashMap<ProjectId, OrganizationId> = gradient_db::fetch_in_chunks(
-            &project_ids,
-            |chunk| async move { EProject::find().filter(CProject::Id.is_in(chunk)).all(db).await },
-        )
-        .await?
-        .into_iter()
-        .map(|p| (p.id, p.organization))
-        .collect();
+        let projects: HashMap<ProjectId, OrganizationId> =
+            gradient_db::fetch_in_chunks(&project_ids, |chunk| async move {
+                EProject::find()
+                    .filter(CProject::Id.is_in(chunk))
+                    .all(db)
+                    .await
+            })
+            .await?
+            .into_iter()
+            .map(|p| (p.id, p.organization))
+            .collect();
 
         // Required features: per-derivation list of feature names.
         let feature_edges = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
@@ -367,15 +375,15 @@ impl BuildDispatchMaps {
             .await?
             .into_iter()
             .filter_map(|cp| {
-                    let nar_size = cp.nar_size? as u64;
-                    let file_size = cp.file_size.unwrap_or(0) as u64;
-                    Some((
-                        cp.hash,
-                        CacheInfo {
-                            file_size,
-                            nar_size,
-                        },
-                    ))
+                let nar_size = cp.nar_size? as u64;
+                let file_size = cp.file_size.unwrap_or(0) as u64;
+                Some((
+                    cp.hash,
+                    CacheInfo {
+                        file_size,
+                        nar_size,
+                    },
+                ))
             })
             .collect();
 
@@ -478,7 +486,8 @@ impl BuildDispatchMaps {
             .get(&(anchor.id, eval_id))
             .copied()
             .unwrap_or(0);
-        let arch_has_worker = arch_available(&self.connected_architectures, &derivation.architecture);
+        let arch_has_worker =
+            arch_available(&self.connected_architectures, &derivation.architecture);
         let mode = decide_dispatch_mode(
             anchor.substitutable,
             miss_count,
@@ -494,7 +503,9 @@ impl BuildDispatchMaps {
                 self.config.build_retry_backoff_secs,
             )
         {
-            return DispatchOutcome::Defer("substitute stalled (no arch worker); backing off re-probe");
+            return DispatchOutcome::Defer(
+                "substitute stalled (no arch worker); backing off re-probe",
+            );
         }
 
         let (job_id, pending) = self.assemble_job(anchor, derivation, eval_id, org_id, mode);
@@ -532,13 +543,19 @@ impl BuildDispatchMaps {
                 is_fixed_output: derivation.is_fixed_output,
                 outputs,
                 timeout_secs: resolve_limit(anchor.timeout_secs, self.config.default_timeout_secs),
-                max_silent_secs: resolve_limit(anchor.max_silent_secs, self.config.default_max_silent_secs),
+                max_silent_secs: resolve_limit(
+                    anchor.max_silent_secs,
+                    self.config.default_max_silent_secs,
+                ),
             }],
         };
         let (architecture, required_features) = if substitute {
             (gradient_types::BUILTIN_ARCH.to_string(), Vec::new())
         } else {
-            (derivation.architecture.clone(), self.required_features(anchor.derivation))
+            (
+                derivation.architecture.clone(),
+                self.required_features(anchor.derivation),
+            )
         };
 
         // A substitute job downloads its outputs straight from upstream, so it
@@ -548,7 +565,10 @@ impl BuildDispatchMaps {
         let required_paths = if substitute {
             Vec::new()
         } else {
-            self.direct_inputs.get(&anchor.derivation).cloned().unwrap_or_default()
+            self.direct_inputs
+                .get(&anchor.derivation)
+                .cloned()
+                .unwrap_or_default()
         };
 
         let pending = PendingBuildJob {
@@ -559,8 +579,16 @@ impl BuildDispatchMaps {
             required_paths,
             architecture,
             required_features,
-            dependency_count: self.dep_counts.get(&anchor.derivation).copied().unwrap_or(0),
-            closure_size: self.closure_sizes.get(&anchor.derivation).copied().flatten(),
+            dependency_count: self
+                .dep_counts
+                .get(&anchor.derivation)
+                .copied()
+                .unwrap_or(0),
+            closure_size: self
+                .closure_sizes
+                .get(&anchor.derivation)
+                .copied()
+                .flatten(),
             prefer_local_build: derivation.prefer_local_build,
             is_fixed_output: derivation.is_fixed_output,
             history: self
@@ -628,7 +656,10 @@ async fn load_sizes_and_histories(
     };
     for (drv_id, size) in &computed {
         if let Err(e) = EDerivation::update_many()
-            .col_expr(CDerivation::ClosureSize, sea_orm::sea_query::Expr::value(*size))
+            .col_expr(
+                CDerivation::ClosureSize,
+                sea_orm::sea_query::Expr::value(*size),
+            )
             .filter(CDerivation::Id.eq(*drv_id))
             .exec(&state.worker_db)
             .await
@@ -699,7 +730,10 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
     let db = &state.worker_db;
     if let Err(e) = gradient_db::for_each_chunk(&ready_ids, |chunk| async move {
         EDerivationBuild::update_many()
-            .col_expr(CDerivationBuild::ReadyAt, sea_orm::sea_query::Expr::value(now()))
+            .col_expr(
+                CDerivationBuild::ReadyAt,
+                sea_orm::sea_query::Expr::value(now()),
+            )
             .filter(CDerivationBuild::Id.is_in(chunk))
             .filter(CDerivationBuild::ReadyAt.is_null())
             .exec(db)
@@ -766,12 +800,18 @@ fn resolve_limit(stored: Option<i64>, default: Option<u64>) -> Option<u64> {
 
 #[cfg(test)]
 mod dispatch_mode_tests {
-    use crate::dispatch_mode::{decide_dispatch_mode, BuildDispatchMode};
+    use crate::dispatch_mode::{BuildDispatchMode, decide_dispatch_mode};
 
     #[test]
     fn stalled_substitute_stays_builtin() {
-        assert_eq!(decide_dispatch_mode(true, 2, 2, false), BuildDispatchMode::SubstituteStalled);
-        assert_eq!(decide_dispatch_mode(true, 2, 2, true), BuildDispatchMode::RealArch);
+        assert_eq!(
+            decide_dispatch_mode(true, 2, 2, false),
+            BuildDispatchMode::SubstituteStalled
+        );
+        assert_eq!(
+            decide_dispatch_mode(true, 2, 2, true),
+            BuildDispatchMode::RealArch
+        );
     }
 }
 
