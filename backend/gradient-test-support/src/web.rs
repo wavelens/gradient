@@ -140,5 +140,5 @@ fn server_from_cli(db: DatabaseConnection, cli: gradient_types::Cli) -> TestServ
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     });
-    TestServer::new(gradient_web::create_router(state))
+    TestServer::new(gradient_web::create_router(state).expect("router"))
 }

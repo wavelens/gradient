@@ -44,7 +44,7 @@ use tracing::Span;
 use uuid::Uuid;
 
 use endpoints::{admin, *};
-use gradient_core::ServerState;
+use gradient_core::{InitError, ServerState};
 use gradient_proto::handler::PerIpLimiter;
 use gradient_proto::{ProtoLimiter, proto_router};
 use gradient_scheduler::Scheduler;
@@ -98,47 +98,58 @@ impl MakeRequestId for MakeRequestUuid {
 fn rl_per_second(
     per_second: u64,
     burst: u32,
-) -> Arc<GovernorConfig<SmartIpOrFallback, NoOpMiddleware>> {
-    Arc::new(
-        GovernorConfigBuilder::default()
-            .per_second(per_second)
-            .burst_size(burst)
-            .key_extractor(SmartIpOrFallback)
-            .finish()
-            .expect("rate-limit config valid"),
-    )
+) -> Result<Arc<GovernorConfig<SmartIpOrFallback, NoOpMiddleware>>, InitError> {
+    let config = GovernorConfigBuilder::default()
+        .per_second(per_second)
+        .burst_size(burst)
+        .key_extractor(SmartIpOrFallback)
+        .finish()
+        .ok_or_else(|| InitError::NetworkConfig("invalid rate-limit configuration".into()))?;
+
+    Ok(Arc::new(config))
 }
 
 /// Sub-second refill granularity, for tiers needing >1 req/s steady-state.
 fn rl_per_ms(
     per_millisecond: u64,
     burst: u32,
-) -> Arc<GovernorConfig<SmartIpOrFallback, NoOpMiddleware>> {
-    Arc::new(
-        GovernorConfigBuilder::default()
-            .per_millisecond(per_millisecond)
-            .burst_size(burst)
-            .key_extractor(SmartIpOrFallback)
-            .finish()
-            .expect("rate-limit config valid"),
-    )
+) -> Result<Arc<GovernorConfig<SmartIpOrFallback, NoOpMiddleware>>, InitError> {
+    let config = GovernorConfigBuilder::default()
+        .per_millisecond(per_millisecond)
+        .burst_size(burst)
+        .key_extractor(SmartIpOrFallback)
+        .finish()
+        .ok_or_else(|| InitError::NetworkConfig("invalid rate-limit configuration".into()))?;
+
+    Ok(Arc::new(config))
 }
 
 /// Build the Axum router with all routes and middleware layered on.
 ///
 /// Extracted from `serve_web` so integration tests can drive the router via
 /// `axum_test::TestServer` without binding a real TCP port.
-pub fn create_router(state: Arc<ServerState>) -> Router {
-    let serve_url: http::HeaderValue = state
-        .config
-        .server
-        .serve_url
-        .clone()
-        .try_into()
-        .expect("invalid serve_url");
+pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
+    let serve_url: http::HeaderValue =
+        state
+            .config
+            .server
+            .serve_url
+            .clone()
+            .try_into()
+            .map_err(|_| {
+                InitError::NetworkConfig(format!(
+                    "invalid serve_url: {}",
+                    state.config.server.serve_url
+                ))
+            })?;
     let debug_url: http::HeaderValue = format!("http://{}:8000", state.config.server.ip.clone())
         .try_into()
-        .expect("invalid debug_url");
+        .map_err(|_| {
+            InitError::NetworkConfig(format!(
+                "invalid debug_url from ip {}",
+                state.config.server.ip
+            ))
+        })?;
 
     let cors_allow_origin = AllowOrigin::list(vec![serve_url, debug_url]);
 
@@ -625,7 +636,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .route("/auth/oidc/callback", get(auth::get_oidc_callback))
         .route("/auth/cli/start", post(auth::post_cli_device_start))
         .route("/auth/cli/poll", post(auth::post_cli_device_poll))
-        .route_layer(GovernorLayer::new(rl_per_second(6, 5)));
+        .route_layer(GovernorLayer::new(rl_per_second(6, 5)?));
 
     // ── Incoming forge webhooks (unauthenticated, HMAC-verified) ─────────
     let webhook_routes = Router::new()
@@ -634,7 +645,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             "/hooks/{forge}/{org}/{integration_name}",
             post(forge_hooks::forge_webhook),
         )
-        .route_layer(GovernorLayer::new(rl_per_second(1, 30)));
+        .route_layer(GovernorLayer::new(rl_per_second(1, 30)?));
 
     let api = Router::new()
         .merge(auth_api)
@@ -666,13 +677,13 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
 
     // Default tier covers everything left under /api/v1 (the bulk authenticated
     // surface) plus the proto WS upgrade.
-    let api = api.route_layer(GovernorLayer::new(rl_per_ms(200, 150)));
+    let api = api.route_layer(GovernorLayer::new(rl_per_ms(200, 150)?));
     let api = api.route_layer(axum::middleware::from_fn(metrics::track_http_metrics));
     let api = api.layer(DefaultBodyLimit::max(state.config.limits.max_request_size));
 
     let mut app = Router::new()
         .nest("/api/v1", api)
-        .merge(proto_router().route_layer(GovernorLayer::new(rl_per_ms(200, 150))))
+        .merge(proto_router().route_layer(GovernorLayer::new(rl_per_ms(200, 150)?)))
         .layer(axum::Extension(Arc::clone(&scheduler)))
         .layer(axum::Extension(Arc::clone(&proto_limiter)));
 
@@ -686,7 +697,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
                 Arc::clone(&state),
                 endpoints::metrics::metrics_auth,
             ))
-            .route_layer(GovernorLayer::new(rl_per_second(6, 5)))
+            .route_layer(GovernorLayer::new(rl_per_second(6, 5)?))
             .layer(axum::Extension(Arc::clone(&scheduler)));
         app = app.merge(metrics_route);
     }
@@ -707,16 +718,16 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             get(caches::upstream_nar),
         )
         .route("/cache/{cache}/nar/{path}", get(caches::nar))
-        .route_layer(GovernorLayer::new(nar_cache_limit()));
+        .route_layer(GovernorLayer::new(nar_cache_limit()?));
 
     let cache_inspect = Router::new()
         .route("/cache/{cache}/ls/{hash}", get(caches::ls))
         .route("/cache/{cache}/serve/{hash}/{*path}", get(caches::serve))
-        .route_layer(GovernorLayer::new(rl_per_ms(333, 180)));
+        .route_layer(GovernorLayer::new(rl_per_ms(333, 180)?));
 
     let cache_log = Router::new()
         .route("/cache/{cache}/log/{drv}", get(caches::log))
-        .route_layer(GovernorLayer::new(rl_per_ms(333, 900)));
+        .route_layer(GovernorLayer::new(rl_per_ms(333, 900)?));
 
     // Cache-scoped read-only proto WebSocket. `authorize_optional` populates
     // MaybeUser/MaybeApiKey/ClientIp so the handler can authorize anon→public
@@ -731,7 +742,7 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
             Arc::clone(&state),
             authorization::authorize_optional,
         ))
-        .route_layer(GovernorLayer::new(nar_cache_limit()))
+        .route_layer(GovernorLayer::new(nar_cache_limit()?))
         .layer(axum::Extension(cache_per_ip))
         .layer(axum::Extension(Arc::clone(&proto_limiter)));
 
@@ -776,12 +787,13 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
     //   TraceLayer           - opens the span (reads the id from headers)
     //   PropagateRequestIdLayer - copies the id onto the response
     //   CORS                 - innermost so preflights still get traced
-    app.fallback(handle_404)
+    Ok(app
+        .fallback(handle_404)
         .layer(cors)
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(trace)
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-        .with_state(state)
+        .with_state(state))
 }
 
 pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
@@ -839,7 +851,8 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         tracing::error!(error = ?e, "failed to reconcile entry-point dep counts after recovery");
     }
 
-    let app = create_router(Arc::clone(&state));
+    let app = create_router(Arc::clone(&state))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
 
     let listener = tokio::net::TcpListener::bind(&server_url)
         .await

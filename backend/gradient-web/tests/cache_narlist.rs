@@ -20,7 +20,7 @@ fn ls_returns_v1_tree_with_null_offsets() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_with_nar().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!(
@@ -61,7 +61,7 @@ fn ls_unknown_hash_returns_404() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_with_nar().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let unknown = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         let resp = server
@@ -79,7 +79,7 @@ fn private_cache_ls_requires_auth() {
         .unwrap();
     rt.block_on(async {
         let state = private_cache_with_nar().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!(

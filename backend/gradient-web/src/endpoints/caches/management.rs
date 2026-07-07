@@ -22,7 +22,7 @@ use gradient_types::input::{check_index_name, validate_display_name};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
     TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
@@ -100,42 +100,19 @@ pub async fn get_cache_name_available(
 pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
-) -> WebResult<Json<BaseResponse<Vec<MCache>>>> {
-    // TODO: Implement pagination
-    // Find all orgs the user belongs to
-    let org_memberships = EOrganizationUser::find()
-        .filter(COrganizationUser::User.eq(user.id))
-        .all(&state.web_db)
-        .await?;
+    Query(params): Query<PaginationParams>,
+) -> WebResult<Json<BaseResponse<Paginated<Vec<MCache>>>>> {
+    let condition = crate::access::visible_cache_condition(&state, user.id).await?;
+    let listing = crate::helpers::paginate(
+        ECache::find()
+            .filter(condition)
+            .order_by_asc(CCache::CreatedAt),
+        &state.web_db,
+        &params,
+    )
+    .await?;
 
-    let org_ids: Vec<OrganizationId> = org_memberships
-        .into_iter()
-        .map(|m| m.organization)
-        .collect();
-
-    // Find cache IDs subscribed by those orgs
-    let org_cache_ids: Vec<CacheId> = if org_ids.is_empty() {
-        vec![]
-    } else {
-        EOrganizationCache::find()
-            .filter(COrganizationCache::Organization.is_in(org_ids))
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|oc| oc.cache)
-            .collect()
-    };
-
-    let caches = ECache::find()
-        .filter(
-            Condition::any()
-                .add(CCache::CreatedBy.eq(user.id))
-                .add(CCache::Id.is_in(org_cache_ids)),
-        )
-        .all(&state.web_db)
-        .await?;
-
-    Ok(ok_json(caches))
+    Ok(ok_json(listing))
 }
 
 pub async fn put(

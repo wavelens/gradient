@@ -19,7 +19,7 @@ fn stats_returns_aggregates() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_stats_row().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars/stats"))

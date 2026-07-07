@@ -109,9 +109,9 @@ export class ApiKeysComponent implements OnInit {
       },
       error: () => {},
     });
-    this.cachesService.getCaches().subscribe({
+    this.cachesService.getCaches(1, 100).subscribe({
       next: (caches) => {
-        this.cacheOptions.set(caches.map((c) => ({ label: c.display_name || c.name, value: c.name })));
+        this.cacheOptions.set(caches.items.map((c) => ({ label: c.display_name || c.name, value: c.name })));
       },
       error: () => {},
     });

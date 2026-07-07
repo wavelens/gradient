@@ -23,7 +23,7 @@ fn show_returns_full_detail() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_with_one_nar().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!(
@@ -51,7 +51,7 @@ fn show_404_when_signature_missing() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_with_path_no_signature().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!(

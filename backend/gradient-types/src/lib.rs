@@ -115,6 +115,19 @@ pub struct Paginated<T> {
     pub per_page: u64,
 }
 
+impl<T> Paginated<Vec<T>> {
+    /// Map each item to a summary/response type while carrying the page metadata
+    /// through unchanged, so handlers can post-process a paginated result set.
+    pub fn map<U, F: FnMut(T) -> U>(self, f: F) -> Paginated<Vec<U>> {
+        Paginated {
+            items: self.items.into_iter().map(f).collect(),
+            total: self.total,
+            page: self.page,
+            per_page: self.per_page,
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Default)]
 pub struct PaginationParams {
     pub page: Option<u64>,

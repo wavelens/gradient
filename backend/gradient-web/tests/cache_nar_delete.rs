@@ -25,7 +25,7 @@ fn delete_unauthenticated_returns_403() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_empty_nars().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .delete(&format!(

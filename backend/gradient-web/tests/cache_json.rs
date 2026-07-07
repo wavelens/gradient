@@ -23,7 +23,7 @@ fn nix_cache_info_json_returns_object_with_pascal_case_keys() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_state().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!("/cache/{FIXTURE_CACHE_NAME}/nix-cache-info"))
@@ -49,7 +49,7 @@ fn nix_cache_info_no_json_returns_text() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_state().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!("/cache/{FIXTURE_CACHE_NAME}/nix-cache-info"))
@@ -71,7 +71,7 @@ fn gradient_cache_info_json_returns_object() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_state().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!("/cache/{FIXTURE_CACHE_NAME}/gradient-cache-info"))
@@ -92,7 +92,7 @@ fn gradient_cache_info_no_json_returns_text() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_state().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!("/cache/{FIXTURE_CACHE_NAME}/gradient-cache-info"))
@@ -111,7 +111,7 @@ fn narinfo_json_returns_object_with_pascal_case_keys() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_with_narinfo().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!(
@@ -140,7 +140,7 @@ fn private_cache_requires_auth() {
         .unwrap();
     rt.block_on(async {
         let state = private_cache_state().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!("/cache/{FIXTURE_CACHE_NAME}/nix-cache-info"))
@@ -148,14 +148,14 @@ fn private_cache_requires_auth() {
         resp.assert_status(StatusCode::UNAUTHORIZED);
 
         let state = private_cache_state().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
         let resp = server
             .get(&format!("/cache/{FIXTURE_CACHE_NAME}/gradient-cache-info"))
             .await;
         resp.assert_status(StatusCode::UNAUTHORIZED);
 
         let state = private_cache_state().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
         let resp = server
             .get(&format!(
                 "/cache/{FIXTURE_CACHE_NAME}/{FIXTURE_PATH_HASH}.narinfo"

@@ -4646,11 +4646,18 @@ paths:
     get:
       tags: [caches]
       summary: List caches
-      description: Returns all binary caches owned by the current user.
+      description: Returns a paginated list of binary caches the current user owns or can access through an organization subscription.
       operationId: listCaches
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
       responses:
         '200':
-          description: Cache list
+          description: Paginated cache list
           content:
             application/json:
               schema:
@@ -4659,7 +4666,18 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ListResponse'
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/Cache'
+                          total:
+                            type: integer
+                          page:
+                            type: integer
+                          per_page:
+                            type: integer
         '401':
           $ref: '#/components/responses/Unauthorized'
     put:

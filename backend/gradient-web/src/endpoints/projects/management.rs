@@ -10,7 +10,7 @@ use crate::access::{Caller, OrgAccess, ProjectAccess, has_permission, load_org, 
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{ErrorCode, WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
@@ -26,8 +26,7 @@ use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, PaginatorTrait,
-    QueryFilter, QueryOrder,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -103,8 +102,6 @@ pub async fn get(
     )
     .await?;
 
-    let page = params.page();
-    let per_page = params.per_page();
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
             has_permission(
@@ -127,16 +124,21 @@ pub async fn get(
         None => (false, false),
     };
 
-    let paginator = EProject::find()
-        .filter(CProject::Organization.eq(organization.id))
-        .order_by_asc(CProject::CreatedAt)
-        .paginate(&state.web_db, per_page);
-
-    let total = paginator.num_items().await?;
-    let raw = paginator.fetch_page(page - 1).await?;
+    let listing = paginate(
+        EProject::find()
+            .filter(CProject::Organization.eq(organization.id))
+            .order_by_asc(CProject::CreatedAt),
+        &state.web_db,
+        &params,
+    )
+    .await?;
 
     // Batch-fetch the status of the last evaluation for each project.
-    let eval_ids: Vec<EvaluationId> = raw.iter().filter_map(|p| p.last_evaluation).collect();
+    let eval_ids: Vec<EvaluationId> = listing
+        .items
+        .iter()
+        .filter_map(|p| p.last_evaluation)
+        .collect();
     let db = &state.web_db;
     let eval_status_map: HashMap<EvaluationId, gradient_entity::evaluation::EvaluationStatus> =
         gradient_db::fetch_in_chunks(&eval_ids, |chunk| async move {
@@ -150,42 +152,34 @@ pub async fn get(
         .map(|e| (e.id, e.status))
         .collect();
 
-    let items: Vec<ProjectResponse> = raw
-        .into_iter()
-        .map(|p| {
-            let last_evaluation_status = p
-                .last_evaluation
-                .and_then(|id| eval_status_map.get(&id).cloned());
-            ProjectResponse {
-                id: p.id,
-                organization: p.organization,
-                name: p.name,
-                active: p.active,
-                display_name: p.display_name,
-                description: p.description,
-                repository: p.repository,
-                wildcard: p.wildcard,
-                last_evaluation: p.last_evaluation,
-                last_evaluation_status,
-                force_evaluation: p.force_evaluation,
-                keep_evaluations: p.keep_evaluations,
-                concurrency: p.concurrency,
-                created_by: p.created_by,
-                created_at: p.created_at,
-                managed: p.managed,
-                sign_cache: p.sign_cache,
-                can_edit,
-                can_trigger,
-            }
-        })
-        .collect();
+    let listing = listing.map(|p| {
+        let last_evaluation_status = p
+            .last_evaluation
+            .and_then(|id| eval_status_map.get(&id).cloned());
+        ProjectResponse {
+            id: p.id,
+            organization: p.organization,
+            name: p.name,
+            active: p.active,
+            display_name: p.display_name,
+            description: p.description,
+            repository: p.repository,
+            wildcard: p.wildcard,
+            last_evaluation: p.last_evaluation,
+            last_evaluation_status,
+            force_evaluation: p.force_evaluation,
+            keep_evaluations: p.keep_evaluations,
+            concurrency: p.concurrency,
+            created_by: p.created_by,
+            created_at: p.created_at,
+            managed: p.managed,
+            sign_cache: p.sign_cache,
+            can_edit,
+            can_trigger,
+        }
+    });
 
-    Ok(ok_json(Paginated {
-        items,
-        total,
-        page,
-        per_page,
-    }))
+    Ok(ok_json(listing))
 }
 
 pub async fn put(

@@ -1,4 +1,4 @@
-use crate::{Client, ConnectorError, ListResponse, PaginatedListResponse, http};
+use crate::{Client, ConnectorError, PaginatedListResponse, http};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
@@ -127,7 +127,7 @@ pub struct NarListQuery {
 pub struct CachesApi<'a>(pub(crate) &'a Client);
 
 impl CachesApi<'_> {
-    pub async fn list(&self) -> Result<ListResponse, ConnectorError> {
+    pub async fn list(&self) -> Result<PaginatedListResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

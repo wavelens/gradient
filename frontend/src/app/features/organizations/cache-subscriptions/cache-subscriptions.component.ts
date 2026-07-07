@@ -91,18 +91,18 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   private loadAvailableCaches(): void {
     const subscribedNames = new Set(this.caches().map((c) => c.name));
-    this.cachesService.getCaches().subscribe({
+    this.cachesService.getCaches(1, 100).subscribe({
       next: (own) => {
         this.cachesService.getPublicCaches().subscribe({
           next: (pub) => {
-            const all = [...own, ...pub];
+            const all = [...own.items, ...pub];
             const seen = new Set<string>();
             this.availableCacheNames = all
               .filter((c) => !subscribedNames.has(c.name) && !seen.has(c.name) && seen.add(c.name))
               .map((c) => c.name);
           },
           error: () => {
-            this.availableCacheNames = own
+            this.availableCacheNames = own.items
               .filter((c) => !subscribedNames.has(c.name))
               .map((c) => c.name);
           },

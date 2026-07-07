@@ -63,7 +63,7 @@ fn missing_request_id_is_generated() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()));
+        let server = TestServer::new(create_router(make_state()).expect("router"));
         let response = server.get("/api/v1/health").await;
         response.assert_status_ok();
 
@@ -87,7 +87,7 @@ fn supplied_request_id_is_echoed() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()));
+        let server = TestServer::new(create_router(make_state()).expect("router"));
         let supplied = "trace-from-upstream-proxy";
         let response = server
             .get("/api/v1/health")
@@ -111,7 +111,7 @@ fn each_request_gets_a_distinct_id() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()));
+        let server = TestServer::new(create_router(make_state()).expect("router"));
         let first = server.get("/api/v1/health").await;
         let second = server.get("/api/v1/health").await;
 

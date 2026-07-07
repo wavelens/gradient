@@ -47,7 +47,7 @@ export class DashboardComponent implements OnInit {
     }).subscribe({
       next: ({ organizations, caches }) => {
         this.organizations.set(organizations.items);
-        this.caches.set(caches);
+        this.caches.set(caches.items);
         this.loading.set(false);
       },
       error: (error) => {

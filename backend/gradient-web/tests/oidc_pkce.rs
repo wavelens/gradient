@@ -119,7 +119,7 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
-    let server = axum_test::TestServer::new(create_router(state));
+    let server = axum_test::TestServer::new(create_router(state).expect("router"));
     let res = server.get("/api/v1/auth/oidc/login").await;
     res.assert_status(axum::http::StatusCode::FOUND);
 

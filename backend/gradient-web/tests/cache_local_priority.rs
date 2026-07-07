@@ -87,7 +87,9 @@ fn build_server(cache: gradient_entity::cache::Model, peer: &str) -> TestServer 
     });
 
     let peer_addr: SocketAddr = format!("{peer}:0").parse().expect("valid peer addr");
-    let router = gradient_web::create_router(state).layer(MockConnectInfo(peer_addr));
+    let router = gradient_web::create_router(state)
+        .expect("router")
+        .layer(MockConnectInfo(peer_addr));
     TestServer::new(router)
 }
 

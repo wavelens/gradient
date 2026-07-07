@@ -61,7 +61,7 @@ fn post_builds_returns_404() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()));
+        let server = TestServer::new(create_router(make_state()).expect("router"));
 
         let response = server
             .post("/api/v1/builds")
@@ -85,7 +85,7 @@ fn get_recent_direct_builds_returns_404() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()));
+        let server = TestServer::new(create_router(make_state()).expect("router"));
 
         let response = server.get("/api/v1/builds/direct/recent").await;
 

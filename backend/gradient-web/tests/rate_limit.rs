@@ -64,7 +64,7 @@ fn auth_tier_throttles_burst() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()));
+        let server = TestServer::new(create_router(make_state()).expect("router"));
 
         for i in 1..=5 {
             let resp = server
@@ -104,7 +104,7 @@ fn cache_tier_does_not_throttle_moderate_burst() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()));
+        let server = TestServer::new(create_router(make_state()).expect("router"));
 
         for i in 1..=50 {
             let resp = server.get("/cache/missing-cache/nix-cache-info").await;
@@ -129,7 +129,7 @@ fn cache_proto_tier_does_not_throttle_burst() {
         .build()
         .unwrap();
     rt.block_on(async {
-        let server = TestServer::new(create_router(make_state()));
+        let server = TestServer::new(create_router(make_state()).expect("router"));
 
         for i in 1..=250 {
             let resp = server.get("/cache/missing-cache/proto").await;

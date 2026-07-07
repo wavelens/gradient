@@ -8,7 +8,7 @@ use crate::access::{Caller, OrgAccess, load_org};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult, require_create_permission};
-use crate::helpers::ok_json;
+use crate::helpers::{ok_json, paginate, role_names};
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
@@ -20,8 +20,8 @@ use gradient_types::input::{check_index_name, validate_display_name};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, JoinType, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, JoinType, QueryFilter, QueryOrder,
+    QuerySelect, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -142,41 +142,33 @@ pub async fn get(
     Extension(user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<OrganizationSummary>>>>> {
-    let page = params.page();
-    let per_page = params.per_page();
+    let listing = paginate(
+        EOrganization::find()
+            .join_rev(
+                JoinType::InnerJoin,
+                EOrganizationUser::belongs_to(gradient_entity::organization::Entity)
+                    .from(COrganizationUser::Organization)
+                    .to(COrganization::Id)
+                    .into(),
+            )
+            .filter(COrganizationUser::User.eq(user.id))
+            .order_by_asc(COrganization::CreatedAt),
+        &state.web_db,
+        &params,
+    )
+    .await?;
 
-    let paginator = EOrganization::find()
-        .join_rev(
-            JoinType::InnerJoin,
-            EOrganizationUser::belongs_to(gradient_entity::organization::Entity)
-                .from(COrganizationUser::Organization)
-                .to(COrganization::Id)
-                .into(),
-        )
-        .filter(COrganizationUser::User.eq(user.id))
-        .order_by_asc(COrganization::CreatedAt)
-        .paginate(&state.web_db, per_page);
-
-    let total = paginator.num_items().await?;
-    let orgs = paginator.fetch_page(page - 1).await?;
-
-    let org_ids: Vec<OrganizationId> = orgs.iter().map(|o| o.id).collect();
+    let org_ids: Vec<OrganizationId> = listing.items.iter().map(|o| o.id).collect();
     let running_per_org = count_running_evaluations(&state, &org_ids).await?;
 
-    // Fetch the current user's membership row for each org to get the role.
     let org_users = EOrganizationUser::find()
         .filter(COrganizationUser::User.eq(user.id))
-        .filter(COrganizationUser::Organization.is_in(org_ids.clone()))
+        .filter(COrganizationUser::Organization.is_in(org_ids))
         .all(&state.web_db)
         .await?;
 
-    let role_ids: Vec<RoleId> = org_users.iter().map(|ou| ou.role).collect();
-    let roles = ERole::find()
-        .filter(CRole::Id.is_in(role_ids))
-        .all(&state.web_db)
-        .await?;
-    let role_name_map: HashMap<RoleId, String> =
-        roles.into_iter().map(|r| (r.id, r.name)).collect();
+    let role_name_map =
+        role_names(&state.web_db, org_users.iter().map(|ou| ou.role).collect()).await?;
     let org_role_map: HashMap<OrganizationId, String> = org_users
         .into_iter()
         .filter_map(|ou| {
@@ -186,30 +178,22 @@ pub async fn get(
         })
         .collect();
 
-    let items: Vec<OrganizationSummary> = orgs
-        .into_iter()
-        .map(|o| OrganizationSummary {
-            running_evaluations: *running_per_org.get(&o.id).unwrap_or(&0),
-            role: org_role_map.get(&o.id).cloned(),
-            id: o.id,
-            name: o.name,
-            display_name: o.display_name,
-            description: o.description,
-            public_key: Some(o.public_key),
-            public: o.public,
-            hide_build_requests: o.hide_build_requests,
-            managed: o.managed,
-            created_by: o.created_by,
-            created_at: o.created_at,
-        })
-        .collect();
+    let listing = listing.map(|o| OrganizationSummary {
+        running_evaluations: *running_per_org.get(&o.id).unwrap_or(&0),
+        role: org_role_map.get(&o.id).cloned(),
+        id: o.id,
+        name: o.name,
+        display_name: o.display_name,
+        description: o.description,
+        public_key: Some(o.public_key),
+        public: o.public,
+        hide_build_requests: o.hide_build_requests,
+        managed: o.managed,
+        created_by: o.created_by,
+        created_at: o.created_at,
+    });
 
-    Ok(ok_json(Paginated {
-        items,
-        total,
-        page,
-        per_page,
-    }))
+    Ok(ok_json(listing))
 }
 
 pub async fn put(
@@ -287,23 +271,16 @@ pub async fn get_public_organizations(
     state: State<Arc<ServerState>>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<MOrganization>>>>> {
-    let page = params.page();
-    let per_page = params.per_page();
+    let listing = paginate(
+        EOrganization::find()
+            .filter(COrganization::Public.eq(true))
+            .order_by_asc(COrganization::CreatedAt),
+        &state.web_db,
+        &params,
+    )
+    .await?;
 
-    let paginator = EOrganization::find()
-        .filter(COrganization::Public.eq(true))
-        .order_by_asc(COrganization::CreatedAt)
-        .paginate(&state.web_db, per_page);
-
-    let total = paginator.num_items().await?;
-    let items = paginator.fetch_page(page - 1).await?;
-
-    Ok(ok_json(Paginated {
-        items,
-        total,
-        page,
-        per_page,
-    }))
+    Ok(ok_json(listing))
 }
 
 pub async fn get_organization(

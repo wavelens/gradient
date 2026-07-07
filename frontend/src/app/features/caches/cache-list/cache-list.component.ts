@@ -99,9 +99,9 @@ export class CacheListComponent implements OnInit, OnDestroy {
 
   loadCaches(): void {
     this.loading.set(true);
-    this.cachesService.getCaches().subscribe({
+    this.cachesService.getCaches(1, 100).subscribe({
       next: (caches) => {
-        this.caches.set(caches);
+        this.caches.set(caches.items);
         this.loading.set(false);
       },
       error: (error) => {
