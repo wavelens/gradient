@@ -18,7 +18,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::{error, info};
 
 pub async fn update_derivation_build_status(
@@ -171,4 +171,77 @@ pub async fn notify_build_status_for_derivations(ctx: &DbContext, derivations: &
         .map(|(derivation, status)| TransitionChange::unchanged(derivation, status))
         .collect();
     emit_transition_effects(ctx, &changes).await;
+}
+
+/// Announce each entry point's current anchor status through the CI reactor as
+/// its `entry_point` row is recorded, so a forge check exists the moment the
+/// entry point evaluates: pending for `Created`, immediate green/red for an
+/// already-terminal anchor that never transitions in this eval. Unlike
+/// [`emit_transition_effects`] this reports `Created` too; callers pass one
+/// streamed batch, and every query is scoped to `evaluation`.
+pub async fn announce_entry_point_statuses(
+    ctx: &DbContext,
+    evaluation: EvaluationId,
+    derivations: &[DerivationId],
+) {
+    if derivations.is_empty() {
+        return;
+    }
+
+    let db = &ctx.worker_db;
+
+    let entry_point_drvs: HashSet<DerivationId> =
+        crate::fetch_in_chunks(derivations, |chunk| async move {
+            EEntryPoint::find()
+                .filter(CEntryPoint::Evaluation.eq(evaluation))
+                .filter(CEntryPoint::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|ep| ep.derivation)
+        .collect();
+    if entry_point_drvs.is_empty() {
+        return;
+    }
+
+    let drv_ids: Vec<DerivationId> = entry_point_drvs.iter().copied().collect();
+    let status_by_drv: HashMap<DerivationId, BuildStatus> =
+        crate::fetch_in_chunks(&drv_ids, |chunk| async move {
+            EDerivationBuild::find()
+                .filter(CDerivationBuild::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|a| (a.derivation, a.status))
+        .collect();
+
+    let jobs = crate::fetch_in_chunks(&drv_ids, |chunk| async move {
+        EBuildJob::find()
+            .filter(CBuildJob::Evaluation.eq(evaluation))
+            .filter(CBuildJob::Derivation.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .unwrap_or_default();
+
+    for job in jobs {
+        let Some(&status) = status_by_drv.get(&job.derivation) else {
+            continue;
+        };
+
+        let action_ctx = ctx.clone();
+        ctx.shutdown.spawn(async move {
+            action_ctx
+                .reactor
+                .on_build_status_changed(&action_ctx, job, status)
+                .await;
+        });
+    }
 }
