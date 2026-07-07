@@ -11,9 +11,11 @@
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use std::sync::Arc;
-use gradient_test_support::cache_fixture::{FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, public_cache_empty_nars};
+use gradient_test_support::cache_fixture::{
+    FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, public_cache_empty_nars,
+};
 use gradient_web::create_router;
+use std::sync::Arc;
 
 #[test]
 fn delete_unauthenticated_returns_403() {

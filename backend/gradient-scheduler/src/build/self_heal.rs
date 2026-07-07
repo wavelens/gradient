@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use gradient_types::*;
 use gradient_core::ServerState;
+use gradient_types::*;
 use tracing::{info, warn};
 
 /// Extract the 32-char hash from a `/nix/store/<hash>-<name>` store path.
@@ -29,7 +29,10 @@ fn store_path_hash(store_path: &str) -> Option<&str> {
 /// must instead be revived by re-walking its cached referrers.
 async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[DerivationId]) -> bool {
     for d in derivations {
-        if gradient_db::derivation_is_reachable(db, *d).await.unwrap_or(false) {
+        if gradient_db::derivation_is_reachable(db, *d)
+            .await
+            .unwrap_or(false)
+        {
             return true;
         }
     }
@@ -95,9 +98,7 @@ pub(super) async fn reconcile_missing_inputs(
                 // The leaf rebuilds + re-pushes closure-complete; meanwhile drop
                 // the now-stale `closure_complete` up the chain so the dispatch
                 // gate re-blocks dependents until the closure is whole again.
-                if let Err(e) =
-                    gradient_db::clear_closure_complete_for_referrers(db, hash).await
-                {
+                if let Err(e) = gradient_db::clear_closure_complete_for_referrers(db, hash).await {
                     warn!(%path, error = %e, "reconcile: clear closure_complete failed");
                 }
 
@@ -111,15 +112,15 @@ pub(super) async fn reconcile_missing_inputs(
                 let orphan = !any_reachable(db, &drvs).await;
                 demoted_producers.extend(drvs);
                 if orphan {
-                    match gradient_db::demote_referrers_of(db, &state.nar_storage, hash)
-                        .await
-                    {
+                    match gradient_db::demote_referrers_of(db, &state.nar_storage, hash).await {
                         Ok(refs) if !refs.is_empty() => {
                             referrers_demoted += refs.len();
                             demoted_producers.extend(refs);
                         }
                         Ok(_) => needs_dep_rewalk = true,
-                        Err(e) => warn!(%path, error = %e, "reconcile: demote referrers (orphan producer) failed"),
+                        Err(e) => {
+                            warn!(%path, error = %e, "reconcile: demote referrers (orphan producer) failed")
+                        }
                     }
                 }
             }
@@ -147,12 +148,8 @@ pub(super) async fn reconcile_missing_inputs(
     // build - demote its output-only-cached direct deps to force the next eval
     // to re-walk them and re-record the orphan (and its now-buildable subtree).
     if needs_dep_rewalk {
-        match gradient_db::demote_output_only_cached_deps(
-            db,
-            &state.nar_storage,
-            failed_derivation,
-        )
-        .await
+        match gradient_db::demote_output_only_cached_deps(db, &state.nar_storage, failed_derivation)
+            .await
         {
             Ok(drvs) => {
                 referrers_demoted += drvs.len();
@@ -163,7 +160,9 @@ pub(super) async fn reconcile_missing_inputs(
                     "reconcile: demoted output-only-cached direct deps to re-walk an absent orphan input"
                 );
             }
-            Err(e) => warn!(%failed_derivation, error = %e, "reconcile: demote output-only-cached deps failed"),
+            Err(e) => {
+                warn!(%failed_derivation, error = %e, "reconcile: demote output-only-cached deps failed")
+            }
         }
     }
 

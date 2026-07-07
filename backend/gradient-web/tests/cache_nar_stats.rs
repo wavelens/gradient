@@ -6,10 +6,10 @@
 //! Integration tests for `GET /api/v1/caches/{cache}/nars/stats`.
 
 use axum_test::TestServer;
-use serde_json::Value;
-use std::sync::Arc;
 use gradient_test_support::cache_fixture::{FIXTURE_CACHE_NAME, public_cache_stats_row};
 use gradient_web::create_router;
+use serde_json::Value;
+use std::sync::Arc;
 
 #[test]
 fn stats_returns_aggregates() {

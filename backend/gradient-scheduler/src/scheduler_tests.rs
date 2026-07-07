@@ -12,17 +12,15 @@ use std::sync::Arc;
 
 use gradient_types::ids::*;
 
-use gradient_types::proto::{
-    CandidateScore, FlakeJob, FlakeTask, GradientCapabilities, JobKind,
-};
+use gradient_types::proto::{CandidateScore, FlakeJob, FlakeTask, GradientCapabilities, JobKind};
 
 use super::Scheduler;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
 
 /// Create a scheduler backed by a mock DB that returns empty results.
 fn test_scheduler() -> Arc<Scheduler> {
-    use sea_orm::{DatabaseBackend, MockDatabase};
     use gradient_test_support::prelude::*;
+    use sea_orm::{DatabaseBackend, MockDatabase};
 
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
     let state = test_state(db);
@@ -60,7 +58,10 @@ fn eval_job(peer: OrganizationId) -> PendingEvalJob {
 /// and the absence of `fetch` keeps the reserve-fetch-workers rule from
 /// penalizing it into a negative score on the unscored request_job path.
 fn eval_worker_caps() -> GradientCapabilities {
-    GradientCapabilities { eval: true, ..GradientCapabilities::default() }
+    GradientCapabilities {
+        eval: true,
+        ..GradientCapabilities::default()
+    }
 }
 
 #[tokio::test]
@@ -95,16 +96,32 @@ async fn job_notify_bump_is_not_lost_when_not_awaiting() {
     let peer = OrganizationId::now_v7();
 
     let mut rx = scheduler.job_notify();
-    assert!(!rx.has_changed().unwrap(), "fresh receiver starts un-bumped");
+    assert!(
+        !rx.has_changed().unwrap(),
+        "fresh receiver starts un-bumped"
+    );
 
-    scheduler.enqueue_eval_job("j1".into(), eval_job(peer)).await;
-    assert!(rx.has_changed().unwrap(), "missed-while-busy enqueue must still be observed");
+    scheduler
+        .enqueue_eval_job("j1".into(), eval_job(peer))
+        .await;
+    assert!(
+        rx.has_changed().unwrap(),
+        "missed-while-busy enqueue must still be observed"
+    );
 
     rx.changed().await.unwrap();
-    assert!(!rx.has_changed().unwrap(), "consuming the change resets the flag");
+    assert!(
+        !rx.has_changed().unwrap(),
+        "consuming the change resets the flag"
+    );
 
-    scheduler.enqueue_eval_job("j2".into(), eval_job(peer)).await;
-    assert!(rx.has_changed().unwrap(), "a later enqueue re-arms the receiver");
+    scheduler
+        .enqueue_eval_job("j2".into(), eval_job(peer))
+        .await;
+    assert!(
+        rx.has_changed().unwrap(),
+        "a later enqueue re-arms the receiver"
+    );
 }
 
 /// Reactive dispatch (#359): a kick fired while the dispatch loop is mid-pass
@@ -120,7 +137,10 @@ async fn dispatch_kick_is_retained_when_not_awaiting() {
         scheduler.dispatch_kick.notified(),
     )
     .await;
-    assert!(woke.is_ok(), "kick fired while not awaiting must still wake the dispatch loop");
+    assert!(
+        woke.is_ok(),
+        "kick fired while not awaiting must still wake the dispatch loop"
+    );
 }
 
 #[tokio::test]
@@ -130,11 +150,7 @@ async fn test_candidates_filtered_by_authorized_peers() {
     let peer_b = OrganizationId::now_v7();
 
     scheduler
-        .register_worker(
-            "w1",
-            eval_worker_caps(),
-            HashSet::from([peer_a]),
-        )
+        .register_worker("w1", eval_worker_caps(), HashSet::from([peer_a]))
         .await;
 
     scheduler
@@ -245,11 +261,7 @@ async fn test_update_authorized_peers_expands_access() {
 
     // Worker starts authorized for peer_a only.
     scheduler
-        .register_worker(
-            "w1",
-            eval_worker_caps(),
-            HashSet::from([peer_a]),
-        )
+        .register_worker("w1", eval_worker_caps(), HashSet::from([peer_a]))
         .await;
 
     scheduler
@@ -335,9 +347,9 @@ async fn record_eval_message_drops_when_job_unknown() {
 #[tokio::test]
 async fn record_eval_message_inserts_for_active_build_job() {
     use crate::jobs::PendingBuildJob;
+    use gradient_test_support::prelude::*;
     use gradient_types::proto::{BuildJob, BuildTask};
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
-    use gradient_test_support::prelude::*;
 
     let eval_id = EvaluationId::now_v7();
     let peer = OrganizationId::now_v7();
@@ -394,7 +406,11 @@ async fn record_eval_message_inserts_for_active_build_job() {
     scheduler
         .record_scores(
             "w1",
-            vec![CandidateScore { job_id: "jbuild".into(), missing_count: 0, missing_nar_size: 0 }],
+            vec![CandidateScore {
+                job_id: "jbuild".into(),
+                missing_count: 0,
+                missing_nar_size: 0,
+            }],
         )
         .await;
     scheduler.request_job("w1", JobKind::Build).await;
@@ -413,8 +429,8 @@ async fn record_eval_message_inserts_for_active_build_job() {
 #[tokio::test]
 async fn fetch_only_completion_enqueues_cached_eval_followup() {
     use gradient_entity::evaluation::EvaluationStatus;
-    use sea_orm::{DatabaseBackend, MockDatabase};
     use gradient_test_support::prelude::*;
+    use sea_orm::{DatabaseBackend, MockDatabase};
 
     let eval_id = EvaluationId::now_v7();
     let peer = OrganizationId::now_v7();
@@ -449,7 +465,11 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     scheduler
         .register_worker(
             "w1",
-            GradientCapabilities { eval: true, fetch: true, ..GradientCapabilities::default() },
+            GradientCapabilities {
+                eval: true,
+                fetch: true,
+                ..GradientCapabilities::default()
+            },
             HashSet::new(),
         )
         .await;
@@ -467,7 +487,10 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     // negative-total gate a fetch-capable worker is reserved off cached-eval
     // work by ReserveFetchWorkersRule when spare capacity is unknown.)
     let tracker = scheduler.job_tracker.read().await;
-    let follow = match tracker.pending_job(&job_id).expect("follow-up must be pending") {
+    let follow = match tracker
+        .pending_job(&job_id)
+        .expect("follow-up must be pending")
+    {
         crate::jobs::PendingJob::Eval(e) => e,
         other => panic!("expected an eval follow-up, got {other:?}"),
     };

@@ -104,7 +104,10 @@ mod status_tests {
         for status in EvaluationStatus::iter() {
             let active = EvaluationStatus::ACTIVE.contains(&status);
             let terminal = EvaluationStatus::TERMINAL.contains(&status);
-            assert!(active ^ terminal, "{status:?} must be exactly one of active/terminal");
+            assert!(
+                active ^ terminal,
+                "{status:?} must be exactly one of active/terminal"
+            );
             assert_eq!(status.is_active(), active);
         }
     }

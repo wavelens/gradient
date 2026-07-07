@@ -65,9 +65,7 @@ impl RollupGranularity {
 
     /// Query-parameter decode with the API's historical default of `day`.
     pub fn from_query_param(param: Option<&str>) -> Self {
-        param
-            .and_then(Self::from_trunc_unit)
-            .unwrap_or(Self::Day)
+        param.and_then(Self::from_trunc_unit).unwrap_or(Self::Day)
     }
 }
 

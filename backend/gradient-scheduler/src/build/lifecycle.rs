@@ -10,15 +10,15 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
-use gradient_entity::build::BuildStatus;
-use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_core::ServerState;
 use gradient_db::{
     cascade_dependency_failed, fail_latest_attempt, update_derivation_build_status,
     update_evaluation_status,
 };
+use gradient_entity::build::BuildStatus;
+use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
 };
@@ -86,7 +86,9 @@ pub(crate) fn terminal_success_status(outputs_already_valid: bool) -> BuildStatu
 /// `build_attempt.reason`. `Transient` has no single cause, so it stays `None`.
 fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
     match kind {
-        BuildFailureKind::SubstituteUnavailable => Some(AttemptFailureReason::SubstituteUnavailable),
+        BuildFailureKind::SubstituteUnavailable => {
+            Some(AttemptFailureReason::SubstituteUnavailable)
+        }
         BuildFailureKind::InputsUnavailable => Some(AttemptFailureReason::InputsUnavailable),
         BuildFailureKind::Permanent => Some(AttemptFailureReason::BuilderNonzero),
         BuildFailureKind::Timeout => Some(AttemptFailureReason::WallClockTimeout),
@@ -127,7 +129,10 @@ fn truncate_failure_message(error: &str) -> String {
         return error.to_string();
     }
 
-    let end = (0..=MAX).rev().find(|&i| error.is_char_boundary(i)).unwrap_or(0);
+    let end = (0..=MAX)
+        .rev()
+        .find(|&i| error.is_char_boundary(i))
+        .unwrap_or(0);
     format!("{} [truncated]", &error[..end])
 }
 
@@ -364,11 +369,10 @@ pub async fn handle_build_job_failed(
     // frontend's log viewer renders it. Without this, pre-`nix build`
     // aborts (prefetch-time errors, daemon connection failures, etc.)
     // produce a Failed badge with an empty log - useless for diagnosis.
-    if let Some(attempt_id) =
-        gradient_db::latest_attempt_id(&state.worker_db, anchor.id)
-            .await
-            .ok()
-            .flatten()
+    if let Some(attempt_id) = gradient_db::latest_attempt_id(&state.worker_db, anchor.id)
+        .await
+        .ok()
+        .flatten()
         && let Err(e) = state
             .log_storage
             .append(attempt_id, &format!("\n=== build failed: {error} ===\n"))
@@ -456,12 +460,10 @@ pub async fn handle_build_job_failed(
             return Ok(());
         }
         FailureOutcome::Permanent => {
-            update_derivation_build_status(&state.db(), anchor, BuildStatus::FailedPermanent)
-                .await;
+            update_derivation_build_status(&state.db(), anchor, BuildStatus::FailedPermanent).await;
         }
         FailureOutcome::Timeout => {
-            update_derivation_build_status(&state.db(), anchor, BuildStatus::FailedTimeout)
-                .await;
+            update_derivation_build_status(&state.db(), anchor, BuildStatus::FailedTimeout).await;
         }
     }
 
@@ -476,7 +478,10 @@ pub async fn handle_build_job_failed(
 /// references the derivation and finalize the settled ones. Idempotent
 /// belt-and-braces around the emitter's own finalize (which is skipped when
 /// the state machine rejects a racing transition).
-async fn check_referencing_evals_done(state: &Arc<ServerState>, derivation: DerivationId) -> Result<()> {
+async fn check_referencing_evals_done(
+    state: &Arc<ServerState>,
+    derivation: DerivationId,
+) -> Result<()> {
     gradient_db::finalize_evals_for_derivations(&state.db(), &[derivation]).await?;
     Ok(())
 }
@@ -489,19 +494,27 @@ async fn check_referencing_evals_done(state: &Arc<ServerState>, derivation: Deri
 pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
     for job in orphaned {
         if let Some(derivation_build) = job.derivation_build() {
-            match EDerivationBuild::find_by_id(derivation_build).one(&state.worker_db).await {
+            match EDerivationBuild::find_by_id(derivation_build)
+                .one(&state.worker_db)
+                .await
+            {
                 Ok(Some(anchor)) if anchor.status == BuildStatus::Building => {
                     update_derivation_build_status(&state.db(), anchor, BuildStatus::Queued).await;
                 }
                 Ok(_) => {}
-                Err(e) => warn!(error = %e, %derivation_build, "requeue orphaned build: load failed"),
+                Err(e) => {
+                    warn!(error = %e, %derivation_build, "requeue orphaned build: load failed")
+                }
             }
 
             continue;
         }
 
         let evaluation_id = job.evaluation_id();
-        match EEvaluation::find_by_id(evaluation_id).one(&state.worker_db).await {
+        match EEvaluation::find_by_id(evaluation_id)
+            .one(&state.worker_db)
+            .await
+        {
             Ok(Some(eval))
                 if matches!(
                     eval.status,
@@ -527,7 +540,10 @@ pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[Pending
 
 #[cfg(test)]
 mod retry_tests {
-    use super::{FailureOutcome, decide_failure_outcome, inputs_unavailable_circuit_open, retry_backoff_elapsed, truncate_failure_message};
+    use super::{
+        FailureOutcome, decide_failure_outcome, inputs_unavailable_circuit_open,
+        retry_backoff_elapsed, truncate_failure_message,
+    };
     use gradient_types::proto::BuildFailureKind;
 
     #[test]
@@ -571,18 +587,53 @@ mod retry_tests {
     #[test]
     fn backoff_grows_per_attempt() {
         let t0 = chrono::NaiveDateTime::default();
-        assert!(!retry_backoff_elapsed(1, t0, t0 + chrono::Duration::seconds(29), 30));
-        assert!(retry_backoff_elapsed(1, t0, t0 + chrono::Duration::seconds(30), 30));
-        assert!(!retry_backoff_elapsed(2, t0, t0 + chrono::Duration::seconds(59), 30));
-        assert!(retry_backoff_elapsed(2, t0, t0 + chrono::Duration::seconds(60), 30));
+        assert!(!retry_backoff_elapsed(
+            1,
+            t0,
+            t0 + chrono::Duration::seconds(29),
+            30
+        ));
+        assert!(retry_backoff_elapsed(
+            1,
+            t0,
+            t0 + chrono::Duration::seconds(30),
+            30
+        ));
+        assert!(!retry_backoff_elapsed(
+            2,
+            t0,
+            t0 + chrono::Duration::seconds(59),
+            30
+        ));
+        assert!(retry_backoff_elapsed(
+            2,
+            t0,
+            t0 + chrono::Duration::seconds(60),
+            30
+        ));
     }
     #[test]
     fn substitute_miss_requeues_but_real_failures_cap_at_three() {
-        assert!(matches!(decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 0, 3), FailureOutcome::Requeue));
-        assert!(matches!(decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 99, 3), FailureOutcome::Requeue));
-        assert!(matches!(decide_failure_outcome(BuildFailureKind::Transient, 0, 3), FailureOutcome::Retry));
-        assert!(matches!(decide_failure_outcome(BuildFailureKind::Transient, 1, 3), FailureOutcome::Retry));
-        assert!(matches!(decide_failure_outcome(BuildFailureKind::Transient, 2, 3), FailureOutcome::Permanent));
+        assert!(matches!(
+            decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 0, 3),
+            FailureOutcome::Requeue
+        ));
+        assert!(matches!(
+            decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 99, 3),
+            FailureOutcome::Requeue
+        ));
+        assert!(matches!(
+            decide_failure_outcome(BuildFailureKind::Transient, 0, 3),
+            FailureOutcome::Retry
+        ));
+        assert!(matches!(
+            decide_failure_outcome(BuildFailureKind::Transient, 1, 3),
+            FailureOutcome::Retry
+        ));
+        assert!(matches!(
+            decide_failure_outcome(BuildFailureKind::Transient, 2, 3),
+            FailureOutcome::Permanent
+        ));
     }
     #[test]
     fn inputs_unavailable_retries_like_transient_then_permanent() {

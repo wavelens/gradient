@@ -12,11 +12,11 @@
 //! on every request - the Live Jobs "incl. rejected" table then swallowed the
 //! error and stayed empty (#419).
 
+use gradient_test_support::fixtures::user;
+use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
-use gradient_test_support::fixtures::user;
-use gradient_test_support::web::{live_session, make_test_server, make_token};
 
 fn run<F: std::future::Future>(fut: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
@@ -49,7 +49,11 @@ fn dispatch_decisions_rejects_non_superuser() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
-        let db = with_user(MockDatabase::new(DatabaseBackend::Postgres), session_id, user());
+        let db = with_user(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+            user(),
+        );
 
         let server = make_test_server(db.into_connection());
         let res = server

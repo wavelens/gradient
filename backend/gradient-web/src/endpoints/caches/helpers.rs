@@ -8,18 +8,16 @@ use crate::authorization::decode_jwt;
 use crate::client_ip::resolve_client_ip;
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::OptionExt;
+use crate::ip_allowlist::is_allowed as ip_allowed;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
-use crate::ip_allowlist::is_allowed as ip_allowed;
-use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
+use gradient_core::ServerState;
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
-use gradient_core::ServerState;
+use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
+use sea_orm::{ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use sea_orm::{
-    ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait,
-};
 use std::sync::Arc;
 
 /// Extracts HTTP Basic Auth credentials and resolves them to a user.
@@ -33,7 +31,9 @@ async fn try_authenticate_basic(
     let Some(auth) = headers.get(axum::http::header::AUTHORIZATION) else {
         return Ok(None);
     };
-    let Ok(val) = auth.to_str() else { return Ok(None) };
+    let Ok(val) = auth.to_str() else {
+        return Ok(None);
+    };
     let Some(encoded) = val.strip_prefix("Basic ") else {
         return Ok(None);
     };
@@ -194,8 +194,7 @@ async fn get_nar_by_hash_inner(
     let nar_size = cached_path_row
         .nar_size
         .or_not_found("NarSize not recorded")? as u64;
-    let references =
-        gradient_db::references_for_hash(&state.web_db, &cached_path_row.hash).await?;
+    let references = gradient_db::references_for_hash(&state.web_db, &cached_path_row.hash).await?;
     let deriver = cached_path_row.deriver.clone();
     let ca = cached_path_row.ca.clone();
 
@@ -290,8 +289,7 @@ async fn get_nar_by_cached_path(
     let nar_size = cached_path_row
         .nar_size
         .or_not_found("NarSize not recorded")? as u64;
-    let references =
-        gradient_db::references_for_hash(&state.web_db, &cached_path_row.hash).await?;
+    let references = gradient_db::references_for_hash(&state.web_db, &cached_path_row.hash).await?;
     let file_hash_nix32 = strip_hash_algo(&normalize_nar_hash(&file_hash)).to_string();
 
     Ok(NixPathInfo {

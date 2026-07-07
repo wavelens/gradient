@@ -55,5 +55,9 @@ pub async fn derivation_ids_for_org<C: ConnectionTrait>(
     })
     .await?;
 
-    Ok(drv_ids.into_iter().collect::<HashSet<_>>().into_iter().collect())
+    Ok(drv_ids
+        .into_iter()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect())
 }

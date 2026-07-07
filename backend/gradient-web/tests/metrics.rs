@@ -12,19 +12,19 @@
 //! result set per expected scrape.
 
 use axum_test::TestServer;
-use gradient_storage::{EmailSender, NarStore};
-use gradient_types::{MetricsConfig, RuntimeConfig, SecretString};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, Value};
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use gradient_storage::{EmailSender, NarStore};
 use gradient_test_support::cli::test_cli;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::log_storage::NoopLogStorage;
+use gradient_types::{MetricsConfig, RuntimeConfig, SecretString};
 use gradient_web::create_router;
+use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, Value};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 const TOKEN: &str = "metrics-token-abcdef";
 
@@ -50,7 +50,9 @@ fn state_with_metrics(enabled: bool, db: DatabaseConnection) -> Arc<ServerState>
     let nar_storage = NarStore::local(&runtime.storage.base_path).expect("nar store");
     Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: Arc::new(runtime),
         log_storage: Arc::new(NoopLogStorage),
@@ -169,7 +171,11 @@ fn endpoint_reflects_seeded_counts() {
             count_row("build_total", Some(BuildStatus::Completed as i32), 7),
             count_row("build_total", Some(BuildStatus::FailedPermanent as i32), 2),
             count_row("build_in_state", Some(BuildStatus::Queued as i32), 5),
-            count_row("evaluation_total", Some(EvaluationStatus::Completed as i32), 3),
+            count_row(
+                "evaluation_total",
+                Some(EvaluationStatus::Completed as i32),
+                3,
+            ),
             count_row("cache_bytes", None, 1024),
             count_row("cache_packages", None, 9),
         ];

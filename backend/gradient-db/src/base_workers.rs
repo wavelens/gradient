@@ -25,9 +25,16 @@ pub async fn enabled_base_worker_by_worker_id<C: ConnectionTrait>(
 }
 
 /// True when `worker_id` belongs to a base worker, regardless of its `enabled` flag.
-pub async fn worker_id_is_base<C: ConnectionTrait>(db: &C, worker_id: &str) -> Result<bool, sea_orm::DbErr> {
+pub async fn worker_id_is_base<C: ConnectionTrait>(
+    db: &C,
+    worker_id: &str,
+) -> Result<bool, sea_orm::DbErr> {
     use gradient_entity::base_worker::{Column, Entity};
-    Ok(Entity::find().filter(Column::WorkerId.eq(worker_id)).one(db).await?.is_some())
+    Ok(Entity::find()
+        .filter(Column::WorkerId.eq(worker_id))
+        .one(db)
+        .await?
+        .is_some())
 }
 
 /// Org UUIDs that have opted into the given base worker.
@@ -85,7 +92,9 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::organization_base_worker::Model>::new()])
             .into_connection();
-        let out = orgs_enabling_base_worker(&db, BaseWorkerId::nil()).await.unwrap();
+        let out = orgs_enabling_base_worker(&db, BaseWorkerId::nil())
+            .await
+            .unwrap();
         assert!(out.is_empty());
     }
 

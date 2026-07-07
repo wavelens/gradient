@@ -32,9 +32,9 @@ use crate::access::is_org_member;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
+use gradient_core::ServerState;
 use gradient_db::latest_attempt_id;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 
@@ -199,5 +199,8 @@ pub(super) async fn effective_log_id(
     state: &Arc<ServerState>,
     anchor: &MDerivationBuild,
 ) -> Option<BuildAttemptId> {
-    latest_attempt_id(&state.web_db, anchor.id).await.ok().flatten()
+    latest_attempt_id(&state.web_db, anchor.id)
+        .await
+        .ok()
+        .flatten()
 }

@@ -48,7 +48,11 @@ pub struct HttpRevisionResolver {
 
 impl HttpRevisionResolver {
     pub fn new(client: reqwest::Client) -> Self {
-        Self { client, github_token: None, gitlab_token: None }
+        Self {
+            client,
+            github_token: None,
+            gitlab_token: None,
+        }
     }
 
     pub fn with_github_token(mut self, token: Option<String>) -> Self {
@@ -84,7 +88,12 @@ impl HttpRevisionResolver {
         let tarball = format!("{GITHUB_API}/repos/{owner}/{repo}/tarball/{}", commit.sha);
         let nar_hash = tarball_source_nar_hash(self.github_get(&tarball)).await?;
 
-        Ok(ResolvedRev { rev: commit.sha, ref_: ref_.clone(), nar_hash, last_modified })
+        Ok(ResolvedRev {
+            rev: commit.sha,
+            ref_: ref_.clone(),
+            nar_hash,
+            last_modified,
+        })
     }
 
     async fn resolve_gitlab(
@@ -114,7 +123,12 @@ impl HttpRevisionResolver {
         );
         let nar_hash = tarball_source_nar_hash(self.gitlab_get(&tarball)).await?;
 
-        Ok(ResolvedRev { rev: commit.id, ref_: ref_.clone(), nar_hash, last_modified })
+        Ok(ResolvedRev {
+            rev: commit.id,
+            ref_: ref_.clone(),
+            nar_hash,
+            last_modified,
+        })
     }
 
     async fn resolve_git(&self, url: &str, ref_: &Option<String>) -> Result<ResolvedRev> {
@@ -126,7 +140,12 @@ impl HttpRevisionResolver {
                 .context("git checkout task panicked")??;
         let nar_hash = nar_hash_of_dir(tmp.path()).await?;
 
-        Ok(ResolvedRev { rev, ref_: ref_.clone(), nar_hash, last_modified })
+        Ok(ResolvedRev {
+            rev,
+            ref_: ref_.clone(),
+            nar_hash,
+            last_modified,
+        })
     }
 
     fn github_get(&self, url: &str) -> reqwest::RequestBuilder {
@@ -157,14 +176,12 @@ impl HttpRevisionResolver {
 impl RevisionResolver for HttpRevisionResolver {
     async fn resolve(&self, reference: &LockedRef) -> Result<ResolvedRev> {
         match reference {
-            LockedRef::Github { owner, repo, ref_ } => {
-                self.resolve_github(owner, repo, ref_).await
-            }
-            LockedRef::Gitlab { owner, repo, ref_ } => {
-                self.resolve_gitlab(owner, repo, ref_).await
-            }
+            LockedRef::Github { owner, repo, ref_ } => self.resolve_github(owner, repo, ref_).await,
+            LockedRef::Gitlab { owner, repo, ref_ } => self.resolve_gitlab(owner, repo, ref_).await,
             LockedRef::Git { url, ref_ } => self.resolve_git(url, ref_).await,
-            LockedRef::Tarball { .. } => bail!("tarball inputs are not yet supported by the updater"),
+            LockedRef::Tarball { .. } => {
+                bail!("tarball inputs are not yet supported by the updater")
+            }
             LockedRef::Sourcehut { .. } => bail!("sourcehut inputs are not yet supported"),
             LockedRef::Path { .. } => bail!("path inputs cannot be bumped"),
             LockedRef::Indirect { .. } => bail!("indirect inputs cannot be bumped"),
@@ -177,7 +194,8 @@ impl RevisionResolver for HttpRevisionResolver {
 /// checkout (no `.git`) so its NAR matches nix's git-tree narHash.
 fn git_checkout(url: &str, ref_: Option<&str>) -> Result<(String, i64, tempfile::TempDir)> {
     let tmp = tempfile::tempdir().context("creating git temp dir")?;
-    let repo = git2::Repository::clone(url, tmp.path()).with_context(|| format!("cloning {url}"))?;
+    let repo =
+        git2::Repository::clone(url, tmp.path()).with_context(|| format!("cloning {url}"))?;
 
     let commit = match ref_ {
         Some(r) => repo
@@ -186,7 +204,11 @@ fn git_checkout(url: &str, ref_: Option<&str>) -> Result<(String, i64, tempfile:
             .with_context(|| format!("resolving git ref `{r}`"))?
             .peel_to_commit()
             .context("ref does not point at a commit")?,
-        None => repo.head().context("reading HEAD")?.peel_to_commit().context("HEAD commit")?,
+        None => repo
+            .head()
+            .context("reading HEAD")?
+            .peel_to_commit()
+            .context("HEAD commit")?,
     };
 
     let rev = commit.id().to_string();
@@ -194,7 +216,8 @@ fn git_checkout(url: &str, ref_: Option<&str>) -> Result<(String, i64, tempfile:
     let tree = commit.tree().context("commit tree")?;
     let mut checkout = git2::build::CheckoutBuilder::new();
     checkout.force();
-    repo.checkout_tree(tree.as_object(), Some(&mut checkout)).context("git checkout")?;
+    repo.checkout_tree(tree.as_object(), Some(&mut checkout))
+        .context("git checkout")?;
     std::fs::remove_dir_all(tmp.path().join(".git")).ok();
 
     Ok((rev, last_modified, tmp))

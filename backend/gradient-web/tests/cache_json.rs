@@ -7,13 +7,13 @@
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use serde_json::Value;
-use std::sync::Arc;
 use gradient_test_support::cache_fixture::{
     FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, private_cache_state, public_cache_state,
     public_cache_with_narinfo,
 };
 use gradient_web::create_router;
+use serde_json::Value;
+use std::sync::Arc;
 
 #[test]
 fn nix_cache_info_json_returns_object_with_pascal_case_keys() {

@@ -15,8 +15,8 @@ mod lookups;
 mod reconciliation;
 
 use crate::config::StateConfiguration;
-use gradient_types::*;
 use gradient_entity::*;
+use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
     IntoActiveModel, QueryFilter, Set,

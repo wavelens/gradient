@@ -148,7 +148,10 @@ pub fn load_store(dir: &Path) -> StoreFixture {
             allow_substitutes: drv.allow_substitutes(),
             pname: gradient_db::derive_pname(
                 drv.environment.get("pname").map(String::as_str),
-                drv.environment.get("name").map(String::as_str).unwrap_or(""),
+                drv.environment
+                    .get("name")
+                    .map(String::as_str)
+                    .unwrap_or(""),
             ),
             substituted: false,
         });

@@ -16,19 +16,19 @@
 //! `::gradient_core::…` which clashes with the local `core` crate name.
 
 use axum_test::TestServer;
-use gradient_storage::{EmailSender, NarStore};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use sea_orm::{DatabaseBackend, MockDatabase};
-use std::sync::Arc;
+use gradient_storage::{EmailSender, NarStore};
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::fixtures::user;
 use gradient_test_support::log_storage::NoopLogStorage;
 use gradient_test_support::prelude::test_cli;
 use gradient_test_support::web::{live_session, make_test_server_configured, make_token};
 use gradient_types::SessionId;
-use uuid::Uuid;
 use gradient_web::create_router;
+use sea_orm::{DatabaseBackend, MockDatabase};
+use std::sync::Arc;
+use uuid::Uuid;
 
 fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
     let mut cli = test_cli();
@@ -36,7 +36,9 @@ fn make_state_with_limits(max_request_size: usize) -> Arc<ServerState> {
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: std::sync::Arc::new(
             gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),

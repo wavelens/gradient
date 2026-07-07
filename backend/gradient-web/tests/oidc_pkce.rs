@@ -12,22 +12,22 @@ use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use gradient_storage::{EmailSender, NarStore};
-use gradient_types::cli::OidcArgs;
-use gradient_types::{RuntimeConfig};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
+use gradient_storage::{EmailSender, NarStore};
+use gradient_test_support::cli::test_cli;
+use gradient_test_support::fakes::email::InMemoryEmailSender;
+use gradient_test_support::log_storage::NoopLogStorage;
+use gradient_types::RuntimeConfig;
+use gradient_types::cli::OidcArgs;
+use gradient_web::create_router;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use gradient_test_support::cli::test_cli;
-use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::log_storage::NoopLogStorage;
 use url::Url;
 use uuid::Uuid;
-use gradient_web::create_router;
 
 #[derive(Deserialize)]
 struct CsrfClaims {
@@ -96,7 +96,9 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
     let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),
@@ -123,14 +125,15 @@ async fn authorize_redirect_carries_pkce_and_cookie_holds_verifier() {
 
     let location = res.header("location");
     let auth_url = Url::parse(location.to_str().unwrap()).unwrap();
-    let params: std::collections::HashMap<_, _> =
-        auth_url.query_pairs().into_owned().collect();
+    let params: std::collections::HashMap<_, _> = auth_url.query_pairs().into_owned().collect();
 
     assert_eq!(
         params.get("code_challenge_method").map(String::as_str),
         Some("S256")
     );
-    let challenge = params.get("code_challenge").expect("code_challenge present");
+    let challenge = params
+        .get("code_challenge")
+        .expect("code_challenge present");
 
     let cookie = res.header("set-cookie");
     let csrf = jwt_decode(cookie.to_str().unwrap());

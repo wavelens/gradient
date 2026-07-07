@@ -13,8 +13,8 @@
 //! outputs are cached.
 
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, FromQueryResult, QueryFilter,
-    Statement,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, FromQueryResult,
+    QueryFilter, Statement,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -90,16 +90,18 @@ pub async fn references_for_hash<C: ConnectionTrait>(
     db: &C,
     hash: &str,
 ) -> Result<Vec<String>, DbErr> {
-    Ok(ReferenceToken::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        "SELECT reference FROM cached_path_reference WHERE referrer = $1 ORDER BY position",
-        [hash.into()],
-    ))
-    .all(db)
-    .await?
-    .into_iter()
-    .map(|r| r.reference)
-    .collect())
+    Ok(
+        ReferenceToken::find_by_statement(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT reference FROM cached_path_reference WHERE referrer = $1 ORDER BY position",
+            [hash.into()],
+        ))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|r| r.reference)
+        .collect(),
+    )
 }
 
 /// BFS over `cached_path_reference` from `seed_hashes`; returns every reached
@@ -153,7 +155,10 @@ mod tests {
 
     #[test]
     fn reference_hash_strips_name() {
-        assert_eq!(parse_reference_hash("abc123-hello-2.10").as_deref(), Some("abc123"));
+        assert_eq!(
+            parse_reference_hash("abc123-hello-2.10").as_deref(),
+            Some("abc123")
+        );
         assert_eq!(parse_reference_hash("abc123").as_deref(), Some("abc123"));
         assert_eq!(parse_reference_hash(""), None);
     }

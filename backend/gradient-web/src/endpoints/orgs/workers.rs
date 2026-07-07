@@ -10,18 +10,18 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use base64::Engine as _;
 use chrono::NaiveDateTime;
+use gradient_core::ServerState;
 use gradient_entity::worker_registration::{
     self, ActiveModel as AWorkerRegistration, Entity as EWorkerRegistration,
     Model as MWorkerRegistration,
 };
 use gradient_entity::{base_worker, organization_base_worker};
-use gradient_types::{AOrganizationBaseWorker, EBaseWorker, EOrganizationBaseWorker};
+use gradient_scheduler::{Scheduler, WorkerInfo};
 use gradient_types::ids::*;
 use gradient_types::proto::GradientCapabilities;
+use gradient_types::{AOrganizationBaseWorker, EBaseWorker, EOrganizationBaseWorker};
 use gradient_types::{BaseResponse, MUser};
-use gradient_core::ServerState;
 use rand::RngExt as _;
-use gradient_scheduler::{Scheduler, WorkerInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
@@ -342,11 +342,15 @@ pub async fn get_org_workers(
     let registered_ids: std::collections::HashSet<String> =
         entries.iter().map(|e| e.worker_id.clone()).collect();
 
-    entries.extend(unshadowed_base_workers(base_workers, &registered_ids).into_iter().map(|bw| {
-        let live = live_for(&bw.worker_id);
-        let active = enabled_ids.contains(&bw.id);
-        base_worker_entry(bw, active, live)
-    }));
+    entries.extend(
+        unshadowed_base_workers(base_workers, &registered_ids)
+            .into_iter()
+            .map(|bw| {
+                let live = live_for(&bw.worker_id);
+                let active = enabled_ids.contains(&bw.id);
+                base_worker_entry(bw, active, live)
+            }),
+    );
 
     Ok(ok_json(entries))
 }
@@ -391,7 +395,9 @@ pub async fn get_org_worker_metrics(
         Caller::User(&user),
         api_key.as_ref(),
         organization,
-        OrgAccess::Member { reject_managed: false },
+        OrgAccess::Member {
+            reject_managed: false,
+        },
     )
     .await?;
 
@@ -487,7 +493,9 @@ pub async fn post_org_worker_test(
     .await?;
 
     let connected = scheduler.is_worker_connected(&worker_id).await;
-    let authorized_for_org = scheduler.worker_authorized_for_org(&worker_id, org.id).await;
+    let authorized_for_org = scheduler
+        .worker_authorized_for_org(&worker_id, org.id)
+        .await;
     let (ok, message) = worker_test_result(connected, authorized_for_org);
 
     Ok(ok_json(WorkerTestResponse {
@@ -522,7 +530,9 @@ pub async fn patch_org_worker(
             .await?
     {
         if patch_edits_base_worker_fields(&body) {
-            return Err(WebError::conflict("base workers are managed by server state"));
+            return Err(WebError::conflict(
+                "base workers are managed by server state",
+            ));
         }
 
         use gradient_entity::organization_base_worker::{Column as OBWC, Entity as OBW};
@@ -554,7 +564,9 @@ pub async fn patch_org_worker(
                     .exec(&state.web_db)
                     .await?;
                 let org_set = std::collections::HashSet::from([org.id]);
-                scheduler.abort_org_jobs_on_worker(&worker_id, &org_set).await;
+                scheduler
+                    .abort_org_jobs_on_worker(&worker_id, &org_set)
+                    .await;
             }
             None => {}
         }

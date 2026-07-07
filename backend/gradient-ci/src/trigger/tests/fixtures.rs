@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::{self, EvaluationStatus};
+use gradient_types::*;
 use uuid::Uuid;
 
 pub fn make_project() -> MProject {

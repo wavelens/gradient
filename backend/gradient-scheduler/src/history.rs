@@ -24,7 +24,11 @@ fn bucket_bounds(closure_size_bytes: i64) -> (i64, i64) {
     let bucket = closure_bucket(closure_size_bytes);
     let lo_bucket = (bucket - 1).max(0);
     let hi_bucket = bucket + 1;
-    let lo = if lo_bucket == 0 { 0 } else { (1i64 << lo_bucket) * 1_048_576 };
+    let lo = if lo_bucket == 0 {
+        0
+    } else {
+        (1i64 << lo_bucket) * 1_048_576
+    };
     let hi = ((1i64 << (hi_bucket + 1)) * 1_048_576) - 1;
     (lo, hi)
 }
@@ -169,7 +173,10 @@ mod tests {
 
     #[test]
     fn summarize_aggregates_disk_bytes() {
-        let rows = vec![metric(Some(100), Some(1000), false), metric(Some(200), Some(2000), false)];
+        let rows = vec![
+            metric(Some(100), Some(1000), false),
+            metric(Some(200), Some(2000), false),
+        ];
         let p = summarize(&rows);
         // Mean of (read + write) bytes per row: 10M + 40M = 50M.
         assert_eq!(p.avg_disk_bytes, 50_000_000);

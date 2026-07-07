@@ -107,7 +107,9 @@ async fn dispatch_queued_eval_enqueues_job() {
         // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
         // 3. bulk flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::evaluation_flake_input_override::Model>::new()])
+        .append_query_results([
+            Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
+        ])
         // 4. bulk projects → returns org_id
         .append_query_results([vec![make_project(project_id, org_id)]])
         .into_connection();
@@ -140,7 +142,9 @@ async fn dispatch_queued_eval_skips_already_enqueued() {
         // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
         // 3. bulk flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::evaluation_flake_input_override::Model>::new()])
+        .append_query_results([
+            Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
+        ])
         // 4. bulk projects
         .append_query_results([vec![make_project(project_id, org_id)]])
         // Second dispatch:
@@ -177,7 +181,9 @@ async fn dispatch_queued_eval_skips_missing_commit() {
         // 2. bulk commits → none found
         .append_query_results([Vec::<gradient_entity::commit::Model>::new()])
         // 3. bulk flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::evaluation_flake_input_override::Model>::new()])
+        .append_query_results([
+            Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
+        ])
         // 4. bulk projects (loaded up front; the eval is skipped per-row later)
         .append_query_results([Vec::<gradient_entity::project::Model>::new()])
         .into_connection();
@@ -207,7 +213,9 @@ async fn dispatch_queued_eval_without_project_is_skipped() {
         // 2. bulk commits
         .append_query_results([vec![make_commit(commit_id)]])
         // 3. bulk flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::evaluation_flake_input_override::Model>::new()])
+        .append_query_results([
+            Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
+        ])
         // No project query - no eval carries a project id
         .into_connection();
 
@@ -294,4 +302,3 @@ async fn dispatch_once_skips_trigger_within_interval() {
     // No evaluation rows means no job was enqueued
     assert_eq!(scheduler.pending_job_count().await, 0);
 }
-

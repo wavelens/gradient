@@ -229,7 +229,8 @@ mod tests {
             "branches": [],
             "actions": ["opened"],
         });
-        let parsed = TriggerConfig::parse_row(TriggerType::ReporterPullRequest, &legacy_db).unwrap();
+        let parsed =
+            TriggerConfig::parse_row(TriggerType::ReporterPullRequest, &legacy_db).unwrap();
         let TriggerConfig::ReporterPullRequest {
             require_approval, ..
         } = parsed

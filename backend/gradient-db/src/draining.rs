@@ -97,7 +97,10 @@ mod tests {
     #[tokio::test]
     async fn park_returns_rows_affected() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 4 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 4,
+            }])
             .into_connection();
 
         assert_eq!(park_active_evals(&db).await.unwrap(), 4);
@@ -112,7 +115,10 @@ mod tests {
                 waiting_eval(Some(WaitingReason::NoCache)),
             ]])
             // UPDATE the single Draining park back to Queued.
-            .append_exec_results([MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
             .into_connection();
 
         assert_eq!(unpark_draining_evals(&db).await.unwrap(), 1);

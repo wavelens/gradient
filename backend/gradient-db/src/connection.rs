@@ -204,8 +204,14 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
     // scheduler to re-dispatch (its orphaned attempt is closed by recovery);
     // queued/waiting evaluations are left for the dispatcher to re-offer.
     EDerivationBuild::update_many()
-        .col_expr(CDerivationBuild::Status, sea_orm::sea_query::Expr::value(BuildStatus::Queued))
-        .col_expr(CDerivationBuild::UpdatedAt, sea_orm::sea_query::Expr::value(now()))
+        .col_expr(
+            CDerivationBuild::Status,
+            sea_orm::sea_query::Expr::value(BuildStatus::Queued),
+        )
+        .col_expr(
+            CDerivationBuild::UpdatedAt,
+            sea_orm::sea_query::Expr::value(now()),
+        )
         .filter(CDerivationBuild::Status.eq(BuildStatus::Building))
         .exec(db)
         .await?;
@@ -470,7 +476,9 @@ mod pg_version_tests {
 
     #[test]
     fn rejects_postgres_below_18() {
-        let err = require_supported_pg_version(170_004).unwrap_err().to_string();
+        let err = require_supported_pg_version(170_004)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("PostgreSQL 18"), "{err}");
         assert!(err.contains("17.4"), "{err}");
     }

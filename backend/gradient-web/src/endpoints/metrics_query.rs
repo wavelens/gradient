@@ -17,9 +17,9 @@ use crate::helpers::ok_json;
 use crate::metrics_scope::MetricsScope;
 use axum::extract::{Query, State};
 use axum::{Extension, Json};
+use gradient_core::ServerState;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, Value};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -36,16 +36,66 @@ pub struct MetricMeta {
 /// The advertised metric surface. Keys present here are accepted by `query`;
 /// keys whose aggregator has not landed yet simply return no points.
 const CATALOG: &[MetricMeta] = &[
-    MetricMeta { key: "builds.created", kind: "counter", unit: "builds", dimensions: &["org"] },
-    MetricMeta { key: "builds.dispatched", kind: "counter", unit: "builds", dimensions: &["org"] },
-    MetricMeta { key: "builds.completed", kind: "counter", unit: "builds", dimensions: &["org"] },
-    MetricMeta { key: "builds.substituted", kind: "counter", unit: "builds", dimensions: &["org"] },
-    MetricMeta { key: "builds.failed", kind: "counter", unit: "builds", dimensions: &["org"] },
-    MetricMeta { key: "evals.completed", kind: "counter", unit: "evals", dimensions: &["org"] },
-    MetricMeta { key: "evals.failed", kind: "counter", unit: "evals", dimensions: &["org"] },
-    MetricMeta { key: "builds.duration_ms", kind: "histogram", unit: "ms", dimensions: &["org"] },
-    MetricMeta { key: "dispatch.wait_ms", kind: "histogram", unit: "ms", dimensions: &["org"] },
-    MetricMeta { key: "deps.wait_ms", kind: "histogram", unit: "ms", dimensions: &["org"] },
+    MetricMeta {
+        key: "builds.created",
+        kind: "counter",
+        unit: "builds",
+        dimensions: &["org"],
+    },
+    MetricMeta {
+        key: "builds.dispatched",
+        kind: "counter",
+        unit: "builds",
+        dimensions: &["org"],
+    },
+    MetricMeta {
+        key: "builds.completed",
+        kind: "counter",
+        unit: "builds",
+        dimensions: &["org"],
+    },
+    MetricMeta {
+        key: "builds.substituted",
+        kind: "counter",
+        unit: "builds",
+        dimensions: &["org"],
+    },
+    MetricMeta {
+        key: "builds.failed",
+        kind: "counter",
+        unit: "builds",
+        dimensions: &["org"],
+    },
+    MetricMeta {
+        key: "evals.completed",
+        kind: "counter",
+        unit: "evals",
+        dimensions: &["org"],
+    },
+    MetricMeta {
+        key: "evals.failed",
+        kind: "counter",
+        unit: "evals",
+        dimensions: &["org"],
+    },
+    MetricMeta {
+        key: "builds.duration_ms",
+        kind: "histogram",
+        unit: "ms",
+        dimensions: &["org"],
+    },
+    MetricMeta {
+        key: "dispatch.wait_ms",
+        kind: "histogram",
+        unit: "ms",
+        dimensions: &["org"],
+    },
+    MetricMeta {
+        key: "deps.wait_ms",
+        kind: "histogram",
+        unit: "ms",
+        dimensions: &["org"],
+    },
 ];
 
 pub async fn get_metrics_catalog() -> WebResult<Json<BaseResponse<Vec<&'static MetricMeta>>>> {
@@ -110,8 +160,10 @@ pub async fn get_metrics_query(
          FROM metric_rollup WHERE metric = $1 AND granularity = $2",
     );
 
-    let mut values: Vec<Value> =
-        vec![Value::from(params.metric.clone()), Value::from(i16::from(gran))];
+    let mut values: Vec<Value> = vec![
+        Value::from(params.metric.clone()),
+        Value::from(i16::from(gran)),
+    ];
     if let Some(orgs) = &org_filter {
         // DB-sourced UUID strings, safe to inline as a quoted IN list.
         let list = orgs

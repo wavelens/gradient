@@ -5,9 +5,7 @@
  */
 
 //! Tests for `gradient_exec::path_utils` - pure string manipulation.
-use gradient_exec::path_utils::{
-    nix_store_path, strip_nix_store_prefix, strip_store_prefix,
-};
+use gradient_exec::path_utils::{nix_store_path, strip_nix_store_prefix, strip_store_prefix};
 
 // ── nix_store_path ───────────────────────────────────────────────────────────
 

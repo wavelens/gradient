@@ -96,7 +96,9 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     if let Some(evaluation) = scope.evaluation() {
         match crate::promotion::mark_edges_complete_for_eval(db, evaluation).await {
             Ok(n) => report.edges_marked = n,
-            Err(e) => error!(error = %e, %evaluation, "reconcile: mark_edges_complete_for_eval failed"),
+            Err(e) => {
+                error!(error = %e, %evaluation, "reconcile: mark_edges_complete_for_eval failed")
+            }
         }
     }
 
@@ -107,7 +109,9 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         // and trigger a reactive heal.
         match crate::promotion::requeue_failed_closure_for_eval(db, evaluation).await {
             Ok(n) => report.thawed = n,
-            Err(e) => error!(error = %e, %evaluation, "reconcile: requeue_failed_closure_for_eval failed"),
+            Err(e) => {
+                error!(error = %e, %evaluation, "reconcile: requeue_failed_closure_for_eval failed")
+            }
         }
     }
 
@@ -135,7 +139,9 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
                 report.cached_reconciled = changes.len();
                 emit_transition_effects(ctx, &changes).await;
             }
-            Err(e) => error!(error = %e, %evaluation, "reconcile: reconcile_cached_anchors_for_eval failed"),
+            Err(e) => {
+                error!(error = %e, %evaluation, "reconcile: reconcile_cached_anchors_for_eval failed")
+            }
         }
     }
 

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::EmailConfig;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
+use gradient_types::EmailConfig;
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};

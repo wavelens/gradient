@@ -4,12 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use chrono::Timelike;
 use crate::ingest::{IngestInput, SignTargets, ingest_metadata_only};
+use chrono::Timelike;
+use gradient_core::ServerState;
 use gradient_sources::CacheSigner;
 use gradient_types::ids::{CacheId, CacheMetricId, CachedPathId, OrganizationId};
 use gradient_types::*;
-use gradient_core::ServerState;
 use gradient_util::nix_hash::normalize_nar_hash;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
@@ -141,7 +141,10 @@ pub(super) async fn mark_nar_stored(
         );
     }
 
-    debug!(store_path, "cached_path metadata recorded after NarUploaded");
+    debug!(
+        store_path,
+        "cached_path metadata recorded after NarUploaded"
+    );
 
     // Sign this specific path in place so its narinfo is servable immediately,
     // rather than waking a whole-table sweep. Placeholder rows only exist when a

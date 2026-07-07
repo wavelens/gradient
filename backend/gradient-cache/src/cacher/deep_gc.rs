@@ -9,10 +9,10 @@
 //! background task and writes progress + final state to an `admin_task` row.
 
 use anyhow::{Context, Result};
-use gradient_entity::ids::AdminTaskId;
-use gradient_db::admin_tasks;
-use gradient_types::*;
 use gradient_core::ServerState;
+use gradient_db::admin_tasks;
+use gradient_entity::ids::AdminTaskId;
+use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -194,9 +194,9 @@ mod tests {
     use crate::cacher::test_support::test_server_state_with_log;
     use gradient_entity::ids::{BuildRequestBlobId, OrganizationId};
     use gradient_storage::{FileLogStorage, LogStorage, NarStore};
+    use gradient_test_support::log_storage::NoopLogStorage;
     use sea_orm::{DatabaseBackend, MockDatabase};
     use std::sync::Arc;
-    use gradient_test_support::log_storage::NoopLogStorage;
 
     fn make_state(
         nar: NarStore,
@@ -219,7 +219,8 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results::<gradient_entity::build_request_blob::Model, _, _>([Vec::<
                 gradient_entity::build_request_blob::Model,
-            >::new()])
+            >::new(
+            )])
             .into_connection();
         let state = make_state(nar, Arc::new(NoopLogStorage), db);
 
@@ -275,9 +276,10 @@ mod tests {
         log.append(attempt_id, "orphan").await.unwrap();
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results::<gradient_entity::build_attempt::Model, _, _>(
-                [Vec::<gradient_entity::build_attempt::Model>::new()],
-            )
+            .append_query_results::<gradient_entity::build_attempt::Model, _, _>([Vec::<
+                gradient_entity::build_attempt::Model,
+            >::new(
+            )])
             .into_connection();
         let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
         let state = make_state(nar, log, db);

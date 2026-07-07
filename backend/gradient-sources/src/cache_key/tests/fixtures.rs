@@ -5,8 +5,8 @@
  */
 
 use super::super::{generate_signing_key, sign_narinfo_fingerprint};
-use gradient_types::MCache;
 use chrono::NaiveDateTime;
+use gradient_types::MCache;
 use std::io::Write;
 
 pub fn temp_secret_file() -> (tempfile::NamedTempFile, String) {

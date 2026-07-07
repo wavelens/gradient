@@ -8,9 +8,9 @@ use anyhow::{Context, Result, bail};
 use axum::extract::State;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
+use gradient_core::ServerState;
 use gradient_types::input::load_secret;
 use gradient_types::*;
-use gradient_core::ServerState;
 use jsonwebtoken::{
     Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
     jwk::JwkSet,
@@ -614,7 +614,10 @@ mod tests {
     fn claimable_only_when_passwordless_and_unbound() {
         assert!(super::is_claimable(&None, &None));
         assert!(!super::is_claimable(&Some("$argon2id$...".into()), &None));
-        assert!(!super::is_claimable(&None, &Some("existing-subject".into())));
+        assert!(!super::is_claimable(
+            &None,
+            &Some("existing-subject".into())
+        ));
         assert!(!super::is_claimable(
             &Some("$argon2id$...".into()),
             &Some("existing-subject".into())

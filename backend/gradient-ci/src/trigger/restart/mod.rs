@@ -10,9 +10,9 @@ mod previous_lookup;
 use super::TriggerError;
 use super::flake_snapshot::snapshot_flake_input_overrides;
 use super::new_evaluation::ensure_no_active_evaluation;
-use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
@@ -90,12 +90,9 @@ async fn restart_initial_status<C: ConnectionTrait>(
         .await?;
 
     let all_cached = anchors.len() == derivation_ids.len()
-        && anchors.iter().all(|a| {
-            matches!(
-                a.status,
-                BuildStatus::Completed | BuildStatus::Substituted
-            )
-        });
+        && anchors
+            .iter()
+            .all(|a| matches!(a.status, BuildStatus::Completed | BuildStatus::Substituted));
 
     Ok(if all_cached {
         EvaluationStatus::Completed

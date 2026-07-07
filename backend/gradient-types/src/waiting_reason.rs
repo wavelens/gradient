@@ -80,7 +80,9 @@ pub enum WaitingReason {
     /// `closure_complete` gate with no in-flight build to drive promotion. The
     /// reconciler attempts a self-heal (`reconcile_closure_complete` +
     /// re-promote) each pass; `pending_anchors` is the blocked count.
-    GraphStuck { pending_anchors: u32 },
+    GraphStuck {
+        pending_anchors: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,7 +217,10 @@ mod tests {
 
     #[test]
     fn eval_workers_round_trip_carries_capability() {
-        for (cap, expected) in [(EvalCapability::Fetch, "fetch"), (EvalCapability::Eval, "eval")] {
+        for (cap, expected) in [
+            (EvalCapability::Fetch, "fetch"),
+            (EvalCapability::Eval, "eval"),
+        ] {
             let r = WaitingReason::eval_workers(cap, 2);
             let v = r.to_json();
             assert_eq!(v["kind"], "eval_workers");

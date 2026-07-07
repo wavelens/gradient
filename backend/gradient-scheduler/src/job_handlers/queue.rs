@@ -34,7 +34,10 @@ impl Scheduler {
         // A re-queued build (after a failed/rejected/orphaned dispatch) must be
         // offered again so workers score it a second time; clear stale
         // sent-candidate flags. No-op on a first enqueue.
-        self.worker_pool.write().await.remove_sent_candidate(&job_id);
+        self.worker_pool
+            .write()
+            .await
+            .remove_sent_candidate(&job_id);
         self.job_notify.send_modify(|g| *g = g.wrapping_add(1));
         candidate
     }

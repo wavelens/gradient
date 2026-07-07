@@ -22,7 +22,11 @@ pub type ScimResult<T> = Result<T, ScimError>;
 
 impl ScimError {
     pub fn new(status: StatusCode, detail: impl Into<String>) -> Self {
-        Self { status, scim_type: None, detail: detail.into() }
+        Self {
+            status,
+            scim_type: None,
+            detail: detail.into(),
+        }
     }
     pub fn unauthorized(detail: impl Into<String>) -> Self {
         Self::new(StatusCode::UNAUTHORIZED, detail)
@@ -31,10 +35,18 @@ impl ScimError {
         Self::new(StatusCode::NOT_FOUND, detail)
     }
     pub fn bad_request(scim_type: &'static str, detail: impl Into<String>) -> Self {
-        Self { status: StatusCode::BAD_REQUEST, scim_type: Some(scim_type), detail: detail.into() }
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            scim_type: Some(scim_type),
+            detail: detail.into(),
+        }
     }
     pub fn conflict(detail: impl Into<String>) -> Self {
-        Self { status: StatusCode::CONFLICT, scim_type: Some("uniqueness"), detail: detail.into() }
+        Self {
+            status: StatusCode::CONFLICT,
+            scim_type: Some("uniqueness"),
+            detail: detail.into(),
+        }
     }
     pub fn internal(detail: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, detail)

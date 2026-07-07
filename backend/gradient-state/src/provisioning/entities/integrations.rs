@@ -7,13 +7,13 @@
 use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{lookup_id, read_credential};
-use gradient_ci::actions::encrypt_secret_with_file;
-use gradient_ci::IntegrationKind;
-use gradient_types::ForgeType;
 use crate::config::*;
-use gradient_types::*;
 use anyhow::Result;
+use gradient_ci::IntegrationKind;
+use gradient_ci::actions::encrypt_secret_with_file;
 use gradient_entity::*;
+use gradient_types::ForgeType;
+use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::HashMap;
 

@@ -48,17 +48,26 @@ fn build_counts() -> Vec<BuildCount> {
         BuildCount {
             name: "builds.completed",
             time_col: "updated_at",
-            filter: format!("b.status = {}", crate::status_sql::build(BuildStatus::Completed)),
+            filter: format!(
+                "b.status = {}",
+                crate::status_sql::build(BuildStatus::Completed)
+            ),
         },
         BuildCount {
             name: "builds.substituted",
             time_col: "updated_at",
-            filter: format!("b.status = {}", crate::status_sql::build(BuildStatus::Substituted)),
+            filter: format!(
+                "b.status = {}",
+                crate::status_sql::build(BuildStatus::Substituted)
+            ),
         },
         BuildCount {
             name: "builds.failed",
             time_col: "updated_at",
-            filter: format!("b.status IN ({})", crate::status_sql::build_in(&BuildStatus::FAILURE)),
+            filter: format!(
+                "b.status IN ({})",
+                crate::status_sql::build_in(&BuildStatus::FAILURE)
+            ),
         },
     ]
 }
@@ -99,7 +108,10 @@ fn eval_counts() -> Vec<EvalCount> {
     vec![
         EvalCount {
             name: "evals.completed",
-            filter: format!("e.status = {}", crate::status_sql::eval(EvaluationStatus::Completed)),
+            filter: format!(
+                "e.status = {}",
+                crate::status_sql::eval(EvaluationStatus::Completed)
+            ),
         },
         EvalCount {
             name: "evals.failed",
@@ -113,7 +125,11 @@ fn eval_counts() -> Vec<EvalCount> {
 
 /// (target granularity, source granularity, trailing window).
 const CASCADES: &[(RollupGranularity, RollupGranularity, &str)] = &[
-    (RollupGranularity::Hour, RollupGranularity::Minute, "3 hours"),
+    (
+        RollupGranularity::Hour,
+        RollupGranularity::Minute,
+        "3 hours",
+    ),
     (RollupGranularity::Day, RollupGranularity::Hour, "2 days"),
     (RollupGranularity::Week, RollupGranularity::Day, "2 weeks"),
 ];
@@ -123,7 +139,8 @@ const MINUTE_WINDOW: &str = "15 minutes";
 /// Cache traffic per minute per cache (scope `{cache}`): `count` = requests,
 /// `sum` = bytes served. Source is the already-minute-bucketed `cache_metric`.
 fn cache_traffic_sql() -> String {
-    format!("INSERT INTO metric_rollup \
+    format!(
+        "INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
     SELECT uuidv7(), 'cache.bytes_sent', {minute}, cm.bucket_time, \
            jsonb_build_object('cache', cm.cache::text), hashtextextended(cm.cache::text, 0), \
@@ -142,7 +159,8 @@ fn cache_traffic_sql() -> String {
 /// Cache storage added per minute per cache (scope `{cache}`): `count` =
 /// packages added, `sum` = compressed bytes added.
 fn cache_storage_sql() -> String {
-    format!("INSERT INTO metric_rollup \
+    format!(
+        "INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
     SELECT uuidv7(), 'cache.bytes_added', {minute}, date_trunc('minute', cps.created_at), \
            jsonb_build_object('cache', cps.cache::text), hashtextextended(cps.cache::text, 0), \
@@ -159,7 +177,8 @@ fn cache_storage_sql() -> String {
 /// Upstream narinfo latency per minute per URL (scope `{upstream_url}`):
 /// `count` = completed requests, `sum` = summed latency ms (avg = sum/count).
 fn upstream_latency_sql() -> String {
-    format!("INSERT INTO metric_rollup \
+    format!(
+        "INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
     SELECT uuidv7(), 'upstream.latency_ms', {minute}, um.bucket_time, \
            jsonb_build_object('upstream_url', um.upstream_url), hashtextextended(um.upstream_url, 0), \
@@ -175,7 +194,8 @@ fn upstream_latency_sql() -> String {
 
 /// Upstream narinfo hits per minute per URL (scope `{upstream_url}`).
 fn upstream_hits_sql() -> String {
-    format!("INSERT INTO metric_rollup \
+    format!(
+        "INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
     SELECT uuidv7(), 'upstream.narinfo_hits', {minute}, um.bucket_time, \
            jsonb_build_object('upstream_url', um.upstream_url), hashtextextended(um.upstream_url, 0), \
@@ -191,7 +211,8 @@ fn upstream_hits_sql() -> String {
 
 /// Upstream narinfo misses per minute per URL (scope `{upstream_url}`).
 fn upstream_misses_sql() -> String {
-    format!("INSERT INTO metric_rollup \
+    format!(
+        "INSERT INTO metric_rollup \
     (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
     SELECT uuidv7(), 'upstream.narinfo_misses', {minute}, um.bucket_time, \
            jsonb_build_object('upstream_url', um.upstream_url), hashtextextended(um.upstream_url, 0), \
@@ -442,8 +463,14 @@ mod tests {
             .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
             .chain(std::iter::once(build_duration_attempt_sql()));
         for sql in sqls {
-            assert!(sql.contains("JOIN project pr"), "missing project join: {sql}");
-            assert!(!sql.contains("d.organization"), "stale derivation org: {sql}");
+            assert!(
+                sql.contains("JOIN project pr"),
+                "missing project join: {sql}"
+            );
+            assert!(
+                !sql.contains("d.organization"),
+                "stale derivation org: {sql}"
+            );
         }
     }
 }

@@ -8,14 +8,14 @@ use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{lookup_id, read_credential};
 use crate::config::*;
-use gradient_types::consts::{
-    BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
-};
-use gradient_types::*;
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use gradient_entity::*;
+use gradient_types::consts::{
+    BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
+};
+use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use std::collections::{HashMap, HashSet};
 
@@ -310,8 +310,8 @@ impl<'a> StateApplicator<'a> {
 
             let mut perms = Vec::with_capacity(entry.permissions.len());
             for wire in &entry.permissions {
-                let p =
-                    gradient_db::permissions::CachePermission::from_wire_name(wire).ok_or_else(|| {
+                let p = gradient_db::permissions::CachePermission::from_wire_name(wire)
+                    .ok_or_else(|| {
                         format!(
                             "Cache '{}' role '{}' references unknown permission '{}'",
                             cache_name, entry.name, wire

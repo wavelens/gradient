@@ -75,8 +75,9 @@ pub async fn source_nar_from_bytes(nar_bytes: Vec<u8>) -> Result<SourceNar> {
     let store_hash = store_path_obj.hash().to_string();
     let store_path = gradient_types::StorePath::from_parts(store_hash.clone(), "source").full();
 
-    let compressed_bytes = zstd::encode_all(std::io::Cursor::new(&nar_bytes), SOURCE_NAR_ZSTD_LEVEL)
-        .context("failed to zstd-compress source NAR")?;
+    let compressed_bytes =
+        zstd::encode_all(std::io::Cursor::new(&nar_bytes), SOURCE_NAR_ZSTD_LEVEL)
+            .context("failed to zstd-compress source NAR")?;
     let file_size = compressed_bytes.len() as u64;
     let file_hash_sri = Sha256::digest(&compressed_bytes).as_sri().to_string();
 

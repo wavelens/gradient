@@ -44,25 +44,46 @@ mod tests {
 
     #[test]
     fn non_substitutable_is_real_arch() {
-        assert_eq!(decide_dispatch_mode(false, 0, 2, false), BuildDispatchMode::RealArch);
-        assert_eq!(decide_dispatch_mode(false, 5, 2, true), BuildDispatchMode::RealArch);
+        assert_eq!(
+            decide_dispatch_mode(false, 0, 2, false),
+            BuildDispatchMode::RealArch
+        );
+        assert_eq!(
+            decide_dispatch_mode(false, 5, 2, true),
+            BuildDispatchMode::RealArch
+        );
     }
 
     #[test]
     fn substitutable_under_threshold_is_builtin() {
-        assert_eq!(decide_dispatch_mode(true, 0, 2, false), BuildDispatchMode::SubstituteBuiltin);
-        assert_eq!(decide_dispatch_mode(true, 1, 2, false), BuildDispatchMode::SubstituteBuiltin);
+        assert_eq!(
+            decide_dispatch_mode(true, 0, 2, false),
+            BuildDispatchMode::SubstituteBuiltin
+        );
+        assert_eq!(
+            decide_dispatch_mode(true, 1, 2, false),
+            BuildDispatchMode::SubstituteBuiltin
+        );
     }
 
     #[test]
     fn escalates_only_when_arch_worker_present() {
-        assert_eq!(decide_dispatch_mode(true, 2, 2, true), BuildDispatchMode::RealArch);
+        assert_eq!(
+            decide_dispatch_mode(true, 2, 2, true),
+            BuildDispatchMode::RealArch
+        );
     }
 
     #[test]
     fn stalls_when_budget_spent_and_no_arch_worker() {
-        assert_eq!(decide_dispatch_mode(true, 2, 2, false), BuildDispatchMode::SubstituteStalled);
-        assert_eq!(decide_dispatch_mode(true, 9, 2, false), BuildDispatchMode::SubstituteStalled);
+        assert_eq!(
+            decide_dispatch_mode(true, 2, 2, false),
+            BuildDispatchMode::SubstituteStalled
+        );
+        assert_eq!(
+            decide_dispatch_mode(true, 9, 2, false),
+            BuildDispatchMode::SubstituteStalled
+        );
     }
 
     #[test]

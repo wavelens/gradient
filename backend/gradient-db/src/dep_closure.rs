@@ -47,7 +47,10 @@ pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
     let root_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
 
     let roots = fetch_in_chunks(&root_ids, |chunk| async move {
-        EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
+        EDerivation::find()
+            .filter(CDerivation::Id.is_in(chunk))
+            .all(db)
+            .await
     })
     .await?;
 
@@ -241,7 +244,10 @@ pub async fn load_entry_point_dep_counts<C: ConnectionTrait>(
     let mut out: HashMap<EntryPointId, HashMap<BuildStatus, i64>> = HashMap::new();
     for r in rows {
         if let Ok(status) = BuildStatus::try_from(r.status) {
-            *out.entry(r.entry_point).or_default().entry(status).or_insert(0) += r.count;
+            *out.entry(r.entry_point)
+                .or_default()
+                .entry(status)
+                .or_insert(0) += r.count;
         }
     }
 
@@ -254,7 +260,11 @@ mod tests {
     use gradient_entity::ids::EntryPointDepCountId;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    fn count_row(entry_point: EntryPointId, status: BuildStatus, count: i64) -> MEntryPointDepCount {
+    fn count_row(
+        entry_point: EntryPointId,
+        status: BuildStatus,
+        count: i64,
+    ) -> MEntryPointDepCount {
         gradient_entity::entry_point_dep_count::Model {
             id: EntryPointDepCountId::now_v7(),
             entry_point,

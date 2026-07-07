@@ -13,9 +13,9 @@ use sea_orm::EntityTrait;
 use sea_orm::{ColumnTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, info, warn};
 
+use gradient_core::ServerState;
 use gradient_types::proto::{CandidateScore, JobKind};
 use gradient_types::*;
-use gradient_core::ServerState;
 
 use crate::Scheduler;
 use crate::dispatch;
@@ -88,7 +88,10 @@ impl Scheduler {
     }
 
     pub async fn job_rejected(&self, worker_id: &str, job_id: &str) {
-        self.worker_pool.write().await.release_job(worker_id, job_id);
+        self.worker_pool
+            .write()
+            .await
+            .release_job(worker_id, job_id);
         self.job_tracker.write().await.release_to_pending(job_id);
         // Clear the sent-candidate flag so the job shows up in the next delta push.
         self.worker_pool.write().await.remove_sent_candidate(job_id);
@@ -139,14 +142,17 @@ impl Scheduler {
                 .await
                 .assign_job(worker_id, &a.job_id);
             if let Some(record) = a.dispatch_record.take() {
-                let _ = self.state.board_events.send(crate::BoardEvent::JobDispatched {
-                    organization: record.organization.into(),
-                    worker_id: worker_id.to_owned(),
-                    kind: i16::from(record.kind),
-                    score: record.score,
-                    build_id: record.derivation_build.map(Into::into),
-                    evaluation_id: record.evaluation_id.into(),
-                });
+                let _ = self
+                    .state
+                    .board_events
+                    .send(crate::BoardEvent::JobDispatched {
+                        organization: record.organization.into(),
+                        worker_id: worker_id.to_owned(),
+                        kind: i16::from(record.kind),
+                        score: record.score,
+                        build_id: record.derivation_build.map(Into::into),
+                        evaluation_id: record.evaluation_id.into(),
+                    });
                 let state = Arc::clone(&self.state);
                 let worker = worker_id.to_owned();
                 self.state.shutdown.spawn(async move {
@@ -272,12 +278,9 @@ async fn find_or_create_build_job(
     .into_active_model();
     match gradient_entity::build_job::Entity::insert(row)
         .on_conflict(
-            sea_orm::sea_query::OnConflict::columns([
-                CBuildJob::Evaluation,
-                CBuildJob::Derivation,
-            ])
-            .do_nothing()
-            .to_owned(),
+            sea_orm::sea_query::OnConflict::columns([CBuildJob::Evaluation, CBuildJob::Derivation])
+                .do_nothing()
+                .to_owned(),
         )
         .exec_without_returning(&state.worker_db)
         .await

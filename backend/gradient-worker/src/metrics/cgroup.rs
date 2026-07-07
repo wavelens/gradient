@@ -32,9 +32,15 @@ pub fn parse_io_stat(s: &str) -> (u64, u64) {
         let mut r = rb;
         let mut w = wb;
         for token in line.split_ascii_whitespace().skip(1) {
-            if let Some(v) = token.strip_prefix("rbytes=").and_then(|n| n.parse::<u64>().ok()) {
+            if let Some(v) = token
+                .strip_prefix("rbytes=")
+                .and_then(|n| n.parse::<u64>().ok())
+            {
                 r += v;
-            } else if let Some(v) = token.strip_prefix("wbytes=").and_then(|n| n.parse::<u64>().ok()) {
+            } else if let Some(v) = token
+                .strip_prefix("wbytes=")
+                .and_then(|n| n.parse::<u64>().ok())
+            {
                 w += v;
             }
         }
@@ -64,7 +70,9 @@ pub fn read_build_cgroup(dir: &std::path::Path) -> Option<BuildMetricsRaw> {
         cpu_usage_usec: read("cpu.stat").and_then(|s| parse_cpu_usage_usec(&s)),
         disk_read_bytes: io.0,
         disk_write_bytes: io.1,
-        oom_killed: read("memory.events").map(|s| parse_oom_kill(&s)).unwrap_or(false),
+        oom_killed: read("memory.events")
+            .map(|s| parse_oom_kill(&s))
+            .unwrap_or(false),
     })
 }
 
@@ -105,7 +113,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path();
         std::fs::write(p.join("memory.peak"), "4194304\n").unwrap();
-        std::fs::write(p.join("cpu.stat"), "usage_usec 1234567\nuser_usec 1000000\n").unwrap();
+        std::fs::write(
+            p.join("cpu.stat"),
+            "usage_usec 1234567\nuser_usec 1000000\n",
+        )
+        .unwrap();
         std::fs::write(p.join("io.stat"), "8:0 rbytes=1000 wbytes=2000\n").unwrap();
         std::fs::write(p.join("memory.events"), "oom_kill 0\n").unwrap();
 

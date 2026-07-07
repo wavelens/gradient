@@ -90,12 +90,12 @@ pub(crate) fn cron_due(
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_entity::project_trigger as ept;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger, trigger::maybe_trigger_input_update};
+use gradient_core::ServerState;
+use gradient_entity::project_trigger as ept;
 use gradient_sources::{check_project_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, QueryFilter};
 use tracing::{debug, error, info, warn};
 
@@ -144,19 +144,17 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         .collect();
 
     let db = &state.worker_db;
-    let projects: std::collections::HashMap<_, _> = gradient_db::fetch_in_chunks(
-        &project_ids,
-        |chunk| async move {
+    let projects: std::collections::HashMap<_, _> =
+        gradient_db::fetch_in_chunks(&project_ids, |chunk| async move {
             EProject::find()
                 .filter(CProject::Id.is_in(chunk))
                 .all(db)
                 .await
-        },
-    )
-    .await?
-    .into_iter()
-    .map(|p| (p.id, p))
-    .collect();
+        })
+        .await?
+        .into_iter()
+        .map(|p| (p.id, p))
+        .collect();
 
     for trig in triggers {
         let Some(project) = projects.get(&trig.project) else {
@@ -193,9 +191,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         // Resolve current HEAD. Polling reports whether it advanced; time
         // triggers fire on whatever HEAD currently is.
         let (has_update, commit_hash) =
-            match check_project_updates(&state.db(), project, branch_for_check.as_deref())
-                .await
-            {
+            match check_project_updates(&state.db(), project, branch_for_check.as_deref()).await {
                 Ok(v) => v,
                 Err(e) => {
                     warn!(error = %e, project = %project.name, "trigger commit resolution failed");

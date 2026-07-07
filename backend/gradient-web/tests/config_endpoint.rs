@@ -7,10 +7,10 @@
 //! `GET /api/v1/config` exposes the `create_org` / `create_cache` permission
 //! knobs so the frontend can hide the create buttons (issue #470).
 
+use gradient_test_support::web::{make_test_server, make_test_server_configured};
 use gradient_types::CreatePermission;
 use sea_orm::{DatabaseBackend, MockDatabase};
 use serde_json::Value;
-use gradient_test_support::web::{make_test_server, make_test_server_configured};
 
 fn run<F: std::future::Future>(f: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()

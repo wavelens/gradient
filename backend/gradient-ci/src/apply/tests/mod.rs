@@ -7,13 +7,13 @@
 mod fixtures;
 
 use super::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_if_storage_full};
-use gradient_types::triggers::TriggerType;
-use gradient_types::*;
 use fixtures::{
     input, make_commit, make_eval, make_project_with_concurrency, make_project_with_last_eval,
     with_eval_worker, with_storage_not_full, with_writable_cache,
 };
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_types::triggers::TriggerType;
+use gradient_types::*;
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
 /// The storage gate only acts on `Queued` evaluations; a row already
@@ -91,7 +91,12 @@ async fn time_trigger_bypasses_same_commit_check() {
         .append_query_results([vec![make_commit(new_commit_id, same_hash.clone())]])
         // evaluation insert
         .append_query_results([vec![{
-            let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+            let mut m = make_eval(
+                new_eval_id,
+                project.id,
+                new_commit_id,
+                EvaluationStatus::Queued,
+            );
             m.trigger = Some(trig);
             m
         }]])
@@ -204,7 +209,12 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         // evaluation insert - the new eval carries concurrent=true
         .append_query_results([vec![{
-            let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+            let mut m = make_eval(
+                new_eval_id,
+                project.id,
+                new_commit_id,
+                EvaluationStatus::Queued,
+            );
             m.trigger = Some(trig);
             m.concurrent = true;
             m
@@ -388,7 +398,12 @@ async fn hard_abort_populates_aborted_fields() {
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         // trigger_evaluation: eval insert
         .append_query_results([vec![{
-            let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+            let mut m = make_eval(
+                new_eval_id,
+                project.id,
+                new_commit_id,
+                EvaluationStatus::Queued,
+            );
             m.trigger = Some(trig);
             m
         }]])
@@ -438,7 +453,12 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
     let new_hash = vec![1u8; 20];
 
     let parked_eval = {
-        let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Waiting);
+        let mut m = make_eval(
+            new_eval_id,
+            project.id,
+            new_commit_id,
+            EvaluationStatus::Waiting,
+        );
         m.trigger = Some(trig);
         m.waiting_reason = Some(WaitingReason::approval(42, "external-contrib").to_json());
         m
@@ -449,7 +469,12 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()])
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         .append_query_results([vec![{
-            let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+            let mut m = make_eval(
+                new_eval_id,
+                project.id,
+                new_commit_id,
+                EvaluationStatus::Queued,
+            );
             m.trigger = Some(trig);
             m
         }]])
@@ -521,7 +546,12 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
     let new_hash = vec![1u8; 20];
 
     let parked_eval = {
-        let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Waiting);
+        let mut m = make_eval(
+            new_eval_id,
+            project.id,
+            new_commit_id,
+            EvaluationStatus::Waiting,
+        );
         m.trigger = Some(trig);
         m.waiting_reason = Some(WaitingReason::NoCache.to_json());
         m
@@ -536,7 +566,12 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         // trigger_evaluation: eval insert (initially Queued)
         .append_query_results([vec![{
-            let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+            let mut m = make_eval(
+                new_eval_id,
+                project.id,
+                new_commit_id,
+                EvaluationStatus::Queued,
+            );
             m.trigger = Some(trig);
             m
         }]])
@@ -594,7 +629,12 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
     let new_hash = vec![1u8; 20];
 
     let parked_eval = {
-        let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Waiting);
+        let mut m = make_eval(
+            new_eval_id,
+            project.id,
+            new_commit_id,
+            EvaluationStatus::Waiting,
+        );
         m.trigger = Some(trig);
         m.waiting_reason = Some(WaitingReason::workers(Vec::new(), 0, Vec::new()).to_json());
         m
@@ -609,7 +649,12 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
         .append_query_results([vec![make_commit(new_commit_id, new_hash.clone())]])
         // trigger_evaluation: eval insert (initially Queued)
         .append_query_results([vec![{
-            let mut m = make_eval(new_eval_id, project.id, new_commit_id, EvaluationStatus::Queued);
+            let mut m = make_eval(
+                new_eval_id,
+                project.id,
+                new_commit_id,
+                EvaluationStatus::Queued,
+            );
             m.trigger = Some(trig);
             m
         }]])

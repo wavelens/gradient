@@ -9,8 +9,8 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use gradient_types::*;
 use gradient_core::ServerState;
+use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -44,7 +44,10 @@ pub async fn get_commit(
     if !project_ids.is_empty() {
         let db = &state.web_db;
         let projects = gradient_db::fetch_in_chunks(&project_ids, |chunk| async move {
-            EProject::find().filter(CProject::Id.is_in(chunk)).all(db).await
+            EProject::find()
+                .filter(CProject::Id.is_in(chunk))
+                .all(db)
+                .await
         })
         .await?;
         org_ids.extend(projects.into_iter().map(|p| p.organization));

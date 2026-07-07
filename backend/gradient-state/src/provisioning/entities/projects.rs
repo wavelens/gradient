@@ -10,10 +10,10 @@ use super::super::{
     inbound_integrations_by_name, lookup_id, outbound_integrations_by_name, read_credential,
 };
 use crate::config::*;
-use gradient_types::triggers::TriggerConfig;
-use gradient_types::*;
 use anyhow::{Context, Result};
 use gradient_entity::*;
+use gradient_types::triggers::TriggerConfig;
+use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
 };

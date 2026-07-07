@@ -17,7 +17,10 @@ pub struct NetworkAffinityRule {
 
 impl Default for NetworkAffinityRule {
     fn default() -> Self {
-        Self { bonus: crate::weights::NETWORK_AFFINITY_BONUS, reference_mbps: crate::weights::NETWORK_REFERENCE_MBPS }
+        Self {
+            bonus: crate::weights::NETWORK_AFFINITY_BONUS,
+            reference_mbps: crate::weights::NETWORK_REFERENCE_MBPS,
+        }
     }
 }
 
@@ -82,7 +85,9 @@ impl ScoreRule for DiskAffinityRule {
     ) -> f64 {
         let Some(b) = job.job.build() else { return 0.0 };
         let h = b.history();
-        let heavy_threshold = instance.disk_bytes.w24h_or(self.heavy_threshold_bytes as f64);
+        let heavy_threshold = instance
+            .disk_bytes
+            .w24h_or(self.heavy_threshold_bytes as f64);
         if h.samples == 0 || (h.avg_disk_bytes as f64) < heavy_threshold {
             return 0.0;
         }
@@ -118,72 +123,154 @@ mod tests {
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
-        JobContext { job, missing_count: None, missing_nar_size: None, dependency_count: 0, queued_at: gradient_types::now(), ready_at: gradient_types::now(), org_work_share: None, rescore_count: 0, now: gradient_types::now() }
+        JobContext {
+            job,
+            missing_count: None,
+            missing_nar_size: None,
+            dependency_count: 0,
+            queued_at: gradient_types::now(),
+            ready_at: gradient_types::now(),
+            org_work_share: None,
+            rescore_count: 0,
+            now: gradient_types::now(),
+        }
     }
 
     fn worker_with(metrics: WorkerMetricsView) -> WorkerContext<'static> {
-        WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: Some(metrics) }
+        WorkerContext {
+            architectures: &[],
+            system_features: &[],
+            fetch: false,
+            metrics: Some(metrics),
+        }
     }
 
     #[test]
     fn network_rule_prefers_fast_net_for_fod() {
         let rule = NetworkAffinityRule::default();
         let j = job(true, HistoryPrediction::default());
-        let fast = worker_with(WorkerMetricsView { network_speed_mbps: Some(100.0), ..Default::default() });
-        let slow = worker_with(WorkerMetricsView { network_speed_mbps: Some(10.0), ..Default::default() });
-        assert!(rule.score(&ctx(&j), &fast, &InstanceContext::default()) > rule.score(&ctx(&j), &slow, &InstanceContext::default()));
+        let fast = worker_with(WorkerMetricsView {
+            network_speed_mbps: Some(100.0),
+            ..Default::default()
+        });
+        let slow = worker_with(WorkerMetricsView {
+            network_speed_mbps: Some(10.0),
+            ..Default::default()
+        });
+        assert!(
+            rule.score(&ctx(&j), &fast, &InstanceContext::default())
+                > rule.score(&ctx(&j), &slow, &InstanceContext::default())
+        );
     }
 
     #[test]
     fn network_rule_zero_for_non_fod() {
         let rule = NetworkAffinityRule::default();
         let j = job(false, HistoryPrediction::default());
-        let fast = worker_with(WorkerMetricsView { network_speed_mbps: Some(100.0), ..Default::default() });
-        assert_eq!(rule.score(&ctx(&j), &fast, &InstanceContext::default()), 0.0);
+        let fast = worker_with(WorkerMetricsView {
+            network_speed_mbps: Some(100.0),
+            ..Default::default()
+        });
+        assert_eq!(
+            rule.score(&ctx(&j), &fast, &InstanceContext::default()),
+            0.0
+        );
     }
 
     #[test]
     fn network_rule_zero_without_metric() {
         let rule = NetworkAffinityRule::default();
         let j = job(true, HistoryPrediction::default());
-        let w = worker_with(WorkerMetricsView { network_speed_mbps: None, ..Default::default() });
+        let w = worker_with(WorkerMetricsView {
+            network_speed_mbps: None,
+            ..Default::default()
+        });
         assert_eq!(rule.score(&ctx(&j), &w, &InstanceContext::default()), 0.0);
     }
 
     #[test]
     fn disk_rule_prefers_fast_disk_for_heavy_build() {
         let rule = DiskAffinityRule::default();
-        let heavy = HistoryPrediction { avg_disk_bytes: 500 * 1_048_576, samples: 5, ..Default::default() };
+        let heavy = HistoryPrediction {
+            avg_disk_bytes: 500 * 1_048_576,
+            samples: 5,
+            ..Default::default()
+        };
         let j = job(false, heavy);
-        let fast = worker_with(WorkerMetricsView { disk_speed_mbps: Some(500.0), ..Default::default() });
-        let slow = worker_with(WorkerMetricsView { disk_speed_mbps: Some(50.0), ..Default::default() });
-        assert!(rule.score(&ctx(&j), &fast, &InstanceContext::default()) > rule.score(&ctx(&j), &slow, &InstanceContext::default()));
+        let fast = worker_with(WorkerMetricsView {
+            disk_speed_mbps: Some(500.0),
+            ..Default::default()
+        });
+        let slow = worker_with(WorkerMetricsView {
+            disk_speed_mbps: Some(50.0),
+            ..Default::default()
+        });
+        assert!(
+            rule.score(&ctx(&j), &fast, &InstanceContext::default())
+                > rule.score(&ctx(&j), &slow, &InstanceContext::default())
+        );
     }
 
     #[test]
     fn disk_rule_zero_for_light_build() {
         let rule = DiskAffinityRule::default();
-        let light = HistoryPrediction { avg_disk_bytes: 1_048_576, samples: 5, ..Default::default() };
+        let light = HistoryPrediction {
+            avg_disk_bytes: 1_048_576,
+            samples: 5,
+            ..Default::default()
+        };
         let j = job(false, light);
-        let fast = worker_with(WorkerMetricsView { disk_speed_mbps: Some(500.0), ..Default::default() });
-        assert_eq!(rule.score(&ctx(&j), &fast, &InstanceContext::default()), 0.0);
+        let fast = worker_with(WorkerMetricsView {
+            disk_speed_mbps: Some(500.0),
+            ..Default::default()
+        });
+        assert_eq!(
+            rule.score(&ctx(&j), &fast, &InstanceContext::default()),
+            0.0
+        );
     }
 
     #[test]
     fn disk_rule_zero_without_history() {
         let rule = DiskAffinityRule::default();
-        let j = job(false, HistoryPrediction { avg_disk_bytes: 999 * 1_048_576, samples: 0, ..Default::default() });
-        let fast = worker_with(WorkerMetricsView { disk_speed_mbps: Some(500.0), ..Default::default() });
-        assert_eq!(rule.score(&ctx(&j), &fast, &InstanceContext::default()), 0.0);
+        let j = job(
+            false,
+            HistoryPrediction {
+                avg_disk_bytes: 999 * 1_048_576,
+                samples: 0,
+                ..Default::default()
+            },
+        );
+        let fast = worker_with(WorkerMetricsView {
+            disk_speed_mbps: Some(500.0),
+            ..Default::default()
+        });
+        assert_eq!(
+            rule.score(&ctx(&j), &fast, &InstanceContext::default()),
+            0.0
+        );
     }
 
     #[test]
     fn disk_heavy_uses_instance_threshold() {
         let rule = DiskAffinityRule::default();
-        let j = job(false, HistoryPrediction { avg_disk_bytes: 50 * 1_048_576, samples: 5, ..Default::default() });
-        let fast = worker_with(WorkerMetricsView { disk_speed_mbps: Some(500.0), ..Default::default() });
+        let j = job(
+            false,
+            HistoryPrediction {
+                avg_disk_bytes: 50 * 1_048_576,
+                samples: 5,
+                ..Default::default()
+            },
+        );
+        let fast = worker_with(WorkerMetricsView {
+            disk_speed_mbps: Some(500.0),
+            ..Default::default()
+        });
 
-        assert_eq!(rule.score(&ctx(&j), &fast, &InstanceContext::default()), 0.0);
+        assert_eq!(
+            rule.score(&ctx(&j), &fast, &InstanceContext::default()),
+            0.0
+        );
 
         let mut inst = InstanceContext::default();
         inst.disk_bytes.w24h = Some((10 * 1_048_576) as f64);

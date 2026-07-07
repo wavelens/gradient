@@ -15,9 +15,9 @@
 //! - [`logs`] - log streaming
 //! - [`abort`] - evaluation abort
 
-mod queue;
-mod assignment;
-mod eval_status;
-mod build_status;
-mod logs;
 mod abort;
+mod assignment;
+mod build_status;
+mod eval_status;
+mod logs;
+mod queue;

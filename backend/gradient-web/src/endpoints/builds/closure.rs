@@ -10,8 +10,8 @@ use crate::error::WebResult;
 use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use gradient_types::*;
 use gradient_core::ServerState;
+use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -275,7 +275,11 @@ mod tests {
         }
     }
 
-    fn out(derivation: DerivationId, hash: &str, nar_size: Option<i64>) -> derivation_output::Model {
+    fn out(
+        derivation: DerivationId,
+        hash: &str,
+        nar_size: Option<i64>,
+    ) -> derivation_output::Model {
         derivation_output::Model {
             id: DerivationOutputId::now_v7(),
             derivation,

@@ -11,19 +11,19 @@
 //! error context via tracing; clients see only a stable, generic message.
 
 use axum_test::TestServer;
-use gradient_storage::{EmailSender, NarStore};
-use gradient_types::cli::OidcArgs;
-use gradient_types::{RuntimeConfig};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use sea_orm::{DatabaseBackend, MockDatabase};
-use serde_json::Value;
-use std::sync::Arc;
+use gradient_storage::{EmailSender, NarStore};
 use gradient_test_support::cli::test_cli;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::log_storage::NoopLogStorage;
-use uuid::Uuid;
+use gradient_types::RuntimeConfig;
+use gradient_types::cli::OidcArgs;
 use gradient_web::create_router;
+use sea_orm::{DatabaseBackend, MockDatabase};
+use serde_json::Value;
+use std::sync::Arc;
+use uuid::Uuid;
 
 /// Boots a `TestServer` with OIDC enabled but pointing at an unreachable
 /// discovery URL (`127.0.0.1:1` - reserved, refuses immediately).
@@ -52,7 +52,9 @@ fn server_with_broken_oidc() -> TestServer {
     let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),

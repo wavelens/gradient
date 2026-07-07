@@ -56,7 +56,12 @@ impl CiStatusReactor {
 
 #[async_trait]
 impl StatusReactor for CiStatusReactor {
-    async fn on_build_status_changed(&self, db: &DbContext, build_job: MBuildJob, status: BuildStatus) {
+    async fn on_build_status_changed(
+        &self,
+        db: &DbContext,
+        build_job: MBuildJob,
+        status: BuildStatus,
+    ) {
         let Some(event) = crate::reporting::build_event_for_status(status) else {
             return;
         };

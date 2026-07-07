@@ -39,7 +39,11 @@ pub enum WorkerSampleState {
 
 impl From<bool> for WorkerSampleState {
     fn from(draining: bool) -> Self {
-        if draining { Self::Draining } else { Self::Active }
+        if draining {
+            Self::Draining
+        } else {
+            Self::Active
+        }
     }
 }
 

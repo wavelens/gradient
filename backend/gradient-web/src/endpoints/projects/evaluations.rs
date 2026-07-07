@@ -18,14 +18,14 @@ use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use gradient_core::ServerState;
+use gradient_db::get_any_organization_by_name;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation_message::MessageLevel;
-use gradient_db::get_any_organization_by_name;
 use gradient_sources::{check_project_updates, get_commit_info, get_path_from_derivation_output};
 use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -53,8 +53,7 @@ pub(super) async fn evaluations_to_summaries(
     let db = &state.web_db;
     let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
 
-    let trigger_ids: Vec<ProjectTriggerId> =
-        evaluations.iter().filter_map(|e| e.trigger).collect();
+    let trigger_ids: Vec<ProjectTriggerId> = evaluations.iter().filter_map(|e| e.trigger).collect();
     let triggers: HashMap<ProjectTriggerId, TriggerType> =
         gradient_db::fetch_in_chunks(&trigger_ids, |chunk| async move {
             EProjectTrigger::find()
@@ -70,7 +69,10 @@ pub(super) async fn evaluations_to_summaries(
     let commit_ids: Vec<CommitId> = evaluations.iter().map(|e| e.commit).collect();
     let commits: HashMap<CommitId, MCommit> =
         gradient_db::fetch_in_chunks(&commit_ids, |chunk| async move {
-            ECommit::find().filter(CCommit::Id.is_in(chunk)).all(db).await
+            ECommit::find()
+                .filter(CCommit::Id.is_in(chunk))
+                .all(db)
+                .await
         })
         .await?
         .into_iter()
@@ -87,8 +89,7 @@ pub(super) async fn evaluations_to_summaries(
         .map(|u| (u.id, u.name))
         .collect();
 
-    let status_counts =
-        gradient_db::build_status_counts_by_evaluation(db, &eval_ids).await?;
+    let status_counts = gradient_db::build_status_counts_by_evaluation(db, &eval_ids).await?;
     let message_counts = gradient_db::evaluation_message_counts(db, &eval_ids).await?;
 
     let mut out = Vec::with_capacity(evaluations.len());
@@ -130,7 +131,12 @@ pub(super) async fn evaluations_to_summaries(
             .source_comment
             .as_ref()
             .and_then(|v| v.get("pr_number"))
-            .or_else(|| evaluation.waiting_reason.as_ref().and_then(|v| v.get("pr_number")))
+            .or_else(|| {
+                evaluation
+                    .waiting_reason
+                    .as_ref()
+                    .and_then(|v| v.get("pr_number"))
+            })
             .and_then(|n| n.as_u64());
 
         out.push(EvaluationSummary {
@@ -205,19 +211,19 @@ pub async fn post_project_evaluate(
 
     let mut project_for_check = project.clone();
     project_for_check.force_evaluation = true;
-    let (_has_updates, commit_hash) =
-        check_project_updates(&state.db(), &project_for_check, None)
-            .await
-            .map_err(|e| {
-                WebError::bad_request_with(
-                    ErrorCode::REPOSITORY_UNREACHABLE,
-                    format!("Failed to fetch repository state: {}", e),
-                )
-            })?;
-
-    let (commit_message, _email, author_name) = get_commit_info(&state.db(), &project, &commit_hash)
+    let (_has_updates, commit_hash) = check_project_updates(&state.db(), &project_for_check, None)
         .await
-        .unwrap_or_else(|_| (String::new(), None, String::new()));
+        .map_err(|e| {
+            WebError::bad_request_with(
+                ErrorCode::REPOSITORY_UNREACHABLE,
+                format!("Failed to fetch repository state: {}", e),
+            )
+        })?;
+
+    let (commit_message, _email, author_name) =
+        get_commit_info(&state.db(), &project, &commit_hash)
+            .await
+            .unwrap_or_else(|_| (String::new(), None, String::new()));
 
     // A manual evaluation also bumps tracked flake inputs (OpenPr action).
     // Self-gated: no-ops unless the project qualifies.
@@ -250,14 +256,11 @@ pub async fn post_project_evaluate(
         gradient_ci::TriggerError::AlreadyInProgress => {
             WebError::bad_request("Evaluation already in progress")
         }
-        gradient_ci::TriggerError::NoPreviousEvaluation => {
-            WebError::internal("Unexpected error")
-        }
+        gradient_ci::TriggerError::NoPreviousEvaluation => WebError::internal("Unexpected error"),
         gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
     })?;
 
-    let eval =
-        gradient_ci::park_if_no_cache(&state.web_db, eval, project.organization).await?;
+    let eval = gradient_ci::park_if_no_cache(&state.web_db, eval, project.organization).await?;
     let eval = gradient_ci::park_if_storage_full(
         &state.web_db,
         eval,
@@ -265,8 +268,7 @@ pub async fn post_project_evaluate(
         state.config.storage.max_storage_gb,
     )
     .await?;
-    let eval =
-        gradient_ci::park_if_no_workers(&state.web_db, eval, project.organization).await?;
+    let eval = gradient_ci::park_if_no_workers(&state.web_db, eval, project.organization).await?;
     gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
 
     Ok(ok_json("Evaluation started".to_string()))
@@ -332,8 +334,7 @@ pub async fn get_project_details(
 
     let evaluation_summaries = evaluations_to_summaries(&state.0, evaluations).await?;
 
-    let (building, queued) =
-        gradient_db::project_queue_summary(&state.web_db, project.id).await?;
+    let (building, queued) = gradient_db::project_queue_summary(&state.web_db, project.id).await?;
 
     let (can_edit, can_trigger) = match &maybe_user {
         Some(user) => (
@@ -466,7 +467,10 @@ impl EntryPointRelatedData {
 
         let derivations: HashMap<DerivationId, MDerivation> =
             gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-                EDerivation::find().filter(CDerivation::Id.is_in(chunk)).all(db).await
+                EDerivation::find()
+                    .filter(CDerivation::Id.is_in(chunk))
+                    .all(db)
+                    .await
             })
             .await?
             .into_iter()
@@ -475,7 +479,10 @@ impl EntryPointRelatedData {
 
         let anchors: HashMap<DerivationId, MDerivationBuild> =
             gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
-                EDerivationBuild::find().filter(CDerivationBuild::Derivation.is_in(chunk)).all(db).await
+                EDerivationBuild::find()
+                    .filter(CDerivationBuild::Derivation.is_in(chunk))
+                    .all(db)
+                    .await
             })
             .await?
             .into_iter()
@@ -873,12 +880,21 @@ mod tests {
     #[test]
     fn first_line_truncated_takes_first_line_and_caps_length() {
         assert_eq!(super::first_line_truncated("", 100), None);
-        assert_eq!(super::first_line_truncated("   \n x", 100).as_deref(), Some("x"));
+        assert_eq!(
+            super::first_line_truncated("   \n x", 100).as_deref(),
+            Some("x")
+        );
         assert_eq!(
             super::first_line_truncated("hello world\nsecond", 100).as_deref(),
             Some("hello world")
         );
         let long: String = "a".repeat(250);
-        assert_eq!(super::first_line_truncated(&long, 100).unwrap().chars().count(), 100);
+        assert_eq!(
+            super::first_line_truncated(&long, 100)
+                .unwrap()
+                .chars()
+                .count(),
+            100
+        );
     }
 }

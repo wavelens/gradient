@@ -9,8 +9,8 @@
 use super::DynError;
 use super::StateApplicator;
 use crate::config::StateConfiguration;
-use gradient_types::*;
 use gradient_entity::*;
+use gradient_types::*;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use std::collections::{HashMap, HashSet};
 

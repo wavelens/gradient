@@ -7,13 +7,13 @@
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use serde_json::Value;
-use std::sync::Arc;
 use gradient_test_support::cache_fixture::{
     FIXTURE_CACHE_NAME, FIXTURE_PATH_HASH, public_cache_with_one_nar,
     public_cache_with_path_no_signature,
 };
 use gradient_web::create_router;
+use serde_json::Value;
+use std::sync::Arc;
 
 #[test]
 fn show_returns_full_detail() {

@@ -26,11 +26,11 @@ pub use self::context::CiContext;
 pub use self::integration_lookup::*;
 pub use self::reactor::CiStatusReactor;
 pub use self::reporting::*;
-pub use gradient_forge::github_app::*;
-pub use gradient_forge::reporter::*;
 pub use self::trigger::*;
 pub use self::unpark::{
     find_approval_gated_eval, set_evaluation_source_comment, unpark_approval,
     unpark_approval_with_wildcard, unpark_no_cache_for_org, unpark_no_workers_for_org,
     unpark_storage_full_all, unpark_storage_full_for_org,
 };
+pub use gradient_forge::github_app::*;
+pub use gradient_forge::reporter::*;

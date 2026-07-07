@@ -12,8 +12,20 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{BuildAttemptId, BuildJobId, DerivationBuildId, DispatchedJobId};
 
 #[repr(i32)]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, DeriveActiveEnum, EnumIter,
-    Deserialize, Serialize, IntoPrimitive, TryFromPrimitive)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum AttemptOutcome {
     #[default]
@@ -30,8 +42,19 @@ pub enum AttemptOutcome {
 }
 
 #[repr(i32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, DeriveActiveEnum, EnumIter,
-    Deserialize, Serialize, IntoPrimitive, TryFromPrimitive)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
 #[sea_orm(rs_type = "i32", db_type = "Integer")]
 pub enum AttemptFailureReason {
     #[sea_orm(num_value = 0)]

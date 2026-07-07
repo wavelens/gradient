@@ -7,8 +7,8 @@
 //! Full structured views of the worker and job scoring context, serialized
 //! onto the dispatched-job record so the frontend can show every collected value.
 
-use gradient_types::proto::{FlakeTask, GradientCapabilities};
 use gradient_score::{DerivationRef, HistoryPrediction, JobContext, WorkerContext};
+use gradient_types::proto::{FlakeTask, GradientCapabilities};
 use serde::Serialize;
 
 use crate::jobs::PendingJob;
@@ -152,9 +152,9 @@ impl JobContextView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_score::ScoredJob;
     use gradient_types::ids::{DerivationBuildId, EvaluationId, OrganizationId};
     use gradient_types::proto::{BuildJob, BuildTask};
-    use gradient_score::ScoredJob;
 
     fn build_pending() -> PendingJob {
         let now = gradient_types::now();
@@ -180,7 +180,10 @@ mod tests {
             closure_size: Some(42),
             prefer_local_build: true,
             is_fixed_output: false,
-            history: HistoryPrediction { samples: 7, ..Default::default() },
+            history: HistoryPrediction {
+                samples: 7,
+                ..Default::default()
+            },
             queued_at: now,
             ready_at: now,
             rescore_count: 0,

@@ -15,13 +15,13 @@
 //!   `has_secret`/`has_access_token` booleans so non-admin members cannot
 //!   probe credential state.
 
-use gradient_entity::{github_installation, ids::*, integration, organization_user, role};
-use gradient_types::{ForgeType, SessionId};
 use gradient_entity::integration::IntegrationKind;
-use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
-use serde_json::Value;
+use gradient_entity::{github_installation, ids::*, integration, organization_user, role};
 use gradient_test_support::fixtures::{org, org_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
+use gradient_types::{ForgeType, SessionId};
+use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+use serde_json::Value;
 use uuid::Uuid;
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -277,8 +277,14 @@ fn delete_github_integration_removes_pair_and_installation() {
         ))
         .append_query_results([vec![github_inbound_row()]])
         .append_exec_results([
-            MockExecResult { last_insert_id: 0, rows_affected: 2 },
-            MockExecResult { last_insert_id: 0, rows_affected: 1 },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 2,
+            },
+            MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            },
         ]);
 
         let _ = github_installation_row();

@@ -106,7 +106,8 @@ impl PartialStore {
             .with_context(|| format!("open partial {}", path.display()))?;
 
         if offset == 0 {
-            file.set_len(0).context("truncate partial for fresh start")?;
+            file.set_len(0)
+                .context("truncate partial for fresh start")?;
         } else {
             let len = file.metadata().context("stat partial for append")?.len();
             if offset != len {

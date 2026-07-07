@@ -9,8 +9,8 @@
 use super::DynError;
 use super::StateApplicator;
 use gradient_ci::IntegrationKind;
-use gradient_types::*;
 use gradient_entity::*;
+use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::collections::HashMap;
 

@@ -45,7 +45,9 @@ fn force_push_blocking(
     let mut remote = repo.remote_anonymous(git_url).context("anonymous remote")?;
 
     let mut fetch = FetchOptions::new();
-    fetch.depth(1).remote_callbacks(credentials_cb(cred_user, cred_pass));
+    fetch
+        .depth(1)
+        .remote_callbacks(credentials_cb(cred_user, cred_pass));
     remote
         .fetch(&[&format!("refs/heads/{base}")], Some(&mut fetch), None)
         .with_context(|| format!("fetching base branch {base}"))?;
@@ -70,13 +72,21 @@ fn force_push_blocking(
     let new_commit = repo
         .commit(None, &sig, &sig, &commit.message, &tree, &[&base_commit])
         .context("creating commit")?;
-    repo.reference(&format!("refs/heads/{head}"), new_commit, true, "flake.lock update")
-        .context("local head ref")?;
+    repo.reference(
+        &format!("refs/heads/{head}"),
+        new_commit,
+        true,
+        "flake.lock update",
+    )
+    .context("local head ref")?;
 
     let mut push = PushOptions::new();
     push.remote_callbacks(credentials_cb(cred_user, cred_pass));
     remote
-        .push(&[&format!("+refs/heads/{head}:refs/heads/{head}")], Some(&mut push))
+        .push(
+            &[&format!("+refs/heads/{head}:refs/heads/{head}")],
+            Some(&mut push),
+        )
         .with_context(|| format!("force-pushing {head}"))?;
 
     Ok(new_commit.to_string())
@@ -95,7 +105,9 @@ fn upsert_path(repo: &Repository, base: Option<&Tree>, path: &str, blob: Oid) ->
     match path.split_once('/') {
         None => {
             let mut builder = repo.treebuilder(base).context("treebuilder")?;
-            builder.insert(path, blob, i32::from(git2::FileMode::Blob)).context("insert blob")?;
+            builder
+                .insert(path, blob, i32::from(git2::FileMode::Blob))
+                .context("insert blob")?;
             builder.write().context("write tree")
         }
         Some((dir, rest)) => {
@@ -105,7 +117,9 @@ fn upsert_path(repo: &Repository, base: Option<&Tree>, path: &str, blob: Oid) ->
                 .and_then(|o| o.into_tree().ok());
             let sub_oid = upsert_path(repo, sub.as_ref(), rest, blob)?;
             let mut builder = repo.treebuilder(base).context("treebuilder")?;
-            builder.insert(dir, sub_oid, i32::from(git2::FileMode::Tree)).context("insert subtree")?;
+            builder
+                .insert(dir, sub_oid, i32::from(git2::FileMode::Tree))
+                .context("insert subtree")?;
             builder.write().context("write tree")
         }
     }
@@ -122,16 +136,25 @@ mod tests {
 
         let mut tb = repo.treebuilder(None).unwrap();
         let old = repo.blob(b"old lock").unwrap();
-        tb.insert("flake.lock", old, i32::from(git2::FileMode::Blob)).unwrap();
+        tb.insert("flake.lock", old, i32::from(git2::FileMode::Blob))
+            .unwrap();
         let base = repo.find_tree(tb.write().unwrap()).unwrap();
 
         let keep = repo.blob(b"keep me").unwrap();
-        let with_dir = repo.find_tree(upsert_path(&repo, Some(&base), "dir/keep.txt", keep).unwrap()).unwrap();
+        let with_dir = repo
+            .find_tree(upsert_path(&repo, Some(&base), "dir/keep.txt", keep).unwrap())
+            .unwrap();
 
         let new = repo.blob(b"new lock").unwrap();
-        let result = repo.find_tree(upsert_path(&repo, Some(&with_dir), "flake.lock", new).unwrap()).unwrap();
+        let result = repo
+            .find_tree(upsert_path(&repo, Some(&with_dir), "flake.lock", new).unwrap())
+            .unwrap();
 
-        let lock = result.get_name("flake.lock").unwrap().to_object(&repo).unwrap();
+        let lock = result
+            .get_name("flake.lock")
+            .unwrap()
+            .to_object(&repo)
+            .unwrap();
         assert_eq!(lock.as_blob().unwrap().content(), b"new lock");
 
         let nested = result

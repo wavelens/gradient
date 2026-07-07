@@ -86,7 +86,8 @@ pub async fn check_evaluation_done(
     // Authoritative resync of the entry-point histogram now the eval has
     // settled: a terminal eval has a fixed graph, so one recompute makes the
     // displayed bar exact even if any incremental delta was missed.
-    if let Err(e) = crate::dep_closure::reconcile_eval_dep_counts(&ctx.worker_db, evaluation_id).await
+    if let Err(e) =
+        crate::dep_closure::reconcile_eval_dep_counts(&ctx.worker_db, evaluation_id).await
     {
         warn!(error = %e, %evaluation_id, "reconcile_eval_dep_counts at eval settle failed");
     }

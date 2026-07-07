@@ -42,7 +42,10 @@ mod tests {
     use gradient_types::ids::{UserId, WorkerRegistrationId};
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    fn registration_row(active: bool, enable_eval: bool) -> gradient_entity::worker_registration::Model {
+    fn registration_row(
+        active: bool,
+        enable_eval: bool,
+    ) -> gradient_entity::worker_registration::Model {
         gradient_entity::worker_registration::Model {
             id: WorkerRegistrationId::now_v7(),
             peer_id: OrganizationId::nil(),

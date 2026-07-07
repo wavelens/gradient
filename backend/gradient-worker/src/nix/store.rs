@@ -169,7 +169,10 @@ impl LocalNixStore {
             .execute(|client| async move { client.add_indirect_root(&bytes).await })
             .await
             .map_err(|e| {
-                anyhow::anyhow!("add_indirect_root failed for {}: {e}", gcroot_symlink.display())
+                anyhow::anyhow!(
+                    "add_indirect_root failed for {}: {e}",
+                    gcroot_symlink.display()
+                )
             })
     }
 

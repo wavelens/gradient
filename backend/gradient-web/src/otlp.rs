@@ -15,9 +15,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gradient_core::ServerState;
+use gradient_scheduler::Scheduler;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
-use gradient_scheduler::Scheduler;
 use tracing::{error, info};
 
 #[derive(Default, Clone, Copy)]

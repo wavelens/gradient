@@ -14,13 +14,13 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 
-use gradient_types::ForgeType;
 use crate::github_app::verify_github_signature;
 use crate::provider::ForgeProvider;
 use crate::reporter::{CiReporter, GithubReporter};
 use crate::webhook::{
     ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind,
 };
+use gradient_types::ForgeType;
 
 #[derive(Debug)]
 pub struct GithubProvider;

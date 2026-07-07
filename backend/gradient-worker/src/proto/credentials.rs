@@ -15,8 +15,8 @@
 //! connection closes. [`SecretBytes`] locks its memory pages with `mlock(2)`
 //! and zeros it on drop.
 
-use gradient_types::SecretBytes;
 use gradient_proto::messages::CredentialKind;
+use gradient_types::SecretBytes;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]

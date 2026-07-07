@@ -15,7 +15,7 @@ use anyhow::{Context, Result, anyhow};
 use gradient_forge::reporter::parse_owner_repo;
 use gradient_forge::{BranchCommit, CommitFile, CommitIdent};
 use gradient_types::{
-    AOpenPrState, COpenPrState, CEvaluationInputUpdate, ECommit, EEvaluation,
+    AOpenPrState, CEvaluationInputUpdate, COpenPrState, ECommit, EEvaluation,
     EEvaluationInputUpdate, EOpenPrState, EProject, EvaluationId, IntegrationId, OpenPrStateId,
     ProjectActionId, ProjectId,
 };
@@ -112,7 +112,10 @@ pub(crate) async fn execute_open_pr(
             &ctx.db.config.server.pr_commit_name,
             &ctx.db.config.server.pr_commit_email,
         ),
-        files: vec![CommitFile { path: "flake.lock".into(), contents: candidate_lock.into_bytes() }],
+        files: vec![CommitFile {
+            path: "flake.lock".into(),
+            contents: candidate_lock.into_bytes(),
+        }],
     };
 
     let head_commit = reporter
@@ -138,7 +141,10 @@ pub(crate) async fn execute_open_pr(
 }
 
 fn no_op() -> ExecutorOk {
-    ExecutorOk { status_code: Some(204), response_body: None }
+    ExecutorOk {
+        status_code: Some(204),
+        response_body: None,
+    }
 }
 
 /// The identity to force onto the commit, or `None` to let the forge attribute
@@ -146,9 +152,10 @@ fn no_op() -> ExecutorOk {
 /// identity falls back to `None`.
 fn configured_commit_ident(name: &Option<String>, email: &Option<String>) -> Option<CommitIdent> {
     match (name.as_deref(), email.as_deref()) {
-        (Some(n), Some(e)) if !n.is_empty() && !e.is_empty() => {
-            Some(CommitIdent { name: n.to_owned(), email: e.to_owned() })
-        }
+        (Some(n), Some(e)) if !n.is_empty() && !e.is_empty() => Some(CommitIdent {
+            name: n.to_owned(),
+            email: e.to_owned(),
+        }),
         _ => None,
     }
 }
@@ -175,7 +182,9 @@ async fn upsert_open_pr_state(
         am.head_commit = Set(Some(head_commit.to_owned()));
         am.status = Set("open".to_owned());
         am.updated_at = Set(now);
-        am.update(&ctx.db.worker_db).await.context("updating open_pr_state")?;
+        am.update(&ctx.db.worker_db)
+            .await
+            .context("updating open_pr_state")?;
     } else {
         AOpenPrState {
             id: Set(OpenPrStateId::now_v7()),
@@ -234,13 +243,19 @@ async fn point_eval_at_pushed_commit(
         .pr_commit_name
         .clone()
         .unwrap_or_else(|| "Gradient".to_owned()));
-    am.update(&ctx.db.worker_db).await.context("updating evaluation commit")?;
+    am.update(&ctx.db.worker_db)
+        .await
+        .context("updating evaluation commit")?;
 
     Ok(())
 }
 
 fn input_summary(bumps: &[BumpRow]) -> String {
-    bumps.iter().map(|b| b.name.as_str()).collect::<Vec<_>>().join(", ")
+    bumps
+        .iter()
+        .map(|b| b.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn default_title(bumps: &[BumpRow]) -> String {
@@ -251,7 +266,12 @@ fn default_body(bumps: &[BumpRow]) -> String {
     let mut body = String::from("Automated flake.lock update.\n\n");
     for b in bumps {
         let from = b.old_rev.as_deref().map(short_rev).unwrap_or("(new)");
-        body.push_str(&format!("- `{}`: {} -> {}\n", b.name, from, short_rev(&b.new_rev)));
+        body.push_str(&format!(
+            "- `{}`: {} -> {}\n",
+            b.name,
+            from,
+            short_rev(&b.new_rev)
+        ));
     }
 
     body
@@ -281,14 +301,20 @@ mod tests {
         assert_eq!(configured_commit_ident(&None, &None), None);
         assert_eq!(configured_commit_ident(&Some("Bot".into()), &None), None);
         assert_eq!(configured_commit_ident(&None, &Some("b@x".into())), None);
-        assert_eq!(configured_commit_ident(&Some(String::new()), &Some("b@x".into())), None);
+        assert_eq!(
+            configured_commit_ident(&Some(String::new()), &Some("b@x".into())),
+            None
+        );
     }
 
     #[test]
     fn commit_ident_set_when_both_present() {
         assert_eq!(
             configured_commit_ident(&Some("Bot".into()), &Some("b@x".into())),
-            Some(CommitIdent { name: "Bot".into(), email: "b@x".into() })
+            Some(CommitIdent {
+                name: "Bot".into(),
+                email: "b@x".into()
+            })
         );
     }
 }

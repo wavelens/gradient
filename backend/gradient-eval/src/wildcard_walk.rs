@@ -215,7 +215,13 @@ pub fn discover<N: WalkNode>(
     let mut diags = Vec::new();
     for inc in includes {
         let segs = collapse_stars(inc);
-        traverse(root, &[], &segs, &mut Sink::Derivations(&mut out), &mut diags);
+        traverse(
+            root,
+            &[],
+            &segs,
+            &mut Sink::Derivations(&mut out),
+            &mut diags,
+        );
     }
 
     out.retain(|p| {
@@ -545,10 +551,7 @@ mod tests {
 
     #[test]
     fn traverse_records_thrown_attr_and_continues() {
-        let root = StubNode::set(vec![
-            ("ok", StubNode::drv()),
-            ("bad", StubNode::throwing()),
-        ]);
+        let root = StubNode::set(vec![("ok", StubNode::drv()), ("bad", StubNode::throwing())]);
         let (got, errors) = discover(&&root, &[segs(&["*"])], &[]);
         assert_eq!(got, vec!["ok"], "sibling still discovered");
         assert_eq!(errors.len(), 1, "one dedup'd diagnostic: {errors:?}");
@@ -573,7 +576,9 @@ mod tests {
         let (got, errors) = discover(&&root, &[segs(&["packages", "x86_64-linux", "*"])], &[]);
         assert_eq!(got, vec!["packages.x86_64-linux.hello"]);
         assert!(
-            errors.iter().any(|e| e.contains("packages.x86_64-linux.broken")),
+            errors
+                .iter()
+                .any(|e| e.contains("packages.x86_64-linux.broken")),
             "path is the full dotted attr path: {errors:?}"
         );
     }

@@ -10,13 +10,13 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 
-use gradient_types::ForgeType;
 use crate::github_app::verify_gitea_signature;
 use crate::provider::ForgeProvider;
 use crate::reporter::{CiReporter, GiteaReporter};
 use crate::webhook::{
     ParsedPullRequestEvent, ParsedPushEvent, ParsedReleaseEvent, PushOutcome, WebhookEventKind,
 };
+use gradient_types::ForgeType;
 
 #[derive(Debug)]
 pub struct GiteaProvider {
@@ -106,7 +106,13 @@ mod tests {
     #[test]
     fn classifies_pr_comment_as_comment() {
         let p = GiteaProvider::new(ForgeType::Forgejo);
-        assert!(matches!(p.classify_event("issue_comment"), WebhookEventKind::Comment));
-        assert!(matches!(p.classify_event("pull_request_comment"), WebhookEventKind::Comment));
+        assert!(matches!(
+            p.classify_event("issue_comment"),
+            WebhookEventKind::Comment
+        ));
+        assert!(matches!(
+            p.classify_event("pull_request_comment"),
+            WebhookEventKind::Comment
+        ));
     }
 }

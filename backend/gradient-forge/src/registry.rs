@@ -10,9 +10,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use gradient_types::ForgeType;
 use crate::provider::ForgeProvider;
 use crate::providers::{gitea::GiteaProvider, github::GithubProvider, gitlab::GitlabProvider};
+use gradient_types::ForgeType;
 
 #[derive(Clone, Debug)]
 pub struct ForgeRegistry {
@@ -24,7 +24,10 @@ impl ForgeRegistry {
     /// `insert` here plus its `providers/*` impl.
     pub fn with_builtin() -> Self {
         let mut providers: HashMap<ForgeType, Arc<dyn ForgeProvider>> = HashMap::new();
-        providers.insert(ForgeType::Gitea, Arc::new(GiteaProvider::new(ForgeType::Gitea)));
+        providers.insert(
+            ForgeType::Gitea,
+            Arc::new(GiteaProvider::new(ForgeType::Gitea)),
+        );
         providers.insert(
             ForgeType::Forgejo,
             Arc::new(GiteaProvider::new(ForgeType::Forgejo)),

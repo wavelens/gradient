@@ -5,19 +5,20 @@
  */
 
 use super::SourceError;
-use gradient_types::*;
-use anyhow::Result;
-use base64::{Engine, engine::general_purpose};
-use ed25519_compact::KeyPair;
 use ::ssh_key::{
     Algorithm, LineEnding, PrivateKey, private::Ed25519Keypair, private::Ed25519PrivateKey,
     private::KeypairData, public::Ed25519PublicKey,
 };
+use anyhow::Result;
+use base64::{Engine, engine::general_purpose};
+use ed25519_compact::KeyPair;
+use gradient_types::*;
 pub fn generate_ssh_key(secret_file: &str) -> Result<(String, String), SourceError> {
-    let secret =
-        gradient_types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
+    let secret = gradient_types::input::load_secret_bytes(secret_file).map_err(|e| {
+        SourceError::FileRead {
             reason: e.to_string(),
-        })?;
+        }
+    })?;
 
     let keypair = KeyPair::generate();
 
@@ -73,10 +74,11 @@ pub fn decrypt_ssh_private_key(
     organization: MOrganization,
     serve_url: &str,
 ) -> Result<(String, String), SourceError> {
-    let secret =
-        gradient_types::input::load_secret_bytes(secret_file).map_err(|e| SourceError::FileRead {
+    let secret = gradient_types::input::load_secret_bytes(secret_file).map_err(|e| {
+        SourceError::FileRead {
             reason: e.to_string(),
-        })?;
+        }
+    })?;
 
     let encrypted_private_key = general_purpose::STANDARD
         .decode(organization.clone().private_key)

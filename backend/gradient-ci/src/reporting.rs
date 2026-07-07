@@ -67,10 +67,7 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
         | "evaluation.completed"
         | "evaluation.failed"
         | "evaluation.aborted" => Some(CheckContextKind::Evaluation),
-        "build.queued"
-        | "build.started"
-        | "build.completed"
-        | "build.failed"
+        "build.queued" | "build.started" | "build.completed" | "build.failed"
         | "build.substituted" => Some(CheckContextKind::Build),
         _ => None,
     }
@@ -115,8 +112,8 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
         BuildStatus::Building => Some(CiStatus::Running),
         BuildStatus::Completed | BuildStatus::Substituted => Some(CiStatus::Success),
         BuildStatus::FailedPermanent
-            | BuildStatus::FailedTimeout
-            | BuildStatus::DependencyFailed => Some(CiStatus::Failure),
+        | BuildStatus::FailedTimeout
+        | BuildStatus::DependencyFailed => Some(CiStatus::Failure),
         BuildStatus::Aborted => Some(CiStatus::Error),
         BuildStatus::Created | BuildStatus::Queued | BuildStatus::FailedTransient => None,
     }
@@ -274,10 +271,22 @@ mod tests {
     fn build_event_posts_live_progress() {
         // Queued/Building report before the terminal result so the per-build
         // check tracks progress, not just completion.
-        assert_eq!(build_event_for_status(BuildStatus::Queued), Some("build.queued"));
-        assert_eq!(build_event_for_status(BuildStatus::Building), Some("build.started"));
-        assert_eq!(build_event_for_status(BuildStatus::Completed), Some("build.completed"));
-        assert_eq!(build_event_for_status(BuildStatus::Substituted), Some("build.substituted"));
+        assert_eq!(
+            build_event_for_status(BuildStatus::Queued),
+            Some("build.queued")
+        );
+        assert_eq!(
+            build_event_for_status(BuildStatus::Building),
+            Some("build.started")
+        );
+        assert_eq!(
+            build_event_for_status(BuildStatus::Completed),
+            Some("build.completed")
+        );
+        assert_eq!(
+            build_event_for_status(BuildStatus::Substituted),
+            Some("build.substituted")
+        );
     }
 
     #[test]

@@ -262,9 +262,8 @@ fn sign_narinfo_nar_size_affects_signature() {
         &[],
     )
     .unwrap();
-    let s2 =
-        sign_narinfo_fingerprint(&path, cache, url, "/nix/store/x-y", "sha256:AAAA", 101, &[])
-            .unwrap();
+    let s2 = sign_narinfo_fingerprint(&path, cache, url, "/nix/store/x-y", "sha256:AAAA", 101, &[])
+        .unwrap();
     assert_ne!(s1, s2, "nar_size must participate in the fingerprint");
 }
 

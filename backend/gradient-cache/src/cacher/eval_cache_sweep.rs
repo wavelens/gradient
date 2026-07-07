@@ -99,7 +99,10 @@ pub async fn evict_eval_cache(state: Arc<ServerState>) -> anyhow::Result<()> {
             warn!(fingerprint = %row.fingerprint, error = ?e, "eval-cache sweep: blob delete failed");
         }
 
-        match EEvalCacheStore::delete_by_id(row.id).exec(&state.worker_db).await {
+        match EEvalCacheStore::delete_by_id(row.id)
+            .exec(&state.worker_db)
+            .await
+        {
             Ok(_) => {
                 freed = freed.saturating_add(row.size_bytes.max(0) as u64);
                 evicted += 1;
@@ -111,7 +114,11 @@ pub async fn evict_eval_cache(state: Arc<ServerState>) -> anyhow::Result<()> {
     }
 
     if evicted > 0 {
-        info!(evicted, freed_bytes = freed, "eval-cache sweep: blobs evicted");
+        info!(
+            evicted,
+            freed_bytes = freed,
+            "eval-cache sweep: blobs evicted"
+        );
     }
 
     Ok(())
@@ -156,7 +163,9 @@ mod tests {
     }
 
     fn ts(secs: i64) -> NaiveDateTime {
-        chrono::DateTime::from_timestamp(secs, 0).unwrap().naive_utc()
+        chrono::DateTime::from_timestamp(secs, 0)
+            .unwrap()
+            .naive_utc()
     }
 
     const NOW: i64 = 1_000_000;
@@ -169,10 +178,7 @@ mod tests {
 
     #[test]
     fn under_budget_and_fresh_evicts_nothing() {
-        let rows = vec![
-            (id(1), 100, ts(NOW - 10)),
-            (id(2), 200, ts(NOW - 20)),
-        ];
+        let rows = vec![(id(1), 100, ts(NOW - 10)), (id(2), 200, ts(NOW - 20))];
         let out = select_evictions(&rows, 1024, Duration::days(30), ts(NOW));
         assert!(out.is_empty());
     }
@@ -180,10 +186,7 @@ mod tests {
     #[test]
     fn aged_row_evicted_regardless_of_size() {
         let day = 86_400;
-        let rows = vec![
-            (id(1), 1, ts(NOW - 40 * day)),
-            (id(2), 999, ts(NOW - 10)),
-        ];
+        let rows = vec![(id(1), 1, ts(NOW - 40 * day)), (id(2), 999, ts(NOW - 10))];
         let out = select_evictions(&rows, u64::MAX, Duration::days(30), ts(NOW));
         assert_eq!(out, vec![id(1)]);
     }
@@ -196,7 +199,11 @@ mod tests {
             (id(3), 400, ts(NOW - 10)),
         ];
         let out = select_evictions(&rows, 800, Duration::days(30), ts(NOW));
-        assert_eq!(out, vec![id(1)], "evict oldest until surviving total <= cap");
+        assert_eq!(
+            out,
+            vec![id(1)],
+            "evict oldest until surviving total <= cap"
+        );
     }
 
     #[test]

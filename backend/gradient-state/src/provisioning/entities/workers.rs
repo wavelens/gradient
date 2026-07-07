@@ -8,9 +8,9 @@ use super::super::DynError;
 use super::super::StateApplicator;
 use super::super::{lookup_id, read_credential};
 use crate::config::*;
-use gradient_types::*;
 use anyhow::Result;
 use gradient_entity::*;
+use gradient_types::*;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
 };

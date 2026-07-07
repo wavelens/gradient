@@ -14,8 +14,8 @@ use sea_orm::{
 };
 use serde_json::Value as JsonValue;
 
-use gradient_types::*;
 use gradient_entity::ids::{AdminTaskId, UserId};
+use gradient_types::*;
 
 #[derive(Debug)]
 pub enum InsertPendingError {

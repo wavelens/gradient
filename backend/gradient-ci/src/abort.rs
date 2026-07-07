@@ -15,9 +15,9 @@
 //! - `AbortKind::Soft` marks only the evaluation. In-flight builds keep running
 //!   and their outputs land in the cache for the next eval to reuse.
 
-use gradient_types::*;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use std::collections::HashSet;
@@ -155,7 +155,10 @@ mod tests {
         }
     }
 
-    fn make_job(eval_id: EvaluationId, anchor: DerivationBuildId) -> gradient_entity::build_job::Model {
+    fn make_job(
+        eval_id: EvaluationId,
+        anchor: DerivationBuildId,
+    ) -> gradient_entity::build_job::Model {
         gradient_entity::build_job::Model {
             id: BuildJobId::now_v7(),
             evaluation: eval_id,

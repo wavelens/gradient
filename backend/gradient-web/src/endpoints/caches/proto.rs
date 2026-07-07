@@ -9,7 +9,7 @@ use axum::extract::{Extension, Path, State};
 use axum::response::Response;
 use std::sync::Arc;
 
-use crate::access::{Caller, CacheAccess, load_cache};
+use crate::access::{CacheAccess, Caller, load_cache};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::client_ip::ClientIp;
 use crate::error::{WebError, WebResult};
@@ -70,6 +70,11 @@ pub async fn cache_proto(
     Ok(upgrade.on_upgrade(move |sock| async move {
         let _global_permit = global_permit;
         let _ip_permit = ip_permit;
-        gradient_proto::handler::handle_cache_socket(gradient_proto::server::accept_axum(sock), state, cache_id).await;
+        gradient_proto::handler::handle_cache_socket(
+            gradient_proto::server::accept_axum(sock),
+            state,
+            cache_id,
+        )
+        .await;
     }))
 }

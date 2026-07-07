@@ -77,7 +77,12 @@ pub async fn list(
 ) -> ScimResult<impl IntoResponse> {
     let names: Vec<String> = match q.filter.as_deref().and_then(parse_eq_filter) {
         Some((attr, val)) if attr == "displayname" => vec![val],
-        Some(_) => return Err(ScimError::bad_request("invalidFilter", "unsupported filter")),
+        Some(_) => {
+            return Err(ScimError::bad_request(
+                "invalidFilter",
+                "unsupported filter",
+            ));
+        }
         None => state.scim_group_roles.keys().cloned().collect(),
     };
 
@@ -99,7 +104,10 @@ pub async fn get(
     State(state): State<Arc<ServerState>>,
     Path(id): Path<String>,
 ) -> ScimResult<impl IntoResponse> {
-    Ok(scim_json(StatusCode::OK, group_resource(&state, &id).await?))
+    Ok(scim_json(
+        StatusCode::OK,
+        group_resource(&state, &id).await?,
+    ))
 }
 
 pub async fn patch(
@@ -132,7 +140,10 @@ pub async fn patch(
         }
     }
 
-    Ok(scim_json(StatusCode::OK, group_resource(&state, &id).await?))
+    Ok(scim_json(
+        StatusCode::OK,
+        group_resource(&state, &id).await?,
+    ))
 }
 
 fn extract_member_ids(op: &PatchOperation) -> Vec<String> {

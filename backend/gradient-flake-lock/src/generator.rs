@@ -116,7 +116,13 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
                 .resolve(&reference)
                 .await
                 .with_context(|| format!("resolving newest revision for input `{input}`"))?;
-            resolutions.push((input.clone(), node_name.clone(), old_rev, reference, resolved));
+            resolutions.push((
+                input.clone(),
+                node_name.clone(),
+                old_rev,
+                reference,
+                resolved,
+            ));
         }
 
         let mut bumped = Vec::new();
@@ -139,7 +145,11 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
                 None => locked.remove("ref"),
             };
 
-            bumped.push(BumpedInput { name: input, old_rev, new_rev: resolved.rev });
+            bumped.push(BumpedInput {
+                name: input,
+                old_rev,
+                new_rev: resolved.rev,
+            });
         }
 
         if bumped.is_empty() {
@@ -149,7 +159,10 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
         let contents = lock.to_bytes()?;
 
         Ok(Some(Patch {
-            edits: vec![FileEdit { path: PathBuf::from("flake.lock"), contents }],
+            edits: vec![FileEdit {
+                path: PathBuf::from("flake.lock"),
+                contents,
+            }],
             bumped,
         }))
     }
@@ -217,15 +230,26 @@ mod tests {
             nar_hash: "sha256-NEW0000000000000000000000000000000000000000=".into(),
             last_modified: 1800000000,
         };
-        let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::from([("nixpkgs".into(), resolved)])));
+        let lockgen =
+            FlakeLockGenerator::new(FakeResolver(HashMap::from([("nixpkgs".into(), resolved)])));
 
-        let patch = lockgen.produce(dir.path(), &["nixpkgs".into()]).await.unwrap().unwrap();
+        let patch = lockgen
+            .produce(dir.path(), &["nixpkgs".into()])
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(patch.bumped.len(), 1);
-        assert_eq!(patch.bumped[0].new_rev, "2222222222222222222222222222222222222222");
+        assert_eq!(
+            patch.bumped[0].new_rev,
+            "2222222222222222222222222222222222222222"
+        );
 
         let out = FlakeLock::parse(&patch.edits[0].contents).unwrap();
         let node = &out.nodes["nixpkgs"];
-        assert_eq!(node.locked_rev().unwrap(), "2222222222222222222222222222222222222222");
+        assert_eq!(
+            node.locked_rev().unwrap(),
+            "2222222222222222222222222222222222222222"
+        );
         assert_eq!(
             node.locked.as_ref().unwrap()["narHash"].as_str().unwrap(),
             "sha256-NEW0000000000000000000000000000000000000000="
@@ -272,12 +296,21 @@ mod tests {
             nar_hash: "sha256-NEW0000000000000000000000000000000000000000=".into(),
             last_modified: 1800000000,
         };
-        let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::from([("nixpkgs".into(), resolved)])));
+        let lockgen =
+            FlakeLockGenerator::new(FakeResolver(HashMap::from([("nixpkgs".into(), resolved)])));
 
-        let patch = lockgen.produce(dir.path(), &["nixpkgs".into()]).await.unwrap().unwrap();
+        let patch = lockgen
+            .produce(dir.path(), &["nixpkgs".into()])
+            .await
+            .unwrap()
+            .unwrap();
         let out = FlakeLock::parse(&patch.edits[0].contents).unwrap();
         assert!(
-            !out.nodes["nixpkgs"].locked.as_ref().unwrap().contains_key("ref"),
+            !out.nodes["nixpkgs"]
+                .locked
+                .as_ref()
+                .unwrap()
+                .contains_key("ref"),
             "a previously poisoned github locked block must heal on the next bump"
         );
     }
@@ -322,10 +355,17 @@ mod tests {
             resolved,
         )])));
 
-        let patch = lockgen.produce(dir.path(), &["dep".into()]).await.unwrap().unwrap();
+        let patch = lockgen
+            .produce(dir.path(), &["dep".into()])
+            .await
+            .unwrap()
+            .unwrap();
         let out = FlakeLock::parse(&patch.edits[0].contents).unwrap();
         let locked = out.nodes["dep"].locked.as_ref().unwrap();
-        assert_eq!(locked["rev"].as_str().unwrap(), "2222222222222222222222222222222222222222");
+        assert_eq!(
+            locked["rev"].as_str().unwrap(),
+            "2222222222222222222222222222222222222222"
+        );
         assert_eq!(
             locked["ref"].as_str().unwrap(),
             "refs/heads/main",
@@ -344,10 +384,17 @@ mod tests {
             nar_hash: "sha256-OLD0000000000000000000000000000000000000000=".into(),
             last_modified: 1700000000,
         };
-        let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::from([("nixpkgs".into(), resolved)])));
+        let lockgen =
+            FlakeLockGenerator::new(FakeResolver(HashMap::from([("nixpkgs".into(), resolved)])));
 
-        let patch = lockgen.produce(dir.path(), &["nixpkgs".into()]).await.unwrap();
-        assert!(patch.is_none(), "no rev change must short-circuit to no patch");
+        let patch = lockgen
+            .produce(dir.path(), &["nixpkgs".into()])
+            .await
+            .unwrap();
+        assert!(
+            patch.is_none(),
+            "no rev change must short-circuit to no patch"
+        );
     }
 
     #[tokio::test]
@@ -356,7 +403,10 @@ mod tests {
         write_fixture(dir.path(), "1111111111111111111111111111111111111111");
 
         let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::new()));
-        let err = lockgen.produce(dir.path(), &["does-not-exist".into()]).await.unwrap_err();
+        let err = lockgen
+            .produce(dir.path(), &["does-not-exist".into()])
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("not a direct flake input"));
     }
 }

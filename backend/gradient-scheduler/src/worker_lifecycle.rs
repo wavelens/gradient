@@ -11,7 +11,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder};
+use sea_orm::{
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder,
+};
 use tracing::{debug, info, warn};
 
 use gradient_types::ids::OrganizationId;
@@ -46,7 +48,10 @@ pub(crate) async fn record_worker_sample(
     }
     .into_active_model();
 
-    if let Err(e) = gradient_entity::worker_sample::Entity::insert(sample).exec(db).await {
+    if let Err(e) = gradient_entity::worker_sample::Entity::insert(sample)
+        .exec(db)
+        .await
+    {
         warn!(error = %e, worker_id = %info.id, "failed to insert worker_sample");
     }
 }
@@ -67,7 +72,10 @@ impl Scheduler {
 
     /// Connected peers silent longer than `timeout_ms` as of `now_ms`.
     pub async fn stale_workers(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
-        self.worker_pool.read().await.stale_worker_ids(now_ms, timeout_ms)
+        self.worker_pool
+            .read()
+            .await
+            .stale_worker_ids(now_ms, timeout_ms)
     }
 
     pub async fn worker_authorized_for_org(&self, worker_id: &str, org: OrganizationId) -> bool {
@@ -261,7 +269,11 @@ impl Scheduler {
     pub async fn unregister_worker(&self, worker_id: &str) {
         self.close_worker_connection(worker_id).await;
         let orphaned = self.worker_pool.write().await.unregister(worker_id);
-        let requeued = self.job_tracker.write().await.worker_disconnected(worker_id);
+        let requeued = self
+            .job_tracker
+            .write()
+            .await
+            .worker_disconnected(worker_id);
         let total = orphaned.len() + requeued.len();
         if total > 0 {
             info!(%worker_id, orphaned_jobs = total, "worker disconnected; jobs re-queued");
@@ -275,7 +287,9 @@ impl Scheduler {
         let _ = self
             .state
             .board_events
-            .send(crate::BoardEvent::WorkerDisconnected { worker_id: worker_id.to_owned() });
+            .send(crate::BoardEvent::WorkerDisconnected {
+                worker_id: worker_id.to_owned(),
+            });
         // A worker leaving may strand evaluations whose remaining builds
         // only it could service.
         if let Err(e) = self.reconcile_waiting_state().await {
@@ -296,7 +310,8 @@ impl Scheduler {
             .map(|w| (w.architectures, w.system_features))
             .collect();
         let draining = self.draining.load(std::sync::atomic::Ordering::Relaxed);
-        build::reconcile_waiting_state(&self.state, &caps, eval_capable, fetch_capable, draining).await
+        build::reconcile_waiting_state(&self.state, &caps, eval_capable, fetch_capable, draining)
+            .await
     }
 
     /// Snapshot of every connected worker for the Job Board (includes the

@@ -21,11 +21,11 @@
 //!   6. SELECT org_user membership (permission check)
 
 use gradient_entity::{ids::*, integration, organization_user, project, project_trigger};
+use gradient_test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
+use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::{ConcurrencyPolicy, ForgeType, SessionId, TriggerType};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 use serde_json::Value;
-use gradient_test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
-use gradient_test_support::web::{live_session, make_test_server, make_token};
 use uuid::Uuid;
 
 // ── Fixture helpers ────────────────────────────────────────────────────────────

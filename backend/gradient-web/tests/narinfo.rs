@@ -7,17 +7,17 @@
 //! Integration test: `.narinfo` handler serves metadata from DB rows only.
 
 use axum_test::TestServer;
-use gradient_storage::{EmailSender, NarStore};
-use gradient_types::ids::*;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use sea_orm::{DatabaseBackend, MockDatabase};
-use std::sync::Arc;
+use gradient_storage::{EmailSender, NarStore};
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::log_storage::NoopLogStorage;
 use gradient_test_support::prelude::test_cli;
-use uuid::Uuid;
+use gradient_types::ids::*;
 use gradient_web::create_router;
+use sea_orm::{DatabaseBackend, MockDatabase};
+use std::sync::Arc;
+use uuid::Uuid;
 
 // ── Fixture IDs ───────────────────────────────────────────────────────────────
 
@@ -147,7 +147,9 @@ async fn narinfo_served_from_db_inner() {
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: std::sync::Arc::new(
             gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),
@@ -288,7 +290,9 @@ async fn narinfo_unsigned_inner() {
     let nar_storage = NarStore::local(&cli.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(db),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config: std::sync::Arc::new(
             gradient_types::RuntimeConfig::from_cli(&cli).expect("valid test config"),

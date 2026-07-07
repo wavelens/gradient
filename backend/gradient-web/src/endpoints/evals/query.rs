@@ -9,9 +9,9 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
+use gradient_core::ServerState;
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, Order, QueryFilter, QueryOrder};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -303,8 +303,10 @@ pub async fn get_evaluation_builds(
 
     // Batch the latest-attempt lookup for the whole page (keyed by anchor); a
     // per-build query here is an N+1 that made large build lists take ~10s (#391).
-    let page_anchor_ids: Vec<DerivationBuildId> =
-        page_slice.iter().map(|(_, _, j, _)| j.derivation_build).collect();
+    let page_anchor_ids: Vec<DerivationBuildId> = page_slice
+        .iter()
+        .map(|(_, _, j, _)| j.derivation_build)
+        .collect();
     let attempts = gradient_db::latest_attempts(&state.web_db, &page_anchor_ids).await?;
 
     let mut page = Vec::with_capacity(page_slice.len());
@@ -312,8 +314,12 @@ pub async fn get_evaluation_builds(
         let drv = derivations
             .get(&j.derivation)
             .expect("derivation hydrated above");
-        let anchor = anchors.get(&j.derivation_build).expect("anchor hydrated above");
-        let build_time_ms = attempts.get(&j.derivation_build).and_then(|a| a.duration_ms());
+        let anchor = anchors
+            .get(&j.derivation_build)
+            .expect("anchor hydrated above");
+        let build_time_ms = attempts
+            .get(&j.derivation_build)
+            .and_then(|a| a.duration_ms());
 
         page.push(BuildItem {
             id: j.id,

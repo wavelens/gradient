@@ -42,7 +42,8 @@ pub fn dependency_closure_cte(
 /// `promote_dependents`) and the dispatch gate (`find_ready_anchors`) so a
 /// drift between them (a latent dead zone) is impossible by construction.
 pub fn deps_ready_predicate(alias: &str) -> String {
-    let terminal_success = crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS);
+    let terminal_success =
+        crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS);
     format!(
         r#"NOT EXISTS (
         SELECT 1 FROM derivation_dependency e
@@ -101,7 +102,10 @@ mod tests {
             "SELECT $1::uuid",
             ClosureDirection::Dependents,
         ));
-        assert!(cte.starts_with("WITH RECURSIVE dependents(derivation) AS"), "{cte}");
+        assert!(
+            cte.starts_with("WITH RECURSIVE dependents(derivation) AS"),
+            "{cte}"
+        );
         assert!(
             cte.contains("SELECT e.derivation FROM derivation_dependency e JOIN dependents c ON e.dependency = c.derivation"),
             "must walk dependents upward via the dependency edge: {cte}"
@@ -113,8 +117,14 @@ mod tests {
     #[test]
     fn dependencies_walk_downward() {
         let cte = norm(&eval_closure_cte());
-        assert!(cte.starts_with("WITH RECURSIVE closure(derivation) AS"), "{cte}");
-        assert!(cte.contains("SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1"), "{cte}");
+        assert!(
+            cte.starts_with("WITH RECURSIVE closure(derivation) AS"),
+            "{cte}"
+        );
+        assert!(
+            cte.contains("SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1"),
+            "{cte}"
+        );
         assert!(
             cte.contains("SELECT e.dependency FROM derivation_dependency e JOIN closure c ON e.derivation = c.derivation"),
             "must recurse toward dependencies: {cte}"
@@ -148,8 +158,14 @@ mod tests {
     #[test]
     fn reachable_cte_closes_over_roots_and_dependency_edges() {
         let cte = norm(&reachable_derivations_cte());
-        assert!(cte.contains("FROM entry_point"), "entry points are roots: {cte}");
-        assert!(cte.contains("FROM build_job"), "build_job derivations are roots: {cte}");
+        assert!(
+            cte.contains("FROM entry_point"),
+            "entry points are roots: {cte}"
+        );
+        assert!(
+            cte.contains("FROM build_job"),
+            "build_job derivations are roots: {cte}"
+        );
         assert!(
             cte.contains("SELECT e.dependency"),
             "recursion walks toward dependencies (the inputs a root needs): {cte}"

@@ -38,13 +38,25 @@ pub struct EvalArgs {
     pub inputs_unavailable_max_loops: u32,
     #[arg(long, env = "GRADIENT_BUILD_RETRY_BACKOFF_SECS", default_value = "30")]
     pub build_retry_backoff_secs: u64,
-    #[arg(long, env = "GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS", default_value = "14400")]
+    #[arg(
+        long,
+        env = "GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS",
+        default_value = "14400"
+    )]
     pub build_default_timeout_secs: u64,
-    #[arg(long, env = "GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS", default_value = "3600")]
+    #[arg(
+        long,
+        env = "GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS",
+        default_value = "3600"
+    )]
     pub build_default_max_silent_secs: u64,
     /// Name of the scheduler scoring policy (`simple`, `resource-aware`).
     /// Unknown names fall back to `resource-aware`.
-    #[arg(long, env = "GRADIENT_SCHEDULER_SCORING_POLICY", default_value = "resource-aware")]
+    #[arg(
+        long,
+        env = "GRADIENT_SCHEDULER_SCORING_POLICY",
+        default_value = "resource-aware"
+    )]
     pub scheduler_scoring_policy: String,
 }
 

@@ -106,8 +106,7 @@ pub(super) async fn instance_metrics_loop(scheduler: Arc<Scheduler>) {
             _ = cancel.cancelled() => return,
             _ = interval.tick() => {}
         }
-        let (active_builds, pending_builds) =
-            scheduler.job_tracker.read().await.instance_counts();
+        let (active_builds, pending_builds) = scheduler.job_tracker.read().await.instance_counts();
         let (total_workers, idle_workers) = scheduler.worker_pool.read().await.worker_counts();
         let counts = crate::instance::InstanceCounts {
             active_builds,
@@ -123,8 +122,11 @@ pub(super) async fn instance_metrics_loop(scheduler: Arc<Scheduler>) {
         .await;
         scheduler.instance.store(Arc::new(ctx));
 
-        let eval_history =
-            crate::instance::compute_eval_history(&scheduler.state.worker_db, gradient_types::now()).await;
+        let eval_history = crate::instance::compute_eval_history(
+            &scheduler.state.worker_db,
+            gradient_types::now(),
+        )
+        .await;
         scheduler.eval_history.store(Arc::new(eval_history));
     }
 }
@@ -153,6 +155,10 @@ pub(super) async fn worker_sample_loop(scheduler: Arc<Scheduler>) {
         let _ = scheduler
             .state
             .board_events
-            .send(crate::BoardEvent::QueueDepth { workers, pending, active });
+            .send(crate::BoardEvent::QueueDepth {
+                workers,
+                pending,
+                active,
+            });
     }
 }

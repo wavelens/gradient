@@ -11,18 +11,18 @@
 //! stays observably equivalent to the prior hand-built responses.
 
 use axum_test::TestServer;
-use gradient_storage::{EmailSender, NarStore};
-use gradient_types::{RuntimeConfig};
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use sea_orm::{DatabaseBackend, MockDatabase};
-use serde_json::Value;
-use std::sync::Arc;
+use gradient_storage::{EmailSender, NarStore};
 use gradient_test_support::cli::test_cli;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::log_storage::NoopLogStorage;
-use uuid::Uuid;
+use gradient_types::RuntimeConfig;
 use gradient_web::create_router;
+use sea_orm::{DatabaseBackend, MockDatabase};
+use serde_json::Value;
+use std::sync::Arc;
+use uuid::Uuid;
 
 /// Build a `ServerState` whose `jwt_secret_file` points at a real on-disk
 /// file - required because `load_secret` calls `process::exit(1)` if the
@@ -39,7 +39,9 @@ fn server() -> TestServer {
     let nar_storage = NarStore::local(&config.storage.base_path).expect("create test NarStore");
     let state = Arc::new(ServerState {
         web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-        cache_db: gradient_db::CacheDb::new(sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection()),
+        cache_db: gradient_db::CacheDb::new(
+            sea_orm::MockDatabase::new(sea_orm::DatabaseBackend::Postgres).into_connection(),
+        ),
         worker_db: WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
         config,
         log_storage: Arc::new(NoopLogStorage),

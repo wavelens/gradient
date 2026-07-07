@@ -12,10 +12,10 @@ use crate::permissions::CachePermission;
 use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
+use gradient_core::ServerState;
 use gradient_entity::cache_upstream::{CacheUpstreamKind, CacheUpstreamSource};
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -201,9 +201,7 @@ pub async fn put_cache_upstream(
             )
             .await?;
             if upstream.id == cache.id {
-                return Err(WebError::bad_request(
-                    "A cache cannot be its own upstream",
-                ));
+                return Err(WebError::bad_request("A cache cannot be its own upstream"));
             }
             let name = display_name.unwrap_or_else(|| upstream.display_name.clone());
             MCacheUpstream {

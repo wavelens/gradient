@@ -18,7 +18,9 @@ pub struct FairShareRule {
 
 impl Default for FairShareRule {
     fn default() -> Self {
-        Self { weight: crate::weights::FAIR_SHARE_WEIGHT }
+        Self {
+            weight: crate::weights::FAIR_SHARE_WEIGHT,
+        }
     }
 }
 
@@ -91,7 +93,12 @@ mod tests {
     }
 
     fn worker() -> WorkerContext<'static> {
-        WorkerContext { architectures: &[], system_features: &[], fetch: false, metrics: None }
+        WorkerContext {
+            architectures: &[],
+            system_features: &[],
+            fetch: false,
+            metrics: None,
+        }
     }
 
     #[test]
@@ -111,13 +118,21 @@ mod tests {
         let w = worker();
         let busy = ctx(&job, Some(1.0));
 
-        let saturated = InstanceContext { idle_workers: 0, total_workers: 4, ..Default::default() };
+        let saturated = InstanceContext {
+            idle_workers: 0,
+            total_workers: 4,
+            ..Default::default()
+        };
         assert!(
             rule.score(&busy, &w, &saturated) < 0.0,
             "a saturated cluster still rations a busy org"
         );
 
-        let spare = InstanceContext { idle_workers: 1, total_workers: 4, ..Default::default() };
+        let spare = InstanceContext {
+            idle_workers: 1,
+            total_workers: 4,
+            ..Default::default()
+        };
         assert_eq!(
             rule.score(&busy, &w, &spare),
             0.0,
@@ -130,8 +145,14 @@ mod tests {
         let rule = FairShareRule::default();
         let job = build_job();
         let w = worker();
-        assert_eq!(rule.score(&ctx(&job, Some(0.0)), &w, &InstanceContext::default()), 0.0);
-        assert_eq!(rule.score(&ctx(&job, None), &w, &InstanceContext::default()), 0.0);
+        assert_eq!(
+            rule.score(&ctx(&job, Some(0.0)), &w, &InstanceContext::default()),
+            0.0
+        );
+        assert_eq!(
+            rule.score(&ctx(&job, None), &w, &InstanceContext::default()),
+            0.0
+        );
     }
 
     // Among jobs with equal wait, the quieter org's job must score higher.
@@ -143,12 +164,23 @@ mod tests {
         let w = worker();
         let n = now();
 
-        let quiet = JobContext { ready_at: n, queued_at: n, ..ctx(&job, Some(0.0)) };
-        let busy = JobContext { ready_at: n, queued_at: n, ..ctx(&job, Some(1.0)) };
+        let quiet = JobContext {
+            ready_at: n,
+            queued_at: n,
+            ..ctx(&job, Some(0.0))
+        };
+        let busy = JobContext {
+            ready_at: n,
+            queued_at: n,
+            ..ctx(&job, Some(1.0))
+        };
 
         let inst = InstanceContext::default();
         let quiet_total = fair.score(&quiet, &w, &inst) + wait.score(&quiet, &w, &inst);
         let busy_total = fair.score(&busy, &w, &inst) + wait.score(&busy, &w, &inst);
-        assert!(quiet_total > busy_total, "at equal wait the quiet org wins: quiet={quiet_total} busy={busy_total}");
+        assert!(
+            quiet_total > busy_total,
+            "at equal wait the quiet org wins: quiet={quiet_total} busy={busy_total}"
+        );
     }
 }

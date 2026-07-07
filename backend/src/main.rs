@@ -14,7 +14,9 @@ use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberI
 
 /// Dependency targets pinned to `warn` so a plain `info` server log stays
 /// readable. `RUST_LOG` still overrides them.
-const NOISY_DEPS: &[&str] = &["hyper", "h2", "sqlx", "sea_orm", "tower", "reqwest", "rustls"];
+const NOISY_DEPS: &[&str] = &[
+    "hyper", "h2", "sqlx", "sea_orm", "tower", "reqwest", "rustls",
+];
 
 /// Build an `EnvFilter` directive from the global default, baked-in dependency
 /// noise suppression, and optional per-component overrides targeting the

@@ -440,14 +440,28 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
     let committed = match c.staged {
         Some(ref staged) => {
             commit_relayed(
-                &c.writer, &c.state, &c.scheduler, &c.peer_id, &c.job_id, &c.store_path, &c.hash,
-                &c.file_hash, c.file_size, staged,
+                &c.writer,
+                &c.state,
+                &c.scheduler,
+                &c.peer_id,
+                &c.job_id,
+                &c.store_path,
+                &c.hash,
+                &c.file_hash,
+                c.file_size,
+                staged,
             )
             .await
         }
         None => {
             commit_presigned(
-                &c.writer, &c.state, &c.scheduler, &c.peer_id, &c.job_id, &c.store_path, &c.hash,
+                &c.writer,
+                &c.state,
+                &c.scheduler,
+                &c.peer_id,
+                &c.job_id,
+                &c.store_path,
+                &c.hash,
                 c.file_size,
             )
             .await
@@ -491,7 +505,11 @@ async fn commit_relayed(
     file_size: u64,
     staged: &StagedNar,
 ) -> bool {
-    let (store, key, token) = (staged.store.clone(), staged.key.clone(), staged.token.clone());
+    let (store, key, token) = (
+        staged.store.clone(),
+        staged.key.clone(),
+        staged.token.clone(),
+    );
     let staged_len =
         tokio::task::spawn_blocking(move || store.received_len(&key, &token).unwrap_or(0))
             .await
@@ -918,8 +936,17 @@ mod nar_receive_store_tests {
         assert_ok(s.append(JOB, &a, 0, &[0u8; 256]).await);
         assert_ok(s.append(JOB, &a, 256, &[1u8; 256]).await);
         let staged = s.take_staged(JOB, &a).expect("direct stream is active");
-        assert!(s.take_staged(JOB, &a).is_none(), "take_staged must detach the stream");
-        assert_eq!(staged.store.received_len(&staged.key, &staged.token).unwrap(), 512);
+        assert!(
+            s.take_staged(JOB, &a).is_none(),
+            "take_staged must detach the stream"
+        );
+        assert_eq!(
+            staged
+                .store
+                .received_len(&staged.key, &staged.token)
+                .unwrap(),
+            512
+        );
         assert_eq!(staged.store.read_all(&staged.key).unwrap().len(), 512);
     }
 
@@ -1035,7 +1062,11 @@ mod nar_receive_store_tests {
         assert_ok(s.append(JOB, &a, 0, b"hello").await);
         s.finish(JOB, &a).await;
         assert!(s.take_staged(JOB, &a).is_none());
-        assert_eq!(s.note_header(JOB, &a, "").await, 0, "partial must be gone from disk");
+        assert_eq!(
+            s.note_header(JOB, &a, "").await,
+            0,
+            "partial must be gone from disk"
+        );
     }
 }
 

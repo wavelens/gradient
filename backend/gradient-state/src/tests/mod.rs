@@ -7,9 +7,9 @@
 mod fixtures;
 
 use super::{StateConfiguration, resolve_oidc_group_roles, resolve_scim_group_roles};
+use fixtures::{integration_cfg, reporter_cfg, worker_cfg};
 use gradient_types::triggers::ConcurrencyPolicy;
 use gradient_types::{OrganizationId, RoleId};
-use fixtures::{integration_cfg, reporter_cfg, worker_cfg};
 use std::collections::HashMap;
 
 #[test]
@@ -94,7 +94,10 @@ fn state_project_concurrency_defaults_to_soft_abort() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.projects["web"].concurrency, ConcurrencyPolicy::SoftAbort);
+    assert_eq!(
+        cfg.projects["web"].concurrency,
+        ConcurrencyPolicy::SoftAbort
+    );
 }
 
 #[test]
@@ -551,7 +554,10 @@ fn state_project_concurrency_hard_abort_round_trip() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.projects["web"].concurrency, ConcurrencyPolicy::HardAbort);
+    assert_eq!(
+        cfg.projects["web"].concurrency,
+        ConcurrencyPolicy::HardAbort
+    );
     assert_eq!(i16::from(cfg.projects["web"].concurrency), 0);
 }
 
@@ -608,7 +614,9 @@ fn base_worker_rejects_bad_authorize_against() {
     let v = cfg.validate();
     assert!(!v.is_valid);
     assert!(
-        v.errors.iter().any(|e| e.message.contains("authorize_against")),
+        v.errors
+            .iter()
+            .any(|e| e.message.contains("authorize_against")),
         "expected authorize_against error, got: {:?}",
         v.errors
     );
@@ -909,7 +917,10 @@ fn resolves_group_to_org_role_grants() {
     let org = OrganizationId::now_v7();
     let role = RoleId::now_v7();
     let mut role_ids = HashMap::new();
-    role_ids.insert(("acme".to_string(), "platform-admin".to_string()), (org, role));
+    role_ids.insert(
+        ("acme".to_string(), "platform-admin".to_string()),
+        (org, role),
+    );
     role_ids.insert(
         ("acme".to_string(), "viewer".to_string()),
         (org, RoleId::now_v7()),
@@ -943,7 +954,10 @@ fn resolves_scim_group_to_org_role_grants() {
     let org = OrganizationId::now_v7();
     let role = RoleId::now_v7();
     let mut role_ids = HashMap::new();
-    role_ids.insert(("acme".to_string(), "platform-admin".to_string()), (org, role));
+    role_ids.insert(
+        ("acme".to_string(), "platform-admin".to_string()),
+        (org, role),
+    );
     role_ids.insert(
         ("acme".to_string(), "viewer".to_string()),
         (org, RoleId::now_v7()),

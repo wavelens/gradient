@@ -7,10 +7,10 @@
 //! SCIM 2.0 (RFC 7643/7644) provisioning surface. Instance-level, bearer-token
 //! authenticated, mounted at `/scim/v2` only when SCIM is configured.
 
+pub mod discovery;
 mod dto;
 mod error;
 mod filter;
-pub mod discovery;
 pub mod groups;
 pub mod users;
 

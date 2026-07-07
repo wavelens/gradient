@@ -190,9 +190,15 @@ mod tests {
         let by = |pred: fn(BuildStatus) -> bool| -> Vec<BuildStatus> {
             BuildStatus::iter().filter(|s| pred(*s)).collect()
         };
-        assert_eq!(by(BuildStatus::is_terminal_failure), BuildStatus::TERMINAL_FAILURE);
+        assert_eq!(
+            by(BuildStatus::is_terminal_failure),
+            BuildStatus::TERMINAL_FAILURE
+        );
         assert_eq!(by(BuildStatus::is_failure), BuildStatus::FAILURE);
-        assert_eq!(by(BuildStatus::is_terminal_success), BuildStatus::TERMINAL_SUCCESS);
+        assert_eq!(
+            by(BuildStatus::is_terminal_success),
+            BuildStatus::TERMINAL_SUCCESS
+        );
         assert_eq!(
             by(|s| s.is_terminal_failure() || s == BuildStatus::Aborted),
             BuildStatus::REQUEUEABLE

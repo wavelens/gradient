@@ -8,16 +8,22 @@ use super::SourceError;
 use base64::{Engine, engine::general_purpose};
 
 pub fn encrypt_secret(secret_file: &str, plaintext: &str) -> Result<String, SourceError> {
-    let secret = gradient_types::input::load_secret_bytes(secret_file)
-        .map_err(|e| SourceError::FileRead { reason: e.to_string() })?;
+    let secret = gradient_types::input::load_secret_bytes(secret_file).map_err(|e| {
+        SourceError::FileRead {
+            reason: e.to_string(),
+        }
+    })?;
     let enc = crypter::encrypt_with_password(secret.expose(), plaintext.as_bytes())
         .ok_or(SourceError::CryptographicOperation)?;
     Ok(general_purpose::STANDARD.encode(enc))
 }
 
 pub fn decrypt_secret(secret_file: &str, blob_b64: &str) -> Result<String, SourceError> {
-    let secret = gradient_types::input::load_secret_bytes(secret_file)
-        .map_err(|e| SourceError::FileRead { reason: e.to_string() })?;
+    let secret = gradient_types::input::load_secret_bytes(secret_file).map_err(|e| {
+        SourceError::FileRead {
+            reason: e.to_string(),
+        }
+    })?;
     let raw = general_purpose::STANDARD
         .decode(blob_b64.trim())
         .map_err(|_| SourceError::CryptographicOperation)?;

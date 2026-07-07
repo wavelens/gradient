@@ -104,11 +104,18 @@ impl BuildContext {
         } else {
             None
         };
-        out.history.predicted_peak_ram_mb =
-            items.iter().map(|i| i.history.predicted_peak_ram_mb).max().unwrap_or(0);
+        out.history.predicted_peak_ram_mb = items
+            .iter()
+            .map(|i| i.history.predicted_peak_ram_mb)
+            .max()
+            .unwrap_or(0);
         out.history.oom_rate = items.iter().map(|i| i.history.oom_rate).fold(0.0, f32::max);
         out.history.avg_cpu_time_ms = items.iter().map(|i| i.history.avg_cpu_time_ms).sum();
-        out.history.build_time_ms = items.iter().map(|i| i.history.build_time_ms).max().unwrap_or(0);
+        out.history.build_time_ms = items
+            .iter()
+            .map(|i| i.history.build_time_ms)
+            .max()
+            .unwrap_or(0);
         out.history.avg_disk_bytes = items.iter().map(|i| i.history.avg_disk_bytes).sum();
         out.history.samples = items.iter().map(|i| i.history.samples).min().unwrap_or(0);
         out.derivations = items.iter().flat_map(|i| i.derivations.clone()).collect();
@@ -162,7 +169,14 @@ impl<'a> ScoredJob<'a> {
         fetch_flake: bool,
         history: HistoryPrediction,
     ) -> Self {
-        Self { job_id, org_id, kind: JobKindContext::Eval(EvalContext { fetch_flake, history }) }
+        Self {
+            job_id,
+            org_id,
+            kind: JobKindContext::Eval(EvalContext {
+                fetch_flake,
+                history,
+            }),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -249,8 +263,19 @@ mod tests {
 
     #[test]
     fn windowed_default_is_absent_and_fields_read_back() {
-        let w = Windowed { w5m: Some(1.0), w1h: Some(2.0), w24h: Some(3.0) };
-        assert_eq!(Windowed::default(), Windowed { w5m: None, w1h: None, w24h: None });
+        let w = Windowed {
+            w5m: Some(1.0),
+            w1h: Some(2.0),
+            w24h: Some(3.0),
+        };
+        assert_eq!(
+            Windowed::default(),
+            Windowed {
+                w5m: None,
+                w1h: None,
+                w24h: None
+            }
+        );
         assert_eq!(w.w1h, Some(2.0));
     }
 
@@ -258,11 +283,39 @@ mod tests {
     /// old `0.0 == absent` heuristic silently swapped in the fallback.
     #[test]
     fn windowed_or_falls_back_only_when_absent() {
-        assert_eq!(Windowed { w1h: Some(5.0), ..Default::default() }.w1h_or(9.0), 5.0);
-        assert_eq!(Windowed { w1h: Some(0.0), ..Default::default() }.w1h_or(9.0), 0.0);
+        assert_eq!(
+            Windowed {
+                w1h: Some(5.0),
+                ..Default::default()
+            }
+            .w1h_or(9.0),
+            5.0
+        );
+        assert_eq!(
+            Windowed {
+                w1h: Some(0.0),
+                ..Default::default()
+            }
+            .w1h_or(9.0),
+            0.0
+        );
         assert_eq!(Windowed::default().w1h_or(9.0), 9.0);
-        assert_eq!(Windowed { w24h: Some(7.0), ..Default::default() }.w24h_or(9.0), 7.0);
-        assert_eq!(Windowed { w24h: Some(0.0), ..Default::default() }.w24h_or(9.0), 0.0);
+        assert_eq!(
+            Windowed {
+                w24h: Some(7.0),
+                ..Default::default()
+            }
+            .w24h_or(9.0),
+            7.0
+        );
+        assert_eq!(
+            Windowed {
+                w24h: Some(0.0),
+                ..Default::default()
+            }
+            .w24h_or(9.0),
+            0.0
+        );
         assert_eq!(Windowed::default().w24h_or(9.0), 9.0);
     }
 

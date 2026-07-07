@@ -26,9 +26,7 @@ mod entity_aliases;
 mod io;
 mod nix_cache;
 
-pub use self::actions::{
-    ActionConfig, ActionType, PatchGeneratorKind, PrGranularity, VerifyGate,
-};
+pub use self::actions::{ActionConfig, ActionType, PatchGeneratorKind, PrGranularity, VerifyGate};
 pub use self::board_events::BoardEvent;
 pub use self::build_output_metadata::BuildOutputMetadata;
 pub use self::cached_path_info::CachedPathInfo;

@@ -159,7 +159,10 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     // would trust whose output is no longer fetchable, so its dependents stop
     // failing `InputsUnavailable` and the next eval rebuilds it.
     match gradient_db::demote_unbacked_trusted_outputs(&state.worker_db, &state.nar_storage).await {
-        Ok(n) if n > 0 => info!(reset = n, "Demoted trusted producers with unfetchable outputs"),
+        Ok(n) if n > 0 => info!(
+            reset = n,
+            "Demoted trusted producers with unfetchable outputs"
+        ),
         Ok(_) => {}
         Err(e) => error!(error = ?e, "Cache-trust reconcile failed"),
     }

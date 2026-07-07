@@ -10,20 +10,20 @@ use crate::authorization::{
 };
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use axum::Extension;
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Extension;
 
 use chrono::Duration;
 use email_address::EmailAddress;
+use gradient_core::ServerState;
 use gradient_storage::generate_verification_token;
 use gradient_types::consts::*;
 use gradient_types::input::{validate_display_name, validate_password, validate_username};
 use gradient_types::*;
-use gradient_core::ServerState;
 use password_auth::{generate_hash, verify_password};
 use rand::distr::{Alphanumeric, SampleString};
 use rand::seq::IndexedRandom;

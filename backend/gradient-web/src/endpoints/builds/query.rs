@@ -9,10 +9,10 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
+use gradient_core::ServerState;
 use gradient_db::latest_attempt_worker;
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
-use gradient_core::ServerState;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -69,7 +69,10 @@ pub async fn get_build(
         outputs.insert(output.name, path);
     }
 
-    let worker = latest_attempt_worker(&state.web_db, anchor.id).await.ok().flatten();
+    let worker = latest_attempt_worker(&state.web_db, anchor.id)
+        .await
+        .ok()
+        .flatten();
 
     let build_with_outputs = BuildWithOutputs {
         id: build_job.id,

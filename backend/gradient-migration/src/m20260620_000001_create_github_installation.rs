@@ -17,16 +17,32 @@ impl MigrationTrait for Migration {
                 Table::create()
                     .table(Alias::new("github_installation"))
                     .if_not_exists()
-                    .col(ColumnDef::new(Alias::new("id")).uuid().not_null().primary_key())
+                    .col(
+                        ColumnDef::new(Alias::new("id"))
+                            .uuid()
+                            .not_null()
+                            .primary_key(),
+                    )
                     .col(ColumnDef::new(Alias::new("organization")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("installation_id")).big_integer().not_null())
+                    .col(
+                        ColumnDef::new(Alias::new("installation_id"))
+                            .big_integer()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(Alias::new("account_login")).text().null())
                     .col(ColumnDef::new(Alias::new("created_by")).uuid().not_null())
-                    .col(ColumnDef::new(Alias::new("created_at")).timestamp().not_null())
+                    .col(
+                        ColumnDef::new(Alias::new("created_at"))
+                            .timestamp()
+                            .not_null(),
+                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk-github_installation-organization")
-                            .from(Alias::new("github_installation"), Alias::new("organization"))
+                            .from(
+                                Alias::new("github_installation"),
+                                Alias::new("organization"),
+                            )
                             .to(Alias::new("organization"), Alias::new("id"))
                             .on_delete(ForeignKeyAction::Cascade),
                     )
@@ -56,7 +72,11 @@ impl MigrationTrait for Migration {
             .alter_table(
                 Table::alter()
                     .table(Alias::new("integration"))
-                    .add_column(ColumnDef::new(Alias::new("github_installation")).uuid().null())
+                    .add_column(
+                        ColumnDef::new(Alias::new("github_installation"))
+                            .uuid()
+                            .null(),
+                    )
                     .to_owned(),
             )
             .await?;
@@ -93,7 +113,11 @@ impl MigrationTrait for Migration {
             .await?;
 
         manager
-            .drop_table(Table::drop().table(Alias::new("github_installation")).to_owned())
+            .drop_table(
+                Table::drop()
+                    .table(Alias::new("github_installation"))
+                    .to_owned(),
+            )
             .await
     }
 }

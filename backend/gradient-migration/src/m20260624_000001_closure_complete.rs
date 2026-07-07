@@ -105,8 +105,10 @@ impl MigrationTrait for Migration {
 
     async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let conn = manager.get_connection();
-        conn.execute_unprepared("ALTER TABLE derivation_build DROP COLUMN IF EXISTS closure_complete")
-            .await?;
+        conn.execute_unprepared(
+            "ALTER TABLE derivation_build DROP COLUMN IF EXISTS closure_complete",
+        )
+        .await?;
         conn.execute_unprepared("ALTER TABLE cached_path DROP COLUMN IF EXISTS closure_complete")
             .await?;
 

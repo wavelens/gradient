@@ -56,7 +56,9 @@ impl Scheduler {
                 .await;
             }
             Ok(None) => warn!(%derivation_build, "anchor not found for Building status update"),
-            Err(e) => warn!(error = %e, %derivation_build, "failed to fetch anchor for status update"),
+            Err(e) => {
+                warn!(error = %e, %derivation_build, "failed to fetch anchor for status update")
+            }
         }
     }
 
@@ -83,13 +85,25 @@ impl Scheduler {
                 }
             }
         };
-        build::handle_build_output(&self.state, &job, derivation_build, outputs, metrics, substituted).await
+        build::handle_build_output(
+            &self.state,
+            &job,
+            derivation_build,
+            outputs,
+            metrics,
+            substituted,
+        )
+        .await
     }
 
     // ── Job completion ────────────────────────────────────────────────────────
 
     pub async fn handle_job_completed(&self, worker_id: &str, job_id: &str) -> Result<()> {
-        let worker_idle = self.worker_pool.write().await.release_job(worker_id, job_id);
+        let worker_idle = self
+            .worker_pool
+            .write()
+            .await
+            .release_job(worker_id, job_id);
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
             Some(PendingJob::Eval(j)) => {
@@ -105,7 +119,8 @@ impl Scheduler {
                     return match store_path {
                         Some(path) => {
                             let follow_id = format!("eval:{}", j.evaluation_id);
-                            self.enqueue_eval_job(follow_id, j.cached_followup(path)).await;
+                            self.enqueue_eval_job(follow_id, j.cached_followup(path))
+                                .await;
                             info!(evaluation_id = %j.evaluation_id, "fetch complete; enqueued cached eval follow-up");
                             Ok(())
                         }
@@ -132,8 +147,7 @@ impl Scheduler {
                     .remove(&j.evaluation_id)
                     .unwrap_or_default()
                     .into_pending();
-                if let Err(e) =
-                    eval::flush_deferred_deps(&self.state, j.evaluation_id, edges).await
+                if let Err(e) = eval::flush_deferred_deps(&self.state, j.evaluation_id, edges).await
                 {
                     error!(error = %e, evaluation_id = %j.evaluation_id, "flush_deferred_deps failed");
                 }
@@ -167,7 +181,10 @@ impl Scheduler {
         kind: BuildFailureKind,
         missing_paths: &[String],
     ) -> Result<()> {
-        self.worker_pool.write().await.release_job(worker_id, job_id);
+        self.worker_pool
+            .write()
+            .await
+            .release_job(worker_id, job_id);
         let job = self.job_tracker.write().await.remove_active(job_id);
         match job {
             Some(PendingJob::Eval(j)) => {
@@ -175,8 +192,14 @@ impl Scheduler {
                 eval::handle_eval_job_failed(&self.state, j.evaluation_id, error).await
             }
             Some(PendingJob::Build(j)) => {
-                build::handle_build_job_failed(&self.state, j.derivation_build, error, kind, missing_paths)
-                    .await
+                build::handle_build_job_failed(
+                    &self.state,
+                    j.derivation_build,
+                    error,
+                    kind,
+                    missing_paths,
+                )
+                .await
             }
             None => {
                 warn!(%job_id, "job_failed for unknown job");

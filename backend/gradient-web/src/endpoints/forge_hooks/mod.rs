@@ -19,6 +19,7 @@ mod trigger;
 
 pub use response::{QueuedEvaluation, SkippedProject, WebhookResponse, WebhookTriggerOutcome};
 
+use crate::ip_allowlist::is_allowed as ip_allowed;
 use axum::Extension;
 use axum::Json;
 use axum::body::Bytes;
@@ -26,13 +27,12 @@ use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use gradient_ci::actions::decrypt_secret_with_file;
 use gradient_ci::{IntegrationKind, verify_github_signature};
-use gradient_types::ForgeType;
+use gradient_core::ServerState;
 use gradient_forge::WebhookEventKind;
-use crate::ip_allowlist::is_allowed as ip_allowed;
+use gradient_scheduler::Scheduler;
+use gradient_types::ForgeType;
 use gradient_types::input::load_secret;
 use gradient_types::*;
-use gradient_core::ServerState;
-use gradient_scheduler::Scheduler;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -421,8 +421,7 @@ pub async fn forge_webhook(
         let peer_ip = peer
             .map(|p| p.ip())
             .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
-        let client_ip =
-            resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
+        let client_ip = resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
         if !ip_allowed(client_ip, &allowlist) {
             warn!(
                 org = %org_name,

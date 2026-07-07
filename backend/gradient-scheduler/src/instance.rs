@@ -23,11 +23,7 @@ pub struct InstanceCounts {
 /// Build a [`gradient_score::Windowed`] from a 5m/1h/24h column triple.
 /// `None` (SQL NULL: no samples in the window) stays `None` - a window with no
 /// data must be distinguishable from a measured zero.
-fn windowed(
-    w5m: Option<f64>,
-    w1h: Option<f64>,
-    w24h: Option<f64>,
-) -> gradient_score::Windowed {
+fn windowed(w5m: Option<f64>, w1h: Option<f64>, w24h: Option<f64>) -> gradient_score::Windowed {
     gradient_score::Windowed { w5m, w1h, w24h }
 }
 
@@ -175,7 +171,11 @@ pub async fn compute_instance_context(
 
     gradient_score::InstanceContext {
         wait_secs: windowed(dispatch.wait_5m, dispatch.wait_1h, dispatch.wait_24h),
-        build_time_ms: windowed(metric.build_time_5m, metric.build_time_1h, metric.build_time_24h),
+        build_time_ms: windowed(
+            metric.build_time_5m,
+            metric.build_time_1h,
+            metric.build_time_24h,
+        ),
         peak_ram_mb: windowed(metric.peak_ram_5m, metric.peak_ram_1h, metric.peak_ram_24h),
         cpu_time_ms: windowed(metric.cpu_time_5m, metric.cpu_time_1h, metric.cpu_time_24h),
         avg_cpu_pct: windowed(metric.cpu_pct_5m, metric.cpu_pct_1h, metric.cpu_pct_24h),
@@ -186,7 +186,11 @@ pub async fn compute_instance_context(
         nar_size_mb: windowed(dispatch.nar_5m, dispatch.nar_1h, dispatch.nar_24h),
         missing_paths: windowed(dispatch.miss_5m, dispatch.miss_1h, dispatch.miss_24h),
         dependency_cnt: windowed(dispatch.dep_5m, dispatch.dep_1h, dispatch.dep_24h),
-        completed: windowed(Some(metric.completed_5m), Some(metric.completed_1h), Some(metric.completed_24h)),
+        completed: windowed(
+            Some(metric.completed_5m),
+            Some(metric.completed_1h),
+            Some(metric.completed_24h),
+        ),
         active_builds: counts.active_builds,
         pending_builds: counts.pending_builds,
         total_workers: counts.total_workers,
@@ -235,11 +239,14 @@ pub async fn compute_eval_history(
 
     rows.into_iter()
         .map(|r| {
-            (r.project, gradient_score::HistoryPrediction {
-                predicted_peak_ram_mb: r.p95_ram.max(0.0) as u64,
-                samples: r.samples.max(0) as u32,
-                ..Default::default()
-            })
+            (
+                r.project,
+                gradient_score::HistoryPrediction {
+                    predicted_peak_ram_mb: r.p95_ram.max(0.0) as u64,
+                    samples: r.samples.max(0) as u32,
+                    ..Default::default()
+                },
+            )
         })
         .collect()
 }
@@ -257,23 +264,49 @@ mod tests {
     async fn maps_columns_and_counts_into_snapshot() {
         let f = |name: &str, v: f64| (name.to_owned(), Value::from(v));
         let metric: BTreeMap<String, Value> = [
-            f("peak_ram_5m", 100.0), f("peak_ram_1h", 200.0), f("peak_ram_24h", 300.0),
-            f("cpu_time_5m", 1.0), f("cpu_time_1h", 2.0), f("cpu_time_24h", 3.0),
-            f("cpu_pct_5m", 10.0), f("cpu_pct_1h", 20.0), f("cpu_pct_24h", 30.0),
-            f("disk_5m", 4.0), f("disk_1h", 5.0), f("disk_24h", 6.0),
-            f("network_5m", 7.0), f("network_1h", 8.0), f("network_24h", 9.0),
-            f("build_time_5m", 11.0), f("build_time_1h", 12.0), f("build_time_24h", 13.0),
-            f("closure_5m", 14.0), f("closure_1h", 15.0), f("closure_24h", 16.0),
-            f("oom_5m", 0.1), f("oom_1h", 0.2), f("oom_24h", 0.3),
-            f("completed_5m", 4.0), f("completed_1h", 40.0), f("completed_24h", 400.0),
+            f("peak_ram_5m", 100.0),
+            f("peak_ram_1h", 200.0),
+            f("peak_ram_24h", 300.0),
+            f("cpu_time_5m", 1.0),
+            f("cpu_time_1h", 2.0),
+            f("cpu_time_24h", 3.0),
+            f("cpu_pct_5m", 10.0),
+            f("cpu_pct_1h", 20.0),
+            f("cpu_pct_24h", 30.0),
+            f("disk_5m", 4.0),
+            f("disk_1h", 5.0),
+            f("disk_24h", 6.0),
+            f("network_5m", 7.0),
+            f("network_1h", 8.0),
+            f("network_24h", 9.0),
+            f("build_time_5m", 11.0),
+            f("build_time_1h", 12.0),
+            f("build_time_24h", 13.0),
+            f("closure_5m", 14.0),
+            f("closure_1h", 15.0),
+            f("closure_24h", 16.0),
+            f("oom_5m", 0.1),
+            f("oom_1h", 0.2),
+            f("oom_24h", 0.3),
+            f("completed_5m", 4.0),
+            f("completed_1h", 40.0),
+            f("completed_24h", 400.0),
         ]
         .into_iter()
         .collect();
         let dispatch: BTreeMap<String, Value> = [
-            f("wait_5m", 1.5), f("wait_1h", 2.5), f("wait_24h", 3.5),
-            f("nar_5m", 17.0), f("nar_1h", 18.0), f("nar_24h", 19.0),
-            f("miss_5m", 1.0), f("miss_1h", 2.0), f("miss_24h", 3.0),
-            f("dep_5m", 21.0), f("dep_1h", 22.0), f("dep_24h", 23.0),
+            f("wait_5m", 1.5),
+            f("wait_1h", 2.5),
+            f("wait_24h", 3.5),
+            f("nar_5m", 17.0),
+            f("nar_1h", 18.0),
+            f("nar_24h", 19.0),
+            f("miss_5m", 1.0),
+            f("miss_1h", 2.0),
+            f("miss_24h", 3.0),
+            f("dep_5m", 21.0),
+            f("dep_1h", 22.0),
+            f("dep_24h", 23.0),
         ]
         .into_iter()
         .collect();
@@ -291,7 +324,10 @@ mod tests {
         };
         let ic = compute_instance_context(&db, counts, gradient_types::now()).await;
 
-        assert_eq!(ic.peak_ram_mb, windowed(Some(100.0), Some(200.0), Some(300.0)));
+        assert_eq!(
+            ic.peak_ram_mb,
+            windowed(Some(100.0), Some(200.0), Some(300.0))
+        );
         assert_eq!(ic.build_time_ms.w1h, Some(12.0));
         assert_eq!(ic.completed.w24h, Some(400.0));
         assert_eq!(ic.wait_secs, windowed(Some(1.5), Some(2.5), Some(3.5)));
