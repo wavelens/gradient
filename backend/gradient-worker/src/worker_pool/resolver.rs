@@ -11,7 +11,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use gradient_db::{Derivation, parse_drv};
 use gradient_eval::ipc::ResolvedItem;
 use gradient_exec::path_utils::nix_store_path;
-use gradient_nix::{DerivationResolver, ResolvedDerivation};
+use gradient_nix::{DerivationResolver, FlakeDiscovery, ResolvedDerivation};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -351,7 +351,7 @@ impl WorkerPoolResolver {
         &self,
         repository: &str,
         wildcards: Vec<String>,
-    ) -> Result<(Vec<String>, Vec<String>)> {
+    ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
         let mut attempt = 0;
         loop {
             match self.list_once(repository, wildcards.clone()).await {
@@ -372,13 +372,13 @@ impl WorkerPoolResolver {
         &self,
         repository: &str,
         wildcards: Vec<String>,
-    ) -> Result<(Vec<String>, Vec<String>)> {
+    ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
         let bucket = self.bucket_of(wildcards.first());
         let mut worker = self.pool.acquire().await?;
         match worker.list(repository.to_string(), wildcards).await {
-            Ok((attrs, warnings, stats)) => {
+            Ok((attrs, warnings, errors, stats)) => {
                 self.finish_call(&mut worker, &bucket, stats);
-                Ok((attrs, warnings))
+                Ok((attrs, warnings, errors))
             }
             Err(e) => {
                 worker.mark_dead();
@@ -425,7 +425,7 @@ impl DerivationResolver for WorkerPoolResolver {
         &self,
         repository: String,
         wildcards: Vec<String>,
-    ) -> Result<(Vec<String>, Vec<String>)> {
+    ) -> Result<FlakeDiscovery> {
         // Record the user entry-points so the resolve pass can bucket by them.
         *self.patterns.lock().unwrap() = wildcards
             .iter()
@@ -438,7 +438,7 @@ impl DerivationResolver for WorkerPoolResolver {
         // whole flake is the call that blows past the RAM budget and never
         // returns; one shard per system keeps each worker within budget and lets
         // discovery advance (and persist) system-by-system.
-        let shards = {
+        let (shards, plan_errors) = {
             let mut worker = self.pool.acquire().await?;
             match worker.plan(repository.clone(), wildcards.clone()).await {
                 Ok(v) => v,
@@ -455,9 +455,13 @@ impl DerivationResolver for WorkerPoolResolver {
             "discovery split into per-system shards"
         );
 
-        // Nothing to fan out (a wildcard-free or single-child pattern): one pass.
+        // Nothing to fan out: one pass, plus the plan-phase errors.
         if shards.len() <= 1 {
-            return self.list_shard(&repository, wildcards).await;
+            let (attrs, warnings, mut errors) = self.list_shard(&repository, wildcards).await?;
+            errors.extend(plan_errors);
+            errors.sort_unstable();
+            errors.dedup();
+            return Ok(FlakeDiscovery { attrs, warnings, errors });
         }
 
         // Exact-path exclusions ride every shard; the final dedup mops up any
@@ -470,17 +474,19 @@ impl DerivationResolver for WorkerPoolResolver {
 
         let attrs = Mutex::new(Vec::<String>::new());
         let warnings = Mutex::new(Vec::<String>::new());
+        let errors = Mutex::new(plan_errors);
         {
             let repo = repository.as_str();
-            let (attrs, warnings, excludes) = (&attrs, &warnings, &excludes);
+            let (attrs, warnings, errors, excludes) = (&attrs, &warnings, &errors, &excludes);
             pooled_fan_out(self.pool.max(), shards, |shard| async move {
                 let mut pattern = Vec::with_capacity(1 + excludes.len());
                 pattern.push(shard);
                 pattern.extend_from_slice(excludes);
 
-                let (a, w) = self.list_shard(repo, pattern).await?;
+                let (a, w, e) = self.list_shard(repo, pattern).await?;
                 attrs.lock().unwrap().extend(a);
                 warnings.lock().unwrap().extend(w);
+                errors.lock().unwrap().extend(e);
                 Ok(())
             })
             .await?;
@@ -492,8 +498,11 @@ impl DerivationResolver for WorkerPoolResolver {
         let mut warnings = warnings.into_inner().unwrap();
         warnings.sort_unstable();
         warnings.dedup();
+        let mut errors = errors.into_inner().unwrap();
+        errors.sort_unstable();
+        errors.dedup();
 
-        Ok((attrs, warnings))
+        Ok(FlakeDiscovery { attrs, warnings, errors })
     }
 
     async fn resolve_derivation_paths(

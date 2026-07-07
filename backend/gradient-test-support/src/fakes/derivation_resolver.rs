@@ -7,7 +7,7 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use gradient_db::Derivation;
-use gradient_nix::{DerivationResolver, ResolvedDerivation};
+use gradient_nix::{DerivationResolver, FlakeDiscovery, ResolvedDerivation};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -19,6 +19,7 @@ use std::sync::Mutex;
 #[derive(Debug, Default)]
 pub struct FakeDerivationResolver {
     flake_attrs: Mutex<HashMap<String, Vec<String>>>,
+    flake_errors: Mutex<HashMap<String, Vec<String>>>,
     drv_paths: Mutex<HashMap<(String, String), String>>,
     derivations: Mutex<HashMap<String, Derivation>>,
     features: Mutex<HashMap<String, (String, Vec<String>)>>,
@@ -31,6 +32,11 @@ impl FakeDerivationResolver {
 
     pub fn with_flake_attrs(self, flake: impl Into<String>, attrs: Vec<String>) -> Self {
         self.flake_attrs.lock().unwrap().insert(flake.into(), attrs);
+        self
+    }
+
+    pub fn with_flake_errors(self, flake: impl Into<String>, errors: Vec<String>) -> Self {
+        self.flake_errors.lock().unwrap().insert(flake.into(), errors);
         self
     }
 
@@ -75,16 +81,24 @@ impl DerivationResolver for FakeDerivationResolver {
         &self,
         repository: String,
         _wildcards: Vec<String>,
-    ) -> Result<(Vec<String>, Vec<String>)> {
-        Ok((
-            self.flake_attrs
+    ) -> Result<FlakeDiscovery> {
+        Ok(FlakeDiscovery {
+            attrs: self
+                .flake_attrs
                 .lock()
                 .unwrap()
                 .get(&repository)
                 .cloned()
                 .unwrap_or_default(),
-            vec![],
-        ))
+            warnings: vec![],
+            errors: self
+                .flake_errors
+                .lock()
+                .unwrap()
+                .get(&repository)
+                .cloned()
+                .unwrap_or_default(),
+        })
     }
 
     async fn resolve_derivation_paths(

@@ -41,18 +41,19 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
             EvalRequest::Plan {
                 repository,
                 wildcards,
-            } => worker
-                .plan(repository, wildcards)
-                .await
-                .map(|sub_patterns| json!({"kind": "plan_ok", "sub_patterns": sub_patterns})),
+            } => worker.plan(repository, wildcards).await.map(
+                |(sub_patterns, errors)| {
+                    json!({"kind": "plan_ok", "sub_patterns": sub_patterns, "errors": errors})
+                },
+            ),
             EvalRequest::List {
                 repository,
                 wildcards,
             } => worker
                 .list(repository, wildcards)
                 .await
-                .map(|(attrs, warnings, _stats)| {
-                    json!({"kind": "list_ok", "attrs": attrs, "warnings": warnings})
+                .map(|(attrs, warnings, errors, _stats)| {
+                    json!({"kind": "list_ok", "attrs": attrs, "warnings": warnings, "errors": errors})
                 }),
             EvalRequest::Resolve { repository, attrs } => {
                 let (items, end) = worker.resolve(repository, attrs).await;

@@ -291,7 +291,7 @@ impl EvalWorker {
         &mut self,
         repository: String,
         wildcards: Vec<String>,
-    ) -> Result<Vec<String>> {
+    ) -> Result<(Vec<String>, Vec<String>)> {
         self.call(
             EvalRequest::Plan {
                 repository,
@@ -299,7 +299,7 @@ impl EvalWorker {
             },
             "Plan",
             |resp| match resp {
-                EvalResponse::PlanOk { sub_patterns } => Ok(sub_patterns),
+                EvalResponse::PlanOk { sub_patterns, errors } => Ok((sub_patterns, errors)),
                 other => Err(other),
             },
         )
@@ -310,7 +310,7 @@ impl EvalWorker {
         &mut self,
         repository: String,
         wildcards: Vec<String>,
-    ) -> Result<(Vec<String>, Vec<String>, Option<StatsDelta>)> {
+    ) -> Result<(Vec<String>, Vec<String>, Vec<String>, Option<StatsDelta>)> {
         self.call(
             EvalRequest::List {
                 repository,
@@ -321,8 +321,9 @@ impl EvalWorker {
                 EvalResponse::ListOk {
                     attrs,
                     warnings,
+                    errors,
                     stats,
-                } => Ok((attrs, warnings, stats)),
+                } => Ok((attrs, warnings, errors, stats)),
                 other => Err(other),
             },
         )

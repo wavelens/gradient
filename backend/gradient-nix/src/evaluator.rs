@@ -17,6 +17,16 @@ use async_trait::async_trait;
 /// Result of resolving one flake attribute path: `(attr_path, Result<(drv_path, references)>)`.
 pub type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
 
+/// Outcome of discovering a flake's derivation attr paths: the matched paths,
+/// nix warnings surfaced during the walk, and errors for attributes that threw
+/// (recorded, not fatal - the walk continues; the server fails the eval).
+#[derive(Debug, Default, Clone)]
+pub struct FlakeDiscovery {
+    pub attrs: Vec<String>,
+    pub warnings: Vec<String>,
+    pub errors: Vec<String>,
+}
+
 /// Evaluates flake-based Nix derivations. All methods are async; production
 /// impls run their work inside `tokio::task::spawn_blocking` to keep the
 /// embedded Nix C API off Tokio worker threads (Boehm GC vs. signal-blocked
@@ -24,12 +34,11 @@ pub type ResolvedDerivation = (String, Result<(String, Vec<String>)>);
 #[async_trait]
 pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
     /// Discover all attribute paths matching `wildcards` in the given flake.
-    /// Returns `(attr_paths, warnings)`.
     async fn list_flake_derivations(
         &self,
         repository: String,
         wildcards: Vec<String>,
-    ) -> Result<(Vec<String>, Vec<String>)>;
+    ) -> Result<FlakeDiscovery>;
 
     /// Resolve a batch of attribute paths into `(drv_path, references)` tuples.
     /// The result preserves the input order of `attrs`.

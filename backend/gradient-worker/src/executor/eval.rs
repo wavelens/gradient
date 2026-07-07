@@ -21,7 +21,7 @@ use crate::worker_pool::{WorkerPoolResolver, budgeted_pool_size};
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_db::parse_drv;
-use gradient_nix::DerivationResolver;
+use gradient_nix::{DerivationResolver, FlakeDiscovery};
 use gradient_proto::messages::{
     DerivationOutput, DiscoveredDerivation, EvalAttrCost, EvalStatsReport, FlakeJob,
     FlakeOutputNode, FlakeSource,
@@ -753,7 +753,11 @@ pub async fn evaluate_derivations_with(
 
     // ── Step 1: discover attr paths ──────────────────────────────────────────
     debug!(repo = %repo, "listing flake derivations");
-    let (attrs, mut warnings) = match resolver
+    let FlakeDiscovery {
+        attrs,
+        mut warnings,
+        mut errors,
+    } = match resolver
         .list_flake_derivations(repo.clone(), job.wildcards.clone())
         .await
     {
@@ -772,7 +776,9 @@ pub async fn evaluate_derivations_with(
 
     if attrs.is_empty() {
         warn!("no derivations found for evaluation");
-        let errors = unmatched_target_errors(&job.wildcards);
+        errors.extend(unmatched_target_errors(&job.wildcards));
+        errors.sort_unstable();
+        errors.dedup();
         updater.report_eval_result(vec![], warnings, errors).await?;
         return Ok(EvalOutcome {
             flake_nodes: Vec::new(),
@@ -799,23 +805,11 @@ pub async fn evaluate_derivations_with(
         };
     warnings.extend(resolve_warnings);
 
-    // An attr the user pinpointed exactly (no `*`/`#`) must surface a resolution
-    // failure; one that only matched a wildcard is silently skipped - a wildcard
-    // legitimately spans attrs that aren't buildable derivations (#419).
-    let explicit = explicit_attr_set(&job.wildcards);
-
     let mut root_drvs: Vec<(String, String)> = Vec::new();
-    let mut errors: Vec<String> = Vec::new();
     for (attr, result) in resolved {
         match result {
             Ok((drv_path, _refs)) => root_drvs.push((attr, drv_path)),
-            Err(e) if explicit.contains(&attr) => {
-                warn!(attr, error = %e, "failed to resolve explicitly requested attr");
-                errors.push(format!("failed to resolve {attr}: {e}"));
-            }
-            Err(e) => {
-                debug!(attr, error = %e, "skipping wildcard attr with no resolvable derivation");
-            }
+            Err(e) => errors.push(format!("failed to resolve {attr}: {e}")),
         }
     }
 
@@ -1239,6 +1233,52 @@ mod tests {
         // We should have bailed before sending an EvaluatingDerivations
         // status update, so the reporter records nothing.
         assert!(reporter.is_empty(), "reporter should not see any events");
+    }
+
+    #[tokio::test]
+    async fn wildcard_resolve_failure_is_reported() {
+        let repo = "https://example.com/repo";
+        // Attr is discovered but has no drv path - fake resolve returns Err.
+        // The job is a pure wildcard, so this is NOT an explicit target.
+        let resolver = FakeDerivationResolver::new().with_flake_attrs(repo, vec!["broken".into()]);
+        let drv_reader = FakeDrvReader::new();
+        let job = make_flake_job(repo); // wildcards: ["*"]
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
+            .await
+            .unwrap();
+
+        let ReportedEvent::EvalResult { errors, .. } = reporter.last_eval_result().unwrap() else {
+            panic!("expected an EvalResult");
+        };
+        assert!(
+            errors.iter().any(|e| e.contains("broken")),
+            "wildcard resolve failure must be surfaced: {errors:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn discovery_errors_reach_eval_result() {
+        let repo = "https://example.com/repo";
+        // No attrs discovered, but discovery recorded a thrown-attr diagnostic.
+        let resolver =
+            FakeDerivationResolver::new().with_flake_errors(repo, vec!["failed to evaluate 'x': boom".into()]);
+        let drv_reader = FakeDrvReader::new();
+        let job = make_flake_job(repo); // wildcard job, no unmatched-target noise
+        let mut reporter = RecordingJobReporter::new();
+
+        evaluate_derivations_with(&resolver, &drv_reader, &job, None, &mut reporter, &mut never_abort())
+            .await
+            .unwrap();
+
+        let ReportedEvent::EvalResult { errors, .. } = reporter.last_eval_result().unwrap() else {
+            panic!("expected an EvalResult");
+        };
+        assert!(
+            errors.iter().any(|e| e.contains("boom")),
+            "discovery errors must reach the server: {errors:?}"
+        );
     }
 
     #[tokio::test]
