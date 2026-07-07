@@ -133,13 +133,15 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 wildcards,
             } => with_evaluator(&evaluator, |ev| {
                 // Warnings from priming the prefix attrset resurface when each
-                // shard re-forces it, so they are not captured here.
+                // shard re-forces it, so they are not captured here; per-attr
+                // eval errors are, because a thrown shard root produces no shard
+                // for any later `List` to re-hit.
                 or_err(walkers.with(ev, &repository, |walker| {
-                    let shards = walker.plan_shards(&wildcards)?;
+                    let (shards, errors) = walker.plan_shards(&wildcards)?;
                     let _ = walker.commit_cache();
-                    Ok(shards)
+                    Ok((shards, errors))
                 })
-                .map(|sub_patterns| EvalResponse::PlanOk { sub_patterns }))
+                .map(|(sub_patterns, errors)| EvalResponse::PlanOk { sub_patterns, errors }))
             }),
             EvalRequest::List {
                 repository,
@@ -147,15 +149,16 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             } => with_evaluator(&evaluator, |ev| {
                 let (result, warnings) = capture_warnings_during(|| {
                     walkers.with(ev, &repository, |walker| {
-                        let attrs = walker.discover(&wildcards)?;
+                        let (attrs, errors) = walker.discover(&wildcards)?;
                         let _ = walker.commit_cache();
-                        Ok(attrs)
+                        Ok((attrs, errors))
                     })
                 });
                 let stats = take_delta(ev);
-                or_err(result.map(|attrs| EvalResponse::ListOk {
+                or_err(result.map(|(attrs, errors)| EvalResponse::ListOk {
                     attrs,
                     warnings,
+                    errors,
                     stats,
                 }))
             }),
@@ -327,7 +330,7 @@ fn send<W: Write>(w: &mut W, resp: &EvalResponse) -> std::io::Result<()> {
 
 fn response_kind(resp: &EvalResponse) -> String {
     match resp {
-        EvalResponse::PlanOk { sub_patterns } => format!("PlanOk({} shards)", sub_patterns.len()),
+        EvalResponse::PlanOk { sub_patterns, .. } => format!("PlanOk({} shards)", sub_patterns.len()),
         EvalResponse::ListOk { attrs, .. } => format!("ListOk({} attrs)", attrs.len()),
         EvalResponse::ResolveItem { item } => format!("ResolveItem({})", item.attr),
         EvalResponse::ResolveEnd { warnings, .. } => {

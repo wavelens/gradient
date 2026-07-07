@@ -8,9 +8,9 @@
 //!
 //! A [`FlakeWalker`] locks a flake once and opens its eval cache, then serves
 //! every discover/resolve call from the same warm cursor. [`CursorNode`] adapts
-//! an eval-cache [`AttrCursor`] to the pure [`WalkNode`] traversal, mirroring
-//! `eval.nix`'s `tryEval`/`safeGet` error tolerance: a cursor call that errors
-//! is treated as absent/empty/false so one bad attribute cannot abort discovery.
+//! an eval-cache [`AttrCursor`] to the pure [`WalkNode`] traversal; a cursor
+//! call that errors surfaces as `Err` so `wildcard_walk::traverse` can record
+//! and tolerate it, mirroring `eval.nix`'s `tryEval`/`safeGet` behaviour.
 
 use std::sync::Arc;
 
@@ -57,17 +57,17 @@ impl<'a> FlakeWalker<'a> {
         })
     }
 
-    pub fn discover(&self, wildcards: &[String]) -> Result<Vec<String>> {
+    pub fn discover(&self, wildcards: &[String]) -> Result<(Vec<String>, Vec<String>)> {
         let root = self.root()?;
 
-        wildcard_walk::discover_patterns(&root, wildcards)
+        Ok(wildcard_walk::discover_patterns(&root, wildcards))
     }
 
     /// Split the include patterns into disjoint sub-patterns for memory-bounded
     /// parallel discovery (one shard per first-wildcard child). Exclusions are
     /// dropped here; the caller re-attaches them to every shard so each worker's
     /// `discover` applies them.
-    pub fn plan_shards(&self, wildcards: &[String]) -> Result<Vec<String>> {
+    pub fn plan_shards(&self, wildcards: &[String]) -> Result<(Vec<String>, Vec<String>)> {
         let root = self.root()?;
         let includes: Vec<Vec<String>> = wildcards
             .iter()
@@ -76,10 +76,14 @@ impl<'a> FlakeWalker<'a> {
             .map(|(_, segs)| segs)
             .collect();
 
-        Ok(wildcard_walk::plan_shards(&root, &includes)?
-            .iter()
-            .map(|s| wildcard_walk::segments_to_pattern(s))
-            .collect())
+        let (shards, errors) = wildcard_walk::plan_shards(&root, &includes);
+        Ok((
+            shards
+                .iter()
+                .map(|s| wildcard_walk::segments_to_pattern(s))
+                .collect(),
+            errors,
+        ))
     }
 
     pub fn resolve(&self, attr_path: &str) -> Result<(String, Vec<String>)> {
@@ -154,36 +158,37 @@ struct CursorNode<'a> {
 }
 
 impl CursorNode<'_> {
-    fn has_attr(&self, name: &str) -> bool {
-        matches!(self.cursor.maybe_get_attr(name), Ok(Some(_)))
+    fn has_attr(&self, name: &str) -> Result<bool> {
+        Ok(self.cursor.maybe_get_attr(name)?.is_some())
     }
 }
 
 impl WalkNode for CursorNode<'_> {
     fn child_names(&self) -> Result<Vec<String>> {
-        Ok(self.cursor.attrs(self.state).unwrap_or_default())
+        self.cursor
+            .attrs(self.state)
+            .map_err(|e| anyhow!("listing attributes: {e}"))
     }
 
     fn child(&self, name: &str) -> Result<Option<Self>> {
-        match self.cursor.maybe_get_attr(name) {
-            Ok(Some(cursor)) => Ok(Some(CursorNode {
-                cursor,
-                state: self.state,
-            })),
-            _ => Ok(None),
-        }
+        Ok(self.cursor.maybe_get_attr(name)?.map(|cursor| CursorNode {
+            cursor,
+            state: self.state,
+        }))
     }
 
     fn is_derivation(&self) -> Result<bool> {
-        Ok(self.cursor.is_derivation().unwrap_or(false))
+        self.cursor
+            .is_derivation()
+            .map_err(|e| anyhow!("is_derivation: {e}"))
     }
 
     fn is_opaque(&self) -> Result<bool> {
         // eval.nix isOpaque: a typed attrset that is NOT a derivation.
-        if self.cursor.is_derivation().unwrap_or(false) {
+        if self.is_derivation()? {
             return Ok(false);
         }
 
-        Ok(self.has_attr("type") || self.has_attr("_type"))
+        Ok(self.has_attr("type")? || self.has_attr("_type")?)
     }
 }

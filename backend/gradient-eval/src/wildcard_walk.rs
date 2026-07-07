@@ -91,52 +91,58 @@ impl Sink<'_> {
     }
 }
 
-/// Walk `node` matching `segs`. `path` is the accumulated path to `node`.
-/// Literal segments recurse in both modes; at a wildcard segment discovery
-/// keeps walking while planning emits `path + residual` and stops, so a shard
-/// carries the unexpanded remainder for its own worker to force.
+/// Consume a `WalkNode` op result: on `Err` record a diagnostic naming the
+/// node's path and yield the tolerant fallback (`false`/`None`/`[]`), so one
+/// thrown attribute is reported without aborting the walk.
+fn tolerate<T: Default>(res: Result<T>, path: &[String], diags: &mut Vec<String>) -> T {
+    match res {
+        Ok(v) => v,
+        Err(e) => {
+            diags.push(format!("failed to evaluate '{}': {:#}", path.join("."), e));
+            T::default()
+        }
+    }
+}
+
 fn traverse<N: WalkNode>(
     node: &N,
     path: &[String],
     segs: &[String],
     sink: &mut Sink<'_>,
-) -> Result<()> {
+    diags: &mut Vec<String>,
+) {
     match segs.split_first() {
         None => match sink {
             Sink::Derivations(out) => {
-                if node.is_derivation()? {
+                if tolerate(node.is_derivation(), path, diags) {
                     out.push(path.join("."));
                 }
             }
             Sink::Shards(out) => out.push(path.to_vec()),
         },
         Some((seg, rest)) if seg == "*" => {
-            for name in node.child_names()? {
-                let Some(child) = node.child(&name)? else {
+            for name in tolerate(node.child_names(), path, diags) {
+                let mut p = path.to_vec();
+                p.push(name.clone());
+                let Some(child) = tolerate(node.child(&name), &p, diags) else {
                     continue;
                 };
-                let mut p = path.to_vec();
-                p.push(name);
 
                 if rest.is_empty() {
-                    if child.is_derivation()? {
+                    if tolerate(child.is_derivation(), &p, diags) {
                         sink.emit_leaf(p);
-                    } else if child.is_opaque()? {
+                    } else if tolerate(child.is_opaque(), &p, diags) {
                         continue;
                     } else {
-                        // Trailing `*` recovers the collapsed second level:
-                        // discovery enumerates derivation grandchildren now,
-                        // planning defers that to the shard via a `#` residual.
                         match sink {
                             Sink::Derivations(out) => {
-                                for sub in child.child_names()? {
-                                    let Some(gc) = child.child(&sub)? else {
+                                for sub in tolerate(child.child_names(), &p, diags) {
+                                    let mut q = p.clone();
+                                    q.push(sub.clone());
+                                    let Some(gc) = tolerate(child.child(&sub), &q, diags) else {
                                         continue;
                                     };
-
-                                    if gc.is_derivation()? {
-                                        let mut q = p.clone();
-                                        q.push(sub);
+                                    if tolerate(gc.is_derivation(), &q, diags) {
                                         out.push(q.join("."));
                                     }
                                 }
@@ -147,72 +153,69 @@ fn traverse<N: WalkNode>(
                             }
                         }
                     }
-                } else if child.is_opaque()? {
+                } else if tolerate(child.is_opaque(), &p, diags) {
                     continue;
                 } else {
-                    descend(&child, p, rest, sink)?;
+                    descend(&child, p, rest, sink, diags);
                 }
             }
         }
         Some((seg, rest)) if seg == "#" => {
-            for name in node.child_names()? {
-                let Some(child) = node.child(&name)? else {
+            for name in tolerate(node.child_names(), path, diags) {
+                let mut p = path.to_vec();
+                p.push(name.clone());
+                let Some(child) = tolerate(node.child(&name), &p, diags) else {
                     continue;
                 };
-                let mut p = path.to_vec();
-                p.push(name);
 
                 if rest.is_empty() {
-                    if child.is_derivation()? {
+                    if tolerate(child.is_derivation(), &p, diags) {
                         sink.emit_leaf(p);
                     }
                 } else {
-                    descend(&child, p, rest, sink)?;
+                    descend(&child, p, rest, sink, diags);
                 }
             }
         }
         Some((seg, rest)) => {
-            if let Some(child) = node.child(seg)? {
-                let mut p = path.to_vec();
-                p.push(seg.clone());
-                traverse(&child, &p, rest, sink)?;
+            let mut p = path.to_vec();
+            p.push(seg.clone());
+            if let Some(child) = tolerate(node.child(seg), &p, diags) {
+                traverse(&child, &p, rest, sink, diags);
             }
         }
     }
-
-    Ok(())
 }
 
-/// Past a wildcard: discovery recurses into the child, planning emits the
-/// shard `path + rest` so forcing beyond the first wildcard happens in the
-/// shard's own worker.
 fn descend<N: WalkNode>(
     child: &N,
     mut path: Vec<String>,
     rest: &[String],
     sink: &mut Sink<'_>,
-) -> Result<()> {
+    diags: &mut Vec<String>,
+) {
     match sink {
         Sink::Shards(out) => {
             path.extend_from_slice(rest);
             out.push(path);
-            Ok(())
         }
-        Sink::Derivations(_) => traverse(child, &path, rest, sink),
+        Sink::Derivations(_) => traverse(child, &path, rest, sink, diags),
     }
 }
 
 /// Discover all derivation attr paths matching `includes`, minus `excludes`
-/// (exact-path matches). `includes`/`excludes` are pre-parsed segment lists.
+/// (exact-path matches). Returns `(attr_paths, errors)` where `errors` are the
+/// deduped diagnostics for attributes that threw during the walk.
 pub fn discover<N: WalkNode>(
     root: &N,
     includes: &[Vec<String>],
     excludes: &[Vec<String>],
-) -> Result<Vec<String>> {
+) -> (Vec<String>, Vec<String>) {
     let mut out = Vec::new();
+    let mut diags = Vec::new();
     for inc in includes {
         let segs = collapse_stars(inc);
-        traverse(root, &[], &segs, &mut Sink::Derivations(&mut out))?;
+        traverse(root, &[], &segs, &mut Sink::Derivations(&mut out), &mut diags);
     }
 
     out.retain(|p| {
@@ -223,13 +226,16 @@ pub fn discover<N: WalkNode>(
     });
     out.sort();
     out.dedup();
+    diags.sort();
+    diags.dedup();
 
-    Ok(out)
+    (out, diags)
 }
 
-/// Discover from raw wildcard strings: parse each into include/exclude segment
-/// lists, then run [`discover`].
-pub fn discover_patterns<N: WalkNode>(root: &N, wildcards: &[String]) -> Result<Vec<String>> {
+pub fn discover_patterns<N: WalkNode>(
+    root: &N,
+    wildcards: &[String],
+) -> (Vec<String>, Vec<String>) {
     let mut includes = Vec::new();
     let mut excludes = Vec::new();
     for w in wildcards {
@@ -244,22 +250,20 @@ pub fn discover_patterns<N: WalkNode>(root: &N, wildcards: &[String]) -> Result<
     discover(root, &includes, &excludes)
 }
 
-/// Split `includes` into disjoint sub-patterns for memory-bounded, parallel
-/// discovery: descend each pattern's literal prefix, then expand its **first**
-/// wildcard into one concrete shard per matched child. The same [`traverse`]
-/// drives discovery, so the union of `discover` over the shards equals
-/// `discover` over the original pattern by construction. Forcing past the first
-/// wildcard is left to each shard's worker, so a `system`-level wildcard yields
-/// one shard per system, each sized to a single eval-worker's RAM budget. A
-/// wildcard-free pattern yields itself unchanged.
-pub fn plan_shards<N: WalkNode>(root: &N, includes: &[Vec<String>]) -> Result<Vec<Vec<String>>> {
+pub fn plan_shards<N: WalkNode>(
+    root: &N,
+    includes: &[Vec<String>],
+) -> (Vec<Vec<String>>, Vec<String>) {
     let mut shards = Vec::new();
+    let mut diags = Vec::new();
     for inc in includes {
         let segs = collapse_stars(inc);
-        traverse(root, &[], &segs, &mut Sink::Shards(&mut shards))?;
+        traverse(root, &[], &segs, &mut Sink::Shards(&mut shards), &mut diags);
     }
+    diags.sort();
+    diags.dedup();
 
-    Ok(shards)
+    (shards, diags)
 }
 
 /// Render shard segments back to a pattern string for the wire: `*`/`#` stay
@@ -286,6 +290,7 @@ mod tests {
     struct StubNode {
         derivation: bool,
         opaque: bool,
+        throws: bool,
         children: BTreeMap<String, StubNode>,
     }
 
@@ -294,6 +299,7 @@ mod tests {
             StubNode {
                 derivation: true,
                 opaque: false,
+                throws: false,
                 children: BTreeMap::new(),
             }
         }
@@ -302,6 +308,7 @@ mod tests {
             StubNode {
                 derivation: false,
                 opaque: false,
+                throws: false,
                 children: children
                     .into_iter()
                     .map(|(k, v)| (k.to_string(), v))
@@ -313,6 +320,15 @@ mod tests {
             StubNode {
                 opaque: true,
                 ..StubNode::set(children)
+            }
+        }
+
+        fn throwing() -> Self {
+            StubNode {
+                derivation: false,
+                opaque: false,
+                throws: true,
+                children: BTreeMap::new(),
             }
         }
     }
@@ -327,6 +343,9 @@ mod tests {
         }
 
         fn is_derivation(&self) -> Result<bool> {
+            if self.throws {
+                anyhow::bail!("boom");
+            }
             Ok(self.derivation)
         }
 
@@ -407,7 +426,7 @@ mod tests {
     #[test]
     fn discover_double_star_recovers_one_level() {
         let root = tree();
-        let got = discover(&&root, &[segs(&["packages", "*", "*"])], &[]).unwrap();
+        let got = discover(&&root, &[segs(&["packages", "*", "*"])], &[]).0;
         assert_eq!(
             got,
             vec![
@@ -421,7 +440,7 @@ mod tests {
     #[test]
     fn discover_hash_non_recursive() {
         let root = tree();
-        let got = discover(&&root, &[segs(&["packages", "x86_64-linux", "#"])], &[]).unwrap();
+        let got = discover(&&root, &[segs(&["packages", "x86_64-linux", "#"])], &[]).0;
         assert_eq!(
             got,
             vec![
@@ -434,7 +453,7 @@ mod tests {
     #[test]
     fn discover_literal() {
         let root = tree();
-        let got = discover(&&root, &[segs(&["packages", "x86_64-linux", "hello"])], &[]).unwrap();
+        let got = discover(&&root, &[segs(&["packages", "x86_64-linux", "hello"])], &[]).0;
         assert_eq!(got, vec!["packages.x86_64-linux.hello"]);
     }
 
@@ -446,7 +465,7 @@ mod tests {
             &[segs(&["packages", "*"])],
             &[segs(&["packages", "aarch64-linux", "hello"])],
         )
-        .unwrap();
+        .0;
         assert_eq!(
             got,
             vec![
@@ -459,7 +478,7 @@ mod tests {
     #[test]
     fn discover_checks_star() {
         let root = tree();
-        let got = discover(&&root, &[segs(&["checks", "*"])], &[]).unwrap();
+        let got = discover(&&root, &[segs(&["checks", "*"])], &[]).0;
         assert_eq!(got, vec!["checks.x86_64-linux.test"]);
     }
 
@@ -472,7 +491,7 @@ mod tests {
                 ("y", StubNode::set(vec![("leaf", StubNode::drv())])),
             ]),
         )]);
-        let got = discover(&&root, &[segs(&["top", "#", "leaf"])], &[]).unwrap();
+        let got = discover(&&root, &[segs(&["top", "#", "leaf"])], &[]).0;
         assert_eq!(got, vec!["top.x.leaf", "top.y.leaf"]);
     }
 
@@ -485,7 +504,7 @@ mod tests {
                 ("nested", StubNode::set(vec![("inner", StubNode::drv())])),
             ]),
         )]);
-        let got = discover(&&root, &[segs(&["top", "#"])], &[]).unwrap();
+        let got = discover(&&root, &[segs(&["top", "#"])], &[]).0;
         assert_eq!(got, vec!["top.a"]);
     }
 
@@ -500,7 +519,7 @@ mod tests {
                 ("sysB", StubNode::set(vec![("hello", StubNode::drv())])),
             ]),
         )]);
-        let got = discover(&&root, &[segs(&["packages", "*", "hello"])], &[]).unwrap();
+        let got = discover(&&root, &[segs(&["packages", "*", "hello"])], &[]).0;
         assert_eq!(got, vec!["packages.sysB.hello"]);
     }
 
@@ -513,32 +532,67 @@ mod tests {
                 ("optset", StubNode::opaque(vec![("b", StubNode::drv())])),
             ]),
         )]);
-        let got = discover(&&root, &[segs(&["top", "*", "*"])], &[]).unwrap();
+        let got = discover(&&root, &[segs(&["top", "*", "*"])], &[]).0;
         assert_eq!(got, vec!["top.realset.a"]);
     }
 
     #[test]
     fn discover_trailing_star_emits_derivation_child() {
         let root = StubNode::set(vec![("top", StubNode::set(vec![("d", StubNode::drv())]))]);
-        let got = discover(&&root, &[segs(&["top", "*"])], &[]).unwrap();
+        let got = discover(&&root, &[segs(&["top", "*"])], &[]).0;
         assert_eq!(got, vec!["top.d"]);
+    }
+
+    #[test]
+    fn traverse_records_thrown_attr_and_continues() {
+        let root = StubNode::set(vec![
+            ("ok", StubNode::drv()),
+            ("bad", StubNode::throwing()),
+        ]);
+        let (got, errors) = discover(&&root, &[segs(&["*"])], &[]);
+        assert_eq!(got, vec!["ok"], "sibling still discovered");
+        assert_eq!(errors.len(), 1, "one dedup'd diagnostic: {errors:?}");
+        assert!(
+            errors[0].contains("bad") && errors[0].contains("boom"),
+            "diagnostic names the attr and the nix error: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn traverse_records_full_dotted_path() {
+        let root = StubNode::set(vec![(
+            "packages",
+            StubNode::set(vec![(
+                "x86_64-linux",
+                StubNode::set(vec![
+                    ("hello", StubNode::drv()),
+                    ("broken", StubNode::throwing()),
+                ]),
+            )]),
+        )]);
+        let (got, errors) = discover(&&root, &[segs(&["packages", "x86_64-linux", "*"])], &[]);
+        assert_eq!(got, vec!["packages.x86_64-linux.hello"]);
+        assert!(
+            errors.iter().any(|e| e.contains("packages.x86_64-linux.broken")),
+            "path is the full dotted attr path: {errors:?}"
+        );
     }
 
     // ── plan_shards ──────────────────────────────────────────────────────────
 
     fn shards(root: &StubNode, pattern: &[&str]) -> Vec<Vec<String>> {
-        plan_shards(&root, &[segs(pattern)]).unwrap()
+        plan_shards(&root, &[segs(pattern)]).0
     }
 
     /// Discovering each shard and unioning must equal discovering the original
     /// pattern in one pass. One shared traversal makes this structural; a single
     /// behavioural test guards the emit-vs-descend split points.
     fn assert_split_equivalent(root: &StubNode, pattern: &[&str]) {
-        let original = discover(&root, &[segs(pattern)], &[]).unwrap();
+        let original = discover(&root, &[segs(pattern)], &[]).0;
 
         let mut union = Vec::new();
-        for shard in plan_shards(&root, &[segs(pattern)]).unwrap() {
-            union.extend(discover(&root, &[shard], &[]).unwrap());
+        for shard in plan_shards(&root, &[segs(pattern)]).0 {
+            union.extend(discover(&root, &[shard], &[]).0);
         }
         union.sort();
         union.dedup();
@@ -630,7 +684,7 @@ mod tests {
             &&root,
             &[segs(&["packages", "*", "*"]), segs(&["checks", "*", "*"])],
         )
-        .unwrap();
+        .0;
         assert_eq!(
             got,
             vec![

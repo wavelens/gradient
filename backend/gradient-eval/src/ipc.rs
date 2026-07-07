@@ -34,7 +34,7 @@ use crate::stats::StatsDelta;
 /// changes. Parent and subprocess are the same re-exec'd binary, so a mismatch
 /// only happens when the binary is replaced mid-run; the handshake turns that
 /// from undecodable frames into one clear error.
-pub const EVAL_IPC_VERSION: u8 = 1;
+pub const EVAL_IPC_VERSION: u8 = 2;
 
 /// Upper bound on a single frame's payload. Far above any real message (a
 /// discovery response for a huge flake is a few MiB); its job is to turn a
@@ -82,10 +82,12 @@ pub enum EvalRequest {
 pub enum EvalResponse {
     PlanOk {
         sub_patterns: Vec<String>,
+        errors: Vec<String>,
     },
     ListOk {
         attrs: Vec<String>,
         warnings: Vec<String>,
+        errors: Vec<String>,
         stats: Option<StatsDelta>,
     },
     /// One resolved attr of an in-flight `Resolve`, streamed in request order.
@@ -233,10 +235,12 @@ mod tests {
         let responses = [
             EvalResponse::PlanOk {
                 sub_patterns: vec!["packages.x86_64-linux.#".into()],
+                errors: vec![],
             },
             EvalResponse::ListOk {
                 attrs: vec!["packages.x86_64-linux.hello".into()],
                 warnings: vec!["warning: insecure".into()],
+                errors: vec!["failed to evaluate 'packages.x86_64-linux.broken': boom".into()],
                 stats: Some(StatsDelta {
                     nr_thunks: 7,
                     gc_heap_size: 42,
