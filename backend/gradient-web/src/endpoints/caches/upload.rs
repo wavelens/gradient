@@ -123,6 +123,8 @@ pub async fn nars_upload(
     .await
     .map_err(WebError::from)?;
 
+    sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
+
     audit_record(
         &state.web_db,
         Some(user.id),
@@ -144,6 +146,28 @@ pub async fn nars_upload(
             "created": outcome.created,
         })),
     ))
+}
+
+/// Sign the freshly ingested path in place so its narinfo is servable
+/// immediately, rather than lagging until the periodic sweep runs.
+async fn sign_uploaded_path(
+    state: &ServerState,
+    narinfo: &NarinfoPart,
+    cached_path: gradient_types::ids::CachedPathId,
+) {
+    gradient_proto::signing::sign_cached_path(
+        &state.web_db,
+        &state.config.secrets.crypt_secret_file,
+        &state.config.server.serve_url,
+        gradient_proto::signing::SignRequest {
+            cached_path,
+            store_path: &narinfo.store_path,
+            nar_hash: &narinfo.nar_hash,
+            nar_size: narinfo.nar_size,
+            references: &narinfo.references,
+        },
+    )
+    .await;
 }
 
 #[derive(Deserialize)]
@@ -284,6 +308,8 @@ pub async fn nar_finalize(
     .await
     .map_err(WebError::from)?;
     let _ = store.discard(&key);
+
+    sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
 
     audit_record(
         &state.web_db,

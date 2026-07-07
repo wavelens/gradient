@@ -37,6 +37,7 @@ pub mod messages;
 pub mod outbound;
 pub mod server;
 pub mod session;
+pub mod signing;
 pub mod traits;
 
 #[cfg(test)]

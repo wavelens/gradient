@@ -13,7 +13,7 @@ gradient cache nar show <cache> <hash>
 gradient cache nar delete <cache> <hash> [-y]
 gradient cache nar stats <cache>
 gradient cache upload --nar-file <file.nar> --narinfo <file.narinfo> <cache>
-gradient cache upload [--full-closure] <store-path>... <cache>   # nix feature only
+gradient cache upload [--no-closure] <store-path>... <cache>   # nix feature only
 ```
 
 `gradient cache nar list` is paginated. Default page size is 50, max 200.
@@ -46,18 +46,19 @@ store path, NAR hash, NAR size, and references before submitting.
 
 When the CLI is built with the `nix` feature, store paths can be uploaded
 directly from the local Nix daemon. Each path is resolved via harmonia,
-NAR-dumped, and uploaded in one step.
+NAR-dumped, zstd-compressed, and uploaded in one step.
 
 ```sh
-# Upload a single store path
+# Upload a store path together with its full runtime closure (default)
 gradient cache upload /nix/store/abc123-hello-2.12.1 my-cache
 
-# Upload the full runtime reference closure of every listed path
-gradient cache upload --full-closure /nix/store/abc123-hello-2.12.1 my-cache
+# Upload only the listed paths, skipping their runtime closure
+gradient cache upload --no-closure /nix/store/abc123-hello-2.12.1 my-cache
 ```
 
-`--full-closure` walks the runtime reference closure of each given path and
-uploads every reachable path in dependency order.
+By default each given path's full runtime reference closure is walked and every
+reachable path is uploaded in dependency order. Pass `--no-closure` to upload
+only the paths named on the command line.
 
 ### Size cap
 

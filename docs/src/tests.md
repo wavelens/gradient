@@ -6065,3 +6065,26 @@ commit identity is chosen:
   configured identity is used only when both `GRADIENT_PR_COMMIT_NAME` and
   `GRADIENT_PR_COMMIT_EMAIL` are non-empty; otherwise it falls back to
   forge-default attribution.
+
+## `gradient cache upload`: compression, eager signing, closure default (#506/#507/#509)
+
+`gradient cache upload <store-path>` streamed the raw NAR but recorded it as the
+narinfo `FileHash`/`FileSize` and uploaded it uncompressed, so the worker's zstd
+import failed with "Unknown frame descriptor" (#509). It also never signed the
+path in place, so its narinfo 404'd until the periodic sweep ran. Uploads now
+zstd-compress the NAR (level 6, matching the server source NAR and worker
+`NarPush`), key `FileHash`/`FileSize` off the compressed bytes, and the REST
+upload endpoints sign the path via the shared `gradient_proto::signing`
+(extracted from the worker `NarPush` handler). The closure flag was inverted:
+the full runtime closure now uploads by default and `--no-closure` restricts to
+the listed paths (#506); progress renders one in-place line per path with
+consistent `Uploading`/`Uploaded` casing (#507).
+
+- `gradient-cli` `commands::cache_upload_nix::tests` -
+  `compress_nar_round_trips_and_hashes_compressed_bytes`: the uploaded bytes are
+  zstd (not the raw NAR), decompress back to the NAR, and `FileHash` is the
+  `sha256:` SRI of the compressed bytes.
+- `gradient-cache` NixOS VM test **Phase 9** (see
+  [Integration Tests](development/tests.md#integration-tests)) uploads a unique
+  store path and realizes it on a client locked to the gradient cache, exercising
+  both the compression and eager-signing fixes end-to-end.

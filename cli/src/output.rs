@@ -6,7 +6,7 @@
 
 use connector::ConnectorError;
 use serde::Serialize;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::process::exit;
 
 #[derive(Clone, Copy)]
@@ -62,6 +62,35 @@ impl Output {
         if !self.json {
             eprintln!("{}", msg);
         }
+    }
+
+    /// Draw a transient status line that a following `step_done` overwrites in
+    /// place. On a non-TTY (piped/CI) the transient line is skipped entirely so
+    /// logs stay one clean line per step.
+    pub fn step_start(&self, msg: impl std::fmt::Display) {
+        if self.json {
+            return;
+        }
+        let mut err = io::stderr();
+        if err.is_terminal() {
+            let _ = write!(err, "\r\x1b[K{msg}");
+            let _ = err.flush();
+        }
+    }
+
+    /// Finalize the current step: overwrite the transient line on a TTY, or emit
+    /// a plain line otherwise. Either way the step ends on its own newline.
+    pub fn step_done(&self, msg: impl std::fmt::Display) {
+        if self.json {
+            return;
+        }
+        let mut err = io::stderr();
+        if err.is_terminal() {
+            let _ = write!(err, "\r\x1b[K{msg}\n");
+        } else {
+            let _ = writeln!(err, "{msg}");
+        }
+        let _ = err.flush();
     }
 
     pub fn err(&self, kind: ExitKind, msg: impl std::fmt::Display) -> ! {

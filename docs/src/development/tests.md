@@ -1763,6 +1763,12 @@ authentication flow that workers use to connect to the server:
 3. Worker's `peersFile` contains `*:{token}` (wildcard matches any org UUID)
 4. On boot, worker authenticates via challenge-response with the pre-shared token
 5. Test asserts `"handshake successful"` in journalctl before proceeding to builds
+6. **Phase 9 (`gradient cache upload`, regression #509)**: adds a unique leaf path
+   to the server store, uploads it with `gradient cache upload main <path>`
+   (default = runtime closure, zstd-compressed, signed in place), then realizes it
+   on the client whose substituters are locked to the gradient cache. A raw
+   (uncompressed) NAR would fail the client's zstd import and an unsigned narinfo
+   would fail its signature check, so the realize passing proves both fixes.
 
 **`gradient-api`** - Worker registration CRUD:
 - Tests `POST /api/v1/orgs/{org}/workers` returns a valid 64-character base64 token

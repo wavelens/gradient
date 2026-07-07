@@ -25,9 +25,10 @@ pub struct UploadArgs {
     /// Narinfo metadata file describing --nar-file.
     #[arg(long)]
     pub narinfo: Option<PathBuf>,
-    /// Upload the full runtime closure of each store path (nix feature only).
+    /// Upload only the given store paths, skipping their runtime closure
+    /// (nix feature only). By default the full runtime closure is uploaded.
     #[arg(long)]
-    pub full_closure: bool,
+    pub no_closure: bool,
 }
 
 pub async fn handle(args: UploadArgs, out: Output) {
@@ -46,7 +47,10 @@ pub async fn handle(args: UploadArgs, out: Output) {
     }
 
     if args.paths.is_empty() {
-        out.err(ExitKind::Usage, "provide store path(s) or --nar-file/--narinfo");
+        out.err(
+            ExitKind::Usage,
+            "provide store path(s) or --nar-file/--narinfo",
+        );
     }
 
     #[cfg(not(feature = "nix"))]
@@ -72,6 +76,15 @@ fn store_hash_of(store_path: &str) -> &str {
 }
 
 pub(crate) async fn upload_one_owned(cache: &str, ni: Narinfo, bytes: Vec<u8>, out: Output) {
+    let store_path = ni.store_path.clone();
+    upload_bytes(cache, ni, bytes, out).await;
+    out.human(format!("Uploaded {store_path}"));
+}
+
+/// Chunk-upload `bytes` and finalize against `ni`, emitting the machine-readable
+/// success line but no human summary - the caller owns human progress output so
+/// closure uploads can render one updating line per path.
+pub(crate) async fn upload_bytes(cache: &str, ni: Narinfo, bytes: Vec<u8>, out: Output) {
     let client = client_from_config(out);
     let store_path = ni.store_path.clone();
     let store_hash = store_hash_of(&store_path).to_string();
@@ -90,7 +103,11 @@ pub(crate) async fn upload_one_owned(cache: &str, ni: Narinfo, bytes: Vec<u8>, o
     while offset < total {
         let end = (offset as usize + UPLOAD_CHUNK_SIZE).min(bytes.len());
         let chunk = bytes[offset as usize..end].to_vec();
-        match client.caches().nar_upload_chunk(cache, &store_hash, offset, chunk).await {
+        match client
+            .caches()
+            .nar_upload_chunk(cache, &store_hash, offset, chunk)
+            .await
+        {
             Ok(received) if received > offset => offset = received,
             Ok(received) => out.err(
                 ExitKind::Api,
@@ -100,11 +117,12 @@ pub(crate) async fn upload_one_owned(cache: &str, ni: Narinfo, bytes: Vec<u8>, o
         }
     }
 
-    match client.caches().nar_upload_finalize(cache, &store_hash, payload).await {
-        Ok(()) => {
-            out.ok(&serde_json::json!({"uploaded": true, "store_path": store_path}));
-            out.human(format!("Uploaded {store_path}"));
-        }
+    match client
+        .caches()
+        .nar_upload_finalize(cache, &store_hash, payload)
+        .await
+    {
+        Ok(()) => out.ok(&serde_json::json!({"uploaded": true, "store_path": store_path})),
         Err(e) => out.err(to_exit_kind(&e), e),
     }
 }
@@ -119,6 +137,9 @@ mod tests {
             store_hash_of("/nix/store/bnq5n76hrfr50l5s2hbbg9vw32fvcrbc-linux-rpi-6.12.75-1+rpt1"),
             "bnq5n76hrfr50l5s2hbbg9vw32fvcrbc"
         );
-        assert_eq!(store_hash_of("bnq5n76hrfr50l5s2hbbg9vw32fvcrbc-hello"), "bnq5n76hrfr50l5s2hbbg9vw32fvcrbc");
+        assert_eq!(
+            store_hash_of("bnq5n76hrfr50l5s2hbbg9vw32fvcrbc-hello"),
+            "bnq5n76hrfr50l5s2hbbg9vw32fvcrbc"
+        );
     }
 }

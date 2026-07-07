@@ -118,8 +118,9 @@ gradient cache nar stats <cache>
 # Upload a pre-dumped NAR (no Nix required)
 gradient cache upload --nar-file <file.nar> --narinfo <file.narinfo> <cache>
 
-# Upload from the local Nix store (nix feature only)
-gradient cache upload [--full-closure] <store-path>... <cache>
+# Upload from the local Nix store, with the full runtime closure (nix feature only).
+# Pass --no-closure to upload only the listed paths.
+gradient cache upload [--no-closure] <store-path>... <cache>
 ```
 
 Deleting a NAR is ref-counted: if the NAR is signed by more than one cache,

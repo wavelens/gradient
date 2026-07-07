@@ -498,6 +498,29 @@ in {
       print(client.succeed(f"nix-store -vvv --realize {store_path}"))
       print(client.succeed(f"ls {store_path}"))
 
+      # ── Phase 9: `gradient cache upload` compresses + signs (regression #509) ─
+      # Add a unique leaf path to the server store and upload it with the CLI:
+      # the default uploads the runtime closure, zstd-compressed, and the server
+      # signs it in place. The client (substituters locked to the gradient cache)
+      # then realizes it. A raw/uncompressed NAR fails the client's zstd import
+      # ("Unknown frame descriptor"); an unsigned narinfo fails its signature
+      # check. Both fixes must hold for realize to succeed.
+      banner("Phase 9: gradient cache upload compresses + signs (#509)")
+      server.succeed("echo gradient-upload-regression-509 > /tmp/upload-probe.txt")
+      upload_path = server.succeed("nix-store --add /tmp/upload-probe.txt").strip()
+      upload_hash = upload_path.split("-")[0].replace("/nix/store/", "")
+      print(f"Uploading probe path: {upload_path}")
+      print(server.succeed(f"{CLI} cache upload main {upload_path}"))
+
+      client.wait_until_succeeds(
+          f"{CURL} -sf {CACHE}/{upload_hash}.narinfo -o /dev/null", timeout=60
+      )
+      print(client.succeed(f"{CURL} {CACHE}/{upload_hash}.narinfo -i --fail"))
+
+      client.fail(f"ls {upload_path}")
+      print(client.succeed(f"nix-store -vvv --realize {upload_path}"))
+      print(client.succeed(f"ls {upload_path}"))
+
       banner("Cache test PASSED")
       '';
   });
