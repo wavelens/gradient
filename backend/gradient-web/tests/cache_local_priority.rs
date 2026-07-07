@@ -84,7 +84,6 @@ fn build_server(cache: gradient_entity::cache::Model, peer: &str) -> TestServer 
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
-        sign_signal: std::sync::Arc::new(tokio::sync::Notify::new()),
     });
 
     let peer_addr: SocketAddr = format!("{peer}:0").parse().expect("valid peer addr");

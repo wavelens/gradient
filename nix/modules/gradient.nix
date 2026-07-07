@@ -701,7 +701,7 @@ in {
         };
 
         signSweepIntervalSecs = lib.mkOption {
-          description = "Interval in seconds between NAR signature backfill sweeps. NARs are signed on arrival (the sweep is woken the moment one is committed), so this is only a fallback for subscription placeholders and periodic backfill.";
+          description = "Interval in seconds between NAR signature backfill sweeps. A freshly uploaded NAR is signed in place by the upload handler, so this is only a fallback for subscription placeholders and any row left unsigned.";
           type = lib.types.ints.positive;
           default = 3600;
         };

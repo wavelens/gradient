@@ -477,9 +477,9 @@ in {
       banner("Phase 7: cache serves nix-cache-info and the narinfo")
       print(client.succeed(f"{CURL} {CACHE}/nix-cache-info -i --fail"))
 
-      # The sign-sweep loop ticks every 60 s; the freshly-built hello path
-      # may not have a signature row yet, in which case the cache returns
-      # 404. Poll up to 120 s for the signature to land.
+      # A freshly cached path is signed in place on upload, but the commit runs
+      # on a detached task, so the signature may lag the build's completion by a
+      # moment (or fall back to the periodic sweep). Poll up to 120 s for it.
       for sig_attempt in range(1, 25):
           rc, _ignored = client.execute(f"{CURL} -sf {CACHE}/{store_hash}.narinfo -o /dev/null")
           if rc == 0:

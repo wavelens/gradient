@@ -89,10 +89,10 @@ pub struct StorageArgs {
         default_value_t = 3600
     )]
     pub cache_maintenance_interval_secs: u64,
-    /// Interval in seconds between NAR signature backfill sweeps. NARs are signed
-    /// on arrival (the sweep is woken the moment one is committed), so this tick
-    /// is only a fallback for subscription placeholders and the periodic
-    /// backfill. Defaults to 3600.
+    /// Interval in seconds between NAR signature backfill sweeps. A freshly
+    /// uploaded NAR is signed in place by the upload handler, so this tick is
+    /// only a fallback for subscription placeholders and any row left unsigned.
+    /// Defaults to 3600.
     #[arg(long, env = "GRADIENT_SIGN_SWEEP_INTERVAL_SECS", default_value_t = 3600)]
     pub sign_sweep_interval_secs: u64,
 }

@@ -4,14 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Periodic sweep that signs `cached_path_signature` placeholder rows.
+//! Periodic backfill that signs `cached_path_signature` placeholder rows.
 //!
 //! NAR uploads and new cache subscriptions insert `cached_path_signature`
 //! rows with `signature = NULL` - "this (path, cache) pair needs a
-//! signature". This sweep walks those pending rows, computes narinfo
-//! signatures with the cache's private key, and fills them in. It also
-//! records `cache_derivation` rows when a derivation's full closure has
-//! become cached for a given cache.
+//! signature". A freshly uploaded NAR is signed in place by the proto upload
+//! handler (`sign_cached_path`); this periodic pass is the backfill that
+//! catches subscription placeholders and any row a commit left NULL. It walks
+//! the pending rows, computes narinfo signatures with the cache's private key,
+//! and fills them in, and records `cache_derivation` rows when a derivation's
+//! full closure has become cached for a given cache.
 
 use gradient_util::nix_hash::normalize_nar_hash;
 use gradient_sources::CacheSigner;
@@ -55,9 +57,6 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
     if pending.is_empty() {
         return Ok(());
     }
-    // A full batch likely means more rows are waiting; re-arm the trigger at the
-    // end so the next batch runs immediately instead of waiting for the tick.
-    let batch_full = pending.len() as u64 >= SIGN_SWEEP_BATCH;
 
     let cache_ids: Vec<CacheId> = pending
         .iter()
@@ -192,10 +191,6 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         if let Err(e) = record_newly_completed_derivations(&state, cache_id, &seed, full).await {
             warn!(cache = %cache_id, error = %e, "sign sweep: cache_derivation update failed");
         }
-    }
-
-    if batch_full {
-        state.sign_signal.notify_one();
     }
 
     Ok(())
