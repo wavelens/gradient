@@ -198,7 +198,10 @@ impl WorkerPool {
         })
     }
 
-    #[allow(clippy::too_many_arguments)] // mirrors the WorkerCapabilities wire fields
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "mirrors the WorkerCapabilities wire fields; refactor tracked in #503"
+    )]
     pub fn update_capabilities(
         &mut self,
         id: &str,

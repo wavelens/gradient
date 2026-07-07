@@ -55,7 +55,10 @@ pub(super) async fn ensure_no_active_evaluation<C: ConnectionTrait>(
 /// - Inserts a `Commit` row, then an `Evaluation` row with status `Queued`.
 /// - Sets `project.force_evaluation = true` and resets `last_check_at` so the
 ///   scheduler picks it up immediately on its next tick.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 pub async fn trigger_evaluation<C: ConnectionTrait>(
     db: &C,
     project: &MProject,

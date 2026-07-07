@@ -368,7 +368,10 @@ pub(super) enum PushRefKind<'a> {
 
 // ── Fan-out functions ───────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 pub(super) async fn trigger_push_for_integration(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
@@ -419,7 +422,10 @@ pub(super) async fn trigger_push_for_integration(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 pub(super) async fn trigger_pr_for_integration(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
@@ -479,7 +485,10 @@ pub(super) async fn trigger_pr_for_integration(
     .await
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 pub(super) async fn trigger_release_for_integration(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
@@ -543,7 +552,10 @@ enum FilterResult {
     Skip,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 async fn fan_out_triggers<F>(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,

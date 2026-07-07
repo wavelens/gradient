@@ -31,7 +31,10 @@ struct BumpRow {
     new_rev: String,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 pub(crate) async fn execute_open_pr(
     ctx: &CiContext,
     _event: &str,

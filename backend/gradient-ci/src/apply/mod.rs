@@ -23,7 +23,10 @@ pub use gates::{
 };
 
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Created is the hot, immediately-matched happy path; boxing MEvaluation would churn every call/match site for a short-lived return value"
+)]
 pub enum ApplyOutcome {
     Created {
         evaluation: MEvaluation,

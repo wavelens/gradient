@@ -24,12 +24,10 @@ mod background;
 mod build;
 mod eval;
 
-// Preserves the pub(crate) surface the flat dispatch.rs exposed; some of these
-// (flake_job_for_eval_source, requeue_transient_failures) have no external caller today.
-#[allow(unused_imports)]
-pub(crate) use build::{dispatch_ready_builds, requeue_transient_failures};
-#[allow(unused_imports)]
-pub(crate) use eval::{dispatch_queued_evals, flake_job_for_eval_source, organization_id_for_eval};
+pub(crate) use build::dispatch_ready_builds;
+#[cfg(test)]
+pub(crate) use eval::dispatch_queued_evals;
+pub(crate) use eval::organization_id_for_eval;
 
 /// Tick interval shared by the eval and build dispatch loops.
 pub(crate) const DISPATCH_TICK_SECS: u64 = 5;

@@ -22,7 +22,10 @@ use gradient_proto::handler::{PerIpLimiter, ProtoLimiter};
 /// anonymous callers reach public caches only; an API key reaches the private
 /// caches it can read (respecting `cache_pin`). Anonymous access additionally
 /// requires `allow_anonymous_cache`; private caches always require a key.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 pub async fn cache_proto(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,

@@ -429,7 +429,10 @@ impl<'a> DispatchContext<'a> {
 
     // ── Capability advertisement ──────────────────────────────────────────────
 
-    #[allow(clippy::too_many_arguments)] // mirrors the WorkerCapabilities wire fields
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "mirrors the WorkerCapabilities wire fields; refactor tracked in #503"
+    )]
     async fn on_worker_capabilities(
         &mut self,
         architectures: Vec<String>,

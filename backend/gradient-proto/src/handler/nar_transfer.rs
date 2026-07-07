@@ -323,7 +323,10 @@ impl<'a> DispatchContext<'a> {
     /// truncated PUT create a `cached_path` row pointing at a missing or
     /// corrupt object - the zombie class the demote/reconcile machinery
     /// exists to repair.
-    #[allow(clippy::too_many_arguments)] // mirrors the wire-protocol message fields
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "mirrors the wire-protocol message fields; refactor tracked in #503"
+    )]
     pub(super) async fn on_nar_uploaded(
         &mut self,
         job_id: String,
@@ -492,7 +495,10 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
 /// against the reported `file_size`, write it to `nar_storage`, then drop
 /// the partial. Returns `false` (after failing the build transiently) if
 /// any step fails.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 async fn commit_relayed(
     writer: &ProtoWriter,
     state: &Arc<ServerState>,
@@ -561,7 +567,10 @@ async fn commit_relayed(
 /// directly, so HEAD the object and compare its size against the reported
 /// `file_size`. Returns `false` (after failing the build transiently) if
 /// the object is missing or its size mismatches.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 async fn commit_presigned(
     writer: &ProtoWriter,
     state: &Arc<ServerState>,
