@@ -277,17 +277,30 @@ attribute (`attr`, `attrPath`, `drvPath`); a per-attribute failure is reported
 in its own line (`{"attr": ..., "error": ...}`) and does not abort the run.
 
 ```sh
+gradient eval .#gradient-cli-full                      # one attr, resolved directly like `nix eval`
 gradient eval 'packages.x86_64-linux.*'                # current flake (.)
 gradient eval .#packages.x86_64-linux.hello            # installable syntax sets the flake
 gradient eval 'github:NixOS/patchelf#hydraJobs.*'      # any flake ref before the '#'
 gradient eval 'checks.*.*' 'packages.*.*'              # multiple wildcard patterns
 ```
 
+A bare attr is qualified as `packages.<system>.<attr>` the way `nix eval .#attr`
+resolves an installable, so `.#gradient-cli-full` targets
+`packages.<host-system>.gradient-cli-full`; known output categories (`packages`,
+`checks`, `apps`, …) and `*`/`#` wildcards pass through unchanged.
+
+A wildcard-free pattern names one attribute and is resolved directly, without
+walking the flake's output tree - `gradient eval .#gradient-cli-full` forces
+exactly that attribute, as fast as `nix eval`. Only a pattern containing a
+`*`/`#` wildcard (or a `!` exclusion) triggers the discovery walk.
+
 The flake to evaluate is taken from the part before `#` in a pattern (default:
 the current directory); every pattern shares one flake. A local flake ref (`.`,
-`./sub`, a relative dir) is resolved to an absolute path, since the Nix C API -
-unlike the CLI - only accepts absolute flake paths; a scheme ref (`github:`,
-`path:`, `git+…`) is passed through unchanged.
+`./sub`, a relative dir) inside a git checkout is evaluated as a `git+file://`
+flake, exactly like `nix eval .` - only tracked files are seen, so gitignored
+build artefacts (`target/`, `node_modules`, `result`) are not copied into the
+store. A directory outside any git repo becomes an absolute `path:` flake; a
+scheme ref (`github:`, `path:`, `git+…`) is passed through unchanged.
 
 This subcommand is gated behind the `nix` and `eval` cargo features (it pulls in
 libnix) and is therefore only shipped by the `gradient-cli-full` package, not the

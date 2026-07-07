@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use crate::commands::attr_spec;
 use crate::config::*;
 use crate::input::client_from_config;
 use crate::output::{ExitKind, Output};
@@ -50,7 +51,7 @@ pub async fn handle_build(
     // Accept `nix build`-style installables (`.#uxc`) and translate them into
     // gradient's attr-path wildcard language before dispatch and result linking.
     let target = target.map(|raw| {
-        let system = system.clone().unwrap_or_else(default_nix_system);
+        let system = system.clone().unwrap_or_else(attr_spec::default_nix_system);
         let normalized = normalize_target(&raw, &system);
         if !quiet && normalized != raw {
             out.progress(format!("Building '{}' (from '{}')", normalized, raw));
@@ -350,32 +351,6 @@ async fn wait_for_terminal(
     }
 }
 
-/// Flake-output categories that are already gradient attr-path syntax; a target
-/// under one of these passes through, anything else is treated as a bare package.
-const OUTPUT_CATEGORIES: &[&str] = &[
-    "packages",
-    "legacyPackages",
-    "checks",
-    "devShells",
-    "apps",
-    "nixosConfigurations",
-    "darwinConfigurations",
-    "homeConfigurations",
-    "hydraJobs",
-    "formatter",
-    "bundlers",
-];
-
-/// The host's Nix system double (`x86_64-linux`, `aarch64-darwin`, ...), used to
-/// qualify a bare `.#uxc` as `packages.<system>.uxc` the way `nix build` does.
-fn default_nix_system() -> String {
-    let os = match std::env::consts::OS {
-        "macos" => "darwin",
-        other => other,
-    };
-    format!("{}-{}", std::env::consts::ARCH, os)
-}
-
 /// Translate a `nix build`-style installable into gradient's `.`-separated
 /// attr-path wildcard language. `gradient build .#uxc` mirrors `nix build .#uxc`:
 /// the flake ref is always the uploaded repo, so drop a leading local ref
@@ -395,20 +370,9 @@ fn normalize_installable(pat: &str, system: &str) -> String {
         .map(|r| ("!", r))
         .unwrap_or(("", pat));
 
-    let attr = match body.split_once('#') {
-        Some(("" | "." | "./", attr)) => attr,
-        _ => return pat.to_string(),
-    };
-
-    if attr.is_empty() {
-        return format!("{excl}packages.{system}.#");
-    }
-
-    let head = attr.split('.').next().unwrap_or("");
-    if head == "*" || head == "#" || OUTPUT_CATEGORIES.contains(&head) {
-        format!("{excl}{attr}")
-    } else {
-        format!("{excl}packages.{system}.{attr}")
+    match body.split_once('#') {
+        Some(("" | "." | "./", attr)) => attr_spec::qualify_attr(&format!("{excl}{attr}"), system),
+        _ => pat.to_string(),
     }
 }
 

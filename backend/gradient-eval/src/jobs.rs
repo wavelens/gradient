@@ -54,15 +54,30 @@ impl Job {
     }
 }
 
-/// Evaluate `wildcards` against `flake_ref`, invoking `sink` once per discovered
-/// attribute (in sorted order) as soon as it is resolved.
+/// Evaluate `wildcards` against `flake_ref`, invoking `sink` once per resolved
+/// attribute as soon as it is resolved.
+///
+/// Concrete attr paths (no `*`/`#`/`!`) are resolved directly, skipping the
+/// output-tree discovery walk: `gradient eval .#gradient-cli-full` then forces
+/// exactly that attribute, like `nix eval .#gradient-cli-full`, instead of
+/// walking siblings (which, for a flake whose `checks` are NixOS VM tests, costs
+/// orders of magnitude more). A set that contains any `*`/`#` wildcard or `!`
+/// exclusion falls back to the discovery walk over all patterns, since an
+/// exclusion is applied across the whole include set.
 ///
 /// Synchronous and Boehm-GC bound: call from a context without a Tokio runtime
 /// (the CLI runs it before the runtime starts, mirroring the eval worker).
 pub fn eval_jobs(flake_ref: &str, wildcards: &[String], mut sink: impl FnMut(Job)) -> Result<()> {
     let evaluator = NixEvaluator::new()?;
     let walker = evaluator.walker(flake_ref)?;
-    for attr in walker.discover(wildcards)? {
+
+    let attrs = if wildcards.iter().all(|w| is_concrete_attr(w)) {
+        wildcards.to_vec()
+    } else {
+        walker.discover(wildcards)?.0
+    };
+
+    for attr in attrs {
         let job = match walker.resolve(&attr) {
             Ok((drv, references)) => Job::resolved(attr, drv, references),
             Err(e) => Job::failed(attr, format!("{e:#}")),
@@ -71,6 +86,15 @@ pub fn eval_jobs(flake_ref: &str, wildcards: &[String], mut sink: impl FnMut(Job
     }
     let _ = walker.commit_cache();
     Ok(())
+}
+
+/// A wildcard-free include: no `*`/`#` segment and no `!` exclusion. Such a
+/// pattern names exactly one attribute, so
+/// [`FlakeWalker::resolve`](crate::flake_walk::FlakeWalker::resolve) reaches it
+/// directly and the discovery walk can be skipped. An exclusion only prunes
+/// wildcard matches, so its presence keeps the whole set on the discovery path.
+fn is_concrete_attr(pattern: &str) -> bool {
+    !pattern.starts_with('!') && pattern.split('.').all(|seg| seg != "*" && seg != "#")
 }
 
 #[cfg(test)]
@@ -94,6 +118,16 @@ mod tests {
         assert_eq!(v["drvPath"], "/nix/store/aaaa-hello.drv");
         assert!(v.get("error").is_none(), "no error key on success");
         assert!(v.get("references").is_none(), "empty references omitted");
+    }
+
+    #[test]
+    fn concrete_attrs_skip_discovery_wildcards_do_not() {
+        assert!(is_concrete_attr("packages.x86_64-linux.gradient-cli-full"));
+        assert!(is_concrete_attr("gradient-cli-full"));
+        assert!(!is_concrete_attr("packages.x86_64-linux.*"));
+        assert!(!is_concrete_attr("checks.*.*"));
+        assert!(!is_concrete_attr("packages.x86_64-linux.#"));
+        assert!(!is_concrete_attr("!packages.x86_64-linux.hello"));
     }
 
     #[test]

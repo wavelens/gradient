@@ -5976,15 +5976,34 @@ output errors with the raw nix diagnostic instead of a bare "nix copy failed".
 ## `gradient eval` installable syntax + local flake ref
 
 `cli/src/commands/eval.rs` `tests` (feature `eval`):
-- `splits_installable_flake_and_attr` / `installable_flake_overrides_default` -
-  a `<ref>#<attr>` pattern sets the flake and yields the bare attr wildcard, so
-  `gradient eval .#packages.x86_64-linux.hello` works like `gradient build`
+- `splits_installable_flake_and_attr` / `installable_flake_overrides_default_and_qualifies`
+  - a `<ref>#<attr>` pattern sets the flake and qualifies the attr, so
+  `gradient eval github:NixOS/nixpkgs#hello` targets `packages.<system>.hello`
   (there is no separate `--flake` flag).
-- `bare_patterns_default_to_current_dir` - patterns without `#` keep their form
-  and evaluate the current directory.
-- `local_path_is_made_absolute` / `scheme_refs_pass_through_unresolved` - a local
-  flake path is canonicalised to an absolute path (the Nix C API rejects a
-  relative `.`), while a `github:`/`path:` ref passes through unchanged.
+- `bare_installable_qualifies_to_packages` - a bare `.#gradient-cli-full` becomes
+  `packages.<system>.gradient-cli-full` the way `nix eval .#attr` resolves an
+  installable, via the shared `attr_spec::qualify_attr`.
+- `bare_patterns_default_to_current_dir` - patterns whose head is already an
+  output category (`packages.…`, `checks.*.*`) keep their form and evaluate the
+  current directory.
+- `git_checkout_root_is_a_git_file_flake` / `git_subdir_flake_carries_a_dir_query`
+  - a local checkout resolves to `git+file://<root>` (with `?dir=` for a
+  sub-flake) so only tracked files are evaluated, like `nix eval .`; a bare
+  `path:` flake would copy gitignored `target/`/`node_modules` into the store and
+  is orders of magnitude slower.
+- `scheme_refs_and_missing_paths_pass_through_unresolved` - a `github:`/`path:`
+  ref and a non-existent local path pass through unchanged.
+
+`cli/src/commands/attr_spec.rs` `tests`: `qualify_bare_package_gets_packages_prefix`,
+`qualify_known_category_and_wildcards_pass_through`,
+`qualify_empty_attr_is_all_packages_and_keeps_exclusion` cover the installable
+qualifier shared by `gradient build` and `gradient eval`.
+
+`backend/gradient-eval/src/jobs.rs` `concrete_attrs_skip_discovery_wildcards_do_not`:
+a wildcard-free pattern (no `*`/`#`/`!`) is classed concrete, so `eval_jobs`
+resolves it directly and skips the output-tree discovery walk - `gradient eval
+.#gradient-cli-full` forces one attribute like `nix eval`, instead of walking the
+flake's `checks`/`apps` (NixOS VM tests, orders of magnitude slower to force).
 
 ## Evaluation log streaming + colouring
 
