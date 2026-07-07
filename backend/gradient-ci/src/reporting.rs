@@ -67,7 +67,7 @@ pub fn check_context_kind_for_event(event: &str) -> Option<CheckContextKind> {
         | "evaluation.completed"
         | "evaluation.failed"
         | "evaluation.aborted" => Some(CheckContextKind::Evaluation),
-        "build.queued" | "build.started" | "build.completed" | "build.failed"
+        "build.created" | "build.queued" | "build.started" | "build.completed" | "build.failed"
         | "build.substituted" => Some(CheckContextKind::Build),
         _ => None,
     }
@@ -119,14 +119,16 @@ pub fn ci_status_for_build(status: &BuildStatus) -> Option<CiStatus> {
     }
 }
 
-/// The dispatch event a per-entry-point build transition reports, or `None` for
-/// statuses that produce no CI check: the initial `Created`, and `FailedTransient`
-/// (a build that will retry, so its check stays put). `Queued`/`Building` post the
-/// live Pending/Running progress; a dependency failure or an abort surface as a
-/// failed check so a build that already posted Pending/Running resolves rather
-/// than hanging.
+/// The dispatch event a per-entry-point build transition reports. `Created` posts
+/// `build.created` (a pending check the moment the entry point evaluates, so an
+/// already-cached derivation that never transitions still shows a check).
+/// `FailedTransient` maps to an event no forge action consumes, so a retrying
+/// build's check stays put. `Queued`/`Building` post the live Pending/Running
+/// progress; a dependency failure or an abort surface as a failed check so a
+/// build that already posted Pending/Running resolves rather than hanging.
 pub fn build_event_for_status(status: BuildStatus) -> Option<&'static str> {
     Some(match status {
+        BuildStatus::Created => "build.created",
         BuildStatus::Queued => "build.queued",
         BuildStatus::Building => "build.started",
         BuildStatus::Completed => "build.completed",
@@ -136,7 +138,6 @@ pub fn build_event_for_status(status: BuildStatus) -> Option<&'static str> {
         | BuildStatus::Aborted => "build.failed",
         BuildStatus::FailedTransient => "build.failed_transient",
         BuildStatus::Substituted => "build.substituted",
-        BuildStatus::Created => return None,
     })
 }
 
@@ -306,7 +307,18 @@ mod tests {
     }
 
     #[test]
-    fn build_event_skips_created() {
-        assert_eq!(build_event_for_status(BuildStatus::Created), None);
+    fn build_event_created_posts_pending_check() {
+        assert_eq!(
+            build_event_for_status(BuildStatus::Created),
+            Some("build.created")
+        );
+        assert_eq!(
+            check_context_kind_for_event("build.created"),
+            Some(CheckContextKind::Build)
+        );
+        assert_eq!(
+            crate::actions::forge_status_for_event("build.created"),
+            Some(CiStatus::Pending)
+        );
     }
 }

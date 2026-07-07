@@ -17,7 +17,8 @@ mod logging;
 
 pub use abort::abort_evaluation;
 pub use derivation_build_status::{
-    notify_build_status_for_derivations, update_derivation_build_status,
+    announce_entry_point_statuses, notify_build_status_for_derivations,
+    update_derivation_build_status,
 };
 pub use effects::{TransitionChange, emit_transition_effects};
 pub use eval_finalize::{check_evaluation_done, finalize_evals_for_derivations};

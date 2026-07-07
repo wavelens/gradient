@@ -17,6 +17,11 @@ use serde_json::json;
 
 #[test]
 fn forge_status_mapping() {
+    // A just-recorded entry point posts a pending check, same as evaluation.queued.
+    assert!(matches!(
+        forge_status_for_event("build.created"),
+        Some(CiStatus::Pending)
+    ));
     assert!(matches!(
         forge_status_for_event("build.started"),
         Some(CiStatus::Running)
@@ -101,6 +106,7 @@ fn matches_event_forge_status_ignores_stored_events() {
     // with an event that is NOT in that set so we can verify the action
     // still fires for every event that IS, regardless of what's stored.
     let a = action_with(ActionType::ForgeStatusReport, vec!["evaluation.waiting"]);
+    assert!(matches_event(&a, "build.created"));
     assert!(matches_event(&a, "build.queued"));
     assert!(matches_event(&a, "build.started"));
     assert!(matches_event(&a, "build.completed"));

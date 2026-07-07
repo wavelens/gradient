@@ -2,6 +2,26 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## Entry-point forge check appears when the entry point evaluates (#510)
+
+`backend/gradient-ci/src/reporting.rs`:
+- `build_event_created_posts_pending_check` - `Created` now maps to
+  `build.created` (not `None`), classifies as the per-`Build` check context, and
+  reports `Pending`, so an already-cached derivation that never transitions still
+  shows a check the moment its entry point evaluates.
+
+`backend/gradient-ci/src/actions/tests/mod.rs`:
+- `forge_status_mapping` - `build.created` maps to `Pending`, same as
+  `evaluation.queued`.
+- `matches_event_forge_status_ignores_stored_events` - a `ForgeStatusReport`
+  action fires for `build.created`.
+
+`announce_entry_point_statuses`
+(`backend/gradient-db/src/status/derivation_build_status.rs`) fires the reactor
+at each entry point's current anchor status as its row is recorded during eval
+streaming, so a `Created`/`Queued`/`Building`/terminal anchor all surface a check
+(replacing the deleted scheduler-side `dispatch_substituted_events`).
+
 ## One graph walk, one readiness predicate (#476)
 
 `backend/gradient-db/src/graph_sql.rs`:

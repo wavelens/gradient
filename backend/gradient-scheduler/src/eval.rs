@@ -483,52 +483,6 @@ impl<'a> EvalResultProcessor<'a> {
         Ok(())
     }
 
-    /// Dispatch `build.substituted` for every just-inserted Substituted build
-    /// that has an `entry_point` row. Substituted builds are inserted in
-    /// their terminal state and never go through `update_build_status`, so
-    /// the regular status-change dispatch path never fires for them.
-    ///
-    /// Must be called AFTER `process_entry_points` - the reporter skips
-    /// build events without an `entry_point`, so dispatching before
-    /// `entry_point` rows exist would silently drop every check.
-    pub(crate) async fn dispatch_substituted_events(&self) -> Result<(), sea_orm::DbErr> {
-        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-
-        let jobs = EBuildJob::find()
-            .filter(CBuildJob::Evaluation.eq(self.evaluation_id))
-            .all(&self.state.worker_db)
-            .await?;
-        if jobs.is_empty() {
-            return Ok(());
-        }
-
-        let db = &self.state.worker_db;
-        let anchor_ids: Vec<DerivationBuildId> = jobs.iter().map(|j| j.derivation_build).collect();
-        let substituted: std::collections::HashSet<DerivationBuildId> =
-            gradient_db::fetch_in_chunks(&anchor_ids, |chunk| async move {
-                EDerivationBuild::find()
-                    .filter(CDerivationBuild::Id.is_in(chunk))
-                    .filter(CDerivationBuild::Status.eq(BuildStatus::Substituted))
-                    .all(db)
-                    .await
-            })
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|a| a.id)
-            .collect();
-
-        for job in jobs {
-            if substituted.contains(&job.derivation_build) {
-                self.state
-                    .reactor
-                    .on_build_status_changed(&self.state.db(), job, BuildStatus::Substituted)
-                    .await;
-            }
-        }
-        Ok(())
-    }
-
     /// Return the subset of `drv_ids` whose every `derivation_output` row's
     /// hash matches a `cached_path` with `file_hash IS NOT NULL`. These are
     /// the drvs the server can confidently mark `Substituted` - anything
@@ -781,21 +735,25 @@ impl<'a> EvalResultProcessor<'a> {
     }
 
     /// Insert project entry points and schedule per-project evaluation GC.
+    /// Returns the entry-point derivation ids recorded in this batch, so the
+    /// caller can announce their current anchor status to the forge.
     async fn process_entry_points(
         &self,
         project_id: ProjectId,
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, DerivationId>,
-    ) {
+    ) -> Vec<DerivationId> {
         let now = gradient_types::now();
 
         let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
+        let mut entry_point_drvs: Vec<DerivationId> = Vec::new();
 
         for d in derivations {
             if d.attr.is_empty() {
                 continue;
             }
             if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) {
+                entry_point_drvs.push(drv_id);
                 active_entry_points.push(
                     MEntryPoint {
                         id: EntryPointId::now_v7(),
@@ -837,6 +795,8 @@ impl<'a> EvalResultProcessor<'a> {
                 }
             });
         }
+
+        entry_point_drvs
     }
 }
 
@@ -912,15 +872,14 @@ pub async fn handle_eval_result(
     // queued builds that should still run.
 
     if let Some(project_id) = job.project_id {
-        proc.process_entry_points(project_id, &derivations, &drv_path_to_id)
+        let entry_point_drvs = proc
+            .process_entry_points(project_id, &derivations, &drv_path_to_id)
             .await;
-    }
 
-    // Must run after `process_entry_points`: the forge reporter skips build
-    // events without a matching `entry_point` row, so emitting
-    // `build.substituted` earlier would drop every check.
-    if let Err(e) = proc.dispatch_substituted_events().await {
-        tracing::warn!(error = %e, "failed to dispatch build.substituted events");
+        // Forge checks appear the moment each entry point evaluates, including
+        // already-cached anchors that never transition in this eval.
+        gradient_db::announce_entry_point_statuses(&state.db(), evaluation_id, &entry_point_drvs)
+            .await;
     }
 
     // Builds and entry-points are inserted directly (no status transition), so

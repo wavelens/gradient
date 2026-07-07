@@ -8,6 +8,7 @@ use gradient_forge::reporter::{APPROVAL_ACTION_ID, CiStatus, RequestedAction};
 use gradient_types::{ActionConfig, ActionType, MProjectAction, VerifyGate};
 
 pub const FORGE_STATUS_EVENTS: &[&str] = &[
+    "build.created",
     "build.queued",
     "build.started",
     "build.completed",
@@ -61,6 +62,7 @@ pub fn open_pr_gate_events(action: &MProjectAction) -> Option<&'static [&'static
 
 pub fn forge_status_for_event(event: &str) -> Option<CiStatus> {
     match event {
+        "build.created" => Some(CiStatus::Pending),
         "build.queued" => Some(CiStatus::Pending),
         "build.started" => Some(CiStatus::Running),
         "build.completed" => Some(CiStatus::Success),
