@@ -341,7 +341,7 @@ a banner when draining, and the button click calls `AdminService.setDraining(tru
 
 ## Wildcard attr tolerance + fair-share idle gate (#419)
 
-A wildcard (`*`/`#`) legitimately spans attrs that aren't buildable derivations, so a drvPath-resolution failure on a wildcard-matched attr is skipped silently; only an attr the user pinpointed exactly still surfaces the error. The `FairShareRule` penalty now applies only when every worker is busy, so a lone busy org is never penalized below the dispatcher's zero floor into leaving the cluster idle.
+A wildcard (`*`/`#`) legitimately spans attrs that aren't buildable derivations, so an attr a wildcard simply doesn't match is skipped, and a pinpointed target that matches nothing surfaces a `matched no derivations` error. A wildcard-matched attr that *throws* when forced, however, is now always surfaced as an eval error (see Thrown-attribute eval errors below) rather than skipped silently. The `FairShareRule` penalty now applies only when every worker is busy, so a lone busy org is never penalized below the dispatcher's zero floor into leaving the cluster idle.
 
 - `backend/gradient-worker/src/executor/eval.rs`: `explicit_attr_set_keeps_only_wildcard_free_includes` asserts only wildcard-free, non-exclusion patterns count as explicit (quoted dots collapse to the discovered path form).
 - `backend/gradient-score/src/rules/fair_share.rs`: `idle_capacity_lifts_penalty` asserts a busy org is rationed when `idle_workers == 0` but not penalized when a worker is idle.
@@ -352,6 +352,14 @@ The scheduler also keeps a bounded ring of recent dispatch decisions - every sco
 - `backend/gradient-scheduler/src/jobs.rs`: `terminal_job_removal_prunes_scores_across_all_workers` / `aborting_an_evaluation_prunes_its_pending_scores` guard the per-worker score map against the dispatch leak - completing, aborting, or eval-aborting a job now drops its recorded scores on every worker, so `take_best_of_kind`'s per-dispatch lookup stays bounded instead of growing with total dispatched jobs.
 - `frontend/src/app/features/board/live-jobs/live-jobs.component.spec.ts`: the decision-scores spec asserts the "incl. rejected" scope flattens decisions to candidate rows, marking the winner and showing negative-scored, passed-over candidates.
 - `backend/gradient-web/tests/board_decisions.rs`: `dispatch_decisions_rejects_non_superuser` and `dispatch_decisions_superuser_returns_empty_ring` guard the routing-tier fix - the handler needs `Extension<MUser>`, so the route must sit on the authenticated tier; on the optional-auth tier it returned `500` for every caller and the "incl. rejected" table stayed empty.
+
+## Thrown-attribute eval errors (walk-tolerated, server-fatal)
+
+An attribute that throws while the flake walk forces it is no longer silently dropped. `wildcard_walk::traverse` records `failed to evaluate '<attr>': <nix error>` and continues, so sibling derivations are still discovered and built. The diagnostics ride the eval-subprocess IPC (`PlanOk.errors` / `ListOk.errors`), are merged and deduped by the parent resolver into `FlakeDiscovery.errors`, and reach the server through `report_eval_result`, which records them as Error-level `evaluation_message` rows - so the evaluation settles `Failed` while the buildable derivations still run.
+
+- `backend/gradient-eval/src/wildcard_walk.rs`: `traverse_records_thrown_attr_and_continues` asserts a thrown sibling is reported exactly once while the healthy sibling is still discovered; `traverse_records_full_dotted_path` asserts the diagnostic carries the full dotted attr path.
+- `backend/gradient-eval/src/ipc.rs`: `responses_roundtrip_through_rkyv` covers `PlanOk`/`ListOk` carrying `errors` across the rkyv frame.
+- `backend/gradient-worker/src/executor/eval.rs`: `wildcard_resolve_failure_is_reported` asserts a wildcard-matched attr whose drvPath resolution throws is now surfaced (previously skipped); `discovery_errors_reach_eval_result` asserts discovery-phase errors reach the final `EvalResult`.
 
 ## Bulk evaluation abort + dispatch race
 
