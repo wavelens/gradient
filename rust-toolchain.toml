@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Pins the toolchain for rustup / non-nix contributors. The nix devShell
+# (flake.lock) remains the source of truth; keep this channel in sync with it.
+[toolchain]
+channel    = "1.95.0"
+components = ["rustfmt", "clippy"]
+profile    = "minimal"

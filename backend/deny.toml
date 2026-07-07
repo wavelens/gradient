@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# cargo-deny policy. License model is allow-list only: any license not listed
+# below is rejected, which keeps GPL/AGPL/LGPL and other copyleft out of the
+# dependency tree. Our own crates are AGPL-3.0-only and publish = false, so they are
+# skipped via `private.ignore`.
+
+[graph]
+all-features = true
+
+[licenses]
+version              = 2
+confidence-threshold = 0.9
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    "bzip2-1.0.6",
+]
+private = { ignore = true }
+
+[bans]
+multiple-versions    = "warn"
+wildcards            = "deny"
+allow-wildcard-paths = true
+
+[advisories]
+version      = 2
+yanked       = "deny"
+unmaintained = "workspace"
+ignore       = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git      = "deny"
+allow-git = [
+    "https://github.com/nix-community/harmonia",
+    "https://github.com/DerDennisOP/nix-bindings",
+]

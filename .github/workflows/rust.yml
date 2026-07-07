@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: "Rust"
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "backend/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: "fmt + deny"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Toolchain (rust-toolchain.toml)"
+        run: rustup show
+
+      - name: "rustfmt"
+        run: cargo fmt --all --check
+
+      - name: "Forbid lazy #[allow]"
+        run: |
+          if grep -rnE --include='*.rs' --exclude-dir=target \
+               '#!?\[allow\((unused_imports|unused|dead_code)' .; then
+            echo "::error::bare #[allow(unused_imports|unused|dead_code)] is forbidden - fix the underlying warning instead"
+            exit 1
+          fi
+
+      - name: "cargo-deny (licenses, bans, sources)"
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: backend/Cargo.toml
+          command: check bans licenses sources

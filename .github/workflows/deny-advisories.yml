@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# The RustSec advisory DB changes independently of our code, so advisories run on
+# a schedule instead of blocking PRs. New vulnerabilities surface here daily.
+name: "Dependency advisories"
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    name: "cargo-deny advisories"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: backend/Cargo.toml
+          command: check advisories

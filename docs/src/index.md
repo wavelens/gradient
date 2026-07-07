@@ -39,4 +39,4 @@ Public Key: public.gradient.ci-main:qmxRE+saUvhNa3jqaCMWje+feVU77TjABchZrPGf7A8=
 
 ## License
 
-Gradient is released under the [GNU Affero General Public License v3.0 (AGPL-3.0)](https://github.com/wavelens/gradient/blob/main/LICENSE).
+Gradient is released under the [GNU Affero General Public License v3.0 (AGPL-3.0-only)](https://github.com/wavelens/gradient/blob/main/LICENSE).
