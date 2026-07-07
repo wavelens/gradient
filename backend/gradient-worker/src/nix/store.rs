@@ -227,9 +227,9 @@ mod tests {
     /// imports queued against the pool, a short acquire deadline fires
     /// before the pool can serve them even though it is making forward
     /// progress. Harmonia's `acquire` now blocks indefinitely, so
-    /// [`LocalNixStore::acquire`] bounds the wait with [`POOL_ACQUIRE_TIMEOUT`]
-    /// - which must stay generous, anything shorter is an artificial cap
-    /// that surfaces as "acquire daemon connection: timed out" mid-build.
+    /// [`LocalNixStore::acquire`] bounds the wait with [`POOL_ACQUIRE_TIMEOUT`],
+    /// which must stay generous; anything shorter is an artificial cap that
+    /// surfaces as "acquire daemon connection: timed out" mid-build.
     #[test]
     fn pool_config_max_size_and_acquire_timeout() {
         assert_eq!(build_pool_config(8).max_size, 8);

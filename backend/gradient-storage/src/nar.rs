@@ -60,7 +60,10 @@ impl NarStore {
     ///
     /// `access_key_id` and `secret_access_key` are optional; when absent the AWS SDK
     /// falls back to instance profiles / environment variables.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "arg-heavy; refactor tracked in #503"
+    )]
     pub fn s3(
         bucket: &str,
         region: &str,

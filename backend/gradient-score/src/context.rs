@@ -179,7 +179,10 @@ impl<'a> ScoredJob<'a> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "arg-heavy; refactor tracked in #503"
+    )]
     pub fn new_build(
         job_id: &'a str,
         org_id: gradient_types::ids::OrganizationId,

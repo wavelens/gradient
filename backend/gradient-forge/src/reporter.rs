@@ -357,8 +357,6 @@ enum GiteaState {
     Success,
     Error,
     Failure,
-    #[allow(dead_code)]
-    Warning,
 }
 
 impl From<&CiStatus> for GiteaState {
@@ -699,8 +697,6 @@ enum GitlabState {
     Running,
     Success,
     Failed,
-    #[allow(dead_code)]
-    Canceled,
 }
 
 impl From<&CiStatus> for GitlabState {

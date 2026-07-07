@@ -9,7 +9,10 @@
 //! Each forge gets a small module that commits a set of file edits onto a
 //! reusable branch and opens or updates a single PR for it. The reporter impls
 //! delegate here so the forge-specific HTTP lives in one place.
-#![allow(clippy::too_many_arguments)]
+#![allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 
 use anyhow::{Context, Result, bail};
 use base64::Engine as _;

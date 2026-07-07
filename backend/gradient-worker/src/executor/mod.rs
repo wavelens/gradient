@@ -221,7 +221,10 @@ pub struct JobExecutor {
 }
 
 impl JobExecutor {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "arg-heavy; refactor tracked in #503"
+    )]
     pub fn new(
         store: LocalNixStore,
         evaluator: WorkerEvaluator,

@@ -31,7 +31,10 @@ use crate::proto::scorer::JobScorer;
 /// clears the server's rescore gate, so requesting here - rather than waiting for
 /// the next 10s heartbeat - lets a serial dependency chain advance at round-trip
 /// speed instead of one level per heartbeat.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 pub(super) fn spawn_scoring_task(
     scorer: JobScorer,
     store: Arc<LocalNixStore>,

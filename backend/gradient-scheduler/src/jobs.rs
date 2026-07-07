@@ -633,7 +633,10 @@ impl JobTracker {
     /// ties break on the smaller job id for determinism. `score_detailed` is
     /// the same rule loop as `score` plus a small per-rule map, so capturing
     /// every candidate's breakdown is essentially free.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "arg-heavy; refactor tracked in #503"
+    )]
     fn score_candidates(
         &self,
         worker_id: &str,

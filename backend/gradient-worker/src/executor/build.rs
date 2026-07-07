@@ -93,7 +93,10 @@ impl ParsedDerivation {
     /// `nar_hash` are `None` at this stage, filled in by the compress step)
     /// plus a `substituted` flag - true when the daemon reported the outputs as
     /// already valid (empty `built_outputs`), i.e. no work was performed.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "arg-heavy; refactor tracked in #503"
+    )]
     pub(super) async fn realize(
         self,
         store: &LocalNixStore,
@@ -326,7 +329,10 @@ pub(super) async fn load_products(store_path: &str) -> Vec<BuildProduct> {
 /// [`JobUpdateKind::BuildOutput`] with the realised outputs on success.
 /// Streams build log lines to the server via `LogChunk` messages while the
 /// daemon is running.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arg-heavy; refactor tracked in #503"
+)]
 pub async fn build_derivation(
     store: &LocalNixStore,
     task: &BuildTask,
