@@ -815,6 +815,8 @@ pub async fn evaluate_derivations_with(
 
     if root_drvs.is_empty() {
         warn!("all attr resolutions failed");
+        errors.sort_unstable();
+        errors.dedup();
         updater.report_eval_result(vec![], warnings, errors).await?;
         return Ok(EvalOutcome {
             flake_nodes: Vec::new(),

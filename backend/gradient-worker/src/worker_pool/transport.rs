@@ -277,13 +277,15 @@ impl EvalWorker {
         &mut self,
         req: EvalRequest,
         what: &'static str,
-        extract: impl FnOnce(EvalResponse) -> std::result::Result<T, EvalResponse>,
+        extract: impl FnOnce(EvalResponse) -> std::result::Result<T, Box<EvalResponse>>,
     ) -> Result<T> {
         self.send(&req).await?;
         match extract(self.recv().await?) {
             Ok(v) => Ok(v),
-            Err(EvalResponse::Err { message }) => Err(anyhow::anyhow!("eval worker: {message}")),
-            Err(other) => anyhow::bail!("eval worker: unexpected response to {what}: {other:?}"),
+            Err(other) => match *other {
+                EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {message}")),
+                other => anyhow::bail!("eval worker: unexpected response to {what}: {other:?}"),
+            },
         }
     }
 
@@ -300,7 +302,7 @@ impl EvalWorker {
             "Plan",
             |resp| match resp {
                 EvalResponse::PlanOk { sub_patterns, errors } => Ok((sub_patterns, errors)),
-                other => Err(other),
+                other => Err(Box::new(other)),
             },
         )
         .await
@@ -324,7 +326,7 @@ impl EvalWorker {
                     errors,
                     stats,
                 } => Ok((attrs, warnings, errors, stats)),
-                other => Err(other),
+                other => Err(Box::new(other)),
             },
         )
         .await
@@ -336,7 +338,7 @@ impl EvalWorker {
             "Fingerprint",
             |resp| match resp {
                 EvalResponse::FingerprintOk { fingerprint } => Ok(fingerprint),
-                other => Err(other),
+                other => Err(Box::new(other)),
             },
         )
         .await
@@ -348,7 +350,7 @@ impl EvalWorker {
             "Checkpoint",
             |resp| match resp {
                 EvalResponse::CheckpointOk => Ok(()),
-                other => Err(other),
+                other => Err(Box::new(other)),
             },
         )
         .await
