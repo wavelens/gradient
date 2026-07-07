@@ -96,7 +96,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
-    TestServer::new(create_router(state))
+    TestServer::new(create_router(state).expect("router"))
 }
 
 fn revoked_session() -> session::Model {

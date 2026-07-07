@@ -22,6 +22,31 @@ at each entry point's current anchor status as its row is recorded during eval
 streaming, so a `Created`/`Queued`/`Building`/terminal anchor all surface a check
 (replacing the deleted scheduler-side `dispatch_substituted_events`).
 
+## `/gradient` comment payload normalizer (#479)
+
+`backend/gradient-web/src/endpoints/forge_hooks/commands.rs`:
+`parse_comment_event_github_issue_comment`,
+`parse_comment_event_gitea_prefers_pull_request_and_username`,
+`parse_comment_event_gitlab_note`,
+`parse_comment_event_github_ignores_non_created_action`, and
+`parse_comment_event_gitlab_ignores_non_merge_request_note` cover
+`parse_comment_event`, which collapses the GitHub/Gitea issue-comment payload
+and the GitLab Note Hook payload into one `CommentEvent` (body, PR number,
+sender, owner/repo, comment id). GitHub/Gitea require `action == "created"`;
+GitLab requires `object_attributes.noteable_type == "MergeRequest"`;
+Gitea/GitLab prefer `username` over `login`, and the PR number comes from
+`pull_request.number` (falling back to `issue.number`) or `merge_request.iid`.
+
+## Shared cache visibility and paginated cache list (#479)
+
+`backend/gradient-web/src/access.rs`:
+`visible_cache_condition_includes_owned_and_subscribed` and
+`visible_cache_condition_owner_only_without_memberships` cover the single
+visibility filter `GET /caches` now shares with the access layer (owned caches
+plus org-subscribed ones). The paginated envelope is decoded end to end by the
+CLI connector tests `caches_api::list_caches_decodes_paginated` and
+`completion::cache_names_returns_names_and_respects_prefix`.
+
 ## One graph walk, one readiness predicate (#476)
 
 `backend/gradient-db/src/graph_sql.rs`:
@@ -177,9 +202,10 @@ backstop, deleting any `log_storage` object whose `build_attempt` row is gone.
 
 ## GitHub App installation org-binding
 
-`backend/gradient-web/src/endpoints/forge_hooks/trigger.rs`:
+`backend/gradient-web/src/endpoints/forge_hooks/installation.rs`:
 `github_full_name_parses_every_url_form`, `github_full_name_rejects_non_github_hosts`,
-and `installation_payload_collects_full_names_from_both_arrays` cover the binding
+and `installation_payload_collects_full_names_from_both_arrays` (in the sibling
+`payloads.rs`) cover the binding
 of an `installation` / `installation_repositories` webhook to every org owning a
 project whose repository URL resolves to one of the payload's repositories. The
 match is purely on the parsed `owner/repo`, so the flake shorthand
@@ -815,7 +841,7 @@ same as `/gradient approve` or the GitHub "Approve and Run" check action.
 `ParsedPullRequestReviewEvent::{from_github,from_gitea}`
 (`backend/gradient-forge/src/webhook.rs`) normalises the forge payloads;
 `handle_pull_request_review`
-(`backend/gradient-web/src/endpoints/forge_hooks/trigger.rs`) verifies the
+(`backend/gradient-web/src/endpoints/forge_hooks/approval.rs`) verifies the
 reviewer is a repo writer before unparking. GitLab is a no-op (no webhook on
 merge-request approval).
 
@@ -4102,7 +4128,7 @@ immediately. Coverage:
 - `core/src/forge/webhook.rs` - extraction of
   `pr_number`, `pr_author`, `is_fork`, `base_owner`, `base_repo` from
   GitHub / Gitea / GitLab payloads.
-- `web/src/endpoints/forge_hooks/trigger.rs::parse_gradient_*` -
+- `web/src/endpoints/forge_hooks/commands.rs::parse_gradient_*` -
   recogniser for the `/gradient run [wildcard]` and `/gradient approve`
   PR comments (case insensitive, allows leading quote-reply lines, rejects
   multi-line prose and unknown subcommands, captures an optional trailing

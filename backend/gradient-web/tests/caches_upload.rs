@@ -23,7 +23,7 @@ fn rt() -> tokio::runtime::Runtime {
 fn upload_unauthenticated_returns_403() {
     rt().block_on(async {
         let state = public_cache_empty_nars().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
         let form = MultipartForm::new()
             .add_part("narinfo", Part::text("{}"))
             .add_part("nar", Part::bytes(vec![1u8, 2, 3]));

@@ -130,12 +130,12 @@ pub async fn handle(cmd: Commands, out: Output) {
         Commands::List => {
             let client = client_from_config(out);
             match client.caches().list().await {
-                Ok(caches) => {
-                    out.ok(&caches);
-                    if caches.is_empty() {
+                Ok(res) => {
+                    out.ok(&res);
+                    if res.items.is_empty() {
                         out.human("You have no caches.");
                     } else {
-                        for cache in caches {
+                        for cache in res.items {
                             out.human(format!("{}: {}", cache.name, cache.id));
                         }
                     }

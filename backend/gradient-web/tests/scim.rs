@@ -89,7 +89,7 @@ fn build_server(
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
-    TestServer::new(create_router(state))
+    TestServer::new(create_router(state).expect("router"))
 }
 
 #[test]

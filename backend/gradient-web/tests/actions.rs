@@ -177,7 +177,7 @@ fn server_with_email(
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
-    TestServer::new(create_router(state))
+    TestServer::new(create_router(state).expect("router"))
 }
 
 const BASE_URL: &str = "/api/v1/projects/test-org/test-project/actions";

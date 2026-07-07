@@ -24,6 +24,9 @@ use sea_orm::{ColumnTrait, EntityTrait, FromQueryResult, QueryFilter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+// Pagination is a dedicated `Query<PaginationParams>` extractor rather than a
+// `#[serde(flatten)]` field: axum's urlencoded query decoder cannot deserialize
+// integer fields through a flattened struct.
 #[derive(Debug, Deserialize, Default)]
 pub struct ListQuery {
     pub hash: Option<String>,
@@ -32,10 +35,6 @@ pub struct ListQuery {
     pub sort: Option<String>,
     #[serde(default)]
     pub order: Option<String>,
-    #[serde(default)]
-    pub page: Option<u64>,
-    #[serde(default)]
-    pub per_page: Option<u64>,
 }
 
 #[derive(Debug, Serialize, FromQueryResult)]
@@ -47,14 +46,6 @@ pub struct NarSummary {
     pub file_size: Option<i64>,
     pub created_at: NaiveDateTime,
     pub last_fetched_at: Option<NaiveDateTime>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct NarListResponse {
-    pub items: Vec<NarSummary>,
-    pub total: u64,
-    pub page: u64,
-    pub per_page: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,7 +89,8 @@ pub async fn list(
     Extension(api_key): Extension<MaybeApiKey>,
     Path(cache_name): Path<String>,
     Query(q): Query<ListQuery>,
-) -> WebResult<Json<BaseResponse<NarListResponse>>> {
+    Query(pagination): Query<PaginationParams>,
+) -> WebResult<Json<BaseResponse<Paginated<Vec<NarSummary>>>>> {
     use sea_orm::{DatabaseBackend, Statement};
 
     let cache = load_cache(
@@ -109,11 +101,11 @@ pub async fn list(
         CacheAccess::Readable,
     )
     .await?;
-    let per_page = q
+    let per_page = pagination
         .per_page
         .unwrap_or(DEFAULT_PER_PAGE)
         .clamp(1, MAX_PER_PAGE);
-    let page = q.page.unwrap_or(1).max(1);
+    let page = pagination.page.unwrap_or(1).max(1);
     let offset = (page - 1) * per_page;
 
     let ascending = matches!(q.order.as_deref(), Some("asc"));
@@ -188,7 +180,7 @@ pub async fn list(
     .all(&state.web_db)
     .await?;
 
-    Ok(ok_json(NarListResponse {
+    Ok(ok_json(Paginated {
         items,
         total,
         page,

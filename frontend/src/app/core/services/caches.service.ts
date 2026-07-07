@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Cache } from '@core/models';
+import { Cache, Paginated } from '@core/models';
 import { CacheMemberItem, CacheRole, CacheRoleListResponse } from '@core/models/cache-permission.model';
 
 export type CacheSubscriptionMode = 'ReadWrite' | 'ReadOnly' | 'WriteOnly';
@@ -99,8 +99,8 @@ export class CachesService {
     return this.api.get<boolean>(`caches/available?name=${encodeURIComponent(name)}`);
   }
 
-  getCaches(): Observable<Cache[]> {
-    return this.api.get<Cache[]>('caches');
+  getCaches(page = 1, perPage = 50): Observable<Paginated<Cache[]>> {
+    return this.api.get<Paginated<Cache[]>>(`caches?page=${page}&per_page=${perPage}`);
   }
 
   getCache(cache: string): Observable<Cache> {

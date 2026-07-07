@@ -29,8 +29,8 @@ use gradient_core::ServerState;
 use gradient_db::{get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name};
 use gradient_types::ids::{CacheId, IntegrationId, OrganizationId, UserId};
 use gradient_types::{
-    CCacheUser, CIntegration, COrganizationCache, COrganizationUser, ECacheRole, ECacheUser,
-    EIntegration, EOrganizationCache, EOrganizationUser, ERole, MCache, MIntegration,
+    CCache, CCacheUser, CIntegration, COrganizationCache, COrganizationUser, ECacheRole,
+    ECacheUser, EIntegration, EOrganizationCache, EOrganizationUser, ERole, MCache, MIntegration,
     MOrganization, MOrganizationUser, MProject, MUser,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
@@ -294,6 +294,38 @@ pub async fn load_cache(
     }
 
     Ok(cache)
+}
+
+/// Build the filter selecting every cache the user may list: caches they own
+/// plus caches subscribed by any organization they belong to. Shared by
+/// `GET /caches` so listing visibility has a single source of truth.
+pub async fn visible_cache_condition(
+    state: &Arc<ServerState>,
+    user_id: UserId,
+) -> WebResult<Condition> {
+    let org_ids: Vec<OrganizationId> = EOrganizationUser::find()
+        .filter(COrganizationUser::User.eq(user_id))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|m| m.organization)
+        .collect();
+
+    let org_cache_ids: Vec<CacheId> = if org_ids.is_empty() {
+        Vec::new()
+    } else {
+        EOrganizationCache::find()
+            .filter(COrganizationCache::Organization.is_in(org_ids))
+            .all(&state.web_db)
+            .await?
+            .into_iter()
+            .map(|oc| oc.cache)
+            .collect()
+    };
+
+    Ok(Condition::any()
+        .add(CCache::CreatedBy.eq(user_id))
+        .add(CCache::Id.is_in(org_cache_ids)))
 }
 
 // ── Org-scoped child resources ───────────────────────────────────────────────
@@ -563,6 +595,7 @@ mod tests {
     use gradient_test_support::cli::test_cli;
     use gradient_test_support::fakes::email::InMemoryEmailSender;
     use gradient_test_support::log_storage::NoopLogStorage;
+    use gradient_types::ECache;
     use gradient_types::consts::{
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };
@@ -1484,6 +1517,46 @@ mod tests {
             .await
             .expect_err("API key View mask must block WriteStore even with Admin role");
             assert!(matches!(err, WebError::Forbidden(..)));
+        });
+    }
+
+    #[test]
+    fn visible_cache_condition_includes_owned_and_subscribed() {
+        use sea_orm::QueryTrait;
+        run(async {
+            let user = user_fixture();
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
+                .append_query_results([vec![org_cache_fixture()]])
+                .into_connection();
+            let state = make_state(db);
+            let cond = visible_cache_condition(&state, user.id)
+                .await
+                .expect("condition builds");
+            let stmt = ECache::find().filter(cond).build(DatabaseBackend::Postgres);
+            assert!(stmt.sql.contains("created_by"), "sql = {}", stmt.sql);
+            let values = format!("{:?}", stmt.values);
+            assert!(
+                values.contains("a0000000-0000-0000-0000-000000000020"),
+                "subscribed cache id must feed the filter: {values}"
+            );
+        });
+    }
+
+    #[test]
+    fn visible_cache_condition_owner_only_without_memberships() {
+        use sea_orm::QueryTrait;
+        run(async {
+            let user = user_fixture();
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([Vec::<gradient_entity::organization_user::Model>::new()])
+                .into_connection();
+            let state = make_state(db);
+            let cond = visible_cache_condition(&state, user.id)
+                .await
+                .expect("condition builds");
+            let stmt = ECache::find().filter(cond).build(DatabaseBackend::Postgres);
+            assert!(stmt.sql.contains("created_by"), "sql = {}", stmt.sql);
         });
     }
 }

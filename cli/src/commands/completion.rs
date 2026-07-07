@@ -84,7 +84,7 @@ async fn worker_ids(client: &Client, org: &str, prefix: &str) -> Vec<String> {
 
 async fn cache_names(client: &Client, prefix: &str) -> Vec<String> {
     match client.caches().list().await {
-        Ok(caches) => matching(caches.into_iter().map(|c| c.name), prefix),
+        Ok(res) => matching(res.items.into_iter().map(|c| c.name), prefix),
         Err(_) => Vec::new(),
     }
 }
@@ -191,11 +191,14 @@ mod tests {
             "/api/v1/caches",
             serde_json::json!({
                 "error": false,
-                "message": [
-                    {"id": "1", "name": "alpha"},
-                    {"id": "2", "name": "beta"},
-                    {"id": "3", "name": "alfa"}
-                ]
+                "message": {
+                    "items": [
+                        {"id": "1", "name": "alpha"},
+                        {"id": "2", "name": "beta"},
+                        {"id": "3", "name": "alfa"}
+                    ],
+                    "total": 3, "page": 1, "per_page": 50
+                }
             }),
         )
         .await;

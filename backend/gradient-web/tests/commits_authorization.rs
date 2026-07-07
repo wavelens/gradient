@@ -177,7 +177,7 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
-    TestServer::new(create_router(state))
+    TestServer::new(create_router(state).expect("router"))
 }
 
 fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {

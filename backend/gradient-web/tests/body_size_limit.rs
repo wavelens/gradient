@@ -73,7 +73,7 @@ fn webhook_body_over_limit_returns_413() {
         .unwrap();
     rt.block_on(async {
         let state = make_state_with_limits(1024);
-        let router = create_router(state);
+        let router = create_router(state).expect("router");
         let server = TestServer::new(router);
 
         let oversized = vec![b'x'; 4096];
@@ -105,7 +105,7 @@ fn webhook_body_within_limit_reaches_handler() {
         .unwrap();
     rt.block_on(async {
         let state = make_state_with_limits(1024);
-        let router = create_router(state);
+        let router = create_router(state).expect("router");
         let server = TestServer::new(router);
 
         let small = vec![b'x'; 256];
@@ -138,7 +138,7 @@ fn blob_upload_route_uses_higher_limit() {
         .unwrap();
     rt.block_on(async {
         let state = make_state_with_limits(1024);
-        let router = create_router(state);
+        let router = create_router(state).expect("router");
         let server = TestServer::new(router);
 
         let body = vec![b'x'; 16 * 1024];

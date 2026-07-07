@@ -8,7 +8,7 @@ use crate::access::{CacheAccess, Caller, effective_cache_mask, load_cache};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, generate_api_key, hash_api_key};
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::{OptionExt, ok_json, paginate};
 use crate::permissions::{
     PermissionEntry, available_cache_permissions, available_permissions, mask_to_vec,
     parse_cache_permission_list, parse_permission_list,
@@ -26,8 +26,8 @@ use gradient_types::*;
 use password_auth::verify_password;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, PaginatorTrait,
-    QueryFilter, QueryOrder, QuerySelect,
+    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
+    QueryOrder, QuerySelect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -743,41 +743,24 @@ pub async fn get_audit_log(
     Extension(user): Extension<MUser>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<AuditLogEntry>>>>> {
-    let page = params.page();
-    let per_page = params.per_page();
-    let offset = (page - 1) * per_page;
+    let listing = paginate(
+        EAuditLog::find()
+            .filter(CAuditLog::UserId.eq(user.id))
+            .order_by_desc(CAuditLog::CreatedAt),
+        &state.web_db,
+        &params,
+    )
+    .await?
+    .map(|r| AuditLogEntry {
+        id: r.id.to_string(),
+        event: r.event,
+        ip: r.ip,
+        user_agent: r.user_agent,
+        metadata: r.metadata,
+        created_at: fmt_dt(r.created_at),
+    });
 
-    let total = EAuditLog::find()
-        .filter(CAuditLog::UserId.eq(user.id))
-        .count(&state.web_db)
-        .await?;
-
-    let rows = EAuditLog::find()
-        .filter(CAuditLog::UserId.eq(user.id))
-        .order_by_desc(CAuditLog::CreatedAt)
-        .limit(per_page)
-        .offset(offset)
-        .all(&state.web_db)
-        .await?;
-
-    let items: Vec<AuditLogEntry> = rows
-        .into_iter()
-        .map(|r| AuditLogEntry {
-            id: r.id.to_string(),
-            event: r.event,
-            ip: r.ip,
-            user_agent: r.user_agent,
-            metadata: r.metadata,
-            created_at: fmt_dt(r.created_at),
-        })
-        .collect();
-
-    Ok(ok_json(Paginated {
-        items,
-        total,
-        page,
-        per_page,
-    }))
+    Ok(ok_json(listing))
 }
 
 fn current_session_id_from_headers(

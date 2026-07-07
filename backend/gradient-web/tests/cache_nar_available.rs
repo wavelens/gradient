@@ -22,7 +22,7 @@ fn available_returns_true_when_signature_present() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_available_true().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!(
@@ -45,7 +45,7 @@ fn available_returns_false_when_no_cached_path() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_available_false().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!(

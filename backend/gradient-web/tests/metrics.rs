@@ -88,7 +88,7 @@ fn endpoint_404_when_no_token_configured() {
         .unwrap();
     rt.block_on(async {
         let state = state_with_metrics(false, empty_db());
-        let server = TestServer::new(create_router(state));
+        let server = TestServer::new(create_router(state).expect("router"));
         let resp = server.get("/metrics").await;
         assert_eq!(resp.status_code(), 404);
     });
@@ -102,7 +102,7 @@ fn endpoint_401_when_no_authorization_header() {
         .unwrap();
     rt.block_on(async {
         let state = state_with_metrics(true, empty_db());
-        let server = TestServer::new(create_router(state));
+        let server = TestServer::new(create_router(state).expect("router"));
         let resp = server.get("/metrics").await;
         assert_eq!(resp.status_code(), 401);
     });
@@ -116,7 +116,7 @@ fn endpoint_401_when_bearer_mismatch() {
         .unwrap();
     rt.block_on(async {
         let state = state_with_metrics(true, empty_db());
-        let server = TestServer::new(create_router(state));
+        let server = TestServer::new(create_router(state).expect("router"));
         let resp = server
             .get("/metrics")
             .add_header("Authorization", "Bearer wrong")
@@ -133,7 +133,7 @@ fn endpoint_200_when_bearer_matches() {
         .unwrap();
     rt.block_on(async {
         let state = state_with_metrics(true, empty_db());
-        let server = TestServer::new(create_router(state));
+        let server = TestServer::new(create_router(state).expect("router"));
         let resp = server
             .get("/metrics")
             .add_header("Authorization", &format!("Bearer {TOKEN}"))
@@ -184,7 +184,7 @@ fn endpoint_reflects_seeded_counts() {
             .into_connection();
 
         let state = state_with_metrics(true, db);
-        let server = TestServer::new(create_router(state));
+        let server = TestServer::new(create_router(state).expect("router"));
         let resp = server
             .get("/metrics")
             .add_header("Authorization", &format!("Bearer {TOKEN}"))
@@ -220,7 +220,7 @@ fn endpoint_rate_limited() {
         }
 
         let state = state_with_metrics(true, mock.into_connection());
-        let server = TestServer::new(create_router(state));
+        let server = TestServer::new(create_router(state).expect("router"));
 
         for i in 1..=5 {
             let r = server

@@ -23,7 +23,7 @@ fn list_empty_cache_returns_empty_items() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_empty_nars().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
@@ -47,7 +47,7 @@ fn list_private_cache_anon_returns_not_found() {
         .unwrap();
     rt.block_on(async {
         let state = private_cache_for_nars().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
@@ -68,7 +68,7 @@ fn list_returns_signed_nar_for_cache() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_list_one_signed_nar().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))
@@ -92,7 +92,7 @@ fn list_accepts_pagination_query_params() {
         .unwrap();
     rt.block_on(async {
         let state = public_cache_empty_nars().await;
-        let server = TestServer::new(create_router(Arc::clone(&state)));
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
 
         let resp = server
             .get(&format!("/api/v1/caches/{FIXTURE_CACHE_NAME}/nars"))

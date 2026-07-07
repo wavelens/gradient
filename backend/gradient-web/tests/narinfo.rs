@@ -172,7 +172,7 @@ async fn narinfo_served_from_db_inner() {
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     // ── Issue GET /cache/test-cache/<hash>.narinfo ────────────────────────
@@ -315,7 +315,7 @@ async fn narinfo_unsigned_inner() {
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
 
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let response = server

@@ -433,7 +433,7 @@ async fn forge_webhook_no_matching_trigger_inner() {
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body = GITEA_PUSH_BODY.as_bytes();
@@ -488,7 +488,7 @@ async fn forge_webhook_push_fires_trigger_inner() {
     let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body = GITEA_PUSH_BODY.as_bytes();
@@ -539,7 +539,7 @@ async fn forge_webhook_test_ping_zero_sha_is_ok_noop_inner() {
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body = GITEA_TEST_WEBHOOK_BODY.as_bytes();
@@ -583,7 +583,7 @@ async fn forge_webhook_invalid_signature_inner() {
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body = GITEA_PUSH_BODY.as_bytes();
@@ -624,7 +624,7 @@ async fn forge_webhook_integration_not_found_inner() {
         Some(temp_secret_file("any-32-byte-secret-here!!!!!!!!")),
         None,
     );
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let response = server
@@ -667,7 +667,7 @@ async fn forge_webhook_branch_glob_no_match_skipped_inner() {
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body = GITEA_PUSH_BRANCH_BODY.as_bytes();
@@ -740,7 +740,7 @@ async fn forge_webhook_pr_fires_trigger_inner() {
     let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body_bytes: Vec<u8> = pr_body.into_bytes();
@@ -808,7 +808,7 @@ async fn forge_webhook_pr_action_mismatch_skipped_inner() {
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body_bytes: Vec<u8> = pr_body.into_bytes();
@@ -874,7 +874,7 @@ async fn forge_webhook_release_fires_releases_only_trigger_inner() {
     let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body_bytes: Vec<u8> = release_body.into_bytes();
@@ -924,7 +924,7 @@ async fn forge_webhook_push_does_not_fire_releases_only_trigger_inner() {
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body = GITEA_PUSH_BODY.as_bytes();
@@ -982,7 +982,7 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body = GITHUB_PUSH_BODY.as_bytes();
@@ -1027,7 +1027,7 @@ async fn github_app_webhook_ping_inner() {
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body: &[u8] = b"{}";
@@ -1069,7 +1069,7 @@ async fn github_app_webhook_installation_inner() {
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body = serde_json::to_vec(&serde_json::json!({
@@ -1115,7 +1115,7 @@ async fn github_app_webhook_not_configured_inner() {
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
 
     let state = make_state(db, None, None);
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let response = server
@@ -1194,7 +1194,7 @@ async fn github_app_webhook_multi_org_routes_to_matching_org_inner() {
     let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body = GITHUB_PUSH_BODY.as_bytes();
@@ -1245,7 +1245,7 @@ async fn github_app_webhook_no_matching_repo_returns_zero_inner() {
         .into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
-    let router = create_router(state);
+    let router = create_router(state).expect("router");
     let server = TestServer::new(router);
 
     let body = GITHUB_PUSH_BODY.as_bytes();

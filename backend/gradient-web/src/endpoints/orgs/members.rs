@@ -8,7 +8,7 @@ use crate::access::{Caller, OrgAccess, load_org};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
-use crate::helpers::{OptionExt, ok_json};
+use crate::helpers::{OptionExt, ok_json, role_names};
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
@@ -94,13 +94,7 @@ pub async fn get_organization_users(
         .await?;
 
     let role_ids: Vec<RoleId> = organization_users.iter().map(|(ou, _)| ou.role).collect();
-    let role_map: std::collections::HashMap<RoleId, String> = ERole::find()
-        .filter(CRole::Id.is_in(role_ids))
-        .all(&state.web_db)
-        .await?
-        .into_iter()
-        .map(|r| (r.id, r.name))
-        .collect();
+    let role_map = role_names(&state.web_db, role_ids).await?;
 
     let items: Vec<StringListItem> = organization_users
         .iter()

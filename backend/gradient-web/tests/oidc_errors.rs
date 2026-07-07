@@ -74,7 +74,7 @@ fn server_with_broken_oidc() -> TestServer {
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
     });
-    TestServer::new(create_router(state))
+    TestServer::new(create_router(state).expect("router"))
 }
 
 /// Substrings that would indicate the underlying IdP/transport error has
