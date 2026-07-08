@@ -249,7 +249,8 @@ impl EvalDispatchMaps {
 /// Build the eval `FlakeJob` and its `required_paths` from the evaluation's
 /// recorded source. A `/nix/store/...` repository is an already-materialised
 /// build-request source: dispatch it as `FlakeSource::Cached` (the worker
-/// substitutes the NAR and evaluates via `path:`) instead of git-cloning it.
+/// substitutes the NAR and evaluates via `path:`), but still run `FetchFlake`
+/// so flake inputs are resolved with the org SSH key.
 pub(crate) fn flake_job_for_eval_source(
     repository: &str,
     commit_sha: String,
@@ -261,8 +262,17 @@ pub(crate) fn flake_job_for_eval_source(
     use gradient_types::proto::FlakeSource;
 
     if repository.starts_with("/nix/store/") {
+        let tasks = if split_fetch {
+            vec![FlakeTask::FetchFlake]
+        } else {
+            vec![
+                FlakeTask::FetchFlake,
+                FlakeTask::EvaluateFlake,
+                FlakeTask::EvaluateDerivations,
+            ]
+        };
         let job = FlakeJob {
-            tasks: vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations],
+            tasks,
             source: FlakeSource::Cached {
                 store_path: repository.to_owned(),
             },
@@ -327,7 +337,7 @@ mod eval_source_tests {
     use gradient_types::proto::{FlakeSource, FlakeTask};
 
     #[test]
-    fn cached_source_dispatches_without_fetch() {
+    fn cached_source_dispatches_with_fetch() {
         let (job, required) = flake_job_for_eval_source(
             "/nix/store/qgzxagd5bql1iqx0w8qzljwdlb06sn6n-source",
             "0".repeat(40),
@@ -339,14 +349,32 @@ mod eval_source_tests {
         assert!(matches!(job.source, FlakeSource::Cached { .. }));
         assert_eq!(
             job.tasks,
-            vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations]
+            vec![
+                FlakeTask::FetchFlake,
+                FlakeTask::EvaluateFlake,
+                FlakeTask::EvaluateDerivations
+            ]
         );
-        assert!(!job.tasks.contains(&FlakeTask::FetchFlake));
         assert_eq!(required.len(), 1);
         assert_eq!(
             required[0].path,
             "/nix/store/qgzxagd5bql1iqx0w8qzljwdlb06sn6n-source"
         );
+    }
+
+    #[test]
+    fn cached_source_split_fetch_dispatches_fetch_only() {
+        let (job, required) = flake_job_for_eval_source(
+            "/nix/store/qgzxagd5bql1iqx0w8qzljwdlb06sn6n-source",
+            "0".repeat(40),
+            vec!["*".into()],
+            true,
+            vec![],
+            None,
+        );
+        assert!(matches!(job.source, FlakeSource::Cached { .. }));
+        assert_eq!(job.tasks, vec![FlakeTask::FetchFlake]);
+        assert_eq!(required.len(), 1);
     }
 
     #[test]
