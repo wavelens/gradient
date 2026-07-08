@@ -171,6 +171,38 @@ impl NarStore {
         }
     }
 
+    /// Verify a stored NAR object against its reported file_hash and size.
+    /// Always HEADs to confirm existence and size; when `rehash` is set it
+    /// additionally GETs the object and recomputes the file hash (authoritative
+    /// but costs a full object read).
+    pub async fn verify(
+        &self,
+        hash: &str,
+        expected_file_hash: &str,
+        expected_size: u64,
+        rehash: bool,
+    ) -> std::result::Result<(), crate::digest::VerifyError> {
+        match self.head_size(hash).await? {
+            Some(size) if size == expected_size => {}
+            Some(size) => {
+                return Err(crate::digest::VerifyError::Size {
+                    expected: expected_size,
+                    actual: size,
+                });
+            }
+            None => return Err(crate::digest::VerifyError::Missing),
+        }
+        if rehash {
+            let bytes = self
+                .get(hash)
+                .await?
+                .ok_or(crate::digest::VerifyError::Missing)?;
+            crate::digest::verify_nar_bytes(&bytes, expected_file_hash, expected_size)?;
+        }
+
+        Ok(())
+    }
+
     /// Initiate a multipart upload for the NAR identified by `hash`.
     ///
     /// Returns a [`WriteMultipart`] configured with `chunk_size`-byte parts.
@@ -622,6 +654,70 @@ mod tests {
         let (_d, store) = local_store();
         let r = store.get_stream("does-not-exist").await.expect("Ok");
         assert!(r.is_none());
+    }
+
+    #[tokio::test]
+    async fn verify_ok_on_size_match_without_rehash() {
+        let (_d, store) = local_store();
+        let bytes = b"verify me".to_vec();
+        let file_hash = crate::digest::file_hash_sri(&bytes);
+        store.put("ab12cd", bytes.clone()).await.expect("put");
+        assert!(
+            store
+                .verify("ab12cd", &file_hash, bytes.len() as u64, false)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_size_mismatch_is_size_error() {
+        let (_d, store) = local_store();
+        store.put("ab12cd", vec![7u8; 100]).await.expect("put");
+        let err = store
+            .verify("ab12cd", "sha256-", 99, false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::digest::VerifyError::Size { .. }));
+    }
+
+    #[tokio::test]
+    async fn verify_missing_object_is_missing_error() {
+        let (_d, store) = local_store();
+        let err = store
+            .verify("ab12cd", "sha256-", 10, false)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::digest::VerifyError::Missing));
+    }
+
+    #[tokio::test]
+    async fn verify_rehash_ok_on_content_match() {
+        let (_d, store) = local_store();
+        let bytes = b"rehash content".to_vec();
+        let file_hash = crate::digest::file_hash_sri(&bytes);
+        store.put("ab12cd", bytes.clone()).await.expect("put");
+        assert!(
+            store
+                .verify("ab12cd", &file_hash, bytes.len() as u64, true)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_rehash_tampered_bytes_is_hash_error() {
+        let (_d, store) = local_store();
+        let good = b"rehash content".to_vec();
+        let file_hash = crate::digest::file_hash_sri(&good);
+        let mut stored = good.clone();
+        *stored.last_mut().unwrap() ^= 0xff;
+        store.put("ab12cd", stored.clone()).await.expect("put");
+        let err = store
+            .verify("ab12cd", &file_hash, stored.len() as u64, true)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, crate::digest::VerifyError::Hash { .. }));
     }
 
     #[tokio::test]

@@ -99,6 +99,13 @@ pub struct StorageArgs {
         default_value_t = 3600
     )]
     pub sign_sweep_interval_secs: u64,
+    /// When set, the S3 presigned NAR commit path GETs the uploaded object and
+    /// recomputes its hash before marking it cached, catching same-length
+    /// corruption at the cost of a full object read. Off by default: the presigned
+    /// path still HEAD-checks size, and the relayed/REST upload paths always
+    /// content-verify since they already hold the bytes in memory.
+    #[arg(long, env = "GRADIENT_NAR_VERIFY_DIGEST", default_value_t = false)]
+    pub nar_verify_digest: bool,
 }
 
 impl Default for StorageArgs {
@@ -121,6 +128,7 @@ impl Default for StorageArgs {
             eval_cache_sweep_interval_secs: 3600,
             cache_maintenance_interval_secs: 3600,
             sign_sweep_interval_secs: 60,
+            nar_verify_digest: false,
         }
     }
 }
