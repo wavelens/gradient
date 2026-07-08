@@ -120,7 +120,7 @@ pub async fn fetch_repository(
     // exactly the lock that will be committed. An empty patch is left as a
     // no-op so no PR is opened.
     if let Some(spec) = &job.input_update {
-        run_input_update(spec, &tmp_path, updater).await?;
+        run_input_update(spec, &tmp_path, ssh_key.as_deref(), updater).await?;
     }
 
     let overrides_in: Vec<OverrideInput> = job.input_overrides.iter().map(Into::into).collect();
@@ -190,11 +190,13 @@ pub async fn fetch_repository(
 async fn run_input_update(
     spec: &gradient_proto::messages::InputUpdateSpec,
     checkout: &str,
+    ssh_key: Option<&str>,
     updater: &mut dyn JobReporter,
 ) -> Result<()> {
     use gradient_flake_lock::PatchGenerator as _;
 
-    let resolver = gradient_flake_lock::HttpRevisionResolver::new(reqwest::Client::new());
+    let resolver = gradient_flake_lock::HttpRevisionResolver::new(reqwest::Client::new())
+        .with_ssh_key(ssh_key.map(str::to_owned));
     let generator = gradient_flake_lock::FlakeLockGenerator::new(resolver);
     let tracked: Vec<gradient_flake_lock::InputName> =
         spec.inputs.iter().cloned().map(Into::into).collect();
