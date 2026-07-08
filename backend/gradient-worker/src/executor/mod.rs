@@ -281,6 +281,13 @@ impl JobExecutor {
         for task in &job.tasks {
             match task {
                 FlakeTask::FetchFlake => {
+                    // A Cached build source lives only in the gradient cache;
+                    // substitute it locally so `nix flake archive path:<store_path>`
+                    // can read it before archiving its inputs with credentials.
+                    if let Some(src) = eval::required_local_source(&job.source) {
+                        crate::proto::prefetch::ensure_path(&self.store, src, updater).await?;
+                    }
+
                     let outcome = fetch::fetch_repository(
                         &job,
                         updater as &mut dyn gradient_proto::traits::JobReporter,
