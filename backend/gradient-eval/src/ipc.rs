@@ -34,7 +34,7 @@ use crate::stats::StatsDelta;
 /// changes. Parent and subprocess are the same re-exec'd binary, so a mismatch
 /// only happens when the binary is replaced mid-run; the handshake turns that
 /// from undecodable frames into one clear error.
-pub const EVAL_IPC_VERSION: u8 = 2;
+pub const EVAL_IPC_VERSION: u8 = 3;
 
 /// Upper bound on a single frame's payload. Far above any real message (a
 /// discovery response for a huge flake is a few MiB); its job is to turn a
@@ -52,11 +52,15 @@ pub enum EvalRequest {
     Plan {
         repository: String,
         wildcards: Vec<String>,
+        #[serde(default)]
+        input_overrides: Vec<(String, String)>,
     },
     /// Discover all attribute paths in `repository` matching `wildcards`.
     List {
         repository: String,
         wildcards: Vec<String>,
+        #[serde(default)]
+        input_overrides: Vec<(String, String)>,
     },
     /// Resolve a batch of attribute paths to `(drv_path, references)` tuples.
     /// Answered by a `ResolveItem` stream terminated with `ResolveEnd`;
@@ -64,13 +68,25 @@ pub enum EvalRequest {
     Resolve {
         repository: String,
         attrs: Vec<String>,
+        #[serde(default)]
+        input_overrides: Vec<(String, String)>,
     },
     /// Return `repository`'s eval-cache fingerprint without evaluating it.
-    /// `None` in the response for mutable/dirty flakes.
-    Fingerprint { repository: String },
+    /// `None` in the response for mutable/dirty flakes. The fingerprint is
+    /// computed from the override-applied locked flake so distinct override
+    /// sets never collide on one eval-cache blob.
+    Fingerprint {
+        repository: String,
+        #[serde(default)]
+        input_overrides: Vec<(String, String)>,
+    },
     /// Fold the eval-cache WAL into the main `.sqlite` (truncate checkpoint).
     /// Run once after all shards finish, before the fleet-share push.
-    Checkpoint { repository: String },
+    Checkpoint {
+        repository: String,
+        #[serde(default)]
+        input_overrides: Vec<(String, String)>,
+    },
     /// Ask the worker to exit cleanly. Parent uses this on graceful shutdown.
     Shutdown,
 }
@@ -205,20 +221,25 @@ mod tests {
             EvalRequest::Plan {
                 repository: "github:nixos/nixpkgs".into(),
                 wildcards: vec!["packages.*.*".into()],
+                input_overrides: vec![("nixpkgs".into(), "github:nixos/nixpkgs/nixos-24.05".into())],
             },
             EvalRequest::List {
                 repository: "github:nixos/nixpkgs".into(),
                 wildcards: vec!["packages.*.*".into(), "!packages.x.broken".into()],
+                input_overrides: vec![],
             },
             EvalRequest::Resolve {
                 repository: "github:nixos/nixpkgs".into(),
                 attrs: vec!["packages.x86_64-linux.hello".into()],
+                input_overrides: vec![],
             },
             EvalRequest::Fingerprint {
                 repository: "github:nixos/nixpkgs".into(),
+                input_overrides: vec![],
             },
             EvalRequest::Checkpoint {
                 repository: "github:nixos/nixpkgs".into(),
+                input_overrides: vec![],
             },
             EvalRequest::Shutdown,
         ];
