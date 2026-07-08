@@ -465,6 +465,7 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
                 &c.job_id,
                 &c.store_path,
                 &c.hash,
+                &c.file_hash,
                 c.file_size,
             )
             .await
@@ -543,6 +544,12 @@ async fn commit_relayed(
             return false;
         }
     };
+    if let Err(e) = gradient_storage::verify_nar_bytes(&buf, file_hash, file_size) {
+        let reason = format!("NAR content verification failed: {e}");
+        error!(%peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
+        fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+        return false;
+    }
     if let Err(e) = crate::ingest::put_nar_idempotent(
         &state.worker_db,
         &state.nar_storage,
@@ -563,10 +570,11 @@ async fn commit_relayed(
     true
 }
 
-/// Commit a presigned (S3) upload: the worker already PUT the bytes
-/// directly, so HEAD the object and compare its size against the reported
-/// `file_size`. Returns `false` (after failing the build transiently) if
-/// the object is missing or its size mismatches.
+/// Commit a presigned (S3) upload: the worker already PUT the bytes directly,
+/// so [`NarStore::verify`] confirms the object exists at the reported
+/// `file_size`; with `nar_verify_digest` enabled it also rehashes the object
+/// against `file_hash`. Returns `false` (after failing the build transiently)
+/// on any mismatch.
 #[allow(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
@@ -579,27 +587,15 @@ async fn commit_presigned(
     job_id: &str,
     store_path: &str,
     hash: &str,
+    file_hash: &str,
     file_size: u64,
 ) -> bool {
-    match state.nar_storage.head_size(hash).await {
-        Ok(Some(size)) if size == file_size => true,
-        Ok(Some(size)) => {
-            let reason = format!(
-                "presigned NAR object size {size} does not match reported file_size {file_size}"
-            );
-            error!(%peer_id, %job_id, %store_path, %reason, "presigned NAR upload integrity check failed");
-            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-            false
-        }
-        Ok(None) => {
-            let reason = format!("presigned NAR object for {store_path} is missing from storage");
-            error!(%peer_id, %job_id, %store_path, %reason, "presigned NAR upload integrity check failed");
-            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-            false
-        }
+    let rehash = state.config.storage.nar_verify_digest;
+    match state.nar_storage.verify(hash, file_hash, file_size, rehash).await {
+        Ok(()) => true,
         Err(e) => {
-            let reason = format!("failed to head presigned NAR object: {e}");
-            error!(%peer_id, %job_id, %store_path, error = %e, "presigned NAR HEAD failed");
+            let reason = format!("presigned NAR upload verification failed: {e}");
+            error!(%peer_id, %job_id, %store_path, %reason, "presigned NAR upload integrity check failed");
             fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
             false
         }

@@ -104,6 +104,14 @@ pub async fn nars_upload(
             ),
         ));
     }
+    if let Err(e) =
+        gradient_storage::verify_nar_bytes(&nar_bytes, &narinfo.file_hash, narinfo.file_size as u64)
+    {
+        return Err(WebError::BadRequest(
+            ErrorCode::INPUT_VALIDATION,
+            format!("nar content verification failed: {e}"),
+        ));
+    }
 
     let outcome = ingest_nar(
         &state.web_db,
@@ -290,6 +298,14 @@ pub async fn nar_finalize(
     }
 
     let nar_bytes = store.read_all(&key)?;
+    if let Err(e) =
+        gradient_storage::verify_nar_bytes(&nar_bytes, &narinfo.file_hash, narinfo.file_size as u64)
+    {
+        return Err(WebError::BadRequest(
+            ErrorCode::INPUT_VALIDATION,
+            format!("nar content verification failed: {e}"),
+        ));
+    }
     let outcome = ingest_nar(
         &state.web_db,
         &state.nar_storage,
