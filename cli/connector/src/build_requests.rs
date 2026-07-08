@@ -7,12 +7,20 @@ struct ChunkReceived {
     received: u64,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct InputOverride {
+    pub input_name: String,
+    pub url: String,
+}
+
 #[derive(Serialize)]
 struct SourceFinalizeBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    input_overrides: Vec<InputOverride>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -46,6 +54,8 @@ pub struct DispatchRequest {
     pub target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub input_overrides: Vec<InputOverride>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -149,10 +159,18 @@ impl BuildRequestsApi<'_> {
         organization: &str,
         target: Option<&str>,
         system: Option<&str>,
+        overrides: &[(String, String)],
     ) -> Result<DispatchResponse, ConnectorError> {
         let body = SourceFinalizeBody {
             target: target.map(str::to_owned),
             system: system.map(str::to_owned),
+            input_overrides: overrides
+                .iter()
+                .map(|(input_name, url)| InputOverride {
+                    input_name: input_name.clone(),
+                    url: url.clone(),
+                })
+                .collect(),
         };
         let req = http::request(
             self.0.http(),
@@ -181,5 +199,21 @@ impl BuildRequestsApi<'_> {
         )?
         .json(&body);
         http::decode(req.send().await?).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_overrides_skipped_when_empty_and_present_when_set() {
+        let empty = SourceFinalizeBody { target: None, system: None, input_overrides: vec![] };
+        assert!(!serde_json::to_string(&empty).unwrap().contains("input_overrides"));
+        let set = SourceFinalizeBody {
+            target: None, system: None,
+            input_overrides: vec![InputOverride { input_name: "nixpkgs".into(), url: "github:NixOS/nixpkgs".into() }],
+        };
+        assert!(serde_json::to_string(&set).unwrap().contains("nixpkgs"));
     }
 }

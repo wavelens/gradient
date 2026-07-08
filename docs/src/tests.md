@@ -4229,6 +4229,13 @@ immediately. Coverage:
 - `delete calls service after confirm`
 - `hides write buttons under read-only access`
 
+### CLI `gradient build --override-input` (`cli/src/commands/build.rs`, `cli/connector/src/build_requests.rs`)
+
+- `parse_overrides_accepts_remote_refs` - `github:`/`git+ssh://` INPUT FLAKE pairs parse to `(name, ref)` tuples.
+- `parse_overrides_rejects_local_paths` - local refs (`/home/u/np`, `./np`, `~/np`, bare `np`, `path:/home/u/np`) are rejected client-side, since the server evaluates remotely.
+- `parse_overrides_accepts_store_path` - `path:/nix/store/...` is allowed (the server can fetch it).
+- `input_overrides_skipped_when_empty_and_present_when_set` - `SourceFinalizeBody`/`DispatchRequest` omit `input_overrides` when empty and serialize the pairs when set.
+
 ## Actions (per-project)
 
 ### Backend - REST endpoints (`backend/web/tests/actions.rs`)
