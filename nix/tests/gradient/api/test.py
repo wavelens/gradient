@@ -267,7 +267,7 @@ api("PUT", "caches", token=token, body=json.dumps({
 api("PUT", "caches", token=token, expect_error=True, body=json.dumps({
     "name": "maincache", "display_name": "Dup", "description": "d", "priority": 10}))  # duplicate name
 api("GET", "caches/maincache", token=token)
-assert any(c["name"] == "maincache" for c in api("GET", "caches", token=token))
+assert any(c["name"] == "maincache" for c in api("GET", "caches", token=token)["items"])
 api("GET", "caches/available", token=token)
 api("GET", "caches/public", token=token)
 api("GET", "caches/maincache/public-key", token=token)
