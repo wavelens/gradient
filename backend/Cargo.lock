@@ -764,9 +764,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.12.0"
+version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
+checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 dependencies = [
  "serde",
 ]
@@ -1074,18 +1074,18 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-queue"
-version = "0.3.12"
+version = "0.3.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
+checksum = "803d13fb3b09d88be9f4dbc29062c66b19bf7170867ceb746d2a8689bf6c7a26"
 dependencies = [
  "crossbeam-utils",
 ]
 
 [[package]]
 name = "crossbeam-utils"
-version = "0.8.21"
+version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
 name = "crypter"
@@ -2684,7 +2684,7 @@ dependencies = [
 [[package]]
 name = "harmonia-file-core"
 version = "3.1.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "serde",
  "serde_json",
@@ -2694,7 +2694,7 @@ dependencies = [
 [[package]]
 name = "harmonia-file-nar"
 version = "3.1.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "bstr",
  "bytes",
@@ -2718,7 +2718,7 @@ dependencies = [
 [[package]]
 name = "harmonia-protocol"
 version = "3.1.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "async-stream",
  "bstr",
@@ -2752,7 +2752,7 @@ dependencies = [
 [[package]]
 name = "harmonia-protocol-derive"
 version = "3.1.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2762,7 +2762,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-aterm"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "bytes",
  "harmonia-store-content-address",
@@ -2778,7 +2778,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-build-result"
 version = "3.1.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "harmonia-store-derivation",
  "num_enum",
@@ -2789,7 +2789,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-content-address"
 version = "3.1.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "derive_more",
  "harmonia-store-path",
@@ -2801,7 +2801,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-derivation"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -2820,7 +2820,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-path"
 version = "3.1.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "derive_more",
  "harmonia-utils-base-encoding",
@@ -2833,7 +2833,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-path-info"
 version = "3.1.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "harmonia-store-content-address",
  "harmonia-store-path",
@@ -2845,7 +2845,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-remote"
 version = "3.1.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -2865,7 +2865,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-base-encoding"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "data-encoding",
  "derive_more",
@@ -2875,7 +2875,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-hash"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "blake3",
  "data-encoding",
@@ -2893,7 +2893,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-io"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "bytes",
  "futures-util",
@@ -2906,7 +2906,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-signature"
 version = "3.1.0"
-source = "git+https://github.com/nix-community/harmonia.git#5f8e47497f37924b4526c62ea99d2a1fbef70912"
+source = "git+https://github.com/nix-community/harmonia.git#be940def673a5a2da6aa51be8dc8fd8600cfcbf9"
 dependencies = [
  "data-encoding",
  "ed25519-dalek",
@@ -3412,11 +3412,11 @@ dependencies = [
 
 [[package]]
 name = "jobserver"
-version = "0.1.34"
+version = "0.1.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33"
+checksum = "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
 dependencies = [
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "libc",
 ]
 
@@ -3679,9 +3679,9 @@ checksum = "ae960838283323069879657ca3de837e9f7bbb4c7bf6ea7f1b290d5e9476d2e0"
 
 [[package]]
 name = "memchr"
-version = "2.8.2"
+version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
+checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "memoffset"
@@ -3826,16 +3826,16 @@ dependencies = [
 
 [[package]]
 name = "nix-bindings"
-version = "0.2347.2"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#b1abd9b8dd7ea8a7df3b23a41af64ac7de586106"
+version = "0.2347.7"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#1e65a047aca03e9ef804323551f6260ad0855567"
 dependencies = [
  "nix-bindings-sys",
 ]
 
 [[package]]
 name = "nix-bindings-sys"
-version = "0.2347.2"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#b1abd9b8dd7ea8a7df3b23a41af64ac7de586106"
+version = "0.2347.7"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#1e65a047aca03e9ef804323551f6260ad0855567"
 dependencies = [
  "bindgen",
  "cc",
@@ -3958,11 +3958,10 @@ dependencies = [
 
 [[package]]
 name = "num-iter"
-version = "0.1.45"
+version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf"
+checksum = "c92800bd69a1eac91786bcfe9da64a897eb72911b8dc3095decbd07429e8048b"
 dependencies = [
- "autocfg",
  "num-integer",
  "num-traits",
 ]
@@ -5319,9 +5318,9 @@ dependencies = [
 
 [[package]]
 name = "rustc-demangle"
-version = "0.1.27"
+version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b50b8869d9fc858ce7266cce0194bd74df58b9d0e3f6df3a9fc8eb470d95c09d"
+checksum = "b74b56ffa8bb2830709a538c2cbcae9aa062db0d2a42563bfb09bdaae44020eb"
 
 [[package]]
 name = "rustc-hash"
@@ -5443,9 +5442,9 @@ dependencies = [
 
 [[package]]
 name = "rustversion"
-version = "1.0.22"
+version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
+checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "ryu"
@@ -5681,9 +5680,9 @@ checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
 
 [[package]]
 name = "sentry"
-version = "0.48.3"
+version = "0.48.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1975064d9f3d9d87a7c8f0371f7fac10d876906ca3e39faad72e61c263ff9b87"
+checksum = "82719d9cd9d2686541dc49875f7944ab71348edfcc6a5686414b22ea0b6d9b29"
 dependencies = [
  "cfg_aliases",
  "httpdate",
@@ -5701,9 +5700,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-backtrace"
-version = "0.48.3"
+version = "0.48.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "134f552b6b147f77aeee46ece875d67a8bfc1d56fe3860d78446ed4c25bb5f9f"
+checksum = "317271b821fcca9fc661f66aa8afe93058578d05cca4bd09615fe28a16c8b4cb"
 dependencies = [
  "backtrace",
  "regex",
@@ -5712,9 +5711,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-contexts"
-version = "0.48.3"
+version = "0.48.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98482b938fb1f31ecd23506fb7f08b2ba20d60b9cc72581b1205a9acd31d32fa"
+checksum = "7bae5c2f69cd0f7a1543846b4df412ba8ea1aa2ec4eb5333f125332cec8d4868"
 dependencies = [
  "hostname",
  "libc",
@@ -5726,9 +5725,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-core"
-version = "0.48.3"
+version = "0.48.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cff96247f4dc36867511d108709e703eb354143e7893319d763d2dd1edb4f48"
+checksum = "b8c44ee52fa3d30581f951b57aec754ef9cd70186df5fb788367804360c48097"
 dependencies = [
  "rand 0.9.4",
  "sentry-types",
@@ -5739,9 +5738,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-debug-images"
-version = "0.48.3"
+version = "0.48.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b603a51b083141062a142d73e36391b14244b4bd0bfe28bcd80e8327bb1d7698"
+checksum = "f96d38ec7e843f909e59acb0cc77452157755ad582be0386df800b6ce71350ba"
 dependencies = [
  "findshlibs",
  "sentry-core",
@@ -5749,9 +5748,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-panic"
-version = "0.48.3"
+version = "0.48.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61de3f4a1fc77d4c57e8bacd8ef064c26aaa88ea5b2541a761d37c7c3703b9a9"
+checksum = "d47aa64170cf609b948fe8f47d2690541bde11e465daa836cf81ad6e62bb3240"
 dependencies = [
  "sentry-backtrace",
  "sentry-core",
@@ -5759,9 +5758,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-tracing"
-version = "0.48.3"
+version = "0.48.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc59b27dae3bb495e37e6d62d252214840a2e7e1875531ee9fa2953df8985537"
+checksum = "27bdb405dbdfb1dd8b1cca46db8afe7ddd28dd4a55108b27b893170cc614912c"
 dependencies = [
  "bitflags",
  "sentry-backtrace",
@@ -5772,9 +5771,9 @@ dependencies = [
 
 [[package]]
 name = "sentry-types"
-version = "0.48.3"
+version = "0.48.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d7e78132ccfb4a1c777b959fb2944d1f6d5145bffe6be2a98ee6b25d244f72c"
+checksum = "1be93ef0435a5ab91f88178fb7681249437e875d004f996ecb35be94dc99a0e0"
 dependencies = [
  "debugid",
  "hex",
@@ -7578,18 +7577,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.52"
+version = "0.8.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce1022995ff5ff5d841ad7d994facc23098cd40152f2c1d11cd607c6f530653f"
+checksum = "75726053136156d419e285b9b7eddaaea9e3fea6ce32eed44a89901f0bd98de1"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.52"
+version = "0.8.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ae7f38b72ec2a254e2b87ef277cf2cd4fb97cbebf944faa6f33354da0867930"
+checksum = "4714fd92cf900833d49538023a9b3915155210801d1c1169eba513b2addefd71"
 dependencies = [
  "proc-macro2",
  "quote",
