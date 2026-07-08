@@ -26,7 +26,7 @@ use gradient_types::*;
 use tracing::instrument;
 
 pub use prefetch::Libgit2Prefetcher;
-pub use remote::accept_cert;
+pub use remote::{accept_cert, fetch_options_with_ssh};
 
 #[instrument(skip(ctx), fields(project_id = %project.id, project_name = %project.name))]
 pub async fn check_project_updates(
