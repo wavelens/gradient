@@ -4253,6 +4253,50 @@ immediately. Coverage:
 - `parse_overrides_accepts_store_path` - `path:/nix/store/...` is allowed (the server can fetch it).
 - `input_overrides_skipped_when_empty_and_present_when_set` - `SourceFinalizeBody`/`DispatchRequest` omit `input_overrides` when empty and serialize the pairs when set.
 
+## SSH flake inputs and per-run overrides (#514/#515/#521)
+
+`gradient build` now archives cached build-request sources through a real
+`FetchFlake` step so `git+ssh://` flake inputs resolve with the org SSH key
+before eval (#515), the `flake.lock` updater's revision resolver clones
+`ssh://` git inputs with the same key and unconditional host-key acceptance
+instead of failing with "invalid or unknown remote ssh hostkey" (#521), and
+both paths now share one `git2` auth helper (#514 groundwork). Tests:
+
+### Shared SSH fetch helper (`backend/gradient-sources/src/git/remote/mod.rs`)
+
+- `fetch_options_with_ssh_builds_for_none_and_some` - smoke test that the
+  shared `FetchOptions` builder (host-key acceptance plus in-memory SSH key
+  credentials, used by both the worker fetch task and the flake-lock
+  revision resolver) constructs without panicking with and without a key.
+
+### flake.lock updater SSH auth (`backend/gradient-flake-lock/src/resolver.rs`)
+
+- `resolve_git_clones_file_url_via_repobuilder` - the `git` revision
+  resolver still clones a plain `file://` URL through the shared
+  `RepoBuilder` + `fetch_options_with_ssh` path.
+- `resolve_git_with_ssh_key_still_resolves_file_url` - configuring the
+  resolver with `with_ssh_key(Some(...))` does not break a keyless `file://`
+  clone; real `ssh://` auth (host-key acceptance, in-memory key credentials)
+  is covered by the shared helper test above plus the nix-enabled CI.
+
+### Scheduler: cached build sources fetch before eval (`backend/gradient-scheduler/src/dispatch/eval.rs`)
+
+- `cached_source_dispatches_with_fetch` - a `/nix/store/...-source`
+  build-request source now dispatches `FlakeTask::FetchFlake` ahead of
+  `EvaluateFlake`/`EvaluateDerivations` (previously fetch-less), so its
+  `git+ssh://` inputs are resolved with credentials even though the
+  top-level source is already materialised.
+- `cached_source_split_fetch_dispatches_fetch_only` - the split-fetch
+  dispatch path narrows a `Cached` source down to just `FetchFlake`, the
+  same as a `Repository` source.
+
+### Worker: archive a cached source instead of rejecting it (`backend/gradient-worker/src/executor/fetch.rs`)
+
+- `fetch_cached_source_does_not_bail_on_kind` - `fetch_repository` given a
+  `FlakeSource::Cached` job attempts the `nix flake archive` step (failing
+  only because `nix` is absent in the unit-test sandbox) instead of bailing
+  with "requires FlakeSource::Repository".
+
 ## Actions (per-project)
 
 ### Backend - REST endpoints (`backend/web/tests/actions.rs`)

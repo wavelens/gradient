@@ -448,6 +448,8 @@ Each project may declare per-input flake overrides applied during evaluation fet
 
 Empty `flake_input_overrides = {}` (the default) means no overrides - `flake.lock` is used as-is. Setting the attrset to `{}` from a non-empty state removes all override rows for that project.
 
+This is a persistent, project-wide mechanism. For a one-off override on a single build request, use `gradient build`'s [`--override-input`](usage/cli.md#build-requests) instead.
+
 ```nix
 services.gradient.state.projects.my-project = {
   # ...

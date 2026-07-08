@@ -151,6 +151,7 @@ gradient build checks.x86_64-linux.foo  # eval a specific attribute path
 gradient build --system x86_64-linux    # system used to expand a bare `.#foo` target
 gradient build -b                       # dispatch and print the evaluation UUID, then exit
 gradient build --no-link                # skip producing a result symlink/folder
+gradient build --override-input nixpkgs github:NixOS/nixpkgs/nixos-unstable
 ```
 
 The target accepts either gradient's attr-path wildcard syntax (`.`-separated,
@@ -160,6 +161,22 @@ installable's flake ref is always the uploaded repo, so `.#foo` is expanded to
 `packages.<system>.foo` (`<system>` from `--system` or the host). A pinpointed
 target that matches no derivation fails the evaluation with a clear message
 instead of completing empty.
+
+`--override-input INPUT REF` overrides a flake input for this run only, like
+`nix build --override-input`; repeat the flag to override several inputs. The
+overrides are applied at Nix lock time on the server, so they change the
+evaluated derivations, not just the archived source. Because evaluation runs
+server-side, `REF` must be a remote flake ref - `github:`, `gitlab:`,
+`sourcehut:`, `git+ssh://`, `git+https://`, `git+http://`, `git://`, `https://`,
+`http://`, `flake:`, or `path:/nix/store/...` - local filesystem paths
+(`./foo`, `/abs/path`, `~/foo`, a bare name) are rejected client-side. This is
+a per-run override distinct from a project's persistent [flake input
+overrides](../configuration.md#flake-input-overrides), which apply to every
+run until removed.
+
+`gradient build` also fetches `git+ssh://` flake inputs during evaluation,
+using the organization's SSH key - the same key used for [private repo
+access](overview.md#ssh-keys).
 
 Requirements and limits:
 
