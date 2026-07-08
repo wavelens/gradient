@@ -103,7 +103,7 @@ fn main() -> Result<()> {
                         _ = gc_shutdown.cancelled() => return,
                         _ = tick.tick() => {}
                     }
-                    match store.gc() {
+                    match store.gc().await {
                         Ok(n) if n > 0 => info!(removed = n, "swept stale NAR partials"),
                         Ok(_) => {}
                         Err(e) => warn!(error = %e, "NAR partial GC failed"),

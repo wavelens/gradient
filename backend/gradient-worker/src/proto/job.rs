@@ -231,7 +231,7 @@ impl JobUpdater {
         // server self-heals a stale/oversized partial by restarting from 0.
         let mut fresh = Vec::new();
         for p in &paths {
-            match self.nar_recv.resumable(&self.job_id, p) {
+            match self.nar_recv.resumable(&self.job_id, p).await {
                 (received, Some(token)) if received > 0 => {
                     self.writer
                         .send(ClientMessage::NarRequestResume {

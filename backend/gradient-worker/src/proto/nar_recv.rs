@@ -138,14 +138,14 @@ impl NarReceiver {
     /// received under, if any. Returns `(0, None)` in memory-only mode or when
     /// nothing is staged - used by the requester to decide between
     /// `NarRequest` and `NarRequestResume`.
-    pub fn resumable(&self, job_id: &str, store_path: &str) -> (u64, Option<String>) {
+    pub async fn resumable(&self, job_id: &str, store_path: &str) -> (u64, Option<String>) {
         let Some(store) = self.partial.as_ref() else {
             return (0, None);
         };
         let Some(key) = partial_key(job_id, store_path) else {
             return (0, None);
         };
-        (store.staged_len(&key), store.token(&key))
+        (store.staged_len(&key).await, store.token(&key).await)
     }
 
     /// Synchronously install a waiter for `(job_id, store_path)`.
@@ -245,24 +245,12 @@ impl NarReceiver {
         };
 
         if !data.is_empty() {
-            match (self.partial.clone(), partial_key(job_id, store_path)) {
+            match (self.partial.as_ref(), partial_key(job_id, store_path)) {
                 (Some(store), Some(pkey)) => {
-                    // Disk staging is blocking `std::fs`; run it on the blocking
-                    // pool so the dispatch task is never stalled mid-pull.
-                    let outcome = tokio::task::spawn_blocking(move || {
-                        match store.append(&pkey, &token, offset, &data) {
-                            Ok(()) => Ok(()),
-                            // Non-fatal: drop the partial so a retry restarts cleanly.
-                            Err(e) => {
-                                let _ = store.discard(&pkey);
-                                Err(format!("partial append failed: {e}"))
-                            }
-                        }
-                    })
-                    .await
-                    .unwrap_or_else(|e| Err(format!("partial append task panicked: {e}")));
-                    if let Err(msg) = outcome {
-                        self.deliver(&key, Err(msg));
+                    if let Err(e) = store.append(&pkey, &token, offset, &data).await {
+                        // Non-fatal: drop the partial so a retry restarts cleanly.
+                        let _ = store.discard(&pkey).await;
+                        self.deliver(&key, Err(format!("partial append failed: {e}")));
                         return;
                     }
                 }
@@ -284,31 +272,29 @@ impl NarReceiver {
 
         // Take the in-memory state under the lock; read/discard the on-disk
         // partial off the runtime.
-        let (expected, started, disk, mem_buf) = {
+        let (expected, started, disk_key, mem_buf) = {
             let mut g = self.inner.lock().unwrap();
             let expected = g.headers.remove(&key).map(|h| h.total_bytes);
             let started = g.started.remove(&key);
-            let disk = match (self.partial.clone(), partial_key(job_id, store_path)) {
-                (Some(store), Some(pkey)) => Some((store, pkey)),
+            let disk_key = match (self.partial.as_ref(), partial_key(job_id, store_path)) {
+                (Some(_), Some(pkey)) => Some(pkey),
                 _ => None,
             };
-            let mem_buf = match disk {
+            let mem_buf = match &disk_key {
                 Some(_) => None,
                 None => Some(g.buffers.remove(&key).unwrap_or_default()),
             };
-            (expected, started, disk, mem_buf)
+            (expected, started, disk_key, mem_buf)
         };
 
-        let buf = match (mem_buf, disk) {
-            (Some(b), _) => b,
-            (None, Some((store, pkey))) => tokio::task::spawn_blocking(move || {
-                let b = store.read_all(&pkey).unwrap_or_default();
-                let _ = store.discard(&pkey);
+        let buf = match (mem_buf, disk_key, self.partial.as_ref()) {
+            (Some(b), _, _) => b,
+            (None, Some(pkey), Some(store)) => {
+                let b = store.read_all(&pkey).await.unwrap_or_default();
+                let _ = store.discard(&pkey).await;
                 b
-            })
-            .await
-            .unwrap_or_default(),
-            (None, None) => Vec::new(),
+            }
+            _ => Vec::new(),
         };
 
         if let Some(start) = started {
@@ -503,7 +489,7 @@ mod tests {
         // Connection drops mid-transfer.
         r1.fail("j", &path, "NarAbort".into());
 
-        let (staged, token) = r1.resumable("j", &path);
+        let (staged, token) = r1.resumable("j", &path).await;
         assert_eq!(staged, 6);
         assert_eq!(token.as_deref(), Some("len-9"));
 

@@ -106,11 +106,8 @@ impl NarReceiveStore {
         self.poisoned.remove(&sk);
         let received = match store_hash(store_path) {
             Some(h) => {
-                let (store, key, token) =
-                    (self.store.clone(), self.key(job_id, h), token.to_owned());
-                tokio::task::spawn_blocking(move || store.received_len(&key, &token).unwrap_or(0))
-                    .await
-                    .unwrap_or(0)
+                let key = self.key(job_id, h);
+                self.store.received_len(&key, token).await.unwrap_or(0)
             }
             None => 0,
         };
@@ -151,22 +148,17 @@ impl NarReceiveStore {
         }
 
         let token = self.active[&sk].token.clone();
-        let (store, key, data) = (self.store.clone(), self.key(job_id, hash), data.to_vec());
+        let key = self.key(job_id, hash);
         let len = data.len() as u64;
-        match tokio::task::spawn_blocking(move || store.append(&key, &token, offset, &data)).await {
-            Ok(Ok(())) => {
+        match self.store.append(&key, &token, offset, data).await {
+            Ok(()) => {
                 if let Some(s) = self.active.get_mut(&sk) {
                     s.staged += len;
                 }
                 AppendOutcome::Ok
             }
-            Ok(Err(e)) => {
-                warn!(%store_path, error = %e, "partial append failed; poisoning path");
-                self.poison(job_id, store_path, hash).await;
-                AppendOutcome::Overflow
-            }
             Err(e) => {
-                warn!(%store_path, error = %e, "partial append task panicked; poisoning path");
+                warn!(%store_path, error = %e, "partial append failed; poisoning path");
                 self.poison(job_id, store_path, hash).await;
                 AppendOutcome::Overflow
             }
@@ -174,8 +166,8 @@ impl NarReceiveStore {
     }
 
     async fn poison(&mut self, job_id: &str, store_path: &str, hash: &str) {
-        let (store, key) = (self.store.clone(), self.key(job_id, hash));
-        let _ = tokio::task::spawn_blocking(move || store.discard(&key)).await;
+        let key = self.key(job_id, hash);
+        let _ = self.store.discard(&key).await;
         let sk = state_key(job_id, store_path);
         self.active.remove(&sk);
         self.poisoned.insert(sk);
@@ -191,11 +183,11 @@ impl NarReceiveStore {
     /// hash resets the shared `{peer}/{hash}` partial (token-mismatch discard /
     /// `offset==0` truncate), so a bare shared key would leave the queued commit
     /// reading 0 bytes ("staged NAR size 0 does not match reported file_size").
-    pub(super) fn take_staged(&mut self, job_id: &str, store_path: &str) -> Option<StagedNar> {
+    pub(super) async fn take_staged(&mut self, job_id: &str, store_path: &str) -> Option<StagedNar> {
         let state = self.active.remove(&state_key(job_id, store_path))?;
         let hash = store_hash(store_path)?;
         let base_key = self.key(job_id, hash);
-        let key = match self.store.detach(&base_key) {
+        let key = match self.store.detach(&base_key).await {
             Ok(Some(claim)) => claim,
             Ok(None) => base_key,
             Err(e) => {
@@ -214,8 +206,8 @@ impl NarReceiveStore {
     pub(super) async fn finish(&mut self, job_id: &str, store_path: &str) {
         self.active.remove(&state_key(job_id, store_path));
         if let Some(hash) = store_hash(store_path) {
-            let (store, key) = (self.store.clone(), self.key(job_id, hash));
-            let _ = tokio::task::spawn_blocking(move || store.discard(&key)).await;
+            let key = self.key(job_id, hash);
+            let _ = self.store.discard(&key).await;
         }
     }
 
@@ -378,7 +370,7 @@ impl<'a> DispatchContext<'a> {
         // transfer on the connection stalled into its send timeout
         // ("WebSocket send stalled on final NarPush"). Detach the staged
         // stream synchronously, then commit on a bounded spawned task.
-        let staged = nar.take_staged(&job_id, &store_path);
+        let staged = nar.take_staged(&job_id, &store_path).await;
         let writer = self.writer.clone();
         let state = Arc::clone(self.state);
         let scheduler = Arc::clone(self.scheduler);
@@ -512,15 +504,11 @@ async fn commit_relayed(
     file_size: u64,
     staged: &StagedNar,
 ) -> bool {
-    let (store, key, token) = (
-        staged.store.clone(),
-        staged.key.clone(),
-        staged.token.clone(),
-    );
-    let staged_len =
-        tokio::task::spawn_blocking(move || store.received_len(&key, &token).unwrap_or(0))
-            .await
-            .unwrap_or(0);
+    let staged_len = staged
+        .store
+        .received_len(&staged.key, &staged.token)
+        .await
+        .unwrap_or(0);
     if staged_len != file_size {
         let reason =
             format!("staged NAR size {staged_len} does not match reported file_size {file_size}");
@@ -528,18 +516,11 @@ async fn commit_relayed(
         fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
         return false;
     }
-    let (store, key) = (staged.store.clone(), staged.key.clone());
-    let buf = match tokio::task::spawn_blocking(move || store.read_all(&key)).await {
-        Ok(Ok(b)) => b,
-        Ok(Err(e)) => {
+    let buf = match staged.store.read_all(&staged.key).await {
+        Ok(b) => b,
+        Err(e) => {
             let reason = format!("failed to read staged NAR: {e}");
             error!(%peer_id, %job_id, %store_path, error = %e, "read staged NAR failed");
-            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-            return false;
-        }
-        Err(e) => {
-            let reason = format!("read staged NAR task panicked: {e}");
-            error!(%peer_id, %job_id, %store_path, %reason, "read staged NAR failed");
             fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
             return false;
         }
@@ -564,8 +545,7 @@ async fn commit_relayed(
         fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
         return false;
     }
-    let (store, key) = (staged.store.clone(), staged.key.clone());
-    let _ = tokio::task::spawn_blocking(move || store.discard(&key)).await;
+    let _ = staged.store.discard(&staged.key).await;
     debug!(%peer_id, %job_id, %store_path, file_size, "NAR stored");
     true
 }
@@ -940,19 +920,20 @@ mod nar_receive_store_tests {
         let a = path('a');
         assert_ok(s.append(JOB, &a, 0, &[0u8; 256]).await);
         assert_ok(s.append(JOB, &a, 256, &[1u8; 256]).await);
-        let staged = s.take_staged(JOB, &a).expect("direct stream is active");
+        let staged = s.take_staged(JOB, &a).await.expect("direct stream is active");
         assert!(
-            s.take_staged(JOB, &a).is_none(),
+            s.take_staged(JOB, &a).await.is_none(),
             "take_staged must detach the stream"
         );
         assert_eq!(
             staged
                 .store
                 .received_len(&staged.key, &staged.token)
+                .await
                 .unwrap(),
             512
         );
-        assert_eq!(staged.store.read_all(&staged.key).unwrap().len(), 512);
+        assert_eq!(staged.store.read_all(&staged.key).await.unwrap().len(), 512);
     }
 
     #[tokio::test]
@@ -1031,17 +1012,17 @@ mod nar_receive_store_tests {
         assert_ok(s.append("build:job-a", &p, 100, &[0u8; 100]).await);
         assert!(!s.is_poisoned("build:job-a", &p));
 
-        let sa = s.take_staged("build:job-a", &p).expect("job-a staged");
-        let sb = s.take_staged("build:job-b", &p).expect("job-b staged");
-        assert_eq!(sa.store.received_len(&sa.key, &sa.token).unwrap(), 200);
-        assert_eq!(sb.store.received_len(&sb.key, &sb.token).unwrap(), 100);
+        let sa = s.take_staged("build:job-a", &p).await.expect("job-a staged");
+        let sb = s.take_staged("build:job-b", &p).await.expect("job-b staged");
+        assert_eq!(sa.store.received_len(&sa.key, &sa.token).await.unwrap(), 200);
+        assert_eq!(sb.store.received_len(&sb.key, &sb.token).await.unwrap(), 100);
     }
 
-    #[test]
-    fn presigned_mode_has_no_active_stream() {
+    #[tokio::test]
+    async fn presigned_mode_has_no_active_stream() {
         let (_d, mut s) = store(1024);
         assert!(
-            s.take_staged(JOB, &path('a')).is_none(),
+            s.take_staged(JOB, &path('a')).await.is_none(),
             "a path with no header/push must not be treated as direct mode"
         );
     }
@@ -1066,7 +1047,7 @@ mod nar_receive_store_tests {
         let a = path('a');
         assert_ok(s.append(JOB, &a, 0, b"hello").await);
         s.finish(JOB, &a).await;
-        assert!(s.take_staged(JOB, &a).is_none());
+        assert!(s.take_staged(JOB, &a).await.is_none());
         assert_eq!(
             s.note_header(JOB, &a, "").await,
             0,

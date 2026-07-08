@@ -244,15 +244,15 @@ pub async fn nar_chunk(
     // A fresh upload sweeps abandoned partials (best-effort); the `offset == 0`
     // append then truncates any stale prefix so a re-run restarts cleanly.
     if offset == 0 {
-        let _ = store.gc();
+        let _ = store.gc().await;
     }
 
     // `received` is authoritative: when the caller's `offset` is contiguous we
     // append and advance it; otherwise we append nothing and report the current
     // length so the caller resyncs and resends from there.
-    let staged = store.received_len(&key, &store_hash)?;
+    let staged = store.received_len(&key, &store_hash).await?;
     let received = if offset == 0 || offset == staged {
-        store.append(&key, &store_hash, offset, &body)?;
+        store.append(&key, &store_hash, offset, &body).await?;
         offset + body.len() as u64
     } else {
         staged
@@ -286,7 +286,7 @@ pub async fn nar_finalize(
 
     let store = upload_partial_store(&state)?;
     let key = format!("{}/{store_hash}", cache.id);
-    let staged = store.staged_len(&key);
+    let staged = store.staged_len(&key).await;
     if staged as i64 != narinfo.file_size {
         return Err(WebError::BadRequest(
             ErrorCode::INPUT_VALIDATION,
@@ -297,7 +297,7 @@ pub async fn nar_finalize(
         ));
     }
 
-    let nar_bytes = store.read_all(&key)?;
+    let nar_bytes = store.read_all(&key).await?;
     if let Err(e) =
         gradient_storage::verify_nar_bytes(&nar_bytes, &narinfo.file_hash, narinfo.file_size as u64)
     {
@@ -323,7 +323,7 @@ pub async fn nar_finalize(
     )
     .await
     .map_err(WebError::from)?;
-    let _ = store.discard(&key);
+    let _ = store.discard(&key).await;
 
     sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
 

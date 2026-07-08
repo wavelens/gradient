@@ -143,12 +143,12 @@ pub async fn source_chunk(
     let store = source_partial_store(&state)?;
     let key = format!("{}/{upload}", user.id);
     if offset == 0 {
-        let _ = store.gc();
+        let _ = store.gc().await;
     }
 
-    let staged = store.received_len(&key, &upload)?;
+    let staged = store.received_len(&key, &upload).await?;
     let received = if offset == 0 || offset == staged {
-        store.append(&key, &upload, offset, &body)?;
+        store.append(&key, &upload, offset, &body).await?;
         offset + body.len() as u64
     } else {
         staged
@@ -186,9 +186,10 @@ pub async fn source_finalize(
     let key = format!("{}/{upload}", user.id);
     let nar_bytes = store
         .read_all(&key)
+        .await
         .map_err(|e| WebError::bad_request(format!("no staged source upload: {e}")))?;
     if nar_bytes.is_empty() {
-        let _ = store.discard(&key);
+        let _ = store.discard(&key).await;
         return Err(WebError::bad_request("empty source upload"));
     }
 
@@ -198,7 +199,7 @@ pub async fn source_finalize(
 
     let response =
         finalize_build_request(&state, org.id, &user, &nar, body.target, body.system).await?;
-    let _ = store.discard(&key);
+    let _ = store.discard(&key).await;
 
     Ok(ok_json(response))
 }
