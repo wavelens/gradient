@@ -3279,6 +3279,8 @@ paths:
                     properties:
                       message:
                         $ref: '#/components/schemas/DispatchResponse'
+        '400':
+          description: An input override is not a remote flake ref.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -3450,6 +3452,13 @@ paths:
                 system:
                   type: string
                   description: Target system.
+                input_overrides:
+                  type: array
+                  description: >-
+                    Per-run flake input overrides applied at eval time; only
+                    remote flake refs are accepted (local paths are rejected).
+                  items:
+                    $ref: '#/components/schemas/InputOverride'
       responses:
         '200':
           description: Evaluation queued
@@ -3463,7 +3472,9 @@ paths:
                       message:
                         $ref: '#/components/schemas/DispatchResponse'
         '400':
-          description: No staged upload for this id, or the staged NAR is empty.
+          description: >-
+            No staged upload for this id, the staged NAR is empty, or an
+            input override is not a remote flake ref.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -8843,6 +8854,26 @@ components:
           description: |-
             Target system (e.g. `x86_64-linux`). Accepted but currently unused
             server-side; reserved for future cross-system scheduling.
+        input_overrides:
+          type: array
+          description: |-
+            Per-run flake input overrides applied at eval time. Only remote flake
+            refs are accepted (`github:`, `gitlab:`, `sourcehut:`, `git+ssh://`,
+            `git+https://`, `git+http://`, `git://`, `https://`, `http://`,
+            `flake:`, or `path:/nix/store/...`); local paths are rejected with 400.
+          items:
+            $ref: '#/components/schemas/InputOverride'
+
+    InputOverride:
+      type: object
+      required: [input_name, url]
+      properties:
+        input_name:
+          type: string
+          description: Flake input to override; must match `^[A-Za-z_][A-Za-z0-9_-]*$`.
+        url:
+          type: string
+          description: Remote flake ref replacing the input for this run.
 
     DispatchResponse:
       type: object

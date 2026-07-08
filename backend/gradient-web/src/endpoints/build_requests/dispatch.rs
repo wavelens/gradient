@@ -24,13 +24,15 @@ use gradient_core::ServerState;
 use gradient_storage::source_nar::{SourceNar, materialise_source_nar};
 use gradient_types::ConcurrencyPolicy;
 use gradient_types::ids::{
-    CachedPathId, CachedPathSignatureId, CommitId, EvaluationId, ProjectId, UploadSessionId,
+    CachedPathId, CachedPathSignatureId, CommitId, EvaluationFlakeInputOverrideId, EvaluationId,
+    ProjectId, UploadSessionId,
 };
 use gradient_types::{
-    ACachedPathSignature, AUploadSession, BaseResponse, CCachedPath, CCachedPathSignature,
-    COrganizationCache, CProject, ECache, ECachedPath, ECachedPathSignature, EOrganizationCache,
-    EProject, EUploadSession, MCachedPath, MCachedPathSignature, MCommit, MEvaluation, MProject,
-    MUser, NULL_TIME, now,
+    ACachedPathSignature, AEvaluationFlakeInputOverride, AUploadSession, BaseResponse, CCachedPath,
+    CCachedPathSignature, COrganizationCache, CProject, ECache, ECachedPath, ECachedPathSignature,
+    EEvaluationFlakeInputOverride, EOrganizationCache, EProject, EUploadSession, MCachedPath,
+    MCachedPathSignature, MCommit, MEvaluation, MEvaluationFlakeInputOverride, MProject, MUser,
+    NULL_TIME, now,
 };
 use gradient_util::nix_hash::normalize_nar_hash;
 use sea_orm::ActiveValue::Set;
@@ -46,12 +48,57 @@ use tokio::fs;
 
 const BUILD_REQUEST_PROJECT_NAME: &str = "build-request";
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct InputOverrideBody {
+    pub input_name: String,
+    pub url: String,
+}
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct DispatchRequest {
     #[serde(default)]
     pub target: Option<String>,
     #[serde(default)]
     pub system: Option<String>,
+    #[serde(default)]
+    pub input_overrides: Vec<InputOverrideBody>,
+}
+
+const REMOTE_OVERRIDE_SCHEMES: &[&str] = &[
+    "github:",
+    "gitlab:",
+    "sourcehut:",
+    "git+ssh://",
+    "git+https://",
+    "git+http://",
+    "git://",
+    "https://",
+    "http://",
+    "flake:",
+];
+
+/// Defense in depth for `--override-input`: the CLI validates too, but the REST
+/// API is directly callable. gradient evaluates on the server, so only remote
+/// flake refs (and fetchable `/nix/store` paths) are accepted.
+pub(super) fn validate_remote_override(input_name: &str, url: &str) -> WebResult<()> {
+    let mut chars = input_name.chars();
+    let name_ok = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    if !name_ok {
+        return Err(WebError::bad_request(
+            "input_name must match ^[A-Za-z_][A-Za-z0-9_-]*$",
+        ));
+    }
+
+    let ref_ok = REMOTE_OVERRIDE_SCHEMES.iter().any(|s| url.starts_with(s))
+        || url.starts_with("path:/nix/store/");
+    if !ref_ok {
+        return Err(WebError::bad_request(format!(
+            "override-input '{input_name}': '{url}' is not a remote flake ref; \
+             use github:/gitlab:/git+ssh://flake:/path:/nix/store/... ."
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -119,6 +166,12 @@ pub async fn post_dispatch(
         .await
         .map_err(|e| WebError::internal(format!("Failed to materialise source NAR: {}", e)))?;
 
+    let input_overrides = body
+        .input_overrides
+        .into_iter()
+        .map(|o| (o.input_name, o.url))
+        .collect();
+
     let response = finalize_build_request(
         &state,
         session.organization,
@@ -126,6 +179,7 @@ pub async fn post_dispatch(
         &nar,
         body.target,
         body.system,
+        input_overrides,
     )
     .await?;
 
@@ -145,8 +199,13 @@ pub(super) async fn finalize_build_request(
     nar: &SourceNar,
     target: Option<String>,
     system: Option<String>,
+    input_overrides: Vec<(String, String)>,
 ) -> WebResult<DispatchResponse> {
     let _ = system;
+
+    for (input_name, url) in &input_overrides {
+        validate_remote_override(input_name, url)?;
+    }
 
     state
         .nar_storage
@@ -191,6 +250,24 @@ pub(super) async fn finalize_build_request(
     .into_active_model()
     .insert(&tx)
     .await?;
+
+    if !input_overrides.is_empty() {
+        let rows: Vec<AEvaluationFlakeInputOverride> = input_overrides
+            .into_iter()
+            .map(|(input_name, url)| {
+                MEvaluationFlakeInputOverride {
+                    id: EvaluationFlakeInputOverrideId::now_v7(),
+                    evaluation: evaluation.id,
+                    input_name,
+                    url: Some(url),
+                }
+                .into_active_model()
+            })
+            .collect();
+        EEvaluationFlakeInputOverride::insert_many(rows)
+            .exec(&tx)
+            .await?;
+    }
 
     let cache = resolve_org_cache_name(&tx, organization).await?;
 
@@ -399,4 +476,43 @@ fn is_unique_violation(err: &DbErr) -> bool {
         sqlx_err,
         sqlx::Error::Database(db_err) if db_err.is_unique_violation()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_remote_override;
+
+    #[test]
+    fn accepts_remote_flake_refs() {
+        for url in [
+            "github:NixOS/nixpkgs",
+            "gitlab:group/project",
+            "sourcehut:~user/project",
+            "git+ssh://git@h/x.git",
+            "git+https://h/x.git",
+            "git+http://h/x.git",
+            "git://h/x.git",
+            "https://h/x.tar.gz",
+            "http://h/x.tar.gz",
+            "flake:nixpkgs",
+            "path:/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-src",
+        ] {
+            assert!(validate_remote_override("nixpkgs", url).is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn rejects_local_and_non_remote_refs() {
+        for url in ["/abs", "./rel", "~/x", "name", "path:/home/u/x"] {
+            assert!(validate_remote_override("nixpkgs", url).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_input_name() {
+        assert!(validate_remote_override("1bad", "github:a/b").is_err());
+        assert!(validate_remote_override("has space", "github:a/b").is_err());
+        assert!(validate_remote_override("", "github:a/b").is_err());
+        assert!(validate_remote_override("ok_name-1", "github:a/b").is_ok());
+    }
 }

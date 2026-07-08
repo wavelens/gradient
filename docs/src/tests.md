@@ -2433,7 +2433,22 @@ migration). Tests:
   `upload_session_sweep_deletes_expired_undispatched` proves that
   expired sessions without a `dispatched_at` flip are reclaimed.
 
-## Cache traffic metrics - atomic UPSERT (no lost updates)
+## Build-request flake input overrides (#514)
+
+`gradient build --override-input INPUT FLAKE` ships per-run overrides on the
+build request (`input_overrides: [{ input_name, url }]`); the server persists
+them as `evaluation_flake_input_override` rows on the build-request evaluation,
+which the scheduler already threads into eval-time `LockFlags`. Tests:
+
+- `backend/gradient-web/src/endpoints/build_requests/dispatch.rs` - unit tests
+  for `validate_remote_override` (defense in depth, the REST API is directly
+  callable): accepts the remote schemes and `path:/nix/store/...`, rejects
+  `/abs`, `./rel`, `~/x`, a bare `name`, and `path:/home/...`, and rejects an
+  `input_name` that breaks `^[A-Za-z_][A-Za-z0-9_-]*$` (`1bad`, `has space`).
+- `backend/gradient-web/tests/build_requests_dispatch.rs` -
+  `rejects_local_input_override` sends a manifest dispatch with a local-path
+  override and asserts 400 (validated before the evaluation is created, so no
+  dangling row). Row insertion runs in CI against Postgres.
 
 `record_nar_traffic` (`backend/web/src/endpoints/stats.rs`) records bytes
 served per `(cache, bucket_time)` row. The previous implementation used a
