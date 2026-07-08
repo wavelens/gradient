@@ -40,11 +40,17 @@ pub async fn dispatch_via_nar(
         let dest = staging.path().join(&entry.path);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent).unwrap_or_else(|e| {
-                out.err(ExitKind::Api, format!("Failed to stage {}: {}", entry.path, e))
+                out.err(
+                    ExitKind::Api,
+                    format!("Failed to stage {}: {}", entry.path, e),
+                )
             });
         }
         std::fs::copy(&entry.abs, &dest).unwrap_or_else(|e| {
-            out.err(ExitKind::Api, format!("Failed to stage {}: {}", entry.path, e))
+            out.err(
+                ExitKind::Api,
+                format!("Failed to stage {}: {}", entry.path, e),
+            )
         });
     }
 
@@ -193,7 +199,13 @@ pub async fn link_result(
     let (cache_opts, _netrc) = cache_substituter_opts(client, dispatch, out).await;
 
     let mut cmd = tokio::process::Command::new("nix-store");
-    cmd.args(["--realise", &realise_path, "--add-root", "result", "--indirect"]);
+    cmd.args([
+        "--realise",
+        &realise_path,
+        "--add-root",
+        "result",
+        "--indirect",
+    ]);
     cmd.args(&cache_opts);
     match cmd.output().await {
         Ok(o) if o.status.success() => out.human(format!("result -> {realise_path}")),
@@ -289,7 +301,10 @@ mod tests {
         assert!(msg.contains("199.0 MiB"), "{msg}");
         assert!(msg.contains("53318 files"), "{msg}");
         assert!(msg.contains("GRADIENT_MAX_SOURCE_UPLOAD_SIZE"), "{msg}");
-        assert!(!msg.contains("<html>"), "raw proxy HTML must be suppressed: {msg}");
+        assert!(
+            !msg.contains("<html>"),
+            "raw proxy HTML must be suppressed: {msg}"
+        );
     }
 
     #[test]

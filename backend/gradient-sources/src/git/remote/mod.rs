@@ -13,8 +13,8 @@ mod ssh;
 
 use super::url::git_transport_url;
 use crate::SourceError;
-use git2::RemoteCallbacks;
 use git_protocol::ls_remote_head_git_protocol;
+use git2::RemoteCallbacks;
 use https::ls_remote_head_no_creds;
 use ssh::ls_remote_head_ssh;
 
@@ -96,6 +96,7 @@ mod tests {
         // Smoke: constructing options with and without a key must not panic and
         // yields a usable FetchOptions (callbacks are set internally).
         let _no_key = super::fetch_options_with_ssh(None);
-        let _with_key = super::fetch_options_with_ssh(Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
+        let _with_key =
+            super::fetch_options_with_ssh(Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
     }
 }

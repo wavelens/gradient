@@ -11,9 +11,7 @@ use crate::output::{ExitKind, Output, to_exit_kind};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::engine::ArgValueCompleter;
 use clap_complete::{CompleteEnv, Shell};
-use connector::auth::{
-    CliDevicePollRequest, CliPollOutcome, MakeLoginRequest, MakeUserRequest,
-};
+use connector::auth::{CliDevicePollRequest, CliPollOutcome, MakeLoginRequest, MakeUserRequest};
 use std::io::{self, Write};
 use std::process::Command;
 use std::time::Duration;
@@ -196,7 +194,10 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                 .env("COMPLETE", shell.to_string())
                 .output()
                 .unwrap_or_else(|e| {
-                    out.err(ExitKind::Api, format!("failed to generate completions: {e}"))
+                    out.err(
+                        ExitKind::Api,
+                        format!("failed to generate completions: {e}"),
+                    )
                 });
             let mut stdout = io::stdout();
             stdout.write_all(&output.stdout).ok();
@@ -349,7 +350,11 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         } => {
             let overrides = build::parse_overrides(&override_input)
                 .unwrap_or_else(|msg| out.err(ExitKind::Usage, msg));
-            let params = build::BuildParams { target, system, overrides };
+            let params = build::BuildParams {
+                target,
+                system,
+                overrides,
+            };
             build::handle_build(params, organization, background, quiet, no_link, out).await
         }
         MainCommands::Watch { evaluation } => watch::handle_watch(&evaluation, out).await,
@@ -401,8 +406,7 @@ async fn run_web_login(out: Output, no_browser: bool) {
     }
 
     let interval = Duration::from_secs(start.interval.max(1));
-    let deadline = std::time::Instant::now()
-        + Duration::from_secs(start.expires_in.max(0) as u64);
+    let deadline = std::time::Instant::now() + Duration::from_secs(start.expires_in.max(0) as u64);
 
     loop {
         if std::time::Instant::now() >= deadline {
