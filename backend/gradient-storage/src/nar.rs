@@ -100,15 +100,9 @@ impl NarStore {
         let store = builder.build().context("Failed to create S3 NAR storage")?;
         let store = Arc::new(store);
 
-        let normalized_prefix = if prefix.is_empty() || prefix.ends_with('/') {
-            prefix.to_string()
-        } else {
-            format!("{}/", prefix)
-        };
-
         Ok(Self {
             inner: Arc::clone(&store) as Arc<dyn ObjectStore>,
-            prefix: normalized_prefix,
+            prefix: crate::layout::normalize_prefix(prefix),
             local_base: None,
             s3_signer: Some(store),
         })
@@ -126,6 +120,114 @@ impl NarStore {
         Path::from(format!("{}nars/{}/{}.nar.zst", self.prefix, shard, stem,))
     }
 
+    /// One canonical `HEAD`, mapping `NotFound` to `None`. Backs `exists`,
+    /// `head_size` and the range-stream head probe.
+    async fn head_object(&self, path: &Path) -> Result<Option<object_store::ObjectMeta>> {
+        match self.inner.head(path).await {
+            Ok(meta) => Ok(Some(meta)),
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e).context("Failed to head object"),
+        }
+    }
+
+    async fn put_object(&self, path: Path, data: Vec<u8>) -> Result<()> {
+        self.inner
+            .put(&path, PutPayload::from(data))
+            .await
+            .context("Failed to upload object")?;
+        Ok(())
+    }
+
+    async fn get_object(&self, path: &Path) -> Result<Option<Vec<u8>>> {
+        match self.inner.get(path).await {
+            Ok(result) => {
+                let bytes = result.bytes().await.context("Failed to read object bytes")?;
+                Ok(Some(bytes.to_vec()))
+            }
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e).context("Failed to get object"),
+        }
+    }
+
+    async fn delete_object(&self, path: &Path) -> Result<()> {
+        match self.inner.delete(path).await {
+            Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+            Err(e) => Err(e).context("Failed to delete object"),
+        }
+    }
+
+    /// Streaming read. `offset == None` is a plain GET whose size comes from the
+    /// object metadata; `offset == Some(o)` HEADs for the FULL size, returns an
+    /// empty stream when `o` is at or past the end, else range-GETs from `o`.
+    async fn get_stream_object(
+        &self,
+        path: &Path,
+        offset: Option<u64>,
+    ) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
+        use object_store::{GetOptions, GetRange};
+
+        let Some(offset) = offset else {
+            return match self.inner.get(path).await {
+                Ok(result) => {
+                    let size = result.meta.size;
+                    let stream = result
+                        .into_stream()
+                        .map(|chunk| chunk.context("object stream chunk read failed"))
+                        .boxed();
+                    Ok(Some((size, stream)))
+                }
+                Err(object_store::Error::NotFound { .. }) => Ok(None),
+                Err(e) => Err(e).context("Failed to open object stream"),
+            };
+        };
+
+        let size = match self.head_object(path).await? {
+            Some(meta) => meta.size,
+            None => return Ok(None),
+        };
+
+        if offset >= size {
+            let empty: BoxStream<'static, Result<Bytes>> = futures::stream::empty().boxed();
+            return Ok(Some((size, empty)));
+        }
+
+        let opts = GetOptions {
+            range: Some(GetRange::Offset(offset)),
+            ..Default::default()
+        };
+        match self.inner.get_opts(path, opts).await {
+            Ok(result) => {
+                let stream = result
+                    .into_stream()
+                    .map(|chunk| chunk.context("object range stream chunk read failed"))
+                    .boxed();
+                Ok(Some((size, stream)))
+            }
+            Err(object_store::Error::NotFound { .. }) => Ok(None),
+            Err(e) => Err(e).context("Failed to open object range stream"),
+        }
+    }
+
+    async fn presign_object(
+        &self,
+        method: reqwest::Method,
+        path: &Path,
+        expires_in: std::time::Duration,
+    ) -> Result<Option<String>> {
+        use object_store::signer::Signer as _;
+
+        let Some(signer) = &self.s3_signer else {
+            return Ok(None);
+        };
+
+        let url = signer
+            .signed_url(method, path, expires_in)
+            .await
+            .context("failed to generate presigned URL")?;
+
+        Ok(Some(url.to_string()))
+    }
+
     /// Verify the storage backend is reachable. Returns `Ok(())` when the
     /// underlying store responds (even with NotFound), or an error when the
     /// server cannot be reached at all (network error, 502, auth failure, …).
@@ -140,11 +242,7 @@ impl NarStore {
     }
 
     pub async fn put(&self, hash: &str, data: Vec<u8>) -> Result<()> {
-        self.inner
-            .put(&self.object_path(hash), PutPayload::from(data))
-            .await
-            .context("Failed to upload NAR")?;
-        Ok(())
+        self.put_object(self.object_path(hash), data).await
     }
 
     /// Whether a NAR object for `hash` is already present (a single `HEAD`).
@@ -152,11 +250,7 @@ impl NarStore {
     /// not rewrite the object - on a versioning-enabled bucket every rewrite is
     /// a retained version that no S3-API GC can reclaim.
     pub async fn exists(&self, hash: &str) -> Result<bool> {
-        match self.inner.head(&self.object_path(hash)).await {
-            Ok(_) => Ok(true),
-            Err(object_store::Error::NotFound { .. }) => Ok(false),
-            Err(e) => Err(e).context("Failed to head NAR"),
-        }
+        Ok(self.head_object(&self.object_path(hash)).await?.is_some())
     }
 
     /// Size in bytes of the stored NAR object for `hash`, or `None` when
@@ -164,11 +258,10 @@ impl NarStore {
     /// bytes directly to object storage, so this HEAD is the only server-side
     /// evidence the object actually landed with the reported size.
     pub async fn head_size(&self, hash: &str) -> Result<Option<u64>> {
-        match self.inner.head(&self.object_path(hash)).await {
-            Ok(meta) => Ok(Some(meta.size)),
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e).context("Failed to head NAR"),
-        }
+        Ok(self
+            .head_object(&self.object_path(hash))
+            .await?
+            .map(|meta| meta.size))
     }
 
     /// Verify a stored NAR object against its reported file_hash and size.
@@ -217,14 +310,7 @@ impl NarStore {
     }
 
     pub async fn get(&self, hash: &str) -> Result<Option<Vec<u8>>> {
-        match self.inner.get(&self.object_path(hash)).await {
-            Ok(result) => {
-                let bytes = result.bytes().await.context("Failed to read NAR bytes")?;
-                Ok(Some(bytes.to_vec()))
-            }
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e).context("Failed to get NAR"),
-        }
+        self.get_object(&self.object_path(hash)).await
     }
 
     /// Streaming counterpart to [`Self::get`].
@@ -237,18 +323,7 @@ impl NarStore {
         &self,
         hash: &str,
     ) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
-        match self.inner.get(&self.object_path(hash)).await {
-            Ok(result) => {
-                let size = result.meta.size;
-                let stream = result
-                    .into_stream()
-                    .map(|chunk| chunk.context("NAR stream chunk read failed"))
-                    .boxed();
-                Ok(Some((size, stream)))
-            }
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e).context("Failed to open NAR stream"),
-        }
+        self.get_stream_object(&self.object_path(hash), None).await
     }
 
     /// Range variant of [`Self::get_stream`]: streams the stored object from
@@ -261,42 +336,12 @@ impl NarStore {
         hash: &str,
         offset: u64,
     ) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
-        use object_store::{GetOptions, GetRange};
-
-        let head = match self.inner.head(&self.object_path(hash)).await {
-            Ok(h) => h,
-            Err(object_store::Error::NotFound { .. }) => return Ok(None),
-            Err(e) => return Err(e).context("Failed to head NAR for range stream"),
-        };
-        let size = head.size;
-
-        if offset >= size {
-            let empty: BoxStream<'static, Result<Bytes>> = futures::stream::empty().boxed();
-            return Ok(Some((size, empty)));
-        }
-
-        let opts = GetOptions {
-            range: Some(GetRange::Offset(offset)),
-            ..Default::default()
-        };
-        match self.inner.get_opts(&self.object_path(hash), opts).await {
-            Ok(result) => {
-                let stream = result
-                    .into_stream()
-                    .map(|chunk| chunk.context("NAR range stream chunk read failed"))
-                    .boxed();
-                Ok(Some((size, stream)))
-            }
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e).context("Failed to open NAR range stream"),
-        }
+        self.get_stream_object(&self.object_path(hash), Some(offset))
+            .await
     }
 
     pub async fn delete(&self, hash: &str) -> Result<()> {
-        match self.inner.delete(&self.object_path(hash)).await {
-            Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
-            Err(e) => Err(e).context("Failed to delete NAR"),
-        }
+        self.delete_object(&self.object_path(hash)).await
     }
 
     /// Returns the local base path when using local-disk storage; `None` for S3.
@@ -315,20 +360,8 @@ impl NarStore {
         hash: &str,
         expires_in: std::time::Duration,
     ) -> Result<Option<String>> {
-        use object_store::signer::Signer as _;
-
-        let signer = match &self.s3_signer {
-            Some(s) => s,
-            None => return Ok(None),
-        };
-
-        let path = self.object_path(hash);
-        let url = signer
-            .signed_url(reqwest::Method::GET, &path, expires_in)
+        self.presign_object(reqwest::Method::GET, &self.object_path(hash), expires_in)
             .await
-            .context("failed to generate presigned GET URL")?;
-
-        Ok(Some(url.to_string()))
     }
 
     /// Generate a presigned PUT URL valid for `expires_in` for the NAR
@@ -343,20 +376,8 @@ impl NarStore {
         hash: &str,
         expires_in: std::time::Duration,
     ) -> Result<Option<String>> {
-        use object_store::signer::Signer as _;
-
-        let signer = match &self.s3_signer {
-            Some(s) => s,
-            None => return Ok(None),
-        };
-
-        let path = self.object_path(hash);
-        let url = signer
-            .signed_url(reqwest::Method::PUT, &path, expires_in)
+        self.presign_object(reqwest::Method::PUT, &self.object_path(hash), expires_in)
             .await
-            .context("failed to generate presigned PUT URL")?;
-
-        Ok(Some(url.to_string()))
     }
 
     /// Object-store path for a fleet-shared eval-cache blob keyed by flake
@@ -367,25 +388,12 @@ impl NarStore {
     }
 
     pub async fn put_eval_cache(&self, fingerprint: &str, data: Vec<u8>) -> Result<()> {
-        self.inner
-            .put(&self.eval_cache_path(fingerprint), PutPayload::from(data))
+        self.put_object(self.eval_cache_path(fingerprint), data)
             .await
-            .context("Failed to upload eval-cache blob")?;
-        Ok(())
     }
 
     pub async fn get_eval_cache(&self, fingerprint: &str) -> Result<Option<Vec<u8>>> {
-        match self.inner.get(&self.eval_cache_path(fingerprint)).await {
-            Ok(result) => Ok(Some(
-                result
-                    .bytes()
-                    .await
-                    .context("Failed to read eval-cache bytes")?
-                    .to_vec(),
-            )),
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e).context("Failed to get eval-cache blob"),
-        }
+        self.get_object(&self.eval_cache_path(fingerprint)).await
     }
 
     /// Streaming counterpart to [`Self::get_eval_cache`]; mirrors
@@ -394,18 +402,8 @@ impl NarStore {
         &self,
         fingerprint: &str,
     ) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
-        match self.inner.get(&self.eval_cache_path(fingerprint)).await {
-            Ok(result) => {
-                let size = result.meta.size;
-                let stream = result
-                    .into_stream()
-                    .map(|chunk| chunk.context("eval-cache stream chunk read failed"))
-                    .boxed();
-                Ok(Some((size, stream)))
-            }
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e).context("Failed to open eval-cache stream"),
-        }
+        self.get_stream_object(&self.eval_cache_path(fingerprint), None)
+            .await
     }
 
     /// Presigned GET URL for an eval-cache blob; `None` for local-disk stores.
@@ -414,22 +412,12 @@ impl NarStore {
         fingerprint: &str,
         expires_in: std::time::Duration,
     ) -> Result<Option<String>> {
-        use object_store::signer::Signer as _;
-
-        let Some(signer) = &self.s3_signer else {
-            return Ok(None);
-        };
-
-        let url = signer
-            .signed_url(
-                reqwest::Method::GET,
-                &self.eval_cache_path(fingerprint),
-                expires_in,
-            )
-            .await
-            .context("failed to generate presigned eval-cache GET URL")?;
-
-        Ok(Some(url.to_string()))
+        self.presign_object(
+            reqwest::Method::GET,
+            &self.eval_cache_path(fingerprint),
+            expires_in,
+        )
+        .await
     }
 
     /// Presigned PUT URL for an eval-cache blob; `None` for local-disk stores.
@@ -438,29 +426,16 @@ impl NarStore {
         fingerprint: &str,
         expires_in: std::time::Duration,
     ) -> Result<Option<String>> {
-        use object_store::signer::Signer as _;
-
-        let Some(signer) = &self.s3_signer else {
-            return Ok(None);
-        };
-
-        let url = signer
-            .signed_url(
-                reqwest::Method::PUT,
-                &self.eval_cache_path(fingerprint),
-                expires_in,
-            )
-            .await
-            .context("failed to generate presigned eval-cache PUT URL")?;
-
-        Ok(Some(url.to_string()))
+        self.presign_object(
+            reqwest::Method::PUT,
+            &self.eval_cache_path(fingerprint),
+            expires_in,
+        )
+        .await
     }
 
     pub async fn delete_eval_cache(&self, fingerprint: &str) -> Result<()> {
-        match self.inner.delete(&self.eval_cache_path(fingerprint)).await {
-            Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
-            Err(e) => Err(e).context("Failed to delete eval-cache blob"),
-        }
+        self.delete_object(&self.eval_cache_path(fingerprint)).await
     }
 
     /// Object-store path for a build-request blob keyed by org + BLAKE3 hash.
@@ -475,32 +450,15 @@ impl NarStore {
     }
 
     pub async fn put_blob(&self, org: uuid::Uuid, hash: &[u8; 32], data: Vec<u8>) -> Result<()> {
-        self.inner
-            .put(&self.blob_path(org, hash), PutPayload::from(data))
-            .await
-            .context("Failed to upload build-request blob")?;
-        Ok(())
+        self.put_object(self.blob_path(org, hash), data).await
     }
 
     pub async fn get_blob(&self, org: uuid::Uuid, hash: &[u8; 32]) -> Result<Option<Vec<u8>>> {
-        match self.inner.get(&self.blob_path(org, hash)).await {
-            Ok(result) => Ok(Some(
-                result
-                    .bytes()
-                    .await
-                    .context("Failed to read build-request blob bytes")?
-                    .to_vec(),
-            )),
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e).context("Failed to get build-request blob"),
-        }
+        self.get_object(&self.blob_path(org, hash)).await
     }
 
     pub async fn delete_blob(&self, org: uuid::Uuid, hash: &[u8; 32]) -> Result<()> {
-        match self.inner.delete(&self.blob_path(org, hash)).await {
-            Ok(_) | Err(object_store::Error::NotFound { .. }) => Ok(()),
-            Err(e) => Err(e).context("Failed to delete build-request blob"),
-        }
+        self.delete_object(&self.blob_path(org, hash)).await
     }
 
     /// Lists all NAR hashes currently present in the store (both local and S3).

@@ -7,6 +7,7 @@
 pub mod context;
 pub mod digest;
 pub mod email;
+mod layout;
 pub mod log;
 pub mod log_chunk;
 pub mod nar;

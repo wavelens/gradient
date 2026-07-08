@@ -296,15 +296,10 @@ impl std::fmt::Debug for S3LogStorage {
 
 impl S3LogStorage {
     pub fn new(local: FileLogStorage, object_store: Arc<dyn ObjectStore>, prefix: &str) -> Self {
-        let normalized_prefix = if prefix.is_empty() || prefix.ends_with('/') {
-            prefix.to_string()
-        } else {
-            format!("{}/", prefix)
-        };
         Self {
             local,
             object_store,
-            prefix: normalized_prefix,
+            prefix: crate::layout::normalize_prefix(prefix),
         }
     }
 
