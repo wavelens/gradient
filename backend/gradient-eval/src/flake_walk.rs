@@ -36,7 +36,7 @@ impl<'a> FlakeWalker<'a> {
     pub fn open(
         ctx: &Arc<Context>,
         fetch: &FetchersSettings,
-        flake: &FlakeSettings,
+        flake: &Arc<FlakeSettings>,
         state: &'a EvalState,
         flake_ref: &str,
         overrides: &[(String, String)],
@@ -125,7 +125,7 @@ impl<'a> FlakeWalker<'a> {
 fn lock_flake(
     ctx: &Arc<Context>,
     fetch: &FetchersSettings,
-    flake: &FlakeSettings,
+    flake: &Arc<FlakeSettings>,
     state: &EvalState,
     flake_ref: &str,
     overrides: &[(String, String)],
@@ -153,7 +153,7 @@ fn lock_flake(
 pub fn fingerprint(
     ctx: &Arc<Context>,
     fetch: &FetchersSettings,
-    flake: &FlakeSettings,
+    flake: &Arc<FlakeSettings>,
     state: &EvalState,
     store: &Store,
     flake_ref: &str,
@@ -213,7 +213,7 @@ mod tests {
     type LockFlakeFn = fn(
         &Arc<Context>,
         &FetchersSettings,
-        &FlakeSettings,
+        &Arc<FlakeSettings>,
         &EvalState,
         &str,
         &[(String, String)],

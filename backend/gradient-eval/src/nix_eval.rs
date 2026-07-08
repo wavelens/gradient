@@ -29,7 +29,7 @@ use nix_bindings::{Context, EvalState, EvalStateBuilder, Store};
 pub struct NixEvaluator {
     ctx: Arc<Context>,
     store: Arc<Store>,
-    flake_settings: FlakeSettings,
+    flake_settings: Arc<FlakeSettings>,
     fetch_settings: FetchersSettings,
     state: EvalState,
 }
@@ -39,6 +39,10 @@ unsafe impl Send for NixEvaluator {}
 unsafe impl Sync for NixEvaluator {}
 
 impl NixEvaluator {
+    // nix-bindings' Context/Store/FlakeSettings aren't Send+Sync, but the C API
+    // mandates Arc (LockFlags holds an Arc<FlakeSettings>); NixEvaluator is only
+    // ever touched from one thread (Boehm GC + spawn_blocking).
+    #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> Result<Self> {
         let ctx = Arc::new(Context::new().context("nix context init")?);
         ctx.set_setting("show-trace", "true")?;
@@ -46,7 +50,7 @@ impl NixEvaluator {
         ctx.set_setting("build-hook", "")?;
 
         let store = Arc::new(Store::open(&ctx, None).context("nix store open")?);
-        let flake_settings = FlakeSettings::new(&ctx)?;
+        let flake_settings = Arc::new(FlakeSettings::new(&ctx)?);
         let fetch_settings = FetchersSettings::new(&ctx)?;
 
         // eval-cache + pure-eval are EvalState-scoped and required for a warm
