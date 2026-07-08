@@ -101,6 +101,16 @@ CLI connector tests `caches_api::list_caches_decodes_paginated` and
   non-substitutable dependent from ever dispatching, with no build to fail and
   trigger a reactive heal.
 
+`backend/gradient-scheduler/src/buildability.rs` - `any_buildable` mirrors the
+dispatch gate so the stall is legible instead of a silent `Building`:
+- `queued_real_build_without_drv_closure_cached_is_not_buildable` - a real-build
+  `Queued` anchor with a matching worker but no importable input `.drv` closure is
+  not buildable; the eval routes to the graph-stuck heal (`Waiting` + `GraphStuck`)
+  rather than sitting `Building` with a NULL `waiting_reason`.
+- `queued_real_build_with_drv_closure_cached_is_buildable` - the same anchor with
+  its `.drv` closure cached and a matching worker is dispatchable, so the flag
+  gates only the missing-`.drv` dead zone.
+
 ## Transition effects fan out from one emitter (#476)
 
 `backend/gradient-db/src/status/effects.rs`:

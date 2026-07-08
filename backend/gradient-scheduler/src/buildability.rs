@@ -122,7 +122,11 @@ impl BuildabilityChecker {
     /// `Building` anchor already has all dependency anchors terminal-success
     /// (the promotion invariant), so it is dispatchable; a `Created` anchor is
     /// still blocked on deps. Substitutable anchors run anywhere until they
-    /// exhaust the miss budget.
+    /// exhaust the miss budget. A real-build `Queued` anchor also mirrors the
+    /// dispatch gate's `.drv`-importability arm (`drv_closure_cached`): reporting
+    /// one buildable while its input `.drv` closure is missing left the eval
+    /// silently `Building` (no `waiting_reason`) instead of surfacing as
+    /// graph-stuck, since the dispatcher never actually selects it.
     pub(crate) fn any_buildable(
         &self,
         anchors: &[MDerivationBuild],
@@ -149,6 +153,13 @@ impl BuildabilityChecker {
                 BuildDispatchMode::SubstituteBuiltin => true,
                 BuildDispatchMode::SubstituteStalled => false,
                 BuildDispatchMode::RealArch => {
+                    // Dispatch gate parity: a real build is only selected once its
+                    // own input `.drv` closure is importable. A non-substitutable
+                    // anchor whose closure lost an input `.drv` (a demote deleted a
+                    // needed `.drv`, no re-eval re-pushed it) is not dispatchable.
+                    if !a.substitutable && !a.drv_closure_cached {
+                        return false;
+                    }
                     let required: Vec<&str> = self.required_features_for(&a.derivation);
                     worker_caps.iter().any(|(arch, feats)| {
                         let arch_ok = drv.architecture == gradient_types::BUILTIN_ARCH
@@ -496,6 +507,40 @@ mod tests {
         let mut b = build_for(d.id, eval_id);
         b.substitutable = true;
         let checker = checker_with(vec![d], vec![]);
+        let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
+        assert!(checker.any_buildable(&[b], &caps));
+    }
+
+    /// Dispatch-gate parity: a real-build `Queued` anchor whose input `.drv`
+    /// closure is missing (`drv_closure_cached = false`) is NOT buildable even
+    /// with a matching worker - the dispatcher never selects it, so reporting it
+    /// buildable strands the eval silently `Building`. Making it unbuildable
+    /// routes the eval to the graph-stuck heal (`Waiting` + `GraphStuck`).
+    #[test]
+    fn queued_real_build_without_drv_closure_cached_is_not_buildable() {
+        let eval_id = EvaluationId::now_v7();
+        let d = drv(DerivationId::now_v7(), "x86_64-linux");
+        let b = build_for(d.id, eval_id);
+        let mut checker = checker_with(vec![d], vec![]);
+        checker
+            .connected_architectures
+            .insert("x86_64-linux".into());
+        let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
+        assert!(!checker.any_buildable(&[b], &caps));
+    }
+
+    /// The same anchor with its `.drv` closure cached and a matching worker IS
+    /// dispatchable - the flag gates only the missing-`.drv` dead zone.
+    #[test]
+    fn queued_real_build_with_drv_closure_cached_is_buildable() {
+        let eval_id = EvaluationId::now_v7();
+        let d = drv(DerivationId::now_v7(), "x86_64-linux");
+        let mut b = build_for(d.id, eval_id);
+        b.drv_closure_cached = true;
+        let mut checker = checker_with(vec![d], vec![]);
+        checker
+            .connected_architectures
+            .insert("x86_64-linux".into());
         let caps = vec![(vec!["x86_64-linux".to_string()], vec![])];
         assert!(checker.any_buildable(&[b], &caps));
     }
