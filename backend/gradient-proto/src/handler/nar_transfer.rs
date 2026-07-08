@@ -183,7 +183,11 @@ impl NarReceiveStore {
     /// hash resets the shared `{peer}/{hash}` partial (token-mismatch discard /
     /// `offset==0` truncate), so a bare shared key would leave the queued commit
     /// reading 0 bytes ("staged NAR size 0 does not match reported file_size").
-    pub(super) async fn take_staged(&mut self, job_id: &str, store_path: &str) -> Option<StagedNar> {
+    pub(super) async fn take_staged(
+        &mut self,
+        job_id: &str,
+        store_path: &str,
+    ) -> Option<StagedNar> {
         let state = self.active.remove(&state_key(job_id, store_path))?;
         let hash = store_hash(store_path)?;
         let base_key = self.key(job_id, hash);
@@ -571,7 +575,11 @@ async fn commit_presigned(
     file_size: u64,
 ) -> bool {
     let rehash = state.config.storage.nar_verify_digest;
-    match state.nar_storage.verify(hash, file_hash, file_size, rehash).await {
+    match state
+        .nar_storage
+        .verify(hash, file_hash, file_size, rehash)
+        .await
+    {
         Ok(()) => true,
         Err(e) => {
             let reason = format!("presigned NAR upload verification failed: {e}");
@@ -920,7 +928,10 @@ mod nar_receive_store_tests {
         let a = path('a');
         assert_ok(s.append(JOB, &a, 0, &[0u8; 256]).await);
         assert_ok(s.append(JOB, &a, 256, &[1u8; 256]).await);
-        let staged = s.take_staged(JOB, &a).await.expect("direct stream is active");
+        let staged = s
+            .take_staged(JOB, &a)
+            .await
+            .expect("direct stream is active");
         assert!(
             s.take_staged(JOB, &a).await.is_none(),
             "take_staged must detach the stream"
@@ -1012,10 +1023,22 @@ mod nar_receive_store_tests {
         assert_ok(s.append("build:job-a", &p, 100, &[0u8; 100]).await);
         assert!(!s.is_poisoned("build:job-a", &p));
 
-        let sa = s.take_staged("build:job-a", &p).await.expect("job-a staged");
-        let sb = s.take_staged("build:job-b", &p).await.expect("job-b staged");
-        assert_eq!(sa.store.received_len(&sa.key, &sa.token).await.unwrap(), 200);
-        assert_eq!(sb.store.received_len(&sb.key, &sb.token).await.unwrap(), 100);
+        let sa = s
+            .take_staged("build:job-a", &p)
+            .await
+            .expect("job-a staged");
+        let sb = s
+            .take_staged("build:job-b", &p)
+            .await
+            .expect("job-b staged");
+        assert_eq!(
+            sa.store.received_len(&sa.key, &sa.token).await.unwrap(),
+            200
+        );
+        assert_eq!(
+            sb.store.received_len(&sb.key, &sb.token).await.unwrap(),
+            100
+        );
     }
 
     #[tokio::test]

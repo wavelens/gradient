@@ -141,7 +141,10 @@ impl NarStore {
     async fn get_object(&self, path: &Path) -> Result<Option<Vec<u8>>> {
         match self.inner.get(path).await {
             Ok(result) => {
-                let bytes = result.bytes().await.context("Failed to read object bytes")?;
+                let bytes = result
+                    .bytes()
+                    .await
+                    .context("Failed to read object bytes")?;
                 Ok(Some(bytes.to_vec()))
             }
             Err(object_store::Error::NotFound { .. }) => Ok(None),

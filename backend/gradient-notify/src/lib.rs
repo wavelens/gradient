@@ -220,7 +220,8 @@ impl EmailSender for EmailService {
 }
 
 fn verification_email_html(name: &str, verification_url: &str) -> String {
-    format!(r#"
+    format!(
+        r#"
 <!DOCTYPE html>
 <html>
 <head>
@@ -259,11 +260,13 @@ fn verification_email_html(name: &str, verification_url: &str) -> String {
     </div>
 </body>
 </html>
-"#)
+"#
+    )
 }
 
 fn password_reset_email_html(name: &str, reset_url: &str) -> String {
-    format!(r#"
+    format!(
+        r#"
 <!DOCTYPE html>
 <html>
 <head>
@@ -302,7 +305,8 @@ fn password_reset_email_html(name: &str, reset_url: &str) -> String {
     </div>
 </body>
 </html>
-"#)
+"#
+    )
 }
 
 pub fn generate_verification_token() -> String {
