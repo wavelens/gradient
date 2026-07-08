@@ -9,7 +9,7 @@
 //! path server-side, and finalises a build-request evaluation. The `nix`-feature
 //! CLI uses this to skip the per-file blob manifest.
 
-use super::dispatch::{DispatchResponse, finalize_build_request};
+use super::dispatch::{DispatchResponse, InputOverrideBody, finalize_build_request};
 use crate::access::{Caller, OrgAccess, load_org};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
@@ -84,7 +84,8 @@ pub async fn post_source(
         .await
         .map_err(|e| WebError::internal(format!("Failed to read source NAR: {}", e)))?;
 
-    let response = finalize_build_request(&state, org.id, &user, &nar, target, system).await?;
+    let response =
+        finalize_build_request(&state, org.id, &user, &nar, target, system, Vec::new()).await?;
 
     Ok(ok_json(response))
 }
@@ -100,6 +101,8 @@ pub struct SourceFinalize {
     pub target: Option<String>,
     #[serde(default)]
     pub system: Option<String>,
+    #[serde(default)]
+    pub input_overrides: Vec<InputOverrideBody>,
 }
 
 /// Disk-staging store for chunked source uploads. Its own root keeps the
@@ -197,8 +200,22 @@ pub async fn source_finalize(
         .await
         .map_err(|e| WebError::internal(format!("Failed to read source NAR: {}", e)))?;
 
-    let response =
-        finalize_build_request(&state, org.id, &user, &nar, body.target, body.system).await?;
+    let input_overrides = body
+        .input_overrides
+        .into_iter()
+        .map(|o| (o.input_name, o.url))
+        .collect();
+
+    let response = finalize_build_request(
+        &state,
+        org.id,
+        &user,
+        &nar,
+        body.target,
+        body.system,
+        input_overrides,
+    )
+    .await?;
     let _ = store.discard(&key).await;
 
     Ok(ok_json(response))

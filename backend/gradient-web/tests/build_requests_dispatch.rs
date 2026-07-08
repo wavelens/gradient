@@ -329,6 +329,31 @@ fn happy_path_creates_project_commit_and_evaluation() {
 }
 
 #[test]
+fn rejects_local_input_override() {
+    run(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+        let upload = UploadSessionId::now_v7();
+
+        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+            .append_query_results([vec![upload_session(upload, vec![], false, false)]])
+            .append_query_results([vec![membership()]])
+            .append_query_results([vec![write_role_row()]]);
+
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .post(&dispatch_url(upload))
+            .add_header("authorization", format!("Bearer {}", token))
+            .json(&json!({
+                "input_overrides": [{ "input_name": "nixpkgs", "url": "/home/u/np" }]
+            }))
+            .await;
+
+        res.assert_status(StatusCode::BAD_REQUEST);
+    });
+}
+
+#[test]
 fn happy_path_reuses_existing_build_request_project() {
     run(async {
         let session_id = SessionId::now_v7();
