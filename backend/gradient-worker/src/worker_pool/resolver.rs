@@ -316,9 +316,13 @@ impl WorkerPoolResolver {
     /// Return `repository`'s eval-cache fingerprint without evaluating it.
     /// `None` for mutable/dirty flakes. A dead worker is marked so it gets
     /// discarded instead of reused.
-    pub async fn fingerprint(&self, repository: String) -> Result<Option<String>> {
+    pub async fn fingerprint(
+        &self,
+        repository: String,
+        overrides: &[(String, String)],
+    ) -> Result<Option<String>> {
         let mut worker = self.pool.acquire().await?;
-        match worker.fingerprint(repository).await {
+        match worker.fingerprint(repository, overrides.to_vec()).await {
             Ok(v) => Ok(v),
             Err(e) => {
                 worker.mark_dead();
@@ -331,9 +335,13 @@ impl WorkerPoolResolver {
     /// have committed, so the fleet-share push ships a complete cache. Best-effort
     /// in spirit (the caller ignores failures), but a crashed worker is marked
     /// dead so it is not reused.
-    pub async fn checkpoint_cache(&self, repository: String) -> Result<()> {
+    pub async fn checkpoint_cache(
+        &self,
+        repository: String,
+        overrides: &[(String, String)],
+    ) -> Result<()> {
         let mut worker = self.pool.acquire().await?;
-        match worker.checkpoint(repository).await {
+        match worker.checkpoint(repository, overrides.to_vec()).await {
             Ok(()) => Ok(()),
             Err(e) => {
                 worker.mark_dead();
@@ -351,10 +359,11 @@ impl WorkerPoolResolver {
         &self,
         repository: &str,
         wildcards: Vec<String>,
+        overrides: &[(String, String)],
     ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
         let mut attempt = 0;
         loop {
-            match self.list_once(repository, wildcards.clone()).await {
+            match self.list_once(repository, wildcards.clone(), overrides).await {
                 Ok(v) => return Ok(v),
                 Err(crash) => {
                     attempt += 1;
@@ -372,10 +381,14 @@ impl WorkerPoolResolver {
         &self,
         repository: &str,
         wildcards: Vec<String>,
+        overrides: &[(String, String)],
     ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
         let bucket = self.bucket_of(wildcards.first());
         let mut worker = self.pool.acquire().await?;
-        match worker.list(repository.to_string(), wildcards).await {
+        match worker
+            .list(repository.to_string(), wildcards, overrides.to_vec())
+            .await
+        {
             Ok((attrs, warnings, errors, stats)) => {
                 self.finish_call(&mut worker, &bucket, stats);
                 Ok((attrs, warnings, errors))
@@ -390,10 +403,17 @@ impl WorkerPoolResolver {
     /// Resolve one batch on a single pooled worker. A subprocess death becomes
     /// [`BatchCall::Crashed`] carrying the streamed prefix; only pool failures
     /// (e.g. shutdown) are `Err`.
-    async fn resolve_once(&self, repository: &str, attrs: Vec<String>) -> Result<BatchCall> {
+    async fn resolve_once(
+        &self,
+        repository: &str,
+        attrs: Vec<String>,
+        overrides: &[(String, String)],
+    ) -> Result<BatchCall> {
         let bucket = self.bucket_of(attrs.first());
         let mut worker = self.pool.acquire().await?;
-        let (items, end) = worker.resolve(repository.to_string(), attrs).await;
+        let (items, end) = worker
+            .resolve(repository.to_string(), attrs, overrides.to_vec())
+            .await;
         match end {
             Ok((warnings, stats)) => {
                 self.finish_call(&mut worker, &bucket, stats);
@@ -425,6 +445,7 @@ impl DerivationResolver for WorkerPoolResolver {
         &self,
         repository: String,
         wildcards: Vec<String>,
+        overrides: &[(String, String)],
     ) -> Result<FlakeDiscovery> {
         // Record the user entry-points so the resolve pass can bucket by them.
         *self.patterns.lock().unwrap() = wildcards
@@ -440,7 +461,10 @@ impl DerivationResolver for WorkerPoolResolver {
         // discovery advance (and persist) system-by-system.
         let (shards, plan_errors) = {
             let mut worker = self.pool.acquire().await?;
-            match worker.plan(repository.clone(), wildcards.clone()).await {
+            match worker
+                .plan(repository.clone(), wildcards.clone(), overrides.to_vec())
+                .await
+            {
                 Ok(v) => v,
                 Err(e) => {
                     worker.mark_dead();
@@ -457,7 +481,8 @@ impl DerivationResolver for WorkerPoolResolver {
 
         // Nothing to fan out: one pass, plus the plan-phase errors.
         if shards.len() <= 1 {
-            let (attrs, warnings, mut errors) = self.list_shard(&repository, wildcards).await?;
+            let (attrs, warnings, mut errors) =
+                self.list_shard(&repository, wildcards, overrides).await?;
             errors.extend(plan_errors);
             errors.sort_unstable();
             errors.dedup();
@@ -487,7 +512,7 @@ impl DerivationResolver for WorkerPoolResolver {
                 pattern.push(shard);
                 pattern.extend_from_slice(excludes);
 
-                let (a, w, e) = self.list_shard(repo, pattern).await?;
+                let (a, w, e) = self.list_shard(repo, pattern, overrides).await?;
                 attrs.lock().unwrap().extend(a);
                 warnings.lock().unwrap().extend(w);
                 errors.lock().unwrap().extend(e);
@@ -517,6 +542,7 @@ impl DerivationResolver for WorkerPoolResolver {
         &self,
         repository: String,
         attrs: Vec<String>,
+        overrides: &[(String, String)],
     ) -> Result<(Vec<ResolvedDerivation>, Vec<String>)> {
         if attrs.is_empty() {
             return Ok((vec![], vec![]));
@@ -545,7 +571,7 @@ impl DerivationResolver for WorkerPoolResolver {
         {
             let repo = repository.as_str();
             let resolve_batch = move |attrs: Vec<String>| -> BoxFuture<'_, Result<BatchCall>> {
-                Box::pin(self.resolve_once(repo, attrs))
+                Box::pin(self.resolve_once(repo, attrs, overrides))
             };
 
             let (indexed, resolve_batch) = (&indexed, &resolve_batch);

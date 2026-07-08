@@ -221,11 +221,18 @@ pub async fn evaluate_derivations(
 ) -> Result<()> {
     let repo = build_flake_url(job, local_flake_path);
     let start = Instant::now();
+    let eval_overrides = eval_input_overrides(job);
 
     // Best-effort fingerprint + pull of the flake's shared eval-cache blob so
-    // the eval runs warm. A fingerprint/pull failure never fails the eval.
+    // the eval runs warm. A fingerprint/pull failure never fails the eval. The
+    // fingerprint is computed WITH the overrides so distinct override sets never
+    // share (and pollute) one eval-cache blob.
     let fingerprint = if evaluator.eval_cache_share {
-        match evaluator.resolver.fingerprint(repo.clone()).await {
+        match evaluator
+            .resolver
+            .fingerprint(repo.clone(), &eval_overrides)
+            .await
+        {
             Ok(fp) => fp,
             Err(e) => {
                 warn!(error = %e, "eval-cache fingerprint failed; evaluating local-only");
@@ -282,7 +289,10 @@ pub async fn evaluate_derivations(
     // checkpoint is PASSIVE: it never blocks, so it is safe even when another
     // evaluation of the same flake is concurrently reading the cache. Best-effort.
     if cache_path.is_some()
-        && let Err(e) = evaluator.resolver.checkpoint_cache(repo.clone()).await
+        && let Err(e) = evaluator
+            .resolver
+            .checkpoint_cache(repo.clone(), &eval_overrides)
+            .await
     {
         warn!(error = %e, "eval-cache checkpoint failed; pushing as-is");
     }
@@ -366,6 +376,17 @@ fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
         // Eval-only: Nix accepts `/nix/store/...` directly as a flake URI.
         FlakeSource::Cached { store_path } => format!("path:{}", store_path),
     }
+}
+
+/// `(input_name, flake_ref)` overrides applied at eval lock time. A `url: None`
+/// override means "force update", which has no concrete ref to lock against, so
+/// it is meaningless at pure eval and dropped here (the archive step still
+/// handles it).
+fn eval_input_overrides(job: &FlakeJob) -> Vec<(String, String)> {
+    job.input_overrides
+        .iter()
+        .filter_map(|o| o.url.clone().map(|u| (o.input_name.clone(), u)))
+        .collect()
 }
 
 /// Read and parse every `.drv` in `wave` concurrently, preserving BFS order.
@@ -750,6 +771,7 @@ pub async fn evaluate_derivations_with(
     updater.report_evaluating_derivations().await?;
 
     let repo = build_flake_url(job, local_flake_path);
+    let eval_overrides = eval_input_overrides(job);
 
     // ── Step 1: discover attr paths ──────────────────────────────────────────
     debug!(repo = %repo, "listing flake derivations");
@@ -758,7 +780,7 @@ pub async fn evaluate_derivations_with(
         mut warnings,
         mut errors,
     } = match resolver
-        .list_flake_derivations(repo.clone(), job.wildcards.clone())
+        .list_flake_derivations(repo.clone(), job.wildcards.clone(), &eval_overrides)
         .await
     {
         Ok(v) => v,
@@ -790,8 +812,10 @@ pub async fn evaluate_derivations_with(
     }
 
     // ── Step 2: resolve attr paths → drv paths ───────────────────────────────
-    let (resolved, resolve_warnings) =
-        match resolver.resolve_derivation_paths(repo.clone(), attrs).await {
+    let (resolved, resolve_warnings) = match resolver
+        .resolve_derivation_paths(repo.clone(), attrs, &eval_overrides)
+        .await
+    {
             Ok(v) => v,
             Err(e) => {
                 // Forward warnings accumulated so far so they aren't lost.

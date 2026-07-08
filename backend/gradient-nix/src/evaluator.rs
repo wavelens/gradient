@@ -34,19 +34,24 @@ pub struct FlakeDiscovery {
 #[async_trait]
 pub trait DerivationResolver: Send + Sync + std::fmt::Debug + 'static {
     /// Discover all attribute paths matching `wildcards` in the given flake.
+    /// `overrides` are `(input_name, flake_ref)` pairs applied at lock time so
+    /// discovery reflects the override set.
     async fn list_flake_derivations(
         &self,
         repository: String,
         wildcards: Vec<String>,
+        overrides: &[(String, String)],
     ) -> Result<FlakeDiscovery>;
 
     /// Resolve a batch of attribute paths into `(drv_path, references)` tuples.
-    /// The result preserves the input order of `attrs`.
+    /// The result preserves the input order of `attrs`. `overrides` are applied
+    /// at lock time so resolved drvPaths reflect them.
     /// Returns `(resolved, warnings)`.
     async fn resolve_derivation_paths(
         &self,
         repository: String,
         attrs: Vec<String>,
+        overrides: &[(String, String)],
     ) -> Result<(Vec<ResolvedDerivation>, Vec<String>)>;
 
     /// Read and parse a `.drv` file at `drv_path`.
