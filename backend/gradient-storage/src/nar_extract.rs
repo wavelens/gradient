@@ -45,11 +45,6 @@ pub enum Extracted {
     Directory { tar_zst: Vec<u8> },
 }
 
-/// Backwards-compatible alias for callers that only handled the file case.
-/// New code should match on [`Extracted`] directly.
-#[deprecated(note = "use Extracted::File via extract_path_from_nar_bytes")]
-pub type ExtractedFile = Extracted;
-
 pub async fn extract_path_from_nar_bytes(
     compressed: Vec<u8>,
     relative_path: &str,
@@ -57,18 +52,6 @@ pub async fn extract_path_from_nar_bytes(
     let reader = BufReader::new(io::Cursor::new(compressed));
     let decoder = ZstdDecoder::new(reader);
     extract_path_from_reader(decoder, relative_path).await
-}
-
-/// Compatibility shim - fails with `NotFound` when the path resolves to a
-/// directory. Prefer [`extract_path_from_nar_bytes`] in new code.
-pub async fn extract_file_from_nar_bytes(
-    compressed: Vec<u8>,
-    relative_path: &str,
-) -> Result<Extracted, ExtractError> {
-    match extract_path_from_nar_bytes(compressed, relative_path).await? {
-        f @ Extracted::File { .. } => Ok(f),
-        Extracted::Directory { .. } => Err(ExtractError::NotFound),
-    }
 }
 
 pub async fn extract_path_from_reader<R>(

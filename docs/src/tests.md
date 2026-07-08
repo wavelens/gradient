@@ -2,6 +2,27 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## NAR content is verified on commit (#482)
+
+`backend/gradient-storage/src/digest.rs`: `verify_nar_bytes` recomputes the
+SHA-256 `file_hash` over stored NAR bytes and compares it to the reported value,
+so a truncated or corrupted upload is rejected at commit instead of becoming a
+zombie `cached_path` row.
+- `valid_bytes_pass` - matching size and hash succeed.
+- `size_mismatch_is_size_error` / `tampered_bytes_are_hash_error` - a wrong
+  length or altered content is rejected with the corresponding error.
+- `non_sha256_hash_takes_size_only_path` - a legacy non-sha256 `file_hash` is
+  size-verified only, never falsely rejected.
+
+`backend/gradient-storage/src/nar.rs`: `NarStore::verify` HEADs the object for
+size and, when `rehash` is set, GETs and re-digests it.
+- `verify_ok_on_size_match_without_rehash` / `verify_size_mismatch_is_size_error`
+  / `verify_missing_object_is_missing_error` cover the HEAD path.
+- `verify_rehash_ok_on_content_match` / `verify_rehash_tampered_bytes_is_hash_error`
+  cover the opt-in `GRADIENT_NAR_VERIFY_DIGEST` rehash path. The relayed and REST
+  upload commits always content-verify (bytes in hand); the S3 presigned commit
+  HEAD-checks size and rehashes only when the flag is set.
+
 ## Entry-point forge check appears when the entry point evaluates (#510)
 
 `backend/gradient-ci/src/reporting.rs`:
