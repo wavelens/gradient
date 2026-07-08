@@ -11,6 +11,7 @@
 use super::sgr::SgrState;
 use crate::log::LogStorage;
 use anyhow::Result;
+use gradient_types::constants::LOG_CHUNK_ZSTD_LEVEL;
 use gradient_types::ids::BuildAttemptId;
 
 /// One uncompressed chunk plus the metadata persisted in `build_log_chunk`.
@@ -90,7 +91,7 @@ pub async fn compress_and_store_chunks(
     storage.delete_chunks(log_key).await.ok();
     let mut out = Vec::new();
     for (index, c) in chunk_log(log, target_bytes).into_iter().enumerate() {
-        let compressed = zstd::stream::encode_all(c.text.as_bytes(), 0)?;
+        let compressed = zstd::stream::encode_all(c.text.as_bytes(), LOG_CHUNK_ZSTD_LEVEL)?;
         storage
             .write_chunk(log_key, index as u32, &compressed)
             .await?;

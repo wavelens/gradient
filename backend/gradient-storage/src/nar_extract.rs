@@ -17,16 +17,11 @@
 
 use async_compression::tokio::bufread::ZstdDecoder;
 use futures::StreamExt as _;
+use gradient_types::constants::{NAR_EXTRACT_MAX_PREALLOC, TAR_ZSTD_LEVEL};
 use harmonia_file_nar::{NarEvent, parse_nar};
 use std::io;
 use thiserror::Error;
 use tokio::io::{AsyncReadExt as _, BufReader};
-
-const MAX_PREALLOC: usize = 16 * 1024 * 1024; // 16 MiB
-/// Compression level for directory tarballs. Low so that large empty/sparse
-/// directories don't pay much CPU; zstd still compacts trivially-redundant
-/// data well at this level.
-const TAR_ZSTD_LEVEL: i32 = 1;
 
 #[derive(Debug, Error)]
 pub enum ExtractError {
@@ -143,7 +138,7 @@ where
                 let matches_file =
                     !in_collector && path_matches_file(&stack, name.as_ref(), &target);
                 if matches_file {
-                    let cap = std::cmp::min(size, MAX_PREALLOC as u64) as usize;
+                    let cap = std::cmp::min(size, NAR_EXTRACT_MAX_PREALLOC as u64) as usize;
                     let mut buf = Vec::with_capacity(cap);
                     reader.read_to_end(&mut buf).await?;
                     return Ok(Extracted::File {
@@ -153,7 +148,7 @@ where
                     });
                 }
                 if in_collector {
-                    let cap = std::cmp::min(size, MAX_PREALLOC as u64) as usize;
+                    let cap = std::cmp::min(size, NAR_EXTRACT_MAX_PREALLOC as u64) as usize;
                     let mut buf = Vec::with_capacity(cap);
                     reader.read_to_end(&mut buf).await?;
                     let c = collector.as_mut().unwrap();

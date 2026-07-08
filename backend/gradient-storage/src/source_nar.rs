@@ -20,10 +20,6 @@ use harmonia_store_path::{StoreDir, StorePathName};
 use harmonia_utils_hash::{Algorithm, Hash, HashFormat as _, Sha256};
 use std::path::Path;
 
-/// zstd level for the stored source NAR; matches the worker's `NarPush`
-/// compression so every object under `nars/` is encoded the same way.
-const SOURCE_NAR_ZSTD_LEVEL: i32 = 6;
-
 pub struct SourceNar {
     pub store_path: String,
     pub store_hash: String,
@@ -75,9 +71,11 @@ pub async fn source_nar_from_bytes(nar_bytes: Vec<u8>) -> Result<SourceNar> {
     let store_hash = store_path_obj.hash().to_string();
     let store_path = gradient_types::StorePath::from_parts(store_hash.clone(), "source").full();
 
-    let compressed_bytes =
-        zstd::encode_all(std::io::Cursor::new(&nar_bytes), SOURCE_NAR_ZSTD_LEVEL)
-            .context("failed to zstd-compress source NAR")?;
+    let compressed_bytes = zstd::encode_all(
+        std::io::Cursor::new(&nar_bytes),
+        gradient_types::constants::NAR_ZSTD_LEVEL,
+    )
+    .context("failed to zstd-compress source NAR")?;
     let file_size = compressed_bytes.len() as u64;
     let file_hash_sri = Sha256::digest(&compressed_bytes).as_sri().to_string();
 
