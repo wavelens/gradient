@@ -41,7 +41,8 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
             EvalRequest::Plan {
                 repository,
                 wildcards,
-            } => worker.plan(repository, wildcards).await.map(
+                input_overrides,
+            } => worker.plan(repository, wildcards, input_overrides).await.map(
                 |(sub_patterns, errors)| {
                     json!({"kind": "plan_ok", "sub_patterns": sub_patterns, "errors": errors})
                 },
@@ -49,24 +50,35 @@ pub async fn run_eval_driver(requests_path: &str, eval_cache_dir: &str) -> Resul
             EvalRequest::List {
                 repository,
                 wildcards,
+                input_overrides,
             } => worker
-                .list(repository, wildcards)
+                .list(repository, wildcards, input_overrides)
                 .await
                 .map(|(attrs, warnings, errors, _stats)| {
                     json!({"kind": "list_ok", "attrs": attrs, "warnings": warnings, "errors": errors})
                 }),
-            EvalRequest::Resolve { repository, attrs } => {
-                let (items, end) = worker.resolve(repository, attrs).await;
+            EvalRequest::Resolve {
+                repository,
+                attrs,
+                input_overrides,
+            } => {
+                let (items, end) = worker.resolve(repository, attrs, input_overrides).await;
                 end.map(|(warnings, _stats)| {
                     json!({"kind": "resolve_ok", "items": items, "warnings": warnings})
                 })
             }
-            EvalRequest::Fingerprint { repository } => worker
-                .fingerprint(repository)
+            EvalRequest::Fingerprint {
+                repository,
+                input_overrides,
+            } => worker
+                .fingerprint(repository, input_overrides)
                 .await
                 .map(|fingerprint| json!({"kind": "fingerprint_ok", "fingerprint": fingerprint})),
-            EvalRequest::Checkpoint { repository } => worker
-                .checkpoint(repository)
+            EvalRequest::Checkpoint {
+                repository,
+                input_overrides,
+            } => worker
+                .checkpoint(repository, input_overrides)
                 .await
                 .map(|()| json!({"kind": "checkpoint_ok"})),
         };

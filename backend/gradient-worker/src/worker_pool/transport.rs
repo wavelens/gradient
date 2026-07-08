@@ -293,11 +293,13 @@ impl EvalWorker {
         &mut self,
         repository: String,
         wildcards: Vec<String>,
+        input_overrides: Vec<(String, String)>,
     ) -> Result<(Vec<String>, Vec<String>)> {
         self.call(
             EvalRequest::Plan {
                 repository,
                 wildcards,
+                input_overrides,
             },
             "Plan",
             |resp| match resp {
@@ -315,11 +317,13 @@ impl EvalWorker {
         &mut self,
         repository: String,
         wildcards: Vec<String>,
+        input_overrides: Vec<(String, String)>,
     ) -> Result<(Vec<String>, Vec<String>, Vec<String>, Option<StatsDelta>)> {
         self.call(
             EvalRequest::List {
                 repository,
                 wildcards,
+                input_overrides,
             },
             "List",
             |resp| match resp {
@@ -335,9 +339,16 @@ impl EvalWorker {
         .await
     }
 
-    pub(super) async fn fingerprint(&mut self, repository: String) -> Result<Option<String>> {
+    pub(super) async fn fingerprint(
+        &mut self,
+        repository: String,
+        input_overrides: Vec<(String, String)>,
+    ) -> Result<Option<String>> {
         self.call(
-            EvalRequest::Fingerprint { repository },
+            EvalRequest::Fingerprint {
+                repository,
+                input_overrides,
+            },
             "Fingerprint",
             |resp| match resp {
                 EvalResponse::FingerprintOk { fingerprint } => Ok(fingerprint),
@@ -347,9 +358,16 @@ impl EvalWorker {
         .await
     }
 
-    pub(super) async fn checkpoint(&mut self, repository: String) -> Result<()> {
+    pub(super) async fn checkpoint(
+        &mut self,
+        repository: String,
+        input_overrides: Vec<(String, String)>,
+    ) -> Result<()> {
         self.call(
-            EvalRequest::Checkpoint { repository },
+            EvalRequest::Checkpoint {
+                repository,
+                input_overrides,
+            },
             "Checkpoint",
             |resp| match resp {
                 EvalResponse::CheckpointOk => Ok(()),
@@ -367,9 +385,12 @@ impl EvalWorker {
         &mut self,
         repository: String,
         attrs: Vec<String>,
+        input_overrides: Vec<(String, String)>,
     ) -> (Vec<ResolvedItem>, Result<(Vec<String>, Option<StatsDelta>)>) {
         let mut items = Vec::new();
-        let end = self.resolve_inner(repository, attrs, &mut items).await;
+        let end = self
+            .resolve_inner(repository, attrs, input_overrides, &mut items)
+            .await;
         (items, end)
     }
 
@@ -377,10 +398,15 @@ impl EvalWorker {
         &mut self,
         repository: String,
         attrs: Vec<String>,
+        input_overrides: Vec<(String, String)>,
         items: &mut Vec<ResolvedItem>,
     ) -> Result<(Vec<String>, Option<StatsDelta>)> {
-        self.send(&EvalRequest::Resolve { repository, attrs })
-            .await?;
+        self.send(&EvalRequest::Resolve {
+            repository,
+            attrs,
+            input_overrides,
+        })
+        .await?;
         loop {
             match self.recv().await? {
                 EvalResponse::ResolveItem { item } => items.push(item),

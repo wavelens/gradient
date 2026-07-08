@@ -4191,6 +4191,10 @@ immediately. Coverage:
 
 - `proto/src/messages.rs::flake_input_override_roundtrip` - rkyv roundtrip of a `FlakeJob` carrying `input_overrides`.
 
+### Eval lock-time overrides (`backend/gradient-eval/src/flake_walk.rs`)
+
+- `lock_flake_accepts_input_overrides` - compile-time guard that `lock_flake` takes the `&[(input_name, flake_ref)]` slice it applies via `LockFlags::add_input_override` before locking. Overrides now change eval-resolved drvPaths (the archive-only `--override-input` did not). Threaded end-to-end through the eval-worker IPC (`EvalRequest::{Plan,List,Resolve,Fingerprint,Checkpoint}` gain `input_overrides`), the `WalkerCache` key `(repository, overrides)`, the `DerivationResolver` trait, and `evaluate_derivations{,_with}`; the fingerprint is computed from the override-applied locked flake so distinct override sets never share an eval-cache blob. Runtime proof runs under the nix-enabled CI.
+
 ### Worker (`backend/worker/src/executor/fetch.rs`)
 
 - `build_archive_argv_appends_override_input_flags` - argv has interleaved `--override-input <name> <ref>` pairs.

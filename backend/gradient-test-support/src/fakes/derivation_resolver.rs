@@ -84,6 +84,7 @@ impl DerivationResolver for FakeDerivationResolver {
         &self,
         repository: String,
         _wildcards: Vec<String>,
+        _overrides: &[(String, String)],
     ) -> Result<FlakeDiscovery> {
         Ok(FlakeDiscovery {
             attrs: self
@@ -108,6 +109,7 @@ impl DerivationResolver for FakeDerivationResolver {
         &self,
         repository: String,
         attrs: Vec<String>,
+        _overrides: &[(String, String)],
     ) -> Result<(Vec<ResolvedDerivation>, Vec<String>)> {
         let drv_paths = self.drv_paths.lock().unwrap();
         Ok((
