@@ -23,8 +23,6 @@ pub(crate) async fn execute_send_mail(
     let subject = render_subject(subject_template, event, payload);
     let body = render_default_body(event, payload);
     let r = ctx
-        .db
-        .storage
         .email
         .send_action_mail(recipients, &subject, &body)
         .await?;

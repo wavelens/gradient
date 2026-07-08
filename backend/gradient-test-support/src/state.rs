@@ -9,7 +9,7 @@ use crate::fakes::email::InMemoryEmailSender;
 use crate::log_storage::NoopLogStorage;
 use gradient_core::ServerState;
 use gradient_db::{CacheDb, WebDb, WorkerDb};
-use gradient_storage::EmailSender;
+use gradient_notify::EmailSender;
 use gradient_storage::LogStorage;
 use gradient_storage::NarStore;
 use gradient_types::{RuntimeConfig, SecretString};

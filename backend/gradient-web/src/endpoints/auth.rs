@@ -20,7 +20,7 @@ use axum::response::{IntoResponse, Response};
 use chrono::Duration;
 use email_address::EmailAddress;
 use gradient_core::ServerState;
-use gradient_storage::generate_verification_token;
+use gradient_notify::generate_verification_token;
 use gradient_types::consts::*;
 use gradient_types::input::{validate_display_name, validate_password, validate_username};
 use gradient_types::*;

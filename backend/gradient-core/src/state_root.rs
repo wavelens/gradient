@@ -20,7 +20,8 @@ use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::{CacheDb, DbContext, StatusReactor, WebDb, WorkerDb};
 use gradient_forge::ForgeRegistry;
 use gradient_state::{OidcGroupRoles, PendingOrgMemberships, ScimGroupRoles};
-use gradient_storage::{EmailSender, LogStorage, NarStore, StorageCtx};
+use gradient_notify::EmailSender;
+use gradient_storage::{LogStorage, NarStore, StorageCtx};
 use gradient_types::{BoardEvent, RuntimeConfig, SecretString};
 use gradient_util::shutdown::Shutdown;
 
@@ -86,7 +87,6 @@ impl AppState {
         StorageCtx {
             nar_storage: self.nar_storage.clone(),
             log_storage: self.log_storage.clone(),
-            email: self.email.clone(),
         }
     }
 
@@ -109,6 +109,7 @@ impl AppState {
             db: self.db(),
             http: self.http.clone(),
             forge: self.forge.clone(),
+            email: self.email.clone(),
         }
     }
 }

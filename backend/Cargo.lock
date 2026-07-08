@@ -1996,6 +1996,7 @@ dependencies = [
  "gradient-db",
  "gradient-entity",
  "gradient-forge",
+ "gradient-notify",
  "gradient-sources",
  "gradient-storage",
  "gradient-test-support",
@@ -2030,6 +2031,7 @@ dependencies = [
  "gradient-db",
  "gradient-entity",
  "gradient-forge",
+ "gradient-notify",
  "gradient-storage",
  "gradient-types",
  "gradient-util",
@@ -2073,6 +2075,7 @@ dependencies = [
  "gradient-forge",
  "gradient-migration",
  "gradient-nix",
+ "gradient-notify",
  "gradient-sources",
  "gradient-state",
  "gradient-storage",
@@ -2261,6 +2264,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-notify"
+version = "1.3.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "gradient-types",
+ "hex",
+ "lettre",
+ "rand 0.10.2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "gradient-proto"
 version = "1.3.0"
 dependencies = [
@@ -2420,9 +2437,7 @@ dependencies = [
  "harmonia-store-path",
  "harmonia-utils-hash",
  "hex",
- "lettre",
  "object_store",
- "rand 0.10.2",
  "reqwest 0.13.4",
  "tar",
  "tempfile",
@@ -2450,6 +2465,7 @@ dependencies = [
  "gradient-exec",
  "gradient-forge",
  "gradient-nix",
+ "gradient-notify",
  "gradient-proto",
  "gradient-sources",
  "gradient-storage",
@@ -2537,6 +2553,7 @@ dependencies = [
  "gradient-entity",
  "gradient-forge",
  "gradient-nix",
+ "gradient-notify",
  "gradient-proto",
  "gradient-scheduler",
  "gradient-score",

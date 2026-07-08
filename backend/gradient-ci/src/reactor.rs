@@ -29,19 +29,23 @@ use crate::context::CiContext;
 use crate::{ReactionKind, ReactionTarget};
 use gradient_db::{DbContext, StatusReactor};
 use gradient_forge::ForgeRegistry;
+use gradient_notify::EmailSender;
 use gradient_types::*;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct CiStatusReactor {
     http: reqwest::Client,
     forge: ForgeRegistry,
+    email: Arc<dyn EmailSender>,
 }
 
 impl CiStatusReactor {
-    pub fn new(http: reqwest::Client) -> Self {
+    pub fn new(http: reqwest::Client, email: Arc<dyn EmailSender>) -> Self {
         Self {
             http,
             forge: ForgeRegistry::with_builtin(),
+            email,
         }
     }
 
@@ -50,6 +54,7 @@ impl CiStatusReactor {
             db: db.clone(),
             http: self.http.clone(),
             forge: self.forge.clone(),
+            email: self.email.clone(),
         }
     }
 }

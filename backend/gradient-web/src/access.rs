@@ -591,7 +591,8 @@ mod tests {
     use crate::authorization::ApiKeyContext;
     use gradient_db::permissions::mask_from;
     use gradient_db::{WebDb, WorkerDb};
-    use gradient_storage::{EmailSender, NarStore};
+    use gradient_notify::EmailSender;
+    use gradient_storage::NarStore;
     use gradient_test_support::cli::test_cli;
     use gradient_test_support::fakes::email::InMemoryEmailSender;
     use gradient_test_support::log_storage::NoopLogStorage;

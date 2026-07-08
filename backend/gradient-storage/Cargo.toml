@@ -31,7 +31,6 @@ harmonia-store-path            = { workspace = true }
 harmonia-utils-hash            = { workspace = true }
 hex                            = { workspace = true }
 object_store                   = { workspace = true }
-rand                           = { workspace = true }
 reqwest                        = { workspace = true }
 tempfile                       = { workspace = true }
 thiserror                      = { workspace = true }
@@ -41,5 +40,4 @@ uuid                           = { workspace = true }
 zstd                           = { workspace = true }
 
 async-compression = { workspace = true }
-lettre            = { workspace = true }
 tar               = { workspace = true }

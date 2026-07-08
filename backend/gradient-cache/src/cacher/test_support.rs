@@ -10,7 +10,8 @@
 
 use gradient_core::ServerState;
 use gradient_db::{CacheDb, WebDb, WorkerDb};
-use gradient_storage::{EmailSender, LogStorage, NarStore};
+use gradient_notify::EmailSender;
+use gradient_storage::{LogStorage, NarStore};
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::log_storage::NoopLogStorage;
 use gradient_test_support::prelude::test_cli;
