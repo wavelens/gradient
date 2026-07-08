@@ -84,50 +84,56 @@ pub async fn fetch_repository(
 
     updater.report_fetching().await?;
 
-    // Only Repository sources are supported on this path - Cached sources
-    // skip FetchFlake entirely and go straight to eval. The scheduler
-    // guarantees this by construction, but guard in case.
-    let (url, commit) = match &job.source {
-        FlakeSource::Repository { url, commit } => (url.clone(), commit.clone()),
-        FlakeSource::Cached { .. } => {
-            anyhow::bail!("FetchFlake task requires FlakeSource::Repository");
-        }
-    };
     let ssh_key = credentials
         .ssh_key()
         .map(|k| String::from_utf8_lossy(k.expose()).to_string());
 
-    debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
+    // Repository sources are cloned and archived from a git checkout; a Cached
+    // build source is already a `/nix/store/...-source` path (ensured present by
+    // the caller) that we archive in place so its `git+ssh` inputs are fetched
+    // into the shared store with credentials.
+    let (flake_ref, flake_root) = match &job.source {
+        FlakeSource::Repository { url, commit } => {
+            let (url, commit) = (url.clone(), commit.clone());
+            debug!(%url, %commit, has_ssh_key = ssh_key.is_some(), "fetching repository");
 
-    let ssh_key_for_clone = ssh_key.clone();
-    let commit_for_clone = commit.clone();
-    let clone_task = tokio::task::spawn_blocking(move || {
-        clone_and_checkout(&url, &commit_for_clone, ssh_key_for_clone.as_deref())
-    });
+            let ssh_key_for_clone = ssh_key.clone();
+            let commit_for_clone = commit.clone();
+            let clone_task = tokio::task::spawn_blocking(move || {
+                clone_and_checkout(&url, &commit_for_clone, ssh_key_for_clone.as_deref())
+            });
 
-    let tmp_path = tokio::select! {
-        biased;
-        _ = abort_true(&mut abort) => {
-            anyhow::bail!("job aborted during git clone");
+            let tmp_path = tokio::select! {
+                biased;
+                _ = abort_true(&mut abort) => {
+                    anyhow::bail!("job aborted during git clone");
+                }
+                result = clone_task => {
+                    result.context("fetch task panicked")??
+                }
+            };
+
+            // `input_update` evals bump tracked flake inputs natively, writing the
+            // candidate lock into the checkout so the rest of eval/build runs against
+            // exactly the lock that will be committed. An empty patch is left as a
+            // no-op so no PR is opened. Build requests never carry an input_update.
+            if let Some(spec) = &job.input_update {
+                run_input_update(spec, &tmp_path, ssh_key.as_deref(), updater).await?;
+            }
+
+            (format!("git+file://{tmp_path}?rev={commit}"), tmp_path)
         }
-        result = clone_task => {
-            result.context("fetch task panicked")??
+        FlakeSource::Cached { store_path } => {
+            debug!(%store_path, has_ssh_key = ssh_key.is_some(), "archiving cached build source");
+            (format!("path:{store_path}"), store_path.clone())
         }
     };
-
-    // `input_update` evals bump tracked flake inputs natively, writing the
-    // candidate lock into the checkout so the rest of eval/build runs against
-    // exactly the lock that will be committed. An empty patch is left as a
-    // no-op so no PR is opened.
-    if let Some(spec) = &job.input_update {
-        run_input_update(spec, &tmp_path, ssh_key.as_deref(), updater).await?;
-    }
 
     let overrides_in: Vec<OverrideInput> = job.input_overrides.iter().map(Into::into).collect();
     let (applied_overrides, warnings) = if overrides_in.is_empty() {
         (Vec::new(), Vec::new())
     } else {
-        let lock_path = std::path::Path::new(&tmp_path).join("flake.lock");
+        let lock_path = std::path::Path::new(&flake_root).join("flake.lock");
         let lock_bytes = tokio::fs::read(&lock_path)
             .await
             .with_context(|| format!("failed to read {}", lock_path.display()))?;
@@ -159,7 +165,6 @@ pub async fn fetch_repository(
     // and store-write access).  Returns the nix store source path so the
     // evaluator can use `path:/nix/store/xxx` - a pure, content-addressed
     // reference - instead of the git checkout in /tmp.
-    let flake_ref = format!("git+file://{}?rev={}", tmp_path, commit);
     let binpath_nix = binpath_nix.to_owned();
     let binpath_ssh = binpath_ssh.to_owned();
     match archive_flake(
@@ -644,6 +649,31 @@ mod tests {
 
         assert!(matches!(reporter.events[0], ReportedEvent::Fetching));
         assert!(result.is_err()); // fake URL
+    }
+
+    /// A Cached source must attempt archive (failing only because nix is absent
+    /// in unit context), NOT bail with "requires FlakeSource::Repository".
+    #[tokio::test]
+    async fn fetch_cached_source_does_not_bail_on_kind() {
+        let job = FlakeJob {
+            tasks: vec![FlakeTask::FetchFlake],
+            source: FlakeSource::Cached {
+                store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source".into(),
+            },
+            wildcards: vec![],
+            timeout_secs: None,
+            input_overrides: vec![],
+            input_update: None,
+        };
+        let credentials = crate::proto::credentials::CredentialStore::new();
+        let mut reporter = RecordingJobReporter::new();
+        let result =
+            fetch_repository(&job, &mut reporter, &credentials, "nix", "ssh", no_abort()).await;
+        let msg = format!("{:?}", result.err());
+        assert!(
+            !msg.contains("requires FlakeSource::Repository"),
+            "cached must be handled: {msg}"
+        );
     }
 
     /// fetch_repository clones the repo then runs nix flake archive.
