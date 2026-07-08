@@ -39,12 +39,22 @@ pub trait RevisionResolver: Send + Sync {
 }
 
 /// Resolves github/gitlab over HTTP and plain git over libgit2.
-#[derive(Debug)]
 pub struct HttpRevisionResolver {
     client: reqwest::Client,
     github_token: Option<String>,
     gitlab_token: Option<String>,
     ssh_key: Option<String>,
+}
+
+impl std::fmt::Debug for HttpRevisionResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let redact = |o: &Option<String>| o.as_ref().map(|_| "<redacted>");
+        f.debug_struct("HttpRevisionResolver")
+            .field("github_token", &redact(&self.github_token))
+            .field("gitlab_token", &redact(&self.gitlab_token))
+            .field("ssh_key", &redact(&self.ssh_key))
+            .finish_non_exhaustive()
+    }
 }
 
 impl HttpRevisionResolver {
