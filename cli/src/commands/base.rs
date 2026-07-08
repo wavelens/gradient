@@ -108,6 +108,10 @@ enum MainCommands {
         /// Do not produce a `result` symlink/folder after the build
         #[arg(long)]
         no_link: bool,
+        /// Override a flake input, like `nix build`. Repeatable. REF must be a remote
+        /// flake ref (github:, git+ssh://, flake:, ...); local paths are not supported.
+        #[arg(long = "override-input", num_args = 2, value_names = ["INPUT", "FLAKE"], action = clap::ArgAction::Append)]
+        override_input: Vec<String>,
     },
     /// Watch a running evaluation's live build logs and status
     Watch {
@@ -341,8 +345,12 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             background,
             quiet,
             no_link,
+            override_input,
         } => {
-            build::handle_build(target, system, organization, background, quiet, no_link, out).await
+            let overrides = build::parse_overrides(&override_input)
+                .unwrap_or_else(|msg| out.err(ExitKind::Usage, msg));
+            let params = build::BuildParams { target, system, overrides };
+            build::handle_build(params, organization, background, quiet, no_link, out).await
         }
         MainCommands::Watch { evaluation } => watch::handle_watch(&evaluation, out).await,
         MainCommands::Logs { evaluation } => logs::handle_logs(&evaluation, out).await,

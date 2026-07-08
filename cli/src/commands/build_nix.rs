@@ -8,7 +8,7 @@
 //! (skipping the per-file blob manifest) and substitute the built output back
 //! into the local store as a `result` symlink (instead of downloading products).
 
-use crate::commands::build::{TrackedFile, select_primary_entry_point};
+use crate::commands::build::{BuildParams, TrackedFile, select_primary_entry_point};
 use crate::config::{ConfigKey, load_config};
 use crate::input::server_base;
 use crate::output::{ExitKind, Output, to_exit_kind};
@@ -28,9 +28,8 @@ const SOURCE_UPLOAD_CHUNK_SIZE: usize = 32 * 1024 * 1024;
 pub async fn dispatch_via_nar(
     client: &connector::Client,
     organization: &str,
-    target: Option<String>,
-    system: Option<String>,
     entries: &[TrackedFile],
+    params: &BuildParams,
     quiet: bool,
     out: Output,
 ) -> DispatchResponse {
@@ -89,7 +88,13 @@ pub async fn dispatch_via_nar(
     }
 
     match requests
-        .finalize_source(&upload, organization, target.as_deref(), system.as_deref())
+        .finalize_source(
+            &upload,
+            organization,
+            params.target.as_deref(),
+            params.system.as_deref(),
+            &params.overrides,
+        )
         .await
     {
         Ok(d) => d,

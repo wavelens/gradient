@@ -16,9 +16,17 @@ use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
+/// What to build and how to resolve its flake inputs: the target attr-path, the
+/// target system, and the per-run `--override-input` pairs. Threaded as one unit
+/// through dispatch so the request functions stay under the arg-count limit.
+pub(crate) struct BuildParams {
+    pub target: Option<String>,
+    pub system: Option<String>,
+    pub overrides: Vec<(String, String)>,
+}
+
 pub async fn handle_build(
-    target: Option<String>,
-    system: Option<String>,
+    mut params: BuildParams,
     organization: Option<String>,
     background: bool,
     quiet: bool,
@@ -50,8 +58,8 @@ pub async fn handle_build(
 
     // Accept `nix build`-style installables (`.#uxc`) and translate them into
     // gradient's attr-path wildcard language before dispatch and result linking.
-    let target = target.map(|raw| {
-        let system = system.clone().unwrap_or_else(attr_spec::default_nix_system);
+    params.target = params.target.take().map(|raw| {
+        let system = params.system.clone().unwrap_or_else(attr_spec::default_nix_system);
         let normalized = normalize_target(&raw, &system);
         if !quiet && normalized != raw {
             out.progress(format!("Building '{}' (from '{}')", normalized, raw));
@@ -107,16 +115,7 @@ pub async fn handle_build(
         exit(1);
     }
 
-    let dispatch = upload_and_dispatch(
-        &client,
-        &organization,
-        &entries,
-        target.clone(),
-        system.clone(),
-        quiet,
-        out,
-    )
-    .await;
+    let dispatch = upload_and_dispatch(&client, &organization, &entries, &params, quiet, out).await;
 
     if background {
         out.ok(&dispatch);
@@ -173,36 +172,28 @@ pub async fn handle_build(
     };
 
     #[cfg(feature = "nix")]
-    crate::commands::build_nix::link_result(&client, &dispatch, &tree, target.as_deref(), out).await;
+    crate::commands::build_nix::link_result(&client, &dispatch, &tree, params.target.as_deref(), out)
+        .await;
     #[cfg(not(feature = "nix"))]
-    download_result_dir(&client, &tree, target.as_deref(), out).await;
+    download_result_dir(&client, &tree, params.target.as_deref(), out).await;
 }
 
 async fn upload_and_dispatch(
     client: &connector::Client,
     organization: &str,
     entries: &[TrackedFile],
-    target: Option<String>,
-    system: Option<String>,
+    params: &BuildParams,
     quiet: bool,
     out: Output,
 ) -> DispatchResponse {
     #[cfg(feature = "nix")]
     {
-        crate::commands::build_nix::dispatch_via_nar(
-            client,
-            organization,
-            target,
-            system,
-            entries,
-            quiet,
-            out,
-        )
-        .await
+        crate::commands::build_nix::dispatch_via_nar(client, organization, entries, params, quiet, out)
+            .await
     }
     #[cfg(not(feature = "nix"))]
     {
-        dispatch_via_manifest(client, organization, entries, target, system, quiet, out).await
+        dispatch_via_manifest(client, organization, entries, params, quiet, out).await
     }
 }
 
@@ -211,12 +202,13 @@ async fn dispatch_via_manifest(
     client: &connector::Client,
     organization: &str,
     entries: &[TrackedFile],
-    target: Option<String>,
-    system: Option<String>,
+    params: &BuildParams,
     quiet: bool,
     out: Output,
 ) -> DispatchResponse {
-    use connector::build_requests::{BuildManifestRequest, DispatchRequest, ManifestFile};
+    use connector::build_requests::{
+        BuildManifestRequest, DispatchRequest, InputOverride, ManifestFile,
+    };
 
     if !quiet {
         out.human(format!(
@@ -312,9 +304,25 @@ async fn dispatch_via_manifest(
         }
     }
 
+    let input_overrides = params
+        .overrides
+        .iter()
+        .map(|(input_name, url)| InputOverride {
+            input_name: input_name.clone(),
+            url: url.clone(),
+        })
+        .collect();
+
     match client
         .build_requests()
-        .dispatch(&manifest.session, DispatchRequest { target, system })
+        .dispatch(
+            &manifest.session,
+            DispatchRequest {
+                target: params.target.clone(),
+                system: params.system.clone(),
+                input_overrides,
+            },
+        )
         .await
     {
         Ok(d) => d,
@@ -374,6 +382,34 @@ fn normalize_installable(pat: &str, system: &str) -> String {
         Some(("" | "." | "./", attr)) => attr_spec::qualify_attr(&format!("{excl}{attr}"), system),
         _ => pat.to_string(),
     }
+}
+
+const REMOTE_OVERRIDE_SCHEMES: &[&str] = &[
+    "github:", "gitlab:", "sourcehut:", "git+ssh://", "git+https://", "git+http://",
+    "git://", "https://", "http://", "flake:",
+];
+
+/// Parse `--override-input INPUT FLAKE` pairs. gradient evaluates on the server,
+/// so only remote flake refs (and `/nix/store` paths it can fetch) are accepted.
+pub(crate) fn parse_overrides(raw: &[String]) -> Result<Vec<(String, String)>, String> {
+    if !raw.len().is_multiple_of(2) {
+        return Err("--override-input needs INPUT and FLAKE".into());
+    }
+    let mut out = Vec::with_capacity(raw.len() / 2);
+    for pair in raw.chunks_exact(2) {
+        let (name, ref_) = (pair[0].clone(), pair[1].clone());
+        let ok = REMOTE_OVERRIDE_SCHEMES.iter().any(|s| ref_.starts_with(s))
+            || ref_.starts_with("path:/nix/store/");
+        if !ok {
+            return Err(format!(
+                "override-input '{name}': '{ref_}' is not a remote flake ref. \
+                 gradient build evaluates on the server, so local paths are not \
+                 supported; use github:/gitlab:/git+ssh://flake:/path:/nix/store/... ."
+            ));
+        }
+        out.push((name, ref_));
+    }
+    Ok(out)
 }
 
 /// Pick the entry point matching `target` (exact or suffix), else the first.
@@ -463,6 +499,29 @@ fn hash_file(path: &Path) -> std::io::Result<(String, i64)> {
 #[cfg(test)]
 mod tests {
     use super::{normalize_installable, normalize_target};
+
+    #[test]
+    fn parse_overrides_accepts_remote_refs() {
+        let raw = vec!["nixpkgs".into(), "github:NixOS/nixpkgs/nixos-unstable".into(),
+                       "priv".into(), "git+ssh://git@h/x.git".into()];
+        let out = super::parse_overrides(&raw).unwrap();
+        assert_eq!(out, vec![("nixpkgs".into(), "github:NixOS/nixpkgs/nixos-unstable".into()),
+                             ("priv".into(), "git+ssh://git@h/x.git".into())]);
+    }
+
+    #[test]
+    fn parse_overrides_rejects_local_paths() {
+        for bad in ["/home/u/np", "./np", "~/np", "np", "path:/home/u/np"] {
+            let raw = vec!["nixpkgs".into(), bad.to_string()];
+            assert!(super::parse_overrides(&raw).is_err(), "{bad} must be rejected");
+        }
+    }
+
+    #[test]
+    fn parse_overrides_accepts_store_path() {
+        let raw = vec!["a".into(), "path:/nix/store/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-src".into()];
+        assert!(super::parse_overrides(&raw).is_ok());
+    }
 
     #[test]
     fn bare_installable_qualifies_to_packages() {
