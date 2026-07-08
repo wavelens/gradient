@@ -130,7 +130,9 @@ impl PartialStore {
         tokio::fs::write(self.token_path(key), token)
             .await
             .context("write partial token")?;
-        file.seek(SeekFrom::End(0)).await.context("seek partial end")?;
+        file.seek(SeekFrom::End(0))
+            .await
+            .context("seek partial end")?;
         file.write_all(data).await.context("write partial chunk")?;
         file.flush().await.context("flush partial")?;
         Ok(())
@@ -350,7 +352,11 @@ mod tests {
         let (_d, s) = store(3600);
         s.append("peer/abc", "tok1", 0, b"hello").await.unwrap();
 
-        let claim = s.detach("peer/abc").await.unwrap().expect("something staged");
+        let claim = s
+            .detach("peer/abc")
+            .await
+            .unwrap()
+            .expect("something staged");
         assert_ne!(claim, "peer/abc");
 
         // A later same-hash push resets the shared key (new token discards).
