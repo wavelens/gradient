@@ -309,10 +309,13 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     Ok(producers)
 }
 
-/// Demote every cached output that directly references `missing_hash`. A missing
-/// path with no producing derivation (a source / `.drv`) only ever returns to
-/// the cache as part of a referrer's build closure, so a direct referrer must
-/// rebuild to re-push it - rather than stay trusted-but-unbuildable. The
+/// Demote every cached **output** that directly references `missing_hash`, so its
+/// producer rebuilds and re-pushes the missing path. Only rebuildable output
+/// referrers are demoted ([`OUTPUT_REFERRERS_SELECT`]): a producerless referrer -
+/// a `.drv` or an input source - is left in place. Deleting one re-pushes nothing
+/// (no producer rebuilds) and would strand the `.drv`'s own live dependents behind
+/// the `drv_closure_cached` dispatch gate, a permanent dead zone, since a genuinely
+/// missing input `.drv`/source is re-supplied only by a full re-eval. The
 /// transitive completeness invariant is handled separately by
 /// [`clear_closure_complete_for_referrers`], which only flips the flag and
 /// leaves healthy NARs in place. Returns the producers reset to `Created`.
@@ -322,7 +325,7 @@ pub async fn demote_referrers_of<C: ConnectionTrait>(
     missing_hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
     let mut producers = Vec::new();
-    for referrer_hash in referrers_of_hash(db, missing_hash).await? {
+    for referrer_hash in output_referrers_of_hash(db, missing_hash).await? {
         producers.extend(demote_cached_output(db, nar_storage, &referrer_hash).await?);
     }
 
@@ -617,11 +620,46 @@ async fn clear_anchor_closure_complete_for_output<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Hashes of cached paths whose runtime references name `hash`, via the
-/// `cached_path_reference` reverse index (an exact `reference_hash` match, so no
-/// substring false positives and no full-table scan).
+/// Every cached path whose runtime references name `hash`, via the
+/// `cached_path_reference` reverse index (exact `reference_hash` match, no
+/// full-table scan), `.drv`s and sources included. Used by the closure-complete
+/// flag clear, which may touch any referrer harmlessly; demotion uses the narrower
+/// [`output_referrers_of_hash`].
 async fn referrers_of_hash<C: ConnectionTrait>(
     db: &C,
+    hash: &str,
+) -> Result<Vec<String>, sea_orm::DbErr> {
+    referrers_by_select(
+        db,
+        "SELECT DISTINCT referrer FROM cached_path_reference WHERE reference_hash = $1",
+        hash,
+    )
+    .await
+}
+
+/// Referrers of `missing_hash` that are **rebuildable outputs**: a
+/// `derivation_output` exists for the referrer's own hash, so demoting it resets a
+/// producer that rebuilds and re-pushes `missing_hash`. Producerless referrers - a
+/// `.drv` (whose store-path hash is a derivation hash with no `derivation_output`)
+/// or an input source - are excluded on purpose: demoting one deletes a
+/// `.drv`/source the cache cannot re-supply without a full re-eval, rebuilds
+/// nothing, and strands the deleted `.drv`'s own live dependents behind the
+/// `drv_closure_cached` dispatch gate - the exact dead zone this filter prevents.
+const OUTPUT_REFERRERS_SELECT: &str = "SELECT DISTINCT r.referrer \
+     FROM cached_path_reference r \
+     WHERE r.reference_hash = $1 \
+       AND EXISTS (SELECT 1 FROM derivation_output o WHERE o.hash = r.referrer)";
+
+async fn output_referrers_of_hash<C: ConnectionTrait>(
+    db: &C,
+    hash: &str,
+) -> Result<Vec<String>, sea_orm::DbErr> {
+    referrers_by_select(db, OUTPUT_REFERRERS_SELECT, hash).await
+}
+
+async fn referrers_by_select<C: ConnectionTrait>(
+    db: &C,
+    select: &str,
     hash: &str,
 ) -> Result<Vec<String>, sea_orm::DbErr> {
     use sea_orm::FromQueryResult;
@@ -633,7 +671,7 @@ async fn referrers_of_hash<C: ConnectionTrait>(
 
     Ok(Referrer::find_by_statement(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
-        "SELECT DISTINCT referrer FROM cached_path_reference WHERE reference_hash = $1",
+        select,
         [hash.into()],
     ))
     .all(db)
@@ -790,6 +828,28 @@ mod tests {
         assert!(
             sql.contains("dep.hash IS NULL OR dep.file_hash IS NULL OR NOT dep.closure_complete"),
             "a missing, unbacked, or incomplete reference must fail the gate: {sql}"
+        );
+    }
+
+    /// `demote_referrers_of` may only demote referrers that are rebuildable
+    /// outputs. A producerless `.drv`/source referrer must be excluded: deleting it
+    /// re-pushes nothing (no producer rebuilds) and strands the `.drv`'s own live
+    /// dependents behind the `drv_closure_cached` dispatch gate - a permanent dead
+    /// zone (a completed, substitutable dep whose `.drv` a demote deleted, blocking
+    /// every non-substitutable dependent from ever dispatching).
+    #[test]
+    fn output_referrers_exclude_producerless_drv_and_source() {
+        let sql = OUTPUT_REFERRERS_SELECT
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            sql.contains("FROM cached_path_reference r") && sql.contains("r.reference_hash = $1"),
+            "must resolve referrers of the missing hash: {sql}"
+        );
+        assert!(
+            sql.contains("EXISTS (SELECT 1 FROM derivation_output o WHERE o.hash = r.referrer)"),
+            "must require the referrer to be a producing output, excluding .drv/source: {sql}"
         );
     }
 

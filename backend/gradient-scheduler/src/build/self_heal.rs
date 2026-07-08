@@ -126,10 +126,12 @@ pub(super) async fn reconcile_missing_inputs(
             }
             Ok(_) => {
                 sources_purged.push(path);
-                // No producing derivation (a source / `.drv`): it only returns
-                // to the cache as part of a referrer's closure, so demote the
-                // referrers - a pruned/substituted parent would otherwise never
-                // re-push it, stranding dependents forever.
+                // No producing derivation (a source / `.drv`): it only returns to
+                // the cache as part of a referrer's closure, so demote the
+                // rebuildable *output* referrers - their rebuild re-pushes it. A
+                // producerless `.drv`/source referrer is left intact: deleting it
+                // re-pushes nothing and would strand its own live dependents behind
+                // the dispatch gate ([`demote_referrers_of`]).
                 match gradient_db::demote_referrers_of(db, &state.nar_storage, hash).await {
                     Ok(drvs) if !drvs.is_empty() => {
                         referrers_demoted += drvs.len();
