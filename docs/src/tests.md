@@ -2450,6 +2450,8 @@ which the scheduler already threads into eval-time `LockFlags`. Tests:
   override and asserts 400 (validated before the evaluation is created, so no
   dangling row). Row insertion runs in CI against Postgres.
 
+## Cache traffic metrics - atomic UPSERT (no lost updates)
+
 `record_nar_traffic` (`backend/web/src/endpoints/stats.rs`) records bytes
 served per `(cache, bucket_time)` row. The previous implementation used a
 SELECT-then-UPDATE/INSERT pattern, which dropped updates whenever two NAR
