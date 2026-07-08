@@ -816,17 +816,17 @@ pub async fn evaluate_derivations_with(
         .resolve_derivation_paths(repo.clone(), attrs, &eval_overrides)
         .await
     {
-            Ok(v) => v,
-            Err(e) => {
-                // Forward warnings accumulated so far so they aren't lost.
-                let err_msg = format!("resolve_derivation_paths failed: {:#}", e);
-                warn!(error = %err_msg, "reporting eval error to server");
-                let _ = updater
-                    .report_eval_result(vec![], warnings, vec![err_msg])
-                    .await;
-                return Err(e).context("resolve_derivation_paths failed");
-            }
-        };
+        Ok(v) => v,
+        Err(e) => {
+            // Forward warnings accumulated so far so they aren't lost.
+            let err_msg = format!("resolve_derivation_paths failed: {:#}", e);
+            warn!(error = %err_msg, "reporting eval error to server");
+            let _ = updater
+                .report_eval_result(vec![], warnings, vec![err_msg])
+                .await;
+            return Err(e).context("resolve_derivation_paths failed");
+        }
+    };
     warnings.extend(resolve_warnings);
 
     let mut root_drvs: Vec<(String, String)> = Vec::new();

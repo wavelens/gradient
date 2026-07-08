@@ -363,7 +363,10 @@ impl WorkerPoolResolver {
     ) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
         let mut attempt = 0;
         loop {
-            match self.list_once(repository, wildcards.clone(), overrides).await {
+            match self
+                .list_once(repository, wildcards.clone(), overrides)
+                .await
+            {
                 Ok(v) => return Ok(v),
                 Err(crash) => {
                     attempt += 1;

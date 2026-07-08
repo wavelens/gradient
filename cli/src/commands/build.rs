@@ -59,7 +59,10 @@ pub async fn handle_build(
     // Accept `nix build`-style installables (`.#uxc`) and translate them into
     // gradient's attr-path wildcard language before dispatch and result linking.
     params.target = params.target.take().map(|raw| {
-        let system = params.system.clone().unwrap_or_else(attr_spec::default_nix_system);
+        let system = params
+            .system
+            .clone()
+            .unwrap_or_else(attr_spec::default_nix_system);
         let normalized = normalize_target(&raw, &system);
         if !quiet && normalized != raw {
             out.progress(format!("Building '{}' (from '{}')", normalized, raw));
@@ -172,8 +175,14 @@ pub async fn handle_build(
     };
 
     #[cfg(feature = "nix")]
-    crate::commands::build_nix::link_result(&client, &dispatch, &tree, params.target.as_deref(), out)
-        .await;
+    crate::commands::build_nix::link_result(
+        &client,
+        &dispatch,
+        &tree,
+        params.target.as_deref(),
+        out,
+    )
+    .await;
     #[cfg(not(feature = "nix"))]
     download_result_dir(&client, &tree, params.target.as_deref(), out).await;
 }
@@ -188,8 +197,15 @@ async fn upload_and_dispatch(
 ) -> DispatchResponse {
     #[cfg(feature = "nix")]
     {
-        crate::commands::build_nix::dispatch_via_nar(client, organization, entries, params, quiet, out)
-            .await
+        crate::commands::build_nix::dispatch_via_nar(
+            client,
+            organization,
+            entries,
+            params,
+            quiet,
+            out,
+        )
+        .await
     }
     #[cfg(not(feature = "nix"))]
     {
@@ -373,10 +389,7 @@ fn normalize_target(raw: &str, system: &str) -> String {
 }
 
 fn normalize_installable(pat: &str, system: &str) -> String {
-    let (excl, body) = pat
-        .strip_prefix('!')
-        .map(|r| ("!", r))
-        .unwrap_or(("", pat));
+    let (excl, body) = pat.strip_prefix('!').map(|r| ("!", r)).unwrap_or(("", pat));
 
     match body.split_once('#') {
         Some(("" | "." | "./", attr)) => attr_spec::qualify_attr(&format!("{excl}{attr}"), system),
@@ -385,8 +398,16 @@ fn normalize_installable(pat: &str, system: &str) -> String {
 }
 
 const REMOTE_OVERRIDE_SCHEMES: &[&str] = &[
-    "github:", "gitlab:", "sourcehut:", "git+ssh://", "git+https://", "git+http://",
-    "git://", "https://", "http://", "flake:",
+    "github:",
+    "gitlab:",
+    "sourcehut:",
+    "git+ssh://",
+    "git+https://",
+    "git+http://",
+    "git://",
+    "https://",
+    "http://",
+    "flake:",
 ];
 
 /// Parse `--override-input INPUT FLAKE` pairs. gradient evaluates on the server,
@@ -511,24 +532,42 @@ mod tests {
 
     #[test]
     fn parse_overrides_accepts_remote_refs() {
-        let raw = vec!["nixpkgs".into(), "github:NixOS/nixpkgs/nixos-unstable".into(),
-                       "priv".into(), "git+ssh://git@h/x.git".into()];
+        let raw = vec![
+            "nixpkgs".into(),
+            "github:NixOS/nixpkgs/nixos-unstable".into(),
+            "priv".into(),
+            "git+ssh://git@h/x.git".into(),
+        ];
         let out = super::parse_overrides(&raw).unwrap();
-        assert_eq!(out, vec![("nixpkgs".into(), "github:NixOS/nixpkgs/nixos-unstable".into()),
-                             ("priv".into(), "git+ssh://git@h/x.git".into())]);
+        assert_eq!(
+            out,
+            vec![
+                (
+                    "nixpkgs".into(),
+                    "github:NixOS/nixpkgs/nixos-unstable".into()
+                ),
+                ("priv".into(), "git+ssh://git@h/x.git".into())
+            ]
+        );
     }
 
     #[test]
     fn parse_overrides_rejects_local_paths() {
         for bad in ["/home/u/np", "./np", "~/np", "np", "path:/home/u/np"] {
             let raw = vec!["nixpkgs".into(), bad.to_string()];
-            assert!(super::parse_overrides(&raw).is_err(), "{bad} must be rejected");
+            assert!(
+                super::parse_overrides(&raw).is_err(),
+                "{bad} must be rejected"
+            );
         }
     }
 
     #[test]
     fn parse_overrides_accepts_store_path() {
-        let raw = vec!["a".into(), "path:/nix/store/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-src".into()];
+        let raw = vec![
+            "a".into(),
+            "path:/nix/store/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-src".into(),
+        ];
         assert!(super::parse_overrides(&raw).is_ok());
     }
 
@@ -536,7 +575,10 @@ mod tests {
     fn parse_overrides_rejects_bad_input_name() {
         for bad in ["1bad", "has space", "has.dot", ""] {
             let raw = vec![bad.to_string(), "github:x/y".into()];
-            assert!(super::parse_overrides(&raw).is_err(), "name '{bad}' must be rejected");
+            assert!(
+                super::parse_overrides(&raw).is_err(),
+                "name '{bad}' must be rejected"
+            );
         }
     }
 

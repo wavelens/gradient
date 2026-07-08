@@ -221,7 +221,10 @@ mod tests {
             EvalRequest::Plan {
                 repository: "github:nixos/nixpkgs".into(),
                 wildcards: vec!["packages.*.*".into()],
-                input_overrides: vec![("nixpkgs".into(), "github:nixos/nixpkgs/nixos-24.05".into())],
+                input_overrides: vec![(
+                    "nixpkgs".into(),
+                    "github:nixos/nixpkgs/nixos-24.05".into(),
+                )],
             },
             EvalRequest::List {
                 repository: "github:nixos/nixpkgs".into(),

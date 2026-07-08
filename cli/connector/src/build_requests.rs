@@ -208,11 +208,23 @@ mod tests {
 
     #[test]
     fn input_overrides_skipped_when_empty_and_present_when_set() {
-        let empty = SourceFinalizeBody { target: None, system: None, input_overrides: vec![] };
-        assert!(!serde_json::to_string(&empty).unwrap().contains("input_overrides"));
+        let empty = SourceFinalizeBody {
+            target: None,
+            system: None,
+            input_overrides: vec![],
+        };
+        assert!(
+            !serde_json::to_string(&empty)
+                .unwrap()
+                .contains("input_overrides")
+        );
         let set = SourceFinalizeBody {
-            target: None, system: None,
-            input_overrides: vec![InputOverride { input_name: "nixpkgs".into(), url: "github:NixOS/nixpkgs".into() }],
+            target: None,
+            system: None,
+            input_overrides: vec![InputOverride {
+                input_name: "nixpkgs".into(),
+                url: "github:NixOS/nixpkgs".into(),
+            }],
         };
         assert!(serde_json::to_string(&set).unwrap().contains("nixpkgs"));
     }
