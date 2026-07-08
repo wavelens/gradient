@@ -10,6 +10,7 @@
 # services (OIDC, SMTP e-mail verification, forge webhooks, proto websockets,
 # build-request dispatch) have dedicated tests and are out of scope here.
 
+import hashlib
 import json
 import time
 
@@ -330,8 +331,9 @@ api("DELETE", "orgs/myorg/subscribe/maincache", token=token)
 api("POST", "orgs/myorg/subscribe/maincache", token=token)
 
 # ── Phase 7: cache NAR upload surface (direct + CLI) ──────────────────────────
-# No nix store is needed: the endpoint validates byte length + store-path shape,
-# not NAR content, so a synthetic NAR + narinfo exercises the whole surface.
+# No nix store is needed: the endpoint validates byte length, store-path shape,
+# and the reported file_hash against the uploaded bytes, so a synthetic NAR whose
+# narinfo carries its real sha256 exercises the whole surface.
 banner("Phase 7: cache NAR upload / list / show / stats / delete")
 assert api("GET", "caches/maincache/nars", token=token)["items"] == [], "cache starts empty"
 
@@ -339,15 +341,15 @@ cli_hash = "00000000000000000000000000000000"
 payload = "gradient-test-nar-payload"
 size = len(payload)
 machine.succeed(f"printf '%s' '{payload}' > /tmp/cli.nar")
-zero64 = "0" * 64
+file_hash = "sha256:" + hashlib.sha256(payload.encode()).hexdigest()
 machine.succeed(
     "cat > /tmp/cli.narinfo <<'EOF'\n"
     f"StorePath: /nix/store/{cli_hash}-test\n"
     "URL: nar/cli.nar\n"
     "Compression: none\n"
-    f"FileHash: sha256:{zero64}\n"
+    f"FileHash: {file_hash}\n"
     f"FileSize: {size}\n"
-    f"NarHash: sha256:{zero64}\n"
+    f"NarHash: {file_hash}\n"
     f"NarSize: {size}\n"
     "References: \n"
     "EOF"
@@ -368,8 +370,8 @@ direct_hash = "11111111111111111111111111111111"
 machine.succeed(f"printf '%s' '{payload}' > /tmp/direct.nar")
 narinfo_json = json.dumps({
     "store_path": f"/nix/store/{direct_hash}-test",
-    "file_hash": f"sha256:{zero64}", "file_size": size,
-    "nar_hash": f"sha256:{zero64}", "nar_size": size,
+    "file_hash": file_hash, "file_size": size,
+    "nar_hash": file_hash, "nar_size": size,
     "references": [], "deriver": None,
 })
 machine.succeed(f"cat > /tmp/direct.narinfo.json <<'EOF'\n{narinfo_json}\nEOF")
