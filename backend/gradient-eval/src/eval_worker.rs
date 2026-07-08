@@ -131,6 +131,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             EvalRequest::Plan {
                 repository,
                 wildcards,
+                input_overrides,
             } => with_evaluator(&evaluator, |ev| {
                 // Warnings from priming the prefix attrset resurface when each
                 // shard re-forces it, so they are not captured here; per-attr
@@ -138,7 +139,7 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 // for any later `List` to re-hit.
                 or_err(
                     walkers
-                        .with(ev, &repository, |walker| {
+                        .with(ev, &repository, &input_overrides, |walker| {
                             let (shards, errors) = walker.plan_shards(&wildcards)?;
                             let _ = walker.commit_cache();
                             Ok((shards, errors))
@@ -152,9 +153,10 @@ pub fn run_eval_worker() -> std::io::Result<()> {
             EvalRequest::List {
                 repository,
                 wildcards,
+                input_overrides,
             } => with_evaluator(&evaluator, |ev| {
                 let (result, warnings) = capture_warnings_during(|| {
-                    walkers.with(ev, &repository, |walker| {
+                    walkers.with(ev, &repository, &input_overrides, |walker| {
                         let (attrs, errors) = walker.discover(&wildcards)?;
                         let _ = walker.commit_cache();
                         Ok((attrs, errors))
@@ -168,14 +170,24 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                     stats,
                 }))
             }),
-            EvalRequest::Resolve { repository, attrs } => {
+            EvalRequest::Resolve {
+                repository,
+                attrs,
+                input_overrides,
+            } => {
                 let resp = match evaluator.as_ref() {
                     None => EvalResponse::Err {
                         message: "evaluator not initialized".to_string(),
                     },
                     Some(ev) => {
-                        let (warnings, io) =
-                            stream_resolve(&mut writer, ev, &mut walkers, &repository, attrs);
+                        let (warnings, io) = stream_resolve(
+                            &mut writer,
+                            ev,
+                            &mut walkers,
+                            &repository,
+                            &input_overrides,
+                            attrs,
+                        );
                         // A failed item-frame write means the parent is gone.
                         io?;
                         EvalResponse::ResolveEnd {
@@ -187,16 +199,24 @@ pub fn run_eval_worker() -> std::io::Result<()> {
                 send(&mut writer, &resp)?;
                 continue;
             }
-            EvalRequest::Fingerprint { repository } => with_evaluator(&evaluator, |ev| {
+            EvalRequest::Fingerprint {
+                repository,
+                input_overrides,
+            } => with_evaluator(&evaluator, |ev| {
                 or_err(
-                    ev.fingerprint(&repository)
+                    ev.fingerprint(&repository, &input_overrides)
                         .map(|fingerprint| EvalResponse::FingerprintOk { fingerprint }),
                 )
             }),
-            EvalRequest::Checkpoint { repository } => with_evaluator(&evaluator, |ev| {
+            EvalRequest::Checkpoint {
+                repository,
+                input_overrides,
+            } => with_evaluator(&evaluator, |ev| {
                 or_err(
                     walkers
-                        .with(ev, &repository, |walker| walker.checkpoint_cache())
+                        .with(ev, &repository, &input_overrides, |walker| {
+                            walker.checkpoint_cache()
+                        })
                         .map(|()| EvalResponse::CheckpointOk),
                 )
             }),
@@ -228,41 +248,49 @@ fn or_err(result: anyhow::Result<EvalResponse>) -> EvalResponse {
     })
 }
 
-/// Single-entry walker cache keyed by repository. Consecutive requests for the
-/// same flake (the common Plan/List/Resolve sequence) reuse one locked flake +
-/// open eval cache; a different repository replaces the entry.
+/// Single-entry walker cache keyed by `(repository, input_overrides)`.
+/// Consecutive requests for the same flake and override set (the common
+/// Plan/List/Resolve sequence) reuse one locked flake + open eval cache; a
+/// different repository or a different override set replaces the entry, so a
+/// pooled worker never serves a stale locked flake for a new override set.
+/// A cached walker plus the `(repository, input_overrides)` key it locked for.
+type CachedWalker<'ev> = (String, Vec<(String, String)>, FlakeWalker<'ev>);
+
 struct WalkerCache<'ev> {
-    entry: Option<(String, FlakeWalker<'ev>)>,
+    entry: Option<CachedWalker<'ev>>,
 }
 
 impl<'ev> WalkerCache<'ev> {
-    /// The cached walker for `repository`, opening (and caching) it if absent.
+    /// The cached walker for `(repository, overrides)`, opening (and caching)
+    /// it if the key differs from the current entry.
     fn open(
         &mut self,
         ev: &'ev NixEvaluator,
         repository: &str,
+        overrides: &[(String, String)],
     ) -> anyhow::Result<&FlakeWalker<'ev>> {
         let stale = self
             .entry
             .as_ref()
-            .is_none_or(|(repo, _)| repo != repository);
+            .is_none_or(|(repo, ovr, _)| repo != repository || ovr.as_slice() != overrides);
         if stale {
             // Drop the previous walker before locking the next flake.
             self.entry = None;
-            let walker = ev.walker(repository)?;
-            self.entry = Some((repository.to_string(), walker));
+            let walker = ev.walker(repository, overrides)?;
+            self.entry = Some((repository.to_string(), overrides.to_vec(), walker));
         }
 
-        Ok(&self.entry.as_ref().expect("entry just ensured").1)
+        Ok(&self.entry.as_ref().expect("entry just ensured").2)
     }
 
     fn with<T>(
         &mut self,
         ev: &'ev NixEvaluator,
         repository: &str,
+        overrides: &[(String, String)],
         f: impl FnOnce(&FlakeWalker<'ev>) -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
-        f(self.open(ev, repository)?)
+        f(self.open(ev, repository, overrides)?)
     }
 }
 
@@ -276,6 +304,7 @@ fn stream_resolve<'ev, W: Write>(
     ev: &'ev NixEvaluator,
     walkers: &mut WalkerCache<'ev>,
     repository: &str,
+    overrides: &[(String, String)],
     attrs: Vec<String>,
 ) -> (Vec<String>, std::io::Result<()>) {
     let mut all_warnings = Vec::new();
@@ -286,7 +315,8 @@ fn stream_resolve<'ev, W: Write>(
         }
     };
 
-    let (walker_result, build_warnings) = capture_warnings_during(|| walkers.open(ev, repository));
+    let (walker_result, build_warnings) =
+        capture_warnings_during(|| walkers.open(ev, repository, overrides));
     all_warnings.extend(build_warnings);
 
     match walker_result {

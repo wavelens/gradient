@@ -69,7 +69,7 @@ impl Job {
 /// (the CLI runs it before the runtime starts, mirroring the eval worker).
 pub fn eval_jobs(flake_ref: &str, wildcards: &[String], mut sink: impl FnMut(Job)) -> Result<()> {
     let evaluator = NixEvaluator::new()?;
-    let walker = evaluator.walker(flake_ref)?;
+    let walker = evaluator.walker(flake_ref, &[])?;
 
     let attrs = if wildcards.iter().all(|w| is_concrete_attr(w)) {
         wildcards.to_vec()

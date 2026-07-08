@@ -75,21 +75,32 @@ impl NixEvaluator {
             .map_err(|e| anyhow::anyhow!("eval stats: {e}"))
     }
 
-    /// Lock `flake_ref` and open its eval cache, returning a walker that reuses
-    /// the one locked flake + warm cursor for all discover/resolve calls.
-    pub fn walker(&self, flake_ref: &str) -> Result<crate::flake_walk::FlakeWalker<'_>> {
+    /// Lock `flake_ref` (with `overrides` applied at lock time) and open its
+    /// eval cache, returning a walker that reuses the one locked flake + warm
+    /// cursor for all discover/resolve calls.
+    pub fn walker(
+        &self,
+        flake_ref: &str,
+        overrides: &[(String, String)],
+    ) -> Result<crate::flake_walk::FlakeWalker<'_>> {
         crate::flake_walk::FlakeWalker::open(
             &self.ctx,
             &self.fetch_settings,
             &self.flake_settings,
             &self.state,
             flake_ref,
+            overrides,
         )
     }
 
-    /// Lock `flake_ref` and return its eval-cache fingerprint without
-    /// evaluating or creating the on-disk eval cache. `None` for mutable flakes.
-    pub fn fingerprint(&self, flake_ref: &str) -> Result<Option<String>> {
+    /// Lock `flake_ref` (with `overrides` applied) and return its eval-cache
+    /// fingerprint without evaluating or creating the on-disk eval cache.
+    /// `None` for mutable flakes.
+    pub fn fingerprint(
+        &self,
+        flake_ref: &str,
+        overrides: &[(String, String)],
+    ) -> Result<Option<String>> {
         crate::flake_walk::fingerprint(
             &self.ctx,
             &self.fetch_settings,
@@ -97,6 +108,7 @@ impl NixEvaluator {
             &self.state,
             &self.store,
             flake_ref,
+            overrides,
         )
     }
 }

@@ -39,8 +39,9 @@ impl<'a> FlakeWalker<'a> {
         flake: &FlakeSettings,
         state: &'a EvalState,
         flake_ref: &str,
+        overrides: &[(String, String)],
     ) -> Result<Self> {
-        let locked = lock_flake(ctx, fetch, flake, state, flake_ref)?;
+        let locked = lock_flake(ctx, fetch, flake, state, flake_ref, overrides)?;
         let cache = EvalCache::open(ctx, state, &locked)?;
 
         Ok(FlakeWalker {
@@ -118,26 +119,37 @@ impl<'a> FlakeWalker<'a> {
     }
 }
 
-/// Parse and lock `flake_ref`, returning the [`LockedFlake`] without opening
-/// its eval cache. Shared by [`FlakeWalker::open`] and [`fingerprint`].
+/// Parse and lock `flake_ref`, applying each `(input, flake_ref)` override at
+/// lock time so eval-resolved drvPaths reflect it, without opening its eval
+/// cache. Shared by [`FlakeWalker::open`] and [`fingerprint`].
 fn lock_flake(
     ctx: &Arc<Context>,
     fetch: &FetchersSettings,
     flake: &FlakeSettings,
     state: &EvalState,
     flake_ref: &str,
+    overrides: &[(String, String)],
 ) -> Result<LockedFlake> {
     let parse_flags = FlakeReferenceParseFlags::new(ctx, flake)?;
     let (reference, _frag) = FlakeReference::parse(ctx, fetch, flake, &parse_flags, flake_ref)
         .with_context(|| format!("parsing flake reference '{flake_ref}'"))?;
-    let lock_flags = LockFlags::new(ctx, flake)?;
+
+    let mut lock_flags = LockFlags::new(ctx, flake)?;
+    for (name, ref_str) in overrides {
+        let (override_ref, _) = FlakeReference::parse(ctx, fetch, flake, &parse_flags, ref_str)
+            .with_context(|| format!("parsing override flake reference '{ref_str}'"))?;
+        lock_flags = lock_flags
+            .add_input_override(name, &override_ref)
+            .with_context(|| format!("applying override-input '{name}'"))?;
+    }
 
     LockedFlake::lock(ctx, fetch, flake, state, &lock_flags, &reference)
         .with_context(|| format!("locking flake '{flake_ref}'"))
 }
 
-/// Lock `flake_ref` and return its eval-cache fingerprint without opening (and
-/// thus creating) the on-disk eval cache. `None` for mutable/dirty flakes.
+/// Lock `flake_ref` (with `overrides` applied) and return its eval-cache
+/// fingerprint without opening (and thus creating) the on-disk eval cache.
+/// `None` for mutable/dirty flakes.
 pub fn fingerprint(
     ctx: &Arc<Context>,
     fetch: &FetchersSettings,
@@ -145,8 +157,9 @@ pub fn fingerprint(
     state: &EvalState,
     store: &Store,
     flake_ref: &str,
+    overrides: &[(String, String)],
 ) -> Result<Option<String>> {
-    let locked = lock_flake(ctx, fetch, flake, state, flake_ref)?;
+    let locked = lock_flake(ctx, fetch, flake, state, flake_ref, overrides)?;
 
     Ok(locked.fingerprint(store, fetch)?)
 }
@@ -190,5 +203,30 @@ impl WalkNode for CursorNode<'_> {
         }
 
         Ok(self.has_attr("type")? || self.has_attr("_type")?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type LockFlakeFn = fn(
+        &Arc<Context>,
+        &FetchersSettings,
+        &FlakeSettings,
+        &EvalState,
+        &str,
+        &[(String, String)],
+    ) -> Result<LockedFlake>;
+
+    #[test]
+    fn lock_flake_accepts_input_overrides() {
+        // Compile-time guard that lock_flake takes the overrides slice. The
+        // behavioral proof (an override changes the locked input, hence the
+        // resolved drvPath) runs under CI where nix is available.
+        fn _assert(f: LockFlakeFn) {
+            let _ = f;
+        }
+        _assert(lock_flake);
     }
 }
