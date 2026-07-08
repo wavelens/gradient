@@ -11,7 +11,7 @@ pub use state_root::{AppState, ServerState};
 
 use gradient_db::{CacheDb, WebDb, WorkerDb, connect_cache_db, connect_db, connect_web_db};
 use gradient_state::load_and_apply_state;
-use gradient_storage::EmailService;
+use gradient_notify::EmailService;
 use gradient_storage::NarStore;
 use gradient_storage::{FileLogStorage, S3LogStorage};
 use gradient_types::*;
@@ -124,7 +124,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     let email_service = EmailService::new(cli.email_config())
         .await
         .map_err(InitError::Email)?;
-    let email: Arc<dyn gradient_storage::EmailSender> = Arc::new(email_service);
+    let email: Arc<dyn gradient_notify::EmailSender> = Arc::new(email_service);
 
     let nar_storage = if let Some(s3) = cli.s3_config() {
         let secret = match s3.secret_access_key_file.as_deref() {
@@ -182,7 +182,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     };
 
     let reactor: Arc<dyn gradient_db::StatusReactor> =
-        Arc::new(gradient_ci::CiStatusReactor::new(http.clone()));
+        Arc::new(gradient_ci::CiStatusReactor::new(http.clone(), email.clone()));
 
     let upstream_query_concurrency = config.proto.upstream_query_concurrency;
 

@@ -6,14 +6,13 @@
 
 use std::sync::Arc;
 
-use super::{EmailSender, LogStorage, NarStore};
+use super::{LogStorage, NarStore};
 
-/// Storage-layer slice: the NAR object store, build-log storage, and the email
-/// sender. The narrowest context; carried by `DbContext` so `db`
-/// and `ci` reach storage without naming the composed `AppState`.
+/// Storage-layer slice: the NAR object store and build-log storage. The
+/// narrowest context; carried by `DbContext` so `db` and `ci` reach storage
+/// without naming the composed `AppState`.
 #[derive(Clone, Debug)]
 pub struct StorageCtx {
     pub nar_storage: NarStore,
     pub log_storage: Arc<dyn LogStorage>,
-    pub email: Arc<dyn EmailSender>,
 }

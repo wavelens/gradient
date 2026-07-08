@@ -36,7 +36,8 @@ pub fn make_ctx() -> crate::CiContext {
     use crate::CiContext;
     use futures::future::BoxFuture;
     use gradient_db::{DbContext, NoReactor, WebDb, WorkerDb};
-    use gradient_storage::{EmailSender, LogStorage, NarStore, StorageCtx};
+    use gradient_notify::EmailSender;
+    use gradient_storage::{LogStorage, NarStore, StorageCtx};
     use gradient_types::RuntimeConfig;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
@@ -120,8 +121,8 @@ pub fn make_ctx() -> crate::CiContext {
             _: &[String],
             _: &str,
             _: &str,
-        ) -> anyhow::Result<gradient_storage::email::MailDeliveryResult> {
-            Ok(gradient_storage::email::MailDeliveryResult {
+        ) -> anyhow::Result<gradient_notify::MailDeliveryResult> {
+            Ok(gradient_notify::MailDeliveryResult {
                 status_code: 0,
                 server_response: String::new(),
             })
@@ -161,7 +162,6 @@ pub fn make_ctx() -> crate::CiContext {
         storage: StorageCtx {
             nar_storage,
             log_storage: std::sync::Arc::new(NoopLog),
-            email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
         },
         shutdown: gradient_util::shutdown::Shutdown::new(),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -171,5 +171,6 @@ pub fn make_ctx() -> crate::CiContext {
         db,
         http: gradient_util::http::build_client().expect("http client"),
         forge: gradient_forge::ForgeRegistry::with_builtin(),
+        email: std::sync::Arc::new(NoopEmail) as std::sync::Arc<dyn EmailSender>,
     }
 }

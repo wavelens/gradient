@@ -125,50 +125,7 @@ impl EmailSender for EmailService {
             base_url, verification_token
         );
 
-        let email_body = format!(
-            r#"
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Verify your email address</title>
-</head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h1 style="color: #2c3e50;">Welcome to Gradient!</h1>
-        
-        <p>Hello {name},</p>
-        
-        <p>Thank you for registering with Gradient. To complete your registration and activate your account, please verify your email address by clicking the button below:</p>
-        
-        <div style="text-align: center; margin: 30px 0;">
-            <a href="{verification_url}" 
-               style="background-color: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
-                Verify Email Address
-            </a>
-        </div>
-        
-        <p>If the button above doesn't work, you can also copy and paste the following link into your browser:</p>
-        <p style="word-break: break-all; background-color: #f8f9fa; padding: 10px; border-radius: 3px;">
-            {verification_url}
-        </p>
-        
-        <p>This verification link will expire in 24 hours for security reasons.</p>
-        
-        <p>If you didn't create an account with Gradient, you can safely ignore this email.</p>
-        
-        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-        
-        <p style="font-size: 12px; color: #666;">
-            This email was sent by Gradient. If you have any questions, please contact your system administrator.
-        </p>
-    </div>
-</body>
-</html>
-"#,
-            name = to_name,
-            verification_url = verification_url
-        );
+        let email_body = verification_email_html(to_name, &verification_url);
 
         let email = Message::builder()
             .from(
@@ -208,50 +165,7 @@ impl EmailSender for EmailService {
 
         let reset_url = format!("{}/reset-password?token={}", base_url, reset_token);
 
-        let email_body = format!(
-            r#"
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Reset your password</title>
-</head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h1 style="color: #2c3e50;">Password Reset Request</h1>
-        
-        <p>Hello {name},</p>
-        
-        <p>We received a request to reset your password for your Gradient account. If you made this request, click the button below to reset your password:</p>
-        
-        <div style="text-align: center; margin: 30px 0;">
-            <a href="{reset_url}" 
-               style="background-color: #e74c3c; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
-                Reset Password
-            </a>
-        </div>
-        
-        <p>If the button above doesn't work, you can also copy and paste the following link into your browser:</p>
-        <p style="word-break: break-all; background-color: #f8f9fa; padding: 10px; border-radius: 3px;">
-            {reset_url}
-        </p>
-        
-        <p>This password reset link will expire in 1 hour for security reasons.</p>
-        
-        <p><strong>If you didn't request a password reset, you can safely ignore this email.</strong> Your password will remain unchanged.</p>
-        
-        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-        
-        <p style="font-size: 12px; color: #666;">
-            This email was sent by Gradient. If you have any questions, please contact your system administrator.
-        </p>
-    </div>
-</body>
-</html>
-"#,
-            name = to_name,
-            reset_url = reset_url
-        );
+        let email_body = password_reset_email_html(to_name, &reset_url);
 
         let email = Message::builder()
             .from(
@@ -303,6 +217,92 @@ impl EmailSender for EmailService {
             server_response: response.message().collect::<Vec<_>>().join(" "),
         })
     }
+}
+
+fn verification_email_html(name: &str, verification_url: &str) -> String {
+    format!(r#"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Verify your email address</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h1 style="color: #2c3e50;">Welcome to Gradient!</h1>
+        
+        <p>Hello {name},</p>
+        
+        <p>Thank you for registering with Gradient. To complete your registration and activate your account, please verify your email address by clicking the button below:</p>
+        
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{verification_url}" 
+               style="background-color: #3498db; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                Verify Email Address
+            </a>
+        </div>
+        
+        <p>If the button above doesn't work, you can also copy and paste the following link into your browser:</p>
+        <p style="word-break: break-all; background-color: #f8f9fa; padding: 10px; border-radius: 3px;">
+            {verification_url}
+        </p>
+        
+        <p>This verification link will expire in 24 hours for security reasons.</p>
+        
+        <p>If you didn't create an account with Gradient, you can safely ignore this email.</p>
+        
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        
+        <p style="font-size: 12px; color: #666;">
+            This email was sent by Gradient. If you have any questions, please contact your system administrator.
+        </p>
+    </div>
+</body>
+</html>
+"#)
+}
+
+fn password_reset_email_html(name: &str, reset_url: &str) -> String {
+    format!(r#"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Reset your password</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h1 style="color: #2c3e50;">Password Reset Request</h1>
+        
+        <p>Hello {name},</p>
+        
+        <p>We received a request to reset your password for your Gradient account. If you made this request, click the button below to reset your password:</p>
+        
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{reset_url}" 
+               style="background-color: #e74c3c; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+                Reset Password
+            </a>
+        </div>
+        
+        <p>If the button above doesn't work, you can also copy and paste the following link into your browser:</p>
+        <p style="word-break: break-all; background-color: #f8f9fa; padding: 10px; border-radius: 3px;">
+            {reset_url}
+        </p>
+        
+        <p>This password reset link will expire in 1 hour for security reasons.</p>
+        
+        <p><strong>If you didn't request a password reset, you can safely ignore this email.</strong> Your password will remain unchanged.</p>
+        
+        <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+        
+        <p style="font-size: 12px; color: #666;">
+            This email was sent by Gradient. If you have any questions, please contact your system administrator.
+        </p>
+    </div>
+</body>
+</html>
+"#)
 }
 
 pub fn generate_verification_token() -> String {

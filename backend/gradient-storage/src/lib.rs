@@ -6,7 +6,6 @@
 
 pub mod context;
 pub mod digest;
-pub mod email;
 mod layout;
 pub mod log;
 pub mod log_chunk;
@@ -18,7 +17,6 @@ pub mod source_nar;
 
 pub use self::context::StorageCtx;
 pub use self::digest::{VerifyError, file_hash_sri, verify_nar_bytes};
-pub use self::email::*;
 pub use self::log::*;
 pub use self::nar::*;
 pub use self::partial::PartialStore;
