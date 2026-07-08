@@ -89,6 +89,18 @@ CLI connector tests `caches_api::list_caches_decodes_paginated` and
   `FROM derivation_build old` self-join that captures the pre-update status
   for the effects emitter.
 
+## Missing-input self-heal keeps needed `.drv`s (dead-zone fix)
+
+`backend/gradient-db/src/cache_storage.rs`:
+- `output_referrers_exclude_producerless_drv_and_source` - `demote_referrers_of`
+  only demotes referrers that are rebuildable outputs (`OUTPUT_REFERRERS_SELECT`
+  requires a `derivation_output` for the referrer). A producerless `.drv`/source
+  referrer is left intact: deleting it re-pushes nothing and would strand its own
+  live dependents behind the `drv_closure_cached` dispatch gate - a completed,
+  substitutable dependency whose `.drv` a demote deleted blocks every
+  non-substitutable dependent from ever dispatching, with no build to fail and
+  trigger a reactive heal.
+
 ## Transition effects fan out from one emitter (#476)
 
 `backend/gradient-db/src/status/effects.rs`:
