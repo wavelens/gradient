@@ -313,28 +313,24 @@ mod tests {
         (tmp, repo)
     }
 
-    #[tokio::test]
-    async fn resolve_git_clones_file_url_via_repobuilder() {
+    // git_checkout is exercised directly (not via HttpRevisionResolver) so the
+    // test needs no reqwest client, which cannot be built in the sandboxed CI
+    // environment (no system CA certificates).
+    #[test]
+    fn git_checkout_clones_file_url_via_repobuilder() {
         let (_tmp, repo) = make_git_repo();
-        let resolver = HttpRevisionResolver::new(reqwest::Client::new());
         let url = format!("file://{}", repo.display());
-        let out = resolver.resolve(&LockedRef::Git { url, ref_: None }).await;
-        assert!(out.is_ok(), "file:// git resolve failed: {:?}", out.err());
+        let out = git_checkout(&url, None, None);
+        assert!(out.is_ok(), "file:// clone failed: {:?}", out.err());
     }
 
-    #[tokio::test]
-    async fn resolve_git_with_ssh_key_still_resolves_file_url() {
-        // Building the resolver with a key must not break a keyless (file://) clone.
-        // Real ssh-auth behavior is covered by the shared helper + CI.
+    #[test]
+    fn git_checkout_with_ssh_key_still_clones_file_url() {
+        // An ssh key on the fetch options must not break a keyless (file://)
+        // clone. Real ssh-auth behavior is covered by the shared helper + CI.
         let (_tmp, repo) = make_git_repo();
-        let resolver = HttpRevisionResolver::new(reqwest::Client::new())
-            .with_ssh_key(Some("-----BEGIN OPENSSH PRIVATE KEY-----\n".into()));
         let url = format!("file://{}", repo.display());
-        assert!(
-            resolver
-                .resolve(&LockedRef::Git { url, ref_: None })
-                .await
-                .is_ok()
-        );
+        let out = git_checkout(&url, None, Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
+        assert!(out.is_ok(), "keyed file:// clone failed: {:?}", out.err());
     }
 }
