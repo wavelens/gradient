@@ -398,6 +398,15 @@ pub(crate) fn parse_overrides(raw: &[String]) -> Result<Vec<(String, String)>, S
     let mut out = Vec::with_capacity(raw.len() / 2);
     for pair in raw.chunks_exact(2) {
         let (name, ref_) = (pair[0].clone(), pair[1].clone());
+        let mut name_chars = name.chars();
+        let name_ok = matches!(name_chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+            && name_chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        if !name_ok {
+            return Err(format!(
+                "override-input '{name}': input name must match ^[A-Za-z_][A-Za-z0-9_-]*$"
+            ));
+        }
+
         let ok = REMOTE_OVERRIDE_SCHEMES.iter().any(|s| ref_.starts_with(s))
             || ref_.starts_with("path:/nix/store/");
         if !ok {
@@ -521,6 +530,14 @@ mod tests {
     fn parse_overrides_accepts_store_path() {
         let raw = vec!["a".into(), "path:/nix/store/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-src".into()];
         assert!(super::parse_overrides(&raw).is_ok());
+    }
+
+    #[test]
+    fn parse_overrides_rejects_bad_input_name() {
+        for bad in ["1bad", "has space", "has.dot", ""] {
+            let raw = vec![bad.to_string(), "github:x/y".into()];
+            assert!(super::parse_overrides(&raw).is_err(), "name '{bad}' must be rejected");
+        }
     }
 
     #[test]
