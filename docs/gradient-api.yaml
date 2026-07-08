@@ -120,6 +120,12 @@ tags:
     description: Evaluation details, status, and log streaming
   - name: builds
     description: Build details, logs, artefact downloads, and dependency graph
+  - name: build-requests
+    description: >-
+      Ad-hoc build requests from `gradient build` - CLI-uploaded source
+      evaluated under a per-org build-request project. Flake inputs served
+      over `git+ssh://` are fetched using the organization's SSH key, and
+      `input_overrides` can override remote flake inputs for the run.
   - name: workers
     description: Worker registration and live status (proto workers connected via WebSocket)
   - name: caches
