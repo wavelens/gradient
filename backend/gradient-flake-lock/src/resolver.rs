@@ -44,6 +44,7 @@ pub struct HttpRevisionResolver {
     client: reqwest::Client,
     github_token: Option<String>,
     gitlab_token: Option<String>,
+    ssh_key: Option<String>,
 }
 
 impl HttpRevisionResolver {
@@ -52,6 +53,7 @@ impl HttpRevisionResolver {
             client,
             github_token: None,
             gitlab_token: None,
+            ssh_key: None,
         }
     }
 
@@ -62,6 +64,11 @@ impl HttpRevisionResolver {
 
     pub fn with_gitlab_token(mut self, token: Option<String>) -> Self {
         self.gitlab_token = token;
+        self
+    }
+
+    pub fn with_ssh_key(mut self, key: Option<String>) -> Self {
+        self.ssh_key = key;
         self
     }
 
@@ -134,10 +141,12 @@ impl HttpRevisionResolver {
     async fn resolve_git(&self, url: &str, ref_: &Option<String>) -> Result<ResolvedRev> {
         let url = url.to_owned();
         let ref_owned = ref_.clone();
-        let (rev, last_modified, tmp) =
-            tokio::task::spawn_blocking(move || git_checkout(&url, ref_owned.as_deref()))
-                .await
-                .context("git checkout task panicked")??;
+        let ssh_key = self.ssh_key.clone();
+        let (rev, last_modified, tmp) = tokio::task::spawn_blocking(move || {
+            git_checkout(&url, ref_owned.as_deref(), ssh_key.as_deref())
+        })
+        .await
+        .context("git checkout task panicked")??;
         let nar_hash = nar_hash_of_dir(tmp.path()).await?;
 
         Ok(ResolvedRev {
@@ -192,10 +201,16 @@ impl RevisionResolver for HttpRevisionResolver {
 
 /// Clone `url`, resolve `ref_` (default branch when `None`), and leave a clean
 /// checkout (no `.git`) so its NAR matches nix's git-tree narHash.
-fn git_checkout(url: &str, ref_: Option<&str>) -> Result<(String, i64, tempfile::TempDir)> {
+fn git_checkout(
+    url: &str,
+    ref_: Option<&str>,
+    ssh_key: Option<&str>,
+) -> Result<(String, i64, tempfile::TempDir)> {
     let tmp = tempfile::tempdir().context("creating git temp dir")?;
-    let repo =
-        git2::Repository::clone(url, tmp.path()).with_context(|| format!("cloning {url}"))?;
+    let repo = git2::build::RepoBuilder::new()
+        .fetch_options(gradient_sources::fetch_options_with_ssh(ssh_key))
+        .clone(url, tmp.path())
+        .with_context(|| format!("cloning {url}"))?;
 
     let commit = match ref_ {
         Some(r) => repo
@@ -249,4 +264,67 @@ struct GithubGitUser {
 struct GitlabCommit {
     id: String,
     committed_date: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    fn make_git_repo() -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("r");
+        let rd = repo.to_str().unwrap();
+        Command::new("git")
+            .args(["init", rd, "-b", "main"])
+            .output()
+            .unwrap();
+        std::fs::write(repo.join("f"), "x").unwrap();
+        Command::new("git")
+            .args(["-C", rd, "add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args([
+                "-C",
+                rd,
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "i",
+            ])
+            .output()
+            .unwrap();
+        (tmp, repo)
+    }
+
+    #[tokio::test]
+    async fn resolve_git_clones_file_url_via_repobuilder() {
+        let (_tmp, repo) = make_git_repo();
+        let resolver = HttpRevisionResolver::new(reqwest::Client::new());
+        let url = format!("file://{}", repo.display());
+        let out = resolver.resolve(&LockedRef::Git { url, ref_: None }).await;
+        assert!(out.is_ok(), "file:// git resolve failed: {:?}", out.err());
+    }
+
+    #[tokio::test]
+    async fn resolve_git_with_ssh_key_still_resolves_file_url() {
+        // Building the resolver with a key must not break a keyless (file://) clone.
+        // Real ssh-auth behavior is covered by the shared helper + CI.
+        let (_tmp, repo) = make_git_repo();
+        let resolver = HttpRevisionResolver::new(reqwest::Client::new())
+            .with_ssh_key(Some("-----BEGIN OPENSSH PRIVATE KEY-----\n".into()));
+        let url = format!("file://{}", repo.display());
+        assert!(
+            resolver
+                .resolve(&LockedRef::Git { url, ref_: None })
+                .await
+                .is_ok()
+        );
+    }
 }

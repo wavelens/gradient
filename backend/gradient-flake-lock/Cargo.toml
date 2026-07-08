@@ -25,6 +25,7 @@ chrono            = { workspace = true }
 flate2            = { workspace = true }
 futures           = { workspace = true }
 git2              = { workspace = true }
+gradient-sources  = { workspace = true }
 harmonia-file-nar = { workspace = true }
 reqwest           = { workspace = true }
 serde             = { workspace = true }
