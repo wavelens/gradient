@@ -15,7 +15,6 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use git2::RemoteCallbacks;
 use gradient_proto::messages::{FlakeJob, FlakeSource};
 use gradient_proto::traits::JobReporter;
 use tempfile::NamedTempFile;
@@ -414,30 +413,11 @@ async fn query_path_info(
     Ok(Vec::new())
 }
 
-/// `FetchOptions` that accept the remote certificate and authenticate with the
-/// SSH key when one is given. Returned by value so the same auth can serve both
-/// the initial clone and a fallback fetch-by-SHA.
-fn fetch_options_with_auth(ssh_key: Option<&str>) -> git2::FetchOptions<'static> {
-    let mut callbacks = RemoteCallbacks::new();
-    callbacks.certificate_check(|cert, _valid| Ok(gradient_sources::accept_cert(cert)));
-
-    if let Some(key) = ssh_key {
-        let key = key.to_owned();
-        callbacks.credentials(move |_url, username_from_url, _allowed| {
-            git2::Cred::ssh_key_from_memory(username_from_url.unwrap_or("git"), None, &key, None)
-        });
-    }
-
-    let mut fo = git2::FetchOptions::new();
-    fo.remote_callbacks(callbacks);
-    fo
-}
-
 fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<String> {
     let temp_dir = std::env::temp_dir().join(format!("gradient-fetch-{}", uuid::Uuid::now_v7()));
 
     let repo = git2::build::RepoBuilder::new()
-        .fetch_options(fetch_options_with_auth(ssh_key))
+        .fetch_options(gradient_sources::fetch_options_with_ssh(ssh_key))
         .clone(url, &temp_dir)
         .with_context(|| format!("failed to clone {url}"))?;
 
@@ -453,7 +433,11 @@ fn clone_and_checkout(url: &str, commit: &str, ssh_key: Option<&str>) -> Result<
             // retry before giving up.
             repo.find_remote("origin")
                 .context("failed to find origin remote")?
-                .fetch(&[commit], Some(&mut fetch_options_with_auth(ssh_key)), None)
+                .fetch(
+                    &[commit],
+                    Some(&mut gradient_sources::fetch_options_with_ssh(ssh_key)),
+                    None,
+                )
                 .with_context(|| {
                     format!(
                         "commit {commit} not reachable in {url} (force-pushed, GC'd, or a fork PR ref)"

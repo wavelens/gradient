@@ -13,6 +13,7 @@ mod ssh;
 
 use super::url::git_transport_url;
 use crate::SourceError;
+use git2::RemoteCallbacks;
 use git_protocol::ls_remote_head_git_protocol;
 use https::ls_remote_head_no_creds;
 use ssh::ls_remote_head_ssh;
@@ -27,6 +28,25 @@ pub fn accept_cert(cert: &git2::cert::Cert<'_>) -> git2::CertificateCheckStatus 
     } else {
         git2::CertificateCheckStatus::CertificatePassthrough
     }
+}
+
+/// `FetchOptions` accepting the remote host key and, when a key is given,
+/// authenticating with it from memory. Shared by the worker fetch task and the
+/// flake.lock revision resolver so SSH git inputs clone the same way everywhere.
+pub fn fetch_options_with_ssh(ssh_key: Option<&str>) -> git2::FetchOptions<'static> {
+    let mut callbacks = RemoteCallbacks::new();
+    callbacks.certificate_check(|cert, _valid| Ok(accept_cert(cert)));
+
+    if let Some(key) = ssh_key {
+        let key = key.to_owned();
+        callbacks.credentials(move |_url, username_from_url, _allowed| {
+            git2::Cred::ssh_key_from_memory(username_from_url.unwrap_or("git"), None, &key, None)
+        });
+    }
+
+    let mut fo = git2::FetchOptions::new();
+    fo.remote_callbacks(callbacks);
+    fo
 }
 
 pub(super) fn ls_remote_head(
@@ -66,5 +86,16 @@ fn find_ref_in_list(
                 .map(|h| h.oid().as_bytes().to_vec())
                 .ok_or(SourceError::GitHashExtraction)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn fetch_options_with_ssh_builds_for_none_and_some() {
+        // Smoke: constructing options with and without a key must not panic and
+        // yields a usable FetchOptions (callbacks are set internally).
+        let _no_key = super::fetch_options_with_ssh(None);
+        let _with_key = super::fetch_options_with_ssh(Some("-----BEGIN OPENSSH PRIVATE KEY-----\n"));
     }
 }
