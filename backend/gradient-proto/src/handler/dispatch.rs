@@ -640,6 +640,11 @@ impl<'a> DispatchContext<'a> {
                     .persist_input_update_result(&job_id, candidate_lock, bumped)
                     .await;
             }
+            JobUpdateKind::InputUpdateExpansion { matched } => {
+                self.scheduler
+                    .persist_input_update_expansion(&job_id, matched)
+                    .await;
+            }
         }
     }
 

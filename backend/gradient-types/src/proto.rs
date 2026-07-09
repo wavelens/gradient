@@ -221,6 +221,12 @@ pub enum JobUpdateKind {
         candidate_lock: String,
         bumped: Vec<BumpedInputWire>,
     },
+    /// Reported by a discovery `input_update` eval: the concrete flake inputs a
+    /// glob tracked-input expanded to. The server fans out one per-input eval
+    /// per name. Empty means the glob matched nothing.
+    InputUpdateExpansion {
+        matched: Vec<String>,
+    },
 }
 
 // ── Scheduling types ─────────────────────────────────────────────────────────
