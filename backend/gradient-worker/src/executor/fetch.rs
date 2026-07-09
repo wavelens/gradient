@@ -200,6 +200,30 @@ async fn run_input_update(
 ) -> Result<()> {
     use gradient_flake_lock::PatchGenerator as _;
 
+    if spec.discover_only {
+        let lock_path = std::path::Path::new(checkout).join("flake.lock");
+        let bytes = tokio::fs::read(&lock_path)
+            .await
+            .with_context(|| format!("failed to read {}", lock_path.display()))?;
+        let lock: serde_json::Value =
+            serde_json::from_slice(&bytes).context("failed to parse flake.lock")?;
+        let declared = declared_inputs_from_lock(&lock)?;
+        let mut matched: Vec<String> = spec
+            .inputs
+            .iter()
+            .filter(|p| gradient_util::glob::is_pattern(p))
+            .flat_map(|p| {
+                declared
+                    .iter()
+                    .filter(move |d| gradient_util::glob::glob_match(p, d))
+                    .cloned()
+            })
+            .collect();
+        matched.sort();
+        matched.dedup();
+        return updater.report_input_expansion(matched).await;
+    }
+
     let resolver = gradient_flake_lock::HttpRevisionResolver::new(reqwest::Client::new())
         .with_ssh_key(ssh_key.map(str::to_owned));
     let generator = gradient_flake_lock::FlakeLockGenerator::new(resolver);

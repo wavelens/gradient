@@ -481,6 +481,11 @@ impl JobReporter for JobUpdater {
         .await
     }
 
+    async fn report_input_expansion(&mut self, matched: Vec<String>) -> Result<()> {
+        self.send_update(JobUpdateKind::InputUpdateExpansion { matched })
+            .await
+    }
+
     async fn report_evaluating_flake(&mut self) -> Result<()> {
         self.send_update(JobUpdateKind::EvaluatingFlake).await
     }
