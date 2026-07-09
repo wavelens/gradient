@@ -128,6 +128,65 @@ impl Scheduler {
         }
     }
 
+    /// On a discovery `input_update` report, fan the matched inputs out into one
+    /// per-input update eval each via the ci trigger helper.
+    pub async fn persist_input_update_expansion(&self, job_id: &str, matched: Vec<String>) {
+        use sea_orm::{ColumnTrait, QueryFilter};
+
+        let evaluation_id = {
+            let tracker = self.job_tracker.read().await;
+            let Some(j) = tracker.active_eval_job(job_id) else {
+                return;
+            };
+            j.evaluation_id
+        };
+        let db = &self.state.worker_db;
+
+        let eval = match EEvaluation::find_by_id(evaluation_id).one(db).await {
+            Ok(Some(e)) => e,
+            _ => {
+                warn!(%evaluation_id, "input_update expansion: evaluation missing");
+                return;
+            }
+        };
+        let Some(project_id) = eval.project else {
+            return;
+        };
+        let sidecar = match gradient_entity::evaluation_input_update::Entity::find()
+            .filter(gradient_entity::evaluation_input_update::Column::Evaluation.eq(evaluation_id))
+            .one(db)
+            .await
+        {
+            Ok(Some(s)) => s,
+            _ => {
+                warn!(%evaluation_id, "input_update expansion: sidecar missing");
+                return;
+            }
+        };
+        let project = match EProject::find_by_id(project_id).one(db).await {
+            Ok(Some(p)) => p,
+            _ => {
+                warn!(%project_id, "input_update expansion: project missing");
+                return;
+            }
+        };
+
+        match gradient_ci::trigger::fan_out_expansion(
+            db,
+            &project,
+            sidecar.base_commit,
+            matched,
+            eval.trigger,
+        )
+        .await
+        {
+            Ok(created) => {
+                debug!(%evaluation_id, count = created.len(), "fanned out input_update expansion")
+            }
+            Err(e) => warn!(error = %e, %evaluation_id, "input_update fan-out failed"),
+        }
+    }
+
     pub async fn handle_eval_result(
         &self,
         job_id: &str,
