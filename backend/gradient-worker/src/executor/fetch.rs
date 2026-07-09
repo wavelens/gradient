@@ -534,47 +534,48 @@ impl From<&gradient_types::proto::FlakeInputOverride> for OverrideInput {
 
 type AppliedOverride = (String, String);
 
-/// Validate overrides against the declared flake inputs, resolve `url=None`
+/// Expand glob overrides against the declared flake inputs, resolve `url=None`
 /// entries from the lock's `original` field, and return `(applied, warnings)`.
 fn resolve_overrides(
     overrides: &[OverrideInput],
     declared: &std::collections::HashSet<String>,
     lock: &serde_json::Value,
 ) -> anyhow::Result<(Vec<AppliedOverride>, Vec<String>)> {
-    let mut applied = Vec::with_capacity(overrides.len());
-    let mut warnings = Vec::new();
-    for o in overrides {
-        if !declared.contains(&o.input_name) {
-            warnings.push(format!(
-                "flake input '{}' does not exist in this project's flake - override skipped",
-                o.input_name,
-            ));
-            continue;
-        }
-        let ref_str = match &o.url {
-            Some(u) => u.clone(),
-            None => {
-                let root_key = lock.get("root").and_then(|v| v.as_str()).unwrap_or("root");
-                let node_key = lock
-                    .get("nodes")
-                    .and_then(|n| n.get(root_key))
-                    .and_then(|r| r.get("inputs"))
-                    .and_then(|i| i.get(&o.input_name))
-                    .and_then(|k| k.as_str())
-                    .with_context(|| {
-                        format!("flake.lock missing nodes.root.inputs.{}", o.input_name)
-                    })?;
-                let original = lock
-                    .get("nodes")
-                    .and_then(|n| n.get(node_key))
-                    .and_then(|n| n.get("original"))
-                    .with_context(|| format!("flake.lock missing nodes.{node_key}.original"))?;
-                flake_ref_from_lock_original(original)?
-            }
+    let raw: Vec<(String, Option<String>)> = overrides
+        .iter()
+        .map(|o| (o.input_name.clone(), o.url.clone()))
+        .collect();
+    let declared_sorted: std::collections::BTreeSet<String> = declared.iter().cloned().collect();
+    let (resolved, warnings) = gradient_util::glob::expand_overrides(&raw, &declared_sorted);
+
+    let mut applied = Vec::with_capacity(resolved.len());
+    for (input_name, url) in resolved {
+        let ref_str = match url {
+            Some(u) => u,
+            None => reconstruct_original_ref(lock, &input_name)?,
         };
-        applied.push((o.input_name.clone(), ref_str));
+        applied.push((input_name, ref_str));
     }
     Ok((applied, warnings))
+}
+
+/// Rebuild a flake ref for a force-update (`url=None`) input from its `original`
+/// block in the lock, so nix re-locks it to the latest of its declared URL.
+fn reconstruct_original_ref(lock: &serde_json::Value, input_name: &str) -> anyhow::Result<String> {
+    let root_key = lock.get("root").and_then(|v| v.as_str()).unwrap_or("root");
+    let node_key = lock
+        .get("nodes")
+        .and_then(|n| n.get(root_key))
+        .and_then(|r| r.get("inputs"))
+        .and_then(|i| i.get(input_name))
+        .and_then(|k| k.as_str())
+        .with_context(|| format!("flake.lock missing nodes.root.inputs.{input_name}"))?;
+    let original = lock
+        .get("nodes")
+        .and_then(|n| n.get(node_key))
+        .and_then(|n| n.get("original"))
+        .with_context(|| format!("flake.lock missing nodes.{node_key}.original"))?;
+    flake_ref_from_lock_original(original)
 }
 
 /// Read the set of input names declared in the root flake from a parsed
@@ -907,6 +908,33 @@ mod tests {
             )]
         );
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn resolve_overrides_expands_glob() {
+        let declared: std::collections::HashSet<String> = ["nixpkgs", "nixpkgs-lib", "flake-utils"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let lock = serde_json::json!({
+            "nodes": {
+                "root": {"inputs": {"nixpkgs": "nixpkgs", "nixpkgs-lib": "nixpkgs-lib", "flake-utils": "flake-utils"}},
+                "nixpkgs": {"original": {"type":"github","owner":"NixOS","repo":"nixpkgs","ref":"nixos-unstable"}},
+                "nixpkgs-lib": {"original": {"type":"github","owner":"nix-community","repo":"nixpkgs.lib"}},
+                "flake-utils": {"original": {"type":"github","owner":"numtide","repo":"flake-utils"}},
+            },
+            "root": "root",
+        });
+        let overrides = [super::OverrideInput {
+            input_name: "nixpkgs*".into(),
+            url: None,
+        }];
+        let (applied, _warnings) = super::resolve_overrides(&overrides, &declared, &lock).unwrap();
+        let names: std::collections::BTreeSet<&str> =
+            applied.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains("nixpkgs"));
+        assert!(names.contains("nixpkgs-lib"));
+        assert!(!names.contains("flake-utils"));
     }
 
     #[test]
