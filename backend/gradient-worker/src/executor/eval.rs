@@ -221,7 +221,7 @@ pub async fn evaluate_derivations(
 ) -> Result<()> {
     let repo = build_flake_url(job, local_flake_path);
     let start = Instant::now();
-    let eval_overrides = eval_input_overrides(job);
+    let eval_overrides = eval_input_overrides(job, local_flake_path);
 
     // Best-effort fingerprint + pull of the flake's shared eval-cache blob so
     // the eval runs warm. A fingerprint/pull failure never fails the eval. The
@@ -378,14 +378,44 @@ fn build_flake_url(job: &FlakeJob, local_flake_path: Option<&str>) -> String {
     }
 }
 
-/// `(input_name, flake_ref)` overrides applied at eval lock time. A `url: None`
-/// override means "force update", which has no concrete ref to lock against, so
-/// it is meaningless at pure eval and dropped here (the archive step still
-/// handles it).
-fn eval_input_overrides(job: &FlakeJob) -> Vec<(String, String)> {
-    job.input_overrides
+/// `(input_name, flake_ref)` overrides applied at eval lock time. `url = None`
+/// (force update) has no concrete ref and is dropped here (the updater handles
+/// it). Glob names expand against the local flake.lock; a remote/dirty flake
+/// with no readable lock yields no expansion.
+fn eval_input_overrides(job: &FlakeJob, local_flake_path: Option<&str>) -> Vec<(String, String)> {
+    let declared: std::collections::BTreeSet<String> = local_flake_path
+        .and_then(|p| std::fs::read(std::path::Path::new(p).join("flake.lock")).ok())
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+        .and_then(|lock| {
+            let root = lock.get("root").and_then(|v| v.as_str()).unwrap_or("root");
+            lock.get("nodes")
+                .and_then(|n| n.get(root))
+                .and_then(|r| r.get("inputs"))
+                .and_then(|i| i.as_object())
+                .map(|o| o.keys().cloned().collect())
+        })
+        .unwrap_or_default();
+
+    if declared.is_empty() {
+        // No readable lock: globs cannot expand; pass literal concrete-url
+        // overrides through as before (nix validates names at lock time).
+        return job
+            .input_overrides
+            .iter()
+            .filter(|o| !gradient_util::glob::is_pattern(&o.input_name))
+            .filter_map(|o| o.url.clone().map(|u| (o.input_name.clone(), u)))
+            .collect();
+    }
+
+    let raw: Vec<(String, Option<String>)> = job
+        .input_overrides
         .iter()
-        .filter_map(|o| o.url.clone().map(|u| (o.input_name.clone(), u)))
+        .map(|o| (o.input_name.clone(), o.url.clone()))
+        .collect();
+    let (resolved, _warnings) = gradient_util::glob::expand_overrides(&raw, &declared);
+    resolved
+        .into_iter()
+        .filter_map(|(n, url)| url.map(|u| (n, u)))
         .collect()
 }
 
@@ -771,7 +801,7 @@ pub async fn evaluate_derivations_with(
     updater.report_evaluating_derivations().await?;
 
     let repo = build_flake_url(job, local_flake_path);
-    let eval_overrides = eval_input_overrides(job);
+    let eval_overrides = eval_input_overrides(job, local_flake_path);
 
     // ── Step 1: discover attr paths ──────────────────────────────────────────
     debug!(repo = %repo, "listing flake derivations");
