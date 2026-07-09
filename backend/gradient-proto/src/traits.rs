@@ -81,6 +81,13 @@ pub trait JobReporter: Send {
         let _ = (candidate_lock, bumped);
         Ok(())
     }
+
+    /// Report the concrete inputs a discovery `input_update` glob expanded to.
+    /// Default is a no-op for reporters that never run discovery jobs.
+    async fn report_input_expansion(&mut self, matched: Vec<String>) -> Result<()> {
+        let _ = matched;
+        Ok(())
+    }
     async fn report_evaluating_flake(&mut self) -> Result<()>;
     async fn report_evaluating_derivations(&mut self) -> Result<()>;
     async fn report_eval_result(

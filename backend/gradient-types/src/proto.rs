@@ -87,6 +87,10 @@ pub struct InputUpdateSpec {
     pub generator: String,
     /// Tracked input names to bump. Empty means "all tracked inputs".
     pub inputs: Vec<String>,
+    /// When true the worker only expands glob inputs against flake.lock and
+    /// reports the matches (`InputUpdateExpansion`); it writes no lock and opens
+    /// no PR. The server then fans out one per-input update eval per match.
+    pub discover_only: bool,
 }
 
 /// One bumped input, reported back from the worker for the sidecar + PR body.

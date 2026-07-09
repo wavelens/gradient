@@ -95,6 +95,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
         let input_overrides = maps.overrides.get(&eval.id).cloned().unwrap_or_default();
         let input_update = sidecar.map(|s| gradient_types::proto::InputUpdateSpec {
             generator: s.generator.clone(),
+            discover_only: s.discover_only,
             inputs: s
                 .target_inputs
                 .as_array()
