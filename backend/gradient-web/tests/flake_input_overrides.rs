@@ -216,6 +216,46 @@ fn create_with_null_url_keep_url_mode() {
 }
 
 #[test]
+fn create_with_glob_input_name() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let glob_row = project_flake_input_override::Model {
+            id: override_id(),
+            project: project_id(),
+            input_name: "nixpkgs*".into(),
+            created_at: test_date(),
+            updated_at: test_date(),
+            ..Default::default()
+        };
+
+        let db = with_project_edit(with_auth(
+            MockDatabase::new(DatabaseBackend::Postgres),
+            session_id,
+        ))
+        .append_query_results([Vec::<project_flake_input_override::Model>::new()])
+        .append_query_results([vec![glob_row]]);
+
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .post(BASE_URL)
+            .add_header("authorization", format!("Bearer {}", token))
+            .json(&serde_json::json!({"input_name": "nixpkgs*", "url": null}))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["error"], false);
+        assert_eq!(body["message"]["input_name"], "nixpkgs*");
+    });
+}
+
+#[test]
 fn create_duplicate_input_name_rejects_400() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
