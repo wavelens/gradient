@@ -197,4 +197,8 @@ export class ProjectFlakeInputsComponent implements OnInit {
   modeLabel(override: FlakeInputOverride): string {
     return override.url === null ? 'Keep URL' : 'URL override';
   }
+
+  isPattern(override: FlakeInputOverride): boolean {
+    return /[*?[]/.test(override.input_name);
+  }
 }

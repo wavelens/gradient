@@ -41,6 +41,15 @@ const overrideKeepUrl: FlakeInputOverride = {
   updated_at: '2026-01-01T00:00:00Z',
 };
 
+const overrideGlob: FlakeInputOverride = {
+  id: 'o3',
+  project: 'p1',
+  input_name: 'nixpkgs*',
+  url: null,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+};
+
 function setup(
   access: AccessState,
   overrides: FlakeInputOverride[] = [override],
@@ -76,6 +85,14 @@ describe('ProjectFlakeInputsComponent', () => {
     const text = fixture.nativeElement.textContent ?? '';
     expect(text).toContain('utils');
     expect(text).toContain('github:numtide/flake-utils');
+  });
+
+  it('marks glob input names as patterns and shows the badge', () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [overrideGlob]);
+    const comp = fixture.componentInstance;
+    expect(comp.isPattern(overrideGlob)).toBe(true);
+    expect(comp.isPattern(override)).toBe(false);
+    expect(fixture.nativeElement.textContent ?? '').toContain('Pattern');
   });
 
   it('keep_url checkbox causes url: null submission', () => {
