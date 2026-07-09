@@ -39,11 +39,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1778716662,
-        "narHash": "sha256-m1Yf0wZ8j1OHjTc2UwHwyQRSnNeSgLJOd7q5Y45hzi4=",
+        "lastModified": 1782949081,
+        "narHash": "sha256-vp6Y/Grm98ESt6ceOkWiHWyZRDV3J1RID4w+6NWK9yA=",
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "f7c1a2d347e4c52d5fb8d10cb4d94b5884e546fb",
+        "rev": "17c9d6cdfc60c64f4ee8d306f9bc0b4ccb51481e",
         "type": "github"
       },
       "original": {
@@ -75,20 +75,17 @@
         "flake-compat": [
           "nix"
         ],
-        "gitignore": [
-          "nix"
-        ],
         "nixpkgs": [
           "nix",
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1778507602,
-        "narHash": "sha256-kTwur1wV+01SdqskVMSo6JMEpg71ps3HpbFY2GsflKs=",
+        "lastModified": 1783008725,
+        "narHash": "sha256-jGiy6+sxjNWXSjp25uoJuNfyH9zBK1PEDY0lVoL4ibQ=",
         "owner": "cachix",
         "repo": "git-hooks.nix",
-        "rev": "61ab0e80d9c7ab14c256b5b453d8b3fb0189ba0a",
+        "rev": "bca82caa46d5ec0f5d422c61fb1e30bc51313cbe",
         "type": "github"
       },
       "original": {
@@ -113,11 +110,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1783087344,
-        "narHash": "sha256-O6EjbWuW2TtuPhKPioCAGv6DRQZ0HDJgea3aIL4P8YA=",
+        "lastModified": 1783554656,
+        "narHash": "sha256-DMY3uaxrzz4Ss+e3Au2F++L0WgnR3Oe+jdj/2nslzHo=",
         "owner": "DerDennisOP",
         "repo": "nix",
-        "rev": "8f5eb00a6bfb3ad3799c5ce6b126b8f0106beb54",
+        "rev": "bdf6ecd496100befa293544ed4cbff5b40ee1435",
         "type": "github"
       },
       "original": {
