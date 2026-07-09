@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod glob;
 pub mod http;
 pub mod http_validation;
 pub mod hydra;
