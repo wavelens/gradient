@@ -5373,6 +5373,14 @@ build status transition.
   CTE-fallback branch - is DB-dependent and covered end-to-end by CI (no local
   Postgres unit harness; counts are atomic per-row, deltas are spawned, and
   restart reconciliation recomputes in-flight evals).
+- **Deadlock fix:** a global anchor's transition fans `apply_dep_count_delta`
+  across every entry point whose closure holds it, so two concurrent transitions
+  over overlapping entry points used to lock `entry_point_dep_count` rows in
+  plan-dependent (opposite) order and deadlock (`deadlock detected` in
+  `emit_transition_effects`). Both statements now lock in a fixed `entry_point`
+  order - the decrement via `SELECT ... ORDER BY c2.entry_point FOR UPDATE OF c2`,
+  the increment via `ORDER BY ep.id` before the upsert - so no two fan-outs can
+  cycle. EXPLAIN-validated against prod; concurrency is CI/prod-covered.
 - The incremental deltas fire only from the single-row status hook; every bulk
   status path (`promote_ready`/`promote_dependents`/`cascade_dependency_failed`/
   `requeue_failed_anchors`) moves anchors with raw SQL that bypasses it, so the
