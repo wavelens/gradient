@@ -214,14 +214,14 @@ The static hardware fields (`cpu_count`, `ram_total_mb`, `cpu_core_score`) are r
 
 Architectures are free-form strings (e.g. `"x86_64-linux"`, `"aarch64-linux"`) - not an enum. Custom or unusual platforms (e.g. `"riscv64-linux"`) can be advertised without any code changes.
 
-The reference worker (`gradient-worker`) auto-detects its host system at startup and uses that as the default `architectures` value (`std::env::consts::ARCH` + OS, with `macos` mapped to `darwin`). Both fields are overridable via env vars / CLI flags so a host with binfmt-emulated architectures or a custom-configured daemon can advertise extras:
+The reference worker (`gradient-worker`) auto-detects both fields at startup: `architectures` defaults to the host system (`std::env::consts::ARCH` + OS, with `macos` mapped to `darwin`), and `system_features` defaults to the daemon's resolved set read from `nix config show system-features` - which includes the CPU-derived `gccarch-*` levels a static config can't enumerate. Both are overridable via env vars / CLI flags:
 
 ```text
 GRADIENT_WORKER_ARCHITECTURES=x86_64-linux,aarch64-linux,builtin
 GRADIENT_WORKER_SYSTEM_FEATURES=kvm,big-parallel,nixos-test
 ```
 
-When `GRADIENT_WORKER_ARCHITECTURES` is **set**, it replaces the auto-detected default entirely (so e.g. setting it on an aarch64 host without including `aarch64-linux` will refuse all native builds - list every system you want to accept). `GRADIENT_WORKER_SYSTEM_FEATURES` is empty by default; it should mirror the daemon's `system-features` line in `nix.conf` so the dispatcher doesn't route a `kvm`-requiring build to a worker whose daemon can't run it.
+When set, each **replaces** its auto-detected default entirely (so e.g. setting `GRADIENT_WORKER_ARCHITECTURES` on an aarch64 host without including `aarch64-linux` refuses all native builds - list every system you want to accept). Leave `GRADIENT_WORKER_SYSTEM_FEATURES` unset so the worker advertises exactly what its daemon can build; the dispatcher then never routes a `gccarch-skylake`- or `kvm`-requiring build to a worker whose daemon can't run it.
 
 When the server dispatches a build, it checks that the build's target architecture is present in the worker's `architectures` and all `required_features` are present in the worker's `system_features`. For example, a build targeting `aarch64-linux` with `required_features: ["kvm"]` requires a worker with `"aarch64-linux"` in `architectures` and `"kvm"` in `system_features`. Builds whose `architecture` is the special string `"builtin"` (e.g. `builtin:fetchurl`) are always assignable, regardless of the worker's `architectures` list.
 

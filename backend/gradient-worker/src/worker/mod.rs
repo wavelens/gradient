@@ -313,7 +313,10 @@ async fn perform_setup(
             .architectures
             .clone()
             .unwrap_or_else(|| vec![crate::config::host_system()]);
-        let system_features = config.system_features.clone().unwrap_or_default();
+        let system_features = match config.system_features.clone() {
+            Some(features) => features,
+            None => detect_system_features(&config.binpath_nix).await,
+        };
         let host = crate::metrics::host_static();
         let cpu_core_score = config
             .cpu_core_score
@@ -347,4 +350,76 @@ async fn perform_setup(
     })
     .await?;
     Ok(())
+}
+
+/// Parse the value printed by `nix config show system-features` into a feature
+/// list. `nix config show <name>` prints just the space-separated value;
+/// tolerate an older `name = value` line by taking the part after `=`.
+fn parse_system_features(output: &str) -> Vec<String> {
+    let value = output.split_once('=').map_or(output, |(_, v)| v);
+    value.split_whitespace().map(str::to_owned).collect()
+}
+
+/// The Nix daemon's advertised `system-features`, read from
+/// `nix config show system-features`. This is the daemon's fully-resolved set,
+/// including the CPU-derived `gccarch-*` levels that a static config can't
+/// enumerate. On any failure we advertise nothing and log - matching a worker
+/// with no declared features rather than crashing setup.
+async fn detect_system_features(binpath_nix: &str) -> Vec<String> {
+    let output = tokio::process::Command::new(binpath_nix)
+        .args([
+            "--extra-experimental-features",
+            "nix-command",
+            "config",
+            "show",
+            "system-features",
+        ])
+        .output()
+        .await;
+    match output {
+        Ok(o) if o.status.success() => parse_system_features(&String::from_utf8_lossy(&o.stdout)),
+        Ok(o) => {
+            tracing::warn!(
+                status = ?o.status.code(),
+                stderr = %String::from_utf8_lossy(&o.stderr).trim(),
+                "`nix config show system-features` failed; advertising no system features"
+            );
+            Vec::new()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, binpath_nix, "could not run nix to detect system features; advertising none");
+            Vec::new()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_system_features;
+
+    #[test]
+    fn parses_space_separated_value() {
+        let out = "benchmark big-parallel gccarch-x86-64-v2 kvm nixos-test\n";
+        assert_eq!(
+            parse_system_features(out),
+            vec![
+                "benchmark",
+                "big-parallel",
+                "gccarch-x86-64-v2",
+                "kvm",
+                "nixos-test"
+            ]
+        );
+    }
+
+    #[test]
+    fn tolerates_name_equals_value_form() {
+        let out = "system-features = kvm big-parallel\n";
+        assert_eq!(parse_system_features(out), vec!["kvm", "big-parallel"]);
+    }
+
+    #[test]
+    fn empty_output_yields_no_features() {
+        assert!(parse_system_features("\n").is_empty());
+    }
 }

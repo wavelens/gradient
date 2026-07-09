@@ -55,50 +55,119 @@ pub struct BuildMeta {
 }
 
 impl Derivation {
-    /// Returns the `requiredSystemFeatures` as a list. The env var is stored as a
-    /// space-separated string inside the derivation.
-    pub fn required_system_features(&self) -> Vec<String> {
+    /// The `__structuredAttrs` JSON blob (`__json` env entry) when the
+    /// derivation was built with structured attributes. Nix stores every
+    /// attribute there instead of as flat env vars, so attribute extraction
+    /// (features, timeouts, flags) must consult it before the flat env.
+    fn structured_attrs(&self) -> Option<serde_json::Value> {
         self.environment
-            .get("requiredSystemFeatures")
-            .map(|v| {
-                v.split_whitespace()
-                    .filter(|f| !f.is_empty())
-                    .map(|f| f.to_string())
-                    .collect()
-            })
-            .unwrap_or_default()
+            .get("__json")
+            .and_then(|s| serde_json::from_str(s).ok())
+    }
+
+    /// A string-list attribute, from structured attrs (`["a","b"]`) or the
+    /// flat env (space-separated).
+    fn attr_strings(
+        attrs: Option<&serde_json::Value>,
+        env: Option<&String>,
+        key: &str,
+    ) -> Vec<String> {
+        match attrs {
+            Some(a) => a
+                .get(key)
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            None => env
+                .map(|v| {
+                    v.split_whitespace()
+                        .filter(|f| !f.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+
+    /// A boolean attribute, from structured attrs (JSON bool) or the flat env
+    /// (truthy `"1"`/`"true"`). Returns `None` when the key is absent.
+    fn attr_bool(
+        attrs: Option<&serde_json::Value>,
+        env: Option<&String>,
+        key: &str,
+    ) -> Option<bool> {
+        match attrs {
+            Some(a) => a.get(key).map(|v| match v {
+                serde_json::Value::Bool(b) => *b,
+                serde_json::Value::String(s) => matches!(s.trim(), "1" | "true"),
+                serde_json::Value::Number(n) => n.as_i64().is_some_and(|i| i != 0),
+                _ => false,
+            }),
+            None => env.map(|v| matches!(v.trim(), "1" | "true")),
+        }
+    }
+
+    /// A `u64` attribute, from structured attrs (JSON number or string) or the
+    /// flat env (parsed string).
+    fn attr_u64(attrs: Option<&serde_json::Value>, env: Option<&String>, key: &str) -> Option<u64> {
+        match attrs {
+            Some(a) => a.get(key).and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+            }),
+            None => env.and_then(|v| v.trim().parse().ok()),
+        }
+    }
+
+    /// Returns the `requiredSystemFeatures` as a list.
+    pub fn required_system_features(&self) -> Vec<String> {
+        let attrs = self.structured_attrs();
+        Self::attr_strings(
+            attrs.as_ref(),
+            self.environment.get("requiredSystemFeatures"),
+            "requiredSystemFeatures",
+        )
     }
 
     /// Whether the derivation permits substitution from a binary cache.
     /// Nix defaults to `true`; a present attr disables it unless it reads as
-    /// truthy (`"1"`/`"true"`). Nix serializes `allowSubstitutes = false` as
-    /// `""` in the env, so an empty or `"0"`/`"false"` value means disabled.
+    /// truthy. Nix serializes `allowSubstitutes = false` as `""` in the flat
+    /// env (so empty/`"0"`/`"false"` means disabled) and as a JSON `false`
+    /// under structured attrs.
     pub fn allow_substitutes(&self) -> bool {
-        self.environment
-            .get("allowSubstitutes")
-            .map(|v| matches!(v.trim(), "1" | "true"))
-            .unwrap_or(true)
+        let attrs = self.structured_attrs();
+        Self::attr_bool(
+            attrs.as_ref(),
+            self.environment.get("allowSubstitutes"),
+            "allowSubstitutes",
+        )
+        .unwrap_or(true)
     }
 
     /// Extract all build-relevant attributes in one pass.
     pub fn build_meta(&self) -> BuildMeta {
-        let secs = |key: &str| {
-            self.environment
-                .get(key)
-                .and_then(|v| v.trim().parse::<u64>().ok())
-        };
-        let prefer_local_build = self
-            .environment
-            .get("preferLocalBuild")
-            .map(|v| matches!(v.trim(), "1" | "true"))
-            .unwrap_or(false);
+        let attrs = self.structured_attrs();
+        let env = |key: &str| self.environment.get(key);
+        let prefer_local_build =
+            Self::attr_bool(attrs.as_ref(), env("preferLocalBuild"), "preferLocalBuild")
+                .unwrap_or(false);
         let is_fixed_output = self.outputs.iter().any(|o| !o.hash.is_empty());
         BuildMeta {
-            timeout_secs: secs("timeout"),
-            max_silent_secs: secs("maxSilent"),
+            timeout_secs: Self::attr_u64(attrs.as_ref(), env("timeout"), "timeout"),
+            max_silent_secs: Self::attr_u64(attrs.as_ref(), env("maxSilent"), "maxSilent"),
             prefer_local_build,
             is_fixed_output,
-            required_features: self.required_system_features(),
+            required_features: Self::attr_strings(
+                attrs.as_ref(),
+                env("requiredSystemFeatures"),
+                "requiredSystemFeatures",
+            ),
         }
     }
 }
@@ -420,6 +489,32 @@ mod tests {
             Some("gcc-wrapper".into())
         );
         assert_eq!(derive_pname(Some(""), "hello-1.0"), Some("hello".into()));
+    }
+
+    // A `__structuredAttrs = true` derivation: every attribute (including
+    // `requiredSystemFeatures`) lives inside the `__json` env blob, not as a
+    // flat env key. The daemon reads them from there, so extraction must too.
+    const STRUCTURED_ATTRS_DRV: &[u8] = br#"Derive([("out","/nix/store/cbir-git-minimal-2.54.0","","")],[],["/nix/store/src"],"x86_64-linux","/nix/store/bash",["-e","/nix/store/builder.sh"],[("__json","{\"requiredSystemFeatures\":[\"gccarch-skylake\"],\"preferLocalBuild\":true,\"timeout\":3600,\"allowSubstitutes\":false}"),("__structuredAttrs","1"),("name","git-minimal-2.54.0"),("out","/nix/store/cbir-git-minimal-2.54.0"),("system","x86_64-linux")])"#;
+
+    #[test]
+    fn required_features_read_from_structured_attrs() {
+        let drv = parse_drv(STRUCTURED_ATTRS_DRV).unwrap();
+        assert_eq!(drv.required_system_features(), vec!["gccarch-skylake"]);
+    }
+
+    #[test]
+    fn build_meta_reads_structured_attrs() {
+        let drv = parse_drv(STRUCTURED_ATTRS_DRV).unwrap();
+        let meta = drv.build_meta();
+        assert_eq!(meta.required_features, vec!["gccarch-skylake"]);
+        assert!(meta.prefer_local_build);
+        assert_eq!(meta.timeout_secs, Some(3600));
+    }
+
+    #[test]
+    fn allow_substitutes_reads_structured_attrs_bool() {
+        let drv = parse_drv(STRUCTURED_ATTRS_DRV).unwrap();
+        assert!(!drv.allow_substitutes());
     }
 
     #[test]

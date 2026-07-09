@@ -215,8 +215,10 @@ pub struct WorkerConfig {
 
     /// Comma-separated Nix system features this worker advertises
     /// (e.g. `kvm,big-parallel,nixos-test`). Builds requiring features not
-    /// in this list won't be assigned to this worker. Empty by default;
-    /// list your daemon's `system-features` here.
+    /// in this list won't be assigned to this worker. When unset, the worker
+    /// auto-detects them from `nix config show system-features` (the daemon's
+    /// resolved set, including CPU-derived `gccarch-*` levels); set this to
+    /// override that.
     #[arg(long, env = "GRADIENT_WORKER_SYSTEM_FEATURES", value_delimiter = ',')]
     pub system_features: Option<Vec<String>>,
 

@@ -667,6 +667,9 @@ Derive(
 | `test_required_system_features` | `required_system_features()` splits the space-separated `requiredSystemFeatures` env var into `["kvm", "big-parallel"]` |
 | `test_no_features` | A derivation with no `requiredSystemFeatures` env entry returns an empty vec from `required_system_features()` |
 | `build_meta_detects_fixed_output` | `build_meta().is_fixed_output` is true when an output carries a non-empty hash, false otherwise |
+| `required_features_read_from_structured_attrs` | For a `__structuredAttrs` derivation, `required_system_features()` reads `requiredSystemFeatures` from the `__json` blob (`["gccarch-skylake"]`), not the absent flat env key |
+| `build_meta_reads_structured_attrs` | `build_meta()` reads `requiredSystemFeatures`, `preferLocalBuild`, and `timeout` from the `__json` blob of a structured-attrs derivation |
+| `allow_substitutes_reads_structured_attrs_bool` | `allow_substitutes()` honours a JSON `false` inside `__json` |
 
 ---
 
@@ -1374,6 +1377,19 @@ eval subprocesses. RSS recycling is parent-side via `EvalWorker::rss_bytes`
 | `load_or_generate_id_creates_new` | Empty dir → generates UUID, writes to file, returns valid UUID |
 | `load_or_generate_id_reads_existing` | Pre-written UUID file → returns that UUID unchanged |
 | `load_or_generate_id_invalid_uuid_fails` | File contains non-UUID string → `Err` |
+
+---
+
+## `worker::worker` - System-Feature Detection
+
+Parsing of `nix config show system-features`, auto-advertised when
+`GRADIENT_WORKER_SYSTEM_FEATURES` is unset.
+
+| Test | What it checks |
+|------|---------------|
+| `parses_space_separated_value` | A plain space-separated value becomes the feature list |
+| `tolerates_name_equals_value_form` | An older `name = value` line yields only the value's features |
+| `empty_output_yields_no_features` | Blank output → empty feature list |
 
 ---
 

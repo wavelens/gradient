@@ -149,10 +149,15 @@ in {
       };
 
       systemFeatures = lib.mkOption {
-        description = "Nix system features this worker advertises";
+        description = ''
+          Nix system features this worker advertises to the scheduler. Empty by
+          default, which makes the worker auto-detect them at runtime from
+          `nix config show system-features` (the daemon's resolved set,
+          including CPU-derived `gccarch-*` levels a static list can't
+          enumerate). Set a non-empty list to override.
+        '';
         type = lib.types.listOf lib.types.str;
-        default = lib.lists.uniqueStrings config.nix.settings.system-features;
-        defaultText = lib.literalExpression "lib.lists.uniqueStrings config.nix.settings.system-features";
+        default = [ ];
         example = [ "nixos-test" "benchmark" "big-parallel" ];
       };
 
