@@ -61,6 +61,16 @@ impl ReconcileScope {
             ReconcileScope::Eval(id) | ReconcileScope::Unstick(id) => Some(*id),
         }
     }
+
+    /// Whether this pass runs the full `cached_path.closure_complete`
+    /// re-derivation. Only the hourly `Deep` backstop pays its full-table
+    /// CLEAR/SET scan; every other scope - including the per-eval `Unstick`,
+    /// which rides the 5s dispatch cadence and fires inline on worker events -
+    /// relies on event-driven clears plus ingest to keep the flag fresh, so a
+    /// self-heal can never re-run the scan that saturated Postgres.
+    fn runs_cached_path_fixpoint(&self) -> bool {
+        matches!(self, ReconcileScope::Deep)
+    }
 }
 
 /// What one reconciliation pass changed. All-zero on a converged graph.
@@ -145,7 +155,7 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         }
     }
 
-    if matches!(scope, ReconcileScope::Deep | ReconcileScope::Unstick(_))
+    if scope.runs_cached_path_fixpoint()
         && let Err(e) = crate::cache_storage::reconcile_cached_path_closure_complete(db).await
     {
         error!(error = %e, "reconcile: reconcile_cached_path_closure_complete failed");
@@ -194,4 +204,19 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     }
 
     report
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_deep_runs_the_cached_path_fixpoint() {
+        let eval = EvaluationId::now_v7();
+        assert!(ReconcileScope::Deep.runs_cached_path_fixpoint());
+        assert!(!ReconcileScope::Tick.runs_cached_path_fixpoint());
+        assert!(!ReconcileScope::Global.runs_cached_path_fixpoint());
+        assert!(!ReconcileScope::Eval(eval).runs_cached_path_fixpoint());
+        assert!(!ReconcileScope::Unstick(eval).runs_cached_path_fixpoint());
+    }
 }
