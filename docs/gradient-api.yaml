@@ -9969,6 +9969,11 @@ components:
           format: uuid
         input_name:
           type: string
+          description: >-
+            A declared flake input name, or a glob (`*`, `?`, e.g. `nixpkgs*`
+            or `*`) matching several inputs. Globs are expanded against the
+            project's flake.lock at evaluation time; a literal name wins over a
+            glob.
         url:
           type: string
           nullable: true
@@ -9988,7 +9993,10 @@ components:
       properties:
         input_name:
           type: string
-          pattern: '^[A-Za-z_][A-Za-z0-9_-]*$'
+          pattern: '^[A-Za-z0-9_*?\[\]-]+$'
+          description: >-
+            A literal flake input name (`^[A-Za-z_][A-Za-z0-9_-]*$`) or a glob
+            (`*`, `?`) matching several inputs, e.g. `nixpkgs*` or `*`.
         url:
           type: string
           nullable: true
@@ -9998,7 +10006,10 @@ components:
       properties:
         input_name:
           type: string
-          pattern: '^[A-Za-z_][A-Za-z0-9_-]*$'
+          pattern: '^[A-Za-z0-9_*?\[\]-]+$'
+          description: >-
+            A literal flake input name (`^[A-Za-z_][A-Za-z0-9_-]*$`) or a glob
+            (`*`, `?`) matching several inputs, e.g. `nixpkgs*` or `*`.
         url:
           type: string
           nullable: true
