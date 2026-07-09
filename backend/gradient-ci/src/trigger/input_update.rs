@@ -121,6 +121,7 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
             target_inputs: serde_json::json!(target),
             candidate_lock: None,
             bumped_inputs: None,
+            discover_only: false,
             created_at: now,
             updated_at: now,
         }
