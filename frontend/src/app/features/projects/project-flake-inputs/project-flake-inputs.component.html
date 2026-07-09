@@ -55,6 +55,9 @@
                 <div>
                   <div class="override-name">{{ override.input_name }}</div>
                   <div class="override-meta text-secondary">
+                    @if (isPattern(override)) {
+                      <span class="badge badge-pattern">Pattern</span>
+                    }
                     <span class="badge" [class]="override.url === null ? 'badge-keep' : 'badge-url'">
                       {{ modeLabel(override) }}
                     </span>
@@ -145,9 +148,9 @@
       id="fi-input-name"
       [(ngModel)]="form.input_name"
       class="w-full"
-      placeholder="nixpkgs"
+      placeholder="nixpkgs or nixpkgs*"
     />
-    <small class="text-secondary">Matches the input name declared in your flake.nix (e.g. <code>nixpkgs</code>).</small>
+    <small class="text-secondary">Input name from your flake.nix, or a glob like <code>nixpkgs*</code> / <code>*</code> to match many. A literal name wins over a glob.</small>
   </div>
 
   <div class="form-group checkbox-group">

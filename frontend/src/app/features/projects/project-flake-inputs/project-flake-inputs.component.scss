@@ -111,6 +111,10 @@
     background: rgba($color-success, 0.15);
     color: $color-success;
   }
+  &.badge-pattern {
+    background: rgba($color-warning, 0.15);
+    color: $color-warning;
+  }
 }
 
 .form-group {
