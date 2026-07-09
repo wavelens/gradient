@@ -24,7 +24,7 @@ pub use wire::{decode_client_message, decode_server_message};
 
 /// Wire protocol version implemented by this build.
 /// v5: dropped `PresignedUpload`/`PresignedDownload` and `AssignJob.timeout_secs`.
-pub const PROTO_VERSION: u16 = 5;
+pub const PROTO_VERSION: u16 = 6;
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 
