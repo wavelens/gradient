@@ -113,6 +113,14 @@ impl FlakeLock {
             InputRef::Follows(_) => None,
         }
     }
+
+    /// The names of every direct input declared in the root node.
+    pub fn root_input_names(&self) -> Vec<String> {
+        self.nodes
+            .get(&self.root)
+            .map(|r| r.inputs.keys().cloned().collect())
+            .unwrap_or_default()
+    }
 }
 
 impl Node {
