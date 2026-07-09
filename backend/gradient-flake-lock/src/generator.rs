@@ -92,13 +92,29 @@ impl<R: RevisionResolver> PatchGenerator for FlakeLockGenerator<R> {
             .with_context(|| format!("reading {}", lock_path.display()))?;
         let mut lock = FlakeLock::parse(&bytes)?;
 
+        let declared = lock.root_input_names();
         let mut targets = Vec::with_capacity(tracked.len());
+        let mut seen = std::collections::BTreeSet::new();
         for input in tracked {
-            let node_name = lock
-                .input_node_name(&input.0)
-                .with_context(|| format!("tracked input `{input}` is not a direct flake input"))?
-                .to_owned();
-            targets.push((input.0.clone(), node_name));
+            let names: Vec<String> = if gradient_util::glob::is_pattern(&input.0) {
+                declared
+                    .iter()
+                    .filter(|d| gradient_util::glob::glob_match(&input.0, d))
+                    .cloned()
+                    .collect()
+            } else {
+                vec![input.0.clone()]
+            };
+            for name in names {
+                if !seen.insert(name.clone()) {
+                    continue;
+                }
+                let node_name = lock
+                    .input_node_name(&name)
+                    .with_context(|| format!("tracked input `{name}` is not a direct flake input"))?
+                    .to_owned();
+                targets.push((name, node_name));
+            }
         }
 
         let mut resolutions = Vec::with_capacity(targets.len());
@@ -258,6 +274,64 @@ mod tests {
             !node.locked.as_ref().unwrap().contains_key("ref"),
             "github locked blocks must pin by rev alone; a ref makes nix reject the input"
         );
+    }
+
+    #[tokio::test]
+    async fn glob_target_expands_over_matching_inputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = |repo: &str, rev: &str| {
+            format!(
+                r#"{{
+      "locked": {{ "lastModified": 1700000000, "narHash": "sha256-OLD0000000000000000000000000000000000000000=", "owner": "o", "repo": "{repo}", "rev": "{rev}", "type": "github" }},
+      "original": {{ "owner": "o", "repo": "{repo}", "type": "github" }}
+    }}"#
+            )
+        };
+        let lock = format!(
+            r#"{{
+  "nodes": {{
+    "nixpkgs": {},
+    "nixpkgs-lib": {},
+    "flake-utils": {},
+    "root": {{ "inputs": {{ "nixpkgs": "nixpkgs", "nixpkgs-lib": "nixpkgs-lib", "flake-utils": "flake-utils" }} }}
+  }},
+  "root": "root",
+  "version": 7
+}}
+"#,
+            node("nixpkgs", "1111111111111111111111111111111111111111"),
+            node("nixpkgs-lib", "1111111111111111111111111111111111111111"),
+            node("flake-utils", "1111111111111111111111111111111111111111"),
+        );
+        std::fs::write(dir.path().join("flake.lock"), lock).unwrap();
+
+        let bumped = |rev: &str| ResolvedRev {
+            rev: rev.into(),
+            ref_: None,
+            nar_hash: "sha256-NEW0000000000000000000000000000000000000000=".into(),
+            last_modified: 1800000000,
+        };
+        let lockgen = FlakeLockGenerator::new(FakeResolver(HashMap::from([
+            (
+                "nixpkgs".into(),
+                bumped("2222222222222222222222222222222222222222"),
+            ),
+            (
+                "nixpkgs-lib".into(),
+                bumped("3333333333333333333333333333333333333333"),
+            ),
+        ])));
+
+        let patch = lockgen
+            .produce(dir.path(), &["nixpkgs*".into()])
+            .await
+            .unwrap()
+            .unwrap();
+        let names: std::collections::BTreeSet<&str> =
+            patch.bumped.iter().map(|b| b.name.as_str()).collect();
+        assert!(names.contains("nixpkgs"));
+        assert!(names.contains("nixpkgs-lib"));
+        assert!(!names.contains("flake-utils"));
     }
 
     #[tokio::test]
