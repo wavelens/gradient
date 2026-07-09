@@ -38,12 +38,69 @@ pub struct NixEvaluator {
 unsafe impl Send for NixEvaluator {}
 unsafe impl Sync for NixEvaluator {}
 
+/// New-master nix refuses to remount a read-only `/nix/store` writable unless it
+/// created its own private mount namespace (its CLI does this in `main`); the
+/// eval-worker drives libnixstore directly, so mirror it here. As root on a
+/// read-only store, unshare a mount namespace and remount the store writable.
+/// No-op off Linux, when not root, or when the store is already writable (prod).
+#[cfg(target_os = "linux")]
+fn ensure_store_writable() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| unsafe {
+        let store = c"/nix/store".as_ptr();
+        if libc::geteuid() != 0 {
+            return;
+        }
+        let mut vfs: libc::statvfs = std::mem::zeroed();
+        if libc::statvfs(store, &mut vfs) != 0 || (vfs.f_flag & libc::ST_RDONLY) == 0 {
+            return;
+        }
+        if libc::unshare(libc::CLONE_NEWNS) != 0 {
+            return;
+        }
+        libc::mount(
+            std::ptr::null(),
+            c"/".as_ptr(),
+            std::ptr::null(),
+            libc::MS_REC | libc::MS_PRIVATE,
+            std::ptr::null(),
+        );
+        let flags = [
+            (libc::ST_NODEV, libc::MS_NODEV),
+            (libc::ST_NOSUID, libc::MS_NOSUID),
+            (libc::ST_NOEXEC, libc::MS_NOEXEC),
+            (libc::ST_NOATIME, libc::MS_NOATIME),
+            (libc::ST_NODIRATIME, libc::MS_NODIRATIME),
+            (libc::ST_RELATIME, libc::MS_RELATIME),
+        ]
+        .into_iter()
+        .fold(libc::MS_REMOUNT | libc::MS_BIND, |acc, (st, ms)| {
+            if (vfs.f_flag & st) != 0 {
+                acc | ms
+            } else {
+                acc
+            }
+        });
+        libc::mount(
+            std::ptr::null(),
+            store,
+            std::ptr::null(),
+            flags,
+            std::ptr::null(),
+        );
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ensure_store_writable() {}
+
 impl NixEvaluator {
     // nix-bindings' Context/Store/FlakeSettings aren't Send+Sync, but the C API
     // mandates Arc (LockFlags holds an Arc<FlakeSettings>); NixEvaluator is only
     // ever touched from one thread (Boehm GC + spawn_blocking).
     #[allow(clippy::arc_with_non_send_sync)]
     pub fn new() -> Result<Self> {
+        ensure_store_writable();
         let ctx = Arc::new(Context::new().context("nix context init")?);
         ctx.set_setting("show-trace", "true")?;
         ctx.set_setting("builders", "")?;
