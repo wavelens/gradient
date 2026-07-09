@@ -80,17 +80,22 @@ fn validate_input_name(name: &str) -> WebResult<()> {
     if name.is_empty() {
         return Err(WebError::bad_request("input_name must not be empty"));
     }
-    let mut chars = name.chars();
-    let first = chars.next().unwrap();
-    if !first.is_ascii_alphabetic() && first != '_' {
+    let ok = name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '*' | '?' | '[' | ']'));
+    if !ok {
         return Err(WebError::bad_request(
-            "input_name must match ^[A-Za-z_][A-Za-z0-9_-]*$",
+            "input_name may contain letters, digits, _ - and glob chars * ? [ ]",
         ));
     }
-    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-        return Err(WebError::bad_request(
-            "input_name must match ^[A-Za-z_][A-Za-z0-9_-]*$",
-        ));
+    // A literal (non-glob) name must still be a valid flake input identifier.
+    if !gradient_util::glob::is_pattern(name) {
+        let first = name.chars().next().unwrap();
+        if !first.is_ascii_alphabetic() && first != '_' {
+            return Err(WebError::bad_request(
+                "input_name must match ^[A-Za-z_][A-Za-z0-9_-]*$",
+            ));
+        }
     }
     Ok(())
 }
