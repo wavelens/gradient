@@ -4275,6 +4275,38 @@ immediately. Coverage:
 - `parse_overrides_accepts_store_path` - `path:/nix/store/...` is allowed (the server can fetch it).
 - `input_overrides_skipped_when_empty_and_present_when_set` - `SourceFinalizeBody`/`DispatchRequest` omit `input_overrides` when empty and serialize the pairs when set.
 
+## Wildcard flake input overrides (#519)
+
+An override name may be a glob (`*`, `nixpkgs*`). Globs are expanded worker-side
+against `flake.lock`; a literal name wins over a glob. For the `OpenPr` updater
+under `per_input` granularity, a discovery eval reports the glob's matches and
+the server fans out one per-input update eval each.
+
+### Glob primitive (`backend/gradient-util/src/glob.rs`)
+
+- `glob_star_and_question` - `*`/`?` matching semantics.
+- `is_pattern_detects_metachars` - `*`/`?`/`[` mark a name as a pattern.
+- `literal_beats_glob` - a literal override wins over a matching glob; other inputs still take the glob.
+- `longer_prefix_glob_wins` - among matching globs the longer literal-prefix wins.
+- `equal_prefix_conflict_skips_with_warning` - an exact-length tie between different-url globs is skipped with a warning.
+- `unmatched_pattern_warns` - a glob matching no declared input warns.
+
+### Worker archive (`backend/gradient-worker/src/executor/fetch.rs`)
+
+- `resolve_overrides_expands_glob` - `nixpkgs*` expands to every matching declared input, reconstructing each ref from the lock.
+
+### flake.lock updater (`backend/gradient-flake-lock/src/generator.rs`)
+
+- `glob_target_expands_over_matching_inputs` - `produce` bumps every input a glob target matches and leaves non-matches alone.
+
+### Web (`backend/web/tests/flake_input_overrides.rs`)
+
+- `create_with_glob_input_name` - a `nixpkgs*` override name is accepted (relaxed `input_name` validation).
+
+### Frontend (`frontend/src/app/features/projects/project-flake-inputs/project-flake-inputs.component.spec.ts`)
+
+- `marks glob input names as patterns and shows the badge` - `isPattern` is true for a glob name and the "Pattern" badge renders.
+
 ## SSH flake inputs and per-run overrides (#514/#515/#521)
 
 `gradient build` now archives cached build-request sources through a real
