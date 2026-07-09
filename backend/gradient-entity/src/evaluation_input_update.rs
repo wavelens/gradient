@@ -31,6 +31,8 @@ pub struct Model {
     pub candidate_lock: Option<String>,
     /// Worker-reported actual bumps `[{name, old_rev, new_rev}]`.
     pub bumped_inputs: Option<Json>,
+    /// A discovery eval expands glob tracked-inputs and fans out; opens no PR.
+    pub discover_only: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
