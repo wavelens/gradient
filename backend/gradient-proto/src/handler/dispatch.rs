@@ -298,7 +298,13 @@ impl<'a> DispatchContext<'a> {
         });
     }
 
-    fn spawn_cache_query(&self, job_id: String, query_id: String, paths: Vec<String>, mode: QueryMode) {
+    fn spawn_cache_query(
+        &self,
+        job_id: String,
+        query_id: String,
+        paths: Vec<String>,
+        mode: QueryMode,
+    ) {
         let rpc = self.rpc();
         tokio::spawn(async move { rpc.on_cache_query(job_id, query_id, paths, mode).await });
     }
