@@ -143,6 +143,28 @@ async fn dispatch_kick_is_retained_when_not_awaiting() {
     );
 }
 
+/// A capability heartbeat must not reconcile inline: `update_worker_capabilities`
+/// runs on the per-connection read loop, and awaiting the (DB-heavy) reconcile
+/// there blocked the loop from reading the same worker's next `CacheQuery`, which
+/// then timed out after 75s. It now kicks the dispatch loop, which reconciles off
+/// that loop.
+#[tokio::test]
+async fn capability_update_kicks_dispatch_instead_of_reconciling_inline() {
+    let scheduler = test_scheduler();
+    scheduler
+        .update_worker_capabilities("peer-x", vec![], vec![], 4, 8, 16_000, 100)
+        .await;
+    let woke = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        scheduler.dispatch_kick.notified(),
+    )
+    .await;
+    assert!(
+        woke.is_ok(),
+        "capability update must kick the dispatch loop, not reconcile inline"
+    );
+}
+
 #[tokio::test]
 async fn test_candidates_filtered_by_authorized_peers() {
     let scheduler = test_scheduler();

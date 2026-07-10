@@ -242,13 +242,13 @@ impl Scheduler {
             cpu_core_score,
         );
         debug!(%worker_id, "worker capabilities updated");
-        // Capabilities just changed - a build that was previously "no worker
-        // can do this" might now be servable, or vice-versa. Re-evaluate
-        // every in-flight evaluation's Waiting/Building gate immediately
-        // instead of waiting for the next dispatch tick.
-        if let Err(e) = self.reconcile_waiting_state().await {
-            warn!(error = %e, "reconcile_waiting_state after capability update failed");
-        }
+        // Capabilities just changed - a build that was previously "no worker can
+        // do this" might now be servable, or vice-versa. Kick the dispatch loop
+        // to re-evaluate every in-flight eval's Waiting/Building gate off this
+        // connection's read loop. Reconciling inline here (a DB-heavy pass) blocked
+        // the loop from reading the same worker's next `CacheQuery`, which then
+        // timed out after 75s.
+        self.kick_dispatch();
     }
 
     pub async fn update_worker_metrics(
@@ -293,11 +293,9 @@ impl Scheduler {
             .send(crate::BoardEvent::WorkerDisconnected {
                 worker_id: worker_id.to_owned(),
             });
-        // A worker leaving may strand evaluations whose remaining builds
-        // only it could service.
-        if let Err(e) = self.reconcile_waiting_state().await {
-            warn!(error = %e, "reconcile_waiting_state after worker unregister failed");
-        }
+        // A worker leaving may strand evaluations whose remaining builds only it
+        // could service; kick the dispatch loop to re-evaluate off the read loop.
+        self.kick_dispatch();
     }
 
     /// Snapshot every connected worker's `(architectures, system_features)`

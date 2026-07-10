@@ -59,10 +59,9 @@ impl Scheduler {
             if let Err(e) = dispatch::dispatch_ready_builds(self).await {
                 warn!(error = %e, "on-demand dispatch_ready_builds failed");
             }
-            // Also reconcile Waiting/Building state while we're at it.
-            if let Err(e) = self.reconcile_waiting_state().await {
-                warn!(error = %e, "reconcile_waiting_state after on-demand dispatch failed");
-            }
+            // Kick the dispatch loop to reconcile Waiting/Building state off the
+            // read loop, rather than blocking this worker's next message on it.
+            self.kick_dispatch();
         }
 
         // ── Second try after refresh ────────────────────────────────────────
