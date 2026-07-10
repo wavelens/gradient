@@ -175,7 +175,10 @@ pub enum ServerMessage {
     /// Paths in the local Gradient cache have `url: None`; paths found in upstream
     /// external Nix caches have `url: Some(absolute_nar_url)`.
     CacheStatus {
-        job_id: String,
+        /// Echoes the [`super::client::ClientMessage::CacheQuery`] `query_id`; it is
+        /// the sole correlator, so the worker routes this reply to the exact query
+        /// that sent it (the worker holds the owning `job_id` locally).
+        query_id: String,
         cached: Vec<CachedPath>,
     },
 
@@ -191,7 +194,11 @@ pub enum ServerMessage {
     /// over-budget handler). Distinct from a `CacheStatus` listing paths as
     /// uncached: the worker must treat this as a retryable transport failure,
     /// never as "inputs missing", so a server-side hiccup cannot poison a build.
-    CacheError { job_id: String, message: String },
+    CacheError {
+        /// Echoes the [`super::client::ClientMessage::CacheQuery`] `query_id`.
+        query_id: String,
+        message: String,
+    },
 }
 
 impl ServerMessage {

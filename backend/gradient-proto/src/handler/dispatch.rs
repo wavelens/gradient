@@ -243,10 +243,11 @@ impl<'a> DispatchContext<'a> {
             }
             ClientMessage::CacheQuery {
                 job_id,
+                query_id,
                 paths,
                 mode,
             } => {
-                self.spawn_cache_query(job_id, paths, mode);
+                self.spawn_cache_query(job_id, query_id, paths, mode);
                 true
             }
             ClientMessage::QueryKnownDerivations { job_id, drv_paths } => {
@@ -297,9 +298,9 @@ impl<'a> DispatchContext<'a> {
         });
     }
 
-    fn spawn_cache_query(&self, job_id: String, paths: Vec<String>, mode: QueryMode) {
+    fn spawn_cache_query(&self, job_id: String, query_id: String, paths: Vec<String>, mode: QueryMode) {
         let rpc = self.rpc();
-        tokio::spawn(async move { rpc.on_cache_query(job_id, paths, mode).await });
+        tokio::spawn(async move { rpc.on_cache_query(job_id, query_id, paths, mode).await });
     }
 
     fn spawn_query_known_derivations(&self, job_id: String, drv_paths: Vec<String>) {
@@ -775,10 +776,11 @@ impl RpcContext {
     async fn on_cache_query(
         &self,
         job_id: String,
+        query_id: String,
         paths: Vec<String>,
         mode: gradient_types::proto::QueryMode,
     ) {
-        debug!(peer_id = %self.peer_id, %job_id, count = paths.len(), ?mode, "CacheQuery");
+        debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, "CacheQuery");
         let org_id = self.scheduler.org_for_job(&job_id).await;
 
         // A DB error or an over-budget handler is *indeterminate*, never
@@ -792,20 +794,20 @@ impl RpcContext {
         .await
         {
             Ok(Ok(cached)) => {
-                debug!(peer_id = %self.peer_id, %job_id, entries = cached.len(), "CacheStatus");
-                ServerMessage::CacheStatus { job_id, cached }
+                debug!(peer_id = %self.peer_id, %job_id, %query_id, entries = cached.len(), "CacheStatus");
+                ServerMessage::CacheStatus { query_id, cached }
             }
             Ok(Err(e)) => {
-                warn!(peer_id = %self.peer_id, %job_id, error = %e, "CacheQuery DB error; replying CacheError");
+                warn!(peer_id = %self.peer_id, %job_id, %query_id, error = %e, "CacheQuery DB error; replying CacheError");
                 ServerMessage::CacheError {
-                    job_id,
+                    query_id,
                     message: format!("cache lookup failed: {e}"),
                 }
             }
             Err(_) => {
-                warn!(peer_id = %self.peer_id, %job_id, budget_secs = CACHE_QUERY_BUDGET.as_secs(), "CacheQuery exceeded server budget; replying CacheError");
+                warn!(peer_id = %self.peer_id, %job_id, %query_id, budget_secs = CACHE_QUERY_BUDGET.as_secs(), "CacheQuery exceeded server budget; replying CacheError");
                 ServerMessage::CacheError {
-                    job_id,
+                    query_id,
                     message: "cache query exceeded server budget".to_string(),
                 }
             }

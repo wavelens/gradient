@@ -273,11 +273,11 @@ impl DispatchState {
             } => {
                 self.on_auth_update(authorized_peers, failed_peers);
             }
-            ServerMessage::CacheStatus { job_id, cached } => {
-                self.on_cache_status(job_id, cached);
+            ServerMessage::CacheStatus { query_id, cached } => {
+                self.on_cache_status(query_id, cached);
             }
-            ServerMessage::CacheError { job_id, message } => {
-                self.on_cache_error(job_id, message);
+            ServerMessage::CacheError { query_id, message } => {
+                self.on_cache_error(query_id, message);
             }
             ServerMessage::KnownDerivations { job_id, known } => {
                 self.on_known_derivations(job_id, known);
@@ -308,7 +308,7 @@ impl DispatchState {
     /// worker still has capacity.
     async fn on_job_done(&mut self, job_id: String, result: Result<()>) -> Result<()> {
         self.jobs.abort_senders.remove(&job_id);
-        self.cache_waiters.lock().unwrap().remove(&job_id);
+        crate::proto::job::forget_cache_waiters_for_job(&self.cache_waiters, &job_id);
         self.known_derivation_waiters
             .lock()
             .unwrap()
@@ -617,19 +617,16 @@ impl DispatchState {
             .await;
     }
 
-    fn on_cache_status(&mut self, job_id: String, cached: Vec<CachedPath>) {
-        if let Some(tx) = self.cache_waiters.lock().unwrap().remove(&job_id) {
-            let _ = tx.send(Ok(cached));
-        } else {
-            debug!(%job_id, count = cached.len(), "CacheStatus arrived after waiter cleared");
+    fn on_cache_status(&mut self, query_id: String, cached: Vec<CachedPath>) {
+        let count = cached.len();
+        if !crate::proto::job::deliver_cache_reply(&self.cache_waiters, &query_id, Ok(cached)) {
+            debug!(%query_id, count, "CacheStatus arrived after waiter cleared");
         }
     }
 
-    fn on_cache_error(&mut self, job_id: String, message: String) {
-        if let Some(tx) = self.cache_waiters.lock().unwrap().remove(&job_id) {
-            let _ = tx.send(Err(message));
-        } else {
-            debug!(%job_id, %message, "CacheError arrived after waiter cleared");
+    fn on_cache_error(&mut self, query_id: String, message: String) {
+        if !crate::proto::job::deliver_cache_reply(&self.cache_waiters, &query_id, Err(message)) {
+            debug!(%query_id, "CacheError arrived after waiter cleared");
         }
     }
 

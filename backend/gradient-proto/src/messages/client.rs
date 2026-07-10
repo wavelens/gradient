@@ -235,6 +235,10 @@ pub enum ClientMessage {
     /// - `Push`   - all paths; uncached ones include presigned S3 PUT URLs (or `url: None`).
     CacheQuery {
         job_id: String,
+        /// Unique per-query id the server echoes in its [`super::server::ServerMessage::CacheStatus`]
+        /// / [`super::server::ServerMessage::CacheError`] reply, so concurrent or
+        /// retried queries under one `job_id` never steal each other's answer.
+        query_id: String,
         paths: Vec<String>,
         /// Defaults to [`QueryMode::Normal`] when deserialized from an older client.
         mode: QueryMode,

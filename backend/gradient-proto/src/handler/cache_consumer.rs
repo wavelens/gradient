@@ -69,6 +69,7 @@ pub(crate) async fn pull_paths(
 
     let query = ClientMessage::CacheQuery {
         job_id: uuid::Uuid::now_v7().to_string(),
+        query_id: uuid::Uuid::now_v7().to_string(),
         paths: paths.to_vec(),
         mode: QueryMode::Pull,
     };

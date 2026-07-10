@@ -142,12 +142,13 @@ pub async fn handle_cache_socket(
 
         match msg {
             ClientMessage::CacheQuery {
-                job_id,
+                query_id,
                 paths,
                 mode,
+                ..
             } => {
                 let cached = super::cache::query_for_cache(&state, cache_id, &paths, mode).await;
-                if send_server_msg(&writer, &ServerMessage::CacheStatus { job_id, cached })
+                if send_server_msg(&writer, &ServerMessage::CacheStatus { query_id, cached })
                     .await
                     .is_err()
                 {
@@ -202,6 +203,7 @@ mod tests {
     fn cache_query(mode: QueryMode) -> ClientMessage {
         ClientMessage::CacheQuery {
             job_id: "job".into(),
+            query_id: "query".into(),
             paths: vec![],
             mode,
         }

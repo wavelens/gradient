@@ -31,11 +31,65 @@ use gradient_proto::traits::JobReporter;
 /// Chunk size for an inline eval-cache push (mirrors the NAR push chunk size).
 const EVAL_CACHE_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
-/// Shared map from job-id to a oneshot sender that delivers a `CacheQuery`
-/// outcome back to the waiting job task: `Ok` for a `CacheStatus`, `Err(message)`
-/// for a server-side `CacheError` (indeterminate - retry, never "inputs absent").
-pub(crate) type CacheWaiters =
-    Arc<Mutex<HashMap<String, oneshot::Sender<Result<Vec<CachedPath>, String>>>>>;
+/// A pending `CacheQuery`: its reply channel plus the owning `job_id` so a
+/// finished or aborted job can drop any query it left in flight.
+pub(crate) struct CacheWaiter {
+    job_id: String,
+    reply: oneshot::Sender<Result<Vec<CachedPath>, String>>,
+}
+
+/// Shared map from a unique per-query id to its pending `CacheQuery`.
+/// Correlating by the query id (not the `job_id`) lets one job keep several
+/// CacheQueries in flight - and survive retries that reuse the `job_id` -
+/// without their replies colliding: a stale or out-of-order reply reaches the
+/// exact waiter that sent it, or none. `Ok` carries a `CacheStatus`,
+/// `Err(message)` a server-side `CacheError` (indeterminate - retry, never
+/// "inputs absent").
+pub(crate) type CacheWaiters = Arc<Mutex<HashMap<String, CacheWaiter>>>;
+
+/// Register a oneshot for `query_id` (scoped to `job_id`) and hand back its
+/// receiver.
+pub(crate) fn register_cache_waiter(
+    waiters: &CacheWaiters,
+    query_id: String,
+    job_id: String,
+) -> oneshot::Receiver<Result<Vec<CachedPath>, String>> {
+    let (reply, rx) = oneshot::channel();
+    waiters
+        .lock()
+        .unwrap()
+        .insert(query_id, CacheWaiter { job_id, reply });
+    rx
+}
+
+/// Deliver a `CacheStatus`/`CacheError` to the waiter that sent `query_id`.
+/// Returns false (dropping the reply) when no waiter is registered - a late
+/// reply for an already-timed-out or superseded query.
+pub(crate) fn deliver_cache_reply(
+    waiters: &CacheWaiters,
+    query_id: &str,
+    result: Result<Vec<CachedPath>, String>,
+) -> bool {
+    match waiters.lock().unwrap().remove(query_id) {
+        Some(w) => {
+            let _ = w.reply.send(result);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Drop the waiter for a single timed-out query so a late reply is discarded
+/// rather than delivered to a closed channel.
+pub(crate) fn forget_cache_waiter(waiters: &CacheWaiters, query_id: &str) {
+    waiters.lock().unwrap().remove(query_id);
+}
+
+/// Drop every waiter belonging to `job_id` so a query a finished or aborted job
+/// left in flight can't leak its slot.
+pub(crate) fn forget_cache_waiters_for_job(waiters: &CacheWaiters, job_id: &str) {
+    waiters.lock().unwrap().retain(|_, w| w.job_id != job_id);
+}
 
 /// Shared map from job-id to a oneshot sender that delivers `KnownDerivations`
 /// responses back to the waiting job task.
@@ -405,13 +459,12 @@ async fn cache_query_with_timeout(
     mode: QueryMode,
 ) -> Result<Vec<CachedPath>> {
     let path_count = paths.len();
-    let (tx, rx) = oneshot::channel();
-    // Re-using the same key drops any stale sender; the previous waiter then
-    // sees `RecvError` and bails out instead of blocking forever.
-    cache_waiters.lock().unwrap().insert(job_id.to_owned(), tx);
+    let query_id = uuid::Uuid::new_v4().to_string();
+    let rx = register_cache_waiter(cache_waiters, query_id.clone(), job_id.to_owned());
     writer
         .send(ClientMessage::CacheQuery {
             job_id: job_id.to_owned(),
+            query_id: query_id.clone(),
             paths,
             mode,
         })
@@ -429,12 +482,11 @@ async fn cache_query_with_timeout(
         Err(_) => {
             // Drop the waiter so a late reply doesn't deliver to a closed
             // channel and log a spurious warning later.
-            cache_waiters.lock().unwrap().remove(job_id);
+            forget_cache_waiter(cache_waiters, &query_id);
             Err(anyhow::anyhow!(
-                "CacheQuery for {} paths timed out after {}s waiting for reply (job_id={})",
+                "CacheQuery for {} paths timed out after {}s waiting for reply (job_id={job_id}, query_id={query_id})",
                 path_count,
                 CACHE_QUERY_TIMEOUT.as_secs(),
-                job_id,
             ))
         }
     }
@@ -611,6 +663,27 @@ mod tests {
             None,
         );
         (updater, reader)
+    }
+
+    /// A `CacheQuery` reply is correlated by its unique query id, never the
+    /// `job_id`: two queries in flight for the same job must not steal each
+    /// other's reply, a stale/unknown reply is dropped, and job cleanup frees a
+    /// query left pending.
+    #[test]
+    fn cache_replies_correlate_by_query_id_not_job_id() {
+        use tokio::sync::oneshot::error::TryRecvError;
+        let waiters: CacheWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let mut rx1 = register_cache_waiter(&waiters, "q1".to_string(), "job-A".to_string());
+        let mut rx2 = register_cache_waiter(&waiters, "q2".to_string(), "job-A".to_string());
+
+        assert!(deliver_cache_reply(&waiters, "q2", Ok(vec![])));
+        assert!(matches!(rx2.try_recv(), Ok(Ok(_))));
+        assert_eq!(rx1.try_recv(), Err(TryRecvError::Empty));
+
+        assert!(!deliver_cache_reply(&waiters, "gone", Ok(vec![])));
+
+        forget_cache_waiters_for_job(&waiters, "job-A");
+        assert_eq!(rx1.try_recv(), Err(TryRecvError::Closed));
     }
 
     #[tokio::test]

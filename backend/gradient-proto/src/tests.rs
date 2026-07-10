@@ -170,6 +170,7 @@ fn flake_input_override_roundtrip() {
 fn cache_query_normal_roundtrip() {
     let original = ClientMessage::CacheQuery {
         job_id: "job-1".into(),
+        query_id: "query-1".into(),
         paths: vec!["/nix/store/aaaa-hello".into()],
         mode: QueryMode::Normal,
     };
@@ -182,6 +183,7 @@ fn cache_query_normal_roundtrip() {
 fn cache_query_push_roundtrip() {
     let original = ClientMessage::CacheQuery {
         job_id: "job-2".into(),
+        query_id: "query-2".into(),
         paths: vec!["/nix/store/aaaa-foo".into(), "/nix/store/bbbb-bar".into()],
         mode: QueryMode::Push,
     };
@@ -194,6 +196,7 @@ fn cache_query_push_roundtrip() {
 fn cache_query_pull_roundtrip() {
     let original = ClientMessage::CacheQuery {
         job_id: "job-3".into(),
+        query_id: "query-3".into(),
         paths: vec!["/nix/store/cccc-baz".into()],
         mode: QueryMode::Pull,
     };
@@ -205,7 +208,7 @@ fn cache_query_pull_roundtrip() {
 #[test]
 fn cache_status_roundtrip() {
     let original = ServerMessage::CacheStatus {
-        job_id: "job-4".into(),
+        query_id: "query-4a".into(),
         cached: vec![
             CachedPath {
                 path: "/nix/store/aaaa-foo".into(),
@@ -247,7 +250,7 @@ fn cache_status_roundtrip() {
 #[test]
 fn cache_error_roundtrip() {
     let original = ServerMessage::CacheError {
-        job_id: "job-5".into(),
+        query_id: "query-5a".into(),
         message: "cache lookup failed: Connection pool timed out".into(),
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
