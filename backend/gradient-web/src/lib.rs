@@ -402,10 +402,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             post(caches::post_cache_public).delete(caches::delete_cache_public),
         )
         .route("/caches/{cache}/key", get(caches::get_cache_key))
-        .route(
-            "/caches/{cache}/upstreams",
-            put(caches::put_cache_upstream),
-        )
+        .route("/caches/{cache}/upstreams", put(caches::put_cache_upstream))
         .route(
             "/caches/{cache}/upstreams/{id}",
             patch(caches::patch_cache_upstream).delete(caches::delete_cache_upstream),

@@ -78,8 +78,7 @@ fn anonymous_lists_public_cache_upstream_keys() {
 fn anonymous_cannot_list_private_cache_upstreams() {
     run(async {
         let cache = cache_row(false);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![cache]]);
+        let db = MockDatabase::new(DatabaseBackend::Postgres).append_query_results([vec![cache]]);
 
         let server = make_test_server(db.into_connection());
         let res = server.get("/api/v1/caches/main/upstreams").await;
