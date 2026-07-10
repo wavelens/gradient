@@ -5425,6 +5425,23 @@ build status transition.
   eval has no counts - never the full recompute on every request. `dep_closure.rs`:
   `rematerializes_null_and_stale_zero_but_trusts_positive` pins the predicate; the
   SQL heal + read-path wiring are E2E-CI-covered.
+- **Mid-eval histogram falls behind its closure (project page showed a handful of
+  deps).** The per-status histogram is only reseeded authoritatively when an eval
+  finishes (`handle_eval_job_completed`); mid-eval it rides the incremental
+  `apply_dep_count_delta`, which misses any transition that fires before the dep's
+  closure edge is materialised. So a root's closure can be fully materialised
+  (`dep_closure_count` correct) while its stored counts sum to far less - on prod
+  (`019f4e30`, `EvaluatingDerivation`) `boron` had a 6133-dep closure but a
+  histogram summing to 7, and several roots had no rows, so the page showed
+  "N / 8 deps" while the graph was correct. The stale-zero heal above did not catch
+  it: the closure count was positive, so nothing re-ran. Fix: every closure dep has
+  a `derivation_build` anchor, so a correct histogram sums to exactly the closure
+  size; `histogram_needs_rebuild` flags any root whose stored total is below its
+  closure, and the web read path rebuilds once when so. `apply_dep_count_delta`
+  preserves the per-root total, so a rebuilt eval stays covered and the recompute
+  does not repeat. `dep_closure.rs`:
+  `histogram_rebuild_triggers_only_when_a_root_falls_behind_its_closure` pins the
+  predicate; the read-path wiring is E2E-CI-covered.
 
 ## Pre-build Waiting state for missing fetch/eval workers (#381)
 

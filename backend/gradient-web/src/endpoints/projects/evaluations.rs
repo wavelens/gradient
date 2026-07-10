@@ -571,11 +571,23 @@ impl EntryPointRelatedData {
         // page load (#391); fall back to the live CTE only if the backfill fails.
         let entry_point_ids: Vec<EntryPointId> = entry_points.iter().map(|ep| ep.id).collect();
         let mut raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;
-        // Rebuild the histogram when a closure just healed (its rows changed) or
-        // for a historical eval with no maintained counts; otherwise the cached
-        // rows stand. The closures are already materialised above, so this is the
-        // histogram recompute only.
-        if healed || raw.is_empty() {
+        // The incremental deltas are only authoritative once an eval finishes and
+        // reseeds; mid-eval they miss transitions that fire before a dep's closure
+        // edge exists, so a root's counts fall behind its closure (the project page
+        // then shows a handful of deps while the graph is correct). Rebuild when a
+        // closure just healed, when a historical eval has no counts, or when any
+        // root's stored total no longer covers its materialised closure - a cheap
+        // recompute over the already-materialised closure that settles after one
+        // pass, since `apply_dep_count_delta` preserves the per-root total.
+        let histogram_stale = gradient_db::histogram_needs_rebuild(entry_points.iter().map(|ep| {
+            let stored: i64 = raw.get(&ep.id).map(|m| m.values().sum()).unwrap_or(0);
+            let closure = derivations
+                .get(&ep.derivation)
+                .and_then(|d| d.dep_closure_count)
+                .unwrap_or(0);
+            (stored, closure)
+        }));
+        if healed || raw.is_empty() || histogram_stale {
             match gradient_db::init_entry_point_dep_counts(db, eval_id).await {
                 Ok(()) => {
                     raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;

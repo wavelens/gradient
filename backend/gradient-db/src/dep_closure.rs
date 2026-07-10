@@ -41,6 +41,19 @@ fn should_rematerialize(dep_closure_count: Option<i64>) -> bool {
     !matches!(dep_closure_count, Some(c) if c > 0)
 }
 
+/// Whether the maintained `entry_point_dep_count` histogram must be rebuilt,
+/// given each entry-point root's `(stored_total, closure_size)`. Every closure
+/// dep has a `derivation_build` anchor, so a correct histogram sums to exactly
+/// the closure size; a stored total below a non-empty closure means the lossy
+/// incremental deltas fell behind while the eval was still discovering its graph
+/// and must be recomputed from the materialised closure. Totals already covering
+/// the closure are authoritative, so the rebuild runs once and then settles.
+pub fn histogram_needs_rebuild(per_root: impl IntoIterator<Item = (i64, i64)>) -> bool {
+    per_root
+        .into_iter()
+        .any(|(stored_total, closure_size)| closure_size > 0 && stored_total < closure_size)
+}
+
 pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
@@ -326,6 +339,35 @@ mod tests {
         );
         assert!(!should_rematerialize(Some(1)), "a real count is trusted");
         assert!(!should_rematerialize(Some(4200)), "a real count is trusted");
+    }
+
+    /// While an eval is still discovering its graph the incremental deltas are
+    /// lossy (a transition firing before the dep's closure edge exists is never
+    /// counted), so a stored total below a non-empty closure means the histogram
+    /// fell behind and must be rebuilt. Leaf roots and totals already covering
+    /// the closure are trusted, so the rebuild runs once and then settles.
+    #[test]
+    fn histogram_rebuild_triggers_only_when_a_root_falls_behind_its_closure() {
+        assert!(
+            !histogram_needs_rebuild([(1499, 1499), (560, 560)]),
+            "totals covering their closures are trusted"
+        );
+        assert!(
+            histogram_needs_rebuild([(1499, 1499), (7, 6133)]),
+            "a single root short of its closure forces a rebuild"
+        );
+        assert!(
+            histogram_needs_rebuild([(0, 1298)]),
+            "no stored rows against a real closure is stale"
+        );
+        assert!(
+            !histogram_needs_rebuild([(0, 0)]),
+            "a leaf root with no deps is not stale"
+        );
+        assert!(
+            !histogram_needs_rebuild(std::iter::empty()),
+            "no entry points means nothing to rebuild"
+        );
     }
 
     #[tokio::test]
