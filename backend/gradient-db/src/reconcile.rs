@@ -160,10 +160,16 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     {
         error!(error = %e, "reconcile: reconcile_cached_path_closure_complete failed");
     }
-    if let Err(e) = crate::promotion::reconcile_drv_closure_cached(db).await {
+    // Anchor-side flag fixpoints. A per-eval scope (`Eval`/`Unstick`, fired
+    // inline on every worker event) bounds them to that eval's closure; the
+    // tick/backstop scopes run the global pass as the cross-eval backstop. Never
+    // a full-table scan on a per-worker-event cadence - unthrottled at ~1.5/s it
+    // saturated Postgres and starved dispatch.
+    let fixpoint_scope = scope.evaluation();
+    if let Err(e) = crate::promotion::reconcile_drv_closure_cached(db, fixpoint_scope).await {
         error!(error = %e, "reconcile: reconcile_drv_closure_cached failed");
     }
-    if let Err(e) = crate::promotion::reconcile_closure_complete(db).await {
+    if let Err(e) = crate::promotion::reconcile_closure_complete(db, fixpoint_scope).await {
         error!(error = %e, "reconcile: reconcile_closure_complete failed");
     }
 
@@ -218,5 +224,18 @@ mod tests {
         assert!(!ReconcileScope::Global.runs_cached_path_fixpoint());
         assert!(!ReconcileScope::Eval(eval).runs_cached_path_fixpoint());
         assert!(!ReconcileScope::Unstick(eval).runs_cached_path_fixpoint());
+    }
+
+    /// The anchor-side fixpoints scan the whole table only on the tick/backstop
+    /// scopes; the per-worker-event scopes (`Eval`/`Unstick`) carry an eval so
+    /// they heal a bounded closure instead - `scope.evaluation()` is the toggle.
+    #[test]
+    fn anchor_fixpoints_scan_globally_only_off_the_tick_cadence() {
+        let eval = EvaluationId::now_v7();
+        assert!(ReconcileScope::Tick.evaluation().is_none());
+        assert!(ReconcileScope::Global.evaluation().is_none());
+        assert!(ReconcileScope::Deep.evaluation().is_none());
+        assert!(ReconcileScope::Eval(eval).evaluation().is_some());
+        assert!(ReconcileScope::Unstick(eval).evaluation().is_some());
     }
 }

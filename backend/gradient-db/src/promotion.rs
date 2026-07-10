@@ -296,37 +296,81 @@ pub async fn propagate_closure_complete<C: ConnectionTrait>(
 /// Run CLEAR to a fixpoint first (remove stale-true), then SET (mark genuinely
 /// satisfied), each converging in O(longest affected chain). A converged graph
 /// costs two zero-row statements.
-pub async fn reconcile_closure_complete<C: ConnectionTrait>(db: &C) -> Result<(), DbErr> {
-    let gate = closure_complete_gate();
-    let clear = format!(
-        "UPDATE derivation_build db SET closure_complete = false \
-         WHERE db.closure_complete AND NOT ({gate})"
-    );
-    loop {
-        let changed = db
-            .execute(Statement::from_string(DatabaseBackend::Postgres, &clear))
-            .await?
-            .rows_affected();
-        if changed == 0 {
-            break;
-        }
-    }
+pub async fn reconcile_closure_complete<C: ConnectionTrait>(
+    db: &C,
+    scope: Option<gradient_types::EvaluationId>,
+) -> Result<(), DbErr> {
+    let (clear, set) = closure_complete_statements(scope);
+    run_bidirectional_fixpoint(db, &clear, &set, scope).await
+}
 
-    let update = format!(
-        "UPDATE derivation_build db SET closure_complete = true \
-         WHERE NOT db.closure_complete AND {gate}"
-    );
-    loop {
-        let changed = db
-            .execute(Statement::from_string(DatabaseBackend::Postgres, &update))
-            .await?
-            .rows_affected();
-        if changed == 0 {
-            break;
+/// Closure CTE prelude and `db` membership filter that bound a fixpoint sweep to
+/// one eval's dependency closure. `None` yields empty fragments - the global
+/// full-table pass carried only by the tick/backstop cadence; `Some` prepends
+/// `eval_closure_cte()` (eval id bound as `$1`) and the `IN (closure)` predicate
+/// so a per-worker-event self-heal (`Eval`/`Unstick`) walks only that eval's
+/// closure, never re-scanning the whole table.
+fn eval_scope_fragments(scope: Option<gradient_types::EvaluationId>) -> (String, String) {
+    match scope {
+        None => (String::new(), String::new()),
+        Some(_) => (
+            format!("{} ", eval_closure_cte()),
+            " AND db.derivation IN (SELECT derivation FROM closure)".to_string(),
+        ),
+    }
+}
+
+/// Bind the eval id as `$1` for a scoped sweep; empty values for the global pass.
+fn fixpoint_params(scope: Option<gradient_types::EvaluationId>) -> Vec<Value> {
+    scope
+        .map(|id| vec![Value::Uuid(Some(Box::new(id.into_inner())))])
+        .unwrap_or_default()
+}
+
+/// Run a bidirectional flag fixpoint: CLEAR (strip stale-true) to convergence,
+/// then SET (mark genuinely satisfied) to convergence. Each converges in
+/// O(longest affected chain); a converged graph costs two zero-row statements.
+async fn run_bidirectional_fixpoint<C: ConnectionTrait>(
+    db: &C,
+    clear: &str,
+    set: &str,
+    scope: Option<gradient_types::EvaluationId>,
+) -> Result<(), DbErr> {
+    let params = fixpoint_params(scope);
+    for stmt in [clear, set] {
+        loop {
+            let changed = db
+                .execute(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    stmt,
+                    params.clone(),
+                ))
+                .await?
+                .rows_affected();
+            if changed == 0 {
+                break;
+            }
         }
     }
 
     Ok(())
+}
+
+/// CLEAR + SET statements for the `closure_complete` fixpoint, sharing
+/// `closure_complete_gate()` (so both passes key on the same ground truth) and
+/// `eval_scope_fragments(scope)` (so both see the same closure bound).
+fn closure_complete_statements(scope: Option<gradient_types::EvaluationId>) -> (String, String) {
+    let gate = closure_complete_gate();
+    let (prelude, filter) = eval_scope_fragments(scope);
+    let clear = format!(
+        "{prelude}UPDATE derivation_build db SET closure_complete = false \
+         WHERE db.closure_complete{filter} AND NOT ({gate})"
+    );
+    let set = format!(
+        "{prelude}UPDATE derivation_build db SET closure_complete = true \
+         WHERE NOT db.closure_complete{filter} AND {gate}"
+    );
+    (clear, set)
 }
 
 /// `.drv`-closure gate for anchor `db`: its own `.drv` is cached (a `.drv`'s
@@ -350,16 +394,18 @@ pub(crate) const DRV_CLOSURE_CACHED_GATE: &str = r#"
 "#;
 
 /// CLEAR + SET statements for the `drv_closure_cached` fixpoint, sharing
-/// `DRV_CLOSURE_CACHED_GATE` so both passes key on the same `.drv`-cached ground
-/// truth and can never drift from each other (or from the test that pins them).
-fn drv_closure_cached_statements() -> (String, String) {
+/// `DRV_CLOSURE_CACHED_GATE` (so both passes key on the same `.drv`-cached ground
+/// truth and can never drift from each other or from the test that pins them)
+/// and `eval_scope_fragments(scope)` (so both see the same closure bound).
+fn drv_closure_cached_statements(scope: Option<gradient_types::EvaluationId>) -> (String, String) {
+    let (prelude, filter) = eval_scope_fragments(scope);
     let clear = format!(
-        "UPDATE derivation_build db SET drv_closure_cached = false \
-         WHERE db.drv_closure_cached AND NOT ({DRV_CLOSURE_CACHED_GATE})"
+        "{prelude}UPDATE derivation_build db SET drv_closure_cached = false \
+         WHERE db.drv_closure_cached{filter} AND NOT ({DRV_CLOSURE_CACHED_GATE})"
     );
     let set = format!(
-        "UPDATE derivation_build db SET drv_closure_cached = true \
-         WHERE NOT db.drv_closure_cached AND {DRV_CLOSURE_CACHED_GATE}"
+        "{prelude}UPDATE derivation_build db SET drv_closure_cached = true \
+         WHERE NOT db.drv_closure_cached{filter} AND {DRV_CLOSURE_CACHED_GATE}"
     );
     (clear, set)
 }
@@ -378,21 +424,12 @@ fn drv_closure_cached_statements() -> (String, String) {
 /// soundness: any anchor whose `.drv` is no longer backed (or whose dependency
 /// regressed) is reset, rippling up to dependents. Run CLEAR to a fixpoint first,
 /// then SET; a converged graph costs two zero-row statements.
-pub async fn reconcile_drv_closure_cached<C: ConnectionTrait>(db: &C) -> Result<(), DbErr> {
-    let (clear, set) = drv_closure_cached_statements();
-    for stmt in [clear, set] {
-        loop {
-            let changed = db
-                .execute(Statement::from_string(DatabaseBackend::Postgres, &stmt))
-                .await?
-                .rows_affected();
-            if changed == 0 {
-                break;
-            }
-        }
-    }
-
-    Ok(())
+pub async fn reconcile_drv_closure_cached<C: ConnectionTrait>(
+    db: &C,
+    scope: Option<gradient_types::EvaluationId>,
+) -> Result<(), DbErr> {
+    let (clear, set) = drv_closure_cached_statements(scope);
+    run_bidirectional_fixpoint(db, &clear, &set, scope).await
 }
 
 /// Recursively mark every dependent of `failed_derivation` `DependencyFailed`.
@@ -795,6 +832,67 @@ mod tests {
         );
     }
 
+    /// The anchor-side flag fixpoints are global full-table sweeps on the
+    /// tick/backstop cadence, but on a per-eval scope (`Eval`/`Unstick`, fired
+    /// inline on every worker event) they must bound the UPDATE to that eval's
+    /// dependency closure - the unthrottled 56k-row scan at ~1.5/s otherwise
+    /// saturates Postgres and starves dispatch. Pin that a scope toggles the
+    /// closure CTE + membership filter (no live DB in unit tests).
+    #[test]
+    fn closure_complete_fixpoint_bounds_to_eval_closure_when_scoped() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        for s in {
+            let (clear, set) = closure_complete_statements(None);
+            [clear, set]
+        } {
+            assert!(
+                !norm(s.clone()).contains("FROM closure"),
+                "global pass scans the whole table, no closure walk: {s}"
+            );
+        }
+        let eval = gradient_types::EvaluationId::now_v7();
+        for s in {
+            let (clear, set) = closure_complete_statements(Some(eval));
+            [clear, set]
+        } {
+            let s = norm(s);
+            assert!(
+                s.contains("WITH RECURSIVE closure(derivation) AS"),
+                "eval scope must walk the eval closure: {s}"
+            );
+            assert!(
+                s.contains("db.derivation IN (SELECT derivation FROM closure)"),
+                "eval scope must bound the update to the closure: {s}"
+            );
+        }
+    }
+
+    /// Same closure-bounding contract for the `.drv`-closure fixpoint.
+    #[test]
+    fn drv_closure_cached_fixpoint_bounds_to_eval_closure_when_scoped() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let (clear_global, _) = drv_closure_cached_statements(None);
+        assert!(
+            !norm(clear_global).contains("FROM closure"),
+            "global pass scans the whole table"
+        );
+        let eval = gradient_types::EvaluationId::now_v7();
+        for s in {
+            let (clear, set) = drv_closure_cached_statements(Some(eval));
+            [clear, set]
+        } {
+            let s = norm(s);
+            assert!(
+                s.contains("WITH RECURSIVE closure(derivation) AS"),
+                "eval scope must walk the eval closure: {s}"
+            );
+            assert!(
+                s.contains("db.derivation IN (SELECT derivation FROM closure)"),
+                "eval scope must bound the update to the closure: {s}"
+            );
+        }
+    }
+
     /// Promotion and the dispatch gate must share one readiness definition: both
     /// statements embed `deps_ready_predicate` verbatim, and only the dispatch
     /// gate adds the `.drv`-importability arm (`drv_closure_cached`). A drift
@@ -867,7 +965,7 @@ mod tests {
     #[test]
     fn drv_closure_cached_reconcile_is_bidirectional() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let (clear, set) = drv_closure_cached_statements();
+        let (clear, set) = drv_closure_cached_statements(None);
         let (clear, set) = (norm(clear), norm(set));
         assert!(
             clear.contains("SET drv_closure_cached = false")
