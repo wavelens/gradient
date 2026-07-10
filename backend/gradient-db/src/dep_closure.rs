@@ -32,16 +32,25 @@ const INSERT_CHUNK: usize = 1000;
 /// `evaluation` that is not already cached, and cache its size on
 /// `derivation.dep_closure_count`. Idempotent: cached roots are skipped and edge
 /// inserts conflict-do-nothing.
+/// Whether a root's cached closure must be (re)computed. A never-computed
+/// (`None`) or stale-zero (`Some(0)`) count recomputes - the latter heals a
+/// closure materialised empty mid-eval, before its dependency edges flushed,
+/// then frozen (the project page then showed the entry point with one dep while
+/// the live graph was correct). A positive count is authoritative and skipped.
+fn should_rematerialize(dep_closure_count: Option<i64>) -> bool {
+    !matches!(dep_closure_count, Some(c) if c > 0)
+}
+
 pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<(), DbErr> {
+) -> Result<usize, DbErr> {
     let entry_points = EEntryPoint::find()
         .filter(CEntryPoint::Evaluation.eq(evaluation))
         .all(db)
         .await?;
     if entry_points.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
 
     let root_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
@@ -54,8 +63,9 @@ pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
     })
     .await?;
 
+    let mut healed = 0usize;
     for root in roots {
-        if root.dep_closure_count.is_some() {
+        if !should_rematerialize(root.dep_closure_count) {
             continue;
         }
 
@@ -89,6 +99,13 @@ pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
         }
 
         let count = edges.len() as i64;
+        // A recompute that produced a non-empty closure healed a poisoned or
+        // never-computed root; the caller rebuilds the histogram when so. A root
+        // still empty (a true leaf, or edges not yet flushed) is cheap and leaves
+        // the histogram untouched.
+        if count > 0 {
+            healed += 1;
+        }
         db.execute(Statement::from_string(
             DbBackend::Postgres,
             format!(
@@ -99,7 +116,7 @@ pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
         .await?;
     }
 
-    Ok(())
+    Ok(healed)
 }
 
 /// Recompute the authoritative `entry_point_dep_count` histogram for every entry
@@ -294,6 +311,21 @@ mod tests {
         assert_eq!(out[&ep1][&BuildStatus::Completed], 3);
         assert_eq!(out[&ep1][&BuildStatus::Building], 1);
         assert_eq!(out[&ep2][&BuildStatus::Queued], 5);
+    }
+
+    /// A root materialised empty mid-eval (before its dependency edges flushed)
+    /// caches `dep_closure_count = 0`; the old `is_some()` skip froze it there so
+    /// the project page showed one dep forever. Recompute `None` and `Some(0)`;
+    /// trust only a positive count.
+    #[test]
+    fn rematerializes_null_and_stale_zero_but_trusts_positive() {
+        assert!(should_rematerialize(None), "never-computed root recomputes");
+        assert!(
+            should_rematerialize(Some(0)),
+            "a zero cached before edges flushed must recompute, not freeze"
+        );
+        assert!(!should_rematerialize(Some(1)), "a real count is trusted");
+        assert!(!should_rematerialize(Some(4200)), "a real count is trusted");
     }
 
     #[tokio::test]

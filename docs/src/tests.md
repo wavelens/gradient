@@ -5402,6 +5402,24 @@ build status transition.
   `reconcile_eval_dep_counts` on the terminal transition (alongside the existing
   abort/startup/read-when-empty reconciles), so a settled eval's bar always
   matches its final graph regardless of which bulk paths ran. Covered E2E by CI.
+- **Stale-zero closure heals instead of freezing (project page showed one dep).**
+  The eval defers `derivation_dependency` writes to stream completion, but a
+  read-path (or startup) `reconcile_eval_dep_counts` can run mid-eval before the
+  edges flush: `materialize_entry_point_closures` then walks an empty graph, caches
+  `dep_closure_count = 0`, and the old `is_some()` skip froze it there forever - so
+  the project page's `deps_total` showed the entry point with a single dep while
+  the graph page (live `derivation_dependency`) was correct. On prod (`019f4da0`)
+  many building-eval entry points sat `dep_closure_count = 0` with live forward
+  edges and zero `derivation_closure` rows. Fix: the skip is now
+  `should_rematerialize` (recompute `None` and stale `Some(0)`; trust only a
+  positive count), so a zero recomputes once edges exist (a true leaf stays 0,
+  cheaply); `materialize_entry_point_closures` returns how many roots healed, and
+  the web read path (`projects/evaluations.rs`) materialises closures *before*
+  loading derivations so `deps_total` is fresh, then rebuilds the histogram
+  (`init_entry_point_dep_counts`) only when a heal actually changed a closure or an
+  eval has no counts - never the full recompute on every request. `dep_closure.rs`:
+  `rematerializes_null_and_stale_zero_but_trusts_positive` pins the predicate; the
+  SQL heal + read-path wiring are E2E-CI-covered.
 
 ## Pre-build Waiting state for missing fetch/eval workers (#381)
 

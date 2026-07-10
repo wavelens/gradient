@@ -465,6 +465,19 @@ impl EntryPointRelatedData {
         let eval_id = entry_points[0].evaluation;
         let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
 
+        // Heal any entry-point closure materialised empty mid-eval - before its
+        // dependency edges flushed - and frozen at zero, so `deps_total` below
+        // reflects the real closure instead of showing a single dep while the
+        // graph page is correct. Cheap in steady state: only NULL/zero-count
+        // roots recompute; positive counts are trusted and skipped.
+        let healed = match gradient_db::materialize_entry_point_closures(db, eval_id).await {
+            Ok(n) => n > 0,
+            Err(e) => {
+                tracing::warn!(evaluation_id = %eval_id, error = %e, "entry-point closure heal failed");
+                false
+            }
+        };
+
         let derivations: HashMap<DerivationId, MDerivation> =
             gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
                 EDerivation::find()
@@ -558,14 +571,18 @@ impl EntryPointRelatedData {
         // page load (#391); fall back to the live CTE only if the backfill fails.
         let entry_point_ids: Vec<EntryPointId> = entry_points.iter().map(|ep| ep.id).collect();
         let mut raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;
-        if raw.is_empty() {
-            match gradient_db::reconcile_eval_dep_counts(db, eval_id).await {
+        // Rebuild the histogram when a closure just healed (its rows changed) or
+        // for a historical eval with no maintained counts; otherwise the cached
+        // rows stand. The closures are already materialised above, so this is the
+        // histogram recompute only.
+        if healed || raw.is_empty() {
+            match gradient_db::init_entry_point_dep_counts(db, eval_id).await {
                 Ok(()) => {
                     raw = gradient_db::load_entry_point_dep_counts(db, &entry_point_ids).await?;
                 }
                 Err(e) => {
                     tracing::warn!(evaluation_id = %eval_id, error = %e,
-                        "dep-count backfill failed; using live closure CTE");
+                        "dep-count rebuild failed; using live closure CTE");
                     let seeds: Vec<(EntryPointId, uuid::Uuid)> = entry_points
                         .iter()
                         .map(|ep| (ep.id, ep.derivation.into_inner()))
