@@ -206,7 +206,7 @@ in {
           max_connections has headroom for it.
         '';
         type = lib.types.ints.positive;
-        default = 32;
+        default = 16;
       };
 
       databaseMinConnections = lib.mkOption {
@@ -222,7 +222,7 @@ in {
           cannot starve dispatch.
         '';
         type = lib.types.ints.positive;
-        default = 32;
+        default = 16;
       };
 
       databaseCacheMinConnections = lib.mkOption {
@@ -234,7 +234,7 @@ in {
       databaseWebMaxConnections = lib.mkOption {
         description = "Maximum connections the axum HTTP pool may open.";
         type = lib.types.ints.positive;
-        default = 16;
+        default = 8;
       };
 
       databaseWebMinConnections = lib.mkOption {
