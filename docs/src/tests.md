@@ -6293,3 +6293,21 @@ consistent `Uploading`/`Uploaded` casing (#507).
   [Integration Tests](development/tests.md#integration-tests)) uploads a unique
   store path and realizes it on a client locked to the gradient cache, exercising
   both the compression and eager-signing fixes end-to-end.
+
+## Public cache upstream keys are readable anonymously (#527)
+
+The cache page renders `trusted-public-keys` from the cache's own key plus every
+upstream's `public_key`, but `GET /caches/{cache}/upstreams` required login while
+the page itself is anonymous-readable for public caches - so an anonymous visitor
+got `403` on the upstreams call (swallowed by the frontend) and the pull-through
+upstream keys silently vanished, leaving only Gradient's own key. Gradient does
+not re-sign pull-through paths, so those upstream keys are exactly what a client
+must trust. `get_cache_upstreams` now uses `CacheAccess::Readable` (matching
+`get_cache`) and moves to the optional-auth router block; create/edit/delete stay
+auth-gated.
+
+- `backend/gradient-web/tests/cache_upstreams_public.rs`:
+  `anonymous_lists_public_cache_upstream_keys` drives an unauthenticated
+  `GET /api/v1/caches/main/upstreams` against a public cache and asserts the
+  upstream `public_key` is returned; `anonymous_cannot_list_private_cache_upstreams`
+  asserts a private cache still `404`s for anonymous callers.

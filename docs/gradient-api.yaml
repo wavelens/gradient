@@ -5370,10 +5370,13 @@ paths:
     get:
       tags: [caches]
       summary: List upstream caches
-      description: Returns all upstream caches configured for this cache (both internal Gradient caches and external binary caches). Requires `viewCache`.
+      description: >-
+        Returns all upstream caches configured for this cache (both internal
+        Gradient caches and external binary caches), including each upstream's
+        `public_key` so clients can trust pull-through paths. Follows the same
+        visibility as `GET /caches/{cache}`: public caches are readable by
+        anyone, private caches only by members and subscribed organizations.
       operationId: listCacheUpstreams
-      security:
-        - bearerAuth: []
       responses:
         '200':
           description: List of upstream entries

@@ -404,7 +404,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/caches/{cache}/key", get(caches::get_cache_key))
         .route(
             "/caches/{cache}/upstreams",
-            get(caches::get_cache_upstreams).put(caches::put_cache_upstream),
+            put(caches::put_cache_upstream),
         )
         .route(
             "/caches/{cache}/upstreams/{id}",
@@ -557,6 +557,10 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route(
             "/caches/{cache}/public-key",
             get(caches::get_cache_public_key),
+        )
+        .route(
+            "/caches/{cache}/upstreams",
+            get(caches::get_cache_upstreams),
         )
         .route("/caches/{cache}/stats", get(stats::get_cache_stats))
         .route("/caches/{cache}/nars", get(caches::nars_list))

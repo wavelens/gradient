@@ -5,7 +5,7 @@
  */
 
 use crate::access::{CacheAccess, Caller, load_cache};
-use crate::authorization::MaybeApiKey;
+use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::CachePermission;
@@ -131,19 +131,16 @@ async fn load_upstream(
 
 pub async fn get_cache_upstreams(
     state: State<Arc<ServerState>>,
-    Extension(user): Extension<MUser>,
+    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(cache): Path<String>,
 ) -> WebResult<Json<BaseResponse<Vec<UpstreamCacheItem>>>> {
     let cache = load_cache(
         &state,
-        Caller::User(&user),
+        Caller::from_option(&maybe_user),
         api_key.as_ref(),
         cache,
-        CacheAccess::Require {
-            permission: CachePermission::ViewCache,
-            reject_managed: false,
-        },
+        CacheAccess::Readable,
     )
     .await?;
 
