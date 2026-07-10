@@ -2504,6 +2504,9 @@ Tests (`cargo test -p web --lib stats`):
   contains `INSERT INTO cache_metric`, `ON CONFLICT (cache, bucket_time)`,
   the additive `bytes_sent`/`nar_count` updates, and contains no `SELECT`
   (a `SELECT` would reintroduce the read-modify-write race).
+
+The worker-upload counterpart (`gradient-proto/src/handler/nar.rs::upsert_cache_metric`, which records bytes on NAR *push* rather than serve) still used the same `find`-then-insert/update pattern, so two workers committing NARs to one cache in the same minute raced into `duplicate key value violates unique constraint "idx-cache_metric-cache-bucket_time"` (the loser's build failed transiently). It now uses the identical `INSERT … ON CONFLICT (cache, bucket_time) DO UPDATE` upsert. The SQL is DB-dependent (no local Postgres unit harness); the concurrent-commit path is E2E-CI-covered.
+
 ## Worker-peer token verification - argon2 + constant time
 
 Worker registration tokens are now stored as argon2 PHC strings rather

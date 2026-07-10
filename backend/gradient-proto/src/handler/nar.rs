@@ -7,10 +7,12 @@
 use crate::ingest::{IngestInput, SignTargets, ingest_metadata_only};
 use chrono::Timelike;
 use gradient_core::ServerState;
-use gradient_types::ids::{CacheId, CacheMetricId, OrganizationId};
+use gradient_types::ids::{CacheId, OrganizationId};
 use gradient_types::*;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, Statement, Value,
+};
 use tracing::debug;
 
 pub(super) struct NarUploadRecord<'a> {
@@ -58,31 +60,25 @@ async fn upsert_cache_metric(
     bucket: chrono::NaiveDateTime,
     bytes: i64,
 ) -> anyhow::Result<()> {
-    match ECacheMetric::find()
-        .filter(CCacheMetric::Cache.eq(cache_id))
-        .filter(CCacheMetric::BucketTime.eq(bucket))
-        .one(&state.worker_db)
-        .await?
-    {
-        Some(metric) => {
-            let mut am: ACacheMetric = metric.into_active_model();
-            am.bytes_sent = Set(am.bytes_sent.unwrap() + bytes);
-            am.nar_count = Set(am.nar_count.unwrap() + 1);
-            am.update(&state.worker_db).await?;
-        }
-        None => {
-            let am = MCacheMetric {
-                id: CacheMetricId::now_v7(),
-                cache: cache_id,
-                bucket_time: bucket,
-                bytes_sent: bytes,
-                nar_count: 1,
-            }
-            .into_active_model();
-
-            am.insert(&state.worker_db).await?;
-        }
-    }
+    // Atomic accumulate keyed on the (cache, bucket_time) unique index: concurrent
+    // NAR commits for the same cache in one minute otherwise race a find-then-insert
+    // into a duplicate-key violation (and the update arm loses each other's writes).
+    state
+        .worker_db
+        .execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count) \
+             VALUES (uuidv7(), $1, $2, $3, 1) \
+             ON CONFLICT (cache, bucket_time) DO UPDATE SET \
+                 bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent, \
+                 nar_count  = cache_metric.nar_count  + 1",
+            [
+                Value::Uuid(Some(Box::new(cache_id.into_inner()))),
+                bucket.into(),
+                bytes.into(),
+            ],
+        ))
+        .await?;
 
     Ok(())
 }
