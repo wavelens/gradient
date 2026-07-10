@@ -29,11 +29,12 @@ use tracing::{debug, error};
 /// What slice of the graph to heal.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ReconcileScope {
-    /// Every dispatch tick: the anchor-side flag fixpoints (they gate dispatch,
-    /// so mid-eval progression rides their cadence) and promotion. Skips the
-    /// `cached_path`-side fixpoint, the unbacked-output demote, and the
-    /// dependency-failed sweep - those are backstops whose full-table scans
-    /// saturated Postgres when re-run every 5s on a large graph.
+    /// Every dispatch tick: promotion only. Skips the anchor-side flag
+    /// fixpoints, the `cached_path`-side fixpoint, the unbacked-output demote,
+    /// and the dependency-failed sweep - all full-table scans that saturated
+    /// Postgres when re-run every 5s on a large graph. Mid-eval progression is
+    /// carried by reactive `propagate_closure_complete` (per completion) and the
+    /// per-flush `Eval` passes; the global fixpoint backstop rides `Global`.
     Tick,
     /// The periodic backstop (every Nth dispatch tick): global flag fixpoints,
     /// the unbacked-output demote, the dependency-failed sweep, and promotion.
@@ -70,6 +71,20 @@ impl ReconcileScope {
     /// self-heal can never re-run the scan that saturated Postgres.
     fn runs_cached_path_fixpoint(&self) -> bool {
         matches!(self, ReconcileScope::Deep)
+    }
+
+    /// Whether this pass runs the anchor-side flag fixpoints
+    /// (`drv_closure_cached`, `closure_complete`). Every scope EXCEPT the plain
+    /// 5s `Tick` does: `Eval`/`Unstick` heal only their eval's closure (bounded),
+    /// while `Global` (30s) and `Deep` run the global full-table backstop. `Tick`
+    /// skips them - on a large converged graph the full-table CLEAR/SET is
+    /// seconds long, and re-running it every 5s saturated Postgres and starved
+    /// the dispatch loop it shares. Mid-eval progression does not need it: the
+    /// reactive `propagate_closure_complete` marks `closure_complete` on every
+    /// completion, and the per-flush `Eval`-scoped passes converge an eval's
+    /// `drv_closure_cached` while it evaluates.
+    fn runs_anchor_fixpoints(&self) -> bool {
+        !matches!(self, ReconcileScope::Tick)
     }
 }
 
@@ -160,17 +175,20 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     {
         error!(error = %e, "reconcile: reconcile_cached_path_closure_complete failed");
     }
-    // Anchor-side flag fixpoints. A per-eval scope (`Eval`/`Unstick`, fired
-    // inline on every worker event) bounds them to that eval's closure; the
-    // tick/backstop scopes run the global pass as the cross-eval backstop. Never
-    // a full-table scan on a per-worker-event cadence - unthrottled at ~1.5/s it
-    // saturated Postgres and starved dispatch.
-    let fixpoint_scope = scope.evaluation();
-    if let Err(e) = crate::promotion::reconcile_drv_closure_cached(db, fixpoint_scope).await {
-        error!(error = %e, "reconcile: reconcile_drv_closure_cached failed");
-    }
-    if let Err(e) = crate::promotion::reconcile_closure_complete(db, fixpoint_scope).await {
-        error!(error = %e, "reconcile: reconcile_closure_complete failed");
+    // Anchor-side flag fixpoints. A per-eval scope (`Eval`/`Unstick`) bounds them
+    // to that eval's closure; `Global`/`Deep` run the global full-table backstop.
+    // The plain 5s `Tick` skips them entirely - the full-table scan is seconds
+    // long on a large graph and saturated the dispatch loop's DB when re-run
+    // every 5s, while reactive `propagate_closure_complete` and the per-flush
+    // `Eval` passes already carry mid-eval progression.
+    if scope.runs_anchor_fixpoints() {
+        let fixpoint_scope = scope.evaluation();
+        if let Err(e) = crate::promotion::reconcile_drv_closure_cached(db, fixpoint_scope).await {
+            error!(error = %e, "reconcile: reconcile_drv_closure_cached failed");
+        }
+        if let Err(e) = crate::promotion::reconcile_closure_complete(db, fixpoint_scope).await {
+            error!(error = %e, "reconcile: reconcile_closure_complete failed");
+        }
     }
 
     if matches!(scope, ReconcileScope::Global | ReconcileScope::Deep) {
@@ -226,13 +244,19 @@ mod tests {
         assert!(!ReconcileScope::Unstick(eval).runs_cached_path_fixpoint());
     }
 
-    /// The anchor-side fixpoints scan the whole table only on the tick/backstop
-    /// scopes; the per-worker-event scopes (`Eval`/`Unstick`) carry an eval so
-    /// they heal a bounded closure instead - `scope.evaluation()` is the toggle.
+    /// The anchor-side fixpoints skip the plain 5s `Tick` (its full-table scan
+    /// saturated the shared dispatch DB); `Global`/`Deep` run the global
+    /// backstop (`evaluation()` is `None`) and `Eval`/`Unstick` run a
+    /// closure-bounded pass (`evaluation()` is `Some`).
     #[test]
-    fn anchor_fixpoints_scan_globally_only_off_the_tick_cadence() {
+    fn anchor_fixpoints_skip_tick_and_bound_to_eval_when_scoped() {
         let eval = EvaluationId::now_v7();
-        assert!(ReconcileScope::Tick.evaluation().is_none());
+        assert!(!ReconcileScope::Tick.runs_anchor_fixpoints());
+        assert!(ReconcileScope::Global.runs_anchor_fixpoints());
+        assert!(ReconcileScope::Deep.runs_anchor_fixpoints());
+        assert!(ReconcileScope::Eval(eval).runs_anchor_fixpoints());
+        assert!(ReconcileScope::Unstick(eval).runs_anchor_fixpoints());
+
         assert!(ReconcileScope::Global.evaluation().is_none());
         assert!(ReconcileScope::Deep.evaluation().is_none());
         assert!(ReconcileScope::Eval(eval).evaluation().is_some());

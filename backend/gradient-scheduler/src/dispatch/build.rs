@@ -52,11 +52,12 @@ pub(super) async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
         if timer_tick {
             scheduler.job_tracker.write().await.bump_rescore_counts();
 
-            // Every timer tick runs the dispatch-gating anchor fixpoints and
-            // promotion (Tick); the full backstop with the cached_path-side
-            // fixpoint, unbacked-output demote, and failure sweep (Global) runs
-            // every GLOBAL_RECONCILE_TICKS - its full-table scans saturated
-            // Postgres when re-run every 5s on a large graph.
+            // Every timer tick runs promotion (Tick); the anchor-side flag
+            // fixpoints, unbacked-output demote, and failure sweep (Global) run
+            // every GLOBAL_RECONCILE_TICKS, and the cached_path-side fixpoint
+            // (Deep) hourly - their full-table scans saturated Postgres when
+            // re-run every 5s on a large graph. Active evals keep their flags
+            // fresh via reactive completion propagation and per-flush Eval passes.
             tick_count = tick_count.wrapping_add(1);
             let scope = if tick_count.is_multiple_of(DEEP_RECONCILE_TICKS) {
                 gradient_db::ReconcileScope::Deep
