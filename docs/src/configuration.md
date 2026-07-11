@@ -378,7 +378,7 @@ The token must be the 48-byte random secret returned by the registration API (ge
 | `capabilities.build` | `false` | Execute Nix builds |
 | `capabilities.sign` | `false` | Sign store paths |
 | `capabilities.federate` | `false` | Act as a federation relay (requires `discoverable`) |
-| `settings.maxConcurrentBuilds` | `100` | Parallel build slots |
+| `settings.maxConcurrentBuilds` | `64` | Parallel build slots |
 | `settings.maxBuildCores` | `null` | Cap on CPU cores a single build may use (nix `--cores` / `NIX_BUILD_CORES`, `GRADIENT_WORKER_MAX_BUILD_CORES`). When null, a build may use all available cores |
 | `settings.evalWorkers` | `1` | Number of evaluator subprocesses |
 | `settings.maxConcurrentEvaluations` | `1` | Parallel evaluations |
