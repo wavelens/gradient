@@ -179,6 +179,23 @@ impl EvalWorkerPool {
         while tasks.next().await.is_some() {}
     }
 
+    /// Drain and discard every idle worker so the next `acquire` spawns fresh
+    /// subprocesses. A pooled worker keeps its walker (and the open eval-cache
+    /// SQLite handle) alive across requests, so once the on-disk blob is deleted
+    /// the idle workers still point at the stale/corrupt file; recycling drops
+    /// them. Unlike [`Self::shutdown`] the semaphore stays open - the pool is
+    /// still usable - and `kill_on_drop` reaps the discarded children.
+    pub(super) fn recycle_idle(&self) {
+        let drained: Vec<EvalWorker> = {
+            let mut idle = self.idle.lock().unwrap();
+            std::mem::take(&mut *idle)
+        };
+        if !drained.is_empty() {
+            debug!(count = drained.len(), "recycling idle eval workers");
+        }
+        drop(drained);
+    }
+
     #[cfg(test)]
     pub(super) fn idle_count(&self) -> usize {
         self.idle.lock().unwrap().len()
@@ -356,6 +373,26 @@ mod tests {
             !live.lock().unwrap().contains(&4242),
             "PidGuard must remove its pid from the live registry on drop"
         );
+    }
+
+    #[tokio::test]
+    async fn recycle_idle_drains_but_keeps_pool_usable() {
+        let pool = EvalWorkerPool::new(2, 2 * GIB, String::new());
+        pool.push_for_test(fake_worker());
+        pool.push_for_test(fake_worker());
+        assert_eq!(pool.idle_count(), 2);
+
+        pool.recycle_idle();
+        assert_eq!(pool.idle_count(), 0, "recycle drains the idle workers");
+        assert!(
+            !pool.is_shutting_down(),
+            "recycle must leave the pool usable (semaphore open)"
+        );
+
+        // A fresh worker can still be handed out afterwards.
+        pool.push_for_test(fake_worker());
+        let w = pool.acquire().await.expect("acquire after recycle");
+        assert!(w.pid().is_some());
     }
 
     #[tokio::test]

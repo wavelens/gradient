@@ -26,7 +26,7 @@ use sea_orm::{
 use tracing::{debug, error, info, warn};
 
 use super::jobs::PendingEvalJob;
-use gradient_types::proto::DiscoveredDerivation;
+use gradient_types::proto::{BuildFailureKind, DiscoveredDerivation};
 
 const BATCH_SIZE: usize = 1000;
 
@@ -1292,7 +1292,19 @@ pub async fn handle_eval_job_failed(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
     error: &str,
+    kind: BuildFailureKind,
+    missing_paths: &[String],
 ) -> Result<()> {
+    // Corrupt shared eval-cache: the worker already dropped its local copy, so
+    // purge the poisoned shared blob and re-queue the eval to re-evaluate
+    // cache-less. If it heals (blob existed), skip the terminal-Failed path.
+    if kind == BuildFailureKind::CorruptEvalCache
+        && let Some(fingerprint) = missing_paths.first()
+        && heal_corrupt_eval_cache(state, evaluation_id, fingerprint).await?
+    {
+        return Ok(());
+    }
+
     if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
         .one(&state.worker_db)
         .await?
@@ -1311,6 +1323,43 @@ pub async fn handle_eval_job_failed(
         .await;
     }
     Ok(())
+}
+
+/// Purge a corrupt shared eval-cache blob and re-queue the evaluation. Returns
+/// `true` when it re-queued. The blob's own existence is the circuit breaker:
+/// the first corrupt failure finds the row and purges+re-queues it; once purged,
+/// a recurring corruption (the freshly-generated cache is itself unreadable, i.e.
+/// a broken worker/disk) has no shared blob to blame, so this returns `false` and
+/// the caller fails the eval for real instead of looping.
+async fn heal_corrupt_eval_cache(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+    fingerprint: &str,
+) -> Result<bool> {
+    let purged = EEvalCacheStore::delete_many()
+        .filter(CEvalCacheStore::Fingerprint.eq(fingerprint))
+        .exec(&state.worker_db)
+        .await?
+        .rows_affected;
+    if purged == 0 {
+        warn!(%evaluation_id, %fingerprint, "corrupt eval-cache recurred with no shared blob to purge; failing eval");
+        return Ok(false);
+    }
+    if let Err(e) = state.nar_storage.delete_eval_cache(fingerprint).await {
+        warn!(%fingerprint, error = %e, "failed to delete corrupt eval-cache object");
+    }
+    if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
+        .one(&state.worker_db)
+        .await?
+        && !matches!(
+            eval.status,
+            EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
+        )
+    {
+        update_evaluation_status(&state.db(), eval, EvaluationStatus::Queued).await;
+    }
+    info!(%evaluation_id, %fingerprint, "purged corrupt eval-cache blob; re-queued eval for fresh evaluation");
+    Ok(true)
 }
 
 /// Derivations whose *every* output hash is in `available` (cached in the

@@ -41,6 +41,64 @@ fn is_aborted(abort: &mut watch::Receiver<bool>) -> bool {
     *abort.borrow_and_update()
 }
 
+/// A pulled shared eval-cache blob was corrupt, so evaluation could not read it.
+/// Typed (like [`crate::proto::prefetch::CorruptCachedNar`]) so the failure
+/// classifier maps it to `BuildFailureKind::CorruptEvalCache` and the server
+/// purges the poisoned blob + re-queues, while the worker drops its own local
+/// copy first. Carries the corrupt blob's fingerprint (its `<fp>.sqlite` name).
+#[derive(Debug)]
+pub struct CorruptEvalCache {
+    pub fingerprint: String,
+}
+
+impl std::fmt::Display for CorruptEvalCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "corrupt eval-cache blob {}", self.fingerprint)
+    }
+}
+impl std::error::Error for CorruptEvalCache {}
+
+/// Whether `msg` is the SQLite-corruption signature of a poisoned eval-cache
+/// blob. The evaluator opens no other SQLite, so these phrases unambiguously
+/// mean "discard and re-evaluate", never a real flake error.
+fn is_corrupt_eval_cache_error(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    m.contains("database disk image is malformed") || m.contains("file is not a database")
+}
+
+/// The eval-cache blob fingerprint embedded in a corruption error, extracted
+/// from the `eval-cache-v6/<fingerprint>.sqlite` path Nix reports. `<fingerprint>`
+/// is a contiguous hex run (no ANSI colouring inside the path segment).
+fn eval_cache_fingerprint_from_error(msg: &str) -> Option<String> {
+    const MARKER: &str = "eval-cache-v6/";
+    let rest = &msg[msg.find(MARKER)? + MARKER.len()..];
+    let fp = &rest[..rest.find(".sqlite")?];
+    (!fp.is_empty() && fp.bytes().all(|b| b.is_ascii_hexdigit())).then(|| fp.to_string())
+}
+
+/// A [`CorruptEvalCache`] when `msg` is a corruption error naming our eval-cache
+/// blob; `None` otherwise (a corruption phrase with no eval-cache path is left
+/// as a normal error - we only self-heal our own cache).
+fn corrupt_eval_cache(msg: &str) -> Option<CorruptEvalCache> {
+    if !is_corrupt_eval_cache_error(msg) {
+        return None;
+    }
+    eval_cache_fingerprint_from_error(msg).map(|fingerprint| CorruptEvalCache { fingerprint })
+}
+
+/// Delete a corrupt eval-cache SQLite blob and its WAL/SHM sidecars so the next
+/// evaluation opens a fresh cache. A missing file is already-healed, not an error.
+async fn delete_eval_cache_blob(sqlite_path: &str) {
+    for suffix in ["", "-wal", "-shm"] {
+        let p = format!("{sqlite_path}{suffix}");
+        match tokio::fs::remove_file(&p).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => warn!(path = %p, error = %e, "failed to delete corrupt eval-cache blob"),
+        }
+    }
+}
+
 /// The set of attr paths the user requested explicitly: patterns with no
 /// `*`/`#` wildcard segment (and not an exclusion). A drvPath-resolution
 /// failure on one of these is a genuine error; failures on wildcard-expanded
@@ -263,7 +321,7 @@ pub async fn evaluate_derivations(
         }
     }
 
-    let EvalOutcome { flake_nodes } = evaluate_derivations_with(
+    let EvalOutcome { flake_nodes } = match evaluate_derivations_with(
         &*evaluator.resolver,
         &FsDrvReader,
         job,
@@ -271,7 +329,27 @@ pub async fn evaluate_derivations(
         updater,
         abort,
     )
-    .await?;
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            // Corrupt eval-cache: drop our local copy and recycle the eval
+            // subprocesses (a pooled worker keeps the cache open across
+            // requests) before re-raising, so the server-side purge + re-queue
+            // re-evaluates against a clean cache. Other errors just propagate.
+            if let Some(corrupt) = e.downcast_ref::<CorruptEvalCache>() {
+                let path = format!(
+                    "{}/eval-cache-v6/{}.sqlite",
+                    evaluator.resolver.eval_cache_dir(),
+                    corrupt.fingerprint
+                );
+                warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt; dropping local blob + recycling eval workers");
+                delete_eval_cache_blob(&path).await;
+                evaluator.resolver.recycle_workers();
+            }
+            return Err(e);
+        }
+    };
 
     // Drain the per-eval stats and ship one report; skip if nothing was
     // observed (metrics gated off or an empty eval).
@@ -826,6 +904,15 @@ pub async fn evaluate_derivations_with(
         }
     };
 
+    // A corrupt shared eval-cache blob makes every attr throw an SQLite error;
+    // that's not a flake failure, so fail with a typed signal for the self-heal
+    // (worker drops its local copy, server purges + re-queues) instead of
+    // reporting the SQLite noise as the evaluation's result.
+    if let Some(corrupt) = errors.iter().find_map(|e| corrupt_eval_cache(e)) {
+        warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt during discovery; failing for self-heal");
+        return Err(anyhow::Error::new(corrupt));
+    }
+
     if attrs.is_empty() {
         warn!("no derivations found for evaluation");
         errors.extend(unmatched_target_errors(&job.wildcards));
@@ -865,6 +952,12 @@ pub async fn evaluate_derivations_with(
             Ok((drv_path, _refs)) => root_drvs.push((attr, drv_path)),
             Err(e) => errors.push(format!("failed to resolve {attr}: {e}")),
         }
+    }
+
+    // Corruption can also surface while resolving attrs to `.drv` paths.
+    if let Some(corrupt) = errors.iter().find_map(|e| corrupt_eval_cache(e)) {
+        warn!(fingerprint = %corrupt.fingerprint, "eval-cache corrupt during resolve; failing for self-heal");
+        return Err(anyhow::Error::new(corrupt));
     }
 
     if root_drvs.is_empty() {
@@ -918,6 +1011,64 @@ mod tests {
             .parent()
             .unwrap()
             .join("test-store")
+    }
+
+    /// A real corrupt-blob error (with ANSI colouring around the path) is
+    /// recognised and its fingerprint extracted from the `eval-cache-v6/<fp>.sqlite`
+    /// segment; unrelated errors and non-eval-cache SQLite paths are left alone.
+    #[test]
+    fn corrupt_eval_cache_detects_and_extracts_fingerprint() {
+        let fp = "ad2ae6ba345f9dce45b15a42b43f4dcb706dec975e7ea558779f3861f9f0b586";
+        let msg = format!(
+            "failed to evaluate 'checks': [nix::SQLiteError] ...: database disk image is malformed \
+             (in '\u{1b}[35;1m/var/lib/gradient-worker/eval-cache/eval-cache-v6/{fp}.sqlite\u{1b}[0m')"
+        );
+        assert!(is_corrupt_eval_cache_error(&msg));
+        assert_eq!(eval_cache_fingerprint_from_error(&msg).as_deref(), Some(fp));
+        assert_eq!(corrupt_eval_cache(&msg).unwrap().fingerprint, fp);
+
+        assert!(!is_corrupt_eval_cache_error(
+            "failed to evaluate 'x': attribute missing"
+        ));
+        // Corruption phrase, but not our eval-cache blob: not our heal.
+        assert!(
+            corrupt_eval_cache("database disk image is malformed (in '/tmp/other.sqlite')")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn corrupt_eval_cache_fails_typed_without_reporting() {
+        let repo = "https://example.com/repo";
+        let fp = "deadbeefcafebabe1234567890abcdef1234567890abcdef1234567890abcdef";
+        let corrupt = format!(
+            "failed to evaluate 'packages': database disk image is malformed \
+             (in '/var/lib/gradient-worker/eval-cache/eval-cache-v6/{fp}.sqlite')"
+        );
+        let resolver = FakeDerivationResolver::new().with_flake_errors(repo, vec![corrupt]);
+        let drv_reader = FakeDrvReader::new();
+        let job = make_flake_job(repo);
+        let mut reporter = RecordingJobReporter::new();
+
+        let err = evaluate_derivations_with(
+            &resolver,
+            &drv_reader,
+            &job,
+            None,
+            &mut reporter,
+            &mut never_abort(),
+        )
+        .await
+        .expect_err("a corrupt eval-cache must fail, not complete");
+
+        let corrupt = err
+            .downcast_ref::<CorruptEvalCache>()
+            .expect("must be a typed CorruptEvalCache for the self-heal");
+        assert_eq!(corrupt.fingerprint, fp);
+        assert!(
+            reporter.last_eval_result().is_none(),
+            "SQLite corruption noise must not be reported as the eval result"
+        );
     }
 
     #[test]

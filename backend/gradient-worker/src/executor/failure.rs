@@ -9,6 +9,7 @@
 
 use gradient_proto::messages::BuildFailureKind;
 
+use crate::executor::eval::CorruptEvalCache;
 use crate::proto::prefetch::{CorruptCachedNar, MissingInputs, SubstituteNotOnUpstream};
 
 // ── BuildError ────────────────────────────────────────────────────────────────
@@ -145,6 +146,13 @@ pub(super) fn classify_substitute_failure(build_id: &str, e: anyhow::Error) -> B
 /// failures, plumbing errors) is an explicit, logged Permanent fallthrough -
 /// never a silent default.
 pub(crate) fn wire_failure(e: &anyhow::Error) -> (BuildFailureKind, Vec<String>) {
+    // Eval-job corruption: carry the blob fingerprint so the server purges it.
+    if let Some(c) = e.chain().find_map(|s| s.downcast_ref::<CorruptEvalCache>()) {
+        return (
+            BuildFailureKind::CorruptEvalCache,
+            vec![c.fingerprint.clone()],
+        );
+    }
     match e.downcast_ref::<BuildError>() {
         Some(be) => (be.kind, be.missing_paths.clone()),
         None => {
@@ -184,6 +192,21 @@ mod tests {
         let (kind, missing) = wire_failure(&e);
         assert_eq!(kind, BuildFailureKind::InputsUnavailable);
         assert_eq!(missing, vec!["/nix/store/x-y".to_owned()]);
+    }
+
+    #[test]
+    fn wire_failure_maps_corrupt_eval_cache_with_fingerprint() {
+        let e = anyhow::Error::new(CorruptEvalCache {
+            fingerprint: "abc123".into(),
+        })
+        .context("evaluate flake");
+        let (kind, missing) = wire_failure(&e);
+        assert_eq!(kind, BuildFailureKind::CorruptEvalCache);
+        assert_eq!(
+            missing,
+            vec!["abc123".to_owned()],
+            "the fingerprint rides missing_paths so the server can purge the blob"
+        );
     }
 
     #[test]

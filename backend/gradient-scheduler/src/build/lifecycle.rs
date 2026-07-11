@@ -64,6 +64,9 @@ pub(crate) fn decide_failure_outcome(
                 FailureOutcome::Permanent
             }
         }
+        // Eval-only kind (handled in `handle_eval_job_failed`); a build never
+        // produces it, so treat it as terminal if one somehow reaches here.
+        BuildFailureKind::CorruptEvalCache => FailureOutcome::Permanent,
     }
 }
 
@@ -92,7 +95,7 @@ fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
         BuildFailureKind::InputsUnavailable => Some(AttemptFailureReason::InputsUnavailable),
         BuildFailureKind::Permanent => Some(AttemptFailureReason::BuilderNonzero),
         BuildFailureKind::Timeout => Some(AttemptFailureReason::WallClockTimeout),
-        BuildFailureKind::Transient => None,
+        BuildFailureKind::Transient | BuildFailureKind::CorruptEvalCache => None,
     }
 }
 

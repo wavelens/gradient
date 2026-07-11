@@ -130,6 +130,8 @@ impl Scheduler {
                                 &self.state,
                                 j.evaluation_id,
                                 "fetch completed but no flake source was archived",
+                                BuildFailureKind::Permanent,
+                                &[],
                             )
                             .await
                         }
@@ -189,7 +191,18 @@ impl Scheduler {
         match job {
             Some(PendingJob::Eval(j)) => {
                 self.eval_edges.write().await.remove(&j.evaluation_id);
-                eval::handle_eval_job_failed(&self.state, j.evaluation_id, error).await
+                let r = eval::handle_eval_job_failed(
+                    &self.state,
+                    j.evaluation_id,
+                    error,
+                    kind,
+                    missing_paths,
+                )
+                .await;
+                // A corrupt-eval-cache heal re-queues the eval; kick dispatch so
+                // it re-runs promptly instead of waiting for the next tick.
+                self.kick_dispatch();
+                r
             }
             Some(PendingJob::Build(j)) => {
                 build::handle_build_job_failed(

@@ -561,4 +561,10 @@ pub enum BuildFailureKind {
     /// re-queues their producers so the next evaluation succeeds. Carries the
     /// offending paths on `ClientMessage::JobFailed.missing_paths`.
     InputsUnavailable,
+    /// The shared eval-cache SQLite blob the worker pulled is corrupt
+    /// ("database disk image is malformed"). Eval-only: the worker has already
+    /// dropped its local copy; the server purges the shared blob and re-queues
+    /// the evaluation so it re-evaluates cache-less. Carries the corrupt blob's
+    /// fingerprint on `ClientMessage::JobFailed.missing_paths`.
+    CorruptEvalCache,
 }

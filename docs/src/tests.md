@@ -156,6 +156,30 @@ pins the scoped SQL (recursive `eval_paths` CTE seeded from `build_job`, walking
 `reconcile.rs`: `cached_path_fixpoint_runs_on_deep_and_per_eval_only` pins the cadence.
 The recursive convergence stays E2E-CI-covered (MockDatabase can't run it).
 
+## Corrupt eval-cache blob self-heals (worker detects, server heals)
+
+A poisoned shared eval-cache SQLite blob (fingerprint `ad2ae6ba…`, error `database
+disk image is malformed`) failed every evaluation of a flake: the worker pulled the
+corrupt blob warm, Nix threw on every attr, and nothing purged it (the push
+size-guard even blocks a clean re-push from overwriting it). Fixed with the same
+worker-detects / server-heals split as `CorruptCachedNar` -> `reconcile_missing_inputs`:
+the worker classifies the SQLite-corruption signature into a typed `CorruptEvalCache`
+carrying the blob's fingerprint (parsed from the `eval-cache-v6/<fp>.sqlite` path),
+deletes its local blob (+WAL/SHM) and recycles the pooled eval subprocesses (a walker
+holds the cache open across requests), and reports `JobFailed { CorruptEvalCache,
+missing_paths: [fingerprint] }`. The server purges the shared `eval_cache_store`
+row + object and re-queues the eval to re-evaluate cache-less. The blob's own
+existence is the circuit breaker - once purged, a recurring corruption has no shared
+blob to blame (`rows_affected == 0`) so the eval fails for real instead of looping.
+`gradient-worker/src/executor/eval.rs`: `corrupt_eval_cache_detects_and_extracts_fingerprint`
+pins the signature match + fingerprint extraction (ANSI-coloured path),
+`corrupt_eval_cache_fails_typed_without_reporting` pins that a corrupt discovery
+fails with a typed `CorruptEvalCache` and reports no eval result;
+`executor/failure.rs`: `wire_failure_maps_corrupt_eval_cache_with_fingerprint` pins
+the wire mapping; `worker_pool/pool.rs`: `recycle_idle_drains_but_keeps_pool_usable`
+pins the subprocess recycle. The server purge + re-queue is E2E-CI-covered
+(MockDatabase can't run the delete + status transition).
+
 ## Transition effects fan out from one emitter (#476)
 
 `backend/gradient-db/src/status/effects.rs`:
