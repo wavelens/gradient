@@ -180,6 +180,25 @@ the wire mapping; `worker_pool/pool.rs`: `recycle_idle_drains_but_keeps_pool_usa
 pins the subprocess recycle. The server purge + re-queue is E2E-CI-covered
 (MockDatabase can't run the delete + status transition).
 
+## Self-heal must not destroy a producerless source (InputsUnavailable dead-end)
+
+An eval sat `graph_stuck` forever (prod `019f5218`): `vm-test-run` -> `nixos-test-driver`
+-> `gradient-1.3.0`/clippy, all `Created`, blocked on the build-time input source
+`gp5pwmz...-source` which had no `cached_path` row - and no producer, so nothing could
+rebuild it. Root cause: `demote_cached_output` deletes the `cached_path` row + NAR
+object for ANY reported-missing input, including a producerless build-time source. A
+single (possibly transient) `InputsUnavailable` on that source therefore permanently
+destroyed the only copy; the code's own comments even note "no producing derivation, so
+a missed source cannot self-heal - the build just fails InputsUnavailable forever." Fix:
+`demote_cached_output` now preserves a producerless artifact whose NAR is still present
+(`preserve_missing_artifact(has_producer, object_present)`), probing `NarStore::exists`
+- a present object means a transient fetch miss (keep it, the build retries), only a
+genuinely-gone one is purged (a zombie the dispatch gate must stop trusting). An output
+(has a producer, restored by its rebuild) keeps the demote+rebuild path. Probe errors
+preserve (never destroy on uncertainty). `gradient-db/src/cache_storage.rs`:
+`preserve_only_a_present_producerless_artifact` pins the decision table; the DB+storage
+integration (delete only when absent) is E2E-CI-covered (MockDatabase can't run it).
+
 ## Transition effects fan out from one emitter (#476)
 
 `backend/gradient-db/src/status/effects.rs`:

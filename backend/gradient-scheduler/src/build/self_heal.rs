@@ -49,9 +49,10 @@ async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[Deriv
 /// retries once the input is back (the dispatch gate holds it until then).
 ///
 /// A missing input with no producing derivation (a `.drv` file or a source
-/// path) has its stale row + object purged just the same; the next eval
-/// re-instantiates the `.drv` and re-pushes it, so this is a recoverable
-/// purge, not a dead-end.
+/// path) is only purged when its NAR is genuinely gone: `demote_cached_output`
+/// preserves a still-present producerless artifact, because nothing rebuilds it
+/// and deleting the only copy dead-ends every dependent on `InputsUnavailable`
+/// forever (a present one means a transient fetch miss, so the build just retries).
 pub(super) async fn reconcile_missing_inputs(
     state: &Arc<ServerState>,
     failed_derivation: DerivationId,

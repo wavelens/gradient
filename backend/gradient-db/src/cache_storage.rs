@@ -240,6 +240,16 @@ fn demoted_output(
     active
 }
 
+/// Whether `demote_cached_output` must PRESERVE a reported-missing artifact
+/// instead of deleting it: a producerless input (source / `.drv`) whose NAR is
+/// still present. Nothing rebuilds such an input, so deleting the only copy
+/// dead-ends every dependent on `InputsUnavailable`; a present object means the
+/// failure was transient. An output (`has_producer`, restored by its rebuild) or
+/// a genuinely-absent object is never preserved.
+fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
+    !has_producer && object_present
+}
+
 /// Purge a cached output proven unfetchable, so the next evaluation rebuilds it
 /// from scratch as if it had never been cached. Clears `is_cached` /
 /// `cached_path` on every `derivation_output` with this store-path `hash`,
@@ -247,8 +257,9 @@ fn demoted_output(
 /// cascade; the `derivation_output` FK is `ON DELETE SET NULL`), and removes the
 /// NAR object from storage so the row⟺object invariant holds. The derivation
 /// graph is left intact - only the cache artifact is removed. Returns the
-/// producing derivations for logging (empty for a `.drv`/source, which the next
-/// eval re-instantiates and re-pushes).
+/// producing derivations for logging. A producerless input (`.drv`/source) is
+/// only purged when its NAR is genuinely gone: a still-present one is preserved
+/// (see [`preserve_missing_artifact`]) since nothing else can restore it.
 pub async fn demote_cached_output<C: ConnectionTrait>(
     db: &C,
     nar_storage: &gradient_storage::NarStore,
@@ -263,6 +274,19 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     for o in outputs {
         producers.push(o.derivation);
         demoted_output(o).update(db).await?;
+    }
+
+    // A producerless input (a build-time source or a `.drv`) has nothing to
+    // rebuild it, so deleting a still-present NAR destroys the only copy and
+    // dead-ends every dependent on `InputsUnavailable` forever (a producer's
+    // output, by contrast, is restored by the rebuild below). Only purge it when
+    // the object is genuinely gone - a zombie the dispatch gate must stop trusting;
+    // a present object means the fetch failure was transient, so keep it and let
+    // the build retry. A probe error preserves (never destroy on uncertainty).
+    let has_producer = !producers.is_empty();
+    let object_present = !has_producer && nar_storage.exists(hash).await.unwrap_or(true);
+    if preserve_missing_artifact(has_producer, object_present) {
+        return Ok(producers);
     }
 
     // The artifact is gone, so a producer the graph trusts as build-once success
@@ -879,6 +903,28 @@ mod tests {
             sql.contains("dep.hash IS NULL OR dep.file_hash IS NULL OR NOT dep.closure_complete"),
             "a missing, unbacked, or incomplete reference must fail the gate: {sql}"
         );
+    }
+
+    /// A producerless input (source / `.drv`) whose NAR is still present must be
+    /// PRESERVED by `demote_cached_output`: nothing rebuilds it, so deleting the
+    /// only copy dead-ends every dependent on `InputsUnavailable`. An output (has
+    /// a producer, restored by the rebuild) or a genuinely-absent object is never
+    /// preserved.
+    #[test]
+    fn preserve_only_a_present_producerless_artifact() {
+        assert!(
+            preserve_missing_artifact(false, true),
+            "producerless + present must be kept (transient fetch miss, not a zombie)"
+        );
+        assert!(
+            !preserve_missing_artifact(false, false),
+            "producerless + gone is a zombie to purge"
+        );
+        assert!(
+            !preserve_missing_artifact(true, true),
+            "an output is demoted so its producer rebuilds it"
+        );
+        assert!(!preserve_missing_artifact(true, false));
     }
 
     /// The `cached_path.closure_complete` fixpoint must offer a per-eval bounded
