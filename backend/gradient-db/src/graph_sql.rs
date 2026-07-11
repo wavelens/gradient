@@ -61,6 +61,25 @@ pub fn deps_ready_predicate(alias: &str) -> String {
     )
 }
 
+/// The build target `{alias}`'s own `.drv` has its full NAR reference closure
+/// backed in the cache (`cached_path.closure_complete`, whose ground truth is
+/// every recorded `cached_path_reference` resolving to a backed, itself
+/// closure-complete row). A `.drv` is an ordinary compressed-NAR store path, so
+/// this is the authoritative "the worker can fetch and import the whole
+/// input-`.drv` closure" signal - computed over the actual `.drv` NAR references,
+/// not the eval-time build graph. The build-graph `drv_closure_cached` flag
+/// mirrors it but diverges when eval pruning leaves dependency edges unrecorded
+/// (`edges_complete = false` with no edges), dead-zoning a build whose `.drv`
+/// closure is in fact fully cached; the dispatch gate accepts either signal.
+pub fn drv_nar_closure_complete_predicate(alias: &str) -> String {
+    format!(
+        r#"EXISTS (
+        SELECT 1 FROM derivation d
+        JOIN cached_path cp ON cp.hash = d.hash
+        WHERE d.id = {alias}.derivation AND cp.closure_complete)"#
+    )
+}
+
 /// Closure of the derivations an evaluation directly references (its
 /// `build_job` rows), walking toward dependencies. Binds the evaluation id as
 /// `$1`. Shared by every per-eval sweep so they all see the same closure.
@@ -148,6 +167,22 @@ mod tests {
         assert!(
             p.contains("FROM derivation_input_source s") && p.contains("cp.file_hash IS NOT NULL"),
             "every input source must be fully cached: {p}"
+        );
+    }
+
+    /// A `.drv` is an ordinary NAR store path, so the authoritative "the worker
+    /// can import the whole input-`.drv` closure" signal is the `.drv`'s own
+    /// `cached_path.closure_complete` (computed over real NAR references), not the
+    /// eval-build-graph `drv_closure_cached` flag that diverges when pruning
+    /// leaves edges unrecorded. The predicate must key on that.
+    #[test]
+    fn drv_nar_closure_predicate_keys_on_cached_path_closure_complete() {
+        let p = norm(&drv_nar_closure_complete_predicate("db"));
+        assert!(
+            p.contains("JOIN cached_path cp ON cp.hash = d.hash")
+                && p.contains("d.id = db.derivation")
+                && p.contains("cp.closure_complete"),
+            "must assert the build target's own .drv NAR-closure is complete: {p}"
         );
     }
 

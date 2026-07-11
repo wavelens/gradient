@@ -573,10 +573,15 @@ fn promote_ready_sql() -> String {
 /// right now. Reachability (`build_job` EXISTS) skips anchors left Queued after
 /// their last referencing eval was torn down; a `substitutable` anchor dispatches
 /// with no dependency wait at all (its NAR is on an upstream cache); otherwise the
-/// anchor's own `.drv` closure must be importable (`drv_closure_cached`) and the
-/// shared readiness predicate must hold. Ordered by dependency count desc
-/// (integration builds first), then age. This is [`promote_ready`]'s predicate
-/// applied one step later - both embed [`crate::graph_sql::deps_ready_predicate`].
+/// shared readiness predicate must hold and the anchor's own `.drv` closure must be
+/// importable, satisfied by either the build-graph `drv_closure_cached` flag or the
+/// `.drv`'s own NAR-closure (`cached_path.closure_complete`, via
+/// [`crate::graph_sql::drv_nar_closure_complete_predicate`]). The flag diverges from
+/// that NAR ground truth when eval pruning leaves a substitutable dep's edges
+/// unrecorded, so keying on it alone stalls a build whose `.drv` closure is in fact
+/// fully cached. Ordered by dependency count desc (integration builds first), then
+/// age. This is [`promote_ready`]'s predicate applied one step later - both embed
+/// [`crate::graph_sql::deps_ready_predicate`].
 pub async fn find_ready_anchors<C: ConnectionTrait>(
     db: &C,
 ) -> Result<Vec<gradient_types::MDerivationBuild>, DbErr> {
@@ -592,6 +597,7 @@ pub async fn find_ready_anchors<C: ConnectionTrait>(
 
 fn find_ready_anchors_sql() -> String {
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");
+    let drv_nar_closure = crate::graph_sql::drv_nar_closure_complete_predicate("db");
     format!(
         r#"
         SELECT db.*
@@ -600,7 +606,7 @@ fn find_ready_anchors_sql() -> String {
           AND db.edges_complete
           AND EXISTS (
             SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
-          AND (db.substitutable OR (db.drv_closure_cached AND {deps_ready}))
+          AND (db.substitutable OR ((db.drv_closure_cached OR {drv_nar_closure}) AND {deps_ready}))
         ORDER BY
             (SELECT count(*)
                FROM derivation_dependency dd
@@ -895,9 +901,12 @@ mod tests {
 
     /// Promotion and the dispatch gate must share one readiness definition: both
     /// statements embed `deps_ready_predicate` verbatim, and only the dispatch
-    /// gate adds the `.drv`-importability arm (`drv_closure_cached`). A drift
-    /// between the two is a latent dead zone (promoted but never dispatchable,
-    /// or dispatched without its inputs).
+    /// gate adds the `.drv`-importability arm. That arm accepts either the
+    /// build-graph `drv_closure_cached` flag OR the `.drv`'s own NAR-closure
+    /// (`cached_path.closure_complete`, the ground truth) - the flag diverges when
+    /// eval pruning leaves edges unrecorded, so keying on it alone dead-zones a
+    /// build whose `.drv` closure is in fact fully cached. A drift between the two
+    /// statements is a latent dead zone.
     #[test]
     fn promotion_and_dispatch_share_the_readiness_predicate() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -913,8 +922,9 @@ mod tests {
             "find_ready_anchors must embed the shared predicate: {dispatch}"
         );
         assert!(
-            dispatch.contains("db.substitutable OR (db.drv_closure_cached AND"),
-            "dispatch additionally requires an importable .drv closure: {dispatch}"
+            dispatch.contains("db.substitutable OR ((db.drv_closure_cached OR")
+                && dispatch.contains("cp.closure_complete"),
+            "dispatch accepts the build-graph flag OR the .drv's own NAR-closure: {dispatch}"
         );
         assert!(
             promote.contains("db.substitutable OR (NOT EXISTS"),

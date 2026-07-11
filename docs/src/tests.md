@@ -111,6 +111,26 @@ dispatch gate so the stall is legible instead of a silent `Building`:
   its `.drv` closure cached and a matching worker is dispatchable, so the flag
   gates only the missing-`.drv` dead zone.
 
+The dispatch gate also accepts the `.drv`'s own NAR-closure as an alternative to
+the `drv_closure_cached` build-graph flag. A `.drv` is an ordinary compressed-NAR
+store path (its whole closure is tracked by `cached_path.closure_complete` over
+real `cached_path_reference` edges), whereas `drv_closure_cached` re-derives the
+same fact from the eval-time `derivation_dependency` graph - which the substitutable
+BFS prune leaves incomplete (`edges_complete = false` with zero recorded edges).
+The two diverge: on prod (`019f4eb9`) 103 frontier builds had their `.drv`'s full
+NAR closure cached (`cached_path.closure_complete = true`) yet `drv_closure_cached
+= false`, so `find_ready_anchors` refused to dispatch genuinely-buildable work and
+the eval hung `Building` for hours. Fix: `find_ready_anchors_sql` now gates on
+`substitutable OR ((drv_closure_cached OR {drv_nar_closure}) AND deps_ready)` where
+`graph_sql::drv_nar_closure_complete_predicate` asserts the build target's own
+`.drv` is `cached_path.closure_complete`. Sound with no `InputsUnavailable` risk -
+`closure_complete` means every transitive `.drv` reference is backed, exactly the
+worker import requirement - and strictly additive (never removes a dispatchable
+build). `graph_sql.rs`: `drv_nar_closure_predicate_keys_on_cached_path_closure_complete`
+pins the predicate; `promotion.rs`:
+`promotion_and_dispatch_share_the_readiness_predicate` pins the new gate shape; the
+recursive marking stays E2E-CI-covered (MockDatabase can't run it).
+
 ## Transition effects fan out from one emitter (#476)
 
 `backend/gradient-db/src/status/effects.rs`:
