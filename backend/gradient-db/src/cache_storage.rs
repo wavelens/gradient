@@ -458,6 +458,48 @@ pub(crate) const CACHED_PATH_CLOSURE_COMPLETE_GATE: &str = r#"
           AND (dep.hash IS NULL OR dep.file_hash IS NULL OR NOT dep.closure_complete))
 "#;
 
+/// Prelude CTE and `cp` membership filter bounding the `cached_path` fixpoint to
+/// one eval's output NAR-reference closure. `None` yields empty fragments (the
+/// global full-table `Deep` backstop); `Some` seeds `eval_paths` from the eval's
+/// `build_job` output hashes and walks `cached_path_reference` toward references,
+/// so the bound is closed under the reference relation and the SET pass still
+/// converges leaves-first within it. Eval id binds as `$1`.
+fn cached_path_eval_scope_fragments(
+    scope: Option<gradient_types::EvaluationId>,
+) -> (String, String) {
+    match scope {
+        None => (String::new(), String::new()),
+        Some(_) => (
+            "WITH RECURSIVE eval_paths(hash) AS ( \
+                 SELECT DISTINCT o.hash FROM derivation_output o \
+                 JOIN build_job bj ON bj.derivation = o.derivation \
+                 WHERE bj.evaluation = $1 \
+               UNION \
+                 SELECT r.reference_hash FROM cached_path_reference r \
+                 JOIN eval_paths ep ON r.referrer = ep.hash) "
+                .to_string(),
+            " AND cp.hash IN (SELECT hash FROM eval_paths)".to_string(),
+        ),
+    }
+}
+
+/// CLEAR + SET statements for the `cached_path.closure_complete` fixpoint,
+/// sharing `CACHED_PATH_CLOSURE_COMPLETE_GATE` (so both passes key on the same
+/// ground truth) and `cached_path_eval_scope_fragments(scope)` (so both see the
+/// same closure bound).
+fn cached_path_closure_statements(scope: Option<gradient_types::EvaluationId>) -> (String, String) {
+    let (prelude, filter) = cached_path_eval_scope_fragments(scope);
+    let clear = format!(
+        "{prelude}UPDATE cached_path cp SET closure_complete = false \
+         WHERE cp.closure_complete AND NOT ({CACHED_PATH_CLOSURE_COMPLETE_GATE}){filter}"
+    );
+    let set = format!(
+        "{prelude}UPDATE cached_path cp SET closure_complete = true \
+         WHERE NOT cp.closure_complete AND ({CACHED_PATH_CLOSURE_COMPLETE_GATE}){filter}"
+    );
+    (clear, set)
+}
+
 /// Bidirectional CLEAR+SET fixpoint over `cached_path.closure_complete`,
 /// mirroring the anchor-side fixpoints. Before this the flag had no forward
 /// maintainer at all: only the m20260624 backfill ever set it, ingest inserts
@@ -467,21 +509,29 @@ pub(crate) const CACHED_PATH_CLOSURE_COMPLETE_GATE: &str = r#"
 /// closure regressed (GC, purge), SET marks rows whose full reference closure
 /// is backed, one layer per pass. A converged cache costs two zero-row
 /// statements.
+///
+/// `scope` bounds the sweep: `None` is the full-table `Deep` backstop, while
+/// `Some(eval)` walks only that eval's output closure so it can run cheaply on
+/// every `Eval`/`Unstick` worker event - the flag then converges as an eval
+/// pushes its closures instead of lagging up to a full `Deep` interval, which
+/// is what keeps the BFS prune gate (`prunable_known_derivations`) able to skip
+/// an already-built subtree on the next evaluation.
 pub async fn reconcile_cached_path_closure_complete<C: ConnectionTrait>(
     db: &C,
+    scope: Option<gradient_types::EvaluationId>,
 ) -> Result<(), sea_orm::DbErr> {
-    let clear = format!(
-        "UPDATE cached_path cp SET closure_complete = false \
-         WHERE cp.closure_complete AND NOT ({CACHED_PATH_CLOSURE_COMPLETE_GATE})"
-    );
-    let set = format!(
-        "UPDATE cached_path cp SET closure_complete = true \
-         WHERE NOT cp.closure_complete AND {CACHED_PATH_CLOSURE_COMPLETE_GATE}"
-    );
+    let (clear, set) = cached_path_closure_statements(scope);
+    let params: Vec<sea_orm::Value> = scope
+        .map(|id| vec![sea_orm::Value::Uuid(Some(Box::new(id.into_inner())))])
+        .unwrap_or_default();
     for stmt in [clear, set] {
         loop {
             let changed = db
-                .execute(Statement::from_string(DatabaseBackend::Postgres, &stmt))
+                .execute(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    &stmt,
+                    params.clone(),
+                ))
                 .await?
                 .rows_affected();
             if changed == 0 {
@@ -829,6 +879,41 @@ mod tests {
             sql.contains("dep.hash IS NULL OR dep.file_hash IS NULL OR NOT dep.closure_complete"),
             "a missing, unbacked, or incomplete reference must fail the gate: {sql}"
         );
+    }
+
+    /// The `cached_path.closure_complete` fixpoint must offer a per-eval bounded
+    /// form so it can converge on every worker event (like the anchor fixpoints)
+    /// without the full-table scan that made it a `Deep`-only backstop. `None` is
+    /// the global full-table pass; `Some(eval)` bounds CLEAR/SET to that eval's
+    /// output NAR-reference closure, seeded from its `build_job` outputs.
+    #[test]
+    fn cached_path_closure_fixpoint_scopes_to_one_eval() {
+        let (clear_global, set_global) = cached_path_closure_statements(None);
+        assert!(
+            !clear_global.contains("eval_paths") && !set_global.contains("eval_paths"),
+            "the global pass stays full-table: {clear_global} / {set_global}"
+        );
+
+        let eval = gradient_types::EvaluationId::now_v7();
+        let (clear, set) = cached_path_closure_statements(Some(eval));
+        for stmt in [&clear, &set] {
+            assert!(
+                stmt.contains("WITH RECURSIVE eval_paths(hash)"),
+                "scoped pass bounds to the eval's paths: {stmt}"
+            );
+            assert!(
+                stmt.contains("bj.evaluation = $1"),
+                "seeded from the eval's build_job outputs: {stmt}"
+            );
+            assert!(
+                stmt.contains("SELECT r.reference_hash FROM cached_path_reference r"),
+                "walks the NAR reference closure so leaves converge first: {stmt}"
+            );
+            assert!(
+                stmt.contains("cp.hash IN (SELECT hash FROM eval_paths)"),
+                "restricts the UPDATE to that closure: {stmt}"
+            );
+        }
     }
 
     /// `demote_referrers_of` may only demote referrers that are rebuildable

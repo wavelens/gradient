@@ -63,14 +63,20 @@ impl ReconcileScope {
         }
     }
 
-    /// Whether this pass runs the full `cached_path.closure_complete`
-    /// re-derivation. Only the hourly `Deep` backstop pays its full-table
-    /// CLEAR/SET scan; every other scope - including the per-eval `Unstick`,
-    /// which rides the 5s dispatch cadence and fires inline on worker events -
-    /// relies on event-driven clears plus ingest to keep the flag fresh, so a
-    /// self-heal can never re-run the scan that saturated Postgres.
+    /// Whether this pass runs the `cached_path.closure_complete` re-derivation,
+    /// and (via `evaluation()`) at what scope. Only the hourly `Deep` backstop
+    /// pays the full-table CLEAR/SET scan that once saturated Postgres; `Eval`/
+    /// `Unstick` run the bounded per-eval form (its own output closure), cheap
+    /// enough for the 5s worker-event cadence. `Global` (30s) and `Tick` skip it
+    /// entirely, since neither carries an eval to bound the scan to and would
+    /// fall back to the full table. Running it per eval keeps the flag fresh
+    /// enough for the BFS prune gate to skip an already-built subtree on the next
+    /// eval, instead of lagging a whole `Deep` interval behind a build.
     fn runs_cached_path_fixpoint(&self) -> bool {
-        matches!(self, ReconcileScope::Deep)
+        matches!(
+            self,
+            ReconcileScope::Deep | ReconcileScope::Eval(_) | ReconcileScope::Unstick(_)
+        )
     }
 
     /// Whether this pass runs the anchor-side flag fixpoints
@@ -171,7 +177,9 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     }
 
     if scope.runs_cached_path_fixpoint()
-        && let Err(e) = crate::cache_storage::reconcile_cached_path_closure_complete(db).await
+        && let Err(e) =
+            crate::cache_storage::reconcile_cached_path_closure_complete(db, scope.evaluation())
+                .await
     {
         error!(error = %e, "reconcile: reconcile_cached_path_closure_complete failed");
     }
@@ -234,14 +242,21 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
 mod tests {
     use super::*;
 
+    /// The cached_path fixpoint runs full-table only on `Deep`, bounded per-eval
+    /// on `Eval`/`Unstick` (so a build's outputs mark `closure_complete` before
+    /// the next eval prunes them), and never on `Tick`/`Global` (no eval to bound
+    /// the scan, so those would fall back to the saturating full table).
     #[test]
-    fn only_deep_runs_the_cached_path_fixpoint() {
+    fn cached_path_fixpoint_runs_on_deep_and_per_eval_only() {
         let eval = EvaluationId::now_v7();
         assert!(ReconcileScope::Deep.runs_cached_path_fixpoint());
+        assert!(ReconcileScope::Eval(eval).runs_cached_path_fixpoint());
+        assert!(ReconcileScope::Unstick(eval).runs_cached_path_fixpoint());
         assert!(!ReconcileScope::Tick.runs_cached_path_fixpoint());
         assert!(!ReconcileScope::Global.runs_cached_path_fixpoint());
-        assert!(!ReconcileScope::Eval(eval).runs_cached_path_fixpoint());
-        assert!(!ReconcileScope::Unstick(eval).runs_cached_path_fixpoint());
+        // Deep is the global backstop; the per-eval scopes bound the scan.
+        assert!(ReconcileScope::Deep.evaluation().is_none());
+        assert!(ReconcileScope::Eval(eval).evaluation().is_some());
     }
 
     /// The anchor-side fixpoints skip the plain 5s `Tick` (its full-table scan

@@ -131,6 +131,31 @@ pins the predicate; `promotion.rs`:
 `promotion_and_dispatch_share_the_readiness_predicate` pins the new gate shape; the
 recursive marking stays E2E-CI-covered (MockDatabase can't run it).
 
+## cached_path.closure_complete converges per eval (requeue prunes to entry points)
+
+The BFS prune gate (`prunable_known_derivations`) skips an already-built subtree
+only when its output has `cached_path.closure_complete = true`, but that flag was
+maintained solely by the full-table `reconcile_cached_path_closure_complete` sweep,
+which `runs_cached_path_fixpoint` gated to `Deep` (1h) alone - the sweep's cost is
+why it was pulled off the faster cadences. Unlike the anchor flags it had no inline
+setter and no per-eval convergence, so a freshly built-and-pushed output sat at
+`closure_complete = false` for up to a full `Deep` interval. During that window a
+requeue of a just-completed eval re-walked hundreds of already-built interior nodes
+instead of pruning to its entry points (prod `019f5201`: 5993 derivations walked for
+76 entry points, ~385 not-prunable, 59 of 72 blocking outputs stale-false - closure
+in fact fully cached). Fix: `reconcile_cached_path_closure_complete` now takes a
+`scope`; `Some(eval)` bounds the CLEAR/SET to that eval's output NAR-reference
+closure (seeded from its `build_job` output hashes, walked over `cached_path_reference`
+so the bound is closed under references and the SET still converges leaves-first),
+and `runs_cached_path_fixpoint` runs it bounded on every `Eval`/`Unstick` worker event
+while keeping the full table on `Deep` only (`Tick`/`Global` skip it - no eval to bound
+the scan). A completed eval then marks its own outputs `closure_complete` before the
+next eval prunes them. `cache_storage.rs`: `cached_path_closure_fixpoint_scopes_to_one_eval`
+pins the scoped SQL (recursive `eval_paths` CTE seeded from `build_job`, walking
+`cached_path_reference`, restricting the UPDATE) vs the full-table global form;
+`reconcile.rs`: `cached_path_fixpoint_runs_on_deep_and_per_eval_only` pins the cadence.
+The recursive convergence stays E2E-CI-covered (MockDatabase can't run it).
+
 ## Transition effects fan out from one emitter (#476)
 
 `backend/gradient-db/src/status/effects.rs`:
