@@ -759,39 +759,86 @@ async fn referrers_by_select<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
-    /// Demoting a proven-unfetchable output must remove the NAR object from
-    /// storage as well as the `cached_path` row, so a re-eval re-pushes it
-    /// instead of trusting a row whose object is gone.
-    #[tokio::test]
-    async fn demote_deletes_the_nar_object() {
+    fn present_nar(
+        hash: &str,
+    ) -> (
+        tempfile::TempDir,
+        gradient_storage::NarStore,
+        std::path::PathBuf,
+    ) {
         use gradient_storage::NarStore;
-        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
-        let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("nars").join(&hash[..2]);
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join(format!("{}.nar.zst", &hash[2..]));
         std::fs::write(&file, b"x").unwrap();
         let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
+        (tmp, nar_storage, file)
+    }
 
-        // A `.drv` hash has no `derivation_output` rows; demote still deletes the
-        // `cached_path` row (one exec) and the object.
+    /// A producerless input (`.drv` / source) whose NAR is still present must be
+    /// PRESERVED: nothing rebuilds it, so demote early-returns before touching the
+    /// `cached_path` row or the object. Appending no exec result is the assertion:
+    /// reaching `delete_many` would fail on the missing mock result.
+    #[tokio::test]
+    async fn demote_preserves_a_present_producerless_object() {
+        use sea_orm::{DatabaseBackend, MockDatabase};
+
+        let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
+        let (_tmp, nar_storage, file) = present_nar(hash);
+
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
             .into_connection();
 
         let producers = demote_cached_output(&db, &nar_storage, hash).await.unwrap();
 
-        assert!(producers.is_empty(), "a .drv has no producing derivation");
+        assert!(producers.is_empty(), "a producerless input has no producer");
         assert!(
-            !file.exists(),
-            "demote must delete the NAR object from storage"
+            file.exists(),
+            "a present producerless object must be preserved"
         );
+    }
+
+    /// An output (a producer restores it on rebuild) whose NAR is present must have
+    /// the object AND `cached_path` row removed, so a re-eval re-pushes it instead
+    /// of trusting a row whose object is gone.
+    #[tokio::test]
+    async fn demote_deletes_a_present_output_object() {
+        use gradient_types::ids::{DerivationId, DerivationOutputId};
+        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+
+        let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
+        let (_tmp, nar_storage, file) = present_nar(hash);
+
+        let output = gradient_entity::derivation_output::Model {
+            id: DerivationOutputId::now_v7(),
+            derivation: DerivationId::now_v7(),
+            hash: hash.to_string(),
+            ..Default::default()
+        };
+
+        // Find the output, RETURNING the demoted row, reset its producer, delete
+        // the `cached_path` row; then the object is removed from storage.
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![output.clone()], vec![output]])
+            .append_exec_results([
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+            ])
+            .into_connection();
+
+        let producers = demote_cached_output(&db, &nar_storage, hash).await.unwrap();
+
+        assert_eq!(producers.len(), 1, "the output's producer is returned");
+        assert!(!file.exists(), "demote must delete the output's NAR object");
     }
 
     /// Demote must clear `external_url` too, not just `is_cached` - otherwise the
