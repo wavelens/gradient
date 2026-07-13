@@ -6465,3 +6465,23 @@ comes from `query_path_info`'s `UnkeyedValidPathInfo.ca` (harmonia
   server-received `NarUploaded.ca` matches. Daemon-sourced `ca` (the
   `NarSource::Path` branch through `gather_path_meta`) needs a live nix daemon
   and is covered by E2E CI.
+
+## Narinfo emission and protocol round-tripping of content address
+
+The `ca` field is persisted end-to-end: from worker `PathMeta` through
+`NarUploaded.ca` to the server's `cached_path.ca` column, and served in narinfo
+replies via `NixPathInfo.ca`.
+
+- `backend/gradient-types/src/nix_cache.rs` `tests`:
+  `nix_path_info_ca_appears_only_when_set` constructs `NixPathInfo` with and
+  without `ca` set, verifies that narinfo emission includes `CA:` line only when
+  `ca: Some(...)` is present, and the emitted line contains the exact
+  content-address string.
+- `backend/gradient-proto/src/wire.rs` `tests`:
+  `nar_uploaded_round_trips_content_address` encodes a `NarUploaded` with
+  `ca: Some(...)` via rkyv, decodes it, and asserts `ca` field matches
+  byte-for-byte.
+- `backend/gradient-proto/src/ingest.rs` `tests`:
+  `ingest_records_content_address` drives the ingest pipeline with a
+  `NarUploadRecord` holding `ca: Some(...)`, asserts the resulting `cached_path`
+  row has `ca` populated with the exact input string.
