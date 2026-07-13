@@ -333,6 +333,7 @@ impl<'a> DispatchContext<'a> {
         nar_hash: String,
         references: Vec<String>,
         deriver: Option<String>,
+        ca: Option<String>,
         nar: &mut NarReceiveStore,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, "NarUploaded");
@@ -400,6 +401,7 @@ impl<'a> DispatchContext<'a> {
                 nar_hash,
                 references,
                 deriver,
+                ca,
                 staged,
             })
             .await;
@@ -431,6 +433,7 @@ struct CommitUploadedNar {
     nar_hash: String,
     references: Vec<String>,
     deriver: Option<String>,
+    ca: Option<String>,
     staged: Option<StagedNar>,
 }
 
@@ -479,6 +482,7 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
         nar_hash: &c.nar_hash,
         references: &c.references,
         deriver: c.deriver.as_deref(),
+        ca: c.ca.as_deref(),
     };
     if let Err(e) = mark_nar_stored(&c.state, c.org_id, &c.store_path, &nar_record).await {
         warn!(store_path = %c.store_path, error = %e, "failed to mark NAR as stored");

@@ -152,6 +152,10 @@ pub enum ClientMessage {
         /// `None` when the worker could not query local path info or when the
         /// path has no deriver (e.g. sources, `.drv` files themselves).
         deriver: Option<String>,
+        /// Content address of the path in narinfo form
+        /// (`text:sha256:<b32>` / `fixed:[r:]sha256:<b32>`), when the path is
+        /// content-addressed. `None` for input-addressed paths.
+        ca: Option<String>,
     },
 
     /// Opens a push stream for `store_path`; sent before the first `NarPush`.

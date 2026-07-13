@@ -436,6 +436,7 @@ async fn send_nar_uploaded(
             nar_hash: meta.nar_hash,
             references,
             deriver,
+            ca: None, // Task 3 wires this from PathMeta / relay metadata.
         })
         .await
 }

@@ -24,6 +24,8 @@ pub(super) struct NarUploadRecord<'a> {
     pub references: &'a [String],
     /// Full deriver `.drv` path, if the worker reported one.
     pub deriver: Option<&'a str>,
+    /// Content address of the path in narinfo form, if content-addressed.
+    pub ca: Option<&'a str>,
 }
 
 /// Resolves the org's cache and increments the traffic counter. `org_id` is
@@ -109,6 +111,7 @@ pub(super) async fn mark_nar_stored(
         nar_hash: record.nar_hash,
         references: record.references,
         deriver: record.deriver,
+        ca: record.ca,
     };
 
     let cached_path_id = ingest_metadata_only(&state.worker_db, input, targets)

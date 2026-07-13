@@ -199,10 +199,11 @@ impl<'a> DispatchContext<'a> {
                 nar_hash,
                 references,
                 deriver,
+                ca,
             } => {
                 self.on_nar_uploaded(
                     job_id, store_path, file_hash, file_size, nar_size, nar_hash, references,
-                    deriver, nar,
+                    deriver, ca, nar,
                 )
                 .await;
                 true
