@@ -142,6 +142,7 @@ async fn main() {
             nar_hash: "sha256:deadbeef".into(),
             references: vec![],
             deriver: None,
+            ca: None,
         },
     )
     .await;

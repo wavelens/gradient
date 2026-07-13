@@ -24,7 +24,8 @@ pub use wire::{decode_client_message, decode_server_message};
 
 /// Wire protocol version implemented by this build.
 /// v5: dropped `PresignedUpload`/`PresignedDownload` and `AssignJob.timeout_secs`.
-/// v7: `CacheQuery`/`CacheStatus`/`CacheError` carry a per-query `query_id`.
+/// v7: `CacheQuery`/`CacheStatus`/`CacheError` carry a per-query `query_id`;
+///     `NarUploaded` carries the path's content address (`ca`).
 pub const PROTO_VERSION: u16 = 7;
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};

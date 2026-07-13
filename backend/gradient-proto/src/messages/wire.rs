@@ -108,4 +108,22 @@ mod tests {
         let decoded = decode_server_message(unaligned).expect("misaligned decode must succeed");
         assert_eq!(decoded, original);
     }
+
+    #[test]
+    fn nar_uploaded_round_trips_content_address() {
+        let original = ClientMessage::NarUploaded {
+            job_id: "job-1".into(),
+            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12".into(),
+            file_hash: "sha256:abc".into(),
+            file_size: 10,
+            nar_size: 20,
+            nar_hash: "sha256:def".into(),
+            references: vec![],
+            deriver: None,
+            ca: Some("text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944".into()),
+        };
+        let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+        let decoded = decode_client_message(&bytes).expect("decode");
+        assert_eq!(decoded, original);
+    }
 }

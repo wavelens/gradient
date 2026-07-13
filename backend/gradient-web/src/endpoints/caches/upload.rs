@@ -125,6 +125,7 @@ pub async fn nars_upload(
             nar_hash: &narinfo.nar_hash,
             references: &narinfo.references,
             deriver: narinfo.deriver.as_deref(),
+            ca: None,
         },
         SignTargets::Cache(cache.id),
     )
@@ -318,6 +319,7 @@ pub async fn nar_finalize(
             nar_hash: &narinfo.nar_hash,
             references: &narinfo.references,
             deriver: narinfo.deriver.as_deref(),
+            ca: None,
         },
         SignTargets::Cache(cache.id),
     )

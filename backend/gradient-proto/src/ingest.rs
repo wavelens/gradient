@@ -25,6 +25,9 @@ pub struct IngestInput<'a> {
     /// References in hash-name format (no `/nix/store/` prefix).
     pub references: &'a [String],
     pub deriver: Option<&'a str>,
+    /// Content address in narinfo form (`text:sha256:<b32>` /
+    /// `fixed:[r:]sha256:<b32>`), if the path is content-addressed.
+    pub ca: Option<&'a str>,
 }
 
 pub enum SignTargets {
@@ -166,6 +169,9 @@ async fn upsert_and_sign<C: ConnectionTrait>(
             if input.deriver.is_some() {
                 active.deriver = Set(input.deriver.map(str::to_owned));
             }
+            if input.ca.is_some() {
+                active.ca = Set(input.ca.map(str::to_owned));
+            }
             active.update(db).await?;
             (id, false)
         }
@@ -179,6 +185,7 @@ async fn upsert_and_sign<C: ConnectionTrait>(
                 nar_size: Some(input.nar_size),
                 nar_hash: Some(normalize_nar_hash(input.nar_hash)),
                 deriver: input.deriver.map(str::to_owned),
+                ca: input.ca.map(str::to_owned),
                 created_at: ts,
                 ..Default::default()
             }
@@ -277,6 +284,7 @@ mod tests {
             nar_hash: "sha256:def",
             references: &[],
             deriver: None,
+            ca: None,
         }
     }
     fn returned_cached_path(hash: &str) -> gradient_entity::cached_path::Model {
@@ -479,6 +487,28 @@ mod tests {
             log_has_signature_insert(db),
             "OrgCaches target must insert a cached_path_signature placeholder"
         );
+    }
+
+    #[tokio::test]
+    async fn ingest_records_content_address() {
+        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let ca = "text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944";
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .append_query_results([vec![returned_cached_path(hash)]])
+            .into_connection();
+
+        let mut inp = input(SP);
+        inp.ca = Some(ca);
+        ingest_metadata_only(&db, inp, SignTargets::None)
+            .await
+            .expect("ingest");
+
+        let logged = db
+            .into_transaction_log()
+            .iter()
+            .any(|t| format!("{t:?}").contains(ca));
+        assert!(logged, "the content address must be written to cached_path");
     }
 
     /// No resolvable org (the exact state the pre-fix race produced) records the
