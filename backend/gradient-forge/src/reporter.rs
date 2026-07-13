@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::pr::{BranchCommit, PrRef};
+use crate::pr::{BranchCommit, CommitIdent, PrRef};
 use crate::registry::ForgeRegistry;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -13,6 +13,16 @@ use gradient_util::http_validation::{WebhookUrlError, validate_webhook_url};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::warn;
+
+/// Commit identity for the libgit2 force-push path: the resolved token owner
+/// when available, else the Gradient bot default. Never fails, so a token
+/// missing the forge's read-user scope no longer blocks the flake-lock PR.
+fn author_or_bot(resolved: Result<CommitIdent>, base_url: &str) -> CommitIdent {
+    resolved.unwrap_or_else(|e| {
+        warn!(error = %e, "resolving forge commit author; using Gradient bot default");
+        CommitIdent::gradient_bot(base_url)
+    })
+}
 
 /// Validate a user-supplied base URL for outbound CI API calls.
 ///
@@ -605,14 +615,14 @@ impl CiReporter for GiteaReporter {
         // Force-push: the Gitea/Forgejo REST API cannot force-update a ref, so
         // the contents API would stack commits on a never-rebased branch.
         // libgit2 needs an explicit signature, so resolve the token owner when
-        // no identity was configured.
+        // no identity was configured, defaulting to the Gradient bot if the
+        // token lacks the read:user scope.
         let mut commit = commit.clone();
         if commit.author.is_none() {
-            commit.author = Some(
+            let resolved =
                 crate::pr::gitea::authenticated_user(&self.client, &self.base_url, &self.token)
-                    .await
-                    .context("resolving Gitea commit author")?,
-            );
+                    .await;
+            commit.author = Some(author_or_bot(resolved, &self.base_url));
         }
         crate::git_push::force_push_lock_commit(
             format!("{}/{}/{}.git", self.base_url, owner, repo),
@@ -953,14 +963,14 @@ impl CiReporter for GitlabReporter {
     ) -> Result<String> {
         // Force-push: the GitLab commits API stacks onto a never-rebased branch,
         // so push a single clean commit on the current base instead. libgit2 needs
-        // an explicit signature, so resolve the token owner when none was set.
+        // an explicit signature, so resolve the token owner when none was set,
+        // defaulting to the Gradient bot if the token lacks the read_user scope.
         let mut commit = commit.clone();
         if commit.author.is_none() {
-            commit.author = Some(
+            let resolved =
                 crate::pr::gitlab::authenticated_user(&self.client, &self.base_url, &self.token)
-                    .await
-                    .context("resolving GitLab commit author")?,
-            );
+                    .await;
+            commit.author = Some(author_or_bot(resolved, &self.base_url));
         }
         crate::git_push::force_push_lock_commit(
             format!("{}/{}/{}.git", self.base_url, owner, repo),
@@ -1990,6 +2000,26 @@ mod tests {
 
     fn test_client() -> reqwest::Client {
         gradient_util::http::build_client().expect("build test http client")
+    }
+
+    #[test]
+    fn author_or_bot_keeps_resolved_identity() {
+        let ident = CommitIdent {
+            name: "Bot".to_owned(),
+            email: "bot@example.com".to_owned(),
+        };
+        assert_eq!(
+            author_or_bot(Ok(ident.clone()), "https://codeberg.org"),
+            ident
+        );
+    }
+
+    #[test]
+    fn author_or_bot_falls_back_to_gradient_bot_on_error() {
+        assert_eq!(
+            author_or_bot(Err(anyhow::anyhow!("403 read:user")), "https://codeberg.org"),
+            CommitIdent::gradient_bot("https://codeberg.org")
+        );
     }
 
     // ── State conversions ─────────────────────────────────────────────────────

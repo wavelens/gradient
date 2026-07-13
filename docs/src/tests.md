@@ -6409,6 +6409,16 @@ commit identity is chosen:
   `GRADIENT_PR_COMMIT_EMAIL` are non-empty; otherwise it falls back to
   forge-default attribution.
 
+The libgit2 force-push forges (Gitea/Forgejo, GitLab) need an explicit signature,
+so `pr.rs` `ident_tests` and `reporter.rs` `tests` cover the resolve-or-default path:
+- `gradient_bot_uses_host_noreply_email` / `gradient_bot_strips_scheme_port_and_path`
+  - `CommitIdent::gradient_bot` derives `Gradient <gradient@users.noreply.HOST>`
+  from the forge base URL.
+- `author_or_bot_keeps_resolved_identity` / `author_or_bot_falls_back_to_gradient_bot_on_error`
+  - the token owner is used when the get-user lookup succeeds, else the Gradient
+  bot default, so a token missing the `read:user` scope no longer fails the PR
+  (regression from `275f9b63`).
+
 ## `gradient cache upload`: compression, eager signing, closure default (#506/#507/#509)
 
 `gradient cache upload <store-path>` streamed the raw NAR but recorded it as the

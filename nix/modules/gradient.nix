@@ -814,7 +814,7 @@ in {
         };
 
         prCommitName = lib.mkOption {
-          description = "Git author/committer name for the commits Gradient's `open_pr` action pushes. `null` (the default) lets the forge attribute the commit to the authenticated app/token: GitHub credits the App bot and signs it verified.";
+          description = "Git author/committer name for the commits Gradient's `open_pr` action pushes. `null` (the default) lets each forge pick attribution: GitHub credits the App bot and signs it verified; Gitea/Forgejo and GitLab use the token owner (needs the `read:user` / `read_user` scope), falling back to a `Gradient <gradient@users.noreply.HOST>` bot identity when that scope is missing.";
           type = lib.types.nullOr lib.types.str;
           default = null;
         };

@@ -32,11 +32,25 @@ pub struct CommitIdent {
     pub email: String,
 }
 
+impl CommitIdent {
+    /// Fallback bot identity for the libgit2 force-push path (Gitea/Forgejo,
+    /// GitLab) when no identity is configured and the token owner cannot be
+    /// resolved. GitHub never uses this: it omits the author so the forge
+    /// credits its App bot and signs the commit verified.
+    pub fn gradient_bot(base_url: &str) -> Self {
+        Self {
+            name: "Gradient".to_owned(),
+            email: format!("gradient@users.noreply.{}", host_of(base_url)),
+        }
+    }
+}
+
 /// A commit to upsert onto a branch: the message, optional identity, and edits.
 ///
-/// `author == None` lets the forge attribute the commit to the authenticated
-/// app/token: GitHub then credits the App bot and signs the commit (verified),
-/// which is why we omit the identity by default instead of inventing one.
+/// `author == None` lets each forge pick attribution: GitHub omits the identity
+/// so its App bot authors the commit (verified); the libgit2 force-push forges
+/// (Gitea/Forgejo, GitLab) resolve the token owner, falling back to
+/// [`CommitIdent::gradient_bot`] when that lookup's scope is missing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BranchCommit {
     pub message: String,
@@ -88,6 +102,24 @@ async fn send_ok(req: reqwest::RequestBuilder, ctx: &str) -> Result<reqwest::Sta
 }
 
 // ── GitHub (shared by PAT and App reporters) ────────────────────────────────
+
+#[cfg(test)]
+mod ident_tests {
+    use super::CommitIdent;
+
+    #[test]
+    fn gradient_bot_uses_host_noreply_email() {
+        let id = CommitIdent::gradient_bot("https://codeberg.org");
+        assert_eq!(id.name, "Gradient");
+        assert_eq!(id.email, "gradient@users.noreply.codeberg.org");
+    }
+
+    #[test]
+    fn gradient_bot_strips_scheme_port_and_path() {
+        let id = CommitIdent::gradient_bot("https://git.example.com:3000/sub");
+        assert_eq!(id.email, "gradient@users.noreply.git.example.com");
+    }
+}
 
 pub(crate) mod github {
     use super::*;

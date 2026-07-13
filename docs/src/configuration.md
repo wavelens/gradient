@@ -72,7 +72,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.enableRegistration` | `true` | Allow new user self-registration |
 | `settings.createOrg` | `everyone` | Who may create organizations via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Organization" button accordingly. (`GRADIENT_CREATE_ORG`) |
 | `settings.createCache` | `everyone` | Who may create caches via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Cache" button accordingly. (`GRADIENT_CREATE_CACHE`) |
-| `settings.prCommitName` | `null` | Git author/committer name for the commits the `open_pr` action pushes. `null` lets the forge attribute the commit to the authenticated app/token: GitHub credits the App bot and signs it verified. Set both this and `prCommitEmail` to force an explicit identity. (`GRADIENT_PR_COMMIT_NAME`) |
+| `settings.prCommitName` | `null` | Git author/committer name for the commits the `open_pr` action pushes. `null` lets each forge pick attribution: GitHub credits the App bot and signs it verified; Gitea/Forgejo and GitLab use the token owner (needs the `read:user` / `read_user` scope), falling back to a `Gradient <gradient@users.noreply.HOST>` bot identity when that scope is missing. Set both this and `prCommitEmail` to force an explicit identity. (`GRADIENT_PR_COMMIT_NAME`) |
 | `settings.prCommitEmail` | `null` | Git author/committer email for `open_pr` commits; see `prCommitName`. (`GRADIENT_PR_COMMIT_EMAIL`) |
 | `settings.deleteState` | `true` | Remove entities no longer in `state` (see below) |
 | `settings.cacheTtlHours` | `336` | TTL in hours for cached NARs not fetched recently (0 = disabled) |
