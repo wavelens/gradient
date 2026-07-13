@@ -2017,7 +2017,10 @@ mod tests {
     #[test]
     fn author_or_bot_falls_back_to_gradient_bot_on_error() {
         assert_eq!(
-            author_or_bot(Err(anyhow::anyhow!("403 read:user")), "https://codeberg.org"),
+            author_or_bot(
+                Err(anyhow::anyhow!("403 read:user")),
+                "https://codeberg.org"
+            ),
             CommitIdent::gradient_bot("https://codeberg.org")
         );
     }

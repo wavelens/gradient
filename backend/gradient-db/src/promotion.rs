@@ -830,7 +830,10 @@ mod tests {
             ),
         );
         assert_eq!(status_sql::attempt_outcome(AttemptOutcome::Failed), 3);
-        assert_eq!(status_sql::attempt_reason(AttemptFailureReason::BuilderNonzero), 5);
+        assert_eq!(
+            status_sql::attempt_reason(AttemptFailureReason::BuilderNonzero),
+            5
+        );
     }
 
     /// Both requeue paths must carry the deterministic-failure exclusion, keep
