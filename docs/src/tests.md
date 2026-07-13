@@ -6477,7 +6477,7 @@ replies via `NixPathInfo.ca`.
   without `ca` set, verifies that narinfo emission includes `CA:` line only when
   `ca: Some(...)` is present, and the emitted line contains the exact
   content-address string.
-- `backend/gradient-proto/src/wire.rs` `tests`:
+- `backend/gradient-proto/src/messages/wire.rs` `tests`:
   `nar_uploaded_round_trips_content_address` encodes a `NarUploaded` with
   `ca: Some(...)` via rkyv, decodes it, and asserts `ca` field matches
   byte-for-byte.

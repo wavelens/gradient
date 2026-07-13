@@ -336,7 +336,7 @@ impl<'a> DispatchContext<'a> {
         ca: Option<String>,
         nar: &mut NarReceiveStore,
     ) {
-        debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, "NarUploaded");
+        debug!(peer_id = %self.peer_id, %job_id, %store_path, %file_hash, file_size, nar_size, %nar_hash, ?deriver, ?ca, "NarUploaded");
 
         // Reject any NarUploaded for a path whose chunked transfer was rejected
         // mid-stream. Without this guard `mark_nar_stored` would record a
