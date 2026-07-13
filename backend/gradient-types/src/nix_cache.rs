@@ -290,9 +290,7 @@ mod tests {
         pi.ca = Some("text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944".into());
         let s = pi.to_nix_string();
         assert!(
-            s.contains(
-                "CA: text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944\n"
-            ),
+            s.contains("CA: text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944\n"),
             "content-addressed path must emit the CA line:\n{s}"
         );
     }
