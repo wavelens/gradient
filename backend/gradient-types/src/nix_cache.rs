@@ -283,10 +283,18 @@ mod tests {
     #[test]
     fn nix_path_info_ca_appears_only_when_set() {
         let mut pi = path_info();
-        assert!(!pi.to_nix_string().contains("CA:"));
-        pi.ca = Some("fixed:r:sha256:deadbeef".into());
+        assert!(
+            !pi.to_nix_string().contains("CA:"),
+            "no ca must omit the CA line"
+        );
+        pi.ca = Some("text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944".into());
         let s = pi.to_nix_string();
-        assert!(s.contains("CA: fixed:r:sha256:deadbeef"));
+        assert!(
+            s.contains(
+                "CA: text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944\n"
+            ),
+            "content-addressed path must emit the CA line:\n{s}"
+        );
     }
 
     #[test]
