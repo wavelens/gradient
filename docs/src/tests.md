@@ -6449,3 +6449,19 @@ auth-gated.
   `GET /api/v1/caches/main/upstreams` against a public cache and asserts the
   upstream `public_key` is returned; `anonymous_cannot_list_private_cache_upstreams`
   asserts a private cache still `404`s for anonymous callers.
+
+## Worker sources `NarUploaded.ca` from the daemon and the substitute relay
+
+`NarUploaded.ca` was a `None` bridge left after the wire field and DB column
+were added. The worker now populates it: on the direct-upload path, `PathMeta.ca`
+comes from `query_path_info`'s `UnkeyedValidPathInfo.ca` (harmonia
+`ContentAddress::to_string()`, narinfo form); on the substitute-relay path,
+`NarSource::Compressed.ca` carries the upstream `CachedPath.ca` from the
+`QueryMode::Pull` reply straight through to `NarUploaded`.
+
+- `backend/gradient-worker/src/proto/nar.rs` `proto::nar::tests`:
+  `compressed_source_threads_content_address` drives a `NarSource::Compressed`
+  upload with `ca: Some(...)` through `MockProtoServer` and asserts the
+  server-received `NarUploaded.ca` matches. Daemon-sourced `ca` (the
+  `NarSource::Path` branch through `gather_path_meta`) needs a live nix daemon
+  and is covered by E2E CI.

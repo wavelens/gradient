@@ -86,6 +86,7 @@ pub enum NarSource<'a> {
         meta: CompressedNarMeta,
         references: Vec<String>,
         deriver: Option<String>,
+        ca: Option<String>,
     },
 }
 
@@ -169,6 +170,7 @@ pub async fn upload_nar(
                 meta,
                 path_meta.references,
                 path_meta.deriver,
+                path_meta.ca,
             )
             .await
         }
@@ -177,6 +179,7 @@ pub async fn upload_nar(
             meta,
             references,
             deriver,
+            ca,
         } => {
             match sink {
                 NarSink::Relay { nar_recv } => {
@@ -207,7 +210,7 @@ pub async fn upload_nar(
                     http_put(url, method, headers, bytes.to_vec()).await?;
                 }
             }
-            send_nar_uploaded(writer, job_id, store_path, meta, references, deriver).await
+            send_nar_uploaded(writer, job_id, store_path, meta, references, deriver, ca).await
         }
     }
 }
@@ -418,6 +421,7 @@ async fn send_nar_uploaded(
     meta: CompressedNarMeta,
     references: Vec<String>,
     deriver: Option<String>,
+    ca: Option<String>,
 ) -> Result<()> {
     debug!(
         store_path,
@@ -436,7 +440,7 @@ async fn send_nar_uploaded(
             nar_hash: meta.nar_hash,
             references,
             deriver,
-            ca: None, // Task 3 wires this from PathMeta / relay metadata.
+            ca,
         })
         .await
 }
@@ -477,6 +481,8 @@ struct PathMeta {
     references: Vec<String>,
     /// Full deriver `.drv` path, if the daemon reports one.
     deriver: Option<String>,
+    /// Content address in narinfo form, if the daemon reports one.
+    ca: Option<String>,
 }
 
 /// Resolve the metadata an upload should attach to a NAR push.
@@ -560,10 +566,12 @@ async fn gather_path_meta(store: &LocalNixStore, store_path: &str) -> Option<Pat
         .collect();
 
     let deriver = path_info.deriver.as_ref().map(|d| d.to_string());
+    let ca = path_info.ca.as_ref().map(|c| c.to_string());
 
     Some(PathMeta {
         references,
         deriver,
+        ca,
     })
 }
 
@@ -979,6 +987,7 @@ mod tests {
                     meta,
                     references: vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()],
                     deriver: None,
+                    ca: None,
                 },
                 NarSink::Relay { nar_recv: &recv2 },
                 &writer,
@@ -988,6 +997,59 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         recv.resolve_push("job-relay", store_path, 0);
         push.await.unwrap().unwrap();
+        server_task.await.unwrap();
+    }
+
+    /// The upstream content address must thread through the relay's
+    /// `NarSource::Compressed` into the `NarUploaded` the server receives.
+    #[tokio::test]
+    async fn compressed_source_threads_content_address() {
+        let ca = "text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944";
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let expected_ca = ca.to_string();
+
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            let msg = sc.recv().await.unwrap();
+            match msg {
+                ClientMessage::NarUploaded { ca, .. } => {
+                    assert_eq!(ca.as_deref(), Some(expected_ca.as_str()));
+                }
+                other => panic!("expected NarUploaded, got {other:?}"),
+            }
+        });
+
+        let (http_url, _http_task) = one_shot_http_server().await;
+        let conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        let (writer, _reader) = conn.split();
+        let meta = CompressedNarMeta {
+            file_hash: "sha256:abc".into(),
+            file_size: 3,
+            nar_hash: "sha256:def".into(),
+            nar_size: 3,
+        };
+        upload_nar(
+            "job-ca",
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12",
+            NarSource::Compressed {
+                bytes: b"abc",
+                meta,
+                references: vec![],
+                deriver: None,
+                ca: Some(ca.to_string()),
+            },
+            NarSink::Presigned {
+                url: &http_url,
+                method: "PUT",
+                headers: &[],
+            },
+            &writer,
+        )
+        .await
+        .unwrap();
         server_task.await.unwrap();
     }
 
@@ -1025,6 +1087,7 @@ mod tests {
                 meta,
                 references: vec![],
                 deriver: None,
+                ca: None,
             },
             NarSink::Presigned {
                 url: &http_url,
