@@ -164,6 +164,7 @@ pub async fn relay_external_cached_outputs(
                 meta: cmeta,
                 references,
                 deriver: meta.deriver.clone(),
+                ca: upstream.ca.clone(),
             },
             crate::proto::nar::NarSink::from_upload_url(
                 push.get(path).and_then(|c| c.url.as_deref()),
