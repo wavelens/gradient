@@ -156,6 +156,30 @@ pins the scoped SQL (recursive `eval_paths` CTE seeded from `build_job`, walking
 `reconcile.rs`: `cached_path_fixpoint_runs_on_deep_and_per_eval_only` pins the cadence.
 The recursive convergence stays E2E-CI-covered (MockDatabase can't run it).
 
+## Requeue thaw skips a deterministic build failure (retry-storm fix)
+
+A fresh evaluation thaws the anchors it walks out of terminal failure back to
+`Created` (`requeue_failed_anchors` / `requeue_failed_closure_for_eval`), on the
+premise that a transient cause may have cleared. But a `BuilderNonzero` failure -
+the builder ran and exited non-zero - is deterministic: the same `.drv` rebuilds
+to the same exit. A polling-triggered project re-evaluated on its interval thus
+looped a non-substitutable cross-compile forever (prod `atop-riscv64` /
+`tree-sitter-riscv64`: ~680 rebuilds over 2.5 days, `FailedPermanent -> Created ->
+rebuild -> FailedPermanent` every ~7 min), saturating the fleet, while native
+one-shot-eval failures (never re-walked) stayed terminal. Both requeue paths now
+carry `AND NOT deterministic_build_failure(alias)` - an `EXISTS` over `build_attempt`
+for an `outcome=Failed, reason=BuilderNonzero` row on the anchor - so a reproducible
+builder exit is never thawed, while `FailedPermanent` reached via an exhausted
+*transient* cause (its latest reason is Network/OOM/... , not BuilderNonzero) keeps
+its legitimate cross-eval retry. `FailedPermanent` stays in `REQUEUEABLE`; the
+filter is the reason, not the status. `backend/gradient-db/src/promotion.rs`:
+`deterministic_build_failure_predicate_matches_builder_nonzero` pins the predicate
+SQL shape and its `outcome=3`/`reason=5` integers, and
+`requeue_keeps_failed_permanent_but_excludes_deterministic` pins that `REQUEUEABLE`
+still thaws `FailedPermanent` but never a build-once success;
+`status_sql.rs`: `renders_the_pinned_numbers` pins `attempt_outcome`/`attempt_reason`.
+The recursive requeue convergence stays E2E-CI-covered (no live DB in unit tests).
+
 ## Corrupt eval-cache blob self-heals (worker detects, server heals)
 
 A poisoned shared eval-cache SQLite blob (fingerprint `ad2ae6ba…`, error `database

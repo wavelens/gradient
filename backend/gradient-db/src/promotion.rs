@@ -46,6 +46,7 @@ use crate::graph_sql::{ClosureDirection, dependency_closure_cte, eval_closure_ct
 use crate::status::TransitionChange;
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
+use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, QueryResult, Statement, Value};
 
@@ -661,13 +662,29 @@ pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
     Ok(affected)
 }
 
+/// SQL predicate: the `derivation_build` aliased `alias` has a recorded
+/// deterministic build failure - the builder ran and exited non-zero. Rebuilding
+/// the identical derivation reproduces it, so a fresh evaluation must not thaw it
+/// (else it loops: re-queue -> rebuild -> same non-zero exit -> re-queue). Only a
+/// changed drv (a new anchor) or a newly-substitutable output can recover it.
+fn deterministic_build_failure(alias: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM build_attempt ba WHERE ba.derivation_build = {alias}.id \
+         AND ba.outcome = {outcome} AND ba.reason = {reason})",
+        outcome = status_sql::attempt_outcome(AttemptOutcome::Failed),
+        reason = status_sql::attempt_reason(AttemptFailureReason::BuilderNonzero),
+    )
+}
+
 /// Re-queue anchors a previous evaluation left in a terminal-failure state
 /// (`FailedPermanent`/`Aborted`/`DependencyFailed`/`FailedTimeout`) back to
 /// `Created`, for the derivations a new evaluation needs. A new evaluation is a
 /// fresh build intent - the upstream cache, network, or a transient cause may
 /// have changed since the global anchor failed - so it retries rather than
-/// inheriting the stale failure. Build-once success states
-/// (`Completed`/`Substituted`) are never touched. Returns the number re-queued.
+/// inheriting the stale failure. Anchors with a [`deterministic_build_failure`]
+/// are excluded: their non-zero builder exit is reproducible, so re-queueing only
+/// loops the fleet. Build-once success states (`Completed`/`Substituted`) are
+/// never touched. Returns the number re-queued.
 pub async fn requeue_failed_anchors<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
@@ -680,13 +697,15 @@ pub async fn requeue_failed_anchors<C: ConnectionTrait>(
                 DatabaseBackend::Postgres,
                 format!(
                     r#"
-                UPDATE derivation_build
+                UPDATE derivation_build db
                 SET status = {created}, attempt = 0, closure_complete = false,
                     updated_at = (now() AT TIME ZONE 'UTC')
-                WHERE derivation = ANY($1) AND status IN ({requeueable})
+                WHERE db.derivation = ANY($1) AND db.status IN ({requeueable})
+                  AND NOT {deterministic}
                 "#,
                     created = status_sql::build(BuildStatus::Created),
                     requeueable = status_sql::build_in(&BuildStatus::REQUEUEABLE),
+                    deterministic = deterministic_build_failure("db"),
                 ),
                 [ids.into()],
             ))
@@ -706,7 +725,9 @@ pub async fn requeue_failed_anchors<C: ConnectionTrait>(
 /// reactive heal. Walks `derivation_dependency` down from the eval's anchors and
 /// resets every `FailedPermanent`/`Aborted`/`DependencyFailed`/`FailedTimeout`
 /// node to `Created` so promotion (which keys on any `build_job`, not this eval's)
-/// can rebuild the failed subtree bottom-up. Returns the number re-queued.
+/// can rebuild the failed subtree bottom-up. Anchors with a
+/// [`deterministic_build_failure`] are excluded, as in [`requeue_failed_anchors`].
+/// Returns the number re-queued.
 pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
@@ -723,9 +744,11 @@ pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
                 updated_at = (now() AT TIME ZONE 'UTC')
             WHERE db.derivation IN (SELECT derivation FROM closure)
               AND db.status IN ({requeueable})
+              AND NOT {deterministic}
             "#,
                 created = status_sql::build(BuildStatus::Created),
                 requeueable = status_sql::build_in(&BuildStatus::REQUEUEABLE),
+                deterministic = deterministic_build_failure("db"),
             ),
             [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
         ))
@@ -787,6 +810,39 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The requeue thaw must skip a reproducible non-zero builder exit, or a
+    /// polling-triggered eval loops it forever (re-queue -> rebuild -> same exit).
+    /// No live DB in unit tests, so pin the predicate SQL shape and its integers.
+    #[test]
+    fn deterministic_build_failure_predicate_matches_builder_nonzero() {
+        let sql = deterministic_build_failure("db")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(
+            sql,
+            format!(
+                "EXISTS (SELECT 1 FROM build_attempt ba WHERE ba.derivation_build = db.id \
+                 AND ba.outcome = {outcome} AND ba.reason = {reason})",
+                outcome = status_sql::attempt_outcome(AttemptOutcome::Failed),
+                reason = status_sql::attempt_reason(AttemptFailureReason::BuilderNonzero),
+            ),
+        );
+        assert_eq!(status_sql::attempt_outcome(AttemptOutcome::Failed), 3);
+        assert_eq!(status_sql::attempt_reason(AttemptFailureReason::BuilderNonzero), 5);
+    }
+
+    /// Both requeue paths must carry the deterministic-failure exclusion, keep
+    /// `FailedPermanent` requeueable for transient causes, and never thaw a
+    /// build-once success.
+    #[test]
+    fn requeue_keeps_failed_permanent_but_excludes_deterministic() {
+        assert!(BuildStatus::REQUEUEABLE.contains(&BuildStatus::FailedPermanent));
+        for s in BuildStatus::TERMINAL_SUCCESS {
+            assert!(!BuildStatus::REQUEUEABLE.contains(&s));
+        }
+    }
 
     /// The proactive dependency-failed sweep must mirror the reactive cascade:
     /// seed the recursive walk from the terminal-failed set the cascade reacts

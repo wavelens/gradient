@@ -11,6 +11,7 @@
 //! statements.
 
 use gradient_entity::build::BuildStatus;
+use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_entity::evaluation::EvaluationStatus;
 
 pub fn build(status: BuildStatus) -> i32 {
@@ -19,6 +20,14 @@ pub fn build(status: BuildStatus) -> i32 {
 
 pub fn eval(status: EvaluationStatus) -> i32 {
     status.into()
+}
+
+pub fn attempt_outcome(outcome: AttemptOutcome) -> i32 {
+    outcome.into()
+}
+
+pub fn attempt_reason(reason: AttemptFailureReason) -> i32 {
+    reason.into()
 }
 
 /// Comma-joined integer list for `status IN (...)`, e.g. `"4, 6, 9"`.
@@ -48,5 +57,7 @@ mod tests {
         assert_eq!(build_in(&BuildStatus::TERMINAL_SUCCESS), "3, 7");
         assert_eq!(build_in(&BuildStatus::REQUEUEABLE), "4, 5, 6, 9");
         assert_eq!(eval_in(&EvaluationStatus::TERMINAL), "5, 6, 7");
+        assert_eq!(attempt_outcome(AttemptOutcome::Failed), 3);
+        assert_eq!(attempt_reason(AttemptFailureReason::BuilderNonzero), 5);
     }
 }
