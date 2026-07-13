@@ -110,7 +110,7 @@ Each cache has a dedicated Ed25519 signing key encrypted in the database (using 
 
 **Narinfo** (`GET /cache/{cache}/{hash}.narinfo`)
 
-Constructs a `NixPathInfo` response from `derivation_output` + `cached_path` + `cached_path_signature`. Sizes, hashes, and references are read directly from the DB row the worker populated when it uploaded the NAR - the server never re-packs or re-hashes a NAR.
+Constructs a `NixPathInfo` response from `derivation_output` + `cached_path` + `cached_path_signature`. Sizes, hashes, and references are read directly from the DB row the worker populated when it uploaded the NAR - the server never re-packs or re-hashes a NAR. For content-addressed paths (those with `cached_path.ca` set), the `CA:` field is emitted in the narinfo response.
 
 When the hash doesn't match any `derivation_output`, narinfo falls back to the `cached_path` table. This covers `.drv` files and any other standalone store path the worker pushed.
 
