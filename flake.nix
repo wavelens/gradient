@@ -114,7 +114,9 @@
     };
   }) // {
     overlays = {
-      nix = final: prev: { gradient-nix = nix.packages.${final.stdenv.hostPlatform.system}.nix; };
+      nix = final: prev: {
+        gradient-nix = nix.packages.${final.stdenv.hostPlatform.system}.nix.overrideScope (finalScope: prevScope: { withAWS = false; });
+      };
       gradient = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient; };
       gradient-frontend = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-frontend; };
       gradient-cli = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-cli gradient-cli-full; };
