@@ -42,7 +42,9 @@
 //! `flush_deferred_deps` could not record) is held off promotion by the
 //! separate `edges_unresolved` flag instead of a clear.
 
-use crate::graph_sql::{ClosureDirection, dependency_closure_cte, eval_closure_cte};
+use crate::graph_sql::{
+    ClosureDirection, dependency_closure_cte, eval_closure_cte, eval_closure_cte_body,
+};
 use crate::status::TransitionChange;
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
@@ -488,11 +490,13 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
 /// finalize the now-settled evaluations.
 pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
     db: &C,
+    scope: Option<gradient_types::EvaluationId>,
 ) -> Result<Vec<TransitionChange>, DbErr> {
     let rows = db
-        .query_all(Statement::from_string(
+        .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            dependency_failed_reconcile_sql(),
+            dependency_failed_reconcile_sql(scope),
+            fixpoint_params(scope),
         ))
         .await?;
 
@@ -503,29 +507,49 @@ pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
 /// reachable non-terminal anchor. Mirrors the reactive
 /// [`cascade_dependency_failed`] terminal-failed set (it excludes `Aborted`,
 /// which is retried, not permanent). The failed roots are excluded from the
-/// UPDATE by the cascade-target predicate, so the sweep is idempotent.
-fn dependency_failed_reconcile_sql() -> String {
-    let cte = dependency_closure_cte(
-        "dependents",
-        &format!(
-            "SELECT derivation FROM derivation_build WHERE status IN ({})",
-            status_sql::build_in(&BuildStatus::TERMINAL_FAILURE)
+/// UPDATE by the cascade-target predicate, so the sweep is idempotent. `None`
+/// is the global full-table backstop; `Some(eval)` bounds the seed, the walk,
+/// and the UPDATE to that eval's dependency closure ($1) so the per-worker-event
+/// `Eval`/`Unstick` heal - which runs right after the requeue thaw - re-fails
+/// that eval's thawed victims without scanning the whole table.
+fn dependency_failed_reconcile_sql(scope: Option<gradient_types::EvaluationId>) -> String {
+    let dependency_failed = status_sql::build(BuildStatus::DependencyFailed);
+    let cascade_target = status_sql::build_in(&CASCADE_TARGET);
+    let terminal_failure = status_sql::build_in(&BuildStatus::TERMINAL_FAILURE);
+    let (prelude, update_bound) = match scope {
+        None => (
+            dependency_closure_cte(
+                "dependents",
+                &format!("SELECT derivation FROM derivation_build WHERE status IN ({terminal_failure})"),
+                ClosureDirection::Dependents,
+            ),
+            String::new(),
         ),
-        ClosureDirection::Dependents,
-    );
+        Some(_) => (
+            format!(
+                r#"WITH RECURSIVE {closure},
+    dependents(derivation) AS (
+        SELECT derivation FROM derivation_build
+        WHERE status IN ({terminal_failure}) AND derivation IN (SELECT derivation FROM closure)
+        UNION
+        SELECT e.derivation FROM derivation_dependency e JOIN dependents c ON e.dependency = c.derivation
+        WHERE e.derivation IN (SELECT derivation FROM closure))"#,
+                closure = eval_closure_cte_body(),
+            ),
+            " AND db.derivation IN (SELECT derivation FROM closure)".to_string(),
+        ),
+    };
     format!(
         r#"
-    {cte}
+    {prelude}
     UPDATE derivation_build AS db
     SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
     FROM derivation_build old
     WHERE old.id = db.id
       AND db.status IN ({cascade_target})
-      AND db.derivation IN (SELECT derivation FROM dependents)
+      AND db.derivation IN (SELECT derivation FROM dependents){update_bound}
     RETURNING db.derivation, old.status AS from_status, db.status AS to_status
-    "#,
-        dependency_failed = status_sql::build(BuildStatus::DependencyFailed),
-        cascade_target = status_sql::build_in(&CASCADE_TARGET),
+    "#
     )
 }
 
@@ -689,24 +713,14 @@ pub async fn requeue_failed_anchors<C: ConnectionTrait>(
     db: &C,
     derivations: &[DerivationId],
 ) -> Result<u64, DbErr> {
+    let sql = requeue_failed_anchors_sql();
     let mut total = 0;
     for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
         total += db
             .execute(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
-                format!(
-                    r#"
-                UPDATE derivation_build db
-                SET status = {created}, attempt = 0, closure_complete = false,
-                    updated_at = (now() AT TIME ZONE 'UTC')
-                WHERE db.derivation = ANY($1) AND db.status IN ({requeueable})
-                  AND NOT {deterministic}
-                "#,
-                    created = status_sql::build(BuildStatus::Created),
-                    requeueable = status_sql::build_in(&BuildStatus::REQUEUEABLE),
-                    deterministic = deterministic_build_failure("db"),
-                ),
+                &sql,
                 [ids.into()],
             ))
             .await?
@@ -714,6 +728,49 @@ pub async fn requeue_failed_anchors<C: ConnectionTrait>(
     }
 
     Ok(total)
+}
+
+/// `WITH RECURSIVE` prelude binding a requeue candidate `closure` (the downward
+/// build closure of the candidates) and the `deterministic_blocked` subset a
+/// reproducible build failure permanently poisons. `deterministic_blocked` seeds
+/// from every anchor in the closure with a [`deterministic_build_failure`] and
+/// closes upward over `derivation_dependency` (bounded to the closure), so a
+/// `DependencyFailed` dependent of such a failure is caught even though it never
+/// ran a build of its own. A thaw must exclude this whole set: its members can
+/// never build, and thawing one back to `Created` only re-enters the demote<->
+/// thaw oscillation with [`reconcile_dependency_failed`] that hangs the eval in
+/// `graph_stuck` forever.
+fn requeue_ctes(closure_seed: &str) -> String {
+    let deterministic = deterministic_build_failure("dbf");
+    format!(
+        r#"WITH RECURSIVE closure(derivation) AS (
+        {closure_seed}
+        UNION
+        SELECT e.dependency FROM derivation_dependency e JOIN closure c ON e.derivation = c.derivation),
+    deterministic_blocked(derivation) AS (
+        SELECT dbf.derivation FROM derivation_build dbf
+        WHERE dbf.derivation IN (SELECT derivation FROM closure) AND {deterministic}
+        UNION
+        SELECT e.derivation FROM derivation_dependency e
+        JOIN deterministic_blocked c ON e.dependency = c.derivation
+        WHERE e.derivation IN (SELECT derivation FROM closure))"#
+    )
+}
+
+fn requeue_failed_anchors_sql() -> String {
+    let ctes = requeue_ctes("SELECT unnest($1::uuid[])");
+    format!(
+        r#"
+        {ctes}
+        UPDATE derivation_build db
+        SET status = {created}, attempt = 0, closure_complete = false,
+            updated_at = (now() AT TIME ZONE 'UTC')
+        WHERE db.derivation = ANY($1) AND db.status IN ({requeueable})
+          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)
+        "#,
+        created = status_sql::build(BuildStatus::Created),
+        requeueable = status_sql::build_in(&BuildStatus::REQUEUEABLE),
+    )
 }
 
 /// Re-queue terminal-failed anchors across the full build-dependency **closure**
@@ -732,30 +789,33 @@ pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
 ) -> Result<u64, DbErr> {
-    let cte = eval_closure_cte();
     let affected = db
         .execute(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            format!(
-                r#"
-            {cte}
-            UPDATE derivation_build db
-            SET status = {created}, attempt = 0, closure_complete = false,
-                updated_at = (now() AT TIME ZONE 'UTC')
-            WHERE db.derivation IN (SELECT derivation FROM closure)
-              AND db.status IN ({requeueable})
-              AND NOT {deterministic}
-            "#,
-                created = status_sql::build(BuildStatus::Created),
-                requeueable = status_sql::build_in(&BuildStatus::REQUEUEABLE),
-                deterministic = deterministic_build_failure("db"),
-            ),
+            requeue_failed_closure_for_eval_sql(),
             [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
         ))
         .await?
         .rows_affected();
 
     Ok(affected)
+}
+
+fn requeue_failed_closure_for_eval_sql() -> String {
+    let ctes = requeue_ctes("SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1");
+    format!(
+        r#"
+        {ctes}
+        UPDATE derivation_build db
+        SET status = {created}, attempt = 0, closure_complete = false,
+            updated_at = (now() AT TIME ZONE 'UTC')
+        WHERE db.derivation IN (SELECT derivation FROM closure)
+          AND db.status IN ({requeueable})
+          AND db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)
+        "#,
+        created = status_sql::build(BuildStatus::Created),
+        requeueable = status_sql::build_in(&BuildStatus::REQUEUEABLE),
+    )
 }
 
 /// Reconcile anchor state from cache state across an evaluation's dependency
@@ -847,6 +907,46 @@ mod tests {
         }
     }
 
+    /// A thaw must exclude not just a derivation's own reproducible failure but
+    /// the whole subtree a deterministic failure poisons: a `DependencyFailed`
+    /// dependent never ran a build of its own, so keying the exclusion on the
+    /// anchor's own attempts alone re-thaws it forever (the demote<->thaw
+    /// oscillation that hangs the eval). Pin that both requeue SQLs build the
+    /// closure + `deterministic_blocked` walk and exclude that set (no live DB).
+    #[test]
+    fn requeue_excludes_the_deterministic_blocked_subtree() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let deterministic = norm(deterministic_build_failure("dbf"));
+        for sql in [
+            norm(requeue_failed_anchors_sql()),
+            norm(requeue_failed_closure_for_eval_sql()),
+        ] {
+            assert!(
+                sql.contains("deterministic_blocked(derivation) AS"),
+                "must build the deterministic-blocked closure: {sql}"
+            );
+            assert!(
+                sql.contains(&deterministic),
+                "blocked set must seed from a reproducible builder-nonzero exit: {sql}"
+            );
+            assert!(
+                sql.contains("JOIN deterministic_blocked c ON e.dependency = c.derivation"),
+                "must close upward over dependents so DependencyFailed victims are caught: {sql}"
+            );
+            assert!(
+                sql.contains("db.derivation NOT IN (SELECT derivation FROM deterministic_blocked)"),
+                "the thaw must skip the whole poisoned subtree: {sql}"
+            );
+            assert!(
+                sql.contains(&format!(
+                    "db.status IN ({})",
+                    status_sql::build_in(&BuildStatus::REQUEUEABLE)
+                )),
+                "still thaws the requeueable states for transient causes: {sql}"
+            );
+        }
+    }
+
     /// The proactive dependency-failed sweep must mirror the reactive cascade:
     /// seed the recursive walk from the terminal-failed set the cascade reacts
     /// to (NOT `Aborted`), fail only non-terminal anchors to `DependencyFailed`,
@@ -855,7 +955,7 @@ mod tests {
     /// anchors, so pin the SQL shape (no live DB in unit tests).
     #[test]
     fn dependency_failed_reconcile_sql_mirrors_the_cascade() {
-        let sql = dependency_failed_reconcile_sql()
+        let sql = dependency_failed_reconcile_sql(None)
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -894,6 +994,37 @@ mod tests {
         assert!(
             sql.contains("RETURNING db.derivation"),
             "must return failed derivations so the caller can finalize their evals: {sql}"
+        );
+    }
+
+    /// Scoped to an eval (`Eval`/`Unstick`), the sweep must bound the seed, the
+    /// walk, and the UPDATE to that eval's dependency closure ($1) so the inline
+    /// per-worker-event heal re-fails its own thawed victims without a full-table
+    /// scan. The global (`None`) pass must not carry any closure walk.
+    #[test]
+    fn dependency_failed_reconcile_sql_bounds_to_eval_closure_when_scoped() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let global = norm(dependency_failed_reconcile_sql(None));
+        assert!(
+            !global.contains("FROM closure"),
+            "global pass scans the whole table, no closure walk: {global}"
+        );
+        let scoped = norm(dependency_failed_reconcile_sql(Some(
+            gradient_types::EvaluationId::now_v7(),
+        )));
+        assert!(
+            scoped.contains("WITH RECURSIVE closure(derivation) AS"),
+            "scoped pass must walk the eval closure: {scoped}"
+        );
+        assert!(
+            scoped.contains(
+                "WHERE status IN (4, 6, 9) AND derivation IN (SELECT derivation FROM closure)"
+            ),
+            "scoped seed must be the closure's terminal-failed anchors: {scoped}"
+        );
+        assert!(
+            scoped.matches("IN (SELECT derivation FROM closure)").count() >= 3,
+            "scoped seed, walk, and UPDATE must all be bounded to the closure: {scoped}"
         );
     }
 

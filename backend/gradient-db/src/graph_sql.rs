@@ -24,6 +24,20 @@ pub fn dependency_closure_cte(
     seed_select: &str,
     direction: ClosureDirection,
 ) -> String {
+    format!(
+        "WITH RECURSIVE {}",
+        dependency_closure_cte_body(name, seed_select, direction)
+    )
+}
+
+/// The bare `{name}(derivation) AS (...)` CTE body, without the `WITH RECURSIVE`
+/// prefix, so a statement can bind several closures under one `WITH RECURSIVE`
+/// (e.g. an eval closure plus the deterministic-blocked set it constrains).
+pub fn dependency_closure_cte_body(
+    name: &str,
+    seed_select: &str,
+    direction: ClosureDirection,
+) -> String {
     let step = match direction {
         ClosureDirection::Dependencies => format!(
             "SELECT e.dependency FROM derivation_dependency e JOIN {name} c ON e.derivation = c.derivation"
@@ -32,7 +46,7 @@ pub fn dependency_closure_cte(
             "SELECT e.derivation FROM derivation_dependency e JOIN {name} c ON e.dependency = c.derivation"
         ),
     };
-    format!("WITH RECURSIVE {name}(derivation) AS ({seed_select} UNION {step})")
+    format!("{name}(derivation) AS ({seed_select} UNION {step})")
 }
 
 /// Dependency-readiness of anchor `{alias}`: every build dependency is
@@ -84,7 +98,13 @@ pub fn drv_nar_closure_complete_predicate(alias: &str) -> String {
 /// `build_job` rows), walking toward dependencies. Binds the evaluation id as
 /// `$1`. Shared by every per-eval sweep so they all see the same closure.
 pub fn eval_closure_cte() -> String {
-    dependency_closure_cte(
+    format!("WITH RECURSIVE {}", eval_closure_cte_body())
+}
+
+/// The eval-closure CTE body (no `WITH RECURSIVE` prefix), for statements that
+/// bind it alongside a second closure under one `WITH RECURSIVE`.
+pub fn eval_closure_cte_body() -> String {
+    dependency_closure_cte_body(
         "closure",
         "SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = $1",
         ClosureDirection::Dependencies,
