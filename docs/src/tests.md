@@ -180,6 +180,30 @@ still thaws `FailedPermanent` but never a build-once success;
 `status_sql.rs`: `renders_the_pinned_numbers` pins `attempt_outcome`/`attempt_reason`.
 The recursive requeue convergence stays E2E-CI-covered (no live DB in unit tests).
 
+## Requeue thaw skips the whole deterministic-blocked subtree (graph-stuck follow-up)
+
+The retry-storm fix kept the deterministic *root* terminal, which then exposed its
+*dependents*: the failure cascade demotes them `DependencyFailed`, but a
+`DependencyFailed` dependent never ran a build of its own, so the own-attempt
+`deterministic_build_failure` guard did not protect it - the next graph-stuck heal
+thawed it back to `Created`, the cascade re-demoted it, and the eval oscillated in
+`graph_stuck` forever, never finalizing (prod: 26 evals wedged since the retry-storm
+fix landed; c3d2/nix-config `019f6cd0` had 27 dependents of `atop`/`tree-sitter`/
+`rustfs` trapped). Both requeue paths now exclude the whole `deterministic_blocked`
+subtree - the closure's deterministic failures plus every dependent reachable upward
+over `derivation_dependency` (bounded to the requeue closure) - so a poisoned
+dependent is never thawed and the eval settles to `Failed`. Paired with this,
+`reconcile_dependency_failed` gained an eval-scoped mode and now also runs in the
+`Eval`/`Unstick` reconcile scopes (right after the requeue thaw), bounded to the
+eval closure, so the graph-stuck heal re-fails its own thawed victims inline instead
+of waiting for the sporadic global backstop. `backend/gradient-db/src/promotion.rs`:
+`requeue_excludes_the_deterministic_blocked_subtree` pins that both requeue SQLs
+build the `deterministic_blocked` closure, seed it from a reproducible builder-nonzero
+exit, close upward over dependents, and exclude that set from the thaw;
+`dependency_failed_reconcile_sql_bounds_to_eval_closure_when_scoped` pins that the
+scoped sweep bounds its seed, walk, and UPDATE to the eval closure while the global
+pass carries no closure walk. The demote/thaw convergence stays E2E-CI-covered.
+
 ## Corrupt eval-cache blob self-heals (worker detects, server heals)
 
 A poisoned shared eval-cache SQLite blob (fingerprint `ad2ae6ba…`, error `database

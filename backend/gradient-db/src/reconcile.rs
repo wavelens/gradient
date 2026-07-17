@@ -199,11 +199,14 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
         }
     }
 
-    if matches!(scope, ReconcileScope::Global | ReconcileScope::Deep) {
-        // Failure-side backstop: fail every non-terminal anchor reachable from a
-        // terminal failure (the reactive cascade misses anchors thawed after
-        // their dependency already failed).
-        match crate::promotion::reconcile_dependency_failed(db).await {
+    if scope.runs_anchor_fixpoints() {
+        // Failure-side backstop, paired with the requeue thaw above: fail every
+        // non-terminal anchor reachable from a terminal failure (the reactive
+        // cascade misses anchors thawed after their dependency already failed).
+        // `Eval`/`Unstick` bound it to the eval closure so the graph-stuck heal
+        // re-fails its own thawed victims inline; `Global`/`Deep` sweep the whole
+        // table. `Tick` skips it, as with the other anchor fixpoints.
+        match crate::promotion::reconcile_dependency_failed(db, scope.evaluation()).await {
             Ok(changes) => {
                 emit_transition_effects(ctx, &changes).await;
                 report.dependency_failed = changes;
