@@ -82,6 +82,12 @@ pub(super) async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
         if let Err(e) = scheduler.reconcile_waiting_state().await {
             error!(error = %e, "reconcile_waiting_state in dispatch loop failed");
         }
+        // A `.drv` our cache lost has no producer; the only recovery is a fresh
+        // evaluation of the same commit. Runs after the waiting-state reconcile
+        // has settled `graph_stuck`.
+        if let Err(e) = crate::waiting_state::recover_drv_stuck_evals(&scheduler.state).await {
+            error!(error = %e, "recover_drv_stuck_evals in dispatch loop failed");
+        }
 
         // Re-offer still-pending jobs to all sessions each pass. A build
         // re-queued after a failed/rejected dispatch had its sent-flag cleared,
