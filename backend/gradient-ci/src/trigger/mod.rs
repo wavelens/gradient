@@ -8,6 +8,7 @@
 //! (API endpoint, incoming forge webhook, …) and for restarting the failed
 //! builds of a previous evaluation.
 
+mod drv_recovery;
 mod flake_snapshot;
 mod input_update;
 mod new_evaluation;
@@ -15,6 +16,7 @@ mod restart;
 
 use thiserror::Error;
 
+pub use drv_recovery::trigger_drv_recovery;
 pub use input_update::{fan_out_expansion, maybe_trigger_input_update};
 pub use new_evaluation::trigger_evaluation;
 pub use restart::trigger_restart_builds;

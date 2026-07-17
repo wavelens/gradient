@@ -21,6 +21,7 @@ fn eval_kind_str(kind: EvaluationKind) -> &'static str {
     match kind {
         EvaluationKind::Normal => "normal",
         EvaluationKind::InputUpdate => "input_update",
+        EvaluationKind::DrvRecovery => "drv_recovery",
     }
 }
 

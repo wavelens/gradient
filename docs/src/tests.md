@@ -204,6 +204,28 @@ exit, close upward over dependents, and exclude that set from the thaw;
 scoped sweep bounds its seed, walk, and UPDATE to the eval closure while the global
 pass carries no closure walk. The demote/thaw convergence stays E2E-CI-covered.
 
+## Re-evaluate to regenerate a lost `.drv` (graph-stuck zone B)
+
+A build target's own `.drv` has no producer - only evaluation emits a `.drv`, and
+the daemon-free server cannot reproduce one - so an anchor whose `.drv` NAR is absent
+from our cache (never uploaded, or GC-reclaimed) can never dispatch and no reconcile
+heals it; the eval hangs `graph_stuck` (prod `019f6661`: entry point
+`testPCB-image_set` had no `cached_path` row for its `.drv` while its sibling's
+survived, a transient upload miss). The scheduler now detects this - a pending anchor
+that is `edges_complete`, deps-ready, not `substitutable`, with neither
+`drv_closure_cached` nor its `.drv`'s own NAR closure - and auto-triggers a fresh
+evaluation of the same commit (`gradient_ci::trigger_drv_recovery`), which
+re-instantiates the flake and re-uploads the `.drv`. The recovery run is
+`EvaluationKind::DrvRecovery`; if it stalls the same way, it is failed rather than
+retried (one-shot), and a 120s grace on the stuck eval's age avoids racing an
+in-flight `.drv` upload. `backend/gradient-scheduler/src/waiting_state.rs`:
+`unproducible_drv_block_sql_shape` pins the detection predicate (pending anchors
+only, edges complete, not substitutable, not `drv_closure_cached`, the `.drv`
+NAR-closure and deps-ready predicates embedded). `backend/gradient-entity/src/evaluation.rs`:
+`kind_numbering_is_pinned` pins `DrvRecovery = 2` so a renumber can't reinterpret
+persisted rows. The abort-and-re-eval convergence is E2E-CI-covered (MockDatabase
+can't drive the multi-step trigger).
+
 ## Corrupt eval-cache blob self-heals (worker detects, server heals)
 
 A poisoned shared eval-cache SQLite blob (fingerprint `ad2ae6ba…`, error `database

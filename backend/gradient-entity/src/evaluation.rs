@@ -99,6 +99,20 @@ mod status_tests {
         assert_eq!(EvaluationStatus::iter().count(), 9);
     }
 
+    /// `kind` is persisted as a raw integer; a renumber silently reinterprets
+    /// existing rows (an `input_update` run becoming `drv_recovery`, etc.).
+    #[test]
+    fn kind_numbering_is_pinned() {
+        for (kind, n) in [
+            (EvaluationKind::Normal, 0),
+            (EvaluationKind::InputUpdate, 1),
+            (EvaluationKind::DrvRecovery, 2),
+        ] {
+            assert_eq!(i32::from(kind), n);
+        }
+        assert_eq!(EvaluationKind::iter().count(), 3);
+    }
+
     #[test]
     fn active_and_terminal_partition_every_status() {
         for status in EvaluationStatus::iter() {
@@ -137,6 +151,12 @@ pub enum EvaluationKind {
     Normal = 0,
     #[sea_orm(num_value = 1)]
     InputUpdate = 1,
+    /// A re-evaluation the scheduler auto-triggered to regenerate a `.drv` whose
+    /// NAR our cache lost (or never received): the daemon-free server cannot
+    /// reproduce a `.drv`, so it re-evaluates the same commit. A `DrvRecovery`
+    /// run that stalls the same way again is not retried (one-shot).
+    #[sea_orm(num_value = 2)]
+    DrvRecovery = 2,
 }
 
 #[repr(i32)]

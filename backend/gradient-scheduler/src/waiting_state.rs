@@ -15,10 +15,18 @@ use anyhow::{Context, Result};
 use gradient_core::ServerState;
 use gradient_db::update_evaluation_status;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::EvaluationStatus;
+use gradient_entity::evaluation::{EvaluationKind, EvaluationStatus};
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, Statement, Value,
+};
 use tracing::{info, warn};
+
+/// How long an evaluation must have sat `graph_stuck` before `.drv`-recovery
+/// re-evaluates it, so a still-in-flight `.drv` upload isn't raced into a
+/// needless re-eval. The graph-stuck reason is only rewritten on change, so a
+/// stably-stuck eval's `updated_at` ages past this quickly.
+const DRV_RECOVERY_GRACE_SECS: i64 = 120;
 
 use crate::buildability::BuildabilityChecker;
 
@@ -276,6 +284,120 @@ async fn attempt_graph_unstick(
     ))
 }
 
+/// Re-evaluate evaluations wedged in `graph_stuck` on a `.drv` our cache lost.
+/// A build target's own `.drv` has no producer - only evaluation emits a `.drv`,
+/// and the daemon-free server cannot reproduce one - so an anchor whose `.drv`
+/// NAR is absent (never uploaded, or GC-reclaimed) can never dispatch and no
+/// reconcile heals it. The sole recovery is a fresh evaluation of the same
+/// commit ([`gradient_ci::trigger_drv_recovery`]), which re-materialises and
+/// re-uploads the `.drv`. Runs after [`reconcile_waiting_state`] has persisted
+/// the `graph_stuck` reason; the abort inside the trigger drops the stuck eval
+/// out of `Waiting`, so each is handled once.
+///
+/// One-shot: a run already marked [`EvaluationKind::DrvRecovery`] that stalls
+/// the same way is failed, not retried - a `.drv` a cold re-eval still cannot
+/// persist is a real defect, not a transient upload miss, and re-triggering
+/// would loop.
+pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
+    let waiting = EEvaluation::find()
+        .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
+        .all(&state.worker_db)
+        .await
+        .context("fetch waiting evaluations")?;
+
+    let now = gradient_types::now();
+    for eval in waiting {
+        let graph_stuck = eval
+            .waiting_reason
+            .as_ref()
+            .and_then(WaitingReason::from_json)
+            .is_some_and(|r| matches!(r, WaitingReason::GraphStuck { .. }));
+        if !graph_stuck || (now - eval.updated_at).num_seconds() < DRV_RECOVERY_GRACE_SECS {
+            continue;
+        }
+        if !eval_blocked_on_unproducible_drv(state, eval.id).await? {
+            continue;
+        }
+
+        if eval.kind == EvaluationKind::DrvRecovery {
+            warn!(evaluation_id = %eval.id, "drv-recovery re-eval still blocked on its own missing .drv; failing (unrecoverable)");
+            update_evaluation_status(&state.db(), eval, EvaluationStatus::Failed).await;
+            continue;
+        }
+
+        let Some(project_id) = eval.project else {
+            continue;
+        };
+        let project = match EProject::find_by_id(project_id).one(&state.worker_db).await {
+            Ok(Some(p)) => p,
+            Ok(None) => continue,
+            Err(e) => {
+                warn!(evaluation_id = %eval.id, error = %e, "drv recovery: project lookup failed");
+                continue;
+            }
+        };
+
+        match gradient_ci::trigger_drv_recovery(state.worker_db.inner(), &project, &eval).await {
+            Ok(new_eval) => {
+                info!(stuck = %eval.id, recovery = %new_eval.id, "auto-triggered .drv-recovery re-evaluation");
+                gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &new_eval).await;
+            }
+            Err(e) => warn!(evaluation_id = %eval.id, error = %e, "failed to trigger .drv recovery"),
+        }
+    }
+
+    Ok(())
+}
+
+/// True when a pending anchor of `evaluation_id` is dispatch-blocked solely by
+/// its own missing `.drv`: its build dependencies are all satisfied and it is
+/// not substitutable, yet neither the build-graph `drv_closure_cached` flag nor
+/// the `.drv`'s own NAR-closure holds. That is the zone-B signature - a `.drv`
+/// our cache never received or lost - distinct from a failed-dependency block,
+/// whose anchors the dependency-failed cascade has already demoted.
+async fn eval_blocked_on_unproducible_drv(
+    state: &Arc<ServerState>,
+    evaluation_id: EvaluationId,
+) -> Result<bool> {
+    let row = state
+        .worker_db
+        .inner()
+        .query_one(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            unproducible_drv_block_sql(),
+            [Value::Uuid(Some(Box::new(evaluation_id.into_inner())))],
+        ))
+        .await
+        .context("detect unproducible-drv block")?;
+
+    Ok(row
+        .and_then(|r| r.try_get::<bool>("", "blocked").ok())
+        .unwrap_or(false))
+}
+
+fn unproducible_drv_block_sql() -> String {
+    let deps_ready = gradient_db::graph_sql::deps_ready_predicate("db");
+    let drv_nar_closure = gradient_db::graph_sql::drv_nar_closure_complete_predicate("db");
+    format!(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM build_job bj
+            JOIN derivation_build db ON db.id = bj.derivation_build
+            WHERE bj.evaluation = $1
+              AND db.status IN ({created}, {queued})
+              AND db.edges_complete
+              AND NOT db.substitutable
+              AND NOT db.drv_closure_cached
+              AND NOT {drv_nar_closure}
+              AND ({deps_ready})
+        ) AS blocked
+        "#,
+        created = BuildStatus::Created as i32,
+        queued = BuildStatus::Queued as i32,
+    )
+}
+
 /// The non-terminal `derivation_build` anchors an evaluation still needs:
 /// the anchors of its `build_job`s in Created/Queued/Building/FailedTransient.
 async fn eval_pending_anchors(
@@ -416,6 +538,42 @@ pub(crate) async fn persist_waiting_reason(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The zone-B detection must fire only on an anchor blocked *solely* by its
+    /// own unimportable `.drv`: pending, edges complete, deps satisfied, not
+    /// substitutable, and neither `.drv` signal true. Mis-shaping it would either
+    /// re-eval healthy evals or miss the lost-`.drv` stall (no live DB in unit
+    /// tests, so pin the SQL shape).
+    #[test]
+    fn unproducible_drv_block_sql_shape() {
+        let sql = unproducible_drv_block_sql()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(
+            sql.contains(&format!(
+                "db.status IN ({}, {})",
+                BuildStatus::Created as i32,
+                BuildStatus::Queued as i32
+            )),
+            "only pending anchors: {sql}"
+        );
+        for frag in [
+            "db.edges_complete",
+            "NOT db.substitutable",
+            "NOT db.drv_closure_cached",
+        ] {
+            assert!(sql.contains(frag), "missing `{frag}`: {sql}");
+        }
+        assert!(
+            sql.contains(&gradient_db::graph_sql::drv_nar_closure_complete_predicate("db")),
+            "must require the .drv's own NAR closure to be absent: {sql}"
+        );
+        assert!(
+            sql.contains("cached_path cp") && sql.contains("derivation_input_source"),
+            "must embed the deps-ready predicate (all build deps and sources cached): {sql}"
+        );
+    }
 
     fn eval_workers_view(r: &WaitingReason) -> (EvalCapability, u32) {
         match r {
