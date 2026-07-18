@@ -23,7 +23,9 @@ use gradient_db::get_any_organization_by_name;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_sources::{check_project_updates, get_commit_info, get_path_from_derivation_output};
-use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
+use gradient_storage::nar_extract::{
+    ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
+};
 use gradient_types::input::vec_to_hex;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
@@ -735,8 +737,8 @@ async fn serve_hydra_artifact(
             .map(str::to_owned)
             .unwrap_or_else(|| product.path.trim_start_matches('/').to_owned());
 
-        let compressed = match state.nar_storage.get(hash).await {
-            Ok(Some(b)) => b,
+        let (_size, stream) = match state.nar_storage.get_stream(hash).await {
+            Ok(Some(s)) => s,
             Ok(None) => continue,
             Err(e) => {
                 tracing::warn!(output_path = %output_root, error = %e, "Failed to fetch NAR from nar_storage");
@@ -750,7 +752,7 @@ async fn serve_hydra_artifact(
             format!("attachment; filename=\"{}\"", filename)
         };
 
-        match extract_path_from_nar_bytes(compressed, &rel).await {
+        match extract_path_from_reader(nar_reader_from_stream(stream), &rel).await {
             Ok(Extracted::File { contents, .. }) => {
                 return Ok(Some(
                     (

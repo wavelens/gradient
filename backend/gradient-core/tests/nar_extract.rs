@@ -9,7 +9,11 @@
 //! Async assertions use sync `#[test]` + `tokio::runtime::Builder::block_on`.
 
 use bytes::Bytes;
-use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
+use futures::StreamExt as _;
+use gradient_storage::nar_extract::{
+    ExtractError, Extracted, extract_path_from_nar_bytes, extract_path_from_reader,
+    nar_reader_from_stream,
+};
 use harmonia_file_nar::archive::test_data::{TestNarEvent, TestNarEvents};
 use harmonia_file_nar::archive::write_nar;
 use std::collections::BTreeMap;
@@ -93,6 +97,33 @@ fn extracts_file_at_relative_path() {
     let (contents, executable, _) = unwrap_file(out);
     assert_eq!(contents, b"hi there");
     assert!(!executable);
+}
+
+/// The streaming bridge used by the serve/browse endpoints must decode and
+/// extract identically to the buffered path, even when the compressed input is
+/// delivered as many small chunks that split the zstd frame across boundaries.
+#[test]
+fn streaming_reader_extracts_same_file_as_buffered() {
+    let nar = dir_with_file("hello.txt", b"streamed hi", false);
+    let compressed = zstd_compress(&nar);
+
+    let buffered = block_on(extract_path_from_nar_bytes(compressed.clone(), "hello.txt")).unwrap();
+    let (buffered_contents, _, _) = unwrap_file(buffered);
+
+    let chunks: Vec<anyhow::Result<Bytes>> = compressed
+        .chunks(48)
+        .map(|c| Ok(Bytes::copy_from_slice(c)))
+        .collect();
+    let stream = futures::stream::iter(chunks).boxed();
+    let streamed = block_on(extract_path_from_reader(
+        nar_reader_from_stream(stream),
+        "hello.txt",
+    ))
+    .unwrap();
+    let (streamed_contents, _, _) = unwrap_file(streamed);
+
+    assert_eq!(streamed_contents, b"streamed hi");
+    assert_eq!(streamed_contents, buffered_contents);
 }
 
 #[test]

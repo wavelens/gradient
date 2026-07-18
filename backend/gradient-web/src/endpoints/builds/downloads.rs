@@ -13,7 +13,9 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_sources::get_path_from_derivation_output;
-use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
+use gradient_storage::nar_extract::{
+    ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
+};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
@@ -132,8 +134,8 @@ async fn find_and_serve_file(
         let hash = store_path_hash(&output_root);
         let rel = relative_in_output(&product.path, &output_root);
 
-        let compressed = match state.nar_storage.get(hash).await {
-            Ok(Some(b)) => b,
+        let (_size, stream) = match state.nar_storage.get_stream(hash).await {
+            Ok(Some(s)) => s,
             Ok(None) => {
                 tracing::warn!(%build_id, %filename, hash, "NAR not found in nar_storage");
                 continue;
@@ -150,7 +152,7 @@ async fn find_and_serve_file(
             format!("attachment; filename=\"{}\"", filename)
         };
 
-        match extract_path_from_nar_bytes(compressed, &rel).await {
+        match extract_path_from_reader(nar_reader_from_stream(stream), &rel).await {
             Ok(Extracted::File { contents, .. }) => {
                 tracing::info!(%build_id, %filename, file_size = contents.len(), "Successfully extracted file for download");
                 return Ok(Some(

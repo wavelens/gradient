@@ -16,7 +16,9 @@
 //! arbitrarily large outputs.
 
 use async_compression::tokio::bufread::ZstdDecoder;
+use bytes::Bytes;
 use futures::StreamExt as _;
+use futures::stream::BoxStream;
 use gradient_types::constants::{NAR_EXTRACT_MAX_PREALLOC, TAR_ZSTD_LEVEL};
 use harmonia_file_nar::{NarEvent, parse_nar};
 use std::io;
@@ -52,6 +54,17 @@ pub async fn extract_path_from_nar_bytes(
     let reader = BufReader::new(io::Cursor::new(compressed));
     let decoder = ZstdDecoder::new(reader);
     extract_path_from_reader(decoder, relative_path).await
+}
+
+/// Wraps a compressed `.nar.zst` byte stream (as returned by
+/// `NarStore::get_stream`) into an `AsyncRead` over the *decompressed* NAR, so a
+/// caller can extract or enumerate a single path without ever buffering the
+/// whole compressed object in memory.
+pub fn nar_reader_from_stream(
+    stream: BoxStream<'static, anyhow::Result<Bytes>>,
+) -> impl tokio::io::AsyncRead + Unpin {
+    let byte_stream = stream.map(|chunk| chunk.map_err(io::Error::other));
+    ZstdDecoder::new(tokio_util::io::StreamReader::new(byte_stream))
 }
 
 pub async fn extract_path_from_reader<R>(

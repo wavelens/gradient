@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, cache_client_ip, fetch_nar_bytes};
+use super::helpers::{CacheContext, cache_client_ip, fetch_nar_stream};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use axum::body::Body;
@@ -11,7 +11,9 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::Response;
 use gradient_core::ServerState;
-use gradient_storage::nar_extract::{ExtractError, Extracted, extract_path_from_nar_bytes};
+use gradient_storage::nar_extract::{
+    ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
+};
 use std::sync::Arc;
 
 pub async fn serve(
@@ -22,9 +24,10 @@ pub async fn serve(
 ) -> WebResult<Response> {
     let client_ip = cache_client_ip(&state, &headers, peer);
     let _ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
-    let compressed = fetch_nar_bytes(&state, &hash).await?;
+    let (_effective_hash, _size, stream) = fetch_nar_stream(&state, &hash).await?;
+    let reader = nar_reader_from_stream(stream);
 
-    match extract_path_from_nar_bytes(compressed, &rel_path).await {
+    match extract_path_from_reader(reader, &rel_path).await {
         Ok(Extracted::File { contents, size, .. }) => {
             let ct = mime_guess::from_path(&rel_path).first_or_octet_stream();
             Response::builder()
