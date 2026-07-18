@@ -12,6 +12,8 @@ use crate::ip_allowlist::is_allowed as ip_allowed;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use base64::Engine;
+use bytes::Bytes;
+use futures::stream::BoxStream;
 use gradient_core::ServerState;
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
@@ -378,6 +380,25 @@ pub async fn fetch_nar_bytes(state: &Arc<ServerState>, path_hash: &str) -> WebRe
         .await
         .map_err(|e| WebError::internal(format!("Failed to read NAR: {}", e)))?
         .or_not_found("Path")
+}
+
+/// Streaming counterpart to [`fetch_nar_bytes`]: resolves the store hash once
+/// and opens a byte stream over the stored `.nar.zst` so the substitution path
+/// never pins a whole NAR (which can be hundreds of MB) in the server heap.
+/// Returns the resolved `(effective_hash, object_size, byte_stream)`.
+pub async fn fetch_nar_stream(
+    state: &Arc<ServerState>,
+    path_hash: &str,
+) -> WebResult<(String, u64, BoxStream<'static, anyhow::Result<Bytes>>)> {
+    let effective_hash =
+        crate::endpoints::caches::nar::resolve_effective_hash_db(&state.web_db, path_hash).await?;
+    let (size, stream) = state
+        .nar_storage
+        .get_stream(&effective_hash)
+        .await
+        .map_err(|e| WebError::internal(format!("Failed to read NAR: {}", e)))?
+        .or_not_found("Path")?;
+    Ok((effective_hash, size, stream))
 }
 
 #[derive(Debug, Clone, Copy)]
