@@ -35,10 +35,10 @@ pub async fn nar(
     let client_ip = cache_client_ip(&state, &headers, peer);
     let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
 
-    let compressed = super::helpers::fetch_nar_bytes(&state, &path_hash).await?;
-    let effective_hash = resolve_effective_hash_db(&state.web_db, &path_hash).await?;
+    let (effective_hash, size, stream) =
+        super::helpers::fetch_nar_stream(&state, &path_hash).await?;
 
-    spawn_nar_traffic_metric(Arc::clone(&state), ctx.cache.id, compressed.len() as i64);
+    spawn_nar_traffic_metric(Arc::clone(&state), ctx.cache.id, size as i64);
     spawn_cache_derivation_fetch_update(Arc::clone(&state), ctx.cache.id, effective_hash);
 
     Response::builder()
@@ -46,7 +46,8 @@ pub async fn nar(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/x-nix-nar"),
         )
-        .body(Body::from(compressed))
+        .header(header::CONTENT_LENGTH, size)
+        .body(Body::from_stream(stream))
         .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 
@@ -70,14 +71,27 @@ pub async fn upstream_nar(
         .url
         .ok_or_else(|| WebError::bad_request("Not an external upstream"))?;
 
-    let bytes = fetch_upstream_nar(&state.http, &base_url, &path, query.as_deref()).await?;
+    let nar_url = build_upstream_nar_url(&base_url, &path, query.as_deref());
+    let resp = state
+        .http
+        .get(&nar_url)
+        .send()
+        .await
+        .map_err(|e| WebError::internal(format!("Upstream request failed: {}", e)))?;
 
-    Response::builder()
-        .header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/x-nix-nar"),
-        )
-        .body(Body::from(bytes))
+    if !resp.status().is_success() {
+        return Err(WebError::not_found("NAR in upstream"));
+    }
+
+    let mut builder = Response::builder().header(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/x-nix-nar"),
+    );
+    if let Some(len) = resp.content_length() {
+        builder = builder.header(header::CONTENT_LENGTH, len);
+    }
+    builder
+        .body(Body::from_stream(resp.bytes_stream()))
         .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
 }
 
@@ -157,28 +171,6 @@ fn build_upstream_nar_url(base_url: &str, path: &str, query: Option<&str>) -> St
         Some(q) if !q.is_empty() => format!("{url}?{q}"),
         _ => url,
     }
-}
-
-async fn fetch_upstream_nar(
-    http: &reqwest::Client,
-    base_url: &str,
-    path: &str,
-    query: Option<&str>,
-) -> WebResult<bytes::Bytes> {
-    let nar_url = build_upstream_nar_url(base_url, path, query);
-    let resp = http
-        .get(&nar_url)
-        .send()
-        .await
-        .map_err(|e| WebError::internal(format!("Upstream request failed: {}", e)))?;
-
-    if !resp.status().is_success() {
-        return Err(WebError::not_found("NAR in upstream"));
-    }
-
-    resp.bytes()
-        .await
-        .map_err(|e| WebError::internal(format!("Failed to read upstream response: {}", e)))
 }
 
 #[cfg(test)]

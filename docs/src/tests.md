@@ -6519,3 +6519,21 @@ replies via `NixPathInfo.ca`.
   `ingest_records_content_address` drives the ingest pipeline with a
   `NarUploadRecord` holding `ca: Some(...)`, asserts the resulting `cached_path`
   row has `ca` populated with the exact input string.
+
+## HTTP NAR serving streams instead of buffering the whole object
+
+The daemon-free serve path read the entire compressed NAR into a `Vec<u8>`
+before responding (`fetch_nar_bytes` -> `Body::from(compressed)`), so heap grew
+with `concurrent downloads x NAR size` and OOM-killed the server under
+substitution load. `caches::nar` now opens `NarStore::get_stream` and returns
+`Body::from_stream`, setting an explicit `Content-Length` from the object size
+(a streamed body has no implicit length); `upstream_nar` streams the upstream
+response via `bytes_stream()` instead of `resp.bytes()`.
+
+- `backend/gradient-web/tests/nar_serve.rs`:
+  `nar_serve_streams_stored_blob_byte_for_byte` seeds a multi-chunk blob in a
+  local `NarStore`, drives `GET /cache/{cache}/nar/{hash}.nar.zst`, and asserts
+  the response is byte-identical to the stored blob with `Content-Type:
+  application/x-nix-nar` and a `Content-Length` equal to the object size. The
+  streaming/no-buffering property itself is covered by the storage-level
+  `get_stream` tests in `backend/gradient-storage/src/nar.rs`.
