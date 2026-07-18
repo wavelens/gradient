@@ -61,6 +61,15 @@ impl PartialStore {
         self.partial_path(key)
     }
 
+    /// Open the staged `.partial` for streaming reads, so a large NAR can be
+    /// verified and uploaded without `read_all` buffering it whole in memory.
+    pub async fn open_read(&self, key: &str) -> Result<tokio::fs::File> {
+        let path = self.partial_path(key);
+        tokio::fs::File::open(&path)
+            .await
+            .with_context(|| format!("open staged partial {}", path.display()))
+    }
+
     /// Ensure any parent directory implied by a `{peer}/{hash}` key exists.
     async fn ensure_parent(&self, key: &str) -> Result<()> {
         if let Some(parent) = self.partial_path(key).parent()

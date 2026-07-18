@@ -6551,3 +6551,33 @@ compressed NAR into a `Vec<u8>` before extracting. They now feed
   `nar_reader_from_stream` + `extract_path_from_reader` and asserts the
   extracted file is identical to the buffered `extract_path_from_nar_bytes`
   result.
+
+## Inbound NAR upload streaming keeps the #482 integrity guarantee
+
+The inbound paths that receive a NAR (worker WS commit `commit_relayed`, chunked
+`nar_finalize`, single-shot `nars_upload`) previously `read_all`/`field.bytes()`
+the whole NAR into a `Vec<u8>` to verify (`verify_nar_bytes`) and store
+(`nar_storage.put`). They now stream from the staged `.partial`: `verify_nar_reader`
+hashes incrementally and `put_reader` uploads via multipart, so the object is
+never held whole in memory. `nars_upload` streams its multipart `nar` field to a
+staged file first (`stage_nar_field`). The single-source-of-truth for the skip
+decision is `nar_write_needed`, shared by the buffered and streaming puts. The
+integrity guarantee (#482) is preserved: verification passes over the full
+content before any object write.
+
+- `backend/gradient-storage/src/digest.rs`:
+  `reader_verify_matches_one_shot_hash` asserts the incremental SHA-256 in
+  `verify_nar_reader` produces the exact `file_hash` SRI the one-shot
+  `file_hash_sri` reports (so a valid NAR passes);
+  `reader_verify_rejects_size_mismatch` / `reader_verify_rejects_tampered_content`
+  assert a wrong length or altered byte is rejected with the matching error.
+- `backend/gradient-storage/src/nar.rs`:
+  `put_reader_round_trips_multipart_payload` streams a 20 MiB payload (spanning
+  multiple 8 MiB parts) through `put_reader` and asserts `get` returns it
+  byte-for-byte.
+- `backend/gradient-proto/src/ingest.rs`:
+  `idempotent_reader_writes_when_no_row` /
+  `idempotent_reader_skips_when_present_and_hash_matches` assert
+  `put_nar_idempotent_reader` writes the streamed bytes when no row records the
+  path and honours the same idempotency skip as the buffered `put_nar_idempotent`
+  (leaving stored bytes untouched, reader unread).

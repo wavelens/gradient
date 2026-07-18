@@ -11,6 +11,7 @@ use futures::stream::BoxStream;
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 pub use object_store::{MultipartUpload, WriteMultipart};
 use std::sync::Arc;
+use tokio::io::{AsyncRead, AsyncReadExt as _};
 
 /// Unified NAR file storage abstraction over local disk or an S3-compatible backend.
 ///
@@ -312,6 +313,41 @@ impl NarStore {
         Ok(WriteMultipart::new_with_chunk_size(upload, chunk_size))
     }
 
+    /// Stream `reader` into object storage under `hash` via a multipart upload,
+    /// so a large NAR is never held whole in memory: bytes flow reader -> part
+    /// buffer -> object store with at most `MAX_INFLIGHT_PARTS` uploads pending.
+    pub async fn put_reader<R: AsyncRead + Unpin + Send>(
+        &self,
+        hash: &str,
+        mut reader: R,
+    ) -> Result<()> {
+        const PART_SIZE: usize = 8 * 1024 * 1024;
+        const MAX_INFLIGHT_PARTS: usize = 2;
+        const READ_CHUNK: usize = 256 * 1024;
+
+        let mut upload = self.put_streaming(hash, PART_SIZE).await?;
+        let mut buf = vec![0u8; READ_CHUNK];
+        loop {
+            let n = reader
+                .read(&mut buf)
+                .await
+                .context("read NAR while streaming to storage")?;
+            if n == 0 {
+                break;
+            }
+            upload.write(&buf[..n]);
+            upload
+                .wait_for_capacity(MAX_INFLIGHT_PARTS)
+                .await
+                .context("multipart upload backpressure")?;
+        }
+        upload
+            .finish()
+            .await
+            .context("finish multipart NAR upload")?;
+        Ok(())
+    }
+
     pub async fn get(&self, hash: &str) -> Result<Option<Vec<u8>>> {
         self.get_object(&self.object_path(hash)).await
     }
@@ -587,6 +623,22 @@ mod tests {
             assembled.extend_from_slice(&chunk.expect("chunk"));
         }
         assert_eq!(assembled, payload);
+    }
+
+    #[tokio::test]
+    async fn put_reader_round_trips_multipart_payload() {
+        let (_d, store) = local_store();
+        // Larger than the 8 MiB part size so the multipart path spans >1 part.
+        let mut payload = Vec::with_capacity(20 * 1024 * 1024);
+        for i in 0..(20 * 1024 * 1024 / 4) {
+            payload.extend_from_slice(&(i as u32).to_le_bytes());
+        }
+        store
+            .put_reader("streamed", &payload[..])
+            .await
+            .expect("put_reader");
+        let got = store.get("streamed").await.expect("get").expect("present");
+        assert_eq!(got, payload);
     }
 
     #[tokio::test]

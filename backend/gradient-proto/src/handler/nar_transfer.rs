@@ -524,8 +524,12 @@ async fn commit_relayed(
         fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
         return false;
     }
-    let buf = match staged.store.read_all(&staged.key).await {
-        Ok(b) => b,
+    // Stream-verify then stream-store the staged NAR so a large build output is
+    // never buffered whole in server memory (two sequential reads of the local
+    // `.partial`; verify passes before any object write so a corrupt upload
+    // never commits).
+    let verify_reader = match staged.store.open_read(&staged.key).await {
+        Ok(f) => f,
         Err(e) => {
             let reason = format!("failed to read staged NAR: {e}");
             error!(%peer_id, %job_id, %store_path, error = %e, "read staged NAR failed");
@@ -533,18 +537,27 @@ async fn commit_relayed(
             return false;
         }
     };
-    if let Err(e) = gradient_storage::verify_nar_bytes(&buf, file_hash, file_size) {
+    if let Err(e) = gradient_storage::verify_nar_reader(verify_reader, file_hash, file_size).await {
         let reason = format!("NAR content verification failed: {e}");
         error!(%peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
         fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
         return false;
     }
-    if let Err(e) = crate::ingest::put_nar_idempotent(
+    let put_reader = match staged.store.open_read(&staged.key).await {
+        Ok(f) => f,
+        Err(e) => {
+            let reason = format!("failed to read staged NAR: {e}");
+            error!(%peer_id, %job_id, %store_path, error = %e, "read staged NAR failed");
+            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+            return false;
+        }
+    };
+    if let Err(e) = crate::ingest::put_nar_idempotent_reader(
         &state.worker_db,
         &state.nar_storage,
         hash,
         file_hash,
-        buf,
+        put_reader,
     )
     .await
     {
