@@ -371,21 +371,9 @@ impl JsonFlag {
     }
 }
 
-pub async fn fetch_nar_bytes(state: &Arc<ServerState>, path_hash: &str) -> WebResult<Vec<u8>> {
-    let effective_hash =
-        crate::endpoints::caches::nar::resolve_effective_hash_db(&state.web_db, path_hash).await?;
-    state
-        .nar_storage
-        .get(&effective_hash)
-        .await
-        .map_err(|e| WebError::internal(format!("Failed to read NAR: {}", e)))?
-        .or_not_found("Path")
-}
-
-/// Streaming counterpart to [`fetch_nar_bytes`]: resolves the store hash once
-/// and opens a byte stream over the stored `.nar.zst` so the substitution path
-/// never pins a whole NAR (which can be hundreds of MB) in the server heap.
-/// Returns the resolved `(effective_hash, object_size, byte_stream)`.
+/// Resolves the store hash once and opens a byte stream over the stored
+/// `.nar.zst` so the serve paths never pin a whole NAR (which can be hundreds of
+/// MB) in the server heap. Returns `(effective_hash, object_size, byte_stream)`.
 pub async fn fetch_nar_stream(
     state: &Arc<ServerState>,
     path_hash: &str,

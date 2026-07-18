@@ -35,6 +35,7 @@ reqwest                        = { workspace = true }
 tempfile                       = { workspace = true }
 thiserror                      = { workspace = true }
 tokio                          = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync"] }
+tokio-util                     = { workspace = true, features = ["io"] }
 tracing                        = { workspace = true }
 uuid                           = { workspace = true }
 zstd                           = { workspace = true }

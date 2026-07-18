@@ -6530,6 +6530,14 @@ substitution load. `caches::nar` now opens `NarStore::get_stream` and returns
 (a streamed body has no implicit length); `upstream_nar` streams the upstream
 response via `bytes_stream()` instead of `resp.bytes()`.
 
+The single-path browse/download endpoints that extract one file or subtree out
+of a NAR (`caches::serve`, `caches::ls`, `builds` product download,
+`evaluations` product download) had the same problem: they read the whole
+compressed NAR into a `Vec<u8>` before extracting. They now feed
+`NarStore::get_stream` through the new `nar_extract::nar_reader_from_stream`
+(a `StreamReader` + async `ZstdDecoder` bridge) into the already-streaming
+`extract_path_from_reader`, so the compressed NAR is never fully buffered.
+
 - `backend/gradient-web/tests/nar_serve.rs`:
   `nar_serve_streams_stored_blob_byte_for_byte` seeds a multi-chunk blob in a
   local `NarStore`, drives `GET /cache/{cache}/nar/{hash}.nar.zst`, and asserts
@@ -6537,3 +6545,9 @@ response via `bytes_stream()` instead of `resp.bytes()`.
   application/x-nix-nar` and a `Content-Length` equal to the object size. The
   streaming/no-buffering property itself is covered by the storage-level
   `get_stream` tests in `backend/gradient-storage/src/nar.rs`.
+- `backend/gradient-core/tests/nar_extract.rs`:
+  `streaming_reader_extracts_same_file_as_buffered` feeds a compressed NAR as
+  many small chunks (splitting the zstd frame across boundaries) through
+  `nar_reader_from_stream` + `extract_path_from_reader` and asserts the
+  extracted file is identical to the buffered `extract_path_from_nar_bytes`
+  result.

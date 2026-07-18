@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::helpers::{CacheContext, cache_client_ip, fetch_nar_bytes};
+use super::helpers::{CacheContext, cache_client_ip, fetch_nar_stream};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
 use axum::Json;
@@ -12,12 +12,12 @@ use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use futures::StreamExt as _;
 use gradient_core::ServerState;
+use gradient_storage::nar_extract::nar_reader_from_stream;
 use harmonia_file_nar::parse_nar;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
-use tokio::io::BufReader;
 
 type DirFrame = (Option<String>, BTreeMap<String, Box<FileTree>>);
 
@@ -53,12 +53,10 @@ pub async fn ls(
 ) -> WebResult<Response> {
     let client_ip = cache_client_ip(&state, &headers, peer);
     let _ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;
-    let compressed = fetch_nar_bytes(&state, &hash).await?;
+    let (_effective_hash, _size, stream) = fetch_nar_stream(&state, &hash).await?;
+    let reader = nar_reader_from_stream(stream);
 
-    let decompressed = zstd::decode_all(io::Cursor::new(&compressed))
-        .map_err(|e| WebError::internal(format!("NAR decompression failed: {}", e)))?;
-
-    let root = walk_nar(BufReader::new(io::Cursor::new(decompressed)))
+    let root = walk_nar(reader)
         .await
         .map_err(|e| WebError::internal(format!("NAR walk failed: {}", e)))?;
 
