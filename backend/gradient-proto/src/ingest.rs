@@ -13,6 +13,7 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
 };
+use tokio::io::AsyncRead;
 use tracing::{debug, warn};
 
 /// NAR metadata required to record a cached path. Hashes are normalized on write.
@@ -66,6 +67,25 @@ pub async fn ingest_nar<C: ConnectionTrait>(
     upsert_and_sign(db, sp.hash(), sp.name(), input, targets).await
 }
 
+/// Streaming counterpart to [`ingest_nar`]: takes an `AsyncRead` over the
+/// compressed NAR (typically a staged `.partial` file) so the whole object is
+/// never buffered in memory.
+pub async fn ingest_nar_reader<C, R>(
+    db: &C,
+    nar_storage: &NarStore,
+    reader: R,
+    input: IngestInput<'_>,
+    targets: SignTargets,
+) -> anyhow::Result<IngestOutcome>
+where
+    C: ConnectionTrait,
+    R: AsyncRead + Unpin + Send,
+{
+    let sp = parse_store_path(input.store_path)?;
+    put_nar_idempotent_reader(db, nar_storage, sp.hash(), input.file_hash, reader).await?;
+    upsert_and_sign(db, sp.hash(), sp.name(), input, targets).await
+}
+
 /// Store `nar_bytes` for store-path `hash`, skipping the object-store write when
 /// the identical NAR is already present: a `cached_path` row records the same
 /// compressed `file_hash` AND the object is physically there (`HEAD`). A re-push
@@ -80,13 +100,54 @@ pub async fn put_nar_idempotent<C: ConnectionTrait>(
     file_hash: &str,
     nar_bytes: Vec<u8>,
 ) -> anyhow::Result<bool> {
+    if !nar_write_needed(db, nar_storage, hash, file_hash).await? {
+        return Ok(false);
+    }
+    nar_storage.put(hash, nar_bytes).await?;
+    Ok(true)
+}
+
+/// Streaming counterpart to [`put_nar_idempotent`]: same idempotency skip, but
+/// streams `reader` into storage via multipart instead of taking a `Vec<u8>`.
+/// On a skip the reader is dropped unread.
+pub async fn put_nar_idempotent_reader<C, R>(
+    db: &C,
+    nar_storage: &NarStore,
+    hash: &str,
+    file_hash: &str,
+    reader: R,
+) -> anyhow::Result<bool>
+where
+    C: ConnectionTrait,
+    R: AsyncRead + Unpin + Send,
+{
+    if !nar_write_needed(db, nar_storage, hash, file_hash).await? {
+        return Ok(false);
+    }
+    nar_storage.put_reader(hash, reader).await?;
+    Ok(true)
+}
+
+/// Whether `hash`'s NAR must be (re)written, or can be skipped because an
+/// identical one is already stored: a `cached_path` row records the same
+/// compressed `file_hash` AND the object is physically present (`HEAD`). A
+/// re-push of unchanged content is then a metadata-only no-op instead of a
+/// fresh write, which on a versioning-enabled bucket would otherwise pile up
+/// retained versions that no S3-API GC can reclaim. `file_hash` is the incoming
+/// compressed-NAR hash (`sha256:<nix32>`).
+///
+/// The lookup is a best-effort optimization. A transient DB error here (e.g. a
+/// worker_db pool timeout under an eval's input-.drv push storm) must NOT
+/// propagate: it would abort the commit and terminally fail an eval whose
+/// evaluation actually succeeded. Degrade to "must write", which is always safe
+/// (re-storing identical bytes is a no-op on the store side).
+async fn nar_write_needed<C: ConnectionTrait>(
+    db: &C,
+    nar_storage: &NarStore,
+    hash: &str,
+    file_hash: &str,
+) -> anyhow::Result<bool> {
     let incoming = normalize_nar_hash(file_hash);
-    // The idempotency lookup is a best-effort optimization that skips a
-    // redundant write. A transient DB error here (e.g. a worker_db pool timeout
-    // under an eval's input-.drv push storm) must NOT propagate: it would abort
-    // the commit and terminally fail an eval whose evaluation actually
-    // succeeded. Degrade to "not recorded" and fall through to the write, which
-    // is always safe (re-storing identical bytes is a no-op on the store side).
     let recorded_match = match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
         .one(db)
@@ -106,7 +167,6 @@ pub async fn put_nar_idempotent<C: ConnectionTrait>(
         return Ok(false);
     }
 
-    nar_storage.put(hash, nar_bytes).await?;
     Ok(true)
 }
 
@@ -439,6 +499,40 @@ mod tests {
             "must write the NAR when the idempotency lookup errors"
         );
         assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
+    }
+
+    /// The streaming put writes through when no row records the path, storing
+    /// exactly the bytes read from the reader.
+    #[tokio::test]
+    async fn idempotent_reader_writes_when_no_row() {
+        let store = temp_store();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
+            .into_connection();
+
+        let wrote = put_nar_idempotent_reader(&db, &store, IDEM_HASH, "sha256:abc", &b"NEW"[..])
+            .await
+            .unwrap();
+        assert!(wrote);
+        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"NEW");
+    }
+
+    /// The streaming put honours the same idempotency skip as the buffered one:
+    /// identical content already present leaves the stored bytes untouched and
+    /// never consumes/streams the reader.
+    #[tokio::test]
+    async fn idempotent_reader_skips_when_present_and_hash_matches() {
+        let store = temp_store();
+        store.put(IDEM_HASH, b"OLD".to_vec()).await.unwrap();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row_with_file_hash("sha256:abc")]])
+            .into_connection();
+
+        let wrote = put_nar_idempotent_reader(&db, &store, IDEM_HASH, "sha256:abc", &b"NEW"[..])
+            .await
+            .unwrap();
+        assert!(!wrote, "must skip when an identical NAR is already stored");
+        assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"OLD");
     }
 
     const SP: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";

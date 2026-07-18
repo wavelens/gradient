@@ -15,7 +15,7 @@ use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use gradient_core::ServerState;
-use gradient_proto::ingest::{IngestInput, SignTargets, ingest_nar};
+use gradient_proto::ingest::{IngestInput, SignTargets, ingest_nar_reader};
 use gradient_storage::PartialStore;
 use gradient_types::*;
 use serde::Deserialize;
@@ -56,15 +56,20 @@ pub async fn nars_upload(
     )
     .await?;
 
+    let upload_store = upload_partial_store(&state)?;
+    let stage_key = format!("{}/oneshot-{}", cache.id, uuid::Uuid::now_v7());
+    let max = state.config.limits.max_nar_upload_size as u64;
+
     let mut narinfo: Option<NarinfoPart> = None;
-    let mut nar_bytes: Option<Vec<u8>> = None;
+    let mut staged_size: Option<u64> = None;
 
     while let Some(field) = multipart
         .next_field()
         .await
         .map_err(|e| WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string()))?
     {
-        match field.name() {
+        let name = field.name().map(str::to_owned);
+        match name.as_deref() {
             Some("narinfo") => {
                 let text = field.text().await.map_err(|e| {
                     WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string())
@@ -78,45 +83,63 @@ pub async fn nars_upload(
                 narinfo = Some(parsed);
             }
             Some("nar") => {
-                let bytes = field.bytes().await.map_err(|e| {
-                    WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string())
-                })?;
-                nar_bytes = Some(bytes.to_vec());
+                staged_size = Some(stage_nar_field(&upload_store, &stage_key, field, max).await?);
             }
             _ => {}
         }
     }
 
-    let narinfo = narinfo.ok_or_else(|| {
-        WebError::BadRequest(ErrorCode::INPUT_VALIDATION, "missing narinfo part".into())
-    })?;
-    let nar_bytes = nar_bytes.ok_or_else(|| {
+    let narinfo = match narinfo {
+        Some(n) => n,
+        None => {
+            let _ = upload_store.discard(&stage_key).await;
+            return Err(WebError::BadRequest(
+                ErrorCode::INPUT_VALIDATION,
+                "missing narinfo part".into(),
+            ));
+        }
+    };
+    let staged_size = staged_size.ok_or_else(|| {
         WebError::BadRequest(ErrorCode::INPUT_VALIDATION, "missing nar part".into())
     })?;
 
-    if nar_bytes.len() as i64 != narinfo.file_size {
+    if staged_size as i64 != narinfo.file_size {
+        let _ = upload_store.discard(&stage_key).await;
         return Err(WebError::BadRequest(
             ErrorCode::INPUT_VALIDATION,
             format!(
-                "nar size mismatch: declared {} bytes, got {}",
-                narinfo.file_size,
-                nar_bytes.len()
+                "nar size mismatch: declared {} bytes, got {staged_size}",
+                narinfo.file_size
             ),
         ));
     }
-    if let Err(e) =
-        gradient_storage::verify_nar_bytes(&nar_bytes, &narinfo.file_hash, narinfo.file_size as u64)
+
+    let verify_reader = upload_store
+        .open_read(&stage_key)
+        .await
+        .map_err(|e| WebError::internal(format!("failed to read staged NAR: {e}")))?;
+    if let Err(e) = gradient_storage::verify_nar_reader(
+        verify_reader,
+        &narinfo.file_hash,
+        narinfo.file_size as u64,
+    )
+    .await
     {
+        let _ = upload_store.discard(&stage_key).await;
         return Err(WebError::BadRequest(
             ErrorCode::INPUT_VALIDATION,
             format!("nar content verification failed: {e}"),
         ));
     }
 
-    let outcome = ingest_nar(
+    let nar_reader = upload_store
+        .open_read(&stage_key)
+        .await
+        .map_err(|e| WebError::internal(format!("failed to read staged NAR: {e}")))?;
+    let outcome = ingest_nar_reader(
         &state.web_db,
         &state.nar_storage,
-        nar_bytes,
+        nar_reader,
         IngestInput {
             store_path: &narinfo.store_path,
             file_hash: &narinfo.file_hash,
@@ -131,6 +154,7 @@ pub async fn nars_upload(
     )
     .await
     .map_err(WebError::from)?;
+    let _ = upload_store.discard(&stage_key).await;
 
     sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
 
@@ -191,6 +215,38 @@ fn upload_partial_store(state: &ServerState) -> WebResult<PartialStore> {
     let root = format!("{}/nar-upload-partial", state.config.storage.base_path);
     let ttl = Duration::from_secs(state.config.proto.nar_partial_ttl_secs);
     Ok(PartialStore::new(root, ttl)?)
+}
+
+/// Stream one multipart `nar` field to a staged `.partial` so a single-shot
+/// upload never buffers the whole NAR in memory. Returns the staged byte count;
+/// discards the partial and errors if it would exceed `max`.
+async fn stage_nar_field(
+    store: &PartialStore,
+    key: &str,
+    mut field: axum::extract::multipart::Field<'_>,
+    max: u64,
+) -> WebResult<u64> {
+    let token = "oneshot";
+    let mut offset = 0u64;
+    while let Some(chunk) = field
+        .chunk()
+        .await
+        .map_err(|e| WebError::BadRequest(ErrorCode::INPUT_VALIDATION, e.to_string()))?
+    {
+        if offset + chunk.len() as u64 > max {
+            let _ = store.discard(key).await;
+            return Err(WebError::PayloadTooLarge(
+                ErrorCode::PAYLOAD_TOO_LARGE,
+                format!("nar exceeds max upload size of {max} bytes"),
+            ));
+        }
+        store
+            .append(key, token, offset, &chunk)
+            .await
+            .map_err(|e| WebError::internal(format!("failed to stage NAR: {e}")))?;
+        offset += chunk.len() as u64;
+    }
+    Ok(offset)
 }
 
 /// A store path's base name (`<hash>-<name>`) used as the staging key. Rejected
@@ -298,19 +354,30 @@ pub async fn nar_finalize(
         ));
     }
 
-    let nar_bytes = store.read_all(&key).await?;
-    if let Err(e) =
-        gradient_storage::verify_nar_bytes(&nar_bytes, &narinfo.file_hash, narinfo.file_size as u64)
+    let verify_reader = store
+        .open_read(&key)
+        .await
+        .map_err(|e| WebError::internal(format!("failed to read staged NAR: {e}")))?;
+    if let Err(e) = gradient_storage::verify_nar_reader(
+        verify_reader,
+        &narinfo.file_hash,
+        narinfo.file_size as u64,
+    )
+    .await
     {
         return Err(WebError::BadRequest(
             ErrorCode::INPUT_VALIDATION,
             format!("nar content verification failed: {e}"),
         ));
     }
-    let outcome = ingest_nar(
+    let nar_reader = store
+        .open_read(&key)
+        .await
+        .map_err(|e| WebError::internal(format!("failed to read staged NAR: {e}")))?;
+    let outcome = ingest_nar_reader(
         &state.web_db,
         &state.nar_storage,
-        nar_bytes,
+        nar_reader,
         IngestInput {
             store_path: &narinfo.store_path,
             file_hash: &narinfo.file_hash,
