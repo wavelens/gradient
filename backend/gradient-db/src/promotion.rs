@@ -520,7 +520,9 @@ fn dependency_failed_reconcile_sql(scope: Option<gradient_types::EvaluationId>) 
         None => (
             dependency_closure_cte(
                 "dependents",
-                &format!("SELECT derivation FROM derivation_build WHERE status IN ({terminal_failure})"),
+                &format!(
+                    "SELECT derivation FROM derivation_build WHERE status IN ({terminal_failure})"
+                ),
                 ClosureDirection::Dependents,
             ),
             String::new(),
@@ -1023,7 +1025,10 @@ mod tests {
             "scoped seed must be the closure's terminal-failed anchors: {scoped}"
         );
         assert!(
-            scoped.matches("IN (SELECT derivation FROM closure)").count() >= 3,
+            scoped
+                .matches("IN (SELECT derivation FROM closure)")
+                .count()
+                >= 3,
             "scoped seed, walk, and UPDATE must all be bounded to the closure: {scoped}"
         );
     }

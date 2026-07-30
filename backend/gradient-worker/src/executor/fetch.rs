@@ -1233,7 +1233,10 @@ mod tests {
             super::percent_encode_hash("sha256:A+b/C="),
             "sha256:A%2Bb%2FC%3D"
         );
-        assert_eq!(super::percent_encode_hash("plain-hash_123"), "plain-hash_123");
+        assert_eq!(
+            super::percent_encode_hash("plain-hash_123"),
+            "plain-hash_123"
+        );
     }
 
     #[test]
