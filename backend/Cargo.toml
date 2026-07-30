@@ -47,7 +47,6 @@ gradient-web          = { path = "gradient-web" }
 gradient-worker       = { path = "gradient-worker" }
 
 # Async / runtime
-async-std    = { version = "1", features = ["attributes", "tokio1"] } # defaults: provides the task executor
 async-stream = { version = "0.3", default-features = false }
 async-trait  = { version = "0.1", default-features = false }
 futures      = { version = "0.3", default-features = false, features = ["std", "async-await"] }
@@ -129,7 +128,7 @@ tower_governor       = { version = "0.8", default-features = false, features = [
 # Object store / git
 git2         = { version = "0.21", default-features = false, features = ["https", "ssh"] }
 libc         = { version = "0.2", default-features = false }
-object_store = { version = "0.13", default-features = false, features = ["aws", "fs"] }
+object_store = { version = "0.14", default-features = false, features = ["aws", "fs"] }
 
 # Harmonia (git deps)
 harmonia-file-nar              = { git = "https://github.com/nix-community/harmonia.git", default-features = false }

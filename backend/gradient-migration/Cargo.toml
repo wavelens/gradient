@@ -18,6 +18,5 @@ workspace = true
 async-trait       = { workspace = true }
 sea-orm-migration = { workspace = true }
 sha2              = { workspace = true }
+tokio             = { workspace = true, features = ["macros"] }
 uuid              = { workspace = true }
-
-async-std = { workspace = true }
