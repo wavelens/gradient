@@ -6581,3 +6581,25 @@ content before any object write.
   `put_nar_idempotent_reader` writes the streamed bytes when no row records the
   path and honours the same idempotency skip as the buffered `put_nar_idempotent`
   (leaving stored bytes untouched, reader unread).
+
+## Per-input flake prefetch fallback (#550)
+
+`nix flake archive` fetches every input in `flake.lock`, so one unfetchable
+input (e.g. a private `git+ssh` input the org has no key for) failed the whole
+fetch even when the eval targets never referenced it. On archive failure the
+worker now prefetches the source and each locked input independently
+(`prefetch_flake_best_effort`), collecting successes and emitting per-input
+`Warning` `EvalMessage`s instead of aborting.
+
+`backend/gradient-worker/src/executor/fetch.rs`:
+- `flake_ref_from_lock_locked_github_rev_narhash` - `github` rebuilds
+  `{ty}:{owner}/{repo}/{rev}?narHash=<percent-encoded>`.
+- `flake_ref_from_lock_locked_git_ref_rev` - `git` appends `ref`/`rev` query
+  params; `flake_ref_from_lock_locked_tarball_narhash` / `_path` cover the
+  remaining locked node types.
+- `percent_encode_hash_encodes_base64_specials` - the SRI hash helper encodes
+  `+`/`/`/`=` and leaves other characters untouched.
+- `build_prefetch_argv_shape` - argv is `flake prefetch --json <ref>`.
+- `prefetch_refs_from_lock_walks_all_and_applies_override` - the lock walk
+  covers transitive (non-root-input) nodes, skips the root node, prefers an
+  override for a root input, and warns on an unsupported node type.

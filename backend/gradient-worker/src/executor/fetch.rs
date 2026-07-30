@@ -19,7 +19,7 @@ use gradient_proto::messages::{FlakeJob, FlakeSource};
 use gradient_proto::traits::JobReporter;
 use tempfile::NamedTempFile;
 use tokio::sync::watch;
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, warn};
 
 use crate::proto::credentials::CredentialStore;
 
@@ -46,16 +46,15 @@ async fn abort_true(abort: &mut watch::Receiver<bool>) {
 
 /// Outcome of a successful `fetch_repository` call.
 ///
-/// `local_flake_path` is the path eval tasks should point at (either the
-/// archived nix-store source, or the temporary git checkout on fallback).
-/// `flake_source` is `Some(store_path)` when `nix flake archive` succeeded
-/// and the source now lives in the cache - this is the value reported back
-/// to the server so subsequent eval-only jobs can use
-/// `FlakeSource::Cached { store_path }`. On archive fallback it is `None`
-/// (worker is on a tmp checkout; no eval-only follow-up possible).
-/// `archived_paths` lists every store path produced by the archive (source
-/// + transitive inputs) - the caller pushes and optionally signs these.
-///   Empty on fallback.
+/// `local_flake_path` is the path eval tasks should point at (the nix-store
+/// source produced by `nix flake archive` or the per-input prefetch fallback).
+/// `flake_source` is `Some(store_path)` whenever the source landed in the
+/// cache - either `nix flake archive` succeeded or the fallback prefetched at
+/// least the source - and is reported back so subsequent eval-only jobs can use
+/// `FlakeSource::Cached { store_path }`. `archived_paths` lists every store path
+/// pushed to the cache (source plus every input the archive or fallback managed
+/// to fetch) - the caller pushes and optionally signs these. The fallback may
+/// legitimately omit inputs the org has no credentials for.
 pub struct FetchOutcome {
     pub local_flake_path: String,
     pub flake_source: Option<String>,
@@ -173,7 +172,7 @@ pub async fn fetch_repository(
         &binpath_ssh,
         ssh_key.as_deref(),
         &applied_overrides,
-        abort,
+        &mut abort,
     )
     .await
     {
@@ -185,7 +184,56 @@ pub async fn fetch_repository(
                 archived_paths,
             })
         }
-        Err(e) => Err(e),
+        // `nix flake archive` is all-or-nothing: one unfetchable input (e.g. a
+        // private `git+ssh` input the org has no key for) fails the whole
+        // command even though eval targets never reference it. Nix evaluation is
+        // lazy, so fall back to prefetching the source and each locked input
+        // independently as best-effort cache population.
+        Err(archive_err) => {
+            let archive_msg = archive_err.to_string();
+            warn!(error = %archive_msg, "nix flake archive failed; falling back to per-input prefetch");
+            match prefetch_flake_best_effort(
+                &flake_ref,
+                &flake_root,
+                &binpath_nix,
+                &binpath_ssh,
+                ssh_key.as_deref(),
+                &applied_overrides,
+                &mut abort,
+            )
+            .await
+            {
+                Ok((source_path, archived_paths, input_warnings)) => {
+                    updater
+                        .send_eval_message(
+                            gradient_types::proto::EvalMessageLevel::Warning,
+                            "fetch",
+                            &format!(
+                                "nix flake archive failed, continued with best-effort per-input fetch: {}",
+                                archive_msg.trim()
+                            ),
+                        )
+                        .await?;
+                    for msg in &input_warnings {
+                        updater
+                            .send_eval_message(
+                                gradient_types::proto::EvalMessageLevel::Warning,
+                                "fetch",
+                                msg,
+                            )
+                            .await?;
+                    }
+                    info!(%source_path, inputs = archived_paths.len(), "flake prefetched to nix store after archive fallback");
+                    Ok(FetchOutcome {
+                        local_flake_path: source_path.clone(),
+                        flake_source: Some(source_path),
+                        archived_paths,
+                    })
+                }
+                Err(prefetch_err) => Err(prefetch_err
+                    .context(format!("nix flake archive failed: {}", archive_msg.trim()))),
+            }
+        }
     }
 }
 
@@ -282,98 +330,198 @@ fn build_archive_argv(flake_ref: &str, overrides: &[(String, String)]) -> Vec<St
 }
 
 /// Run `nix flake archive --json` and collect all store paths (source + all
-/// transitive flake inputs).  Returns the source store path and metadata for
-/// every archived path obtained from `nix path-info`.
-///
-/// When `ssh_key` is `Some`, the key is written to a mode-600 temp file and
-/// `GIT_SSH_COMMAND` is set on the subprocess so libfetchers can clone private
-/// `git+ssh` inputs.  The temp file is deleted when this function returns.
+/// transitive flake inputs). Returns the source store path and every archived
+/// path, verified present via `nix path-info`.
 async fn archive_flake(
     flake_ref: &str,
     binpath_nix: &str,
     binpath_ssh: &str,
     ssh_key: Option<&str>,
     overrides: &[(String, String)],
-    mut abort: watch::Receiver<bool>,
+    abort: &mut watch::Receiver<bool>,
 ) -> Result<(String, Vec<String>)> {
-    use std::os::unix::fs::PermissionsExt;
-
     trace!(binpath_nix, flake_ref, "executing nix flake archive");
+    let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
     let mut cmd = tokio::process::Command::new(binpath_nix);
     cmd.args(build_archive_argv(flake_ref, overrides));
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-    cmd.kill_on_drop(true);
-
-    // Write the SSH key to a temp file (mode 0600) and set GIT_SSH_COMMAND so
-    // that nix's libfetchers picks it up when cloning git+ssh inputs.  The
-    // _key_file guard ensures the file is deleted when this scope exits.
-    let _key_file: Option<NamedTempFile> = if let Some(key) = ssh_key {
-        let kf =
-            NamedTempFile::with_suffix(".key").context("failed to create SSH key temp file")?;
-        tokio::fs::set_permissions(kf.path(), std::fs::Permissions::from_mode(0o600))
-            .await
-            .context("failed to chmod SSH key file")?;
-        tokio::fs::write(kf.path(), key.as_bytes())
-            .await
-            .context("failed to write SSH key file")?;
-        let ssh_command = format!(
-            "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
-            binpath_ssh,
-            kf.path().display()
-        );
+    if let Some((_guard, ssh_command)) = &key_env {
         cmd.env("GIT_SSH_COMMAND", ssh_command);
-        Some(kf)
-    } else {
-        None
-    };
-
-    let child = cmd.spawn().context("failed to spawn nix flake archive")?;
-
-    // Spawn into a separate task so abort_handle can cancel it (dropping child,
-    // which triggers kill_on_drop) independently of the await future.
-    let archive_task = tokio::spawn(async move { child.wait_with_output().await });
-    let abort_handle = archive_task.abort_handle();
-
-    let output = tokio::select! {
-        biased;
-        _ = abort_true(&mut abort) => {
-            abort_handle.abort();
-            anyhow::bail!("job aborted during nix flake archive");
-        }
-        result = archive_task => {
-            result
-                .context("nix flake archive task panicked")?
-                .context("failed to run nix flake archive")?
-        }
-    };
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("nix flake archive failed: {}", stderr.trim());
     }
+    let output = run_nix_subprocess(cmd, "nix flake archive", abort).await?;
 
     let json: serde_json::Value = parse_nix_json(&output.stdout, "nix flake archive")?;
-
     let source_path = json["path"]
         .as_str()
         .context("nix flake archive JSON missing 'path' field")?
         .to_owned();
 
-    // Collect every store path referenced by the archive output (deduplicated).
     let mut all_paths: HashSet<String> = HashSet::new();
     all_paths.insert(source_path.clone());
     collect_input_paths(&json, &mut all_paths);
 
     let all_paths: Vec<String> = all_paths.into_iter().collect();
-    // Path metadata is no longer surfaced via FetchResult - the server
-    // records cached_path rows from the NarUploaded stream instead. We
-    // still run `nix path-info` here to verify every archived path is
-    // actually present in the local store before the caller tries to push
-    // it, which surfaces a misbehaving archive step early.
     let _ = query_path_info(&all_paths, binpath_nix, abort).await?;
 
     Ok((source_path, all_paths))
+}
+
+/// Spawn a `nix` subprocess, honoring `abort` (killing the child via
+/// `kill_on_drop` on abort), and return its captured output, failing on a
+/// non-zero exit with the trimmed stderr. Shared by archive, prefetch and
+/// path-info so the spawn/select/status plumbing lives in one place.
+async fn run_nix_subprocess(
+    mut cmd: tokio::process::Command,
+    label: &str,
+    abort: &mut watch::Receiver<bool>,
+) -> Result<std::process::Output> {
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.kill_on_drop(true);
+
+    let child = cmd
+        .spawn()
+        .with_context(|| format!("failed to spawn {label}"))?;
+
+    let task = tokio::spawn(async move { child.wait_with_output().await });
+    let abort_handle = task.abort_handle();
+
+    let output = tokio::select! {
+        biased;
+        _ = abort_true(abort) => {
+            abort_handle.abort();
+            anyhow::bail!("job aborted during {label}");
+        }
+        result = task => {
+            result
+                .with_context(|| format!("{label} task panicked"))?
+                .with_context(|| format!("failed to run {label}"))?
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("{label} failed: {}", stderr.trim());
+    }
+
+    Ok(output)
+}
+
+/// Write `ssh_key` to a mode-0600 temp file and build the matching
+/// `GIT_SSH_COMMAND` value so nix's libfetchers can clone private `git+ssh`
+/// inputs. The returned guard deletes the file on drop and MUST outlive every
+/// subprocess that reads the env.
+async fn ssh_key_env(
+    ssh_key: Option<&str>,
+    binpath_ssh: &str,
+) -> Result<Option<(NamedTempFile, String)>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let Some(key) = ssh_key else {
+        return Ok(None);
+    };
+    let kf = NamedTempFile::with_suffix(".key").context("failed to create SSH key temp file")?;
+    tokio::fs::set_permissions(kf.path(), std::fs::Permissions::from_mode(0o600))
+        .await
+        .context("failed to chmod SSH key file")?;
+    tokio::fs::write(kf.path(), key.as_bytes())
+        .await
+        .context("failed to write SSH key file")?;
+    let ssh_command = format!(
+        "{} -i {} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null",
+        binpath_ssh,
+        kf.path().display()
+    );
+    Ok(Some((kf, ssh_command)))
+}
+
+fn build_prefetch_argv(flake_ref: &str) -> Vec<String> {
+    vec![
+        "flake".to_owned(),
+        "prefetch".to_owned(),
+        "--json".to_owned(),
+        flake_ref.to_owned(),
+    ]
+}
+
+/// Prefetch a single flake ref via `nix flake prefetch --json` and return its
+/// `storePath`.
+async fn prefetch_one(
+    flake_ref: &str,
+    binpath_nix: &str,
+    ssh_command: Option<&str>,
+    abort: &mut watch::Receiver<bool>,
+) -> Result<String> {
+    trace!(binpath_nix, flake_ref, "executing nix flake prefetch");
+    let mut cmd = tokio::process::Command::new(binpath_nix);
+    cmd.args(build_prefetch_argv(flake_ref));
+    if let Some(sc) = ssh_command {
+        cmd.env("GIT_SSH_COMMAND", sc);
+    }
+    let output = run_nix_subprocess(cmd, "nix flake prefetch", abort).await?;
+    let json = parse_nix_json(&output.stdout, "nix flake prefetch")?;
+    json["storePath"]
+        .as_str()
+        .context("nix flake prefetch JSON missing 'storePath' field")
+        .map(str::to_owned)
+}
+
+/// Best-effort fallback for when `nix flake archive` fails: prefetch the flake
+/// source itself (a hard error if that fails) then every locked input from
+/// `flake.lock` independently, collecting the successes and turning per-input
+/// failures into warnings. Returns `(source_path, collected_paths, warnings)`.
+async fn prefetch_flake_best_effort(
+    flake_ref: &str,
+    flake_root: &str,
+    binpath_nix: &str,
+    binpath_ssh: &str,
+    ssh_key: Option<&str>,
+    overrides: &[(String, String)],
+    abort: &mut watch::Receiver<bool>,
+) -> Result<(String, Vec<String>, Vec<String>)> {
+    // The key-file guard must outlive every prefetch invocation below.
+    let key_env = ssh_key_env(ssh_key, binpath_ssh).await?;
+    let ssh_command = key_env.as_ref().map(|(_, c)| c.as_str());
+
+    let source_path = prefetch_one(flake_ref, binpath_nix, ssh_command, abort)
+        .await
+        .context("nix flake prefetch of source failed")?;
+
+    let mut all_paths: HashSet<String> = HashSet::new();
+    all_paths.insert(source_path.clone());
+    let mut warnings: Vec<String> = Vec::new();
+
+    let lock_path = std::path::Path::new(flake_root).join("flake.lock");
+    match tokio::fs::read(&lock_path).await {
+        Ok(bytes) => {
+            let lock: serde_json::Value =
+                serde_json::from_slice(&bytes).context("failed to parse flake.lock")?;
+            let (refs, walk_warnings) = prefetch_refs_from_lock(&lock, overrides);
+            warnings.extend(walk_warnings);
+            for (name, input_ref) in refs {
+                if *abort.borrow() {
+                    anyhow::bail!("job aborted during flake input prefetch");
+                }
+                match prefetch_one(&input_ref, binpath_nix, ssh_command, abort).await {
+                    Ok(path) => {
+                        all_paths.insert(path);
+                    }
+                    Err(e) => warnings.push(format!(
+                        "skipping flake input '{name}': {}",
+                        e.to_string().trim()
+                    )),
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(e).with_context(|| format!("failed to read {}", lock_path.display()));
+        }
+    }
+
+    let all_paths: Vec<String> = all_paths.into_iter().collect();
+    let _ = query_path_info(&all_paths, binpath_nix, abort).await?;
+
+    Ok((source_path, all_paths, warnings))
 }
 
 /// Recursively walk the `inputs` tree from `nix flake archive --json` output
@@ -389,15 +537,15 @@ fn collect_input_paths(node: &serde_json::Value, paths: &mut HashSet<String>) {
     }
 }
 
-/// Query `narHash` and `narSize` for each store path via `nix path-info --json`.
+/// Verify every store path is present locally via `nix path-info --json`.
 ///
-/// Supports both the legacy object output (`{"/nix/store/xxx": {...}}`) and the
-/// modern array output (`[{"path": "/nix/store/xxx", ...}]`) from newer Nix
-/// versions.
+/// Metadata is no longer surfaced here (the server records it from the
+/// NarUploaded stream); this only confirms the archive/prefetch step actually
+/// populated the store before the caller pushes.
 async fn query_path_info(
     paths: &[String],
     binpath_nix: &str,
-    mut abort: watch::Receiver<bool>,
+    abort: &mut watch::Receiver<bool>,
 ) -> Result<Vec<()>> {
     if paths.is_empty() {
         return Ok(vec![]);
@@ -406,39 +554,11 @@ async fn query_path_info(
     trace!(binpath_nix, count = paths.len(), "executing nix path-info");
     let mut cmd = tokio::process::Command::new(binpath_nix);
     cmd.arg("path-info").arg("--json");
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-    cmd.kill_on_drop(true);
     for path in paths {
         cmd.arg(path);
     }
+    let output = run_nix_subprocess(cmd, "nix path-info", abort).await?;
 
-    let child = cmd.spawn().context("failed to spawn nix path-info")?;
-
-    let path_info_task = tokio::spawn(async move { child.wait_with_output().await });
-    let abort_handle = path_info_task.abort_handle();
-
-    let output = tokio::select! {
-        biased;
-        _ = abort_true(&mut abort) => {
-            abort_handle.abort();
-            anyhow::bail!("job aborted during nix path-info");
-        }
-        result = path_info_task => {
-            result
-                .context("nix path-info task panicked")?
-                .context("failed to run nix path-info")?
-        }
-    };
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("nix path-info failed: {}", stderr.trim());
-    }
-
-    // Just parse enough to confirm nix path-info ran successfully; we no
-    // longer surface narHash/narSize from here because the server receives
-    // that metadata via the NarUploaded stream.
     let _json: serde_json::Value = parse_nix_json(&output.stdout, "nix path-info")?;
 
     Ok(Vec::new())
@@ -538,6 +658,137 @@ fn flake_ref_from_lock_original(original: &serde_json::Value) -> anyhow::Result<
         }
         other => anyhow::bail!("unsupported flake.lock input type '{other}'"),
     })
+}
+
+/// Percent-encode the base64/SRI characters a `narHash` can contain so it
+/// survives inside a flake-ref query string. SRI hashes only use these three.
+fn percent_encode_hash(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '+' => out.push_str("%2B"),
+            '/' => out.push_str("%2F"),
+            '=' => out.push_str("%3D"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn nar_hash_param(locked: &serde_json::Value, sep: char) -> String {
+    match locked.get("narHash").and_then(|v| v.as_str()) {
+        Some(h) => format!("{sep}narHash={}", percent_encode_hash(h)),
+        None => String::new(),
+    }
+}
+
+/// Reconstruct a pinned flake-ref from a `flake.lock` node's `locked` field,
+/// used by the per-input prefetch fallback. Appends the percent-encoded
+/// `narHash` so nix prefetches exactly the pinned revision.
+fn flake_ref_from_lock_locked(locked: &serde_json::Value) -> anyhow::Result<String> {
+    use anyhow::Context;
+    let ty = locked
+        .get("type")
+        .and_then(|v| v.as_str())
+        .context("flake.lock node.locked missing 'type'")?;
+
+    let s = |k: &str| -> Option<&str> { locked.get(k).and_then(|v| v.as_str()) };
+
+    Ok(match ty {
+        "github" | "gitlab" | "sourcehut" => {
+            let owner = s("owner").with_context(|| format!("{ty} node missing 'owner'"))?;
+            let repo = s("repo").with_context(|| format!("{ty} node missing 'repo'"))?;
+            let rev = s("rev").with_context(|| format!("{ty} node missing 'rev'"))?;
+            format!("{ty}:{owner}/{repo}/{rev}{}", nar_hash_param(locked, '?'))
+        }
+        "git" => {
+            let url = s("url").context("git node missing 'url'")?;
+            let mut params: Vec<String> = Vec::new();
+            if let Some(r) = s("ref") {
+                params.push(format!("ref={r}"));
+            }
+            if let Some(rev) = s("rev") {
+                params.push(format!("rev={rev}"));
+            }
+            if let Some(h) = s("narHash") {
+                params.push(format!("narHash={}", percent_encode_hash(h)));
+            }
+            if params.is_empty() {
+                format!("git+{url}")
+            } else {
+                let sep = if url.contains('?') { '&' } else { '?' };
+                format!("git+{url}{sep}{}", params.join("&"))
+            }
+        }
+        "tarball" => {
+            let url = s("url").context("tarball node missing 'url'")?;
+            let sep = if url.contains('?') { '&' } else { '?' };
+            format!("{url}{}", nar_hash_param(locked, sep))
+        }
+        "path" => {
+            let path = s("path").context("path node missing 'path'")?;
+            format!("path:{path}")
+        }
+        other => anyhow::bail!("unsupported flake.lock locked type '{other}'"),
+    })
+}
+
+/// Walk every non-root node in a `flake.lock` (a flat graph, so this covers
+/// transitive inputs) and build the pinned flake ref to prefetch for each. Root
+/// inputs carrying an override prefetch the override ref instead of the locked
+/// one. Returns `(refs, warnings)` where each unsupported node becomes a warning
+/// rather than aborting the walk. `refs` items are `(display_name, flake_ref)`.
+fn prefetch_refs_from_lock(
+    lock: &serde_json::Value,
+    overrides: &[(String, String)],
+) -> (Vec<(String, String)>, Vec<String>) {
+    let root_key = lock.get("root").and_then(|v| v.as_str()).unwrap_or("root");
+    let override_map: std::collections::HashMap<&str, &str> = overrides
+        .iter()
+        .map(|(n, r)| (n.as_str(), r.as_str()))
+        .collect();
+
+    // node key -> root input name, for the override lookup and warning names.
+    let root_input_of: std::collections::HashMap<&str, &str> = lock
+        .get("nodes")
+        .and_then(|n| n.get(root_key))
+        .and_then(|r| r.get("inputs"))
+        .and_then(|i| i.as_object())
+        .map(|inputs| {
+            inputs
+                .iter()
+                .filter_map(|(name, key)| key.as_str().map(|k| (k, name.as_str())))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let Some(nodes) = lock.get("nodes").and_then(|n| n.as_object()) else {
+        return (Vec::new(), Vec::new());
+    };
+
+    let mut refs = Vec::new();
+    let mut warnings = Vec::new();
+    for (node_key, node) in nodes {
+        if node_key == root_key {
+            continue;
+        }
+        let root_name = root_input_of.get(node_key.as_str()).copied();
+        let display_name = root_name.unwrap_or(node_key.as_str());
+
+        if let Some(override_ref) = root_name.and_then(|name| override_map.get(name)) {
+            refs.push((display_name.to_owned(), (*override_ref).to_owned()));
+            continue;
+        }
+
+        let Some(locked) = node.get("locked") else {
+            continue;
+        };
+        match flake_ref_from_lock_locked(locked) {
+            Ok(r) => refs.push((display_name.to_owned(), r)),
+            Err(e) => warnings.push(format!("skipping flake input '{display_name}': {e}")),
+        }
+    }
+    (refs, warnings)
 }
 
 /// Worker-side mirror of the proto `FlakeInputOverride`.
@@ -974,5 +1225,127 @@ mod tests {
         assert!(applied.is_empty());
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("missing"));
+    }
+
+    #[test]
+    fn percent_encode_hash_encodes_base64_specials() {
+        assert_eq!(
+            super::percent_encode_hash("sha256:A+b/C="),
+            "sha256:A%2Bb%2FC%3D"
+        );
+        assert_eq!(super::percent_encode_hash("plain-hash_123"), "plain-hash_123");
+    }
+
+    #[test]
+    fn flake_ref_from_lock_locked_github_rev_narhash() {
+        let locked = serde_json::json!({
+            "type": "github",
+            "owner": "NixOS",
+            "repo": "nixpkgs",
+            "rev": "deadbeef",
+            "narHash": "sha256:x+y/z=",
+        });
+        assert_eq!(
+            super::flake_ref_from_lock_locked(&locked).unwrap(),
+            "github:NixOS/nixpkgs/deadbeef?narHash=sha256:x%2By%2Fz%3D",
+        );
+    }
+
+    #[test]
+    fn flake_ref_from_lock_locked_git_ref_rev() {
+        let locked = serde_json::json!({
+            "type": "git",
+            "url": "ssh://git@example.test/r.git",
+            "ref": "main",
+            "rev": "abc123",
+        });
+        assert_eq!(
+            super::flake_ref_from_lock_locked(&locked).unwrap(),
+            "git+ssh://git@example.test/r.git?ref=main&rev=abc123",
+        );
+    }
+
+    #[test]
+    fn flake_ref_from_lock_locked_tarball_narhash() {
+        let locked = serde_json::json!({
+            "type": "tarball",
+            "url": "https://example.test/x.tar.gz",
+            "narHash": "sha256:a/b=",
+        });
+        assert_eq!(
+            super::flake_ref_from_lock_locked(&locked).unwrap(),
+            "https://example.test/x.tar.gz?narHash=sha256:a%2Fb%3D",
+        );
+    }
+
+    #[test]
+    fn flake_ref_from_lock_locked_path() {
+        let locked = serde_json::json!({
+            "type": "path",
+            "path": "/nix/store/xxx-source",
+        });
+        assert_eq!(
+            super::flake_ref_from_lock_locked(&locked).unwrap(),
+            "path:/nix/store/xxx-source",
+        );
+    }
+
+    #[test]
+    fn build_prefetch_argv_shape() {
+        assert_eq!(
+            super::build_prefetch_argv("github:NixOS/nixpkgs/rev"),
+            vec![
+                "flake".to_owned(),
+                "prefetch".to_owned(),
+                "--json".to_owned(),
+                "github:NixOS/nixpkgs/rev".to_owned(),
+            ],
+        );
+    }
+
+    /// The lock walk covers transitive (non-root-input) nodes, skips the root
+    /// node, prefers an override for a root input, and warns on an unknown type.
+    #[test]
+    fn prefetch_refs_from_lock_walks_all_and_applies_override() {
+        let lock = serde_json::json!({
+            "root": "root",
+            "nodes": {
+                "root": { "inputs": { "nixpkgs": "nixpkgs", "secret": "secret" } },
+                "nixpkgs": {
+                    "locked": { "type": "github", "owner": "NixOS", "repo": "nixpkgs", "rev": "aaa" },
+                    "inputs": { "flake-utils": "flake-utils" }
+                },
+                "flake-utils": {
+                    "locked": { "type": "github", "owner": "numtide", "repo": "flake-utils", "rev": "bbb" }
+                },
+                "secret": {
+                    "locked": { "type": "git", "url": "ssh://git@host/secret.git", "rev": "ccc" }
+                },
+                "weird": {
+                    "locked": { "type": "mercurial", "url": "http://x" }
+                }
+            }
+        });
+        let overrides = [(
+            "nixpkgs".to_owned(),
+            "github:NixOS/nixpkgs/override-rev".to_owned(),
+        )];
+        let (refs, warnings) = super::prefetch_refs_from_lock(&lock, &overrides);
+        let map: std::collections::HashMap<String, String> = refs.into_iter().collect();
+        assert_eq!(
+            map.get("nixpkgs").map(String::as_str),
+            Some("github:NixOS/nixpkgs/override-rev")
+        );
+        assert_eq!(
+            map.get("flake-utils").map(String::as_str),
+            Some("github:numtide/flake-utils/bbb")
+        );
+        assert_eq!(
+            map.get("secret").map(String::as_str),
+            Some("git+ssh://git@host/secret.git?rev=ccc")
+        );
+        assert!(!map.contains_key("root"));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("weird"));
     }
 }
