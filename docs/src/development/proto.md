@@ -528,16 +528,15 @@ Fetch runs on a worker that has the `fetch` capability. The fetch step performs 
  3. **Compress and push every uncached NAR** - the worker sends `CacheQuery { mode: Push }` for every fetched path. For uncached paths, it **zstd-compresses the NAR locally** and uploads via presigned S3 PUT (S3-backed) or chunked `NarPush` (local stores); on completion it emits `NarUploaded` with the full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, `deriver`). A failed upload fails the evaluation. **NARs are never transmitted uncompressed.**
  4. **Report `FetchResult`** carrying only the archived flake source store path (not the full input list - the server already has every `cached_path` row from the `NarUploaded` stream). The server hands this path to any subsequent eval-only job via `FlakeSource::Cached { store_path }`.
 
-If `nix flake archive` fails (e.g. network unavailable), the worker falls back to the temporary git checkout path, skips step 3 (nothing to push), and sets `flake_source` to `None` to signal the fallback - no follow-up eval-only job can then use `FlakeSource::Cached`.
+`nix flake archive` is all-or-nothing: one unfetchable input (e.g. a private `git+ssh` input the org has no key for) fails the whole command even though the eval targets never reference it. Since Nix evaluation is lazy, the archive is only cache population, so on that failure the worker falls back to **best-effort per-input prefetch**: it runs `nix flake prefetch --json` for the flake source (a hard error if even that fails) and then for each locked input from `flake.lock` independently, pushing the successes and turning per-input failures into `Warning` `EvalMessage`s (plus one leading warning naming the archive error). `flake_source` still carries the cached source path, so an eval-only follow-up can proceed against exactly the inputs its targets need.
 
 ```rust
 FetchResult {
     /// Nix store path of the archived flake source (e.g.
-    /// `/nix/store/xxx-source`). `Some` when `nix flake archive`
-    /// succeeded and the source now lives in the cache as a NAR;
-    /// `None` when the worker fell back to a temporary git checkout -
-    /// in that case the server cannot dispatch an eval-only follow-up
-    /// job (no `FlakeSource::Cached` path is available).
+    /// `/nix/store/xxx-source`). `Some` when the source landed in the
+    /// cache - either `nix flake archive` succeeded or the per-input
+    /// prefetch fallback fetched at least the source; only `None` when
+    /// the fetch failed outright (no `FlakeSource::Cached` follow-up).
     flake_source: Option<String>,
 }
 ```
