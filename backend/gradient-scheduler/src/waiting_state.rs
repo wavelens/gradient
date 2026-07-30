@@ -342,7 +342,9 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
                 info!(stuck = %eval.id, recovery = %new_eval.id, "auto-triggered .drv-recovery re-evaluation");
                 gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &new_eval).await;
             }
-            Err(e) => warn!(evaluation_id = %eval.id, error = %e, "failed to trigger .drv recovery"),
+            Err(e) => {
+                warn!(evaluation_id = %eval.id, error = %e, "failed to trigger .drv recovery")
+            }
         }
     }
 
@@ -566,7 +568,9 @@ mod tests {
             assert!(sql.contains(frag), "missing `{frag}`: {sql}");
         }
         assert!(
-            sql.contains(&gradient_db::graph_sql::drv_nar_closure_complete_predicate("db")),
+            sql.contains(&gradient_db::graph_sql::drv_nar_closure_complete_predicate(
+                "db"
+            )),
             "must require the .drv's own NAR closure to be absent: {sql}"
         );
         assert!(
