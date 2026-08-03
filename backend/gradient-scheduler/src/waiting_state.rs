@@ -548,10 +548,8 @@ mod tests {
     /// tests, so pin the SQL shape).
     #[test]
     fn unproducible_drv_block_sql_shape() {
-        let sql = unproducible_drv_block_sql()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let sql = norm(unproducible_drv_block_sql());
         assert!(
             sql.contains(&format!(
                 "db.status IN ({}, {})",
@@ -568,8 +566,8 @@ mod tests {
             assert!(sql.contains(frag), "missing `{frag}`: {sql}");
         }
         assert!(
-            sql.contains(&gradient_db::graph_sql::drv_nar_closure_complete_predicate(
-                "db"
+            sql.contains(&norm(
+                gradient_db::graph_sql::drv_nar_closure_complete_predicate("db")
             )),
             "must require the .drv's own NAR closure to be absent: {sql}"
         );
