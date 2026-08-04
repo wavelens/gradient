@@ -2,6 +2,37 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## Nix's repeated log tail is stripped from failures (#546)
+
+On failure nix appends the last `log-lines` (25 by default) lines of the build
+log to its error message, which gradient then wrote into the build log - so the
+UI showed those lines twice, once as streamed and once inside the failure
+banner. Nix omits the block when `log-lines` is `0`, but the daemon only honours
+that setting from a trusted client, so gradient strips it instead.
+
+`backend/gradient-sources/src/build_log.rs`: `strip_nix_log_tail` is covered by
+`strips_the_tail_block_and_keeps_the_diagnosis` (the reported message, keeping
+`Cannot build` / `Reason` / `Output paths` and the `For full logs, run:` hint),
+`strips_an_indented_header_with_any_line_count` (nested errors arrive indented
+and the count is configurable), `keeps_quoted_lines_that_precede_a_header` (a
+`>` line that is the builder's own output is diagnosis, not the tail),
+`leaves_a_message_without_a_tail_untouched`, and
+`strips_every_block_in_a_multi_build_failure`.
+
+## A pull-through cache exposes build logs (#547)
+
+`nix log` against a gradient cache reported the log as missing for any path the
+cache had substituted rather than built, because the endpoint only served
+locally-built derivations.
+
+`backend/gradient-web/tests/cache_log_upstream.rs`:
+`serves_the_log_from_the_first_upstream_that_has_it` runs two real upstream HTTP
+servers - the first 404s, the second holds the log - and asserts both are asked
+in order and the second's body is returned;
+`reports_no_log_when_no_upstream_has_one` keeps the 404 path honest; and
+`normalizes_a_trailing_slash_on_the_upstream_url` guards the `//log/...` URL
+that a trailing slash in an upstream's configured URL would otherwise produce.
+
 ## Cache RPCs are chunked so a big eval cannot wedge the connection
 
 An evaluation of a large flake asked the server about its whole path set in one
