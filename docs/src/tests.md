@@ -2,6 +2,63 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## Cache RPCs are chunked so a big eval cannot wedge the connection
+
+An evaluation of a large flake asked the server about its whole path set in one
+`CacheQuery` (37,640 paths, ~3 MB) whose `CacheStatus` reply was ~5.7 MB. A
+message that far exceeds the socket buffers leaves its sender blocked mid-write,
+and a peer that is itself blocked mid-write never returns to reading, so the
+connection wedged until a send timeout tore it down - and the evaluation was
+dispatched again, forever.
+
+`backend/gradient-worker/src/proto/job.rs`:
+`cache_query_splits_oversized_path_list_into_bounded_chunks` and
+`known_derivations_splits_oversized_path_list_into_bounded_chunks` drive a real
+WebSocket against `MockProtoServer`, assert every request stays within
+`CACHE_QUERY_MAX_PATHS`, and assert the per-chunk replies merge back into one
+answer covering each queried path in order.
+
+`backend/gradient-proto/src/session/frame.rs`:
+`a_full_cache_query_and_its_worst_case_reply_stay_inflight_safe` encodes a
+full-size query plus the largest reply it can provoke (every path uncached, each
+with a presigned upload URL) and holds both under `SAFE_INFLIGHT_MESSAGE_SIZE`,
+so raising the chunk bound cannot silently re-arm the deadlock.
+
+## A refused session backs off instead of storming
+
+After the wedge the server still held the worker's slot, so every reconnect was
+answered with `Reject` 496 ("worker already connected"). The worker logged it as
+an unexpected handshake message and retried about once a second, because
+completing a handshake reset the backoff to its floor.
+
+`backend/gradient-worker/src/reconnect.rs`:
+`refused_sessions_escalate_the_backoff` walks the delay from 1 s to the 60 s cap
+across repeated refusals, and `served_sessions_reset_the_backoff` confirms a
+session that actually ran starts the next attempt from the floor, so a plain
+network blip does not inherit a long delay.
+
+## An evaluation stops being re-dispatched forever
+
+Builds have an attempt budget; evaluations had none, so an evaluation whose
+worker vanished mid-run was re-queued indefinitely.
+
+`backend/gradient-scheduler/src/build/lifecycle.rs`:
+`an_eval_under_budget_is_requeued` keeps the ordinary single-disconnect case
+retrying, and `an_eval_that_spends_its_budget_stops_being_requeued` fails the
+evaluation once `MAX_EVAL_DISPATCH_ATTEMPTS` dispatches have each ended in a
+disconnect rather than a result.
+
+## `/live` channels release a client that walked away
+
+The live-update stream only wrote to its socket, so a closed browser tab was
+noticed only at the next event that failed to send. A quiet channel kept its
+task and file descriptor forever; production accumulated 258 CLOSE-WAIT sockets.
+
+`backend/gradient-web/tests/live_stream_disconnect.rs`:
+`live_stream_ends_when_the_client_disconnects` serves the real `live_stream`,
+connects a WebSocket client, drops it without ever publishing an event, and
+requires the server-side task to finish.
+
 ## NAR content is verified on commit (#482)
 
 `backend/gradient-storage/src/digest.rs`: `verify_nar_bytes` recomputes the
