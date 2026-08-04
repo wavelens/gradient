@@ -93,6 +93,40 @@ fn corrupt_eval_cache(msg: &str) -> Option<CorruptEvalCache> {
     eval_cache_fingerprint_from_error(msg).map(|fingerprint| CorruptEvalCache { fingerprint })
 }
 
+/// Whether an eval-cache blob is worth sharing: a real SQLite database that
+/// actually declares a table.
+///
+/// A cache no evaluation ever wrote into is a valid SQLite file consisting of
+/// nothing but its 4096-byte header page - readable, but with no schema, so
+/// every consumer fails on `no such table: Attributes`. Publishing one under a
+/// flake's fingerprint poisons that flake for every worker, which is exactly
+/// how 92% of the blobs in production ended up empty. The schema page lists
+/// each table's `CREATE TABLE` text, so its presence is the cheap, direct
+/// check for "this database has content".
+fn is_shareable_eval_cache(bytes: &[u8]) -> bool {
+    const SQLITE_MAGIC: &[u8] = b"SQLite format 3\0";
+
+    if !bytes.starts_with(SQLITE_MAGIC) {
+        warn!(
+            len = bytes.len(),
+            "eval-cache blob is not a SQLite database; not pushing"
+        );
+        return false;
+    }
+
+    let has_schema = bytes
+        .windows(b"CREATE TABLE".len())
+        .any(|w| w.eq_ignore_ascii_case(b"CREATE TABLE"));
+    if !has_schema {
+        warn!(
+            len = bytes.len(),
+            "eval-cache blob carries no schema; not pushing"
+        );
+    }
+
+    has_schema
+}
+
 /// Delete a corrupt eval-cache SQLite blob and its WAL/SHM sidecars so the next
 /// evaluation opens a fresh cache. A missing file is already-healed, not an error.
 async fn delete_eval_cache_blob(sqlite_path: &str) {
@@ -328,7 +362,10 @@ pub async fn evaluate_derivations(
         }
     }
 
-    let EvalOutcome { flake_nodes } = match evaluate_derivations_with(
+    let EvalOutcome {
+        flake_nodes,
+        cacheable,
+    } = match evaluate_derivations_with(
         &*evaluator.resolver,
         &FsDrvReader,
         job,
@@ -369,6 +406,13 @@ pub async fn evaluate_derivations(
         }
     }
 
+    // An eval that discovered nothing has an empty cache; sharing it would
+    // poison every later eval of the same flake with a schemaless blob.
+    if !cacheable {
+        debug!("evaluation produced no derivations; keeping its eval-cache local");
+        return Ok(());
+    }
+
     // Fold the shared eval-cache WAL into the main `.sqlite` so the pushed blob
     // carries this eval's writes (per-shard commits only append to the WAL). The
     // checkpoint is PASSIVE: it never blocks, so it is safe even when another
@@ -384,6 +428,7 @@ pub async fn evaluate_derivations(
 
     if let (Some(fp), Some(path)) = (fingerprint.as_ref(), cache_path.as_ref())
         && let Ok(bytes) = tokio::fs::read(path).await
+        && is_shareable_eval_cache(&bytes)
         && let Err(e) = updater.push_eval_cache(fp, bytes).await
     {
         warn!(error = %e, "eval-cache push failed; continuing");
@@ -789,6 +834,14 @@ impl<'a> ClosureWalker<'a> {
 #[derive(Debug)]
 pub struct EvalOutcome {
     pub flake_nodes: Vec<FlakeOutputNode>,
+    /// Whether this eval got far enough for its cache to be worth sharing.
+    ///
+    /// An eval that discovered nothing - the flake failed to evaluate, or every
+    /// attr resolution failed - leaves a cache with no schema at all. Pushing
+    /// that publishes an empty SQLite blob under the flake's fingerprint, and
+    /// every later eval of the same flake pulls it and dies on it. Failures
+    /// keep their cache local.
+    pub cacheable: bool,
 }
 
 /// Classify a flake-output attr path into a coarse node kind from its top-level
@@ -928,6 +981,7 @@ pub async fn evaluate_derivations_with(
         updater.report_eval_result(vec![], warnings, errors).await?;
         return Ok(EvalOutcome {
             flake_nodes: Vec::new(),
+            cacheable: false,
         });
     }
 
@@ -974,6 +1028,7 @@ pub async fn evaluate_derivations_with(
         updater.report_eval_result(vec![], warnings, errors).await?;
         return Ok(EvalOutcome {
             flake_nodes: Vec::new(),
+            cacheable: false,
         });
     }
 
@@ -1003,7 +1058,10 @@ pub async fn evaluate_derivations_with(
     updater
         .report_eval_result(remaining, warnings, errors)
         .await?;
-    Ok(EvalOutcome { flake_nodes })
+    Ok(EvalOutcome {
+        flake_nodes,
+        cacheable: true,
+    })
 }
 
 #[cfg(test)]
@@ -1062,6 +1120,32 @@ mod tests {
 
         assert!(is_corrupt_eval_cache_error(&msg));
         assert_eq!(corrupt_eval_cache(&msg).unwrap().fingerprint, fp);
+    }
+
+    /// The blob production kept publishing: a valid SQLite file that is just
+    /// its header page, with no schema. Sharing one poisons the flake for
+    /// every worker, so it must never be pushed.
+    #[test]
+    fn a_schemaless_blob_is_not_shareable() {
+        let mut header_only = b"SQLite format 3\0".to_vec();
+        header_only.resize(4096, 0);
+
+        assert!(!is_shareable_eval_cache(&header_only));
+        assert!(!is_shareable_eval_cache(b""));
+        assert!(!is_shareable_eval_cache(b"not a database at all"));
+    }
+
+    /// A cache that actually holds the eval-cache schema is shared as before.
+    #[test]
+    fn a_blob_with_a_schema_is_shareable() {
+        let mut blob = b"SQLite format 3\0".to_vec();
+        blob.resize(4096, 0);
+        blob.extend_from_slice(
+            b"CREATE TABLE Attributes (parent integer, name text, type integer, value text)",
+        );
+        blob.resize(8192, 0);
+
+        assert!(is_shareable_eval_cache(&blob));
     }
 
     /// The same missing-table error against any other SQLite file is somebody

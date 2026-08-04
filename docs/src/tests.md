@@ -2,6 +2,23 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## A failed evaluation no longer publishes its empty cache
+
+The source of those empty blobs: an eval that discovered nothing - the flake
+failed to evaluate, or every attr resolution failed - still reported its errors
+and returned `Ok`, so the caller checkpointed and pushed a cache that had never
+been written to. That published a schemaless SQLite file under the flake's
+fingerprint, and every later eval of the same flake pulled it and died. In
+production 92% of stored blobs (315 of 343 on one instance, 238 of 243 on
+another) were exactly 4096 bytes - a bare header page.
+
+`backend/gradient-worker/src/executor/eval.rs`: `EvalOutcome::cacheable` is
+false on both no-derivation paths, so the push is skipped entirely. As a second
+line of defence `is_shareable_eval_cache` inspects the bytes:
+`a_schemaless_blob_is_not_shareable` covers the header-only file production kept
+publishing (plus an empty buffer and a non-SQLite one), and
+`a_blob_with_a_schema_is_shareable` keeps a real cache flowing.
+
 ## An empty eval-cache blob is corrupt too
 
 The self-heal recognised a *damaged* blob ("malformed", "not a database") but
