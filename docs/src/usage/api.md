@@ -347,6 +347,8 @@ Private caches require HTTP Basic Auth (any username, JWT or API key as password
 
 The inspection endpoints (`/ls`, `/serve`) are rate-limited at 60 req/min. The `/log` endpoint is rate-limited at ~300 req/min on its own tier. All endpoints return `404` when the hash or derivation is unknown.
 
+`/log` serves this cache's own log whenever a build produced one - a failed build's log included, since that is the one worth reading. When the cache has no log of its own, which is the normal case for a path it substituted rather than built, it asks its upstreams in configured order and proxies the first that answers. The response carries `X-Cache: HIT` for our own log and `MISS` for an upstream's, so `nix log` works against a pull-through cache.
+
 ## Example: Trigger an Evaluation
 
 ```sh
