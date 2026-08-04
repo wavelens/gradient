@@ -40,6 +40,17 @@ pub const NAR_PUSH_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 /// connect.
 pub const MAX_PROTO_MESSAGE_SIZE: usize = 8 * 1024 * 1024;
 
+/// Size a *bidirectional* RPC (a request whose reply travels the other way
+/// while the peer may itself be writing) must stay under.
+///
+/// [`MAX_PROTO_MESSAGE_SIZE`] bounds memory, not liveness: a message far
+/// larger than the socket's send buffer leaves its sender blocked mid-write,
+/// and a peer that is itself blocked mid-write never returns to reading. Both
+/// ends then sit on unflushable writes until a send timeout kills the
+/// connection - and the job retries into the same wall. Bulk transfers
+/// (`NarPush`) are exempt: they flow one way against small acks.
+pub const SAFE_INFLIGHT_MESSAGE_SIZE: usize = 2 * 1024 * 1024;
+
 /// Maximum time the server will wait for a peer to complete the handshake
 /// (Discoverable check → InitConnection → AuthChallenge → AuthResponse →
 /// InitAck). A peer that opens the WebSocket and then stalls is dropped after
@@ -472,6 +483,61 @@ mod tests {
     #[test]
     fn nar_push_chunk_size_is_four_mib() {
         assert_eq!(NAR_PUSH_CHUNK_SIZE, 4 * 1024 * 1024);
+    }
+
+    /// The knob that keeps the cache RPC deadlock-free: a full-size
+    /// `CacheQuery` and the worst-case `CacheStatus` it can provoke - every
+    /// path uncached, each carrying a presigned upload URL and path info -
+    /// must both fit inside [`SAFE_INFLIGHT_MESSAGE_SIZE`]. Raising
+    /// `CACHE_QUERY_MAX_PATHS` past that point re-arms the deadlock that
+    /// wedged evals into an endless dispatch loop.
+    #[test]
+    fn a_full_cache_query_and_its_worst_case_reply_stay_inflight_safe() {
+        use crate::messages::{CACHE_QUERY_MAX_PATHS, CachedPath};
+
+        let paths: Vec<String> = (0..CACHE_QUERY_MAX_PATHS)
+            .map(|i| format!("/nix/store/{:0>32}-some-package-name-1.2.3-{i}", i))
+            .collect();
+
+        let query = ClientMessage::CacheQuery {
+            job_id: "eval:019fcd73-aa63-7a41-b51c-05ed673c6d1f".to_owned(),
+            query_id: "6c1a5e2c-0f52-4f9e-9a0e-2f1b7c4d8e90".to_owned(),
+            paths: paths.clone(),
+            mode: gradient_types::proto::QueryMode::Push,
+        };
+
+        let cached: Vec<CachedPath> = paths
+            .iter()
+            .map(|p| CachedPath {
+                path: p.clone(),
+                cached: false,
+                file_size: Some(1),
+                nar_size: Some(1),
+                // Presigned PUT URLs are the largest field a reply can carry.
+                url: Some(format!("https://s3.example.com{p}?{}", "x".repeat(512))),
+                nar_hash: Some(format!("sha256:{}", "y".repeat(52))),
+                file_hash: Some(format!("sha256:{}", "z".repeat(52))),
+                references: None,
+                signatures: None,
+                deriver: None,
+                ca: None,
+            })
+            .collect();
+        let reply = ServerMessage::CacheStatus {
+            query_id: "6c1a5e2c-0f52-4f9e-9a0e-2f1b7c4d8e90".to_owned(),
+            cached,
+        };
+
+        let query_bytes = query.encode().expect("query encodes").len();
+        let reply_bytes = reply.encode().expect("reply encodes").len();
+        assert!(
+            query_bytes <= SAFE_INFLIGHT_MESSAGE_SIZE,
+            "CacheQuery of {CACHE_QUERY_MAX_PATHS} paths encodes to {query_bytes} bytes"
+        );
+        assert!(
+            reply_bytes <= SAFE_INFLIGHT_MESSAGE_SIZE,
+            "worst-case CacheStatus encodes to {reply_bytes} bytes"
+        );
     }
 }
 

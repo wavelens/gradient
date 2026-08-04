@@ -36,4 +36,7 @@ pub enum RunOutcome {
     CleanDisconnect,
     /// Server sent `Draining` - the worker should shut down gracefully.
     Drained,
+    /// Server refused the session (post-handshake `Reject`), so nothing was
+    /// served. Reconnecting is appropriate but must back off.
+    Refused,
 }

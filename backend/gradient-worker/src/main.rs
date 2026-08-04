@@ -26,7 +26,7 @@ use tracing::{error, info, warn};
 
 use config::WorkerConfig;
 use connection_state::RunOutcome;
-use reconnect::retry_reconnect;
+use reconnect::{SessionEnd, backoff_after_session, retry_reconnect};
 use tracing_subscriber::EnvFilter;
 use worker::Worker;
 
@@ -172,20 +172,29 @@ fn main() -> Result<()> {
                 return Ok(());
             }
 
-            match outcome {
+            let session_end = match outcome {
                 Ok(RunOutcome::Drained) => {
                     info!("server requested drain; shutting down");
                     drop(disconnected);
                     executor_handle.shutdown().await;
                     return Ok(());
                 }
+                Ok(RunOutcome::Refused) => {
+                    warn!(
+                        delay_secs = backoff.as_secs(),
+                        "server refused the session; backing off"
+                    );
+                    SessionEnd::Refused
+                }
                 Ok(RunOutcome::CleanDisconnect) => {
                     warn!(delay_secs = backoff.as_secs(), "connection closed; reconnecting");
+                    SessionEnd::Served
                 }
                 Err(e) => {
                     error!(error = %e, delay_secs = backoff.as_secs(), "dispatch loop error; reconnecting");
+                    SessionEnd::Served
                 }
-            }
+            };
 
             // Reconnect with exponential backoff, but bail out if shutdown
             // fires while we're waiting. Never give up otherwise - a transient
@@ -207,7 +216,11 @@ fn main() -> Result<()> {
                 Some(w) => {
                     info!("reconnected successfully");
                     worker = w;
-                    backoff = INITIAL_BACKOFF;
+                    // Reconnecting only proves the transport works. A session
+                    // the server refuses is not a served one, so its delay
+                    // keeps escalating instead of dropping back to the floor.
+                    backoff =
+                        backoff_after_session(backoff, session_end, INITIAL_BACKOFF, MAX_BACKOFF);
                 }
                 None => {
                     info!("shutdown requested during reconnect");
