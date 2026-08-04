@@ -4,12 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+pub mod build_log;
 pub mod cache_key;
 pub mod git;
 pub mod nar_path;
 pub mod secret;
 pub mod ssh_key;
 
+pub use self::build_log::strip_nix_log_tail;
 pub use self::cache_key::*;
 pub use self::git::{
     Libgit2Prefetcher, accept_cert, check_project_updates, fetch_options_with_ssh, get_commit_info,
