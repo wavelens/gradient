@@ -16,6 +16,36 @@ use std::time::Duration;
 
 use tracing::error;
 
+/// How the previous session ended, as far as reconnect pacing cares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionEnd {
+    /// The connection was established and served (jobs, heartbeats, a clean
+    /// close, or an error mid-work).
+    Served,
+    /// The server refused the session outright - e.g. `Reject` 496 while a
+    /// zombie session still owns this worker's slot. Nothing was served.
+    Refused,
+}
+
+/// Delay before the next reconnect attempt.
+///
+/// Reconnecting is only "successful" in the transport sense: the worker can
+/// complete a handshake and still be refused at registration. Treating that as
+/// a healthy connection resets the backoff to its floor, so the worker
+/// hammers the server about once a second until the stale session is reaped.
+/// A refused session therefore escalates instead.
+pub fn backoff_after_session(
+    previous: Duration,
+    end: SessionEnd,
+    initial: Duration,
+    max: Duration,
+) -> Duration {
+    match end {
+        SessionEnd::Served => initial,
+        SessionEnd::Refused => (previous * 2).min(max),
+    }
+}
+
 /// Retry `attempt` indefinitely with exponential backoff.
 ///
 /// `attempt` consumes the current state and returns either the next state on
@@ -59,6 +89,38 @@ where
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    /// A session the server refused did no work, so the next attempt must
+    /// wait longer - resetting to the floor turns a server-side zombie
+    /// session (`Reject` 496, "worker already connected") into a ~1/s
+    /// reconnect storm that lasts until the liveness watchdog reaps it.
+    #[test]
+    fn refused_sessions_escalate_the_backoff() {
+        let initial = Duration::from_secs(1);
+        let max = Duration::from_secs(60);
+
+        let mut delay = initial;
+        for expected in [2, 4, 8, 16, 32, 60, 60] {
+            delay = backoff_after_session(delay, SessionEnd::Refused, initial, max);
+            assert_eq!(delay, Duration::from_secs(expected));
+        }
+    }
+
+    /// A session that actually ran restarts from the floor: a genuine network
+    /// blip must not inherit a long delay from an earlier refusal.
+    #[test]
+    fn served_sessions_reset_the_backoff() {
+        let initial = Duration::from_secs(1);
+        assert_eq!(
+            backoff_after_session(
+                Duration::from_secs(32),
+                SessionEnd::Served,
+                initial,
+                Duration::from_secs(60)
+            ),
+            initial
+        );
+    }
 
     /// Regression for #99: the loop must keep retrying after a single failure
     /// instead of breaking out and shutting the worker down.

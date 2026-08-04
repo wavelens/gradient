@@ -32,13 +32,20 @@ use super::scoring::{send_score_chunks, spawn_scoring_task};
 
 // ── Dispatch loop ─────────────────────────────────────────────────────────────
 
-/// Returns the draining flag: `true` if the server sent `Draining` before
-/// closing the connection.
+/// How the dispatch loop ended, for the caller's reconnect decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LoopEnd {
+    /// The server sent `Draining` before closing.
+    pub(super) draining: bool,
+    /// The server refused the session (post-handshake `Reject`).
+    pub(super) refused: bool,
+}
+
 pub(super) async fn run_dispatch_loop(
     mut state: DispatchState,
     mut reader: ProtoReader,
     shutdown: CancellationToken,
-) -> Result<bool> {
+) -> Result<LoopEnd> {
     let mut done_rx = state
         .done_rx
         .take()
@@ -91,7 +98,10 @@ pub(super) async fn run_dispatch_loop(
         let _ = abort_tx.send(true);
     }
 
-    Ok(state.draining)
+    Ok(LoopEnd {
+        draining: state.draining,
+        refused: state.refused,
+    })
 }
 
 // ── Per-job bookkeeping ───────────────────────────────────────────────────────
@@ -133,6 +143,7 @@ pub(super) struct DispatchState {
     executor: JobExecutor,
     config: WorkerConfig,
     draining: bool,
+    refused: bool,
 }
 
 impl DispatchState {
@@ -177,6 +188,7 @@ impl DispatchState {
             executor,
             config,
             draining: false,
+            refused: false,
         }
     }
 
@@ -261,7 +273,16 @@ impl DispatchState {
             ServerMessage::Error { code, message } => {
                 error!(code, %message, "protocol error from server");
             }
-            ServerMessage::InitAck { .. } | ServerMessage::Reject { .. } => {
+            // A post-handshake `Reject` is the server refusing this session -
+            // typically 496 while a zombie session still holds this worker's
+            // slot. The server closes right after, so end the loop and mark
+            // the session refused: the reconnect path must back off rather
+            // than retry at its floor delay.
+            ServerMessage::Reject { code, reason } => {
+                warn!(code, %reason, "server refused the session");
+                self.refused = true;
+            }
+            ServerMessage::InitAck { .. } => {
                 warn!("unexpected handshake message in dispatch loop - ignoring");
             }
             ServerMessage::AuthChallenge { peers } => {

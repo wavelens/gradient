@@ -219,12 +219,10 @@ impl Worker<Connected> {
             _marker: PhantomData,
         };
 
-        let result = outcome.map(|drained| {
-            if drained {
-                RunOutcome::Drained
-            } else {
-                RunOutcome::CleanDisconnect
-            }
+        let result = outcome.map(|end| match end {
+            _ if end.draining => RunOutcome::Drained,
+            _ if end.refused => RunOutcome::Refused,
+            _ => RunOutcome::CleanDisconnect,
         });
 
         (disconnected, result)

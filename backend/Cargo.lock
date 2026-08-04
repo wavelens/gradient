@@ -2421,6 +2421,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-test",
+ "tokio-tungstenite",
  "tokio-util",
  "tower",
  "tower-http",

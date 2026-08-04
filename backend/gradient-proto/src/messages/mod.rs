@@ -41,6 +41,15 @@ pub const CACHE_QUERY_BUDGET: std::time::Duration = std::time::Duration::from_se
 /// Worker-side wait for `CacheStatus`/`CacheError` and `KnownDerivations`.
 pub const CACHE_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(75);
 
+/// Upper bound on the store paths one `CacheQuery` / `QueryKnownDerivations`
+/// may carry. A whole eval's path set (tens of thousands) serialises into a
+/// multi-MB request whose reply is larger still; with both peers holding a
+/// write the socket can't absorb, neither gets back to reading and the
+/// connection deadlocks until a send timeout tears it down. Chunking keeps
+/// every request and its reply inside
+/// [`crate::handler::SAFE_INFLIGHT_MESSAGE_SIZE`].
+pub const CACHE_QUERY_MAX_PATHS: usize = 1_000;
+
 // The server must give up (and reply CacheError) before the worker stops
 // listening, otherwise a slow query reads as a silent miss.
 const _: () = assert!(CACHE_QUERY_BUDGET.as_secs() < CACHE_QUERY_TIMEOUT.as_secs());
