@@ -399,13 +399,16 @@ pub async fn handle_build_job_failed(
     // frontend's log viewer renders it. Without this, pre-`nix build`
     // aborts (prefetch-time errors, daemon connection failures, etc.)
     // produce a Failed badge with an empty log - useless for diagnosis.
+    // Strip nix's repeated log tail here too: a worker older than this change
+    // still sends it, and those lines are already in the log above.
+    let banner = gradient_sources::strip_nix_log_tail(error);
     if let Some(attempt_id) = gradient_db::latest_attempt_id(&state.worker_db, anchor.id)
         .await
         .ok()
         .flatten()
         && let Err(e) = state
             .log_storage
-            .append(attempt_id, &format!("\n=== build failed: {error} ===\n"))
+            .append(attempt_id, &format!("\n=== build failed: {banner} ===\n"))
             .await
     {
         warn!(%derivation_build, error = %e, "failed to append worker error to build log");

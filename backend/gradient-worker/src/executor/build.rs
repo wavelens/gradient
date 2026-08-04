@@ -246,9 +246,13 @@ impl ParsedDerivation {
                 let msg = String::from_utf8_lossy(&f.error_msg).to_string();
                 warn!(drv = %drv_path, error = %msg, "build failed");
                 let kind = classify_build_error(&msg);
+                // The daemon repeats the tail of the log we just streamed; drop
+                // it so the failure banner doesn't duplicate those lines. No
+                // "build failed" prefix either - the server's banner already
+                // says so, and the daemon's message opens with "Cannot build".
                 Err(BuildError::new(
                     kind,
-                    anyhow::anyhow!("build failed: {}", msg),
+                    anyhow::anyhow!("{}", gradient_sources::strip_nix_log_tail(&msg)),
                 ))
             }
         }
