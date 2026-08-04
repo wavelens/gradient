@@ -6172,7 +6172,7 @@ paths:
       |---|---|
       | `GET /cache/{cache}/ls/{hash}` | JSON tree listing of the NAR (nix-serve `.ls` v1 schema). Rate-limited at 60 req/min. |
       | `GET /cache/{cache}/serve/{hash}/{path}` | Extract a single file (bytes, Content-Type sniffed) or directory (tar.zst) from a NAR. Rate-limited at 60 req/min. |
-      | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv`, from either locally-built or upstream-substituted builds (substituter compat - `nix log`). Rate-limited at ~300 req/min. |
+      | `GET /cache/{cache}/log/{drv}` | Build log for `<drv>.drv` (substituter compat - `nix log`). Serves this cache's own log for any build that produced one, successful or failed; otherwise asks the cache's upstreams in order and proxies the first hit, so a pull-through cache exposes logs for paths it substituted rather than built. `X-Cache: HIT` (ours) or `MISS` (upstream). Rate-limited at ~300 req/min. |
 
   /metrics/catalog:
     get:
