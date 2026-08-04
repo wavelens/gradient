@@ -58,12 +58,19 @@ impl std::fmt::Display for CorruptEvalCache {
 }
 impl std::error::Error for CorruptEvalCache {}
 
-/// Whether `msg` is the SQLite-corruption signature of a poisoned eval-cache
-/// blob. The evaluator opens no other SQLite, so these phrases unambiguously
-/// mean "discard and re-evaluate", never a real flake error.
+/// Whether `msg` is the SQLite signature of a poisoned eval-cache blob.
+///
+/// Corruption has two shapes. A damaged file reports "malformed" or "not a
+/// database"; a file that was truncated or never finished being written is a
+/// perfectly valid, *empty* database whose tables simply do not exist, and
+/// reports a missing table instead. Both are unreadable and both must be
+/// discarded - the caller additionally requires the message to name our own
+/// blob, so nothing else's SQLite is ever swept up.
 fn is_corrupt_eval_cache_error(msg: &str) -> bool {
     let m = msg.to_ascii_lowercase();
-    m.contains("database disk image is malformed") || m.contains("file is not a database")
+    m.contains("database disk image is malformed")
+        || m.contains("file is not a database")
+        || m.contains("no such table")
 }
 
 /// The eval-cache blob fingerprint embedded in a corruption error, extracted
@@ -1034,6 +1041,39 @@ mod tests {
         assert!(
             corrupt_eval_cache("database disk image is malformed (in '/tmp/other.sqlite')")
                 .is_none()
+        );
+    }
+
+    /// A blob that is structurally empty - a valid SQLite file that never got
+    /// its schema, from a truncated write or an interrupted pull - fails with
+    /// a missing-table error rather than a corruption phrase. It is just as
+    /// poisonous: every evaluation sharing the blob dies on it, and until it
+    /// is classified as corrupt nothing purges it, so re-evaluating (including
+    /// `.drv` recovery) hits the identical wall forever.
+    #[test]
+    fn corrupt_eval_cache_detects_a_blob_with_no_schema() {
+        let fp = "fcafabf48d74fdfcd38e0c9d903fe9caa423e4ba9404fe07f5a1a8a5d2ab0253";
+        let msg = format!(
+            "failed to evaluate 'packages': Evaluation error: [nix::SQLiteError] executing SQLite \
+             query 'select rowid, type, value, context from Attributes where parent = 0 and name \
+             = '': SQL logic error, no such table: Attributes \
+             (in '/var/lib/gradient-worker/eval-cache/eval-cache-v6/{fp}.sqlite')"
+        );
+
+        assert!(is_corrupt_eval_cache_error(&msg));
+        assert_eq!(corrupt_eval_cache(&msg).unwrap().fingerprint, fp);
+    }
+
+    /// The same missing-table error against any other SQLite file is somebody
+    /// else's problem - the path is what makes it ours to heal.
+    #[test]
+    fn a_missing_table_outside_the_eval_cache_is_not_healed() {
+        assert!(
+            corrupt_eval_cache(
+                "[nix::SQLiteError] ...: SQL logic error, no such table: Attributes \
+                 (in '/nix/var/nix/db/db.sqlite')"
+            )
+            .is_none()
         );
     }
 

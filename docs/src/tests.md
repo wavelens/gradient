@@ -2,6 +2,23 @@
 
 This page tracks notable tests added to Gradient and where they live.
 
+## An empty eval-cache blob is corrupt too
+
+The self-heal recognised a *damaged* blob ("malformed", "not a database") but
+not an empty one: a truncated or never-finished write leaves a valid SQLite
+file with no schema (4096 bytes - one page, header only), which fails as `SQL
+logic error, no such table: Attributes`. Unclassified, it was never purged, so
+every evaluation sharing the blob died on it and `.drv` recovery re-evaluated
+straight back into the same wall - the evaluation looked like it was recovering
+while nothing was repaired.
+
+`backend/gradient-worker/src/executor/eval.rs`:
+`corrupt_eval_cache_detects_a_blob_with_no_schema` uses the production error
+verbatim and requires both the classification and the fingerprint extraction,
+while `a_missing_table_outside_the_eval_cache_is_not_healed` keeps the path
+requirement honest - the same SQLite error against `/nix/var/nix/db/db.sqlite`
+is not ours to purge.
+
 ## Nix's repeated log tail is stripped from failures (#546)
 
 On failure nix appends the last `log-lines` (25 by default) lines of the build
