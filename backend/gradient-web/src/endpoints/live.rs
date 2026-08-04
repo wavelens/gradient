@@ -27,26 +27,40 @@ use super::evals::EvalAccessContext;
 
 /// Forward events selected by `select` to the socket until either side closes.
 /// A lagged receiver skips missed frames (the client refetches on the next one).
-async fn live_stream<F>(mut socket: WebSocket, mut rx: BoardEventRx, mut select: F)
+///
+/// The inbound half is polled purely to notice the client leaving: a loop that
+/// only writes learns of a closed tab at the next event that fails to send, so
+/// a quiet channel would hold its task and socket open indefinitely.
+pub async fn live_stream<F>(socket: WebSocket, mut rx: BoardEventRx, mut select: F)
 where
     F: FnMut(&BoardEvent) -> Option<String> + Send + 'static,
 {
+    use futures::{SinkExt, StreamExt};
+
+    let (mut sink, mut stream) = socket.split();
     loop {
-        match rx.recv().await {
-            Ok(ev) => {
-                if let Some(text) = select(&ev)
-                    && socket.send(Message::Text(text.into())).await.is_err()
-                {
-                    break;
+        tokio::select! {
+            incoming = stream.next() => match incoming {
+                // Close frame, transport error, or the peer simply went away.
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                Some(Ok(_)) => continue,
+            },
+            event = rx.recv() => match event {
+                Ok(ev) => {
+                    if let Some(text) = select(&ev)
+                        && sink.send(Message::Text(text.into())).await.is_err()
+                    {
+                        break;
+                    }
                 }
-            }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            },
         }
     }
 }
 
-type BoardEventRx = tokio::sync::broadcast::Receiver<BoardEvent>;
+pub type BoardEventRx = tokio::sync::broadcast::Receiver<BoardEvent>;
 
 fn frame(ev: &BoardEvent) -> Option<String> {
     serde_json::to_string(ev).ok()

@@ -83,5 +83,6 @@ harmonia-file-nar = { workspace = true, features = ["test"] }
 hmac              = { workspace = true }
 gradient-test-support = { workspace = true }
 tokio-test   = { workspace = true }
+tokio-tungstenite = { workspace = true }
 tower        = { workspace = true }
 zstd         = { workspace = true }
