@@ -49,12 +49,19 @@ async fn upstream(body: Option<&'static str>) -> (String, Arc<AtomicUsize>) {
 
 const DRV: &str = "1mpqffikzpszxw6zzi8s63a3srqd6swx-python3.14-ctranslate2-4.8.1.drv";
 
+/// The same constructor the server uses. `reqwest::Client::new()` panics where
+/// no system CA bundle exists (the nix build sandbox); `build_client` folds in
+/// `webpki_roots`, so it builds with or without native certs.
+fn client() -> reqwest::Client {
+    gradient_util::http::build_client().expect("http client builds")
+}
+
 #[tokio::test]
 async fn serves_the_log_from_the_first_upstream_that_has_it() {
     let (without, without_hits) = upstream(None).await;
     let (with, with_hits) = upstream(Some("@nix { \"action\": \"setPhase\" }\nbuilding\n")).await;
 
-    let log = fetch_log_from_upstreams(&reqwest::Client::new(), &[without, with], DRV).await;
+    let log = fetch_log_from_upstreams(&client(), &[without, with], DRV).await;
 
     assert_eq!(
         log.as_deref(),
@@ -74,7 +81,7 @@ async fn reports_no_log_when_no_upstream_has_one() {
     let (second, _) = upstream(None).await;
 
     assert_eq!(
-        fetch_log_from_upstreams(&reqwest::Client::new(), &[first, second], DRV).await,
+        fetch_log_from_upstreams(&client(), &[first, second], DRV).await,
         None
     );
 }
@@ -84,7 +91,7 @@ async fn reports_no_log_when_no_upstream_has_one() {
 async fn normalizes_a_trailing_slash_on_the_upstream_url() {
     let (base, hits) = upstream(Some("log body")).await;
 
-    let log = fetch_log_from_upstreams(&reqwest::Client::new(), &[format!("{base}/")], DRV).await;
+    let log = fetch_log_from_upstreams(&client(), &[format!("{base}/")], DRV).await;
 
     assert_eq!(log.as_deref(), Some("log body"));
     assert_eq!(hits.load(Ordering::SeqCst), 1);
