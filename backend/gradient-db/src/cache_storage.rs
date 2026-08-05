@@ -1028,14 +1028,29 @@ mod tests {
     /// failed the evaluation outright.
     #[test]
     fn cached_path_closure_scope_seeds_the_evals_own_drv_paths() {
+        let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
         let eval = gradient_types::EvaluationId::now_v7();
         let (clear, set) = cached_path_closure_statements(Some(eval));
         for stmt in [&clear, &set] {
+            let sql = norm(stmt);
             assert!(
-                stmt.contains("FROM derivation d")
-                    && stmt.contains("bj.derivation = d.id")
-                    && stmt.contains("SELECT d.hash"),
-                "seeds the eval's .drv hashes alongside its output hashes: {stmt}"
+                sql.contains(
+                    "SELECT DISTINCT d.hash FROM derivation d \
+                     JOIN build_job bj ON bj.derivation = d.id WHERE bj.evaluation = $1"
+                ),
+                "seeds the eval's .drv hashes alongside its output hashes: {sql}"
+            );
+            // PostgreSQL accepts exactly one self-reference, in the last arm of
+            // the UNION chain: `(non_recursive UNION non_recursive) UNION
+            // recursive`. Seeding .drv paths after the reference walk would be
+            // rejected at runtime, which no type or compile check would catch.
+            let drv_seed = sql.find("FROM derivation d").expect("drv seed present");
+            let walk = sql
+                .find("FROM cached_path_reference r JOIN eval_paths")
+                .expect("recursive walk present");
+            assert!(
+                drv_seed < walk,
+                "the self-referencing term must stay last in the UNION chain: {sql}"
             );
         }
     }
