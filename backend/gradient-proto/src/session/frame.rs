@@ -57,12 +57,17 @@ pub const SAFE_INFLIGHT_MESSAGE_SIZE: usize = 2 * 1024 * 1024;
 /// this deadline so it cannot pin a tokio task and FD indefinitely.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Bounded queue depth for [`ProtoWriter`]. With a 4 MiB NAR chunk ceiling
-/// (`NAR_PUSH_CHUNK_SIZE`) this caps the per-connection outbound buffer at
-/// roughly `WRITER_QUEUE_DEPTH * NAR_PUSH_CHUNK_SIZE` ≈ 64 MiB. Producers
-/// observe back-pressure as `tx.send().await` blocking, which is then capped
-/// by the per-message send timeout passed to [`ProtoSocket::split`].
+/// Bounded queue depth for the bulk lane of [`ProtoWriter`]. With a 4 MiB NAR
+/// chunk ceiling (`NAR_PUSH_CHUNK_SIZE`) this caps the per-connection outbound
+/// buffer at roughly `WRITER_QUEUE_DEPTH * NAR_PUSH_CHUNK_SIZE` ≈ 64 MiB.
+/// Producers observe back-pressure as `tx.send().await` blocking, which is then
+/// capped by the per-message send timeout passed to [`ProtoSocket::split`].
 const WRITER_QUEUE_DEPTH: usize = 16;
+
+/// Bounded queue depth for the control lane. Control-plane messages are small,
+/// so this lane is deep enough that a burst of RPC replies never applies
+/// back-pressure to their handlers.
+const CONTROL_QUEUE_DEPTH: usize = 256;
 
 /// How many queued messages the writer task drains per `feed`+`flush` cycle,
 /// coalescing bursts (e.g. consecutive `NarPush` chunks) into fewer TCP writes.
@@ -77,6 +82,13 @@ const WRITE_BATCH: usize = 32;
 pub trait WireMessage: Sized + std::fmt::Debug + Send + 'static {
     fn encode(&self) -> Option<Vec<u8>>;
     fn decode(bytes: &[u8]) -> Result<Self, RkyvError>;
+
+    /// Whether this message belongs to a bulk transfer stream rather than the
+    /// control plane. Bulk messages are large and strictly ordered within their
+    /// own stream; control-plane messages are small and latency-critical. The
+    /// two travel separate lanes so a multi-megabyte transfer cannot delay the
+    /// RPC replies a peer is blocked on - see [`WriterLanes`].
+    fn is_bulk(&self) -> bool;
 }
 
 impl WireMessage for ClientMessage {
@@ -89,6 +101,19 @@ impl WireMessage for ClientMessage {
     fn decode(bytes: &[u8]) -> Result<Self, RkyvError> {
         decode_client_message(bytes)
     }
+    fn is_bulk(&self) -> bool {
+        matches!(
+            self,
+            ClientMessage::NarPush { .. }
+                | ClientMessage::NarStreamHeader { .. }
+                | ClientMessage::NarRequestResume { .. }
+                | ClientMessage::NarUploaded { .. }
+                | ClientMessage::EvalCachePush { .. }
+                | ClientMessage::EvalCacheChunk { .. }
+                | ClientMessage::EvalCachePushDone { .. }
+                | ClientMessage::LogChunk { .. }
+        )
+    }
 }
 
 impl WireMessage for ServerMessage {
@@ -100,6 +125,19 @@ impl WireMessage for ServerMessage {
     }
     fn decode(bytes: &[u8]) -> Result<Self, RkyvError> {
         decode_server_message(bytes)
+    }
+    fn is_bulk(&self) -> bool {
+        matches!(
+            self,
+            ServerMessage::NarPush { .. }
+                | ServerMessage::NarStreamHeader { .. }
+                | ServerMessage::NarPushResume { .. }
+                | ServerMessage::NarUnavailable { .. }
+                | ServerMessage::NarAbort { .. }
+                | ServerMessage::EvalCachePullResult { .. }
+                | ServerMessage::EvalCacheChunk { .. }
+                | ServerMessage::EvalCachePushGrant { .. }
+        )
     }
 }
 
@@ -245,21 +283,24 @@ impl ProtoSocket {
         self,
         send_chunk_timeout: Duration,
     ) -> (MsgReader<In>, MsgWriter<Out>) {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (control_tx, control_rx) = mpsc::channel::<Vec<u8>>(CONTROL_QUEUE_DEPTH);
         let writer = MsgWriter {
             tx,
+            control_tx,
             send_chunk_timeout,
             _direction: std::marker::PhantomData,
         };
+        let lanes = WriterLanes::new(control_rx, bulk_rx);
         let inner = match self {
             Self::Axum(ws) => {
                 let (sink, stream) = (*ws).split();
-                tokio::spawn(axum_writer_task(rx, sink));
+                tokio::spawn(axum_writer_task(lanes, sink));
                 ReaderInner::Axum(stream)
             }
             Self::Tungstenite(ws) => {
                 let (sink, stream) = (*ws).split();
-                tokio::spawn(tungstenite_writer_task(rx, sink));
+                tokio::spawn(tungstenite_writer_task(lanes, sink));
                 ReaderInner::Tungstenite(stream)
             }
         };
@@ -346,6 +387,7 @@ impl<M: WireMessage> MsgReader<M> {
 /// as an error.
 pub struct MsgWriter<M> {
     pub(crate) tx: mpsc::Sender<Vec<u8>>,
+    pub(crate) control_tx: mpsc::Sender<Vec<u8>>,
     pub(crate) send_chunk_timeout: Duration,
     pub(crate) _direction: std::marker::PhantomData<M>,
 }
@@ -357,6 +399,7 @@ impl<M> Clone for MsgWriter<M> {
     fn clone(&self) -> Self {
         Self {
             tx: self.tx.clone(),
+            control_tx: self.control_tx.clone(),
             send_chunk_timeout: self.send_chunk_timeout,
             _direction: std::marker::PhantomData,
         }
@@ -369,13 +412,15 @@ impl<M: WireMessage> MsgWriter<M> {
             return Err(());
         };
         trace!(?msg, bytes = bytes.len(), "send message");
-        match tokio::time::timeout(self.send_chunk_timeout, self.tx.send(bytes)).await {
+        let bulk = msg.is_bulk();
+        let lane = if bulk { &self.tx } else { &self.control_tx };
+        match tokio::time::timeout(self.send_chunk_timeout, lane.send(bytes)).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(_)) => Err(()),
             Err(_) => {
                 warn!(
                     timeout_secs = self.send_chunk_timeout.as_secs(),
-                    "WS writer queue full beyond send timeout - peer TCP stalled"
+                    bulk, "WS writer queue full beyond send timeout - peer TCP stalled"
                 );
                 Err(())
             }
@@ -383,13 +428,99 @@ impl<M: WireMessage> MsgWriter<M> {
     }
 }
 
+/// Outbound scheduler for the two writer lanes.
+///
+/// Every message used to share one FIFO, so a small `CacheStatus` reply queued
+/// behind an in-flight NAR transfer could not reach the wire until megabytes of
+/// chunks had flushed - blowing the peer's RPC deadline while the send itself
+/// reported success. Draining the control lane first keeps latency-critical
+/// replies independent of bulk progress. Order within each lane is preserved,
+/// which is all a transfer stream requires.
+pub(crate) struct WriterLanes {
+    control: mpsc::Receiver<Vec<u8>>,
+    bulk: mpsc::Receiver<Vec<u8>>,
+    control_open: bool,
+    bulk_open: bool,
+}
+
+impl WriterLanes {
+    pub(crate) fn new(control: mpsc::Receiver<Vec<u8>>, bulk: mpsc::Receiver<Vec<u8>>) -> Self {
+        Self {
+            control,
+            bulk,
+            control_open: true,
+            bulk_open: true,
+        }
+    }
+
+    /// Fill `batch` from the control lane when it has anything, else from bulk.
+    /// Returns false once both lanes are closed and drained.
+    pub(crate) async fn next_batch(&mut self, batch: &mut Vec<Vec<u8>>) -> bool {
+        loop {
+            if !self.control_open && !self.bulk_open {
+                return false;
+            }
+            self.drain_ready(batch);
+            if !batch.is_empty() {
+                return true;
+            }
+            // Both lanes are idle: block until either wakes, then top up.
+            let woke = tokio::select! {
+                biased;
+                m = self.control.recv(), if self.control_open => {
+                    if m.is_none() { self.control_open = false; }
+                    m
+                }
+                m = self.bulk.recv(), if self.bulk_open => {
+                    if m.is_none() { self.bulk_open = false; }
+                    m
+                }
+            };
+            if let Some(bytes) = woke {
+                batch.push(bytes);
+                self.drain_ready(batch);
+                return true;
+            }
+        }
+    }
+
+    /// Move already-queued messages into `batch`, control lane first, without
+    /// awaiting. Closes a lane whose senders have all dropped.
+    fn drain_ready(&mut self, batch: &mut Vec<Vec<u8>>) {
+        for control in [true, false] {
+            if control && !self.control_open || !control && !self.bulk_open {
+                continue;
+            }
+            while batch.len() < WRITE_BATCH {
+                let lane = if control {
+                    &mut self.control
+                } else {
+                    &mut self.bulk
+                };
+                match lane.try_recv() {
+                    Ok(bytes) => batch.push(bytes),
+                    Err(mpsc::error::TryRecvError::Empty) => break,
+                    Err(mpsc::error::TryRecvError::Disconnected) => {
+                        if control {
+                            self.control_open = false;
+                        } else {
+                            self.bulk_open = false;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
 async fn axum_writer_task(
-    mut rx: mpsc::Receiver<Vec<u8>>,
+    mut lanes: WriterLanes,
     mut sink: futures::stream::SplitSink<WebSocket, AxumMessage>,
 ) {
     let mut batch = Vec::with_capacity(WRITE_BATCH);
     loop {
-        if rx.recv_many(&mut batch, WRITE_BATCH).await == 0 {
+        if !lanes.next_batch(&mut batch).await {
             break;
         }
         for bytes in batch.drain(..) {
@@ -406,7 +537,7 @@ async fn axum_writer_task(
 }
 
 async fn tungstenite_writer_task(
-    mut rx: mpsc::Receiver<Vec<u8>>,
+    mut lanes: WriterLanes,
     mut sink: futures::stream::SplitSink<
         WebSocketStream<MaybeTlsStream<TcpStream>>,
         TungsteniteMessage,
@@ -414,7 +545,7 @@ async fn tungstenite_writer_task(
 ) {
     let mut batch = Vec::with_capacity(WRITE_BATCH);
     loop {
-        if rx.recv_many(&mut batch, WRITE_BATCH).await == 0 {
+        if !lanes.next_batch(&mut batch).await {
             break;
         }
         for bytes in batch.drain(..) {
@@ -485,6 +616,111 @@ mod tests {
         assert_eq!(NAR_PUSH_CHUNK_SIZE, 4 * 1024 * 1024);
     }
 
+    fn nar_chunk(offset: u64) -> ServerMessage {
+        ServerMessage::NarPush {
+            job_id: "build:1".into(),
+            store_path: "/nix/store/aaa-foo".into(),
+            data: vec![0u8; 8],
+            offset,
+            is_final: false,
+        }
+    }
+
+    fn cache_reply() -> ServerMessage {
+        ServerMessage::CacheStatus {
+            query_id: "q1".into(),
+            cached: Vec::new(),
+        }
+    }
+
+    /// Bulk transfers ride their own lane; every control-plane message - above
+    /// all the cache RPC replies a worker blocks on - rides the priority lane.
+    #[test]
+    fn bulk_transfers_and_control_plane_take_different_lanes() {
+        assert!(nar_chunk(0).is_bulk());
+        assert!(
+            ServerMessage::NarStreamHeader {
+                job_id: "build:1".into(),
+                store_path: "/nix/store/aaa-foo".into(),
+                total_bytes: 1,
+                stream_token: "t".into(),
+            }
+            .is_bulk()
+        );
+        assert!(!cache_reply().is_bulk());
+        assert!(
+            !ServerMessage::CacheError {
+                query_id: "q1".into(),
+                message: "boom".into(),
+            }
+            .is_bulk()
+        );
+    }
+
+    /// The bug this split fixes: a 1-path `CacheStatus` used to sit behind up
+    /// to `WRITER_QUEUE_DEPTH * NAR_PUSH_CHUNK_SIZE` of NAR data on one shared
+    /// FIFO and miss the worker's 75 s deadline, failing the build as
+    /// `Transient` while the server logged a clean send.
+    #[tokio::test]
+    async fn a_cache_reply_overtakes_nar_chunks_already_queued() {
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (prio_tx, prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let mut lanes = WriterLanes::new(prio_rx, bulk_rx);
+
+        for i in 0..8u8 {
+            bulk_tx.send(vec![i]).await.unwrap();
+        }
+        prio_tx.send(vec![0xff]).await.unwrap();
+
+        let mut batch = Vec::new();
+        assert!(lanes.next_batch(&mut batch).await);
+        assert_eq!(
+            batch,
+            vec![vec![0xff]],
+            "the control lane must drain before queued bulk chunks"
+        );
+    }
+
+    /// Priority must not mean starvation: with the control lane idle the writer
+    /// still drains bulk, and the loop ends only once both lanes are closed.
+    #[tokio::test]
+    async fn bulk_still_drains_and_the_writer_stops_when_both_lanes_close() {
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (prio_tx, prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let mut lanes = WriterLanes::new(prio_rx, bulk_rx);
+
+        bulk_tx.send(vec![1]).await.unwrap();
+        bulk_tx.send(vec![2]).await.unwrap();
+        drop(bulk_tx);
+        drop(prio_tx);
+
+        let mut batch = Vec::new();
+        assert!(lanes.next_batch(&mut batch).await);
+        assert_eq!(batch, vec![vec![1], vec![2]]);
+
+        batch.clear();
+        assert!(
+            !lanes.next_batch(&mut batch).await,
+            "both lanes closed and drained ends the writer task"
+        );
+    }
+
+    /// A bulk lane wedged full must never block a control reply: the two lanes
+    /// have independent capacity, which is what keeps a stalled NAR transfer
+    /// from taking the cache RPCs down with it.
+    #[tokio::test]
+    async fn a_full_bulk_lane_does_not_block_the_control_lane() {
+        let (bulk_tx, _bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (prio_tx, mut prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        for i in 0..WRITER_QUEUE_DEPTH {
+            bulk_tx.send(vec![i as u8]).await.unwrap();
+        }
+        assert!(bulk_tx.try_send(vec![0xaa]).is_err(), "bulk lane is full");
+
+        prio_tx.try_send(vec![0xff]).expect("control lane is free");
+        assert_eq!(prio_rx.recv().await, Some(vec![0xff]));
+    }
+
     /// The knob that keeps the cache RPC deadlock-free: a full-size
     /// `CacheQuery` and the worst-case `CacheStatus` it can provoke - every
     /// path uncached, each carrying a presigned upload URL and path info -
@@ -548,19 +784,27 @@ mod writer_tests {
     use tokio::sync::mpsc;
 
     /// Construct a writer that's not backed by a draining task, so we can
-    /// observe queue-full back-pressure deterministically.
+    /// observe queue-full back-pressure deterministically. Both lanes get
+    /// `capacity`; the receivers are returned as `(control, bulk)`.
     fn unwired_writer(
         capacity: usize,
         timeout: Duration,
-    ) -> (ProtoWriter, mpsc::Receiver<Vec<u8>>) {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>(capacity);
+    ) -> (
+        ProtoWriter,
+        mpsc::Receiver<Vec<u8>>,
+        mpsc::Receiver<Vec<u8>>,
+    ) {
+        let (tx, bulk_rx) = mpsc::channel::<Vec<u8>>(capacity);
+        let (control_tx, control_rx) = mpsc::channel::<Vec<u8>>(capacity);
         (
             ProtoWriter {
                 tx,
+                control_tx,
                 send_chunk_timeout: timeout,
                 _direction: std::marker::PhantomData,
             },
-            rx,
+            control_rx,
+            bulk_rx,
         )
     }
 
@@ -570,8 +814,8 @@ mod writer_tests {
     /// the worker's 600 s receive ceiling.
     #[tokio::test(start_paused = true)]
     async fn send_msg_times_out_when_queue_is_full() {
-        let (writer, _rx) = unwired_writer(1, Duration::from_secs(5));
-        writer.tx.send(vec![1, 2, 3]).await.unwrap();
+        let (writer, _control_rx, _bulk_rx) = unwired_writer(1, Duration::from_secs(5));
+        writer.control_tx.send(vec![1, 2, 3]).await.unwrap();
 
         let msg = ServerMessage::Reject {
             code: 400,
@@ -589,13 +833,13 @@ mod writer_tests {
     /// receiver just keeps the channel open).
     #[tokio::test]
     async fn send_msg_succeeds_when_queue_has_room() {
-        let (writer, mut rx) = unwired_writer(2, Duration::from_secs(5));
+        let (writer, mut control_rx, _bulk_rx) = unwired_writer(2, Duration::from_secs(5));
         let msg = ServerMessage::Reject {
             code: 200,
             reason: "ok".into(),
         };
         writer.send_msg(&msg).await.expect("queue had room");
-        let bytes = rx.try_recv().expect("byte buffer enqueued");
+        let bytes = control_rx.try_recv().expect("byte buffer enqueued");
         assert!(!bytes.is_empty(), "serialised message should be non-empty");
     }
 }
