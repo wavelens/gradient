@@ -6771,3 +6771,50 @@ worker now prefetches the source and each locked input independently
 - `prefetch_refs_from_lock_walks_all_and_applies_override` - the lock walk
   covers transitive (non-root-input) nodes, skips the root node, prefers an
   override for a root input, and warns on an unsupported node type.
+
+## Control-plane replies get their own writer lane
+
+Every outbound message on a connection shared one bounded FIFO, so a small
+`CacheStatus` queued behind an in-flight NAR transfer could not reach the wire
+until megabytes of 4 MiB chunks had flushed. The reply then missed the peer's
+75 s deadline and failed the build as `Transient` while the send itself
+reported success. `MsgWriter` now holds two lanes and `WriterLanes` drains the
+control lane first; order within each lane is preserved, which is all a
+transfer stream requires.
+
+`backend/gradient-proto/src/session/frame.rs`:
+- `bulk_transfers_and_control_plane_take_different_lanes` - `is_bulk` puts
+  `NarPush`/`NarStreamHeader` on the bulk lane and `CacheStatus`/`CacheError`
+  on the control lane.
+- `a_cache_reply_overtakes_nar_chunks_already_queued` - with eight chunks
+  queued ahead of it, the first batch the writer emits is the cache reply.
+- `bulk_still_drains_and_the_writer_stops_when_both_lanes_close` - priority is
+  not starvation: an idle control lane still lets bulk through, and the writer
+  task ends only once both lanes are closed and drained.
+- `a_full_bulk_lane_does_not_block_the_control_lane` - the lanes have
+  independent capacity, so a wedged transfer cannot apply back-pressure to the
+  RPC replies a peer is blocked on.
+- `send_msg_times_out_when_queue_is_full` / `send_msg_succeeds_when_queue_has_room`
+  now exercise the control lane, since `Reject` is control-plane.
+
+## Store and daemon faults are retryable, not deterministic
+
+`classify_build_error` was binary - OOM to `Transient`, everything else to
+`Permanent` - so `path '/nix/store/...' is not valid` (an input missing from
+the local store) became a deterministic build failure. `Permanent` is never
+re-thawed, so one such fault failed the build outright and cascaded to every
+dependent. `looks_like_infra_failure` now routes store/daemon signatures to
+`Transient`, which `decide_failure_outcome` still bounds by `max_attempts`
+before falling back to `Permanent`.
+
+`backend/gradient-worker/src/executor/failure.rs`:
+- `a_store_or_daemon_error_is_transient_not_permanent` - covers `is not valid`,
+  `does not exist in the store`, daemon connect failure, `No space left on
+  device`, `unexpected end-of-file`, `Input/output error` and
+  `connection reset by peer`.
+- `ansi_coloured_daemon_errors_are_still_recognised` - matching survives the
+  escape codes nix wraps its messages in, which is how the failure actually
+  arrives on the wire.
+- `genuine_build_errors_stay_permanent` - a link error, a failing test suite
+  and a make failure stay terminal, so broken derivations are not retried until
+  their attempt budget runs out.
