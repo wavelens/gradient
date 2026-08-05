@@ -90,10 +90,32 @@ pub(super) fn looks_like_oom(msg: &str) -> bool {
         || l.contains("killed")
 }
 
-/// Classify a builder-reported failure message: OOM -> Transient, otherwise a
-/// real build error -> Permanent.
+/// Signatures of a failure in the store or the daemon rather than in the
+/// derivation. These say nothing about whether the build *would* succeed, so
+/// treating them as deterministic strands the build: `Permanent` is never
+/// re-thawed, and every dependent cascades to `DependencyFailed`.
+const INFRA_FAILURE_SIGNATURES: &[&str] = &[
+    "is not valid",
+    "does not exist in the store",
+    "no space left on device",
+    "cannot connect to daemon",
+    "unexpected end-of-file",
+    "input/output error",
+    "connection reset by peer",
+    "broken pipe",
+];
+
+/// Best-effort scan for a store/daemon failure. Matched on the raw message, so
+/// the ANSI escapes nix wraps its errors in cannot hide a signature.
+pub(super) fn looks_like_infra_failure(msg: &str) -> bool {
+    let l = msg.to_ascii_lowercase();
+    INFRA_FAILURE_SIGNATURES.iter().any(|s| l.contains(s))
+}
+
+/// Classify a builder-reported failure message: OOM or an infrastructure fault
+/// -> Transient, otherwise a real build error -> Permanent.
 pub(super) fn classify_build_error(msg: &str) -> BuildFailureKind {
-    if looks_like_oom(msg) {
+    if looks_like_oom(msg) || looks_like_infra_failure(msg) {
         BuildFailureKind::Transient
     } else {
         BuildFailureKind::Permanent
@@ -180,6 +202,54 @@ mod tests {
         assert!(looks_like_oom("Killed"));
         assert!(looks_like_oom("oom-killer: invoked"));
         assert!(!looks_like_oom("error: undefined reference to `foo'"));
+    }
+
+    /// The failure that took down eval `019fcf38`: a single missing input path
+    /// was classified `Permanent`, so it was never retried and cascaded into
+    /// 2,687 `DependencyFailed` dependents. A store path the daemon refuses is
+    /// infrastructure, never a deterministic property of the derivation.
+    #[test]
+    fn a_store_or_daemon_error_is_transient_not_permanent() {
+        for msg in [
+            "error: path '/nix/store/p59cz-coreutils-9.11.tar.xz' is not valid",
+            "error: path '/nix/store/abc-foo' does not exist in the store",
+            "error: cannot connect to daemon at '/nix/var/nix/daemon-socket/socket'",
+            "error: writing to file: No space left on device",
+            "error: unexpected end-of-file",
+            "error: reading from file: Input/output error",
+            "error: connection reset by peer",
+        ] {
+            assert_eq!(
+                classify_build_error(msg),
+                BuildFailureKind::Transient,
+                "infrastructure failure must stay retryable: {msg}"
+            );
+        }
+    }
+
+    /// The escape codes nix wraps its messages in must not hide a signature.
+    #[test]
+    fn ansi_coloured_daemon_errors_are_still_recognised() {
+        let coloured = "build failed: \u{1b}[31;1merror:\u{1b}[0m path \
+             '\u{1b}[35;1m/nix/store/p59cz-coreutils-9.11.tar.xz\u{1b}[0m' is not valid";
+        assert_eq!(classify_build_error(coloured), BuildFailureKind::Transient);
+    }
+
+    /// A real compile failure stays terminal: misrouting these to `Transient`
+    /// would retry every broken derivation until its attempt budget ran out.
+    #[test]
+    fn genuine_build_errors_stay_permanent() {
+        for msg in [
+            "error: undefined reference to `foo'",
+            "error: test suite failed with exit code 1",
+            "make: *** [Makefile:42: all] Error 2",
+        ] {
+            assert_eq!(
+                classify_build_error(msg),
+                BuildFailureKind::Permanent,
+                "deterministic build failure must not be retried: {msg}"
+            );
+        }
     }
 
     #[test]
