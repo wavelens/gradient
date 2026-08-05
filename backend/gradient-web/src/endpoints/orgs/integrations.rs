@@ -391,8 +391,7 @@ pub async fn put_integration(
         .map(|s| s.to_string())
         .unwrap_or_else(|| body.name.clone());
 
-    let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?
-        .and_then(|v| if v.is_empty() { None } else { Some(v) });
+    let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?.filter(|v| !v.is_empty());
     let integration = MIntegration {
         id: IntegrationId::now_v7(),
         organization: org.id,
