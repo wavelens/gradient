@@ -1980,11 +1980,10 @@ pub fn parse_owner_repo(repository_url: &str) -> Option<(String, String)> {
     {
         // https://host/owner/repo.git → "host/owner/repo.git" → take after first '/'
         rest.split_once('/')?.1
-    } else if let Some(colon_pos) = url.find(':') {
-        // git@host:owner/repo.git
-        &url[colon_pos + 1..]
     } else {
-        return None;
+        // git@host:owner/repo.git
+        let colon_pos = url.find(':')?;
+        &url[colon_pos + 1..]
     };
 
     let path = path.trim_end_matches(".git");
