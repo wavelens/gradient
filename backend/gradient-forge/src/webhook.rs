@@ -443,10 +443,9 @@ pub fn decode_push_commit(git_ref: &str, after: &str, forge: &str) -> Option<Pus
     }
     let (ref_name, is_tag) = if let Some(branch) = git_ref.strip_prefix("refs/heads/") {
         (branch.to_string(), false)
-    } else if let Some(tag) = git_ref.strip_prefix("refs/tags/") {
-        (tag.to_string(), true)
     } else {
-        return None;
+        let tag = git_ref.strip_prefix("refs/tags/")?;
+        (tag.to_string(), true)
     };
     match hex::decode(after) {
         Ok(hash) => Some(PushCommit {
