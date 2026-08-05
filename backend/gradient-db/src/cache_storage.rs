@@ -483,9 +483,13 @@ pub(crate) const CACHED_PATH_CLOSURE_COMPLETE_GATE: &str = r#"
 "#;
 
 /// Prelude CTE and `cp` membership filter bounding the `cached_path` fixpoint to
-/// one eval's output NAR-reference closure. `None` yields empty fragments (the
-/// global full-table `Deep` backstop); `Some` seeds `eval_paths` from the eval's
-/// `build_job` output hashes and walks `cached_path_reference` toward references,
+/// one eval's NAR-reference closure. `None` yields empty fragments (the global
+/// full-table `Deep` backstop); `Some` seeds `eval_paths` from the eval's
+/// `build_job` output hashes **and its targets' own `.drv` hashes** - a `.drv` is
+/// keyed by `derivation.hash` and is never a `derivation_output.hash`, so
+/// seeding from outputs alone put every `.drv` row outside the bound, leaving the
+/// flag the dispatch gate reads settable only by the rare `Deep` pass - and walks
+/// `cached_path_reference` toward references,
 /// so the bound is closed under the reference relation and the SET pass still
 /// converges leaves-first within it. Eval id binds as `$1`.
 fn cached_path_eval_scope_fragments(
@@ -497,6 +501,10 @@ fn cached_path_eval_scope_fragments(
             "WITH RECURSIVE eval_paths(hash) AS ( \
                  SELECT DISTINCT o.hash FROM derivation_output o \
                  JOIN build_job bj ON bj.derivation = o.derivation \
+                 WHERE bj.evaluation = $1 \
+               UNION \
+                 SELECT DISTINCT d.hash FROM derivation d \
+                 JOIN build_job bj ON bj.derivation = d.id \
                  WHERE bj.evaluation = $1 \
                UNION \
                  SELECT r.reference_hash FROM cached_path_reference r \
@@ -1005,6 +1013,29 @@ mod tests {
             assert!(
                 stmt.contains("cp.hash IN (SELECT hash FROM eval_paths)"),
                 "restricts the UPDATE to that closure: {stmt}"
+            );
+        }
+    }
+
+    /// The scope must also seed the eval's own `.drv` paths. A build target's
+    /// `.drv` is keyed by `derivation.hash` and is never a
+    /// `derivation_output.hash`, so seeding from outputs alone left every `.drv`
+    /// row outside the filter - unreachable by `Eval`/`Unstick`, and settable
+    /// only by the rare global `Deep` pass. The dispatch gate
+    /// (`drv_nar_closure_complete_predicate`) reads exactly those rows, so the
+    /// flag it depends on never converged: anchors stayed undispatchable, the
+    /// graph-stuck heal called `Unstick` forever, and `DrvRecovery` eventually
+    /// failed the evaluation outright.
+    #[test]
+    fn cached_path_closure_scope_seeds_the_evals_own_drv_paths() {
+        let eval = gradient_types::EvaluationId::now_v7();
+        let (clear, set) = cached_path_closure_statements(Some(eval));
+        for stmt in [&clear, &set] {
+            assert!(
+                stmt.contains("FROM derivation d")
+                    && stmt.contains("bj.derivation = d.id")
+                    && stmt.contains("SELECT d.hash"),
+                "seeds the eval's .drv hashes alongside its output hashes: {stmt}"
             );
         }
     }
