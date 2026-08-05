@@ -94,6 +94,23 @@ pub fn drv_nar_closure_complete_predicate(alias: &str) -> String {
     )
 }
 
+/// The build target `{alias}`'s own `.drv` NAR is not in our cache at all: no
+/// `cached_path` row, or a row with no backing NAR. This is the only `.drv`
+/// state a fresh evaluation repairs - it re-materialises and re-uploads the
+/// `.drv`. Deliberately narrower than
+/// `NOT drv_nar_closure_complete_predicate`, which is also true for a `.drv`
+/// that is present and merely has an unconverged closure flag; re-evaluating
+/// cannot set a flag, so conflating the two burned an evaluation per stall and
+/// then failed it as unrecoverable with the `.drv` cached the whole time.
+pub fn drv_nar_absent_predicate(alias: &str) -> String {
+    format!(
+        r#"NOT EXISTS (
+        SELECT 1 FROM derivation d
+        JOIN cached_path cp ON cp.hash = d.hash
+        WHERE d.id = {alias}.derivation AND cp.file_hash IS NOT NULL)"#
+    )
+}
+
 /// Closure of the derivations an evaluation directly references (its
 /// `build_job` rows), walking toward dependencies. Binds the evaluation id as
 /// `$1`. Shared by every per-eval sweep so they all see the same closure.

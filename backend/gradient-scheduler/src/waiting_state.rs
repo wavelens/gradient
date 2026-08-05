@@ -380,6 +380,7 @@ async fn eval_blocked_on_unproducible_drv(
 fn unproducible_drv_block_sql() -> String {
     let deps_ready = gradient_db::graph_sql::deps_ready_predicate("db");
     let drv_nar_closure = gradient_db::graph_sql::drv_nar_closure_complete_predicate("db");
+    let drv_nar_absent = gradient_db::graph_sql::drv_nar_absent_predicate("db");
     format!(
         r#"
         SELECT EXISTS (
@@ -392,6 +393,7 @@ fn unproducible_drv_block_sql() -> String {
               AND NOT db.substitutable
               AND NOT db.drv_closure_cached
               AND NOT {drv_nar_closure}
+              AND {drv_nar_absent}
               AND ({deps_ready})
         ) AS blocked
         "#,
@@ -574,6 +576,26 @@ mod tests {
         assert!(
             sql.contains("cached_path cp") && sql.contains("derivation_input_source"),
             "must embed the deps-ready predicate (all build deps and sources cached): {sql}"
+        );
+    }
+
+    /// Only a genuinely absent `.drv` NAR justifies condemning an evaluation.
+    ///
+    /// The closure flags are also false while a present `.drv` simply has not
+    /// converged, and re-evaluating cannot fix a flag - so keying on them alone
+    /// burned an eval per stall and then failed it one-shot as "unrecoverable"
+    /// with the `.drv` sitting in the cache the whole time. The block now
+    /// additionally requires that no backed `cached_path` row exists for the
+    /// `.drv`, which is the state a fresh evaluation actually repairs.
+    #[test]
+    fn unproducible_drv_block_requires_the_drv_nar_to_be_absent() {
+        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        let sql = norm(unproducible_drv_block_sql());
+        assert!(
+            sql.contains(&norm(gradient_db::graph_sql::drv_nar_absent_predicate(
+                "db"
+            ))),
+            "must require the .drv's own NAR to be missing, not merely unconverged: {sql}"
         );
     }
 
