@@ -454,64 +454,89 @@ impl WriterLanes {
     }
 
     /// Fill `batch` from the control lane when it has anything, else from bulk.
-    /// Returns false once both lanes are closed and drained.
+    /// A batch never mixes lanes: the writer task flushes only once it has fed
+    /// the whole batch, so a 4 MiB chunk that blocks mid-feed would strand a
+    /// reply sitting in front of it, unflushed - the very stall this split
+    /// exists to prevent. Returns false once both lanes are closed and drained.
     pub(crate) async fn next_batch(&mut self, batch: &mut Vec<Vec<u8>>) -> bool {
         loop {
             if !self.control_open && !self.bulk_open {
                 return false;
             }
-            self.drain_ready(batch);
-            if !batch.is_empty() {
-                return true;
+            for lane in [Lane::Control, Lane::Bulk] {
+                self.drain_ready(lane, batch);
+                if !batch.is_empty() {
+                    return true;
+                }
             }
-            // Both lanes are idle: block until either wakes, then top up.
-            let woke = tokio::select! {
+            // Draining may have closed the last open lane; re-check before the
+            // select, whose branches would otherwise all be disabled (a panic).
+            if !self.control_open && !self.bulk_open {
+                return false;
+            }
+            // Both lanes are idle: block until either wakes, then top up from
+            // that same lane.
+            let (lane, woke) = tokio::select! {
                 biased;
-                m = self.control.recv(), if self.control_open => {
-                    if m.is_none() { self.control_open = false; }
-                    m
-                }
-                m = self.bulk.recv(), if self.bulk_open => {
-                    if m.is_none() { self.bulk_open = false; }
-                    m
-                }
+                m = self.control.recv(), if self.control_open => (Lane::Control, m),
+                m = self.bulk.recv(), if self.bulk_open => (Lane::Bulk, m),
             };
-            if let Some(bytes) = woke {
-                batch.push(bytes);
-                self.drain_ready(batch);
-                return true;
+            match woke {
+                Some(bytes) => {
+                    batch.push(bytes);
+                    self.drain_ready(lane, batch);
+                    return true;
+                }
+                None => self.close(lane),
             }
         }
     }
 
-    /// Move already-queued messages into `batch`, control lane first, without
-    /// awaiting. Closes a lane whose senders have all dropped.
-    fn drain_ready(&mut self, batch: &mut Vec<Vec<u8>>) {
-        for control in [true, false] {
-            if control && !self.control_open || !control && !self.bulk_open {
-                continue;
-            }
-            while batch.len() < WRITE_BATCH {
-                let lane = if control {
-                    &mut self.control
-                } else {
-                    &mut self.bulk
-                };
-                match lane.try_recv() {
-                    Ok(bytes) => batch.push(bytes),
-                    Err(mpsc::error::TryRecvError::Empty) => break,
-                    Err(mpsc::error::TryRecvError::Disconnected) => {
-                        if control {
-                            self.control_open = false;
-                        } else {
-                            self.bulk_open = false;
-                        }
-                        break;
-                    }
+    /// Move already-queued messages from one lane into `batch` without awaiting.
+    /// Closes the lane when all its senders have dropped.
+    fn drain_ready(&mut self, lane: Lane, batch: &mut Vec<Vec<u8>>) {
+        if !self.is_open(lane) {
+            return;
+        }
+        let rx = match lane {
+            Lane::Control => &mut self.control,
+            Lane::Bulk => &mut self.bulk,
+        };
+        let mut disconnected = false;
+        while batch.len() < WRITE_BATCH {
+            match rx.try_recv() {
+                Ok(bytes) => batch.push(bytes),
+                Err(mpsc::error::TryRecvError::Empty) => break,
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    disconnected = true;
+                    break;
                 }
             }
         }
+        if disconnected {
+            self.close(lane);
+        }
     }
+
+    fn is_open(&self, lane: Lane) -> bool {
+        match lane {
+            Lane::Control => self.control_open,
+            Lane::Bulk => self.bulk_open,
+        }
+    }
+
+    fn close(&mut self, lane: Lane) {
+        match lane {
+            Lane::Control => self.control_open = false,
+            Lane::Bulk => self.bulk_open = false,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Lane {
+    Control,
+    Bulk,
 }
 
 async fn axum_writer_task(
@@ -677,7 +702,17 @@ mod tests {
         assert_eq!(
             batch,
             vec![vec![0xff]],
-            "the control lane must drain before queued bulk chunks"
+            "the control lane must drain before queued bulk chunks, and must not \
+             share a batch with them: the writer flushes only after feeding the \
+             whole batch, so a chunk blocking mid-feed would strand the reply"
+        );
+
+        batch.clear();
+        assert!(lanes.next_batch(&mut batch).await);
+        assert_eq!(
+            batch,
+            (0..8u8).map(|i| vec![i]).collect::<Vec<_>>(),
+            "the bulk chunks follow in order, none dropped"
         );
     }
 
@@ -703,6 +738,22 @@ mod tests {
             !lanes.next_batch(&mut batch).await,
             "both lanes closed and drained ends the writer task"
         );
+    }
+
+    /// A connection that closes without ever sending must end the writer task,
+    /// not panic: both lanes close during the same drain pass, leaving a
+    /// `select!` whose branches are all disabled.
+    #[tokio::test]
+    async fn a_writer_that_never_sent_anything_stops_cleanly() {
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (prio_tx, prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let mut lanes = WriterLanes::new(prio_rx, bulk_rx);
+        drop(bulk_tx);
+        drop(prio_tx);
+
+        let mut batch = Vec::new();
+        assert!(!lanes.next_batch(&mut batch).await);
+        assert!(batch.is_empty());
     }
 
     /// A bulk lane wedged full must never block a control reply: the two lanes

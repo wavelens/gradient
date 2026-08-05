@@ -6780,17 +6780,24 @@ until megabytes of 4 MiB chunks had flushed. The reply then missed the peer's
 75 s deadline and failed the build as `Transient` while the send itself
 reported success. `MsgWriter` now holds two lanes and `WriterLanes` drains the
 control lane first; order within each lane is preserved, which is all a
-transfer stream requires.
+transfer stream requires. A batch never mixes lanes, because the writer task
+flushes only after feeding the whole batch: a 4 MiB chunk that blocks mid-feed
+would strand a reply fed ahead of it, reintroducing the same stall one level
+down.
 
 `backend/gradient-proto/src/session/frame.rs`:
 - `bulk_transfers_and_control_plane_take_different_lanes` - `is_bulk` puts
   `NarPush`/`NarStreamHeader` on the bulk lane and `CacheStatus`/`CacheError`
   on the control lane.
 - `a_cache_reply_overtakes_nar_chunks_already_queued` - with eight chunks
-  queued ahead of it, the first batch the writer emits is the cache reply.
+  queued ahead of it, the cache reply is the whole first batch, and the chunks
+  follow in order in the next one.
 - `bulk_still_drains_and_the_writer_stops_when_both_lanes_close` - priority is
   not starvation: an idle control lane still lets bulk through, and the writer
   task ends only once both lanes are closed and drained.
+- `a_writer_that_never_sent_anything_stops_cleanly` - both lanes closing in the
+  same drain pass ends the task instead of reaching a `select!` with every
+  branch disabled, which panics.
 - `a_full_bulk_lane_does_not_block_the_control_lane` - the lanes have
   independent capacity, so a wedged transfer cannot apply back-pressure to the
   RPC replies a peer is blocked on.
