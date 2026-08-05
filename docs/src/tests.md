@@ -6825,3 +6825,39 @@ before falling back to `Permanent`.
 - `genuine_build_errors_stay_permanent` - a link error, a failing test suite
   and a make failure stay terminal, so broken derivations are not retried until
   their attempt budget runs out.
+
+## `.drv` paths converge inside the per-eval closure fixpoint
+
+`cached_path_eval_scope_fragments` seeded `eval_paths` from `derivation_output`
+hashes only. A build target's own `.drv` is keyed by `derivation.hash` and is
+never a `derivation_output.hash`, so every `.drv` row sat outside the
+`cp.hash IN (SELECT hash FROM eval_paths)` bound and no `Eval`/`Unstick` pass
+could ever set its `closure_complete`. The dispatch gate
+(`drv_nar_closure_complete_predicate`) reads exactly those rows, so anchors
+stayed undispatchable, the graph-stuck heal called `Unstick` every ~30 s
+without effect, and `DrvRecovery` eventually failed the evaluation with the
+`.drv` present in the cache the whole time. Measured against production: for one
+stuck eval the old seed covered 0 `.drv` paths, the new one 36,730.
+
+`backend/gradient-db/src/cache_storage.rs`:
+- `cached_path_closure_scope_seeds_the_evals_own_drv_paths` - the scoped CLEAR
+  and SET both seed the eval's `.drv` hashes alongside its output hashes.
+- `cached_path_closure_fixpoint_scopes_to_one_eval` - unchanged guarantees: the
+  global pass stays full-table, the scoped pass still walks the reference
+  closure and still restricts the `UPDATE` to it. The recursive term stays last
+  in the `UNION` chain, as PostgreSQL requires of a self-referencing CTE.
+
+## Only a genuinely missing `.drv` condemns an evaluation
+
+`eval_blocked_on_unproducible_drv` keyed on the closure flags alone, which are
+equally false while a present `.drv` merely has an unconverged flag.
+Re-evaluation cannot set a flag, so the scheduler burned an evaluation per stall
+and then failed it one-shot as unrecoverable. The block now also requires
+`drv_nar_absent_predicate`: no `cached_path` row for the `.drv`, or one with no
+backing NAR - the only state a fresh evaluation repairs.
+
+`backend/gradient-scheduler/src/waiting_state.rs`:
+- `unproducible_drv_block_requires_the_drv_nar_to_be_absent` - the emitted SQL
+  embeds the absent-NAR predicate.
+- `unproducible_drv_block_sql_shape` - the existing gate fragments are retained
+  alongside it.
