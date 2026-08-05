@@ -1111,6 +1111,7 @@ mod serve_nar_tests {
         let (tx, rx) = mpsc::channel::<Vec<u8>>(64);
         (
             ProtoWriter {
+                control_tx: tx.clone(),
                 tx,
                 send_chunk_timeout: timeout,
                 _direction: std::marker::PhantomData,
