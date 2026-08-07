@@ -504,7 +504,7 @@ async fn cache_query_chunk(
     mode: QueryMode,
 ) -> Result<Vec<CachedPath>> {
     let path_count = paths.len();
-    let query_id = uuid::Uuid::new_v4().to_string();
+    let query_id = uuid::Uuid::now_v7().to_string();
     let rx = register_cache_waiter(cache_waiters, query_id.clone(), job_id.to_owned());
     writer
         .send(ClientMessage::CacheQuery {
