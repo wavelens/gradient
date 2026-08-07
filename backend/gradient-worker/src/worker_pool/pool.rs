@@ -275,7 +275,11 @@ impl Drop for PooledEvalWorker {
             return;
         };
 
-        match dispose(self.shutting_down.load(Ordering::SeqCst), self.healthy) {
+        // A cancelled caller leaves its request in flight: the unread response
+        // would answer the worker's next request, so such a worker is never
+        // healthy no matter what the caller observed.
+        let healthy = self.healthy && !worker.in_flight();
+        match dispose(self.shutting_down.load(Ordering::SeqCst), healthy) {
             Disposition::GracefulShutdown => {
                 if let Ok(handle) = tokio::runtime::Handle::try_current() {
                     trace!("pool shutting down; gracefully terminating eval worker");
@@ -334,6 +338,107 @@ mod tests {
         assert_eq!(dispose(false, true), Disposition::ReturnToIdle);
         assert_eq!(dispose(true, false), Disposition::Kill);
         assert_eq!(dispose(false, false), Disposition::Kill);
+    }
+
+    /// A child that swallows every request and never replies - stands in for
+    /// a worker whose caller future gets cancelled mid-call (fan-out error
+    /// propagation, `try_join` sibling cancellation).
+    fn silent_worker() -> EvalWorker {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg("cat >/dev/null");
+        EvalWorker::from_command(cmd).expect("spawn sh")
+    }
+
+    /// A child that immediately writes the given response as one frame, then
+    /// swallows stdin, so exactly one parent call completes normally.
+    fn replying_worker(resp: &gradient_eval::ipc::EvalResponse, tag: &str) -> EvalWorker {
+        let payload = gradient_eval::ipc::encode_response(resp).expect("encode response");
+        let mut frame = (payload.len() as u32).to_le_bytes().to_vec();
+        frame.extend_from_slice(&payload);
+        let path = std::env::temp_dir().join(format!(
+            "gradient-pool-test-{}-{tag}.frame",
+            std::process::id()
+        ));
+        std::fs::write(&path, &frame).expect("write response frame");
+
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(format!("cat '{}'; cat >/dev/null", path.display()));
+        EvalWorker::from_command(cmd).expect("spawn sh")
+    }
+
+    #[tokio::test]
+    async fn mid_call_cancelled_worker_is_discarded_not_pooled() {
+        let pool = EvalWorkerPool::new(1, 2 * GIB, String::new());
+        pool.push_for_test(silent_worker());
+
+        let mut worker = pool.acquire().await.expect("acquire");
+        let call = worker.plan("repo".into(), vec![], vec![]);
+        tokio::time::timeout(Duration::from_millis(200), call)
+            .await
+            .expect_err("a silent child must keep the call pending");
+        drop(worker);
+
+        assert_eq!(
+            pool.idle_count(),
+            0,
+            "a worker dropped with a request in flight has an unread response \
+             on the wire and must not be returned to the pool"
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_call_worker_returns_to_idle() {
+        use gradient_eval::ipc::EvalResponse;
+
+        let pool = EvalWorkerPool::new(1, 2 * GIB, String::new());
+        pool.push_for_test(replying_worker(
+            &EvalResponse::PlanOk {
+                sub_patterns: vec![],
+                errors: vec![],
+            },
+            "planok",
+        ));
+
+        let mut worker = pool.acquire().await.expect("acquire");
+        let (sub_patterns, errors) = worker
+            .plan("repo".into(), vec![], vec![])
+            .await
+            .expect("plan");
+        assert!(sub_patterns.is_empty() && errors.is_empty());
+        drop(worker);
+
+        assert_eq!(
+            pool.idle_count(),
+            1,
+            "a worker whose call completed in lockstep is reusable"
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_resolve_stream_worker_returns_to_idle() {
+        use gradient_eval::ipc::EvalResponse;
+
+        let pool = EvalWorkerPool::new(1, 2 * GIB, String::new());
+        pool.push_for_test(replying_worker(
+            &EvalResponse::ResolveEnd {
+                warnings: vec![],
+                stats: None,
+            },
+            "resolveend",
+        ));
+
+        let mut worker = pool.acquire().await.expect("acquire");
+        let (items, end) = worker.resolve("repo".into(), vec![], vec![]).await;
+        end.expect("resolve end");
+        assert!(items.is_empty());
+        drop(worker);
+
+        assert_eq!(
+            pool.idle_count(),
+            1,
+            "a worker whose resolve stream reached ResolveEnd is reusable"
+        );
     }
 
     #[tokio::test]

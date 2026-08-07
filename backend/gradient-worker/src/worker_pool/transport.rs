@@ -55,6 +55,12 @@ pub(super) struct EvalWorker {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    /// True from the first request byte written until the exchange's terminal
+    /// response frame is fully read. A worker dropped in this state (caller
+    /// future cancelled mid-call) has a half-written request or an unread
+    /// response on the wire; the pool must discard it, because the next
+    /// request on the same pipe would read the stale frame as its answer.
+    in_flight: bool,
     /// RAII deregistration of this subprocess's pid from the pool's live
     /// registry. A field (rather than `impl Drop for EvalWorker`) so `shutdown`
     /// can still move individual fields out of `self`.
@@ -161,6 +167,7 @@ impl EvalWorker {
             child,
             stdin,
             stdout,
+            in_flight: false,
             pid_guard: PidGuard { live: None, pid },
         })
     }
@@ -195,8 +202,15 @@ impl EvalWorker {
         matches!(self.child.try_wait(), Ok(None))
     }
 
+    /// Whether a request has been sent whose terminal response frame has not
+    /// been read yet. Checked by `PooledEvalWorker::drop`.
+    pub(super) fn in_flight(&self) -> bool {
+        self.in_flight
+    }
+
     /// Write one request frame. An error means the worker is no longer usable.
     async fn send(&mut self, req: &EvalRequest) -> Result<()> {
+        self.in_flight = true;
         trace!(pid = self.child.id(), ?req, "sending eval worker request");
         let payload = encode_request(req).context("encoding eval worker request")?;
         self.stdin
@@ -280,7 +294,9 @@ impl EvalWorker {
         extract: impl FnOnce(EvalResponse) -> std::result::Result<T, Box<EvalResponse>>,
     ) -> Result<T> {
         self.send(&req).await?;
-        match extract(self.recv().await?) {
+        let resp = self.recv().await?;
+        self.in_flight = false;
+        match extract(resp) {
             Ok(v) => Ok(v),
             Err(other) => match *other {
                 EvalResponse::Err { message } => Err(anyhow::anyhow!("eval worker: {message}")),
@@ -410,8 +426,12 @@ impl EvalWorker {
         loop {
             match self.recv().await? {
                 EvalResponse::ResolveItem { item } => items.push(item),
-                EvalResponse::ResolveEnd { warnings, stats } => return Ok((warnings, stats)),
+                EvalResponse::ResolveEnd { warnings, stats } => {
+                    self.in_flight = false;
+                    return Ok((warnings, stats));
+                }
                 EvalResponse::Err { message } => {
+                    self.in_flight = false;
                     anyhow::bail!("eval worker: {message}")
                 }
                 other => {

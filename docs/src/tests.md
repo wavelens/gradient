@@ -3964,6 +3964,27 @@ Unit tests in `backend/worker/src/worker_pool/pool.rs`:
   branch in `Drop` instead of being pushed back into the (now drained)
   idle vec.
 
+The transport tracks an `in_flight` flag per subprocess: set when a
+request frame starts writing, cleared only once the exchange's terminal
+response frame (typed response, `ResolveEnd`, or `Err`) is fully read.
+A `PooledEvalWorker` dropped with the flag set (its caller future was
+cancelled, e.g. by fan-out error propagation or `try_join` sibling
+cancellation) is discarded instead of pooled; pooling it would leave an
+unread response in the pipe that answers the worker's next request
+("unexpected response to Plan: ListOk", the eval-failure signature this
+guards against).
+
+- `mid_call_cancelled_worker_is_discarded_not_pooled` - a call against
+  a child that never replies is cancelled via `tokio::time::timeout`;
+  dropping the pooled handle must not return the worker to the idle
+  vec.
+- `completed_call_worker_returns_to_idle` - a scripted child answers
+  one `Plan` with a pre-encoded `PlanOk` frame; after the lockstep call
+  completes the worker is pooled again.
+- `completed_resolve_stream_worker_returns_to_idle` - same for the
+  streamed protocol: a child answering `ResolveEnd` leaves the worker
+  reusable.
+
 ## Prometheus metrics endpoint - `web/tests/metrics.rs`
 
 Covers `GET /metrics`, the Prometheus exposition endpoint introduced
