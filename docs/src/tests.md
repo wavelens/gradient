@@ -6882,3 +6882,28 @@ backing NAR - the only state a fresh evaluation repairs.
   embeds the absent-NAR predicate.
 - `unproducible_drv_block_sql_shape` - the existing gate fragments are retained
   alongside it.
+
+## Concurrent evaluations of one derivation graph - `nix/tests/gradient/eval-concurrent`
+
+E2E NixOS VM test (3 nodes: server + two eval-capable workers) for the
+content-addressed derivation identity under concurrency. Two projects in one
+org point at the same repository with the same wildcard; both poll every 10 s,
+so their evaluations of the identical commit run at the same time and stream
+the same `pkgs.hello` closure to the server concurrently, exercising the
+`ON CONFLICT DO NOTHING` ingestion paths in
+`gradient-db/src/connection.rs`/`dep_closure.rs` that no unit test can reach
+(MockDatabase cannot execute SQL).
+
+Assertions, via psql against the server DB:
+
+- both evaluations reach `Completed` (a conflict error surfacing as an eval
+  failure is the primary regression this guards);
+- the two evals' `build_job` sets overlap and every shared drv resolves to one
+  `derivation` row - no duplicated `(hash, name)` and no derivation with two
+  `derivation_build` anchors. Strict set equality is deliberately NOT asserted:
+  the later eval legitimately prunes subtrees whose outputs the earlier eval
+  already cached;
+- both evals' hello root maps to the same single `derivation` row;
+- neither worker journal contains `unexpected response to` - the pooled
+  eval-worker IPC stayed in lockstep under concurrent load (regression guard
+  for the in-flight cancellation poisoning fix).
