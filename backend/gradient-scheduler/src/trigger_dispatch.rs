@@ -9,11 +9,11 @@
 //!
 //! `polling_due` and `cron_due` are pure helpers testable without time
 //! manipulation. `trigger_dispatch_loop` / `dispatch_once` are the live
-//! DB-driven loop that replaced the legacy `project_poll_loop`.
+//! DB-driven loop that replaced the legacy `task_poll_loop`.
 
 use chrono::{NaiveDateTime, Utc};
 
-use gradient_types::ProjectTriggerId;
+use gradient_types::TaskTriggerId;
 
 /// Upper bound of the jitter added to each polling cycle, expressed as a
 /// percentage of `interval_secs`. Spreads concurrently-created triggers out
@@ -30,7 +30,7 @@ const POLLING_JITTER_PCT: u32 = 10;
 /// stable within a cycle means the firing decision doesn't oscillate; a fresh
 /// value is drawn after each fire because `last_fired_at` advances.
 pub(crate) fn polling_due(
-    trigger_id: ProjectTriggerId,
+    trigger_id: TaskTriggerId,
     last_fired_at: Option<NaiveDateTime>,
     interval_secs: u32,
     now: NaiveDateTime,
@@ -47,7 +47,7 @@ pub(crate) fn polling_due(
 /// Deterministic jitter in `[0, interval_secs * POLLING_JITTER_PCT / 100]`
 /// for a single polling cycle.
 fn polling_jitter_secs(
-    trigger_id: ProjectTriggerId,
+    trigger_id: TaskTriggerId,
     last_fired_at: NaiveDateTime,
     interval_secs: u32,
 ) -> u32 {
@@ -92,8 +92,8 @@ use std::time::Duration;
 
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger, trigger::maybe_trigger_input_update};
 use gradient_core::ServerState;
-use gradient_entity::project_trigger as ept;
-use gradient_sources::{check_project_updates, get_commit_info};
+use gradient_entity::task_trigger as ept;
+use gradient_sources::{check_task_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
 use sea_orm::{ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, QueryFilter};
@@ -136,20 +136,17 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let project_ids: Vec<_> = triggers
+    let task_ids: Vec<_> = triggers
         .iter()
-        .map(|t| t.project)
+        .map(|t| t.task)
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
 
     let db = &state.worker_db;
-    let projects: std::collections::HashMap<_, _> =
-        gradient_db::fetch_in_chunks(&project_ids, |chunk| async move {
-            EProject::find()
-                .filter(CProject::Id.is_in(chunk))
-                .all(db)
-                .await
+    let tasks: std::collections::HashMap<_, _> =
+        gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+            ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
         })
         .await?
         .into_iter()
@@ -157,10 +154,10 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         .collect();
 
     for trig in triggers {
-        let Some(project) = projects.get(&trig.project) else {
+        let Some(task) = tasks.get(&trig.task) else {
             continue;
         };
-        if !project.active {
+        if !task.active {
             continue;
         }
 
@@ -191,27 +188,27 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         // Resolve current HEAD. Polling reports whether it advanced; time
         // triggers fire on whatever HEAD currently is.
         let (has_update, commit_hash) =
-            match check_project_updates(&state.db(), project, branch_for_check.as_deref()).await {
+            match check_task_updates(&state.db(), task, branch_for_check.as_deref()).await {
                 Ok(v) => v,
                 Err(e) => {
-                    warn!(error = %e, project = %project.name, "trigger commit resolution failed");
+                    warn!(error = %e, task = %task.name, "trigger commit resolution failed");
                     // Update on error too, otherwise transient failures retry every 5s.
                     update_last_fired(state, &trig, now).await;
                     continue;
                 }
             };
 
-        let (msg, _email, author) = get_commit_info(&state.db(), project, &commit_hash)
+        let (msg, _email, author) = get_commit_info(&state.db(), task, &commit_hash)
             .await
             .unwrap_or_else(|_| (String::new(), None, String::new()));
 
         // Bump tracked flake inputs (OpenPr action) on every due trigger fire,
         // independent of whether HEAD advanced - upstream input updates never
         // move the repo, so gating this on a new commit would never run it.
-        // Self-gated: no-ops unless the project qualifies.
+        // Self-gated: no-ops unless the task qualifies.
         if let Err(e) = maybe_trigger_input_update(
             state.worker_db.inner(),
-            project,
+            task,
             commit_hash.clone(),
             Some(trig.id),
         )
@@ -226,7 +223,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
             let trigger_type = cfg.trigger_type();
             match apply_trigger(
                 state.worker_db.inner(),
-                project,
+                task,
                 ApplyInput {
                     trigger_id: trig.id,
                     trigger_type,
@@ -253,11 +250,11 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                             .cancel_evaluation_jobs(aborted_id, &aborted_anchors)
                             .await;
                     }
-                    info!(project = %project.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
+                    info!(task = %task.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
                     gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
                 }
                 Ok(other) => {
-                    debug!(project = %project.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");
+                    debug!(task = %task.name, trigger_id = %trig.id, ?other, "trigger applied without creating eval");
                 }
                 Err(e) => {
                     error!(error = %e, trigger_id = %trig.id, "trigger application failed");
@@ -287,8 +284,8 @@ mod tests {
         NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap()
     }
 
-    fn tid() -> ProjectTriggerId {
-        ProjectTriggerId::now_v7()
+    fn tid() -> TaskTriggerId {
+        TaskTriggerId::now_v7()
     }
 
     #[test]
@@ -365,7 +362,7 @@ mod tests {
         // Pick an interval/timing such that the boundary lies inside the
         // jitter window: interval=100, max jitter=10. At now = last + 100s,
         // the trigger must still wait if its own jitter > 0.
-        let id = ProjectTriggerId::now_v7();
+        let id = TaskTriggerId::now_v7();
         let last = dt("2026-05-06 10:00:00");
         let jitter = polling_jitter_secs(id, last, 100);
         if jitter == 0 {

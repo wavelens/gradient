@@ -21,7 +21,7 @@ pub(super) async fn copy_entry_points<C: ConnectionTrait>(
     for prev_ep in prev_entry_points {
         let aep = MEntryPoint {
             id: EntryPointId::now_v7(),
-            project: prev_ep.project,
+            task: prev_ep.task,
             evaluation: new_eval_id,
             derivation: prev_ep.derivation,
             eval: prev_ep.eval.clone(),

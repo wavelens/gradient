@@ -5,8 +5,8 @@
  */
 
 use gradient_entity::ids::*;
-use gradient_entity::project_flake_input_override;
-use gradient_test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
+use gradient_entity::task_flake_input_override;
+use gradient_test_support::fixtures::{org, org_id, task_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::{ConcurrencyPolicy, SessionId};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
@@ -19,13 +19,13 @@ fn override_id() -> FlakeInputOverrideId {
     FlakeInputOverrideId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000077").unwrap())
 }
 
-fn project_row() -> gradient_entity::project::Model {
-    gradient_entity::project::Model {
-        id: project_id(),
+fn task_row() -> gradient_entity::task::Model {
+    gradient_entity::task::Model {
+        id: task_id(),
         organization: org_id(),
-        name: "test-project".into(),
+        name: "test-task".into(),
         active: true,
-        display_name: "Test Project".into(),
+        display_name: "Test Task".into(),
         repository: "https://github.com/test/repo".into(),
         wildcard: "*".into(),
         last_check_at: test_date(),
@@ -38,10 +38,10 @@ fn project_row() -> gradient_entity::project::Model {
     }
 }
 
-fn managed_project_row() -> gradient_entity::project::Model {
-    gradient_entity::project::Model {
+fn managed_task_row() -> gradient_entity::task::Model {
+    gradient_entity::task::Model {
         managed: true,
-        ..project_row()
+        ..task_row()
     }
 }
 
@@ -65,10 +65,10 @@ fn admin_role_row() -> gradient_entity::role::Model {
     }
 }
 
-fn nixpkgs_override_row() -> project_flake_input_override::Model {
-    project_flake_input_override::Model {
+fn nixpkgs_override_row() -> task_flake_input_override::Model {
+    task_flake_input_override::Model {
         id: override_id(),
-        project: project_id(),
+        task: task_id(),
         input_name: "nixpkgs".into(),
         url: Some("github:NixOS/nixpkgs/nixos-unstable".into()),
         created_at: test_date(),
@@ -83,27 +83,27 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-fn with_project_member(db: MockDatabase) -> MockDatabase {
+fn with_task_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![org()]])
-        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
 }
 
-fn with_project_edit(db: MockDatabase) -> MockDatabase {
+fn with_task_edit(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![org()]])
-        .append_query_results([vec![project_row()]])
-        .append_query_results([vec![admin_membership()]])
-        .append_query_results([vec![admin_role_row()]])
-}
-
-fn with_managed_project_edit(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![org()]])
-        .append_query_results([vec![managed_project_row()]])
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
         .append_query_results([vec![admin_role_row()]])
 }
 
-const BASE_URL: &str = "/api/v1/projects/test-org/test-project/flake-inputs";
+fn with_managed_task_edit(db: MockDatabase) -> MockDatabase {
+    db.append_query_results([vec![org()]])
+        .append_query_results([vec![managed_task_row()]])
+        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![admin_role_row()]])
+}
+
+const BASE_URL: &str = "/api/v1/tasks/test-org/test-task/flake-inputs";
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -117,11 +117,11 @@ fn list_empty_returns_empty() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_flake_input_override::Model>::new()]);
+        .append_query_results([Vec::<task_flake_input_override::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -146,11 +146,11 @@ fn create_then_list_returns_one() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_flake_input_override::Model>::new()])
+        .append_query_results([Vec::<task_flake_input_override::Model>::new()])
         .append_query_results([vec![nixpkgs_override_row()]]);
 
         let server = make_test_server(db.into_connection());
@@ -184,20 +184,20 @@ fn create_with_null_url_keep_url_mode() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let null_url_row = project_flake_input_override::Model {
+        let null_url_row = task_flake_input_override::Model {
             id: override_id(),
-            project: project_id(),
+            task: task_id(),
             input_name: "utils".into(),
             created_at: test_date(),
             updated_at: test_date(),
             ..Default::default()
         };
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_flake_input_override::Model>::new()])
+        .append_query_results([Vec::<task_flake_input_override::Model>::new()])
         .append_query_results([vec![null_url_row]]);
 
         let server = make_test_server(db.into_connection());
@@ -225,20 +225,20 @@ fn create_with_glob_input_name() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let glob_row = project_flake_input_override::Model {
+        let glob_row = task_flake_input_override::Model {
             id: override_id(),
-            project: project_id(),
+            task: task_id(),
             input_name: "nixpkgs*".into(),
             created_at: test_date(),
             updated_at: test_date(),
             ..Default::default()
         };
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_flake_input_override::Model>::new()])
+        .append_query_results([Vec::<task_flake_input_override::Model>::new()])
         .append_query_results([vec![glob_row]]);
 
         let server = make_test_server(db.into_connection());
@@ -265,7 +265,7 @@ fn create_duplicate_input_name_rejects_400() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -297,7 +297,7 @@ fn create_invalid_input_name_rejects_400() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));
@@ -331,12 +331,12 @@ fn patch_updates_url_and_returns_new_row() {
         let token = make_token(session_id);
         let oid = override_id();
 
-        let updated = project_flake_input_override::Model {
+        let updated = task_flake_input_override::Model {
             url: Some("github:NixOS/nixpkgs/nixos-24.05".into()),
             ..nixpkgs_override_row()
         };
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -368,12 +368,12 @@ fn patch_url_to_null_sets_keep_url() {
         let token = make_token(session_id);
         let oid = override_id();
 
-        let updated = project_flake_input_override::Model {
+        let updated = task_flake_input_override::Model {
             url: None,
             ..nixpkgs_override_row()
         };
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -405,19 +405,19 @@ fn patch_omitting_url_does_not_change_it() {
         let token = make_token(session_id);
         let oid = override_id();
 
-        let updated = project_flake_input_override::Model {
+        let updated = task_flake_input_override::Model {
             input_name: "renamed".into(),
             url: Some("github:NixOS/nixpkgs/nixos-unstable".into()),
             ..nixpkgs_override_row()
         };
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
         .append_query_results([vec![nixpkgs_override_row()]])
         // dup-check for "renamed" → empty means no conflict
-        .append_query_results([Vec::<project_flake_input_override::Model>::new()])
+        .append_query_results([Vec::<task_flake_input_override::Model>::new()])
         .append_query_results([vec![updated]]);
 
         let server = make_test_server(db.into_connection());
@@ -449,7 +449,7 @@ fn delete_removes_the_row() {
         let token = make_token(session_id);
         let oid = override_id();
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -483,11 +483,11 @@ fn get_not_found_returns_404() {
         let token = make_token(session_id);
         let oid = FlakeInputOverrideId::now_v7();
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_flake_input_override::Model>::new()]);
+        .append_query_results([Vec::<task_flake_input_override::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -509,21 +509,21 @@ fn list_sorted_by_input_name() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let alpha = project_flake_input_override::Model {
+        let alpha = task_flake_input_override::Model {
             id: FlakeInputOverrideId::new(
                 Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
             ),
-            project: project_id(),
+            task: task_id(),
             input_name: "alpha".into(),
             created_at: test_date(),
             updated_at: test_date(),
             ..Default::default()
         };
-        let zebra = project_flake_input_override::Model {
+        let zebra = task_flake_input_override::Model {
             id: FlakeInputOverrideId::new(
                 Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
             ),
-            project: project_id(),
+            task: task_id(),
             input_name: "zebra".into(),
             created_at: test_date(),
             updated_at: test_date(),
@@ -532,7 +532,7 @@ fn list_sorted_by_input_name() {
 
         // MockDatabase returns rows in insertion order; handler sorts by input_name ASC,
         // so we insert alpha first as that is the expected sorted order.
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -554,7 +554,7 @@ fn list_sorted_by_input_name() {
 }
 
 #[test]
-fn managed_project_rejects_mutations_403() {
+fn managed_task_rejects_mutations_403() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -563,7 +563,7 @@ fn managed_project_rejects_mutations_403() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_managed_project_edit(with_auth(
+        let db = with_managed_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));

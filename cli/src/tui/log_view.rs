@@ -34,7 +34,10 @@ impl Default for LogView {
 
 impl LogView {
     pub fn streaming(rx: UnboundedReceiver<String>) -> Self {
-        Self { rx: Some(rx), ..Self::default() }
+        Self {
+            rx: Some(rx),
+            ..Self::default()
+        }
     }
 
     #[cfg(test)]
@@ -67,9 +70,13 @@ impl LogView {
     }
 
     #[cfg(test)]
-    pub fn offset(&self) -> usize { self.offset }
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
     #[cfg(test)]
-    pub fn follow(&self) -> bool { self.follow }
+    pub fn follow(&self) -> bool {
+        self.follow
+    }
 
     pub fn scroll_down(&mut self) {
         let max = self.lines.len().saturating_sub(self.viewport);
@@ -107,7 +114,11 @@ impl View for LogView {
         let end = (self.offset + self.viewport).min(self.lines.len());
         let slice = self.lines.get(self.offset..end).unwrap_or(&[]);
         let body = slice.join("\n");
-        let search_indicator = if self.searching { format!(" /{}", self.query) } else { String::new() };
+        let search_indicator = if self.searching {
+            format!(" /{}", self.query)
+        } else {
+            String::new()
+        };
         let title = format!(
             "Log ({} lines){}{}  [f follow, / search, Esc quit]",
             self.lines.len(),
@@ -130,7 +141,9 @@ impl View for LogView {
                     self.searching = false;
                     self.query.clear();
                 }
-                KeyCode::Backspace => { self.query.pop(); }
+                KeyCode::Backspace => {
+                    self.query.pop();
+                }
                 KeyCode::Char(c) => self.query.push(c),
                 _ => {}
             }
@@ -199,11 +212,13 @@ mod tests {
 
     #[test]
     fn typing_search_then_enter_jumps() {
-        use ratatui::crossterm::event::{KeyModifiers};
+        use ratatui::crossterm::event::KeyModifiers;
         let mut v = lv(20);
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         v.on_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
-        for c in "line 7".chars() { v.on_key(key(c)); }
+        for c in "line 7".chars() {
+            v.on_key(key(c));
+        }
         v.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(v.offset(), 7);
     }

@@ -477,7 +477,7 @@ pub async fn get_board_durations_heatmap(
          FROM build_job bj \
          JOIN derivation_build b ON b.id = bj.derivation_build \
          JOIN evaluation ev ON ev.id = bj.evaluation \
-         JOIN project pr ON pr.id = ev.project \
+         JOIN task pr ON pr.id = ev.task \
          JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at \
            FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \

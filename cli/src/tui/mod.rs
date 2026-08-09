@@ -31,7 +31,10 @@ pub fn run<V: View>(mut view: V) -> io::Result<()> {
     result
 }
 
-fn run_loop<V: View>(terminal: &mut Terminal<CrosstermBackend<Stdout>>, view: &mut V) -> io::Result<()> {
+fn run_loop<V: View>(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    view: &mut V,
+) -> io::Result<()> {
     loop {
         view.on_tick();
         terminal.draw(|f| view.render(f))?;

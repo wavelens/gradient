@@ -119,9 +119,9 @@ impl HttpRevisionResolver {
         repo: &str,
         ref_: &Option<String>,
     ) -> Result<ResolvedRev> {
-        let project = format!("{owner}/{repo}").replace('/', "%2F");
+        let task = format!("{owner}/{repo}").replace('/', "%2F");
         let r = ref_.clone().unwrap_or_else(|| "HEAD".to_owned());
-        let url = format!("{GITLAB_API}/api/v4/projects/{project}/repository/commits/{r}");
+        let url = format!("{GITLAB_API}/api/v4/tasks/{task}/repository/commits/{r}");
         let commit: GitlabCommit = self
             .gitlab_get(&url)
             .send()
@@ -135,7 +135,7 @@ impl HttpRevisionResolver {
 
         let last_modified = parse_rfc3339(&commit.committed_date)?;
         let tarball = format!(
-            "{GITLAB_API}/api/v4/projects/{project}/repository/archive.tar.gz?sha={}",
+            "{GITLAB_API}/api/v4/tasks/{task}/repository/archive.tar.gz?sha={}",
             commit.id
         );
         let nar_hash = tarball_source_nar_hash(self.gitlab_get(&tarball)).await?;

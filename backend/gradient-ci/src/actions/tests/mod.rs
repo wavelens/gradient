@@ -124,7 +124,7 @@ fn matches_event_forge_status_ignores_stored_events() {
 
 #[test]
 fn render_subject_with_default_template() {
-    let payload = json!({ "project": "demo", "id": "abc" });
+    let payload = json!({ "task": "demo", "id": "abc" });
     let s = render_subject(None, "build.failed", &payload);
     assert!(s.contains("build.failed"));
     assert!(s.contains("demo"));
@@ -132,15 +132,15 @@ fn render_subject_with_default_template() {
 
 #[test]
 fn render_subject_with_custom_template() {
-    let payload = json!({ "project": "demo", "status": "fail" });
-    let s = render_subject(Some("X {project} {status}"), "build.failed", &payload);
+    let payload = json!({ "task": "demo", "status": "fail" });
+    let s = render_subject(Some("X {task} {status}"), "build.failed", &payload);
     assert_eq!(s, "X demo fail");
 }
 
 #[test]
 fn render_default_body_includes_fields() {
     let payload = json!({
-        "org": "o", "project": "p", "id": "i",
+        "org": "o", "task": "p", "id": "i",
         "status": "s", "time": "t", "link": "l",
     });
     let b = render_default_body("build.completed", &payload);

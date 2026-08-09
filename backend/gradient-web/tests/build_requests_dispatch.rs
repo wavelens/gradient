@@ -6,7 +6,7 @@
 
 //! Integration tests for `POST /api/v1/build-requests/{session}/dispatch`
 //! (issue #234, task 11). Covers the conflict/gone surfaces and the happy
-//! path which exercises the full materialise → cached_path → project →
+//! path which exercises the full materialise → cached_path → task →
 //! commit → evaluation pipeline against a mock DB.
 
 use axum::http::StatusCode;
@@ -73,14 +73,14 @@ fn upload_session(
     }
 }
 
-fn project_row(id: ProjectId, managed: bool) -> gradient_entity::project::Model {
-    gradient_entity::project::Model {
+fn task_row(id: TaskId, managed: bool) -> gradient_entity::task::Model {
+    gradient_entity::task::Model {
         id,
         organization: org_id(),
         name: "build-request".into(),
         active: true,
         display_name: "Build Requests".into(),
-        description: "Server-managed project for `gradient build` submissions.".into(),
+        description: "Server-managed task for `gradient build` submissions.".into(),
         repository: "build-request".into(),
         wildcard: "*".into(),
         last_check_at: chrono::NaiveDateTime::default(),
@@ -118,11 +118,11 @@ fn commit_row() -> gradient_entity::commit::Model {
     }
 }
 
-fn eval_row(project: ProjectId, commit: CommitId) -> gradient_entity::evaluation::Model {
+fn eval_row(task: TaskId, commit: CommitId) -> gradient_entity::evaluation::Model {
     let now = Utc::now().naive_utc();
     gradient_entity::evaluation::Model {
         id: EvaluationId::now_v7(),
-        project: Some(project),
+        task: Some(task),
         repository: "/nix/store/abc-source".into(),
         commit,
         wildcard: "*".into(),
@@ -238,16 +238,16 @@ fn rejects_session_not_found() {
 }
 
 #[test]
-fn happy_path_creates_project_commit_and_evaluation() {
+fn happy_path_creates_task_commit_and_evaluation() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
         let upload = UploadSessionId::now_v7();
 
-        let project_id = ProjectId::now_v7();
-        let project_model = project_row(project_id, true);
+        let task_id = TaskId::now_v7();
+        let task_model = task_row(task_id, true);
         let commit_model = commit_row();
-        let eval_model = eval_row(project_id, commit_model.id);
+        let eval_model = eval_row(task_id, commit_model.id);
         let cp_row = cached_path_row("00000000000000000000000000000000");
 
         let updated = gradient_entity::upload_session::Model {
@@ -269,10 +269,10 @@ fn happy_path_creates_project_commit_and_evaluation() {
             }])
             // queue_signature_placeholders → list org caches (empty, early return)
             .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
-            // ensure_build_request_project → SELECT existing (None)
-            .append_query_results([Vec::<gradient_entity::project::Model>::new()])
-            // ensure_build_request_project → INSERT project (returns row)
-            .append_query_results([vec![project_model.clone()]])
+            // ensure_build_request_task → SELECT existing (None)
+            .append_query_results([Vec::<gradient_entity::task::Model>::new()])
+            // ensure_build_request_task → INSERT task (returns row)
+            .append_query_results([vec![task_model.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -309,8 +309,8 @@ fn happy_path_creates_project_commit_and_evaluation() {
         let body: Value = res.json();
         assert_eq!(body["error"], false);
         assert_eq!(
-            body["message"]["project"].as_str().unwrap(),
-            project_id.to_string()
+            body["message"]["task"].as_str().unwrap(),
+            task_id.to_string()
         );
         assert_eq!(
             body["message"]["commit"].as_str().unwrap(),
@@ -354,16 +354,16 @@ fn rejects_local_input_override() {
 }
 
 #[test]
-fn happy_path_reuses_existing_build_request_project() {
+fn happy_path_reuses_existing_build_request_task() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
         let upload = UploadSessionId::now_v7();
 
-        let project_id = ProjectId::now_v7();
-        let project_model = project_row(project_id, true);
+        let task_id = TaskId::now_v7();
+        let task_model = task_row(task_id, true);
         let commit_model = commit_row();
-        let eval_model = eval_row(project_id, commit_model.id);
+        let eval_model = eval_row(task_id, commit_model.id);
         let cp_row = cached_path_row("00000000000000000000000000000000");
 
         let updated = gradient_entity::upload_session::Model {
@@ -379,8 +379,8 @@ fn happy_path_reuses_existing_build_request_project() {
             .append_query_results([vec![cp_row]])
             // queue_signature_placeholders → org caches (empty)
             .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
-            // ensure_build_request_project → SELECT existing returns the row
-            .append_query_results([vec![project_model.clone()]])
+            // ensure_build_request_task → SELECT existing returns the row
+            .append_query_results([vec![task_model.clone()]])
             .append_query_results([vec![commit_model.clone()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -409,8 +409,8 @@ fn happy_path_reuses_existing_build_request_project() {
         res.assert_status_ok();
         let body: Value = res.json();
         assert_eq!(
-            body["message"]["project"].as_str().unwrap(),
-            project_id.to_string()
+            body["message"]["task"].as_str().unwrap(),
+            task_id.to_string()
         );
     });
 }

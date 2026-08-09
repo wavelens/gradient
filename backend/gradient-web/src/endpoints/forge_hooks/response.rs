@@ -18,25 +18,25 @@ pub struct WebhookResponse {
     pub event: String,
     /// Repository URLs extracted from the payload (empty for non-push events).
     pub repository_urls: Vec<String>,
-    /// Number of active projects whose canonicalised URL matched any of
+    /// Number of active tasks whose canonicalised URL matched any of
     /// `repository_urls`.
-    pub projects_scanned: u32,
+    pub tasks_scanned: u32,
     pub queued: Vec<QueuedEvaluation>,
-    pub skipped: Vec<SkippedProject>,
+    pub skipped: Vec<SkippedTask>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueuedEvaluation {
-    pub project_id: ProjectId,
-    pub project_name: String,
+    pub task_id: TaskId,
+    pub task_name: String,
     pub organization: String,
     pub evaluation_id: EvaluationId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkippedProject {
-    pub project_id: ProjectId,
-    pub project_name: String,
+pub struct SkippedTask {
+    pub task_id: TaskId,
+    pub task_name: String,
     pub organization: String,
     /// One of `already_in_progress`, `no_previous_evaluation`, `db_error`.
     pub reason: String,
@@ -46,9 +46,9 @@ pub struct SkippedProject {
 /// the handler.
 #[derive(Debug, Clone, Default)]
 pub struct WebhookTriggerOutcome {
-    pub projects_scanned: u32,
+    pub tasks_scanned: u32,
     pub queued: Vec<QueuedEvaluation>,
-    pub skipped: Vec<SkippedProject>,
+    pub skipped: Vec<SkippedTask>,
 }
 
 impl WebhookResponse {
@@ -58,7 +58,7 @@ impl WebhookResponse {
         Self {
             event: event.to_string(),
             repository_urls: Vec::new(),
-            projects_scanned: 0,
+            tasks_scanned: 0,
             queued: Vec::new(),
             skipped: Vec::new(),
         }

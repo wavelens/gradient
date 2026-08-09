@@ -234,8 +234,8 @@ fn subscribe_succeeds_when_both_granted() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // unpark_no_cache_for_org: projects query → empty (short-circuits)
-            .append_query_results([Vec::<gradient_entity::project::Model>::new()])
+            // unpark_no_cache_for_org: tasks query → empty (short-circuits)
+            .append_query_results([Vec::<gradient_entity::task::Model>::new()])
             // enqueue_backfill_signatures: derivations query → empty (short-circuits)
             .append_query_results([Vec::<gradient_entity::derivation::Model>::new()]);
 

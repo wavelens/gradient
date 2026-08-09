@@ -11,11 +11,11 @@ use sea_orm::{
 
 pub(super) async fn snapshot_flake_input_overrides<C: ConnectionTrait>(
     txn: &C,
-    project_id: gradient_entity::ids::ProjectId,
+    task_id: gradient_entity::ids::TaskId,
     evaluation_id: gradient_entity::ids::EvaluationId,
 ) -> Result<(), sea_orm::DbErr> {
-    let rows = EProjectFlakeInputOverride::find()
-        .filter(CProjectFlakeInputOverride::Project.eq(project_id))
+    let rows = ETaskFlakeInputOverride::find()
+        .filter(CTaskFlakeInputOverride::Task.eq(task_id))
         .all(txn)
         .await?;
 

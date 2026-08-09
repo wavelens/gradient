@@ -3,8 +3,8 @@
 ## Getting Started
 
 1. **Register / Log in** - `/` redirects to login automatically.
-2. **Create an organization** - organizations own projects, caches, and workers.
-3. **Create a project** - point it at a Git repository and set an evaluation wildcard.
+2. **Create an organization** - organizations own tasks, caches, and workers.
+3. **Create a task** - point it at a Git repository and set an evaluation wildcard.
 4. **Configure a worker** - at least one `gradient-worker` must be connected to run jobs. Deploy one co-located on the server or on a dedicated build machine (see [Workers](#workers) below).
 
 ## Evaluation Wildcard
@@ -55,7 +55,7 @@ Exclusion patterns must be exact paths - they cannot contain `*` or `#`.
 
 ## Evaluations
 
-Click **Start Evaluation** on the project page. Gradient clones the repo, evaluates each wildcard match, and dispatches the resulting derivations to connected workers.
+Click **Start Evaluation** on the task page. Gradient clones the repo, evaluates each wildcard match, and dispatches the resulting derivations to connected workers.
 
 The evaluation log page shows per-build status, combined ANSI build output, and an **Abort** button.
 
@@ -63,7 +63,7 @@ Evaluations can also be triggered automatically:
 
 - **GitHub App** - when the App is installed, push events from GitHub trigger evaluations instantly (no polling). See [GitHub App](../configuration.md#github-app).
 - **Forge webhooks** - for Gitea, Forgejo, GitLab, or GitHub without the App, configure a per-org push webhook. See [Forge Webhooks](../configuration.md#forge-webhooks-gitea-forgejo-gitlab-github-without-app).
-- **Polling** - fallback for projects without webhook configuration; Gradient checks for new commits every 60 seconds.
+- **Polling** - fallback for tasks without webhook configuration; Gradient checks for new commits every 60 seconds.
 
 ## Members & Roles
 
@@ -76,8 +76,8 @@ Every organization carries the same three immutable system roles:
 
 | Role  | What it can do                                                                                            |
 |-------|-----------------------------------------------------------------------------------------------------------|
-| Admin | Everything: full settings, member & role management, project lifecycle, organization deletion.           |
-| Write | Create/edit projects, manage webhooks/integrations/workers/cache subscriptions, trigger evaluations.     |
+| Admin | Everything: full settings, member & role management, task lifecycle, organization deletion.           |
+| Write | Create/edit tasks, manage webhooks/integrations/workers/cache subscriptions, trigger evaluations.     |
 | View  | Read members-only content; mutate non-secret sub-resources only (workers, integrations, cache subs, SSH key). |
 
 Built-in roles cannot be edited or deleted.
@@ -90,7 +90,7 @@ roles by ticking individual permissions:
 - Org-level: `viewOrg`, `manageOrgSettings`, `deleteOrg`, `manageMembers`,
   `manageRoles`, `manageIntegrations`, `manageWebhooks`, `manageWorkers`,
   `manageSubscriptions`, `manageSshKey`.
-- Project-level: `createProject`, `editProject`, `triggerEvaluation`.
+- Task-level: `createTask`, `editTask`, `triggerEvaluation`.
 
 Permission identifiers and their canonical order are returned by
 `GET /api/v1/orgs/{organization}/roles`'s `available_permissions` field -

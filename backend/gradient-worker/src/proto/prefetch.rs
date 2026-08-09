@@ -26,7 +26,7 @@ use futures::stream::{FuturesUnordered, StreamExt as _};
 use gradient_db::parse_drv;
 use gradient_exec::path_utils::nix_store_path;
 use gradient_proto::messages::{
-    BuildTask, CachedPath, EvalMessageLevel, QueryMode, TRANSFER_TIMEOUT,
+    BuildSpec, CachedPath, EvalMessageLevel, QueryMode, TRANSFER_TIMEOUT,
 };
 use gradient_types::CachedPathInfo;
 use tracing::{debug, error, warn};
@@ -211,7 +211,7 @@ pub(crate) enum ClosureMode {
 /// Drives the five-stage pipeline that ensures every input path a build needs
 /// is present in the local nix store before the build is handed off.
 ///
-/// Created by [`prefetch_inputs`] from a [`BuildTask`] + store + updater.
+/// Created by [`prefetch_inputs`] from a [`BuildSpec`] + store + updater.
 struct InputPrefetcher<'a> {
     store: &'a LocalNixStore,
     /// Derivation path of the build task (used for logging and cache queries).
@@ -224,7 +224,7 @@ struct InputPrefetcher<'a> {
 }
 
 impl<'a> InputPrefetcher<'a> {
-    fn new(store: &'a LocalNixStore, task: &'a BuildTask, updater: &'a mut JobUpdater) -> Self {
+    fn new(store: &'a LocalNixStore, task: &'a BuildSpec, updater: &'a mut JobUpdater) -> Self {
         Self {
             store,
             drv_path: task.drv_path.clone(),
@@ -233,7 +233,7 @@ impl<'a> InputPrefetcher<'a> {
         }
     }
 
-    /// Construct a prefetcher not tied to a `BuildTask` - used by
+    /// Construct a prefetcher not tied to a `BuildSpec` - used by
     /// [`ensure_path`] to substitute a single store path (and its closure)
     /// without a build context. `label` only feeds logging.
     fn for_path(store: &'a LocalNixStore, label: String, updater: &'a mut JobUpdater) -> Self {
@@ -760,7 +760,7 @@ impl<'a> InputPrefetcher<'a> {
 /// having to dig into per-build logs.
 pub async fn prefetch_inputs(
     store: &LocalNixStore,
-    task: &BuildTask,
+    task: &BuildSpec,
     updater: &mut JobUpdater,
 ) -> Result<()> {
     let drv = task.drv_path.clone();

@@ -16,15 +16,15 @@ import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { AuthService } from '@core/services/auth.service';
 import { OrganizationsService } from '@core/services/organizations.service';
-import { ProjectsService } from '@core/services/projects.service';
+import { TasksService } from '@core/services/tasks.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { LabelHelpComponent } from '@shared/components/form';
 import { EvalStatusBadgeComponent } from '@shared/components/eval-status-badge/eval-status-badge.component';
 import { slugify } from '@shared/text';
-import { Organization, Project } from '@core/models';
+import { Organization, Task } from '@core/models';
 
-const RESERVED_PROJECT_NAMES = ['build-request'];
+const RESERVED_TASK_NAMES = ['build-request'];
 
 @Component({
   selector: 'app-organization-detail',
@@ -49,14 +49,14 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
   protected authService = inject(AuthService);
   private organizationsService = inject(OrganizationsService);
-  private projectsService = inject(ProjectsService);
+  private tasksService = inject(TasksService);
   private nameCheck$ = new Subject<string>();
 
   loading = signal(true);
   organization = signal<Organization | null>(null);
-  projects = signal<Project[]>([]);
-  projectsTotal = signal(0);
-  projectsPage = signal(1);
+  tasks = signal<Task[]>([]);
+  tasksTotal = signal(0);
+  tasksPage = signal(1);
   showCreateDialog = signal(false);
   creating = signal(false);
   createError = signal<string | null>(null);
@@ -64,7 +64,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
 
   orgName = '';
 
-  newProject = {
+  newTask = {
     name: '',
     display_name: '',
     description: '',
@@ -72,14 +72,14 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
     wildcard: 'packages.x86_64-linux.*',
   };
 
-  protected projectNameEditedByUser = false;
+  protected taskNameEditedByUser = false;
 
   ngOnInit(): void {
     this.orgName = this.route.snapshot.paramMap.get('org') || '';
     this.loadOrganizationData();
     this.nameCheck$.pipe(
       debounceTime(400),
-      switchMap((name) => name ? this.projectsService.checkProjectNameAvailable(this.orgName, name) : EMPTY),
+      switchMap((name) => name ? this.tasksService.checkTaskNameAvailable(this.orgName, name) : EMPTY),
     ).subscribe((available) => {
       this.nameCheckState.set(available ? 'available' : 'taken');
     });
@@ -94,13 +94,13 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
 
     forkJoin({
       organization: this.organizationsService.getOrganization(this.orgName),
-      projects: this.projectsService.getProjects(this.orgName, this.projectsPage()),
+      tasks: this.tasksService.getTasks(this.orgName, this.tasksPage()),
     }).subscribe({
-      next: ({ organization, projects }) => {
+      next: ({ organization, tasks }) => {
         this.organization.set(organization);
-        this.projects.set(projects.items);
-        this.projectsTotal.set(projects.total);
-        this.projectsPage.set(projects.page);
+        this.tasks.set(tasks.items);
+        this.tasksTotal.set(tasks.total);
+        this.tasksPage.set(tasks.page);
         this.loading.set(false);
       },
       error: (error) => {
@@ -111,33 +111,33 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   }
 
   openCreateDialog(): void {
-    this.newProject = { name: '', display_name: '', description: '', repository: '', wildcard: 'packages.x86_64-linux.*' };
-    this.projectNameEditedByUser = false;
+    this.newTask = { name: '', display_name: '', description: '', repository: '', wildcard: 'packages.x86_64-linux.*' };
+    this.taskNameEditedByUser = false;
     this.nameCheckState.set('idle');
     this.createError.set(null);
     this.showCreateDialog.set(true);
   }
 
-  onProjectDisplayNameChange(value: string): void {
-    if (!this.projectNameEditedByUser) {
+  onTaskDisplayNameChange(value: string): void {
+    if (!this.taskNameEditedByUser) {
       const slug = slugify(value);
-      this.newProject.name = slug;
-      this.onProjectNameChange(slug);
+      this.newTask.name = slug;
+      this.onTaskNameChange(slug);
     }
   }
 
-  onProjectNameUserInput(): void {
-    this.projectNameEditedByUser = true;
+  onTaskNameUserInput(): void {
+    this.taskNameEditedByUser = true;
   }
 
-  onProjectNameChange(name: string): void {
+  onTaskNameChange(name: string): void {
     if (!name) { this.nameCheckState.set('idle'); this.nameCheck$.next(''); return; }
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
       this.nameCheckState.set('invalid');
       this.nameCheck$.next(''); // cancel any pending debounce without making an API call
       return;
     }
-    if (RESERVED_PROJECT_NAMES.includes(name.toLowerCase())) {
+    if (RESERVED_TASK_NAMES.includes(name.toLowerCase())) {
       this.nameCheckState.set('reserved');
       this.nameCheck$.next('');
       return;
@@ -147,25 +147,25 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
   }
 
   get wildcardInvalid(): boolean {
-    const w = this.newProject.wildcard.trim();
+    const w = this.newTask.wildcard.trim();
     if (!w) return false; // empty means use default - not invalid
     const parts = w.split(',').map((p) => p.trim());
     return parts.some((p) => !p || p.startsWith('.') || /\s/.test(p));
   }
 
-  createProject(): void {
-    if (!this.newProject.name || !this.newProject.display_name || !this.newProject.repository) {
+  createTask(): void {
+    if (!this.newTask.name || !this.newTask.display_name || !this.newTask.repository) {
       return;
     }
-    if (RESERVED_PROJECT_NAMES.includes(this.newProject.name.trim().toLowerCase())) {
+    if (RESERVED_TASK_NAMES.includes(this.newTask.name.trim().toLowerCase())) {
       this.nameCheckState.set('reserved');
       return;
     }
 
     this.creating.set(true);
     this.createError.set(null);
-    this.projectsService
-      .createProject(this.orgName, this.newProject)
+    this.tasksService
+      .createTask(this.orgName, this.newTask)
       .subscribe({
         next: () => {
           this.creating.set(false);
@@ -173,7 +173,7 @@ export class OrganizationDetailComponent implements OnInit, OnDestroy {
           this.loadOrganizationData();
         },
         error: (error) => {
-          this.createError.set(error?.message || 'Failed to create project.');
+          this.createError.set(error?.message || 'Failed to create task.');
           this.creating.set(false);
         },
       });

@@ -242,7 +242,7 @@ pub async fn get_integrations(
 /// remains gated on `ManageIntegrations` because it exposes `has_secret`,
 /// `has_access_token`, and `endpoint_url`. Used by the trigger UI to render
 /// integration names and populate the create/edit dropdown for users with
-/// `EditProject` who do not also hold `ManageIntegrations`.
+/// `EditTask` who do not also hold `ManageIntegrations`.
 pub async fn get_integration_summaries(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,

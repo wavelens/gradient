@@ -55,14 +55,14 @@ fn with_org_access(db: MockDatabase) -> MockDatabase {
         .append_query_results([vec![write_role_row()]])
 }
 
-fn project_row(id: ProjectId) -> gradient_entity::project::Model {
-    gradient_entity::project::Model {
+fn task_row(id: TaskId) -> gradient_entity::task::Model {
+    gradient_entity::task::Model {
         id,
         organization: org_id(),
         name: "build-request".into(),
         active: true,
         display_name: "Build Requests".into(),
-        description: "Server-managed project for `gradient build` submissions.".into(),
+        description: "Server-managed task for `gradient build` submissions.".into(),
         repository: "build-request".into(),
         wildcard: "*".into(),
         last_check_at: chrono::NaiveDateTime::default(),
@@ -100,11 +100,11 @@ fn commit_row() -> gradient_entity::commit::Model {
     }
 }
 
-fn eval_row(project: ProjectId, commit: CommitId) -> gradient_entity::evaluation::Model {
+fn eval_row(task: TaskId, commit: CommitId) -> gradient_entity::evaluation::Model {
     let now = Utc::now().naive_utc();
     gradient_entity::evaluation::Model {
         id: EvaluationId::now_v7(),
-        project: Some(project),
+        task: Some(task),
         repository: "/nix/store/abc-source".into(),
         commit,
         wildcard: "*".into(),
@@ -133,10 +133,10 @@ fn source_upload_creates_queued_eval() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let project_id = ProjectId::now_v7();
-        let project_model = project_row(project_id);
+        let task_id = TaskId::now_v7();
+        let task_model = task_row(task_id);
         let commit_model = commit_row();
-        let eval_model = eval_row(project_id, commit_model.id);
+        let eval_model = eval_row(task_id, commit_model.id);
         let cp_row = cached_path_row("00000000000000000000000000000000");
 
         let db = with_org_access(with_auth(
@@ -152,9 +152,9 @@ fn source_upload_creates_queued_eval() {
         }])
         // queue_signature_placeholders → org caches (empty)
         .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
-        // ensure_build_request_project → SELECT (None) then INSERT
-        .append_query_results([Vec::<gradient_entity::project::Model>::new()])
-        .append_query_results([vec![project_model.clone()]])
+        // ensure_build_request_task → SELECT (None) then INSERT
+        .append_query_results([Vec::<gradient_entity::task::Model>::new()])
+        .append_query_results([vec![task_model.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,

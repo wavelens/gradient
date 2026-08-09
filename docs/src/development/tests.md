@@ -541,7 +541,7 @@ nix-daemon, filesystem, or WebSocket connection.
 **File:** `backend/gradient-types/src/wildcard.rs`  
 **Run:** `cargo test -p core --tests`
 
-Tests for the `Wildcard` type used in project evaluation patterns. Parsing is via `FromStr`; the inverse is `Display`. `get_eval_str()` produces the Nix attribute-set expression passed to the evaluator.
+Tests for the `Wildcard` type used in task evaluation patterns. Parsing is via `FromStr`; the inverse is `Display`. `get_eval_str()` produces the Nix attribute-set expression passed to the evaluator.
 
 ### Valid patterns
 
@@ -678,7 +678,7 @@ Derive(
 **File:** `backend/web/src/endpoints/badges.rs`  
 **Run:** `cargo test -p web`
 
-Tests for the SVG badge renderer used by `GET /projects/{org}/{project}/badge`.
+Tests for the SVG badge renderer used by `GET /tasks/{org}/{task}/badge`.
 
 | Test | What it checks |
 |------|---------------|
@@ -1425,8 +1425,8 @@ call the pending job count is asserted directly on the scheduler.
                ├─ 2. ECommit::find_by_id(commit_id).one()          Q
                │
                └─ 3. organization_id_for_eval:
-                       ├─ if eval.project = Some(pid):
-                       │     EProject::find_by_id(pid).one()       Q
+                       ├─ if eval.task = Some(pid):
+                       │     ETask::find_by_id(pid).one()       Q
                        └─ else (direct build):
                              EDirectBuild::find()
                                .filter(evaluation=id).one()        Q
@@ -1450,16 +1450,16 @@ call the pending job count is asserted directly on the scheduler.
 
 | Test | Scenario | What it checks |
 |------|----------|---------------|
-| `dispatch_queued_eval_enqueues_job` | One Queued eval with valid commit and project | `scheduler.pending_job_count() == 1` after dispatch |
+| `dispatch_queued_eval_enqueues_job` | One Queued eval with valid commit and task | `scheduler.pending_job_count() == 1` after dispatch |
 | `dispatch_queued_eval_skips_already_enqueued` | Same eval dispatched twice | Second call is a no-op; job count stays at 1 |
 | `dispatch_queued_eval_skips_missing_commit` | Commit row not found in DB | Eval is skipped; no job enqueued |
-| `dispatch_queued_eval_via_direct_build_org` | Eval with `project: None` (direct build) | Org ID looked up via `DirectBuild`; job enqueued |
+| `dispatch_queued_eval_via_direct_build_org` | Eval with `task: None` (direct build) | Org ID looked up via `DirectBuild`; job enqueued |
 
 ### Group F: `dispatch_ready_builds`
 
 | Test | Scenario | What it checks |
 |------|----------|---------------|
-| `dispatch_ready_build_enqueues_job` | One ready Queued build with derivation, eval, and project | `scheduler.pending_job_count() == 1`; `drv_path` from derivation row |
+| `dispatch_ready_build_enqueues_job` | One ready Queued build with derivation, eval, and task | `scheduler.pending_job_count() == 1`; `drv_path` from derivation row |
 | `dispatch_ready_build_skips_already_enqueued` | Same build dispatched twice | Second call is a no-op; job count stays at 1 |
 
 ---
@@ -1616,7 +1616,7 @@ all active builds before aborting the evaluation itself.
        └─ update_evaluation_status(eval, Aborted)
                update_many().exec()                                  E
                find_by_id(eval)                                      Q
-               spawns fire_evaluation_webhook(project=None → early return)
+               spawns fire_evaluation_webhook(task=None → early return)
 ```
 
 | Test | Scenario | What it checks |
@@ -1637,7 +1637,7 @@ Tests for error paths and edge cases not covered by Groups A–E.
 
 ### Group I: Webhook delivery
 
-Tests that use `eval.project: Some(project_id)` to exercise the full webhook
+Tests that use `eval.task: Some(task_id)` to exercise the full webhook
 delivery path. A real temporary key file is created so `decrypt_webhook_secret`
 can succeed. After the handler returns, `tokio::task::yield_now().await` lets
 the spawned webhook tasks run on the `current_thread` runtime. Deliveries are
@@ -1649,7 +1649,7 @@ captured by `RecordingWebhookClient` (returned alongside the state by
          │
          ├─ update_build_status(Completed)
          │     spawns ──► fire_build_webhook(Completed)
-         │                    ├─ get_build_org_id → eval → project → org
+         │                    ├─ get_build_org_id → eval → task → org
          │                    ├─ find_by_id(derivation) [best-effort]
          │                    └─ fire_webhooks → decrypt → sign → deliver
          │                                                  ↓
@@ -1657,14 +1657,14 @@ captured by `RecordingWebhookClient` (returned alongside the state by
          │
          └─ update_evaluation_status(Completed)
                spawns ──► fire_evaluation_webhook(Completed)
-                              ├─ eval.project = Some → find project → org
+                              ├─ eval.task = Some → find task → org
                               └─ fire_webhooks → subscription check → deliver
 ```
 
 | Test | Scenario | What it checks |
 |------|----------|---------------|
-| `webhook_fired_on_build_completed` | Build completes; eval has `project: Some`; webhook subscribed to `"build.completed"` | After `yield_now()`, `recorder.calls()` contains a delivery with `event == "build.completed"` |
-| `webhook_not_fired_for_dep_failed` | Build A fails → B cascaded to DependencyFailed; eval has `project: Some`; webhook subscribed to `"build.failed"` | After `yield_now()`, `calls` contains `"build.failed"` but NOT `"build.dependency_failed"` (DependencyFailed hits the `Created \| Aborted \| DependencyFailed => return` early exit in `fire_build_webhook`) |
+| `webhook_fired_on_build_completed` | Build completes; eval has `task: Some`; webhook subscribed to `"build.completed"` | After `yield_now()`, `recorder.calls()` contains a delivery with `event == "build.completed"` |
+| `webhook_not_fired_for_dep_failed` | Build A fails → B cascaded to DependencyFailed; eval has `task: Some`; webhook subscribed to `"build.failed"` | After `yield_now()`, `calls` contains `"build.failed"` but NOT `"build.dependency_failed"` (DependencyFailed hits the `Created \| Aborted \| DependencyFailed => return` early exit in `fire_build_webhook`) |
 
 ---
 
@@ -1721,9 +1721,9 @@ scheduler persistence + RAM routing -> board read endpoints -> frontend panel):
   `buckets_per_entry_point`, and `heap_peak_is_max_gauge_not_sum` cover diffing
   cumulative counters per request, bucketing costs per entry-point, and treating
   the GC heap as a max gauge rather than a sum.
-- **Per-project eval-RAM window** (`gradient-scheduler`
+- **Per-task eval-RAM window** (`gradient-scheduler`
   `instance::eval_history`) - `eval_history_maps_row_into_prediction` maps the
-  per-project p95 peak-RSS window row into a `HistoryPrediction`.
+  per-task p95 peak-RSS window row into a `HistoryPrediction`.
 - **Eval RAM-overshoot scoring** (`gradient-score` `rules::resource`) -
   `eval_ram_overshoot_routes_to_big_ram_worker` asserts `ResourceFitRule`
   penalises an RAM-heavy eval on a small worker so it routes to a big-RAM one.
@@ -1771,7 +1771,7 @@ authentication flow that workers use to connect to the server:
 5. **Positive sub-test**: Peers file is written with `{peer_id}:{token}`, worker
    restarts with `GRADIENT_WORKER_PEERS_FILE` → handshake succeeds. Test asserts
    `"handshake successful"` in journalctl.
-6. Project is created and evaluation + build complete with the authenticated worker.
+6. Task is created and evaluation + build complete with the authenticated worker.
 
 **`gradient-cache`** - Declarative state-managed worker registration:
 1. Worker UUID is pre-seeded via `systemd.tmpfiles.rules` to a known value

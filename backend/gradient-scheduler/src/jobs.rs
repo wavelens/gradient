@@ -10,10 +10,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use gradient_entity::dispatched_job::DispatchedJobKind;
 use gradient_types::ids::{
-    CommitId, DerivationBuildId, DispatchedJobId, EvaluationId, OrganizationId, ProjectId,
+    CommitId, DerivationBuildId, DispatchedJobId, EvaluationId, OrganizationId, TaskId,
 };
 use gradient_types::proto::{
-    BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeTask, Job, JobCandidate, JobKind,
+    BuildJob, CandidateScore, FlakeJob, FlakeSource, FlakeStep, Job, JobCandidate, JobKind,
     RequiredPath,
 };
 
@@ -22,7 +22,7 @@ use gradient_score::{JobContext, ScoredJob, ScoringPolicy, WorkerContext};
 #[derive(Debug, Clone)]
 pub struct PendingEvalJob {
     pub evaluation_id: EvaluationId,
-    pub project_id: Option<ProjectId>,
+    pub task_id: Option<TaskId>,
     /// Org (cache/proxy) that owns this job. Workers must be authorized
     /// for this org to receive the job offer.
     pub org_id: OrganizationId,
@@ -39,14 +39,14 @@ pub struct PendingEvalJob {
     /// Number of dispatch ticks this job has waited while pending. Bumped once
     /// per dispatch loop and fed into the scoring policy's rescore-wait rule.
     pub rescore_count: u32,
-    /// Per-project predicted peak eval RSS, fed into `ResourceFitRule`.
+    /// Per-task predicted peak eval RSS, fed into `ResourceFitRule`.
     pub history: gradient_score::HistoryPrediction,
 }
 
 impl PendingEvalJob {
     pub fn cached_followup(&self, store_path: String) -> PendingEvalJob {
         let mut follow = self.clone();
-        follow.job.tasks = vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations];
+        follow.job.steps = vec![FlakeStep::EvaluateFlake, FlakeStep::EvaluateDerivations];
         follow.job.source = FlakeSource::Cached {
             store_path: store_path.clone(),
         };
@@ -61,7 +61,7 @@ impl PendingEvalJob {
 #[derive(Debug, Clone)]
 pub struct PendingBuildJob {
     /// Global build-once anchor (`derivation_build`) this job builds. Round-trips
-    /// through the worker as the opaque `BuildTask.build_id` string.
+    /// through the worker as the opaque `BuildSpec.build_id` string.
     pub derivation_build: DerivationBuildId,
     pub evaluation_id: EvaluationId,
     /// Org (cache/proxy) that owns this job.
@@ -110,7 +110,7 @@ pub struct PendingBuildJob {
 #[derive(Debug, Clone, Default)]
 pub struct WorkerCaps {
     /// Worker can fetch flake sources from a repository. Required for any
-    /// FlakeJob carrying a `FetchFlake` task, since the server only sends SSH
+    /// FlakeJob carrying a `FetchFlake` step, since the server only sends SSH
     /// credentials to fetch-capable workers.
     pub fetch: bool,
     pub architectures: Vec<String>,
@@ -134,15 +134,15 @@ impl WorkerCaps {
         arch_ok && features_ok
     }
 
-    /// Returns true when this worker can run flake `job`: a `FetchFlake` task
+    /// Returns true when this worker can run flake `job`: a `FetchFlake` step
     /// needs `fetch` (the server only sends fetch credentials to fetch workers)
-    /// and any `EvaluateFlake`/`EvaluateDerivations` task needs `eval`.
+    /// and any `EvaluateFlake`/`EvaluateDerivations` step needs `eval`.
     pub fn can_eval(&self, job: &FlakeJob) -> bool {
-        let needs_fetch = job.tasks.contains(&FlakeTask::FetchFlake);
+        let needs_fetch = job.steps.contains(&FlakeStep::FetchFlake);
         let needs_eval = job
-            .tasks
+            .steps
             .iter()
-            .any(|t| matches!(t, FlakeTask::EvaluateFlake | FlakeTask::EvaluateDerivations));
+            .any(|t| matches!(t, FlakeStep::EvaluateFlake | FlakeStep::EvaluateDerivations));
 
         (!needs_fetch || self.fetch) && (!needs_eval || self.capabilities.eval)
     }
@@ -268,7 +268,7 @@ pub struct DispatchRecord {
     pub derivation_build: Option<DerivationBuildId>,
     pub evaluation_id: EvaluationId,
     pub organization: OrganizationId,
-    pub project: Option<ProjectId>,
+    pub task: Option<TaskId>,
     pub score: f64,
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
@@ -291,7 +291,7 @@ struct ScoredCandidate {
 }
 
 /// Returns true when the worker can execute `job`: a flake job needs `fetch`
-/// for a `FetchFlake` task and `eval` for any evaluation task; a build job
+/// for a `FetchFlake` step and `eval` for any evaluation step; a build job
 /// needs matching architecture/features. If `caps` is `None`, capability checks
 /// are skipped (used for tests / open mode).
 fn job_eligible_for_caps(job: &PendingJob, caps: Option<&WorkerCaps>) -> bool {
@@ -343,10 +343,10 @@ impl OrgWorkShare {
     }
 }
 
-/// True when a flake job's only task is `FetchFlake` - a split-mode fetch-only
+/// True when a flake job's only step is `FetchFlake` - a split-mode fetch-only
 /// job whose completion enqueues a cached eval follow-up rather than finalizing.
 pub fn is_fetch_only(job: &FlakeJob) -> bool {
-    job.tasks.as_slice() == [FlakeTask::FetchFlake]
+    job.steps.as_slice() == [FlakeStep::FetchFlake]
 }
 
 /// Per-job score submitted by a worker after checking its local store.
@@ -372,7 +372,7 @@ pub struct PendingJobInfo {
 /// One in-flight job reduced to the dimensions the worker-load radar needs:
 /// its owning worker/org and which capability, architecture, and features it
 /// consumes. Build jobs carry an `architecture` + `required_features`; flake
-/// jobs set `fetch_task`/`eval_task` from their `FlakeTask`s.
+/// jobs set `fetch_step`/`eval_step` from their `FlakeStep`s.
 #[derive(Debug, Clone)]
 pub struct BoardActiveJob {
     pub worker_id: String,
@@ -380,8 +380,8 @@ pub struct BoardActiveJob {
     pub kind: DispatchedJobKind,
     pub architecture: Option<String>,
     pub required_features: Vec<String>,
-    pub fetch_task: bool,
-    pub eval_task: bool,
+    pub fetch_step: bool,
+    pub eval_step: bool,
 }
 
 /// One scored candidate weighed in a dispatch decision. Captured for every
@@ -665,7 +665,7 @@ impl JobTracker {
                     PendingJob::Eval(e) => ScoredJob::new_eval(
                         id,
                         job.org_id(),
-                        e.job.tasks.contains(&FlakeTask::FetchFlake),
+                        e.job.steps.contains(&FlakeStep::FetchFlake),
                         e.history,
                     ),
                     PendingJob::Build(b) => ScoredJob::new_build(
@@ -800,16 +800,16 @@ impl JobTracker {
         instance_context: serde_json::Value,
     ) -> Option<DispatchRecord> {
         let job = self.pending.get(job_id)?;
-        let (kind_disc, derivation_build, project) = match job {
+        let (kind_disc, derivation_build, task) = match job {
             PendingJob::Build(b) => (DispatchedJobKind::Build, Some(b.derivation_build), None),
-            PendingJob::Eval(e) => (DispatchedJobKind::Eval, None, e.project_id),
+            PendingJob::Eval(e) => (DispatchedJobKind::Eval, None, e.task_id),
         };
         Some(DispatchRecord {
             kind: kind_disc,
             derivation_build,
             evaluation_id: job.evaluation_id(),
             organization: job.org_id(),
-            project,
+            task,
             score: sc.total,
             queued_at: job.queued_at(),
             ready_at: job.ready_at(),
@@ -957,7 +957,7 @@ impl JobTracker {
     pub fn board_active_jobs(&self) -> Vec<BoardActiveJob> {
         self.active_jobs()
             .map(|(_, worker_id, job)| {
-                let (architecture, required_features, fetch_task, eval_task) = match job {
+                let (architecture, required_features, fetch_step, eval_step) = match job {
                     PendingJob::Build(b) => (
                         Some(b.architecture.clone()),
                         b.required_features.clone(),
@@ -965,9 +965,9 @@ impl JobTracker {
                         false,
                     ),
                     PendingJob::Eval(e) => {
-                        let fetch = e.job.tasks.contains(&FlakeTask::FetchFlake);
-                        let eval = e.job.tasks.iter().any(|t| {
-                            matches!(t, FlakeTask::EvaluateFlake | FlakeTask::EvaluateDerivations)
+                        let fetch = e.job.steps.contains(&FlakeStep::FetchFlake);
+                        let eval = e.job.steps.iter().any(|t| {
+                            matches!(t, FlakeStep::EvaluateFlake | FlakeStep::EvaluateDerivations)
                         });
                         (None, Vec::new(), fetch, eval)
                     }
@@ -979,8 +979,8 @@ impl JobTracker {
                     kind: job.kind_disc(),
                     architecture,
                     required_features,
-                    fetch_task,
-                    eval_task,
+                    fetch_step,
+                    eval_step,
                 }
             })
             .collect()
@@ -1076,18 +1076,18 @@ impl JobTracker {
 mod tests {
     use super::*;
     use gradient_types::proto::{
-        BuildJob, BuildTask, FlakeJob, FlakeSource, FlakeTask, GradientCapabilities,
+        BuildJob, BuildSpec, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities,
     };
 
     fn eval_job(peer: OrganizationId) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
             evaluation_id: EvaluationId::now_v7(),
-            project_id: None,
+            task_id: None,
             org_id: peer,
             commit_id: CommitId::now_v7(),
             repository: "https://example.com/repo".into(),
             job: FlakeJob {
-                tasks: vec![FlakeTask::EvaluateDerivations],
+                steps: vec![FlakeStep::EvaluateDerivations],
                 source: FlakeSource::Repository {
                     url: "https://example.com/repo".into(),
                     commit: "abc123".into(),
@@ -1108,15 +1108,15 @@ mod tests {
     fn fetch_eval_job(peer: OrganizationId) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {
             evaluation_id: EvaluationId::now_v7(),
-            project_id: None,
+            task_id: None,
             org_id: peer,
             commit_id: CommitId::now_v7(),
             repository: "git+ssh://git@example.com/repo".into(),
             job: FlakeJob {
-                tasks: vec![
-                    FlakeTask::FetchFlake,
-                    FlakeTask::EvaluateFlake,
-                    FlakeTask::EvaluateDerivations,
+                steps: vec![
+                    FlakeStep::FetchFlake,
+                    FlakeStep::EvaluateFlake,
+                    FlakeStep::EvaluateDerivations,
                 ],
                 source: FlakeSource::Repository {
                     url: "git+ssh://git@example.com/repo".into(),
@@ -1151,7 +1151,7 @@ mod tests {
             evaluation_id: EvaluationId::now_v7(),
             org_id: peer,
             job: BuildJob {
-                builds: vec![BuildTask {
+                builds: vec![BuildSpec {
                     build_id: derivation_build.to_string(),
                     drv_path: "/nix/store/abc.drv".into(),
                     external_cached: false,
@@ -1208,9 +1208,9 @@ mod tests {
         assert!(!caps.can_build("x86_64-linux", &["kvm".into(), "big-parallel".into()],));
     }
 
-    fn flake_job(tasks: Vec<FlakeTask>) -> FlakeJob {
+    fn flake_job(steps: Vec<FlakeStep>) -> FlakeJob {
         FlakeJob {
-            tasks,
+            steps,
             source: FlakeSource::Cached {
                 store_path: "/nix/store/abc-source".into(),
             },
@@ -1222,8 +1222,8 @@ mod tests {
     }
 
     #[test]
-    fn can_eval_requires_eval_for_evaluation_tasks() {
-        // A FetchFlake task needs `fetch`; any evaluation task needs `eval`.
+    fn can_eval_requires_eval_for_evaluation_steps() {
+        // A FetchFlake step needs `fetch`; any evaluation step needs `eval`.
         let fetch_only = WorkerCaps {
             fetch: true,
             capabilities: GradientCapabilities {
@@ -1250,12 +1250,12 @@ mod tests {
             ..Default::default()
         };
         let bundled = flake_job(vec![
-            FlakeTask::FetchFlake,
-            FlakeTask::EvaluateFlake,
-            FlakeTask::EvaluateDerivations,
+            FlakeStep::FetchFlake,
+            FlakeStep::EvaluateFlake,
+            FlakeStep::EvaluateDerivations,
         ]);
-        let cached_eval = flake_job(vec![FlakeTask::EvaluateDerivations]);
-        let fetch = flake_job(vec![FlakeTask::FetchFlake]);
+        let cached_eval = flake_job(vec![FlakeStep::EvaluateDerivations]);
+        let fetch = flake_job(vec![FlakeStep::FetchFlake]);
 
         assert!(!fetch_only.can_eval(&bundled), "fetch-only lacks eval");
         assert!(!eval_only.can_eval(&bundled), "eval-only lacks fetch");
@@ -1263,7 +1263,7 @@ mod tests {
         assert!(eval_only.can_eval(&cached_eval));
         assert!(!fetch_only.can_eval(&cached_eval), "cached eval needs eval");
         assert!(fetch_only.can_eval(&fetch));
-        assert!(!eval_only.can_eval(&fetch), "fetch task needs fetch");
+        assert!(!eval_only.can_eval(&fetch), "fetch step needs fetch");
     }
 
     #[test]
@@ -1401,7 +1401,7 @@ mod tests {
 
     #[test]
     fn cached_eval_job_requires_eval_not_fetch() {
-        // Eval-only follow-up jobs (no FetchFlake task) read an already-cached
+        // Eval-only follow-up jobs (no FetchFlake step) read an already-cached
         // source: they need `eval` but not `fetch`. An eval-capable worker
         // without fetch must still receive them.
         let mut tracker = JobTracker::new();
@@ -2087,7 +2087,7 @@ mod tests {
     }
 
     #[test]
-    fn cached_followup_rewrites_source_and_tasks() {
+    fn cached_followup_rewrites_source_and_steps() {
         let peer = OrganizationId::now_v7();
         let PendingJob::Eval(original) = fetch_eval_job(peer) else {
             unreachable!()
@@ -2096,8 +2096,8 @@ mod tests {
         let follow = original.cached_followup("/nix/store/abc-source".into());
 
         assert_eq!(
-            follow.job.tasks,
-            vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations]
+            follow.job.steps,
+            vec![FlakeStep::EvaluateFlake, FlakeStep::EvaluateDerivations]
         );
         match &follow.job.source {
             FlakeSource::Cached { store_path } => assert_eq!(store_path, "/nix/store/abc-source"),
@@ -2135,9 +2135,9 @@ mod tests {
     }
 
     #[test]
-    fn is_fetch_only_true_only_for_fetch_task_alone() {
+    fn is_fetch_only_true_only_for_fetch_step_alone() {
         let fetch_only = FlakeJob {
-            tasks: vec![FlakeTask::FetchFlake],
+            steps: vec![FlakeStep::FetchFlake],
             source: FlakeSource::Repository {
                 url: "u".into(),
                 commit: "c".into(),
@@ -2150,17 +2150,17 @@ mod tests {
         assert!(is_fetch_only(&fetch_only));
 
         let bundled = FlakeJob {
-            tasks: vec![
-                FlakeTask::FetchFlake,
-                FlakeTask::EvaluateFlake,
-                FlakeTask::EvaluateDerivations,
+            steps: vec![
+                FlakeStep::FetchFlake,
+                FlakeStep::EvaluateFlake,
+                FlakeStep::EvaluateDerivations,
             ],
             ..fetch_only.clone()
         };
         assert!(!is_fetch_only(&bundled));
 
         let cached = FlakeJob {
-            tasks: vec![FlakeTask::EvaluateFlake, FlakeTask::EvaluateDerivations],
+            steps: vec![FlakeStep::EvaluateFlake, FlakeStep::EvaluateDerivations],
             ..fetch_only.clone()
         };
         assert!(!is_fetch_only(&cached));

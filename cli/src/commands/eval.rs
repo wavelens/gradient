@@ -122,8 +122,10 @@ mod tests {
 
     #[test]
     fn splits_installable_flake_and_attr() {
-        let (flake, wildcards) =
-            split_installables(&[".#packages.x86_64-linux.hello".to_string()], "x86_64-linux");
+        let (flake, wildcards) = split_installables(
+            &[".#packages.x86_64-linux.hello".to_string()],
+            "x86_64-linux",
+        );
         assert_eq!(flake, ".");
         assert_eq!(wildcards, vec!["packages.x86_64-linux.hello".to_string()]);
     }
@@ -162,7 +164,10 @@ mod tests {
 
     #[test]
     fn scheme_refs_and_missing_paths_pass_through_unresolved() {
-        assert_eq!(resolve_flake_ref("github:NixOS/nixpkgs"), "github:NixOS/nixpkgs");
+        assert_eq!(
+            resolve_flake_ref("github:NixOS/nixpkgs"),
+            "github:NixOS/nixpkgs"
+        );
         assert_eq!(resolve_flake_ref("path:/abs"), "path:/abs");
         // A non-existent local path can't be canonicalised, so it is left as-is.
         assert_eq!(resolve_flake_ref("./no-such-dir-xyz"), "./no-such-dir-xyz");
@@ -179,7 +184,10 @@ mod tests {
     #[test]
     fn git_subdir_flake_carries_a_dir_query() {
         assert_eq!(
-            git_flake_url(Path::new("/home/u/repo"), Path::new("/home/u/repo/sub/flake")),
+            git_flake_url(
+                Path::new("/home/u/repo"),
+                Path::new("/home/u/repo/sub/flake")
+            ),
             "git+file:///home/u/repo?dir=sub/flake"
         );
     }

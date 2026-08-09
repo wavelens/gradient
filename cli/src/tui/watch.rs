@@ -241,7 +241,8 @@ impl Dashboard {
     }
 
     fn push_chunk(&mut self, chunk: String) {
-        self.pending.push_str(&crate::logfmt::decode_escapes(&chunk));
+        self.pending
+            .push_str(&crate::logfmt::decode_escapes(&chunk));
         while let Some(nl) = self.pending.find('\n') {
             let line: String = self.pending.drain(..=nl).collect();
             self.push_line(line.trim_end_matches('\n').to_string());
@@ -319,28 +320,26 @@ impl View for Dashboard {
         let summary = BuildSummary::of(&self.builds);
         let status = self.status().to_string();
         let elapsed = format_duration(self.started.elapsed().as_secs());
-        let mut header: Vec<Line> = vec![
-            Line::from(vec![
-                Span::raw("Status "),
-                Span::styled(status.clone(), eval_style(&status)),
-                Span::raw(format!(
-                    "   Elapsed {elapsed}   Builds {}/{} ",
-                    summary.done(),
-                    summary.total
-                )),
-                Span::styled(format!("✔{}", summary.succeeded), build_style("Completed")),
-                Span::raw(" "),
-                Span::styled(format!("✗{}", summary.failed), build_style("Failed")),
-                Span::raw(" "),
-                Span::styled(format!("▶{}", summary.building), build_style("Building")),
-                Span::raw(" "),
-                Span::styled(format!("·{}", summary.queued), build_style("Queued")),
-            ]),
-        ];
+        let mut header: Vec<Line> = vec![Line::from(vec![
+            Span::raw("Status "),
+            Span::styled(status.clone(), eval_style(&status)),
+            Span::raw(format!(
+                "   Elapsed {elapsed}   Builds {}/{} ",
+                summary.done(),
+                summary.total
+            )),
+            Span::styled(format!("✔{}", summary.succeeded), build_style("Completed")),
+            Span::raw(" "),
+            Span::styled(format!("✗{}", summary.failed), build_style("Failed")),
+            Span::raw(" "),
+            Span::styled(format!("▶{}", summary.building), build_style("Building")),
+            Span::raw(" "),
+            Span::styled(format!("·{}", summary.queued), build_style("Queued")),
+        ])];
         if let Some(e) = &self.eval {
             header.push(Line::raw(format!(
-                "Project {}   Commit {}   Target {}",
-                e.project.as_deref().unwrap_or("-"),
+                "Task {}   Commit {}   Target {}",
+                e.task.as_deref().unwrap_or("-"),
                 short_commit(&e.commit),
                 e.wildcard
             )));
@@ -363,7 +362,10 @@ impl View for Dashboard {
             .iter()
             .map(|b| {
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("{} ", build_icon(&b.status)), build_style(&b.status)),
+                    Span::styled(
+                        format!("{} ", build_icon(&b.status)),
+                        build_style(&b.status),
+                    ),
                     Span::raw(format!("{:<40} ", truncate(&b.name, 40))),
                     Span::styled(format!("{:<12}", b.status), build_style(&b.status)),
                     Span::raw(format_build_time(b.build_time_ms)),

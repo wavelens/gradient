@@ -18,7 +18,7 @@ export class FlakeInputOverridesService {
   private api = inject(ApiService);
 
   private base(org: string, proj: string): string {
-    return `projects/${org}/${proj}/flake-inputs`;
+    return `tasks/${org}/${proj}/flake-inputs`;
   }
 
   list(org: string, proj: string): Observable<FlakeInputOverride[]> {

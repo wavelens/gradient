@@ -9,11 +9,11 @@ export interface AccessState {
   /// blocked even when the caller has permission, but trigger-style actions
   /// (start/abort evaluations) remain available.
   managed: boolean;
-  /// True when the caller may edit configuration (Permission::EditProject /
+  /// True when the caller may edit configuration (Permission::EditTask /
   /// Write or Admin org role / etc.).
   canEdit: boolean;
   /// True when the caller may run trigger-style actions on the resource. For
-  /// projects this is Permission::TriggerEvaluation. For resources without a
+  /// tasks this is Permission::TriggerEvaluation. For resources without a
   /// distinct trigger permission (caches, orgs) this mirrors `canEdit`.
   canTrigger: boolean;
 }

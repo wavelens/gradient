@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use gradient_types::ids::*;
 
-use gradient_types::proto::{CandidateScore, FlakeJob, FlakeTask, GradientCapabilities, JobKind};
+use gradient_types::proto::{CandidateScore, FlakeJob, FlakeStep, GradientCapabilities, JobKind};
 
 use super::Scheduler;
 use super::jobs::{PendingBuildJob, PendingEvalJob};
@@ -30,12 +30,12 @@ fn test_scheduler() -> Arc<Scheduler> {
 fn eval_job(peer: OrganizationId) -> PendingEvalJob {
     PendingEvalJob {
         evaluation_id: EvaluationId::now_v7(),
-        project_id: None,
+        task_id: None,
         org_id: peer,
         commit_id: CommitId::now_v7(),
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
-            tasks: vec![FlakeTask::EvaluateDerivations],
+            steps: vec![FlakeStep::EvaluateDerivations],
             source: gradient_types::proto::FlakeSource::Repository {
                 url: "https://example.com/repo".into(),
                 commit: "abc123".into(),
@@ -370,7 +370,7 @@ async fn record_eval_message_drops_when_job_unknown() {
 async fn record_eval_message_inserts_for_active_build_job() {
     use crate::jobs::PendingBuildJob;
     use gradient_test_support::prelude::*;
-    use gradient_types::proto::{BuildJob, BuildTask};
+    use gradient_types::proto::{BuildJob, BuildSpec};
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
     let eval_id = EvaluationId::now_v7();
@@ -394,7 +394,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
                 evaluation_id: eval_id,
                 org_id: peer,
                 job: BuildJob {
-                    builds: vec![BuildTask {
+                    builds: vec![BuildSpec {
                         build_id: build_id.to_string(),
                         drv_path: "aaaa-hello.drv".into(),
                         external_cached: false,
@@ -480,7 +480,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
 
     let mut fetch_job = eval_job(peer);
     fetch_job.evaluation_id = eval_id;
-    fetch_job.job.tasks = vec![FlakeTask::FetchFlake];
+    fetch_job.job.steps = vec![FlakeStep::FetchFlake];
     let job_id = format!("eval:{eval_id}");
 
     scheduler.enqueue_eval_job(job_id.clone(), fetch_job).await;
@@ -526,7 +526,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
 
 #[tokio::test]
 async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
-    use gradient_types::proto::{BuildJob, BuildTask};
+    use gradient_types::proto::{BuildJob, BuildSpec};
 
     let scheduler = test_scheduler();
     let peer = OrganizationId::now_v7();
@@ -539,12 +539,12 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
             format!("eval:{eval_id}"),
             PendingEvalJob {
                 evaluation_id: eval_id,
-                project_id: None,
+                task_id: None,
                 org_id: peer,
                 commit_id: CommitId::now_v7(),
                 repository: "https://example.com/repo".into(),
                 job: gradient_types::proto::FlakeJob {
-                    tasks: vec![gradient_types::proto::FlakeTask::EvaluateDerivations],
+                    steps: vec![gradient_types::proto::FlakeStep::EvaluateDerivations],
                     source: gradient_types::proto::FlakeSource::Repository {
                         url: "https://example.com/repo".into(),
                         commit: "abc123".into(),
@@ -575,7 +575,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                     evaluation_id: eval_id,
                     org_id: peer,
                     job: BuildJob {
-                        builds: vec![BuildTask {
+                        builds: vec![BuildSpec {
                             build_id: build_id.to_string(),
                             drv_path: "aaaa-hello.drv".into(),
                             external_cached: false,

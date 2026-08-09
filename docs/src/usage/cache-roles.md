@@ -80,6 +80,6 @@ subscribing org (or vice versa) receives 403.
 
 When a cache, its members, or its roles are declared in `gradient-state.nix`,
 the corresponding rows are **immutable via the API**: mutating requests return
-403. This mirrors the managed-resource guard for organizations and projects.
+403. This mirrors the managed-resource guard for organizations and tasks.
 NAR-content endpoints (upload, download) are still permitted on managed caches;
 only configuration-level writes are blocked.

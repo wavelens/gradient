@@ -107,27 +107,25 @@ async fn count_running_evaluations(
         return Ok(HashMap::new());
     }
 
-    let projects = EProject::find()
-        .filter(CProject::Organization.is_in(org_ids.to_vec()))
+    let tasks = ETask::find()
+        .filter(CTask::Organization.is_in(org_ids.to_vec()))
         .all(&state.web_db)
         .await?;
 
-    let project_ids: Vec<ProjectId> = projects.iter().map(|p| p.id).collect();
-    let project_to_org: HashMap<ProjectId, OrganizationId> = projects
-        .into_iter()
-        .map(|p| (p.id, p.organization))
-        .collect();
+    let task_ids: Vec<TaskId> = tasks.iter().map(|p| p.id).collect();
+    let task_to_org: HashMap<TaskId, OrganizationId> =
+        tasks.into_iter().map(|p| (p.id, p.organization)).collect();
 
     let mut running_per_org: HashMap<OrganizationId, i64> = HashMap::new();
-    if !project_ids.is_empty() {
+    if !task_ids.is_empty() {
         let running = EEvaluation::find()
-            .filter(CEvaluation::Project.is_in(project_ids))
+            .filter(CEvaluation::Task.is_in(task_ids))
             .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
             .all(&state.web_db)
             .await?;
         for eval in running {
-            if let Some(project_id) = eval.project
-                && let Some(&org_id) = project_to_org.get(&project_id)
+            if let Some(task_id) = eval.task
+                && let Some(&org_id) = task_to_org.get(&task_id)
             {
                 *running_per_org.entry(org_id).or_insert(0) += 1;
             }

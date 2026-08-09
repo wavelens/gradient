@@ -35,14 +35,14 @@ pub enum BoardEvent {
         pending: usize,
         active: usize,
     },
-    /// An evaluation changed status. `project` lets the project channel filter
+    /// An evaluation changed status. `task` lets the task channel filter
     /// without a lookup; the evaluation channel filters on `evaluation_id`.
     EvaluationStatusChanged {
-        project: Option<Uuid>,
+        task: Option<Uuid>,
         evaluation_id: Uuid,
         status: i16,
     },
-    /// A build changed status. Filtered by `evaluation_id`; the project channel
+    /// A build changed status. Filtered by `evaluation_id`; the task channel
     /// resolves the owning evaluation from the evaluations it has seen.
     BuildStatusChanged {
         evaluation_id: Uuid,
@@ -54,7 +54,7 @@ pub enum BoardEvent {
     /// live UI grow the build/dependency totals during the evaluation phase,
     /// before any build reaches a status change.
     EvaluationProgress {
-        project: Option<Uuid>,
+        task: Option<Uuid>,
         evaluation_id: Uuid,
     },
     /// Cache contents or stats changed (build cached, NAR deleted, GC). A

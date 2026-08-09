@@ -11,7 +11,7 @@
 - **Organizations**: multiple organizations, which work independently from each other (e.g. different workers, user access)
 - **API**: provides a RESTful API with API-Key management for authentication
 - **Streaming Logs**: real-time log streaming for builds
-- **Rich Project Configuration**: flake updates, check all branches, pull requests, and tags
+- **Rich Task Configuration**: flake updates, check all branches, pull requests, and tags
 - **OAuth2 / OIDC**: integrated single-sign-on support
 - **Binary Cache**: built-in Nix store cache with S3 storage backend support
 - **Proto Workers**: build and evaluate Nix derivations on distributed `gradient-worker` instances over a persistent WebSocket protocol

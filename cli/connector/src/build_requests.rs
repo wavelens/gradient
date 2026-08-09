@@ -61,7 +61,7 @@ pub struct DispatchRequest {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DispatchResponse {
     pub evaluation: String,
-    pub project: String,
+    pub task: String,
     pub commit: String,
     pub cache: Option<String>,
 }

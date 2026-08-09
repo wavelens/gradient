@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result};
-use gradient_proto::messages::{BuildTask, CachedPath, QueryMode};
+use gradient_proto::messages::{BuildSpec, CachedPath, QueryMode};
 use sha2::{Digest as _, Sha256};
 use tracing::debug;
 
@@ -30,7 +30,7 @@ use crate::proto::prefetch::{
 /// substituted by its own anchor; the `closure_complete` gate orders dependents.
 /// Returns the output `(name, path)` pairs. Errors map to `SubstituteUnavailable`.
 pub async fn relay_external_cached_outputs(
-    task: &BuildTask,
+    task: &BuildSpec,
     updater: &mut JobUpdater,
 ) -> Result<Vec<(String, String)>> {
     let outputs: Vec<(String, String)> = task

@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use gradient_types::ids::ProjectId;
+use gradient_types::ids::TaskId;
 use sea_orm::{ConnectionTrait, DbBackend, FromQueryResult, Statement};
 use tracing::error;
 
@@ -200,26 +200,26 @@ pub async fn compute_instance_context(
 
 #[derive(Debug, Default, FromQueryResult)]
 struct EvalHistoryRow {
-    project: ProjectId,
+    task: TaskId,
     p95_ram: f64,
     samples: i64,
 }
 
-/// Per-project p95 of evaluation peak RSS over the last 24h, fed into
+/// Per-task p95 of evaluation peak RSS over the last 24h, fed into
 /// `ResourceFitRule` so heavy evals route to big-RAM workers.
 pub async fn compute_eval_history(
     db: &impl ConnectionTrait,
     now: chrono::NaiveDateTime,
-) -> HashMap<ProjectId, gradient_score::HistoryPrediction> {
+) -> HashMap<TaskId, gradient_score::HistoryPrediction> {
     let since = now - chrono::Duration::hours(24);
     let sql = r#"
-        SELECT e.project AS project,
+        SELECT e.task AS task,
                COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY m.peak_rss_mb), 0)::float8 AS p95_ram,
                COUNT(*)::bigint AS samples
         FROM evaluation_metric m
         JOIN evaluation e ON e.id = m.evaluation
-        WHERE m.created_at >= $1 AND e.project IS NOT NULL
-        GROUP BY e.project
+        WHERE m.created_at >= $1 AND e.task IS NOT NULL
+        GROUP BY e.task
     "#;
 
     let rows = match EvalHistoryRow::find_by_statement(Statement::from_sql_and_values(
@@ -240,7 +240,7 @@ pub async fn compute_eval_history(
     rows.into_iter()
         .map(|r| {
             (
-                r.project,
+                r.task,
                 gradient_score::HistoryPrediction {
                     predicted_peak_ram_mb: r.p95_ram.max(0.0) as u64,
                     samples: r.samples.max(0) as u32,
@@ -339,13 +339,13 @@ mod tests {
         assert_eq!(ic.idle_workers, 1);
     }
 
-    /// `MockDatabase` replays one grouped row; pins the project->prediction
+    /// `MockDatabase` replays one grouped row; pins the task->prediction
     /// mapping. The percentile aggregation is validated in CI against Postgres.
     #[tokio::test]
     async fn eval_history_maps_row_into_prediction() {
-        let pid = ProjectId::now_v7();
+        let pid = TaskId::now_v7();
         let row: BTreeMap<String, Value> = [
-            ("project".to_owned(), Value::from(pid.into_inner())),
+            ("task".to_owned(), Value::from(pid.into_inner())),
             ("p95_ram".to_owned(), Value::from(42_000.0_f64)),
             ("samples".to_owned(), Value::from(7_i64)),
         ]
@@ -357,7 +357,7 @@ mod tests {
             .into_connection();
 
         let history = compute_eval_history(&db, gradient_types::now()).await;
-        let h = history.get(&pid).expect("project present");
+        let h = history.get(&pid).expect("task present");
         assert_eq!(h.predicted_peak_ram_mb, 42_000);
         assert_eq!(h.samples, 7);
     }

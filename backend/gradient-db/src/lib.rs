@@ -28,7 +28,6 @@ pub mod org_derivations;
 pub mod org_workers;
 pub mod permissions;
 pub mod pool;
-pub mod project_board;
 pub mod promotion;
 pub mod reachability;
 pub mod reconcile;
@@ -40,6 +39,7 @@ pub mod state_machine;
 pub mod status;
 pub mod status_reactor;
 pub mod status_sql;
+pub mod task_board;
 
 pub use self::build_attempt::*;
 pub use self::cache_reach::*;
@@ -75,7 +75,6 @@ pub use self::org_cache::org_has_writable_cache;
 pub use self::org_derivations::derivation_ids_for_org;
 pub use self::org_workers::org_has_eval_capable_worker_registration;
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
-pub use self::project_board::*;
 pub use self::promotion::{
     cascade_dependency_failed, find_ready_anchors, mark_edges_complete_for_eval,
     promote_dependents, promote_ready, propagate_closure_complete,
@@ -91,3 +90,4 @@ pub use self::recovery::recover_interrupted_work;
 pub use self::runtime_closure::*;
 pub use self::status::*;
 pub use self::status_reactor::{NoReactor, StatusReactor};
+pub use self::task_board::*;

@@ -9,7 +9,7 @@ Gradient supports *pull deployment*, which allows a target machine to periodical
 ## How It Works
 
 1. A build completes successfully on the Gradient server, producing a NixOS system closure.
-2. The `gradient-deploy` systemd service on the target machine polls the Gradient API for the latest successful build of a configured project.
+2. The `gradient-deploy` systemd service on the target machine polls the Gradient API for the latest successful build of a configured task.
 3. When a new build is found, the closure is fetched from the integrated Nix cache and `nixos-rebuild switch` is run.
 
 By default the service runs daily at **04:00** via a systemd timer.
@@ -44,7 +44,7 @@ Add `gradient.nixosModules.deploy` to the target machine's NixOS configuration:
     enable      = true;
     server      = "https://gradient.example.com";
     apiKeyFile  = "/var/lib/gradient-deploy/api-key";
-    project     = "myorg/myproject";
+    task     = "myorg/mytask";
   };
 }
 ```
@@ -52,8 +52,8 @@ Add `gradient.nixosModules.deploy` to the target machine's NixOS configuration:
 | Option | Description |
 |---|---|
 | `server` | URL of your Gradient instance |
-| `apiKeyFile` | Path to a file containing an API key with read access to the project |
-| `project` | `organization/project` slug to watch |
+| `apiKeyFile` | Path to a file containing an API key with read access to the task |
+| `task` | `organization/task` slug to watch |
 
 ### 3. Create an API Key
 

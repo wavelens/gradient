@@ -10,7 +10,7 @@ mod api_keys;
 mod caches;
 mod integrations;
 mod orgs;
-mod projects;
 mod roles;
+mod tasks;
 mod users;
 mod workers;

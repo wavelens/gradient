@@ -12,12 +12,12 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ConnectionTrait};
 
 /// Move a freshly-created `Queued` evaluation into `Waiting` with
-/// `WaitingReason::NoCache` if the project's organisation lacks a writable
+/// `WaitingReason::NoCache` if the task's organisation lacks a writable
 /// cache subscription. Returns the evaluation unchanged when at least one
 /// ReadWrite/WriteOnly cache is present.
 ///
 /// Callers that go through [`apply_trigger`](super::super::apply_trigger) get
-/// this automatically; the manual `/projects/{org}/{project}/evaluate` endpoint
+/// this automatically; the manual `/tasks/{org}/{task}/evaluate` endpoint
 /// applies it directly after calling
 /// [`trigger_evaluation`](crate::trigger_evaluation).
 pub async fn park_if_no_cache<C: ConnectionTrait>(

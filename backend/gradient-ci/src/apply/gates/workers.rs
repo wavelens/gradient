@@ -12,7 +12,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ConnectionTrait};
 
 /// Move a freshly-created `Queued` evaluation into `Waiting` with
-/// `WaitingReason::Workers { connected_workers: 0, .. }` when the project's
+/// `WaitingReason::Workers { connected_workers: 0, .. }` when the task's
 /// organisation has no active worker registration with the `eval` capability
 /// gate enabled. Returns the evaluation unchanged when at least one such
 /// registration exists.

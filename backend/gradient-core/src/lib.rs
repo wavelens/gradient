@@ -86,27 +86,27 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     let scim_group_roles = Arc::new(state_result.scim_group_roles);
 
     if let Some(max) = cli.storage.keep_evaluations_max() {
-        let over_limit = EProject::find()
-            .filter(CProject::KeepEvaluations.gt(max))
+        let over_limit = ETask::find()
+            .filter(CTask::KeepEvaluations.gt(max))
             .all(&db)
             .await;
 
         match over_limit {
-            Ok(projects) => {
-                let count = projects.len();
-                for project in projects {
-                    let mut active = project.into_active_model();
+            Ok(tasks) => {
+                let count = tasks.len();
+                for task in tasks {
+                    let mut active = task.into_active_model();
                     active.keep_evaluations = Set(max);
                     if let Err(e) = active.update(&db).await {
-                        tracing::error!(error = %e, "Failed to cap keep_evaluations for project");
+                        tracing::error!(error = %e, "Failed to cap keep_evaluations for task");
                     }
                 }
                 if count > 0 {
-                    tracing::info!(max, count, "Capped keep_evaluations on projects");
+                    tracing::info!(max, count, "Capped keep_evaluations on tasks");
                 }
             }
             Err(e) => {
-                tracing::error!(error = %e, "Failed to query projects for keep_evaluations cap");
+                tracing::error!(error = %e, "Failed to query tasks for keep_evaluations cap");
             }
         }
     }

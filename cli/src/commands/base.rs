@@ -74,10 +74,10 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: organization::Commands,
     },
-    /// Manage projects
-    Project {
+    /// Manage tasks
+    Task {
         #[command(subcommand)]
-        cmd: project::Commands,
+        cmd: task::Commands,
     },
     /// Manage build workers
     Worker {
@@ -91,7 +91,7 @@ enum MainCommands {
     },
     /// Submit a build request from the current git repository
     Build {
-        /// Eval target attribute path (default: project's wildcard)
+        /// Eval target attribute path (default: task's wildcard)
         target: Option<String>,
         /// Target system (default: organization preference)
         #[arg(long)]
@@ -128,9 +128,9 @@ enum MainCommands {
         /// Skip the eval picker; use this evaluation directly
         #[arg(long)]
         evaluation: Option<String>,
-        /// Restrict latest-eval lookup to a project (accepts `name` or `org/name`)
-        #[arg(long, add = ArgValueCompleter::new(completion::complete_projects))]
-        project: Option<String>,
+        /// Restrict latest-eval lookup to a task (accepts `name` or `org/name`)
+        #[arg(long, add = ArgValueCompleter::new(completion::complete_tasks))]
+        task: Option<String>,
         /// Skip the product picker; comma-separated 1-based indices, ranges (`1-3`), or `all`
         #[arg(long, conflicts_with = "flake_ref")]
         products: Option<String>,
@@ -143,7 +143,7 @@ enum MainCommands {
         #[command(subcommand)]
         cmd: builds::Commands,
     },
-    /// Generate project files
+    /// Generate configuration files
     Generate {
         #[command(subcommand)]
         cmd: generate::Commands,
@@ -362,14 +362,12 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         MainCommands::Download {
             flake_ref,
             evaluation,
-            project,
+            task,
             products,
             out: out_dir,
-        } => {
-            download::handle_download(flake_ref, evaluation, project, products, out_dir, out).await
-        }
+        } => download::handle_download(flake_ref, evaluation, task, products, out_dir, out).await,
         MainCommands::Organization { cmd } => organization::handle(cmd, out).await,
-        MainCommands::Project { cmd } => project::handle(cmd, out).await,
+        MainCommands::Task { cmd } => task::handle(cmd, out).await,
         MainCommands::Worker { cmd } => worker::handle(cmd, out).await,
         MainCommands::Cache { cmd } => cache::handle(cmd, out).await,
         MainCommands::Builds { cmd } => builds::handle(cmd, out).await,

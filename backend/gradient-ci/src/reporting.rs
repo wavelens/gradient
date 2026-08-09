@@ -11,36 +11,36 @@ use crate::CiStatus;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 
-/// `"{org}/{project}"` when both are known, falling back to `"{project}"` when
+/// `"{org}/{task}"` when both are known, falling back to `"{task}"` when
 /// the organization lookup turned up nothing. Used as the scope segment of
-/// every CI check name so multiple Gradient projects reporting to the same
+/// every CI check name so multiple Gradient tasks reporting to the same
 /// repository remain distinguishable.
-pub fn format_check_scope(org_name: Option<&str>, project_name: &str) -> String {
+pub fn format_check_scope(org_name: Option<&str>, task_name: &str) -> String {
     match org_name {
-        Some(org) => format!("{}/{}", org, project_name),
-        None => project_name.to_string(),
+        Some(org) => format!("{}/{}", org, task_name),
+        None => task_name.to_string(),
     }
 }
 
 /// CI check name for the maintainer-approval gate.
-pub fn approval_check_context(project_name: &str) -> String {
-    format!("gradient/{}: Approval", project_name)
+pub fn approval_check_context(task_name: &str) -> String {
+    format!("gradient/{}: Approval", task_name)
 }
 
 /// CI check name for the per-evaluation roll-up status. `wildcard_suffix` is
-/// `Some` only when a run targets a wildcard other than the project default
+/// `Some` only when a run targets a wildcard other than the task default
 /// (e.g. `/gradient run <wildcard>`), so that custom-wildcard runs report as
 /// their own check line instead of overwriting the default evaluation check.
-pub fn evaluation_check_context(project_name: &str, wildcard_suffix: Option<&str>) -> String {
+pub fn evaluation_check_context(task_name: &str, wildcard_suffix: Option<&str>) -> String {
     match wildcard_suffix {
-        Some(w) => format!("gradient/{}: Evaluation: {}", project_name, w),
-        None => format!("gradient/{}: Evaluation", project_name),
+        Some(w) => format!("gradient/{}: Evaluation: {}", task_name, w),
+        None => format!("gradient/{}: Evaluation", task_name),
     }
 }
 
 /// CI check name for a single entry-point build under an evaluation.
-pub fn build_check_context(project_name: &str, entry_point: &str) -> String {
-    format!("gradient/{}: Build {}", project_name, entry_point)
+pub fn build_check_context(task_name: &str, entry_point: &str) -> String {
+    format!("gradient/{}: Build {}", task_name, entry_point)
 }
 
 /// Map an event name to the check-context family it reports to.
@@ -148,45 +148,45 @@ mod tests {
     #[test]
     fn check_scope_with_org() {
         assert_eq!(
-            format_check_scope(Some("wavelens"), "my-project"),
-            "wavelens/my-project"
+            format_check_scope(Some("wavelens"), "my-task"),
+            "wavelens/my-task"
         );
     }
 
     #[test]
-    fn check_scope_without_org_falls_back_to_project() {
-        assert_eq!(format_check_scope(None, "my-project"), "my-project");
+    fn check_scope_without_org_falls_back_to_task() {
+        assert_eq!(format_check_scope(None, "my-task"), "my-task");
     }
 
     #[test]
     fn approval_context_format() {
         assert_eq!(
-            approval_check_context("my-project"),
-            "gradient/my-project: Approval"
+            approval_check_context("my-task"),
+            "gradient/my-task: Approval"
         );
     }
 
     #[test]
     fn evaluation_context_format() {
         assert_eq!(
-            evaluation_check_context("my-project", None),
-            "gradient/my-project: Evaluation"
+            evaluation_check_context("my-task", None),
+            "gradient/my-task: Evaluation"
         );
     }
 
     #[test]
     fn evaluation_context_format_with_custom_wildcard() {
         assert_eq!(
-            evaluation_check_context("my-project", Some("packages.x86_64-linux.foo")),
-            "gradient/my-project: Evaluation: packages.x86_64-linux.foo"
+            evaluation_check_context("my-task", Some("packages.x86_64-linux.foo")),
+            "gradient/my-task: Evaluation: packages.x86_64-linux.foo"
         );
     }
 
     #[test]
     fn build_context_format() {
         assert_eq!(
-            build_check_context("my-project", "my-package"),
-            "gradient/my-project: Build my-package"
+            build_check_context("my-task", "my-package"),
+            "gradient/my-task: Build my-package"
         );
     }
 

@@ -31,8 +31,8 @@ pub struct SignRequest<'a> {
 }
 
 /// Fill the pending `cached_path_signature` rows for one freshly cached path.
-/// Skips paths whose every producing project has `sign_cache=false` (the
-/// reserved `build-request` project is always signable). Signing failures are
+/// Skips paths whose every producing task has `sign_cache=false` (the
+/// reserved `build-request` task is always signable). Signing failures are
 /// logged, never propagated: the NAR is already stored and the periodic sweep
 /// re-signs whatever is left NULL.
 pub async fn sign_cached_path<C: ConnectionTrait>(
@@ -48,7 +48,7 @@ pub async fn sign_cached_path<C: ConnectionTrait>(
         .split('-')
         .next()
         .unwrap_or("");
-    if hash.is_empty() || producing_projects_all_private(db, hash).await {
+    if hash.is_empty() || producing_tasks_all_private(db, hash).await {
         return;
     }
 
@@ -116,11 +116,11 @@ async fn build_signer<C: ConnectionTrait>(
     }
 }
 
-/// True iff the path is produced by at least one project and every producing
-/// project has `sign_cache=false` - mirrors the sweep's skip gate. The reserved
-/// per-org `build-request` project is always signable. Paths with no producing
-/// project (`.drv` files, direct uploads) return false -> signed normally.
-async fn producing_projects_all_private<C: ConnectionTrait>(db: &C, hash: &str) -> bool {
+/// True iff the path is produced by at least one task and every producing
+/// task has `sign_cache=false` - mirrors the sweep's skip gate. The reserved
+/// per-org `build-request` task is always signable. Paths with no producing
+/// task (`.drv` files, direct uploads) return false -> signed normally.
+async fn producing_tasks_all_private<C: ConnectionTrait>(db: &C, hash: &str) -> bool {
     #[derive(FromQueryResult)]
     struct Flags {
         producers: i64,
@@ -138,7 +138,7 @@ async fn producing_projects_all_private<C: ConnectionTrait>(db: &C, hash: &str) 
             JOIN derivation d ON d.id = do_.derivation
             JOIN build_job b  ON b.derivation = d.id
             JOIN evaluation e ON e.id = b.evaluation
-            JOIN project p    ON p.id = e.project
+            JOIN task p    ON p.id = e.task
             WHERE do_.hash = $1
         "#,
         [hash.into()],

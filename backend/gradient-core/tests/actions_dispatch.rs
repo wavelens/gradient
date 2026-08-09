@@ -12,14 +12,14 @@ use gradient_ci::CiStatus;
 use gradient_ci::actions::{
     FORGE_STATUS_EVENTS, forge_status_for_event, forge_status_payload, matches_event,
 };
-use gradient_types::{ActionType, MProjectAction, ProjectActionId, ProjectId, UserId};
+use gradient_types::{ActionType, MTaskAction, TaskActionId, TaskId, UserId};
 use serde_json::json;
 use uuid::Uuid;
 
-fn action_with(action_type: ActionType, events: serde_json::Value) -> MProjectAction {
-    MProjectAction {
-        id: ProjectActionId::now_v7(),
-        project: ProjectId::new(Uuid::nil()),
+fn action_with(action_type: ActionType, events: serde_json::Value) -> MTaskAction {
+    MTaskAction {
+        id: TaskActionId::now_v7(),
+        task: TaskId::new(Uuid::nil()),
         name: "test".into(),
         action_type,
         config: json!({}),

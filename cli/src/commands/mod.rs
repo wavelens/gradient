@@ -5,17 +5,17 @@
  */
 
 pub mod attr_spec;
-pub mod builds;
-pub mod builds_log;
-#[cfg(feature = "nix")]
-pub mod cache_upload_nix;
 pub mod base;
 pub mod build;
 #[cfg(feature = "nix")]
 pub mod build_nix;
+pub mod builds;
+pub mod builds_log;
 pub mod cache;
 pub mod cache_nar;
 pub mod cache_upload;
+#[cfg(feature = "nix")]
+pub mod cache_upload_nix;
 pub mod completion;
 pub mod download;
 #[cfg(feature = "eval")]
@@ -24,6 +24,6 @@ pub mod generate;
 pub mod logs;
 pub mod logstream;
 pub mod organization;
-pub mod project;
+pub mod task;
 pub mod watch;
 pub mod worker;

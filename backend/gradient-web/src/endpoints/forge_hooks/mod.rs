@@ -21,7 +21,7 @@ mod installation;
 mod payloads;
 mod response;
 
-pub use response::{QueuedEvaluation, SkippedProject, WebhookResponse, WebhookTriggerOutcome};
+pub use response::{QueuedEvaluation, SkippedTask, WebhookResponse, WebhookTriggerOutcome};
 
 use crate::ip_allowlist::is_allowed as ip_allowed;
 use axum::Extension;
@@ -115,7 +115,7 @@ pub async fn github_app_webhook(
                 WebhookResponse {
                     event: "push".to_string(),
                     repository_urls: urls,
-                    projects_scanned: outcome.projects_scanned,
+                    tasks_scanned: outcome.tasks_scanned,
                     queued: outcome.queued,
                     skipped: outcome.skipped,
                 }
@@ -131,7 +131,7 @@ pub async fn github_app_webhook(
             WebhookResponse {
                 event: "pull_request".to_string(),
                 repository_urls: urls,
-                projects_scanned: outcome.projects_scanned,
+                tasks_scanned: outcome.tasks_scanned,
                 queued: outcome.queued,
                 skipped: outcome.skipped,
             }
@@ -146,7 +146,7 @@ pub async fn github_app_webhook(
             WebhookResponse {
                 event: "release".to_string(),
                 repository_urls: urls,
-                projects_scanned: outcome.projects_scanned,
+                tasks_scanned: outcome.tasks_scanned,
                 queued: outcome.queued,
                 skipped: outcome.skipped,
             }
@@ -218,7 +218,7 @@ async fn dispatch_github_app_push(
         warn!(
             installation_id,
             urls = ?parsed.repository_urls,
-            "GitHub App push: no integration owns a project matching the webhook's repository"
+            "GitHub App push: no integration owns a task matching the webhook's repository"
         );
         return WebhookTriggerOutcome::default();
     }
@@ -242,7 +242,7 @@ async fn dispatch_github_app_push(
             parsed.author_name.clone(),
         )
         .await;
-        combined.projects_scanned += outcome.projects_scanned;
+        combined.tasks_scanned += outcome.tasks_scanned;
         combined.queued.extend(outcome.queued);
         combined.skipped.extend(outcome.skipped);
     }
@@ -267,7 +267,7 @@ async fn dispatch_github_app_pr(
         warn!(
             installation_id,
             urls = ?parsed.repository_urls,
-            "GitHub App pull_request: no integration owns a project matching the webhook's repository"
+            "GitHub App pull_request: no integration owns a task matching the webhook's repository"
         );
         return WebhookTriggerOutcome::default();
     }
@@ -292,7 +292,7 @@ async fn dispatch_github_app_pr(
             None,
         )
         .await;
-        combined.projects_scanned += outcome.projects_scanned;
+        combined.tasks_scanned += outcome.tasks_scanned;
         combined.queued.extend(outcome.queued);
         combined.skipped.extend(outcome.skipped);
     }
@@ -326,7 +326,7 @@ async fn dispatch_github_app_release(
         warn!(
             installation_id,
             urls = ?parsed.repository_urls,
-            "GitHub App release: no integration owns a project matching the webhook's repository"
+            "GitHub App release: no integration owns a task matching the webhook's repository"
         );
         return WebhookTriggerOutcome::default();
     }
@@ -343,7 +343,7 @@ async fn dispatch_github_app_release(
             None,
         )
         .await;
-        combined.projects_scanned += outcome.projects_scanned;
+        combined.tasks_scanned += outcome.tasks_scanned;
         combined.queued.extend(outcome.queued);
         combined.skipped.extend(outcome.skipped);
     }
@@ -472,7 +472,7 @@ pub async fn forge_webhook(
                 WebhookResponse {
                     event: "push".to_string(),
                     repository_urls: urls,
-                    projects_scanned: outcome.projects_scanned,
+                    tasks_scanned: outcome.tasks_scanned,
                     queued: outcome.queued,
                     skipped: outcome.skipped,
                 }
@@ -505,7 +505,7 @@ pub async fn forge_webhook(
             WebhookResponse {
                 event: "pull_request".to_string(),
                 repository_urls: urls,
-                projects_scanned: outcome.projects_scanned,
+                tasks_scanned: outcome.tasks_scanned,
                 queued: outcome.queued,
                 skipped: outcome.skipped,
             }
@@ -529,7 +529,7 @@ pub async fn forge_webhook(
             WebhookResponse {
                 event: "release".to_string(),
                 repository_urls: urls,
-                projects_scanned: outcome.projects_scanned,
+                tasks_scanned: outcome.tasks_scanned,
                 queued: outcome.queued,
                 skipped: outcome.skipped,
             }

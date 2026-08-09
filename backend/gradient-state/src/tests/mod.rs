@@ -34,7 +34,7 @@ fn user_accepts_missing_password_file() {
 }
 
 #[test]
-fn org_project_cache_descriptions_optional() {
+fn org_task_cache_descriptions_optional() {
     let json = r#"{
         "users": {
             "alice": {
@@ -54,7 +54,7 @@ fn org_project_cache_descriptions_optional() {
                 "created_by": "alice"
             }
         },
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web",
                 "organization": "acme",
@@ -75,15 +75,15 @@ fn org_project_cache_descriptions_optional() {
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
     assert!(cfg.organizations["acme"].description.is_none());
-    assert!(cfg.projects["web"].description.is_none());
+    assert!(cfg.tasks["web"].description.is_none());
     assert!(cfg.caches["main"].description.is_none());
     assert!(cfg.validate().is_valid);
 }
 
 #[test]
-fn state_project_concurrency_defaults_to_soft_abort() {
+fn state_task_concurrency_defaults_to_soft_abort() {
     let json = r#"{
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web",
                 "organization": "acme",
@@ -94,16 +94,13 @@ fn state_project_concurrency_defaults_to_soft_abort() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(
-        cfg.projects["web"].concurrency,
-        ConcurrencyPolicy::SoftAbort
-    );
+    assert_eq!(cfg.tasks["web"].concurrency, ConcurrencyPolicy::SoftAbort);
 }
 
 #[test]
-fn state_project_accepts_wildcard_field() {
+fn state_task_accepts_wildcard_field() {
     let json = r#"{
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web",
                 "organization": "acme",
@@ -115,15 +112,15 @@ fn state_project_accepts_wildcard_field() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.projects["web"].wildcard, "packages.x86_64-linux.*");
+    assert_eq!(cfg.tasks["web"].wildcard, "packages.x86_64-linux.*");
 }
 
 #[test]
-fn state_project_accepts_legacy_evaluation_wildcard_alias() {
+fn state_task_accepts_legacy_evaluation_wildcard_alias() {
     // Existing nix configurations using `evaluation_wildcard` must keep
     // working after the rename to `wildcard`.
     let json = r#"{
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web",
                 "organization": "acme",
@@ -135,13 +132,13 @@ fn state_project_accepts_legacy_evaluation_wildcard_alias() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.projects["web"].wildcard, "checks.*");
+    assert_eq!(cfg.tasks["web"].wildcard, "checks.*");
 }
 
 #[test]
-fn state_project_keep_evaluations_defaults_to_thirty() {
+fn state_task_keep_evaluations_defaults_to_thirty() {
     let json = r#"{
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web",
                 "organization": "acme",
@@ -152,11 +149,11 @@ fn state_project_keep_evaluations_defaults_to_thirty() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.projects["web"].keep_evaluations, 30);
+    assert_eq!(cfg.tasks["web"].keep_evaluations, 30);
 }
 
 #[test]
-fn state_project_keep_evaluations_zero_rejected_by_validator() {
+fn state_task_keep_evaluations_zero_rejected_by_validator() {
     let json = r#"{
         "users": {
             "alice": {
@@ -175,7 +172,7 @@ fn state_project_keep_evaluations_zero_rejected_by_validator() {
                 "created_by": "alice"
             }
         },
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web",
                 "organization": "acme",
@@ -192,17 +189,16 @@ fn state_project_keep_evaluations_zero_rejected_by_validator() {
     assert!(
         v.errors
             .iter()
-            .any(|e| e.field == "projects.web.keep_evaluations"
-                && e.message.contains("at least 1")),
+            .any(|e| e.field == "tasks.web.keep_evaluations" && e.message.contains("at least 1")),
         "expected keep_evaluations >= 1 validation error, got: {:?}",
         v.errors
     );
 }
 
 #[test]
-fn state_project_actions_round_trip_all_types() {
+fn state_task_actions_round_trip_all_types() {
     let json = r#"{
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web",
                 "organization": "acme",
@@ -232,9 +228,9 @@ fn state_project_actions_round_trip_all_types() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.projects["web"].actions.len(), 3);
-    assert_eq!(cfg.projects["web"].actions[0].action_type, "send_mail");
-    assert!(cfg.projects["web"].actions[2].events.is_empty());
+    assert_eq!(cfg.tasks["web"].actions.len(), 3);
+    assert_eq!(cfg.tasks["web"].actions[0].action_type, "send_mail");
+    assert!(cfg.tasks["web"].actions[2].events.is_empty());
 }
 
 #[test]
@@ -255,7 +251,7 @@ fn state_reporter_trigger_rejects_unknown_integration() {
     assert!(
         v.errors
             .iter()
-            .any(|e| e.field == "projects.web.triggers" && e.message.contains("ghost")),
+            .any(|e| e.field == "tasks.web.triggers" && e.message.contains("ghost")),
         "expected unknown-integration trigger error, got: {:?}",
         v.errors
     );
@@ -270,7 +266,7 @@ fn state_reporter_trigger_rejects_outbound_integration() {
     let v = cfg.validate();
     assert!(!v.is_valid);
     assert!(
-        v.errors.iter().any(|e| e.field == "projects.web.triggers"),
+        v.errors.iter().any(|e| e.field == "tasks.web.triggers"),
         "expected outbound-integration trigger error, got: {:?}",
         v.errors
     );
@@ -313,7 +309,7 @@ fn state_github_integration_with_installation_id_is_valid() {
 #[test]
 fn state_action_rejects_unknown_field() {
     let json = r#"{
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web",
                 "organization": "acme",
@@ -351,7 +347,7 @@ fn state_action_validate_rejects_unknown_type() {
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
             }
         },
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web", "organization": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
@@ -367,7 +363,7 @@ fn state_action_validate_rejects_unknown_type() {
     assert!(
         v.errors
             .iter()
-            .any(|e| e.field == "projects.web.actions.a.type"),
+            .any(|e| e.field == "tasks.web.actions.a.type"),
         "expected unknown-type error, got: {:?}",
         v.errors
     );
@@ -388,7 +384,7 @@ fn state_action_validate_rejects_duplicate_names() {
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
             }
         },
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web", "organization": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
@@ -426,7 +422,7 @@ fn state_action_validate_rejects_events_on_forge_status_report() {
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
             }
         },
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web", "organization": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
@@ -442,7 +438,7 @@ fn state_action_validate_rejects_events_on_forge_status_report() {
     assert!(
         v.errors
             .iter()
-            .any(|e| e.field == "projects.web.actions.x.events"),
+            .any(|e| e.field == "tasks.web.actions.x.events"),
         "expected forge_status_report-events error, got: {:?}",
         v.errors
     );
@@ -463,7 +459,7 @@ fn state_action_validate_accepts_open_pr() {
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
             }
         },
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web", "organization": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
@@ -497,7 +493,7 @@ fn state_action_validate_rejects_events_on_open_pr() {
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
             }
         },
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web", "organization": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
@@ -513,18 +509,18 @@ fn state_action_validate_rejects_events_on_open_pr() {
     assert!(
         v.errors
             .iter()
-            .any(|e| e.field == "projects.web.actions.x.events"),
+            .any(|e| e.field == "tasks.web.actions.x.events"),
         "expected open_pr-events error, got: {:?}",
         v.errors
     );
 }
 
 #[test]
-fn state_project_silently_ignores_legacy_force_evaluation_field() {
+fn state_task_silently_ignores_legacy_force_evaluation_field() {
     // Old state files may still set `force_evaluation` - serde drops
     // unknown fields by default, so parsing must keep working.
     let json = r#"{
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web",
                 "organization": "acme",
@@ -536,13 +532,13 @@ fn state_project_silently_ignores_legacy_force_evaluation_field() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(cfg.projects["web"].name, "web");
+    assert_eq!(cfg.tasks["web"].name, "web");
 }
 
 #[test]
-fn state_project_concurrency_hard_abort_round_trip() {
+fn state_task_concurrency_hard_abort_round_trip() {
     let json = r#"{
-        "projects": {
+        "tasks": {
             "web": {
                 "name": "web",
                 "organization": "acme",
@@ -554,11 +550,8 @@ fn state_project_concurrency_hard_abort_round_trip() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert_eq!(
-        cfg.projects["web"].concurrency,
-        ConcurrencyPolicy::HardAbort
-    );
-    assert_eq!(i16::from(cfg.projects["web"].concurrency), 0);
+    assert_eq!(cfg.tasks["web"].concurrency, ConcurrencyPolicy::HardAbort);
+    assert_eq!(i16::from(cfg.tasks["web"].concurrency), 0);
 }
 
 #[test]
@@ -902,13 +895,13 @@ fn resolves_group_to_org_role_grants() {
             "platform": {
                 "name": "platform-admin",
                 "organization": "acme",
-                "permissions": ["create_project"],
+                "permissions": ["create_task"],
                 "oidc_group": ["platform-team", "ops"]
             },
             "unmapped": {
                 "name": "viewer",
                 "organization": "acme",
-                "permissions": ["view_project"]
+                "permissions": ["view_task"]
             }
         }
     }"#;
@@ -939,13 +932,13 @@ fn resolves_scim_group_to_org_role_grants() {
             "eng": {
                 "name": "platform-admin",
                 "organization": "acme",
-                "permissions": ["create_project"],
+                "permissions": ["create_task"],
                 "scim_group": ["acme-eng", "ops"]
             },
             "unmapped": {
                 "name": "viewer",
                 "organization": "acme",
-                "permissions": ["view_project"]
+                "permissions": ["view_task"]
             }
         }
     }"#;

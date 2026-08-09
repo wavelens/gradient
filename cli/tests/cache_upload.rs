@@ -17,14 +17,18 @@ const STORE_HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 async fn upload_nar_file_with_narinfo_succeeds() {
     let server = MockServer::start().await;
     Mock::given(method("PUT"))
-        .and(path(format!("/api/v1/caches/mycache/nars/{STORE_HASH}/chunk")))
+        .and(path(format!(
+            "/api/v1/caches/mycache/nars/{STORE_HASH}/chunk"
+        )))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "error": false, "message": {"received": 3}
         })))
         .mount(&server)
         .await;
     Mock::given(method("POST"))
-        .and(path(format!("/api/v1/caches/mycache/nars/{STORE_HASH}/finalize")))
+        .and(path(format!(
+            "/api/v1/caches/mycache/nars/{STORE_HASH}/finalize"
+        )))
         .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
             "error": false, "message": {"store_path": STORE_PATH, "created": true}
         })))

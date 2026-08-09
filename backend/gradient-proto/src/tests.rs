@@ -6,7 +6,7 @@
 
 use crate::messages::{
     BuildMetrics, BuildOutput, CachedPath, ClientMessage, EvalCachePullOutcome, EvalCachePushMode,
-    FlakeInputOverride, FlakeJob, FlakeSource, FlakeTask, GradientCapabilities, Job, JobCandidate,
+    FlakeInputOverride, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities, Job, JobCandidate,
     JobUpdateKind, PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
 };
 use rkyv::rancor::Error as RkyvError;
@@ -123,7 +123,7 @@ fn assign_job_roundtrip() {
     let original = ServerMessage::AssignJob {
         job_id: "550e8400-e29b-41d4-a716-446655440000".into(),
         job: Job::Flake(FlakeJob {
-            tasks: vec![FlakeTask::FetchFlake, FlakeTask::EvaluateFlake],
+            steps: vec![FlakeStep::FetchFlake, FlakeStep::EvaluateFlake],
             source: FlakeSource::Repository {
                 url: "https://github.com/example/repo".into(),
                 commit: "abc123".into(),
@@ -142,7 +142,7 @@ fn assign_job_roundtrip() {
 #[test]
 fn flake_input_override_roundtrip() {
     let job = FlakeJob {
-        tasks: vec![FlakeTask::FetchFlake, FlakeTask::EvaluateFlake],
+        steps: vec![FlakeStep::FetchFlake, FlakeStep::EvaluateFlake],
         source: FlakeSource::Repository {
             url: "https://example.test/repo.git".into(),
             commit: "deadbeef".into(),

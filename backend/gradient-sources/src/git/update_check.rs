@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::context::ProjectGitContext;
+use super::context::TaskGitContext;
 use super::remote::ls_remote_head;
 use crate::SourceError;
 use gradient_types::input::vec_to_hex;
@@ -12,7 +12,7 @@ use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 use tracing::{debug, info, instrument, warn};
 
-impl ProjectGitContext<'_> {
+impl TaskGitContext<'_> {
     /// Check whether there is a new commit on the remote ref.
     ///
     /// `branch = None` polls the remote HEAD (default branch).
@@ -21,14 +21,14 @@ impl ProjectGitContext<'_> {
     /// Returns `(has_update, remote_hash)`. `has_update` is `false` when the
     /// remote ref matches the last evaluated commit or an evaluation is already
     /// in progress.
-    #[instrument(skip(self), fields(project_id = %self.project.id, project_name = %self.project.name))]
+    #[instrument(skip(self), fields(task_id = %self.task.id, task_name = %self.task.name))]
     pub(super) async fn check_for_updates(
         &self,
         branch: Option<&str>,
     ) -> Result<(bool, Vec<u8>), SourceError> {
-        debug!("Checking for updates on project");
+        debug!("Checking for updates on task");
 
-        let url = self.project.repository.clone();
+        let url = self.task.repository.clone();
         let ssh_creds = self.ssh_creds.clone();
         let branch_owned = branch.map(|b| b.to_owned());
 
@@ -48,12 +48,12 @@ impl ProjectGitContext<'_> {
         let remote_hash_str = vec_to_hex(&remote_hash);
         debug!(remote_hash = %remote_hash_str, "Retrieved remote hash");
 
-        if self.project.force_evaluation {
+        if self.task.force_evaluation {
             // Never supersede an in-flight evaluation: the one-shot force is
             // already satisfied by whatever is running, and re-triggering would
             // let the concurrency policy abort a build that is still making
             // progress (perpetual re-eval under a fast poll interval).
-            if let Some(last_evaluation) = self.project.last_evaluation
+            if let Some(last_evaluation) = self.task.last_evaluation
                 && let Some(evaluation) = EEvaluation::find_by_id(last_evaluation)
                     .one(&self.ctx.worker_db)
                     .await
@@ -65,12 +65,12 @@ impl ProjectGitContext<'_> {
                 debug!(status = ?evaluation.status, "Evaluation already in progress, skipping forced re-eval");
                 return Ok((false, remote_hash));
             }
-            info!("Force evaluation enabled, updating project");
+            info!("Force evaluation enabled, updating task");
             // Consume the one-shot flag so subsequent polls fall back to normal
             // commit-change detection instead of forcing on every cycle.
-            if let Err(e) = EProject::update_many()
-                .col_expr(CProject::ForceEvaluation, Expr::value(false))
-                .filter(CProject::Id.eq(self.project.id))
+            if let Err(e) = ETask::update_many()
+                .col_expr(CTask::ForceEvaluation, Expr::value(false))
+                .filter(CTask::Id.eq(self.task.id))
                 .exec(&self.ctx.worker_db)
                 .await
             {
@@ -81,9 +81,9 @@ impl ProjectGitContext<'_> {
 
         // A dangling `last_evaluation` (row deleted but pointer stale) is
         // treated as "no previous evaluation, update needed" - same path as
-        // a freshly-created project. The pointer self-heals on the next
+        // a freshly-created task. The pointer self-heals on the next
         // successful trigger.
-        if let Some(last_evaluation) = self.project.last_evaluation {
+        if let Some(last_evaluation) = self.task.last_evaluation {
             let evaluation = EEvaluation::find_by_id(last_evaluation)
                 .one(&self.ctx.worker_db)
                 .await

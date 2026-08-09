@@ -6,7 +6,7 @@
 
 export interface FlakeInputOverride {
   id: string;
-  project: string;
+  task: string;
   input_name: string;
   url: string | null;
   created_at: string;

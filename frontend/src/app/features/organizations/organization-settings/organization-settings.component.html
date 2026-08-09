@@ -74,8 +74,8 @@
             [binary]="true"
             [appManagedDisable]="access()"
           />
-          <label for="hide-build-requests">Hide Build Requests project</label>
-          <small class="text-secondary">When enabled, the auto-managed <code>build-request</code> project that receives CLI build artefacts is hidden from project listings.</small>
+          <label for="hide-build-requests">Hide Build Requests task</label>
+          <small class="text-secondary">When enabled, the auto-managed <code>build-request</code> task that receives CLI build artefacts is hidden from task listings.</small>
         </div>
 
         @if (saveError()) {
@@ -211,7 +211,7 @@
           <div class="danger-row">
             <div>
               <h3>Delete Organization</h3>
-              <p class="text-secondary">Permanently delete this organization and all its projects.</p>
+              <p class="text-secondary">Permanently delete this organization and all its tasks.</p>
             </div>
             <button
               pButton

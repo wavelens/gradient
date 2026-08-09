@@ -7,7 +7,7 @@
 //! `POST /build-requests/{session}/dispatch` - finalises a build-request
 //! upload session by materialising the staged blobs into a
 //! `/nix/store/<hash>-source` path, persisting `cached_path` metadata,
-//! lazily creating a per-org `build-request` project, and queueing an
+//! lazily creating a per-org `build-request` task, and queueing an
 //! evaluation for the scheduler to pick up.
 
 use super::types::ManifestEntry;
@@ -25,13 +25,13 @@ use gradient_storage::source_nar::{SourceNar, materialise_source_nar};
 use gradient_types::ConcurrencyPolicy;
 use gradient_types::ids::{
     CachedPathId, CachedPathSignatureId, CommitId, EvaluationFlakeInputOverrideId, EvaluationId,
-    ProjectId, UploadSessionId,
+    TaskId, UploadSessionId,
 };
 use gradient_types::{
     ACachedPathSignature, AEvaluationFlakeInputOverride, AUploadSession, BaseResponse, CCachedPath,
-    CCachedPathSignature, COrganizationCache, CProject, ECache, ECachedPath, ECachedPathSignature,
-    EEvaluationFlakeInputOverride, EOrganizationCache, EProject, EUploadSession, MCachedPath,
-    MCachedPathSignature, MCommit, MEvaluation, MEvaluationFlakeInputOverride, MProject, MUser,
+    CCachedPathSignature, COrganizationCache, CTask, ECache, ECachedPath, ECachedPathSignature,
+    EEvaluationFlakeInputOverride, EOrganizationCache, ETask, EUploadSession, MCachedPath,
+    MCachedPathSignature, MCommit, MEvaluation, MEvaluationFlakeInputOverride, MTask, MUser,
     NULL_TIME, now,
 };
 use gradient_util::nix_hash::normalize_nar_hash;
@@ -46,7 +46,7 @@ use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::fs;
 
-const BUILD_REQUEST_PROJECT_NAME: &str = "build-request";
+const BUILD_REQUEST_TASK_NAME: &str = "build-request";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct InputOverrideBody {
@@ -104,7 +104,7 @@ pub(super) fn validate_remote_override(input_name: &str, url: &str) -> WebResult
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DispatchResponse {
     pub evaluation: EvaluationId,
-    pub project: ProjectId,
+    pub task: TaskId,
     pub commit: CommitId,
     pub cache: Option<String>,
 }
@@ -217,7 +217,7 @@ pub(super) async fn finalize_build_request(
 
     let cached_path = ensure_cached_path(&tx, nar).await?;
     queue_signature_placeholders(&tx, &cached_path, &organization).await?;
-    let project = ensure_build_request_project(
+    let task = ensure_build_request_task(
         &tx,
         organization,
         user.id,
@@ -228,7 +228,7 @@ pub(super) async fn finalize_build_request(
     let target = target
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
-        .unwrap_or_else(|| project.wildcard.clone());
+        .unwrap_or_else(|| task.wildcard.clone());
 
     let commit = MCommit {
         id: CommitId::now_v7(),
@@ -244,7 +244,7 @@ pub(super) async fn finalize_build_request(
     let now_ts = now();
     let evaluation = MEvaluation {
         id: EvaluationId::now_v7(),
-        project: Some(project.id),
+        task: Some(task.id),
         repository: nar.store_path.clone(),
         commit: commit.id,
         wildcard: target,
@@ -281,7 +281,7 @@ pub(super) async fn finalize_build_request(
 
     Ok(DispatchResponse {
         evaluation: evaluation.id,
-        project: project.id,
+        task: task.id,
         commit: commit.id,
         cache,
     })
@@ -421,17 +421,17 @@ async fn queue_signature_placeholders<C: ConnectionTrait>(
     Ok(())
 }
 
-async fn ensure_build_request_project<C: ConnectionTrait>(
+async fn ensure_build_request_task<C: ConnectionTrait>(
     tx: &C,
     org_id: gradient_types::ids::OrganizationId,
     user_id: gradient_types::ids::UserId,
     keep_evaluations: i32,
-) -> WebResult<gradient_entity::project::Model> {
-    if let Some(existing) = EProject::find()
+) -> WebResult<gradient_entity::task::Model> {
+    if let Some(existing) = ETask::find()
         .filter(
             Condition::all()
-                .add(CProject::Organization.eq(org_id))
-                .add(CProject::Name.eq(BUILD_REQUEST_PROJECT_NAME)),
+                .add(CTask::Organization.eq(org_id))
+                .add(CTask::Name.eq(BUILD_REQUEST_TASK_NAME)),
         )
         .one(tx)
         .await?
@@ -439,14 +439,14 @@ async fn ensure_build_request_project<C: ConnectionTrait>(
         return Ok(existing);
     }
 
-    let project = MProject {
-        id: ProjectId::now_v7(),
+    let task = MTask {
+        id: TaskId::now_v7(),
         organization: org_id,
-        name: BUILD_REQUEST_PROJECT_NAME.to_string(),
+        name: BUILD_REQUEST_TASK_NAME.to_string(),
         active: true,
         display_name: "Build Requests".to_string(),
-        description: "Server-managed project for `gradient build` submissions.".to_string(),
-        repository: BUILD_REQUEST_PROJECT_NAME.to_string(),
+        description: "Server-managed task for `gradient build` submissions.".to_string(),
+        repository: BUILD_REQUEST_TASK_NAME.to_string(),
         wildcard: "*".to_string(),
         last_check_at: *NULL_TIME,
         created_by: user_id,
@@ -459,17 +459,17 @@ async fn ensure_build_request_project<C: ConnectionTrait>(
     }
     .into_active_model();
 
-    match project.insert(tx).await {
+    match task.insert(tx).await {
         Ok(row) => Ok(row),
-        Err(err) if is_unique_violation(&err) => EProject::find()
+        Err(err) if is_unique_violation(&err) => ETask::find()
             .filter(
                 Condition::all()
-                    .add(CProject::Organization.eq(org_id))
-                    .add(CProject::Name.eq(BUILD_REQUEST_PROJECT_NAME)),
+                    .add(CTask::Organization.eq(org_id))
+                    .add(CTask::Name.eq(BUILD_REQUEST_TASK_NAME)),
             )
             .one(tx)
             .await?
-            .ok_or_else(|| WebError::internal("build-request project missing after race")),
+            .ok_or_else(|| WebError::internal("build-request task missing after race")),
         Err(err) => Err(err.into()),
     }
 }
@@ -493,8 +493,8 @@ mod tests {
     fn accepts_remote_flake_refs() {
         for url in [
             "github:NixOS/nixpkgs",
-            "gitlab:group/project",
-            "sourcehut:~user/project",
+            "gitlab:group/task",
+            "sourcehut:~user/task",
             "git+ssh://git@h/x.git",
             "git+https://h/x.git",
             "git+http://h/x.git",

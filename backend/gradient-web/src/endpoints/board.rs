@@ -538,10 +538,10 @@ fn aggregate_worker_load(
         match j.kind {
             DispatchedJobKind::Build => bump_in_flight(&mut cap, "build"),
             DispatchedJobKind::Eval => {
-                if j.eval_task {
+                if j.eval_step {
                     bump_in_flight(&mut cap, "eval");
                 }
-                if j.fetch_task {
+                if j.fetch_step {
                     bump_in_flight(&mut cap, "fetch");
                 }
             }
@@ -653,7 +653,7 @@ pub async fn get_expensive_jobs(
          JOIN derivation_build b ON b.id = bj.derivation_build \
          JOIN derivation d ON d.id = bj.derivation \
          JOIN evaluation ev ON ev.id = bj.evaluation \
-         JOIN project pr ON pr.id = ev.project \
+         JOIN task pr ON pr.id = ev.task \
          JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at, ba2.dispatched_job \
            FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
@@ -869,7 +869,7 @@ pub async fn get_top_orgs_by_buildtime(
          FROM build_job bj \
          JOIN derivation_build b ON b.id = bj.derivation_build \
          JOIN evaluation ev ON ev.id = bj.evaluation \
-         JOIN project pr ON pr.id = ev.project \
+         JOIN task pr ON pr.id = ev.task \
          JOIN LATERAL ( \
            SELECT ba2.build_started_at, ba2.build_finished_at \
            FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
@@ -960,7 +960,7 @@ pub async fn get_expensive_by_resource(
     ));
 
     // Derivations are global, so attribute each metric row to one producing org
-    // (an in-scope one when scoped) via the build -> evaluation -> project chain.
+    // (an in-scope one when scoped) via the build -> evaluation -> task chain.
     let sql = format!(
         "SELECT dm.derivation, pro.organization, d.name, {value_expr} AS value, dm.worker_id \
          FROM derivation_metric dm \
@@ -969,7 +969,7 @@ pub async fn get_expensive_by_resource(
            SELECT pr.organization \
            FROM build_job bj \
            JOIN evaluation ev ON ev.id = bj.evaluation \
-           JOIN project pr ON pr.id = ev.project \
+           JOIN task pr ON pr.id = ev.task \
            WHERE bj.derivation = dm.derivation{org_filter} \
            LIMIT 1 \
          ) pro ON true \
@@ -1099,7 +1099,7 @@ fn eval_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
 
 /// Top evaluations by a captured per-eval resource (peak RSS/heap, thunks, fn
 /// calls, allocated bytes, or total eval time) from `evaluation_metric`,
-/// org-scoped through the evaluation's project.
+/// org-scoped through the evaluation's task.
 pub async fn get_expensive_evals_by_resource(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1127,7 +1127,7 @@ pub async fn get_expensive_evals_by_resource(
         "SELECT em.evaluation, p.organization, ev.wildcard AS name, {value_expr} AS value, em.worker_id \
          FROM evaluation_metric em \
          JOIN evaluation ev ON ev.id = em.evaluation \
-         JOIN project p ON p.id = ev.project \
+         JOIN task p ON p.id = ev.task \
          WHERE {} ORDER BY value DESC LIMIT 20",
         clauses.join(" AND ")
     );
@@ -1241,20 +1241,20 @@ mod tests {
             kind: DispatchedJobKind::Build,
             architecture: Some(arch.into()),
             required_features: features.iter().map(|s| s.to_string()).collect(),
-            fetch_task: false,
-            eval_task: false,
+            fetch_step: false,
+            eval_step: false,
         }
     }
 
-    fn flake_job(eval_task: bool, fetch_task: bool) -> BoardActiveJob {
+    fn flake_job(eval_step: bool, fetch_step: bool) -> BoardActiveJob {
         BoardActiveJob {
             worker_id: "w".into(),
             organization: OrganizationId::now_v7(),
             kind: DispatchedJobKind::Eval,
             architecture: None,
             required_features: vec![],
-            fetch_task,
-            eval_task,
+            fetch_step,
+            eval_step,
         }
     }
 

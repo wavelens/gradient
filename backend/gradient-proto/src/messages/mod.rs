@@ -12,10 +12,10 @@ pub mod wire;
 // backward compatibility so existing `crate::messages::FlakeJob` paths still work.
 pub use client::ClientMessage;
 pub use gradient_types::proto::{
-    BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildTask,
+    BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildSpec,
     BumpedInputWire, CacheInfo, CachedPath, CandidateScore, CredentialKind, DerivationOutput,
     DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel,
-    EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource, FlakeTask,
+    EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep,
     GradientCapabilities, InputUpdateSpec, Job, JobCandidate, JobKind, JobUpdateKind, QueryMode,
     RequiredPath,
 };

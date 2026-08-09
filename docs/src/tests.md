@@ -284,7 +284,7 @@ A fresh evaluation thaws the anchors it walks out of terminal failure back to
 `Created` (`requeue_failed_anchors` / `requeue_failed_closure_for_eval`), on the
 premise that a transient cause may have cleared. But a `BuilderNonzero` failure -
 the builder ran and exited non-zero - is deterministic: the same `.drv` rebuilds
-to the same exit. A polling-triggered project re-evaluated on its interval thus
+to the same exit. A polling-triggered task re-evaluated on its interval thus
 looped a non-substitutable cross-compile forever (prod `atop-riscv64` /
 `tree-sitter-riscv64`: ~680 rebuilds over 2.5 days, `FailedPermanent -> Created ->
 rebuild -> FailedPermanent` every ~7 min), saturating the fleet, while native
@@ -412,7 +412,7 @@ cannot silently ignore a dimension.
 
 `backend/gradient-db/src/gc.rs`:
 - `wedged_active_evaluation_stops_blocking_but_is_never_deleted` - an eval
-  "active" past `gc_wedged_eval_hours` no longer blocks the per-project GC,
+  "active" past `gc_wedged_eval_hours` no longer blocks the per-task GC,
   is itself never deleted, and `0` restores the unconditional block.
 - The existing selection tests now run through the (status, updated_at)
   signature with a fresh-eval default.
@@ -507,7 +507,7 @@ dropped on finalize). Reads fall back to S3.
 `retains_keep_most_recent_terminal_regardless_of_outcome`,
 `keeps_single_terminal_within_keep`, and `deletes_terminal_evaluations_beyond_keep`
 cover `evaluations_to_gc` after it stopped deprioritizing `Aborted` runs and
-started skipping the whole project while any evaluation is active. Previously GC
+started skipping the whole task while any evaluation is active. Previously GC
 preferentially deleted failed/aborted evaluations (dropping the completed NARs
 they held) and could race an in-flight run.
 
@@ -530,11 +530,11 @@ backstop, deleting any `log_storage` object whose `build_attempt` row is gone.
 and `installation_payload_collects_full_names_from_both_arrays` (in the sibling
 `payloads.rs`) cover the binding
 of an `installation` / `installation_repositories` webhook to every org owning a
-project whose repository URL resolves to one of the payload's repositories. The
+task whose repository URL resolves to one of the payload's repositories. The
 match is purely on the parsed `owner/repo`, so the flake shorthand
 (`github:owner/repo`) binds the same as the https / SSH clone URLs; previously the
 matcher keyed off a literal `github.com` substring and an org-name equals login
-fallback, so a `github:`-form project (and any org not named after the account)
+fallback, so a `github:`-form task (and any org not named after the account)
 left the org without a `github_installation` row.
 
 `github_installation.created_at` must be `TIMESTAMP` to match the entity's
@@ -545,15 +545,15 @@ read (e.g. `PUT /orgs/{org}/integrations`) failed to decode the column (#449).
 E2E CI against real PostgreSQL; sea-orm `MockDatabase` cannot reproduce the
 column-type decode error.
 
-`event_repo_matches_project_is_host_agnostic_on_owner_repo`,
+`event_repo_matches_task_is_host_agnostic_on_owner_repo`,
 `event_repo_rejects_a_sibling_repo_in_the_same_org`,
-`event_repo_empty_urls_match_every_project`, and
-`event_repo_unparsable_project_never_matches` cover the fan-out repo gate: an
+`event_repo_empty_urls_match_every_task`, and
+`event_repo_unparsable_task_never_matches` cover the fan-out repo gate: an
 org-wide inbound integration (a GitHub App installation spans every repo in the
-org) must fire only triggers whose project tracks the repository the webhook
+org) must fire only triggers whose task tracks the repository the webhook
 event came from. Matching is host-agnostic on `owner/repo`. Without it a push/PR
-to one repo fanned out to sibling projects, whose eval carried the wrong repo's
-commit and made the reporter post a check-run for a SHA absent from the project's
+to one repo fanned out to sibling tasks, whose eval carried the wrong repo's
+commit and made the reporter post a check-run for a SHA absent from the task's
 repo (GitHub 422 "No commit found for SHA", #449).
 
 ## Per-forge webhook events guidance (Gitea/Forgejo/GitLab `/gradient` commands)
@@ -579,7 +579,7 @@ inbound-integration card and the setup docs now surface the full event set.
 - `classifies_pr_comment_as_comment` - `issue_comment` / `pull_request_comment`
   map to `WebhookEventKind::Comment`.
 
-When a `/gradient` comment is delivered but the integration has no project with a
+When a `/gradient` comment is delivered but the integration has no task with a
 usable forge reporter (no API token), `handle_issue_comment` now logs a `warn`
 instead of silently returning, making the "nothing happened" case diagnosable.
 
@@ -588,10 +588,10 @@ instead of silently returning, making the "nothing happened" case diagnosable.
 Frontend (`pnpm --dir frontend exec ng test --include='**/eval-status-badge.component.spec.ts' --watch=false`):
 - shared `EvalStatusBadgeComponent` collapses `Evaluating*` to `Evaluating`,
   applies the success class for `Completed`, spins a running icon, and pulses a
-  queued icon. Reused by the organization detail list and the project detail
+  queued icon. Reused by the organization detail list and the task detail
   title (one source of truth for the eval status tag).
 
-Frontend (`**/project-detail.component.spec.ts`):
+Frontend (`**/task-detail.component.spec.ts`):
 - `disables Start Evaluation while an evaluation is in progress` and `enables
   Start Evaluation once the latest evaluation finished` - the button is gated on
   `evaluationInProgress()` so it no longer surfaces "evaluation already in
@@ -599,9 +599,9 @@ Frontend (`**/project-detail.component.spec.ts`):
 - `shows the eval status badge in the title while in progress` / `hides the title
   badge when the latest evaluation is terminal`.
 
-Frontend (`**/project-actions.component.spec.ts`):
+Frontend (`**/task-actions.component.spec.ts`):
 - `includes a Settings link in the breadcrumb` - Actions breadcrumb is now
-  `[Org] / [Project] / Settings / Actions`.
+  `[Org] / [Task] / Settings / Actions`.
 
 ## Forge action "Test" button connectivity probe
 
@@ -632,11 +632,11 @@ brittle per-query `MockDatabase` unit test; the closure-filter itself is a plain
 
 ## Minor frontend issues (#401)
 
-`backend/gradient-web/src/endpoints/projects/auto_attach.rs`: `host_parsing_covers_url_shapes`,
+`backend/gradient-web/src/endpoints/tasks/auto_attach.rs`: `host_parsing_covers_url_shapes`,
 `self_hosted_pairs_inbound_and_outbound`, `public_github_matches_by_forge_type`,
 `ambiguous_inbound_is_skipped`, and `unrelated_forge_does_not_match` cover the
 repository-URL → org-integration matcher that auto-attaches a push trigger and a
-status-report action on project creation.
+status-report action on task creation.
 
 `backend/gradient-forge/src/webhook.rs`: `github_push_extracts_commit_subject_and_author`,
 `github_push_without_head_commit_has_no_message`, and `gitlab_push_picks_commit_matching_after`
@@ -838,7 +838,7 @@ All "load resource by name and check the caller may use it" logic lives in
 two modules:
 
 - `backend/gradient-db/src/permissions.rs` - declares the [`Permission`] capability
-  enum (e.g. `EditProject`, `ManageMembers`, `ManageRoles`, `ManageWebhooks`),
+  enum (e.g. `EditTask`, `ManageMembers`, `ManageRoles`, `ManageWebhooks`),
   each capability's stable bit position in the `role.permission` bitmask
   (`Permission::bit`), and the canonical bitmasks for the three built-in
   roles (`admin_mask` / `write_mask` / `view_mask`). The mapping between
@@ -846,12 +846,12 @@ two modules:
   decides authorization from a role row's `permission` column, so custom
   roles configured at runtime require no code change at the call sites.
   The web crate re-exports this module as `web::permissions`.
-- `backend/web/src/access.rs` - exposes `load_org`, `load_project`,
+- `backend/web/src/access.rs` - exposes `load_org`, `load_task`,
   `load_cache`, `load_webhook_in_org`, `load_integration_in_org`, plus the
   predicates `is_org_member` / `has_permission` and the new
   `load_membership_with_permissions` helper that loads the membership row
   alongside the role's permission bitmask in one logical step. Each loader
-  takes an access policy enum (`OrgAccess`, `ProjectAccess`, `CacheAccess`)
+  takes an access policy enum (`OrgAccess`, `TaskAccess`, `CacheAccess`)
   so handlers declare *what level of access they need* rather than stitching
   together ad-hoc lookup + permission + state-managed checks.
 
@@ -871,9 +871,9 @@ guard:
 - `org_readable_public_visible_to_anon` /
   `org_readable_private_invisible_to_anon` - visibility rule for anonymous
   callers.
-- `project_editable_admin_passes` / `project_editable_view_forbidden` /
-  `project_editable_managed_forbidden` / `project_missing_returns_project_label` -
-  same matrix at the project level, including the project-existence label
+- `task_editable_admin_passes` / `task_editable_view_forbidden` /
+  `task_editable_managed_forbidden` / `task_missing_returns_task_label` -
+  same matrix at the task level, including the task-existence label
   guarantee.
 - `cache_owned_unmanaged_passes` / `cache_editable_rejects_managed` /
   `cache_owned_allows_managed` / `cache_non_owner_returns_not_found` - cache
@@ -888,9 +888,9 @@ Unit tests in `permissions.rs` (in `core`) lock the bitmask invariants:
   via `from_wire_name`.
 - `admin_mask_grants_everything` - Admin's canonical mask covers
   `Permission::ALL`.
-- `write_mask_excludes_admin_only_perms` - Write retains project/webhook
+- `write_mask_excludes_admin_only_perms` - Write retains task/webhook
   management but cannot manage members, roles, or org settings.
-- `view_mask_cannot_edit_projects_or_webhooks` - View is read-only on
+- `view_mask_cannot_edit_tasks_or_webhooks` - View is read-only on
   sensitive surfaces.
 - `empty_mask_grants_nothing` - defensive: a role with `permission = 0`
   authorizes nothing.
@@ -1151,11 +1151,11 @@ Tests covered:
 
 | # | Test name | Scenario |
 |---|-----------|----------|
-| 1 | `forge_webhook_no_matching_project` | Gitea push, valid signature, no active project tracks the repo → 200, `projects_scanned=0`, empty `queued`/`skipped`. |
-| 2 | `forge_webhook_matching_project_queues` | Gitea push, valid signature, one matching project → 200, one item in `queued` with correct `project_name` and `organization`. |
+| 1 | `forge_webhook_no_matching_task` | Gitea push, valid signature, no active task tracks the repo → 200, `tasks_scanned=0`, empty `queued`/`skipped`. |
+| 2 | `forge_webhook_matching_task_queues` | Gitea push, valid signature, one matching task → 200, one item in `queued` with correct `task_name` and `organization`. |
 | 3 | `forge_webhook_invalid_signature` | Gitea push, wrong HMAC → 401, `error=true`, `message="invalid webhook signature"`. |
 | 4 | `forge_webhook_integration_not_found` | Org found but integration row absent → 404, `message="integration not found"`. |
-| 5 | `github_app_webhook_push_queues` | GitHub App push, valid `X-Hub-Signature-256`, one matching project → 200, one item in `queued`. |
+| 5 | `github_app_webhook_push_queues` | GitHub App push, valid `X-Hub-Signature-256`, one matching task → 200, one item in `queued`. |
 | 6 | `github_app_webhook_ping` | GitHub App ping event → 200, `event="ping"`, all arrays empty. |
 | 7 | `github_app_webhook_installation` | GitHub App installation event, org not found in DB (warns, does not error) → 200, `event="installation"`, empty queued. |
 | 8 | `github_app_webhook_not_configured` | GitHub App config absent (`github_app_webhook_secret_file=None`) → 503, `message="github app integration not configured"`. |
@@ -1165,9 +1165,9 @@ Tests covered:
 The following scenarios are intentionally omitted because they would duplicate
 `trigger_evaluation` unit tests already present in `backend/gradient-ci/src/trigger.rs`:
 
-- *already_in_progress*: project has an in-progress eval → item appears in `skipped` with `reason="already_in_progress"`.
+- *already_in_progress*: task has an in-progress eval → item appears in `skipped` with `reason="already_in_progress"`.
 - *no_previous_evaluation*: `trigger_restart_builds` finds no previous eval → `reason="no_previous_evaluation"`.
-- *db_error during trigger*: DB returns an error inside the per-project loop → `reason="db_error"`.
+- *db_error during trigger*: DB returns an error inside the per-task loop → `reason="db_error"`.
 
 These can be added as further `forge_hooks.rs` tests by extending the
 `MockDatabase` chain to return an in-progress evaluation row (or error) instead
@@ -1259,25 +1259,25 @@ Serializer (`cargo test -p gradient-types nix_cache`):
   - `References` and `Deriver` are emitted as store-path basenames even when the
   in-memory value carries a `/nix/store/` prefix.
 
-## Per-project `sign_cache` option (#125)
+## Per-task `sign_cache` option (#125)
 
 Backend:
 
-- `cache::cacher::sign_sweep::tests::skip_when_all_producing_projects_private` -
-  `compute_skipped_cached_paths` skips a path iff every producing project has
-  `sign_cache=false` and at least one such project exists. A mixed
+- `cache::cacher::sign_sweep::tests::skip_when_all_producing_tasks_private` -
+  `compute_skipped_cached_paths` skips a path iff every producing task has
+  `sign_cache=false` and at least one such task exists. A mixed
   public+private path stays signed (option B semantics).
 - `cache::cacher::sign_sweep::tests::skip_set_empty_when_no_private_producers` -
   no skips when all producers are public.
-- `web::tests::projects_sign_cache::get_project_includes_sign_cache` - GET
-  `/api/v1/projects/{org}/{name}` returns `sign_cache` in the response body.
-- `web::tests::projects_sign_cache::patch_project_writes_sign_cache_false` -
+- `web::tests::tasks_sign_cache::get_task_includes_sign_cache` - GET
+  `/api/v1/tasks/{org}/{name}` returns `sign_cache` in the response body.
+- `web::tests::tasks_sign_cache::patch_task_writes_sign_cache_false` -
   PATCH with `{ "sign_cache": false }` is accepted and round-trips.
-- `web::tests::projects_sign_cache::create_project_accepts_sign_cache_false` -
+- `web::tests::tasks_sign_cache::create_task_accepts_sign_cache_false` -
   PUT body may include `sign_cache: false`; default is `true` when omitted.
 - `web::tests::narinfo::narinfo_returns_404_when_signature_null` -
   regression: when `cached_path_signature.signature` is NULL (the state the
-  sweep leaves rows in for `sign_cache=false` projects), the narinfo handler
+  sweep leaves rows in for `sign_cache=false` tasks), the narinfo handler
   returns 404 rather than serving an unsigned narinfo. The whole privacy
   guarantee depends on this and we lock it in here.
 
@@ -1571,7 +1571,7 @@ Backend:
 `core::storage::nar_extract::extract_path_from_nar_bytes` returns either
 `Extracted::File` (regular file body) or `Extracted::Directory { tar_zst }`
 (zstd-compressed tar of the matched subtree). The download endpoints
-(`/builds/{build}/download/{filename}` and the project-level entry-point
+(`/builds/{build}/download/{filename}` and the task-level entry-point
 download) detect the variant and set `Content-Type: application/zstd` plus a
 `.tar.zst`-suffixed `Content-Disposition` filename for the directory case.
 
@@ -1715,7 +1715,7 @@ Backend (`cargo test -p gradient-db --lib recovery`):
   mirroring the explicit-abort path so the server matches the builder, which
   aborts the eval's builds when the server dies. The forced re-evaluation
   re-drives them (`requeue_failed_anchors` resets `Aborted -> Created`).
-- `project_force_step_skipped_when_no_pre_build_evals` - with no in-flight
+- `task_force_step_skipped_when_no_pre_build_evals` - with no in-flight
   pre-build evals, the abort-anchors, abort-evals, and force-eval steps are all
   skipped and `builds_aborted` stays 0. The shared-anchor exclusion (an anchor a
   still-live eval also needs is left running) is raw SQL, covered E2E in CI.
@@ -1783,7 +1783,7 @@ Evaluation GC deletes old evals and relies on FK cascade for their per-eval rows
 held a bare `build_attempt` UUID with no FK, leaking its chunk-index rows once the
 eval was collected; migration `m20260626_000001_build_log_chunk_cascade` purges the
 existing orphans and adds the missing `ON DELETE CASCADE`. The cascade needs a real
-Postgres, so it is covered by the migration apply + the per-project eval-GC E2E path
+Postgres, so it is covered by the migration apply + the per-task eval-GC E2E path
 rather than a `MockDatabase` test.
 
 Backend (`cargo test -p worker --tests`):
@@ -1981,27 +1981,27 @@ Backend (`cargo test -p core --lib state::tests`):
 - `user_accepts_missing_password_file` - `StateUser` accepts a JSON
   document with `"password_file": null`, so the NixOS module may emit
   OIDC-only users without a password credential file.
-- `org_project_cache_descriptions_optional` - `description` on
-  organizations, projects, and caches is optional; a full config without
+- `org_task_cache_descriptions_optional` - `description` on
+  organizations, tasks, and caches is optional; a full config without
   them validates cleanly.
-- `state_project_accepts_wildcard_field` - `StateProject` deserialises
+- `state_task_accepts_wildcard_field` - `StateTask` deserialises
   the canonical `wildcard` field.
-- `state_project_accepts_legacy_evaluation_wildcard_alias` - pre-rename
+- `state_task_accepts_legacy_evaluation_wildcard_alias` - pre-rename
   state files using `evaluation_wildcard` continue to parse via the
   serde alias, so existing `gradient-state.nix` configurations don't
   break on upgrade.
-- `state_project_keep_evaluations_defaults_to_thirty` - when a project
+- `state_task_keep_evaluations_defaults_to_thirty` - when a task
   omits `keep_evaluations`, the parsed value defaults to 30 so newly
-  provisioned state-managed projects match the API-created default and
+  provisioned state-managed tasks match the API-created default and
   the GC pass keeps a meaningful history window.
-- `state_project_keep_evaluations_zero_rejected_by_validator` - the
+- `state_task_keep_evaluations_zero_rejected_by_validator` - the
   configuration validator rejects `keep_evaluations < 1`, matching the
   `types.ints.positive` constraint in `nix/modules/gradient-state.nix`
   and the API-level `apply_keep_evaluations` check.
 - `default_keep_evaluations_is_thirty`
   (`backend/gradient-types/src/cli/storage.rs`) - `StorageArgs::default()`
   yields `keep_evaluations = 30` so a default `gradient-server` install
-  bounds per-project evaluation retention instead of allowing unbounded
+  bounds per-task evaluation retention instead of allowing unbounded
   growth (issue #92).
 - `default_nar_ttl_hours_is_two_weeks`
   (`backend/gradient-types/src/cli/storage.rs`) - `StorageArgs::default()`
@@ -2015,7 +2015,7 @@ Backend (`cargo test -p core --lib state::tests`):
 - `clap_default_nar_ttl_hours_is_two_weeks`
   (`backend/gradient-types/src/cli/storage.rs`) - parsing an empty argv
   through clap yields `nar_ttl_hours = 336`, same drift guard.
-- `state_project_silently_ignores_legacy_force_evaluation_field` -
+- `state_task_silently_ignores_legacy_force_evaluation_field` -
   state files written before the rename may still carry
   `force_evaluation`; serde's default unknown-field handling drops it
   silently so existing deployments parse cleanly after the field's
@@ -2058,8 +2058,8 @@ Backend (`cargo test -p core --lib state::tests`):
 - `keep_set_tests::keep_sets_track_inner_name_not_attrset_key`
   (`backend/gradient-state/src/provisioning.rs`) - `gradient-state.nix`
   exposes `name = mkOption { default = <attrset key>; }` on users,
-  organizations, projects, caches, and API keys, so a user may pin
-  `projects.foo = { name = "main"; … }`. Every `apply_*` writes the
+  organizations, tasks, caches, and API keys, so a user may pin
+  `tasks.foo = { name = "main"; … }`. Every `apply_*` writes the
   override value to the DB row; `unmark_removed_entities` therefore must
   also key its keep-sets on the value's `name`/`username` field, not on
   the HashMap key, or the cleanup pass deletes (or unmarks) the row the
@@ -2086,7 +2086,7 @@ Backend (`cargo test -p core --lib state::provisioning::trigger_helper_tests`):
   otherwise persist an id no webhook ever resolves to and the trigger would
   silently never fire.
 
-## Integrations apply before projects, validated at build time (#332)
+## Integrations apply before tasks, validated at build time (#332)
 
 Backend (`cargo test -p core --lib state::tests`):
 - `state_reporter_trigger_accepts_declared_inbound_integration` - a
@@ -2094,7 +2094,7 @@ Backend (`cargo test -p core --lib state::tests`):
   org passes validation.
 - `state_reporter_trigger_rejects_unknown_integration` - a reporter trigger
   naming an integration that is not declared yields a
-  `projects.<project>.triggers` validation error, surfacing the mistake at
+  `tasks.<task>.triggers` validation error, surfacing the mistake at
   build/`--validate-state` time instead of mid state-apply.
 - `state_reporter_trigger_rejects_outbound_integration` - a reporter trigger
   pointing at an `outbound`-kind integration is rejected (reporters resolve
@@ -2103,7 +2103,7 @@ Backend (`cargo test -p core --lib state::tests`):
   integration name needs no explicit declaration (auto-managed GitHub App row).
 
 The apply order in `apply_state_to_database` now runs `apply_integrations`
-before `apply_projects` so trigger/action integration lookups resolve against
+before `apply_tasks` so trigger/action integration lookups resolve against
 rows already in the DB.
 
 ## `--validate-state` parses without secret files
@@ -2383,11 +2383,11 @@ and zero remaining build references.
   regression for #107: the TTL SELECT must keep its `derivation_output.ca
   IS NOT NULL` guard so FOD NARs are never evicted by the TTL pass.
 
-## Per-project evaluation GC retention policy (#305)
+## Per-task evaluation GC retention policy (#305)
 
 `evaluations_to_gc` (`backend/gradient-db/src/gc.rs`) decides, by index into a
-newest-first evaluation list, which evaluations `gc_project_evaluations`
-deletes for a project's `keep_evaluations` count. Active evaluations
+newest-first evaluation list, which evaluations `gc_task_evaluations`
+deletes for a task's `keep_evaluations` count. Active evaluations
 (Queued/Fetching/Evaluating*/Building/Waiting) are never deleted and never
 consume a `keep` slot; among terminal evaluations the `keep` most recent
 `Completed`/`Failed` ("done") are retained, and `Aborted` evaluations are
@@ -2466,30 +2466,30 @@ Specs (vitest + jsdom):
   matching the server `/config` response. Direct regression for #218.
   (`shared/components/header/header.component.spec.ts`)
 
-## CI check names - org/project context
+## CI check names - org/task context
 
 CI check names reported to GitHub/Gitea now include the organization
-and project so multiple Gradient instances/projects sharing a forge
+and task so multiple Gradient instances/tasks sharing a forge
 repository remain distinguishable. Helpers live in
 `backend/gradient-ci/src/reporting.rs` and are reused by the
 `ForgeStatusReport` action dispatcher (`backend/gradient-ci/src/actions.rs`):
 
-- Evaluation roll-up: `Gradient Evaluation {org}/{project}` (e.g.
-  `Gradient Evaluation wavelens/my-project`).
-- Per-entry-point build: `Gradient Build {org}/{project}: {entry_point}`.
+- Evaluation roll-up: `Gradient Evaluation {org}/{task}` (e.g.
+  `Gradient Evaluation wavelens/my-task`).
+- Per-entry-point build: `Gradient Build {org}/{task}: {entry_point}`.
 - When the organization lookup returns `None`, the scope degrades to
-  just `{project}`.
+  just `{task}`.
 
 Tests (`cargo test -p core --tests ci::reporting`):
 
-- `check_scope_with_org` - `Some("wavelens"), "my-project"` →
-  `"wavelens/my-project"`.
-- `check_scope_without_org_falls_back_to_project` - `None, "my-project"`
-  → `"my-project"`.
+- `check_scope_with_org` - `Some("wavelens"), "my-task"` →
+  `"wavelens/my-task"`.
+- `check_scope_without_org_falls_back_to_task` - `None, "my-task"`
+  → `"my-task"`.
 - `evaluation_context_format` - produces the new
   `"Gradient Evaluation …"` string.
 - `build_context_format` - produces
-  `"Gradient Build wavelens/my-project: my-package"`.
+  `"Gradient Build wavelens/my-task: my-package"`.
 - `build_context_falls_back_when_org_missing` - degrades correctly when
   the organization is unknown.
 
@@ -2574,7 +2574,7 @@ Unit tests (`cargo test -p core --tests ci::webhook`):
 webhooks (`validate_webhook_url`), and build their reqwest clients with
 `redirect::Policy::none()` so that an attacker cannot pivot a status
 POST to an internal endpoint and leak the integration token via a
-3xx `Location:` header. `reporter_for_project` continues to fall back
+3xx `Location:` header. `reporter_for_task` continues to fall back
 to `NoopCiReporter` when construction fails, with a `warn!` log.
 
 Unit tests (`cargo test -p core --tests forge::reporter`):
@@ -2595,7 +2595,7 @@ Unit tests (`cargo test -p core --tests forge::reporter`):
 - `github_app_reporter_empty_url_still_uses_default` - empty string
   continues to fall back to `https://api.github.com` (the field is
   optional in `integration_lookup`).
-- `reporter_for_project_unsafe_url_falls_back_to_noop` - an unsafe
+- `reporter_for_task_unsafe_url_falls_back_to_noop` - an unsafe
   Gitea base URL plumbed through the factory degrades to
   `NoopCiReporter` rather than crashing the caller.
 
@@ -2618,13 +2618,13 @@ Unit tests (`cargo test -p core --tests forge::providers`):
 ## GitLab outbound CI reporter (#90)
 
 `GitlabReporter` (in `backend/gradient-forge/src/reporter.rs`) posts commit
-statuses to GitLab via `POST {base_url}/api/v4/projects/{id}/statuses/{sha}`,
+statuses to GitLab via `POST {base_url}/api/v4/tasks/{id}/statuses/{sha}`,
 where `id` is the URL-encoded `owner/repo` path (also covers nested
 groups such as `group/sub/repo`). Authenticates with `PRIVATE-TOKEN`,
-which accepts personal, project, and group access tokens. The
+which accepts personal, task, and group access tokens. The
 `ForgeStatusReport` action dispatcher in `backend/gradient-ci/src/actions.rs`
 resolves the integration row and constructs a `GitlabReporter` (or the
-appropriate forge-specific reporter) per dispatch - the legacy per-project
+appropriate forge-specific reporter) per dispatch - the legacy per-task
 lookup helper has been removed.
 
 Unit tests (`cargo test -p core --tests forge::reporter`):
@@ -2634,8 +2634,8 @@ Unit tests (`cargo test -p core --tests forge::reporter`):
   `failed`, with `Error` collapsed to `failed`).
 - `gitlab_state_serializes_lowercase` - wire format matches the
   GitLab API enum.
-- `gitlab_project_id_flat_path` /
-  `gitlab_project_id_nested_groups` - `owner/repo` is URL-encoded as
+- `gitlab_task_id_flat_path` /
+  `gitlab_task_id_nested_groups` - `owner/repo` is URL-encoded as
   `acme%2Fwidgets`, and nested groups (`group/sub/repo`) become
   `group%2Fsub%2Frepo`.
 - `gitlab_reporter_trims_trailing_slash` - base URL normalised.
@@ -2643,7 +2643,7 @@ Unit tests (`cargo test -p core --tests forge::reporter`):
   `gitlab_reporter_rejects_localhost_hostname` /
   `gitlab_reporter_rejects_non_http_scheme` - same SSRF gate as the
   other reporters (`169.254.169.254`, `localhost`, `file://`).
-- `reporter_for_project_gitlab_builds_gitlab` - the public factory
+- `reporter_for_task_gitlab_builds_gitlab` - the public factory
   builds a `GitlabReporter` for `ci_type="gitlab"`.
 
 ## SSH private key decryption - no plaintext fallback
@@ -2819,9 +2819,9 @@ committed path in place via `sign_cached_path`: it loads that path's pending
 `cached_path_signature` rows, builds one `CacheSigner` per distinct cache, and
 fills each signature - so the narinfo is servable immediately instead of waking a
 whole-table sweep on every upload (the earlier `sign_signal`/trigger mechanism is
-gone). `producing_projects_all_private` mirrors the sweep's skip gate (skip iff
-every producing project has `sign_cache=false`; the reserved `build-request`
-project is always signable via `p.name = 'build-request'`). The periodic sweep
+gone). `producing_tasks_all_private` mirrors the sweep's skip gate (skip iff
+every producing task has `sign_cache=false`; the reserved `build-request`
+task is always signable via `p.name = 'build-request'`). The periodic sweep
 (`sign_missing_signatures`, now hourly, `GRADIENT_SIGN_SWEEP_INTERVAL_SECS`
 default 3600) is the backfill for subscription placeholders and any row a commit
 left NULL. Inline signing + skip gate are E2E-covered; the DB-less crate has no
@@ -2950,8 +2950,8 @@ Issue #120: the frontend renders a coloured dot via
 exists. `Created` is an internal-only transient state - the scheduler
 flips builds to `Queued` almost immediately - so the API now collapses
 it via `BuildStatus::for_api()` (`backend/entity/src/build.rs`) at every
-response boundary (`evals::query`, `projects::evaluations`,
-`projects::metrics`, `builds::query`).
+response boundary (`evals::query`, `tasks::evaluations`,
+`tasks::metrics`, `builds::query`).
 
 Unit tests in `backend/entity/src/build.rs`:
 
@@ -2996,7 +2996,7 @@ Eliminates the prior 18 ad-hoc `reqwest::Client::new()` /
 each created a fresh TCP/TLS connection pool with inconsistent (or
 absent) timeout and redirect policy.
 
-`backend/gradient-util/src/http.rs` builds the project-wide client with sane
+`backend/gradient-util/src/http.rs` builds the task-wide client with sane
 defaults (30 s timeout, `redirect::none`, and a branded
 `Gradient/<version> (+https://github.com/wavelens/gradient)`
 user-agent so upstream cache operators can attribute traffic). The
@@ -3014,7 +3014,7 @@ Unit tests in `backend/gradient-util/src/http.rs`:
 - `build_client_succeeds` - the default builder yields a usable
   `reqwest::Client`.
 - `user_agent_includes_brand_and_contact_url` - the user-agent string
-  starts with `Gradient/` and embeds the project URL so cache operators
+  starts with `Gradient/` and embeds the task URL so cache operators
   can identify and contact-trace outbound calls (`#205`).
 - `user_agent_does_not_use_lowercase_brand` - regression guard against
   the previous lowercase `gradient/` format (`#205`).
@@ -3112,7 +3112,7 @@ Tests:
 ## Typed entity IDs (`entity::ids`)
 
 `backend/entity/src/ids.rs` defines one newtype per entity (`UserId`,
-`OrganizationId`, `ProjectId`, …) so the compiler rejects argument
+`OrganizationId`, `TaskId`, …) so the compiler rejects argument
 swaps. Unit tests (`cargo test -p entity --tests`) cover:
 
 - Round-trip with `Uuid` (no information loss).
@@ -3332,22 +3332,22 @@ stall before any builds have been queued:
 
 Run with `cargo test -p core --tests state_machine::eval`.
 
-## Project triggers (issue #116)
+## Task triggers (issue #116)
 
 - `core::types::triggers` - round-trip serialisation, polling interval validation (≥10s), polling branch field (optional, nullable), six-field cron parsing, type/JSON shape mismatches.
 - `core::ci::abort` - `abort_evaluation` hard vs soft, terminal eval no-op.
-- `core::ci::apply` - `apply_trigger` orchestration: same-commit dedup, time-trigger and manual bypass, project-level concurrency policies (skip / hard_abort / soft_abort / all). The `all` policy creates a new evaluation alongside a running one; the new row carries `concurrent = true`.
+- `core::ci::apply` - `apply_trigger` orchestration: same-commit dedup, time-trigger and manual bypass, task-level concurrency policies (skip / hard_abort / soft_abort / all). The `all` policy creates a new evaluation alongside a running one; the new row carries `concurrent = true`.
 - `core::state::provisioning` - trigger config builder helpers, integration name resolution, key stability.
 - `scheduler::trigger_dispatch` - `polling_due` and `cron_due` boundary conditions; `dispatch_once` no-trigger and within-interval skip cases; polling jitter bounded to 10% of `interval_secs`, deterministic for a `(trigger_id, last_fired_at)` pair, varies across cycles, zero when `interval_secs < 10`, and gates firing exactly at the `interval + jitter` boundary.
 - `scheduler::jobs::JobTracker::remove_job` - pending and active map removal; unknown id no-op.
 - `scheduler::Scheduler::cancel_evaluation_jobs` - drops eval and per-build entries from the tracker.
-- `web::endpoints::projects::triggers` - list/create/read/update/delete; `all` concurrency accepted (200); invalid config rejected (400).
-- `web::endpoints::projects::triggers` - **integration enrichment**: list/get responses for `reporter_push`/`reporter_pull_request` include an inlined `integration` object (`id`, `name`, `display_name`, `forge_type`); polling triggers return `integration: null` and skip the integration SELECT (`list_polling_trigger_has_null_integration_and_skips_lookup`); orphaned references (integration row deleted) degrade to `integration: null` (`list_reporter_trigger_with_missing_integration_returns_null`).
+- `web::endpoints::tasks::triggers` - list/create/read/update/delete; `all` concurrency accepted (200); invalid config rejected (400).
+- `web::endpoints::tasks::triggers` - **integration enrichment**: list/get responses for `reporter_push`/`reporter_pull_request` include an inlined `integration` object (`id`, `name`, `display_name`, `forge_type`); polling triggers return `integration: null` and skip the integration SELECT (`list_polling_trigger_has_null_integration_and_skips_lookup`); orphaned references (integration row deleted) degrade to `integration: null` (`list_reporter_trigger_with_missing_integration_returns_null`).
 - `web::endpoints::orgs::integrations` - **summaries endpoint** (`GET /orgs/{org}/integrations/summary`): any org member can list summaries (no `ManageIntegrations` required); response excludes `secret`, `endpoint_url`, `access_token`, `has_secret`, `has_access_token` so non-admins cannot probe credential state; non-members get 404 (consistent with org loader's hide-existence policy).
-- `web::endpoints::projects::evaluations` - response includes nullable `trigger` summary, populated for evaluations created by a trigger.
+- `web::endpoints::tasks::evaluations` - response includes nullable `trigger` summary, populated for evaluations created by a trigger.
 - `web::endpoints::forge_hooks::events` - PR (github/gitea/gitlab) and release (github/gitea/gitlab) parsers; GitLab action mapping; tag-ref support on push parsers.
 - `web::endpoints::forge_hooks` integration - push fans out to matching trigger row; branch glob filter skip; PR action filter; release fires only `releases_only` triggers; GitHub App push by installation_id.
-- `web::endpoints::projects::management` - creating a project seeds a default polling trigger.
+- `web::endpoints::tasks::management` - creating a task seeds a default polling trigger.
 
 ## Proto wire decoders - alignment-safe deserialisation
 
@@ -3471,7 +3471,7 @@ The policy is now two pure predicates the recovery loop applies per row:
 - `eval_survives_restart` - `Queued` and `Waiting` evaluations survive (the
   eval dispatcher re-offers `Queued`; build reconcile re-drives `Waiting`).
   `Fetching` / `EvaluatingFlake` / `EvaluatingDerivation` / `Building` were
-  running on a now-disconnected worker, so they are aborted (and their project
+  running on a now-disconnected worker, so they are aborted (and their task
   is flagged `force_evaluation`).
 - `build_survives_restart` - a build survives only if it is `Created`/`Queued`
   **and** its evaluation survives. A `Building` build was mid-compile on a lost
@@ -3492,13 +3492,13 @@ Tests (`cargo test -p core startup_recovery_tests`):
 `serve_web` startup to reconcile work left in-flight by the previous process: aborts
 `Running` `build_attempt` rows, re-queues `Building` builds, aborts `Fetching` /
 `EvaluatingFlake` / `EvaluatingDerivation` evaluations, and sets `force_evaluation` on
-their projects. `Building` evaluations and all terminal states are not touched.
+their tasks. `Building` evaluations and all terminal states are not touched.
 
 Unit tests in `backend/gradient-db/src/recovery.rs` (MockDatabase):
 
 - `all_four_operations_populate_report` - feeds mock `rows_affected` for each step and
   asserts the `RecoveryReport` fields match.
-- `project_force_step_skipped_when_no_pre_build_evals` - empty eval SELECT causes steps
+- `task_force_step_skipped_when_no_pre_build_evals` - empty eval SELECT causes steps
   3b/3c to be skipped; report fields all zero.
 
 ## Cache GC - guard shared-hash NARs and purge zombie cached_path rows
@@ -3508,7 +3508,7 @@ Two bugs together inflated cache stats and over-deleted shared NARs:
 - `gc_orphan_derivations` deleted the NAR for every output of every orphan
   derivation, with no check whether another (non-orphan) `derivation_output`
   shared the same hash via `cached_path`. FOD source tarballs are the
-  textbook case - `fetchurl` derivations across many projects all
+  textbook case - `fetchurl` derivations across many tasks all
   reference the same `<hash>-<name>`, so when one drv aged into the
   orphan window its NAR vanished for everyone. Fixed by collecting all
   orphan output hashes, subtracting hashes still referenced by any
@@ -3764,7 +3764,7 @@ caller - the handler held a `// TODO: Check if user has access to the
 commit` and never enforced it, allowing cross-tenant disclosure of
 commit message, hash, and author for any commit UUID an attacker could
 guess or harvest. The route now lives behind `authorize_optional` and
-the handler walks `commit → evaluation → project → organization` to
+the handler walks `commit → evaluation → task → organization` to
 require either public visibility or membership; every other case
 (non-member, anonymous on private org, missing commit, no referencing
 evaluation) maps to `404` so existence isn't leaked.
@@ -3772,7 +3772,7 @@ evaluation) maps to `404` so existence isn't leaked.
 Tests (`cargo test -p web --test commits_authorization`):
 
 - `anon_can_read_commit_in_public_org` - an unauthenticated caller may
-  fetch a commit reachable through a project in a public organization.
+  fetch a commit reachable through a task in a public organization.
 - `anon_cannot_read_commit_in_private_org` - the same commit, but the
   organization is private, returns `404` for an unauthenticated caller.
 - `member_can_read_commit_in_private_org` - an authenticated member of
@@ -3781,7 +3781,7 @@ Tests (`cargo test -p web --test commits_authorization`):
   member of any organization that owns a referencing evaluation gets
   `404`. Direct regression for #88.
 - `commit_referenced_only_via_orphan_eval_returns_404` - when every
-  referencing evaluation has no `project` (legacy direct-build rows
+  referencing evaluation has no `task` (legacy direct-build rows
   before issue #234), no org can be resolved and the response is `404`.
 - `nonexistent_commit_returns_404` and
   `commit_without_evaluation_returns_404` - both shapes of "no path"
@@ -3924,7 +3924,7 @@ External behaviour is unchanged (HTTP 500, code `internal`, body
 
 - `IntoResponse` no longer logs for the new variant - the rich-context
   warn line is emitted exactly once at the construction callsite,
-  carrying the structured ids (`project_id`, `evaluation_id`,
+  carrying the structured ids (`task_id`, `evaluation_id`,
   `derivation_id`, `organization_id`) that triage actually needs.
 - The callsite log itself is now `tracing::warn!`, not `error!`, so
   these benign races no longer pollute the error stream.
@@ -4083,7 +4083,7 @@ and the failure mode is loud.
 `backend/web/tests/auth_hardening.rs` (full HTTP via `axum_test`):
 
 - `api_key_with_only_view_cannot_trigger_evaluation` - a key whose mask is
-  `[viewOrg]` returns 403 from the project evaluate endpoint, even when the
+  `[viewOrg]` returns 403 from the task evaluate endpoint, even when the
   owning user is admin.
 - `api_key_pinned_to_other_org_is_invisible` - a key pinned to a different
   org returns 404 (not 403, not 401) on `GET /api/v1/orgs/{name}` so org
@@ -4104,7 +4104,7 @@ Three API-provided flags drive the user-visible rule that:
 - **Trigger access** (`entity.can_trigger`) gates trigger-style actions
   (Start Evaluation, Restart Failed Builds, Abort) independently of
   `can_edit`. `can_trigger` reflects `Permission::TriggerEvaluation` while
-  `can_edit` reflects `Permission::EditProject`. Backends without the field
+  `can_edit` reflects `Permission::EditTask`. Backends without the field
   (caches, orgs) cause `accessFromEntity` to fall back to `can_edit`, so the
   existing single-permission model still works.
 
@@ -4113,7 +4113,7 @@ The primitives:
 - `frontend/src/app/shared/access/access.service.ts` - `AccessService` with
   pure helpers (`isWritable`, `shouldShowWriteAction`, `shouldDisableInput`,
   `triggerAccess`). Tests cover the four flag combinations plus
-  `triggerAccess` for the deeper model split: it projects an AccessState
+  `triggerAccess` for the deeper model split: it tasks an AccessState
   onto trigger-action permissions by replacing `canEdit` with `canTrigger`
   and forcing `managed=false` (trigger actions don't mutate config, so the
   managed flag must not disable them).
@@ -4131,14 +4131,14 @@ The primitives:
   read-only when the user has no write access. A `FakePrimeNgInputDirective`
   in the spec stands in for any `ControlValueAccessor` host and asserts the
   propagation (issue #229).
-- `frontend/src/app/core/resolvers/project-access.resolver.ts` and
+- `frontend/src/app/core/resolvers/task-access.resolver.ts` and
   `cache-access.resolver.ts` - fetch the parent entity once, expose
   `{ entity, access }` on `route.parent.data`. Children consume via
-  `injectProjectAccess()` / `injectCacheAccess()`. Tests cover the happy
+  `injectTaskAccess()` / `injectCacheAccess()`. Tests cover the happy
   path and the `managed=true / can_edit=false` propagation. The router is
   configured with `paramsInheritanceStrategy: 'always'`
   (`frontend/src/app/app.config.ts`) so child routes nested under
-  `project-layout` / `cache-layout` inherit the `:org` / `:project` /
+  `task-layout` / `cache-layout` inherit the `:org` / `:task` /
   `:cache` params from the parent - without it, child components reading
   `route.snapshot.paramMap` get empty strings and the settings pages render
   blank.
@@ -4147,8 +4147,8 @@ The primitives:
   org-scoped pages without a parent entity resolver. Tests cover Admin /
   Write / View / undefined / custom-role-name cases.
 
-Each retrofitted feature component (`project-settings`, `project-triggers`,
-`project-detail`, `cache-settings`, `cache-upstreams`,
+Each retrofitted feature component (`task-settings`, `task-triggers`,
+`task-detail`, `cache-settings`, `cache-upstreams`,
 `organization-settings`, `workers`, `cache-subscriptions`, `members-roles`,
 `api-keys`, `profile`, `integrations`) carries gating tests covering at
 least the two key scenarios:
@@ -4158,7 +4158,7 @@ least the two key scenarios:
 - **State-managed with permission** (`managed=true, canEdit=true`):
   config-edit buttons present in the DOM but disabled.
 
-`project-detail` is the exception for trigger-style actions: Start
+`task-detail` is the exception for trigger-style actions: Start
 Evaluation, Restart Failed Builds, and Abort gate on `canTrigger` instead
 of `canEdit`. The component exposes a `triggerAccess` computed signal
 (`AccessService.triggerAccess(access())`) and the buttons use
@@ -4169,9 +4169,9 @@ spec asserts three scenarios:
   buttons absent from the DOM.
 - `{ managed=true, canEdit=true, canTrigger=true }` - buttons present and
   enabled (the managed flag does not disable them, because the backend
-  permits trigger actions on managed projects).
+  permits trigger actions on managed tasks).
 - `{ managed=false, canEdit=false, canTrigger=true }` - buttons present and
-  enabled (a caller with TriggerEvaluation but not EditProject can act).
+  enabled (a caller with TriggerEvaluation but not EditTask can act).
 
 The two reported bugs that motivated this work are covered directly:
 
@@ -4181,7 +4181,7 @@ The two reported bugs that motivated this work are covered directly:
 - `CacheUpstreamsComponent` - Add Upstream / Edit / Delete absent under
   view-only access (page itself remains navigable); present-disabled
   under state-managed cache.
-- `ProjectTriggersComponent` - reporter trigger renders integration
+- `TaskTriggersComponent` - reporter trigger renders integration
   display name from the inlined `trigger.integration` field (so the
   trigger row shows "from GitHub" rather than the raw `integration_id`
   UUID, even when the caller lacks `ManageIntegrations`); orphaned
@@ -4193,11 +4193,11 @@ Run command: `pnpm -C frontend test --watch=false --include='**/access*'`
 
 ## Entry-point metrics - surface in-progress evaluations (`web/tests/entry_point_metrics.rs`)
 
-Integration tests for `GET /projects/{org}/{project}/entry-point-metrics`
+Integration tests for `GET /tasks/{org}/{task}/entry-point-metrics`
 guarding against the regression where the metrics page renders the empty
 state ("No completed evaluations found for this entry point.") even though
 the entry-point's build is in a terminal state. The endpoint must filter
-only by `project` and `eval`, never by `evaluation.status`, because the
+only by `task` and `eval`, never by `evaluation.status`, because the
 chart's data point is the build's wall-clock - completed builds are
 meaningful even while the owning evaluation is still mid-flight.
 
@@ -4212,25 +4212,25 @@ Three cases:
   the fix from #119 so a future regression that filters Substituted out
   again is caught.
 - `returns_empty_points_when_no_entry_point_matches` - when no
-  `entry_point` row matches `project` + `eval`, the response is the empty
+  `entry_point` row matches `task` + `eval`, the response is the empty
   array (the frontend's empty state is then legitimate).
 
 ## Entry-point download - pin to newest commit (`web/tests/entry_point_download.rs`)
 
-Integration tests for `GET /projects/{org}/{project}/entry-point-downloads`
+Integration tests for `GET /tasks/{org}/{task}/entry-point-downloads`
 guarding against #185: the endpoint previously selected the most recently
 *completed* evaluation by ordering on `evaluation.created_at`, so a
 retriggered run of an older commit shadowed the latest one. The handler now
-resolves against `project.last_evaluation` - the evaluation tied to the
-project's newest commit - with no fallback to older evaluations.
+resolves against `task.last_evaluation` - the evaluation tied to the
+task's newest commit - with no fallback to older evaluations.
 
 Three cases:
 
-- `returns_404_when_project_has_no_last_evaluation` - when
-  `project.last_evaluation` is `None` the endpoint 404s instead of running a
+- `returns_404_when_task_has_no_last_evaluation` - when
+  `task.last_evaluation` is `None` the endpoint 404s instead of running a
   broad search across all evaluations.
-- `resolves_entry_point_against_project_last_evaluation` - happy path with
-  the project pinned to a newest-commit evaluation; the handler reaches the
+- `resolves_entry_point_against_task_last_evaluation` - happy path with
+  the task pinned to a newest-commit evaluation; the handler reaches the
   artefact-serving stage (the test stops at empty `derivation_output` rows
   → `404 File`, sufficient to prove the pinned evaluation drove lookup).
 - `returns_404_when_entry_point_missing_from_last_evaluation` - when the
@@ -4392,11 +4392,11 @@ crashed prior worker.
 ## Frontend titles surface the entity name (issue #229)
 
 `frontend/src/app/core/title/gradient-title-strategy.ts` walks the
-`RouterStateSnapshot` for resolved `projectAccess` / `cacheAccess` /
+`RouterStateSnapshot` for resolved `taskAccess` / `cacheAccess` /
 `organizationAccess` data and composes a title of the form
 `<entity display_name> · <route title> · Gradient`, falling back to
 `<entity> · Gradient` for the root detail pages whose static route title
-is implied by the entity itself (`Project`, `Cache`, `Organization`). The
+is implied by the entity itself (`Task`, `Cache`, `Organization`). The
 spec at `gradient-title-strategy.spec.ts` covers the four combinations
 (both, entity-only, route-only, neither) and the entity-not-found
 fallback that keeps the title strategy a noop when an
@@ -4409,11 +4409,11 @@ doesn't already have a parent resolver. The spec covers the happy path,
 the no-param case, and the network-error fallback (resolver must not
 fail navigation just because the org fetch errored).
 
-## Evaluation duration parity between project page and log page (issue #229)
+## Evaluation duration parity between task page and log page (issue #229)
 
 `frontend/src/app/shared/evaluation/duration.ts` is the single source of
 truth for "how long has this evaluation been running?". Both
-`project-detail` and `evaluation-log` now use
+`task-detail` and `evaluation-log` now use
 `evaluationDuration(evaluation, now)` and `formatEvaluationDuration(ms)`
 so the same evaluation row shows the same `Xh Ym Zs` figure on both
 pages. The regression that motivated this - the log page kept growing
@@ -4433,13 +4433,13 @@ its duration after the evaluation finished because it used
 ## Connector + CLI JSON
 
 The `cli/connector` crate has wiremock-backed unit tests covering each sub-API
-(`cli/connector/tests/{auth,user,orgs,projects,evals,builds,build_requests,caches,commits,workers,webhooks,integrations,admin,server}_api.rs`).
+(`cli/connector/tests/{auth,user,orgs,tasks,evals,builds,build_requests,caches,commits,workers,webhooks,integrations,admin,server}_api.rs`).
 Each file covers: happy path, server `{error: true}` envelope (→ `ConnectorError::Api`),
 401 (→ `Unauthorized`), and transport failure.
 
 `caches_api.rs::list_caches_decodes_bare_array` is a regression for #290: the
 `GET /caches` endpoint returns `message` as a bare array (not the paginated
-`{items,total,page,per_page}` envelope used by orgs/projects), so
+`{items,total,page,per_page}` envelope used by orgs/tasks), so
 `caches().list()` returns `ListResponse` (`Vec<ListItem>`). The test replays the
 exact response from the bug report to prevent the connector from drifting back to
 the paginated type, which made the CLI mis-report a 200 as `api error (200)`.
@@ -4462,7 +4462,7 @@ CLI integration tests in `cli/tests/`:
 Dynamic completer unit tests live in `cli/src/commands/completion.rs` (`#[cfg(test)]`,
 wiremock-backed). They drive each completer core against a mock server and assert it
 returns the resource names and honours the partial prefix
-(`cache_names`, `org_names` reading paginated `items`, `project_names`/`worker_ids`
+(`cache_names`, `org_names` reading paginated `items`, `task_names`/`worker_ids`
 scoped to the selected org), and that a non-2xx response yields no candidates so the
 shell never errors.
 
@@ -4576,10 +4576,10 @@ immediately. Coverage:
 - `patch_omitting_url_does_not_change_it`
 - `delete_removes_the_row`
 - `list_sorted_by_input_name`
-- `get_not_found_returns_404` - also covers cross-project access.
-- `managed_project_rejects_mutations_403`
+- `get_not_found_returns_404` - also covers cross-task access.
+- `managed_task_rejects_mutations_403`
 
-### Frontend (`frontend/src/app/features/projects/project-flake-inputs/project-flake-inputs.component.spec.ts`)
+### Frontend (`frontend/src/app/features/tasks/task-flake-inputs/task-flake-inputs.component.spec.ts`)
 
 - `lists overrides on init`
 - `keep_url checkbox causes url: null submission`
@@ -4623,7 +4623,7 @@ the server fans out one per-input update eval each.
 
 - `create_with_glob_input_name` - a `nixpkgs*` override name is accepted (relaxed `input_name` validation).
 
-### Frontend (`frontend/src/app/features/projects/project-flake-inputs/project-flake-inputs.component.spec.ts`)
+### Frontend (`frontend/src/app/features/tasks/task-flake-inputs/task-flake-inputs.component.spec.ts`)
 
 - `marks glob input names as patterns and shows the badge` - `isPattern` is true for a glob name and the "Pattern" badge renders.
 
@@ -4656,7 +4656,7 @@ both paths now share one `git2` auth helper (#514 groundwork). Tests:
 ### Scheduler: cached build sources fetch before eval (`backend/gradient-scheduler/src/dispatch/eval.rs`)
 
 - `cached_source_dispatches_with_fetch` - a `/nix/store/...-source`
-  build-request source now dispatches `FlakeTask::FetchFlake` ahead of
+  build-request source now dispatches `FlakeStep::FetchFlake` ahead of
   `EvaluateFlake`/`EvaluateDerivations` (previously fetch-less), so its
   `git+ssh://` inputs are resolved with credentials even though the
   top-level source is already materialised.
@@ -4671,7 +4671,7 @@ both paths now share one `git2` auth helper (#514 groundwork). Tests:
   only because `nix` is absent in the unit-test sandbox) instead of bailing
   with "requires FlakeSource::Repository".
 
-## Actions (per-project)
+## Actions (per-task)
 
 ### Backend - REST endpoints (`backend/web/tests/actions.rs`)
 
@@ -4680,7 +4680,7 @@ Run with: `cargo test -p web --test actions`
 - `create_send_mail_action_returns_no_token` - POST with `send_mail` config → `201`, `token: null`.
 - `create_send_web_request_returns_token_once` - POST with `send_web_request` config → `token` present in response body; subsequent GET returns `token: null`.
 - `create_send_mail_without_smtp_returns_400` - when `smtp_enabled=false`, creating a `send_mail` action returns `400`.
-- `list_actions_returns_all_project_actions` - GET list includes all created actions, tokens stripped.
+- `list_actions_returns_all_task_actions` - GET list includes all created actions, tokens stripped.
 - `get_action_strips_token` - GET single action never returns the bearer token field.
 - `patch_action_updates_name_and_events` - PATCH changes `name` and `events`; `updated_at` advances.
 - `delete_action_removes_row` - DELETE returns `true`; subsequent GET returns `404`.
@@ -4690,7 +4690,7 @@ Run with: `cargo test -p web --test actions`
 - `deliveries_paginated` - GET `.../deliveries` with `limit=2&offset=0` returns first 2 rows; `total` reflects full count.
 - `delivery_detail_includes_request_response_body` - GET `.../deliveries/{id}` returns `request_body` and `response_body`.
 - `view_role_cannot_delete_action` - `403` for callers without write permission.
-- `managed_project_rejects_create` - state-managed projects reject action mutations with `403`.
+- `managed_task_rejects_create` - state-managed tasks reject action mutations with `403`.
 
 ### Backend - dispatcher unit tests (`backend/core/tests/actions_dispatch.rs`)
 
@@ -4700,7 +4700,7 @@ Run with: `cargo test -p core --test actions_dispatch`
 - `matches_event_returns_false_for_unlisted` - action does not fire for events not in its list.
 - `matches_event_empty_events_never_fires` - empty `events` list → no dispatch.
 - `forge_status_ignores_events_list` - `forge_status_report` always maps `build.started/completed/failed` regardless of `events`.
-- `payload_helpers_include_all_fields` - outgoing JSON payload for `send_web_request` contains `event`, `project`, `organization`, `id`, `status`.
+- `payload_helpers_include_all_fields` - outgoing JSON payload for `send_web_request` contains `event`, `task`, `organization`, `id`, `status`.
 
 ### Backend - inline unit tests (`backend/gradient-ci/src/actions.rs`)
 
@@ -4708,8 +4708,8 @@ Run with: `cargo test -p core --lib ci::actions::tests`
 
 - `matches_event` - `Action::matches_event` returns correct booleans for listed/unlisted events and the empty-events edge case.
 - `forge_status_for_event` - maps `build.started → pending`, `build.completed → success`, `build.failed → failure`; non-build events return `None`.
-- `render_subject` - applies `{event}`, `{project}`, `{org}`, `{id}`, `{status}` placeholders to a subject template string.
-- `render_default_body` - default body contains event, project slug, entity id, status, and a URL.
+- `render_subject` - applies `{event}`, `{task}`, `{org}`, `{id}`, `{status}` placeholders to a subject template string.
+- `render_default_body` - default body contains event, task slug, entity id, status, and a URL.
 
 ### Frontend
 
@@ -4718,7 +4718,7 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
 - `action-events.component.spec.ts` - checkbox group renders all known event strings; toggling emits updated selection via `ngModel`.
 - `action-deliveries.component.spec.ts` - popup renders paginated delivery rows; clicking a row fetches and displays detail bodies.
 - `action-form.component.spec.ts` - form switches config fields on `type` change; SMTP-disabled state hides `send_mail` option and shows a warning; one-time token is displayed after create/regenerate and cleared on modal close.
-- `project-actions.component.spec.ts` - list page loads actions on init, calls delete service on confirm, links to form modal.
+- `task-actions.component.spec.ts` - list page loads actions on init, calls delete service on confirm, links to form modal.
 
 ## Cache roles & permissions (issue #265)
 
@@ -4736,19 +4736,19 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
 
 ## Evaluation start - surface repository errors (issue #280)
 
-`POST /projects/{org}/{p}/evaluate` and `POST /projects/{org}/{p}/check-repository`
+`POST /tasks/{org}/{p}/evaluate` and `POST /tasks/{org}/{p}/check-repository`
 used to swallow git fetch failures (DNS, connection refused, auth) inside
 `core::sources::git::check_for_updates` and bubble up a generic 500 with no
 actionable detail. The fix propagates the `SourceError` to the web layer, which
 maps it to `400 Bad Request` with `code: "repository_unreachable"` and the
 underlying git error message. The frontend surfaces that message in an inline
-banner under the project header instead of failing silently.
+banner under the task header instead of failing silently.
 
 ### Backend
 
 Run with: `cargo test -p core --test git_remote`
 
-- `check_project_updates_propagates_unreachable_remote_error` - `git://127.0.0.1:1/…`
+- `check_task_updates_propagates_unreachable_remote_error` - `git://127.0.0.1:1/…`
   triggers an immediate connection-refused; the helper now returns `Err(SourceError)`
   instead of `Ok((false, vec![]))`. Locks in the propagation guarantee that the
   endpoint relies on for its 4xx mapping.
@@ -4757,10 +4757,10 @@ Run with: `cargo test -p core --test git_remote`
 
 Run with: `pnpm --dir frontend exec ng test --watch=false`
 
-- `project-detail.component.spec.ts → 'shows an inline error banner when
-  startEvaluation fails'` - mocks `ProjectsService.startEvaluation` to throw;
+- `task-detail.component.spec.ts → 'shows an inline error banner when
+  startEvaluation fails'` - mocks `TasksService.startEvaluation` to throw;
   asserts the `.evaluation-error` banner renders the underlying message.
-- `project-detail.component.spec.ts → 'clears the error banner when the user
+- `task-detail.component.spec.ts → 'clears the error banner when the user
   retries'` - calling `dismissError()` resets `errorMessage()` to `null` and the
   banner disappears.
 
@@ -4816,7 +4816,7 @@ Run with: `cargo test -p gradient-web --test forge_hooks`
 
 - `forge_webhook_test_ping_zero_sha_is_ok_noop` - posting the all-zero Gitea
   push to `/hooks/gitea/{org}/{name}` (valid signature) returns `200` with an
-  empty `push` response and touches no trigger/project rows.
+  empty `push` response and touches no trigger/task rows.
 
 ## Source-IP allowlist (#282)
 
@@ -4859,7 +4859,7 @@ job requires both.
 
 Run with: `cargo test -p scheduler --lib jobs`
 
-- `can_eval_requires_eval_for_evaluation_tasks` - the pure capability check:
+- `can_eval_requires_eval_for_evaluation_steps` - the pure capability check:
   bundled jobs need both `fetch` and `eval`, cached-eval jobs need `eval`,
   fetch-only jobs need `fetch`.
 - `fetch_flake_job_requires_fetch_capability` - a bundled flake job is assigned
@@ -4882,9 +4882,9 @@ Run with: `cargo test -p scheduler --lib` and `cargo test -p worker --lib`
 - `worker_pool::tests::idle_eval_only_worker_detected` /
   `draining_eval_only_worker_does_not_count` - the split heuristic (an idle,
   non-draining eval-only worker triggers the split).
-- `jobs::tests::is_fetch_only_true_only_for_fetch_task_alone` - recognises a
+- `jobs::tests::is_fetch_only_true_only_for_fetch_step_alone` - recognises a
   fetch-only job by its task list.
-- `jobs::tests::cached_followup_rewrites_source_and_tasks` - builds the cached
+- `jobs::tests::cached_followup_rewrites_source_and_steps` - builds the cached
   eval follow-up (Cached source, eval tasks, source as a required path).
 - `scheduler_tests::fetch_only_completion_enqueues_cached_eval_followup` - a
   completed fetch-only job enqueues the cached eval follow-up reusing its id.
@@ -4906,8 +4906,8 @@ contributor's branch (`synchronize`), both thread the event `sender` so the
 gate is bypassed once the actor is verified.
 
 The Evaluation check name gains a wildcard suffix
-(`gradient/{project}: Evaluation: {wildcard}`) whenever the evaluation's
-wildcard differs from the project default.
+(`gradient/{task}: Evaluation: {wildcard}`) whenever the evaluation's
+wildcard differs from the task default.
 
 Run with: `cargo test -p web --lib forge_hooks` and
 `cargo test -p core --tests ci::reporting`.
@@ -4923,7 +4923,7 @@ Run with: `cargo test -p web --lib forge_hooks` and
   `gitea_pr_parses_sender_login` / `gitlab_mr_sender_falls_back_to_event_user`
   - the event actor is parsed independently of the PR author.
 - `reporting::tests::evaluation_context_format_with_custom_wildcard` - custom
-  wildcard produces `gradient/{project}: Evaluation: {wildcard}`.
+  wildcard produces `gradient/{task}: Evaluation: {wildcard}`.
 
 ## Evaluation check goes green when the eval finishes, not all builds (#453)
 
@@ -5077,8 +5077,8 @@ are covered too. Phases:
 - **Organizations** - CRUD, available/public, ssh rotation, roles CRUD, and
   membership (a second user is added via `POST /orgs/{org}/users`, re-roled with
   `PATCH`, and removed with `DELETE`, asserting the member list each time).
-- **Projects** - CRUD, details, triggers, active toggle, plus a transfer flow
-  that moves a throwaway project to a second org and verifies it disappears from
+- **Tasks** - CRUD, details, triggers, active toggle, plus a transfer flow
+  that moves a throwaway task to a second org and verifies it disappears from
   the source and appears under the destination.
 - **Workers** - register/list/patch/delete (direct + CLI), with v4 worker UUIDs.
 - **Caches** - CRUD, key/stats, active/public toggles, plus sub-resources:
@@ -5088,17 +5088,17 @@ are covered too. Phases:
   available, and delete (CLI plus a direct `DELETE` asserting `204`).
 - **Build-dependent endpoints** - exercised on empty state for correct
   not-found behaviour, since no builds are present.
-- **Edge cases** - duplicate creates (org, project, cache, org/cache role, API
+- **Edge cases** - duplicate creates (org, task, cache, org/cache role, API
   key, org/cache member, subscription) return an enveloped `409`; a reserved
-  project name (`build-request`) and an empty API-key permission mask return
+  task name (`build-request`) and an empty API-key permission mask return
   enveloped `400`s.
 - **Permissions (multi-actor)** - the second user acts with their own token: a
   non-member cannot read the private org; the built-in `View` role grants read
-  but is rejected (enveloped `403`) on settings edit, project create, member
+  but is rejected (enveloped `403`) on settings edit, task create, member
   add, and org delete; promotion to `Admin` unlocks the settings edit.
 - **State export (`GET /admin/state`)** - rejected (`403`) for a non-superuser;
   after elevating `operator` to superuser in the DB, the JSON format returns the
-  seeded org/project/cache with secret `*_file` fields redacted to `null`, and
+  seeded org/task/cache with secret `*_file` fields redacted to `null`, and
   the default Nix format renders the same resources as a pasteable expression.
 
 The auth surface is rate-limited (burst 5, one token per 6s), so the script
@@ -5249,8 +5249,8 @@ Run with: `cargo test -p entity --lib build`
   in-closure dependency (`source` = dependency, `target` = dependent).
 
 The shared `derivation_closure_reachable` / `sum_output_sizes` helpers (lifted
-out of `projects/metrics.rs`) keep their existing coverage in
-`backend/web/src/endpoints/projects/metrics.rs` (`sum_output_sizes_*`).
+out of `tasks/metrics.rs`) keep their existing coverage in
+`backend/web/src/endpoints/tasks/metrics.rs` (`sum_output_sizes_*`).
 
 ### Shared closure-size helper - `backend/gradient-db/src/closure.rs`
 
@@ -5482,7 +5482,7 @@ warnings still split and the `SQLite database … is busy` line is still dropped
 ## Declarative state apply - gradient-api NixOS test (#347)
 
 `nix/tests/gradient/api` declares a full `services.gradient.state` (users with a
-superuser, organization with members, a state-managed role, a project with
+superuser, organization with members, a state-managed role, a task with
 non-default fields and polling+time triggers, a cache with members/role/upstream,
 an API key, a worker registration, and inbound+outbound integrations) and
 Phase 8d of `test.py` asserts each resource was provisioned by the startup state
@@ -5503,9 +5503,9 @@ statement binds more than 65535 parameters (regression for the `/evaluate` 500
 ## Per-resource live WebSocket filtering (#345)
 
 `web::endpoints::live::tests` cover the channel predicates: the evaluation channel
-forwards only events for its `evaluation_id`, the project channel learns evaluation
+forwards only events for its `evaluation_id`, the task channel learns evaluation
 ids from `evaluation_status_changed` events and then forwards their
-`build_status_changed` events (ignoring other projects), and `cache_changed`
+`build_status_changed` events (ignoring other tasks), and `cache_changed`
 serializes to the `{"type":"cache_changed"}` ping.
 
 ## Frontend live service (#345)
@@ -5639,28 +5639,28 @@ Frontend (`evaluation-log/evaluation-log.component.spec.ts`,
 - scrolling up during streaming pages older lines from the in-memory log
   (`loadWindow` prepend) with correct numbering and spacer heights.
 
-## Project page redesign - status rollups & dependency counts (#295)
+## Task page redesign - status rollups & dependency counts (#295)
 
-- `backend/gradient-web/src/endpoints/projects/mod.rs::rollup_tests` - `bar_segment` maps every `BuildStatus` to the correct segment, and `BuildStatusCounts::total()` excludes `Substituted`/`Aborted`.
-- `backend/gradient-web/src/endpoints/projects/evaluations.rs::tests::first_line_truncated_takes_first_line_and_caps_length` - commit-message first non-blank line extraction and 100-char cap.
-- `backend/gradient-web/src/endpoints/live.rs::tests::project_channel_forwards_build_transitions_for_seeded_evals` - the project live channel forwards build transitions for evaluations seeded at upgrade, so segmented bars/queue move while builds run.
+- `backend/gradient-web/src/endpoints/tasks/mod.rs::rollup_tests` - `bar_segment` maps every `BuildStatus` to the correct segment, and `BuildStatusCounts::total()` excludes `Substituted`/`Aborted`.
+- `backend/gradient-web/src/endpoints/tasks/evaluations.rs::tests::first_line_truncated_takes_first_line_and_caps_length` - commit-message first non-blank line extraction and 100-char cap.
+- `backend/gradient-web/src/endpoints/live.rs::tests::task_channel_forwards_build_transitions_for_seeded_evals` - the task live channel forwards build transitions for evaluations seeded at upgrade, so segmented bars/queue move while builds run.
 - Frontend `segmented-bar.component.spec.ts` - all four segments render with widths proportional to the four-segment total (substituted/aborted excluded; zero counts render at 0% width so live count changes animate); work finished entirely via substitution renders a single full green segment; all-zero counts render a grey track; hovering a segment shows an instant custom tooltip with its count.
-- Frontend `project-detail.component.spec.ts` - explicit eval selection is persisted in the `eval` query param (back-navigation restores it) and `barCounts` folds the entry point's own build status into its dep-closure counts.
-- `backend/gradient-web/src/endpoints/projects/evaluations.rs::tests::checked_at_maps_null_time_sentinel_to_none` - `last_check_at` epoch sentinel (re-check pending) serialises as `null`, not 1970.
-- SQL helpers in `gradient-db/src/project_board.rs` (grouped counts, queue summary, dependency-closure CTE) are covered end-to-end by CI; no local DB unit harness exists.
+- Frontend `task-detail.component.spec.ts` - explicit eval selection is persisted in the `eval` query param (back-navigation restores it) and `barCounts` folds the entry point's own build status into its dep-closure counts.
+- `backend/gradient-web/src/endpoints/tasks/evaluations.rs::tests::checked_at_maps_null_time_sentinel_to_none` - `last_check_at` epoch sentinel (re-check pending) serialises as `null`, not 1970.
+- SQL helpers in `gradient-db/src/task_board.rs` (grouped counts, queue summary, dependency-closure CTE) are covered end-to-end by CI; no local DB unit harness exists.
 
 ## Live evaluation progress (#295)
 
 Build/dependency totals now grow live during evaluation: the backend was silent
-while the evaluator inserted build rows (no status change), so the project and
+while the evaluator inserted build rows (no status change), so the task and
 evaluation pages stayed frozen until the eval phase finished.
 
 - `backend/gradient-web/src/endpoints/live.rs::tests::eval_channel_matches_only_its_evaluation`
-  and `project_channel_forwards_progress_and_learns_its_eval` assert the new
+  and `task_channel_forwards_progress_and_learns_its_eval` assert the new
   `evaluation_progress` frame is forwarded on the `/evals/{id}/live` and
-  `/projects/{org}/{project}/live` channels (and learnt into the project
+  `/tasks/{org}/{task}/live` channels (and learnt into the task
   channel's known-eval set), while a progress ping for another evaluation /
-  project is dropped.
+  task is dropped.
 - `backend/gradient-scheduler/src/eval.rs::handle_eval_result` emits
   `BoardEvent::EvaluationProgress` after each batch of builds/entry-points is
   persisted, so the silent insert phase no longer leaves the UI frozen.
@@ -5708,25 +5708,25 @@ build status transition.
   `reconcile_eval_dep_counts` on the terminal transition (alongside the existing
   abort/startup/read-when-empty reconciles), so a settled eval's bar always
   matches its final graph regardless of which bulk paths ran. Covered E2E by CI.
-- **Stale-zero closure heals instead of freezing (project page showed one dep).**
+- **Stale-zero closure heals instead of freezing (task page showed one dep).**
   The eval defers `derivation_dependency` writes to stream completion, but a
   read-path (or startup) `reconcile_eval_dep_counts` can run mid-eval before the
   edges flush: `materialize_entry_point_closures` then walks an empty graph, caches
   `dep_closure_count = 0`, and the old `is_some()` skip froze it there forever - so
-  the project page's `deps_total` showed the entry point with a single dep while
+  the task page's `deps_total` showed the entry point with a single dep while
   the graph page (live `derivation_dependency`) was correct. On prod (`019f4da0`)
   many building-eval entry points sat `dep_closure_count = 0` with live forward
   edges and zero `derivation_closure` rows. Fix: the skip is now
   `should_rematerialize` (recompute `None` and stale `Some(0)`; trust only a
   positive count), so a zero recomputes once edges exist (a true leaf stays 0,
   cheaply); `materialize_entry_point_closures` returns how many roots healed, and
-  the web read path (`projects/evaluations.rs`) materialises closures *before*
+  the web read path (`tasks/evaluations.rs`) materialises closures *before*
   loading derivations so `deps_total` is fresh, then rebuilds the histogram
   (`init_entry_point_dep_counts`) only when a heal actually changed a closure or an
   eval has no counts - never the full recompute on every request. `dep_closure.rs`:
   `rematerializes_null_and_stale_zero_but_trusts_positive` pins the predicate; the
   SQL heal + read-path wiring are E2E-CI-covered.
-- **Mid-eval histogram falls behind its closure (project page showed a handful of
+- **Mid-eval histogram falls behind its closure (task page showed a handful of
   deps).** The per-status histogram is only reseeded authoritatively when an eval
   finishes (`handle_eval_job_completed`); mid-eval it rides the incremental
   `apply_dep_count_delta`, which misses any transition that fires before the dep's
@@ -5787,12 +5787,12 @@ validates and ingests the staged NAR.
 - The chunk→finalize→ingest round trip is DB- and storage-dependent and covered
   end-to-end by CI (no local Postgres unit harness).
 
-## Project page bugs: PR label, stale packages, redirect (#391)
+## Task page bugs: PR label, stale packages, redirect (#391)
 
 - `backend/gradient-forge/src/webhook.rs::tests::parse_github_pr_opened_event`
   now asserts the parsed PR `title`, which becomes the evaluation's display
   message for PR triggers (PR webhooks carry no head commit message).
-- `frontend/.../project-detail.component.spec.ts`:
+- `frontend/.../task-detail.component.spec.ts`:
   - `labels a pull-request trigger as "PR #<n>"` - the trigger label shows the
     PR number (from `EvaluationSummary.pr_number`) and falls back to "PR".
   - the existing evaluation-selection specs cover the stale-packages clear on
@@ -5875,7 +5875,7 @@ propagation; `gradient-state` covers `resolve_scim_group_roles` mapping a
 ## Open PR flake.lock updater
 
 The `open_pr` action opens/updates a pull request from a natively recomputed
-flake.lock. An `input_update` evaluation bumps the project's tracked inputs
+flake.lock. An `input_update` evaluation bumps the task's tracked inputs
 (override rows with `url` unset; any override with a `url` set blocks the run as
 a safety gate), verifies the candidate lock by a normal eval/build per
 `verify_gate`, then opens or updates the PR. v1 covers `github`, `gitlab`, and
@@ -5913,11 +5913,11 @@ Backend (`cargo test -p gradient-ci --lib actions::open_pr`):
 Backend (`cargo test -p gradient-ci --lib trigger`):
 - `input_update_noop_without_open_pr_action` / `input_update_noop_without_tracked_inputs`
   - `maybe_trigger_input_update` self-gates: it creates no evaluation unless the
-  project has an active `open_pr` action and at least one tracked input, so the
+  task has an active `open_pr` action and at least one tracked input, so the
   shared call from the periodic dispatch and the manual *Run trigger* /
-  *Start Evaluation* paths is a no-op on projects that do not qualify.
+  *Start Evaluation* paths is a no-op on tasks that do not qualify.
 - `input_update_pinned_override_blocks_run` - a `url`-pinned override anywhere on
-  the project blocks the run.
+  the task blocks the run.
 - `input_update_creates_eval_for_tracked_input` - a tracked input with no pin
   creates one `input_update` evaluation plus its sidecar.
 
@@ -5939,7 +5939,7 @@ Backend (`cargo test -p gradient-nix --test narhash_corpus`):
   upstream `nix` for each fetcher, guarding the native hasher against drift.
 
 NixOS VM (`nix/tests/gradient/open-pr`):
-- E2E trigger-to-PR path: a trigger fires on a project with an `open_pr` action
+- E2E trigger-to-PR path: a trigger fires on a task with an `open_pr` action
   and one tracked input, the worker bumps the input and verifies the candidate
   lock, and a PR is opened on the (test) forge; a re-run with no upstream change
   produces an empty patch and opens no second PR.
@@ -5961,7 +5961,7 @@ Three independent fixes let a `flake.lock` bump actually open its PR:
 2. **The concurrent bump run is not aborted by the normal CI run.** The
    `input_update` eval is created `concurrent`; `apply_trigger` now scopes its
    in-flight lookup to non-concurrent evals (mirroring the
-   `uq_evaluation_one_active_per_project` partial index, which excludes
+   `uq_evaluation_one_active_per_task` partial index, which excludes
    `concurrent` rows), so the concurrency policy and same-commit dedup ignore it.
    Covered by the partial-index parallel and E2E CI rather than a MockDatabase
    test, which cannot observe a WHERE clause.
@@ -5979,7 +5979,7 @@ Frontend (`**/action-form.component.spec.ts`):
 Frontend (`src/app/shared/evaluation/commit.spec.ts`):
 - `commitLabel` / `evaluationTitle` - a blank commit (an `input_update` eval before
   its generated `flake.lock` is pushed) renders the `[unknown]` placeholder instead
-  of empty space in the project-detail strip and evaluation-log header, and falls
+  of empty space in the task-detail strip and evaluation-log header, and falls
   back to the short hash or commit message when those are present.
 
 ## Gradient build end-to-end + nix fast paths (#422)
@@ -6122,10 +6122,10 @@ created via `PUT /orgs/{org}/integrations` with `forge_type=github` and
 - github rows CAN be deleted via `DELETE /orgs/{org}/integrations/{id}`; removing the row also removes the `github_installation` binding.
 
 `backend/gradient-web/tests/forge_hooks.rs` - reworked GitHub App dispatch tests routing by `github_installation` FK:
-- `github_app_webhook_push_fires_trigger` (Test 10) - a push event dispatched via a `github_installation` row fires the matching project trigger and returns one queued evaluation.
+- `github_app_webhook_push_fires_trigger` (Test 10) - a push event dispatched via a `github_installation` row fires the matching task trigger and returns one queued evaluation.
 - `github_app_webhook_installation` (Test 12) - an `installation` event for an org not found in the DB warns and returns `200` with `event="installation"` and empty queued arrays (no crash).
-- `github_app_webhook_multi_org_routes_to_matching_org` (Test 15) - a push event routes only to the org whose project URL matches the push payload; the sibling org with a different repo URL is not queued.
-- `github_app_webhook_no_matching_repo_returns_zero` (Test 16) - a push against a repo URL not tracked by any project returns `projects_scanned=0`.
+- `github_app_webhook_multi_org_routes_to_matching_org` (Test 15) - a push event routes only to the org whose task URL matches the push payload; the sibling org with a different repo URL is not queued.
+- `github_app_webhook_no_matching_repo_returns_zero` (Test 16) - a push against a repo URL not tracked by any task returns `tasks_scanned=0`.
 
 `backend/gradient-state/src/config.rs` - `deserializes_github_integration_with_installation_id`:
 - A `forge_type=github` entry in the `integrations` map deserialises with `installation_id` + optional `account_login`, covering the state provisioning path that links the `github_installation`.
@@ -6285,7 +6285,7 @@ round-trips); the worker keeps the pool-internal `eval_stats` accumulator tests.
 
 ## State import accepts `open_pr` actions
 
-`backend/gradient-state/src/validation/projects.rs` validated the declarative
+`backend/gradient-state/src/validation/tasks.rs` validated the declarative
 action `type` against a stale list (`send_mail`/`send_web_request`/
 `forge_status_report`), so re-importing a state that `export.rs` had emitted with
 an `open_pr` action failed. The validator now also accepts `open_pr` and applies
@@ -6420,7 +6420,7 @@ All load-shape changes with unchanged semantics; covered by E2E CI (no MockDatab
 
 ## Action execution is bounded and convoy-free
 
-A mass status-transition wave (promotion, thaw, requeue after a worker reconnect) fires one `build.*`/`evaluation.*` event per anchor, and `dispatch_event` spawned an unbounded task per matching action. Hundreds of concurrent `execute_action`s each held a DB pool connection for their report loads and forge HTTP, then all converged on `UPDATE project_action SET last_fired_at` for the same row - a single-row lock convoy (observed live: 14 backends stacked on that UPDATE at 15-17s each, pool exhausted, CacheQuery replies missing the worker's 75s deadline, workers false-declared dead past the heartbeat). Two changes: `ACTION_PERMITS` (process-wide semaphore, 8) bounds concurrent action executions, and the `last_fired_at` stamp is now `FOR UPDATE SKIP LOCKED` - it is bookkeeping, and a concurrent writer is stamping an equivalent timestamp, so skipping beats queueing a pool connection behind the row lock. The delivery audit row is unaffected (fresh row per firing, no contention). Not unit-testable against MockDatabase (raw locking semantics); covered by E2E CI.
+A mass status-transition wave (promotion, thaw, requeue after a worker reconnect) fires one `build.*`/`evaluation.*` event per anchor, and `dispatch_event` spawned an unbounded task per matching action. Hundreds of concurrent `execute_action`s each held a DB pool connection for their report loads and forge HTTP, then all converged on `UPDATE task_action SET last_fired_at` for the same row - a single-row lock convoy (observed live: 14 backends stacked on that UPDATE at 15-17s each, pool exhausted, CacheQuery replies missing the worker's 75s deadline, workers false-declared dead past the heartbeat). Two changes: `ACTION_PERMITS` (process-wide semaphore, 8) bounds concurrent action executions, and the `last_fired_at` stamp is now `FOR UPDATE SKIP LOCKED` - it is bookkeeping, and a concurrent writer is stamping an equivalent timestamp, so skipping beats queueing a pool connection behind the row lock. The delivery audit row is unaffected (fresh row per firing, no contention). Not unit-testable against MockDatabase (raw locking semantics); covered by E2E CI.
 
 ## NarUploaded commits run off the session read loop
 
@@ -6584,7 +6584,7 @@ the instant no build is pending - previously it broke at eval start (no
 DB-less crate has no unit harness for the streaming handler.
 
 CLI shares one streamer (`cli/src/commands/logstream.rs`) across `gradient
-build`, `gradient logs <eval>`, and `gradient project log`: it streams the full
+build`, `gradient logs <eval>`, and `gradient task log`: it streams the full
 build log and concurrently polls `/messages`, so substituted/eval-only runs
 still show the eval warnings the build-log stream omits.
 
@@ -6918,25 +6918,25 @@ lands, assert the JSON names the member and an `../nar/...` archive that is
 actually fetchable, and assert `404` for an unknown build id, a malformed one,
 and the exact `/cache/debuginfo/<build-id>.debug` request from the issue.
 
-## A new project never starts above the evaluation cap (#561)
+## A new task never starts above the evaluation cap (#561)
 
-`PUT /projects/{org}` hard-coded `keep_evaluations: 30` and ignored
+`PUT /tasks/{org}` hard-coded `keep_evaluations: 30` and ignored
 `GRADIENT_KEEP_EVALUATIONS`. On an instance with a lower maximum every new
-project was created above it, so the first save - the settings form sends the
+task was created above it, so the first save - the settings form sends the
 whole form back - was rejected with `keep_evaluations cannot exceed the server
 maximum`, using the value the server itself had handed out. The startup sweep
-that caps existing projects only masked it until the next restart.
+that caps existing tasks only masked it until the next restart.
 
 `backend/gradient-types/src/cli/storage.rs`:
-`a_new_project_never_starts_above_the_maximum` is the reported case;
+`a_new_task_never_starts_above_the_maximum` is the reported case;
 `a_higher_maximum_leaves_the_default_alone` pins that the setting is a cap and
-not a target, so raising it does not raise what new projects get;
+not a target, so raising it does not raise what new tasks get;
 `zero_disables_the_cap` covers the documented opt-out; and
 `an_out_of_range_maximum_saturates` guards the `usize as i32` that would
 otherwise wrap a huge configured maximum into a negative ceiling rejecting every
 value.
 
-`nix/tests/gradient/api` runs with `keepEvaluations = 5`, below the per-project
-default, and phase 4 asserts a freshly created project reports `5`, that echoing
+`nix/tests/gradient/api` runs with `keepEvaluations = 5`, below the per-task
+default, and phase 4 asserts a freshly created task reports `5`, that echoing
 that value straight back in a `PATCH` succeeds, and that `6` (over the maximum)
 and `0` (under the floor) are still refused.

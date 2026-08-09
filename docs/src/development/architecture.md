@@ -81,7 +81,7 @@ organization
   │     ├── derivation_output[]         (one per Nix output: out, dev, doc, ...)
   │     ├── derivation_dependency[]     (edges: derivation → dependency)
   │     └── derivation_feature[]
-  └── project[]
+  └── task[]
         └── evaluation[]
               ├── commit
               ├── build[]                (one per attempt at a derivation)
@@ -135,7 +135,7 @@ commits.rs       Commit lookup
 evals.rs         Evaluation detail, abort, log streaming
 mod.rs           Health, config, 404 handler
 orgs/            Org CRUD, members, SSH key, cache subscriptions, worker registration
-projects.rs      Project CRUD, entry points, evaluate trigger
+tasks.rs      Task CRUD, entry points, evaluate trigger
 user.rs          Profile, API keys, settings
 workers.rs       Connected worker list (superuser / global stats)
 ```

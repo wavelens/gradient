@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{CommitId, EvaluationId, ProjectId, ProjectTriggerId, UserId};
+use crate::ids::{CommitId, EvaluationId, TaskId, TaskTriggerId, UserId};
 
 #[repr(i32)]
 #[derive(
@@ -190,7 +190,7 @@ pub enum EvalCacheStatus {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: EvaluationId,
-    pub project: Option<ProjectId>,
+    pub task: Option<TaskId>,
     pub repository: String,
     pub commit: CommitId,
     pub wildcard: String,
@@ -204,7 +204,7 @@ pub struct Model {
     pub flake_source: Option<String>,
     pub check_run_ids: Option<Json>,
     pub waiting_reason: Option<Json>,
-    pub trigger: Option<ProjectTriggerId>,
+    pub trigger: Option<TaskTriggerId>,
     pub started_by: Option<UserId>,
     pub concurrent: bool,
     pub source_comment: Option<Json>,
@@ -218,11 +218,11 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::project::Entity",
-        from = "Column::Project",
-        to = "super::project::Column::Id"
+        belongs_to = "super::task::Entity",
+        from = "Column::Task",
+        to = "super::task::Column::Id"
     )]
-    Project,
+    Task,
     #[sea_orm(
         belongs_to = "super::commit::Entity",
         from = "Column::Commit",
@@ -242,9 +242,9 @@ pub enum Relation {
     )]
     NextEvaluation,
     #[sea_orm(
-        belongs_to = "super::project_trigger::Entity",
+        belongs_to = "super::task_trigger::Entity",
         from = "Column::Trigger",
-        to = "super::project_trigger::Column::Id"
+        to = "super::task_trigger::Column::Id"
     )]
     Trigger,
     #[sea_orm(

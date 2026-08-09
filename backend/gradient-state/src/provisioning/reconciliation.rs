@@ -19,11 +19,11 @@ use std::collections::{HashMap, HashSet};
 /// Each set is built from the value's `name` (or `username`) field - the same
 /// field every `apply_*` writes to the DB row. Using the attrset key here
 /// instead would delete or unmanage rows whose Nix-side `name = "…"` was
-/// overridden away from the attrset key (e.g. `projects.foo = { name = "main"; }`).
+/// overridden away from the attrset key (e.g. `tasks.foo = { name = "main"; }`).
 pub(crate) struct ManagedKeepSets<'a> {
     usernames: HashSet<&'a String>,
     org_names: HashSet<&'a String>,
-    project_names: HashSet<&'a String>,
+    task_names: HashSet<&'a String>,
     cache_names: HashSet<&'a String>,
     api_key_names: HashSet<&'a String>,
 }
@@ -32,7 +32,7 @@ pub(crate) fn managed_keep_sets(config: &StateConfiguration) -> ManagedKeepSets<
     ManagedKeepSets {
         usernames: config.users.values().map(|u| &u.username).collect(),
         org_names: config.organizations.values().map(|o| &o.name).collect(),
-        project_names: config.projects.values().map(|p| &p.name).collect(),
+        task_names: config.tasks.values().map(|p| &p.name).collect(),
         cache_names: config.caches.values().map(|c| &c.name).collect(),
         api_key_names: config.api_keys.values().map(|k| &k.name).collect(),
     }
@@ -77,7 +77,7 @@ impl<'a> StateApplicator<'a> {
         let ManagedKeepSets {
             usernames,
             org_names,
-            project_names,
+            task_names,
             cache_names,
             api_key_names,
         } = managed_keep_sets(config);
@@ -105,7 +105,7 @@ impl<'a> StateApplicator<'a> {
             delete_state,
             "organization"
         );
-        unmark_managed!(db, project, project_names, name, delete_state, "project");
+        unmark_managed!(db, task, task_names, name, delete_state, "task");
         unmark_managed!(db, cache, cache_names, name, delete_state, "cache");
         unmark_managed!(db, api, api_key_names, name, delete_state, "API key");
 
@@ -223,7 +223,7 @@ mod keep_set_tests {
                     "created_by": "alice"
                 }
             },
-            "projects": {
+            "tasks": {
                 "foo-key": {
                     "name": "main",
                     "organization": "acme",
@@ -265,8 +265,8 @@ mod keep_set_tests {
 
         let main = "main".to_string();
         let foo_key = "foo-key".to_string();
-        assert!(sets.project_names.contains(&main));
-        assert!(!sets.project_names.contains(&foo_key));
+        assert!(sets.task_names.contains(&main));
+        assert!(!sets.task_names.contains(&foo_key));
 
         let primary = "primary".to_string();
         let cache_key = "cache-key".to_string();

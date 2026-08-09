@@ -7,7 +7,7 @@
 //! Approval-gate unparking: GitHub check-run buttons and native PR reviews.
 
 use super::commands::{
-    active_project_ids_for_integration, first_project_with_reporter,
+    active_task_ids_for_integration, first_task_with_reporter,
     github_installation_id_from_comment_body,
 };
 use super::installation::resolve_github_app_targets;
@@ -80,11 +80,11 @@ pub(super) async fn handle_github_check_run(
         );
         return;
     };
-    let Some(project_id) = eval.project else {
+    let Some(task_id) = eval.task else {
         return;
     };
 
-    if !sender_is_trusted(state, project_id, owner, repo, sender.login).await {
+    if !sender_is_trusted(state, task_id, owner, repo, sender.login).await {
         warn!(
             evaluation_id = %eval.id,
             sender = %sender.login,
@@ -102,7 +102,7 @@ pub(super) async fn handle_github_check_run(
             );
             dispatch_approval_granted(state, &unparked).await;
             if let Some(pr_number) = approval_pr_number(&eval) {
-                submit_pr_approval_review(state, project_id, owner, repo, pr_number).await;
+                submit_pr_approval_review(state, task_id, owner, repo, pr_number).await;
             }
         }
         Ok(None) => {
@@ -118,17 +118,17 @@ pub(super) async fn handle_github_check_run(
 /// Flip the `Awaiting Approval` check to Success once the gate is cleared, and
 /// re-emit the Evaluation check as Pending so the PR shows the run in flight.
 pub(super) async fn dispatch_approval_granted(state: &Arc<ServerState>, eval: &MEvaluation) {
-    let Some(project_id) = eval.project else {
+    let Some(task_id) = eval.task else {
         return;
     };
     let payload = serde_json::json!({
         "evaluation_id": eval.id,
-        "project_id": project_id,
+        "task_id": task_id,
         "status": "evaluation.approval_granted",
     });
     gradient_ci::actions::dispatch_evaluation_event(
         &state.ci(),
-        project_id,
+        task_id,
         "evaluation.approval_granted",
         payload,
     )
@@ -171,40 +171,40 @@ async fn find_eval_by_check_id(state: &Arc<ServerState>, check_id: i64) -> Optio
         .flatten()
 }
 
-/// Trust probe for the approval-unpark flows: asks the project's reporter
+/// Trust probe for the approval-unpark flows: asks the task's reporter
 /// whether `sender` can write to `owner/repo`. Fails closed on any error.
 pub(super) async fn sender_is_trusted(
     state: &Arc<ServerState>,
-    project_id: ProjectId,
+    task_id: TaskId,
     owner: &str,
     repo: &str,
     sender: &str,
 ) -> bool {
-    let reporter = match gradient_ci::actions::reporter_for_project(&state.ci(), project_id).await {
+    let reporter = match gradient_ci::actions::reporter_for_task(&state.ci(), task_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return false,
         Err(e) => {
-            warn!(error = %e, %project_id, "resolving ForgeStatusReport action for trust probe");
+            warn!(error = %e, %task_id, "resolving ForgeStatusReport action for trust probe");
             return false;
         }
     };
     match reporter.is_repo_writer(owner, repo, sender).await {
         Ok(b) => b,
         Err(e) => {
-            warn!(error = %e, %project_id, "is_repo_writer probe failed");
+            warn!(error = %e, %task_id, "is_repo_writer probe failed");
             false
         }
     }
 }
 
-/// Find the approval-gated evaluation for `(project_id, pr_number)`, flip it
+/// Find the approval-gated evaluation for `(task_id, pr_number)`, flip it
 /// back to `Queued`, and re-emit its pending CI checks.
 async fn unpark_pr_approval_eval(
     state: &Arc<ServerState>,
-    project_id: ProjectId,
+    task_id: TaskId,
     pr_number: u64,
 ) -> Option<MEvaluation> {
-    let eval = find_approval_gated_eval(&state.web_db, project_id, pr_number)
+    let eval = find_approval_gated_eval(&state.web_db, task_id, pr_number)
         .await
         .ok()
         .flatten()?;
@@ -236,16 +236,16 @@ fn approval_pr_number(eval: &MEvaluation) -> Option<u64> {
 /// approving PR review (GitHub only; other forges no-op). Best-effort.
 pub(super) async fn submit_pr_approval_review(
     state: &Arc<ServerState>,
-    project_id: ProjectId,
+    task_id: TaskId,
     owner: &str,
     repo: &str,
     pr_number: u64,
 ) {
-    let reporter = match gradient_ci::actions::reporter_for_project(&state.ci(), project_id).await {
+    let reporter = match gradient_ci::actions::reporter_for_task(&state.ci(), task_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return,
         Err(e) => {
-            warn!(error = %e, %project_id, "resolving reporter for PR approval review");
+            warn!(error = %e, %task_id, "resolving reporter for PR approval review");
             return;
         }
     };
@@ -259,7 +259,7 @@ pub(super) async fn submit_pr_approval_review(
         )
         .await
     {
-        warn!(error = %e, %project_id, pr_number, "submitting forge PR approval review failed");
+        warn!(error = %e, %task_id, pr_number, "submitting forge PR approval review failed");
     }
 }
 
@@ -330,17 +330,17 @@ pub(super) async fn handle_pull_request_review(
     };
 
     for integration_id in &integration_ids {
-        let project_ids = match active_project_ids_for_integration(state, *integration_id).await {
+        let task_ids = match active_task_ids_for_integration(state, *integration_id).await {
             Ok(rows) => rows,
             Err(e) => {
-                warn!(error = %e, "pull_request_review: failed to load project list");
+                warn!(error = %e, "pull_request_review: failed to load task list");
                 continue;
             }
         };
-        let Some(probe_project) = first_project_with_reporter(state, &project_ids).await else {
+        let Some(probe_task) = first_task_with_reporter(state, &task_ids).await else {
             continue;
         };
-        if !sender_is_trusted(state, probe_project, owner, repo, &reviewer).await {
+        if !sender_is_trusted(state, probe_task, owner, repo, &reviewer).await {
             warn!(
                 %integration_id,
                 pr_number,
@@ -349,8 +349,8 @@ pub(super) async fn handle_pull_request_review(
             );
             continue;
         }
-        for project_id in &project_ids {
-            if let Some(unparked) = unpark_pr_approval_eval(state, *project_id, pr_number).await {
+        for task_id in &task_ids {
+            if let Some(unparked) = unpark_pr_approval_eval(state, *task_id, pr_number).await {
                 info!(
                     evaluation_id = %unparked.id,
                     pr_number,

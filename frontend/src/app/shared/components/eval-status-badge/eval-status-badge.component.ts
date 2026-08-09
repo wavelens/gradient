@@ -6,7 +6,7 @@
 
 import { Component, computed, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { EvaluationStatus } from '@core/models/project.model';
+import { EvaluationStatus } from '@core/models/task.model';
 import { isRunningEvaluationStatus } from '@shared/evaluation';
 
 @Component({

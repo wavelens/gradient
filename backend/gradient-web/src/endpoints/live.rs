@@ -8,7 +8,7 @@
 //! resource once at upgrade, then forwards only the `BoardEvent`s belonging to
 //! that resource so the Angular pages can refetch on change instead of polling.
 
-use crate::access::{Caller, ProjectAccess, load_project};
+use crate::access::{Caller, TaskAccess, load_task};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::WebResult;
 use axum::Extension;
@@ -66,33 +66,33 @@ fn frame(ev: &BoardEvent) -> Option<String> {
     serde_json::to_string(ev).ok()
 }
 
-/// `GET /projects/{organization}/{project}/live` - evaluation and entry-point
-/// build status changes for one project.
-pub async fn project_live_ws(
+/// `GET /tasks/{organization}/{task}/live` - evaluation and entry-point
+/// build status changes for one task.
+pub async fn task_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, project)): Path<(String, String)>,
+    Path((organization, task)): Path<(String, String)>,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
-    let (_org, project) = load_project(
+    let (_org, task) = load_task(
         &state,
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
         organization,
-        project,
-        ProjectAccess::Readable,
+        task,
+        TaskAccess::Readable,
     )
     .await?;
 
-    let project_id = project.id.into_inner();
-    // Seed with the project's recent evaluations so build events fire even while
+    let task_id = task.id.into_inner();
+    // Seed with the task's recent evaluations so build events fire even while
     // the evaluation itself stays in `Building`. New evaluations announce
     // themselves via their own status change and are added on the fly.
     let mut known: HashSet<Uuid> = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project.id))
+        .filter(CEvaluation::Task.eq(task.id))
         .order_by_desc(CEvaluation::CreatedAt)
-        .limit(project.keep_evaluations.max(0) as u64)
+        .limit(task.keep_evaluations.max(0) as u64)
         .all(&state.web_db)
         .await
         .map(|rows| rows.into_iter().map(|e| e.id.into_inner()).collect())
@@ -100,25 +100,23 @@ pub async fn project_live_ws(
 
     let rx = state.board_events.subscribe();
     Ok(ws.on_upgrade(move |socket| {
-        live_stream(socket, rx, move |ev| {
-            project_frame(ev, project_id, &mut known)
-        })
+        live_stream(socket, rx, move |ev| task_frame(ev, task_id, &mut known))
     }))
 }
 
-/// Forward a project's own evaluation status changes (learning their ids) and
+/// Forward a task's own evaluation status changes (learning their ids) and
 /// any build status change belonging to an evaluation we've seen for it.
-fn project_frame(ev: &BoardEvent, project_id: Uuid, known: &mut HashSet<Uuid>) -> Option<String> {
+fn task_frame(ev: &BoardEvent, task_id: Uuid, known: &mut HashSet<Uuid>) -> Option<String> {
     match ev {
         BoardEvent::EvaluationStatusChanged {
-            project: Some(p),
+            task: Some(p),
             evaluation_id,
             ..
         }
         | BoardEvent::EvaluationProgress {
-            project: Some(p),
+            task: Some(p),
             evaluation_id,
-        } if *p == project_id => {
+        } if *p == task_id => {
             known.insert(*evaluation_id);
             frame(ev)
         }
@@ -191,9 +189,9 @@ pub async fn cache_live_ws(
 mod tests {
     use super::*;
 
-    fn eval_changed(eval: Uuid, project: Option<Uuid>) -> BoardEvent {
+    fn eval_changed(eval: Uuid, task: Option<Uuid>) -> BoardEvent {
         BoardEvent::EvaluationStatusChanged {
-            project,
+            task,
             evaluation_id: eval,
             status: 3,
         }
@@ -205,9 +203,9 @@ mod tests {
             status: 2,
         }
     }
-    fn progress(eval: Uuid, project: Option<Uuid>) -> BoardEvent {
+    fn progress(eval: Uuid, task: Option<Uuid>) -> BoardEvent {
         BoardEvent::EvaluationProgress {
-            project,
+            task,
             evaluation_id: eval,
         }
     }
@@ -225,23 +223,23 @@ mod tests {
     }
 
     #[test]
-    fn project_channel_learns_eval_ids_then_forwards_their_builds() {
-        let project = Uuid::from_u128(7);
+    fn task_channel_learns_eval_ids_then_forwards_their_builds() {
+        let task = Uuid::from_u128(7);
         let eval = Uuid::from_u128(8);
         let mut known = HashSet::new();
 
         // A build for an unknown evaluation is ignored.
-        assert!(project_frame(&build_changed(eval), project, &mut known).is_none());
+        assert!(task_frame(&build_changed(eval), task, &mut known).is_none());
         // The evaluation's own change is forwarded and remembered.
-        assert!(project_frame(&eval_changed(eval, Some(project)), project, &mut known).is_some());
+        assert!(task_frame(&eval_changed(eval, Some(task)), task, &mut known).is_some());
         // Now its builds are forwarded.
-        assert!(project_frame(&build_changed(eval), project, &mut known).is_some());
-        // Another project's evaluation is ignored.
+        assert!(task_frame(&build_changed(eval), task, &mut known).is_some());
+        // Another task's evaluation is ignored.
         let foreign = Uuid::from_u128(99);
         assert!(
-            project_frame(
+            task_frame(
                 &eval_changed(foreign, Some(Uuid::from_u128(5))),
-                project,
+                task,
                 &mut known
             )
             .is_none()
@@ -249,28 +247,28 @@ mod tests {
     }
 
     #[test]
-    fn project_channel_forwards_build_transitions_for_seeded_evals() {
-        let project = Uuid::from_u128(7);
+    fn task_channel_forwards_build_transitions_for_seeded_evals() {
+        let task = Uuid::from_u128(7);
         let eval = Uuid::from_u128(8);
         let mut known = HashSet::from([eval]);
-        assert!(project_frame(&build_changed(eval), project, &mut known).is_some());
+        assert!(task_frame(&build_changed(eval), task, &mut known).is_some());
     }
 
     #[test]
-    fn project_channel_forwards_progress_and_learns_its_eval() {
-        let project = Uuid::from_u128(7);
+    fn task_channel_forwards_progress_and_learns_its_eval() {
+        let task = Uuid::from_u128(7);
         let eval = Uuid::from_u128(8);
         let mut known = HashSet::new();
 
-        // A progress ping for our project is forwarded and remembers the eval,
+        // A progress ping for our task is forwarded and remembers the eval,
         // so subsequent build events for it flow even before any status change.
-        assert!(project_frame(&progress(eval, Some(project)), project, &mut known).is_some());
-        assert!(project_frame(&build_changed(eval), project, &mut known).is_some());
-        // Another project's progress is ignored.
+        assert!(task_frame(&progress(eval, Some(task)), task, &mut known).is_some());
+        assert!(task_frame(&build_changed(eval), task, &mut known).is_some());
+        // Another task's progress is ignored.
         assert!(
-            project_frame(
+            task_frame(
                 &progress(eval, Some(Uuid::from_u128(5))),
-                project,
+                task,
                 &mut HashSet::new()
             )
             .is_none()

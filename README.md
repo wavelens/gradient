@@ -11,8 +11,8 @@
   •
   <a href="https://matrix.to/#/#gradient-ci:matrix.org">💬 Matrix Chat</a>
   •
-  <sup><a href="https://public.gradient.ci/organization/gradient/project/main">
-    <img src="https://public.gradient.ci/api/v1/projects/gradient/main/badge" alt="Gradient Badge" align="middle">
+  <sup><a href="https://public.gradient.ci/organization/gradient/task/main">
+    <img src="https://public.gradient.ci/api/v1/tasks/gradient/main/badge" alt="Gradient Badge" align="middle">
   </a></sup>
 </p>
 
@@ -30,7 +30,7 @@
 - **Organizations**: multiple organizations, which work independently from each other (e.g. different workers, user access)
 - **API**: provides a RESTful API with API-Key management for authentication
 - **Streaming Logs**: real-time log streaming for builds
-- **Rich Project Configuration**: flake updates, check all branches, pull requests, and tags
+- **Rich Task Configuration**: flake updates, check all branches, pull requests, and tags
 - **OAuth2 / OIDC**: integrated single-sign-on support
 - **Binary Cache**: built-in Nix store cache with S3 storage backend support
 - **Proto Workers**: build and evaluate Nix derivations on distributed `gradient-worker` instances over a persistent WebSocket protocol
@@ -173,7 +173,7 @@ To use pull deployment, you need to enable the `gradient-deploy` module in your 
     enable = true;
     server = "https://gradient.example.com";
     apiKeyFile = "/var/lib/gradient-deploy/api-key";
-    project = "organization/project";
+    task = "organization/task";
   };
 }
 ```

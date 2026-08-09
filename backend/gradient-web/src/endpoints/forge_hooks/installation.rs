@@ -57,10 +57,10 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         return;
     }
 
-    // Bind to every org owning a project whose parsed `owner/repo` matches an
+    // Bind to every org owning a task whose parsed `owner/repo` matches an
     // installed repo, so flake shorthand and every clone-URL form match alike.
-    let owner_org_ids: HashSet<OrganizationId> = EProject::find()
-        .filter(CProject::Repository.contains("github"))
+    let owner_org_ids: HashSet<OrganizationId> = ETask::find()
+        .filter(CTask::Repository.contains("github"))
         .all(&state.web_db)
         .await
         .unwrap_or_default()
@@ -79,7 +79,7 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
             github_login,
             sender = %sender_login,
             installation_id,
-            "GitHub App installed but no Gradient project tracks an installed repository"
+            "GitHub App installed but no Gradient task tracks an installed repository"
         );
 
         return;
@@ -141,7 +141,7 @@ fn github_full_name(repo_url: &str) -> Option<String> {
     parse_owner_repo(repo_url).map(|(owner, repo)| format!("{owner}/{repo}").to_ascii_lowercase())
 }
 
-/// Canonical form for matching `project.repository` against forge-reported URLs:
+/// Canonical form for matching `task.repository` against forge-reported URLs:
 /// strips `.git`/trailing slash and rewrites `git@host:owner/repo` SSH to https.
 pub(super) fn normalize_repo_url(url: &str) -> String {
     let s = url.trim().trim_end_matches('/');
@@ -158,13 +158,10 @@ fn repo_identity(url: &str) -> Option<String> {
     parse_owner_repo(url).map(|(owner, repo)| format!("{owner}/{repo}").to_ascii_lowercase())
 }
 
-/// Whether a webhook event from `event_repo_urls` targets a project tracking
-/// `project_repository`. An org-wide inbound integration (a GitHub App spans the
-/// whole org) would otherwise fan out to sibling projects. Empty urls match all.
-pub(super) fn event_repo_matches_project(
-    event_repo_urls: &[String],
-    project_repository: &str,
-) -> bool {
+/// Whether a webhook event from `event_repo_urls` targets a task tracking
+/// `task_repository`. An org-wide inbound integration (a GitHub App spans the
+/// whole org) would otherwise fan out to sibling tasks. Empty urls match all.
+pub(super) fn event_repo_matches_task(event_repo_urls: &[String], task_repository: &str) -> bool {
     let mut keys = event_repo_urls
         .iter()
         .filter_map(|u| repo_identity(u))
@@ -173,14 +170,14 @@ pub(super) fn event_repo_matches_project(
         return true;
     }
 
-    match repo_identity(project_repository) {
+    match repo_identity(task_repository) {
         Some(target) => keys.any(|k| k == target),
         None => false,
     }
 }
 
 /// Resolve a GitHub App webhook to the inbound GitHub integrations whose org
-/// owns a project matching one of `repository_urls`. A single installation can
+/// owns a task matching one of `repository_urls`. A single installation can
 /// serve multiple orgs, so the repo-URL gate selects only the matching ones.
 pub(super) async fn resolve_github_app_targets(
     state: &Arc<ServerState>,
@@ -212,18 +209,18 @@ pub(super) async fn resolve_github_app_targets(
     let mut integrations = Vec::new();
     for inst in installs {
         let org_id = inst.organization;
-        let projects = match EProject::find()
-            .filter(CProject::Organization.eq(org_id))
+        let tasks = match ETask::find()
+            .filter(CTask::Organization.eq(org_id))
             .all(&state.web_db)
             .await
         {
             Ok(rows) => rows,
             Err(e) => {
-                warn!(error = %e, %org_id, "resolve_github_app_targets: project lookup failed");
+                warn!(error = %e, %org_id, "resolve_github_app_targets: task lookup failed");
                 continue;
             }
         };
-        let has_match = projects
+        let has_match = tasks
             .iter()
             .any(|p| webhook_urls.contains(&normalize_repo_url(&p.repository)));
         if !has_match {
@@ -254,7 +251,7 @@ pub(super) async fn resolve_github_app_targets(
             }
             None => warn!(
                 %org_id,
-                "resolve_github_app_targets: org has matching project but no inbound github integration row"
+                "resolve_github_app_targets: org has matching task but no inbound github integration row"
             ),
         }
     }
@@ -263,44 +260,44 @@ pub(super) async fn resolve_github_app_targets(
 
 #[cfg(test)]
 mod tests {
-    use super::{event_repo_matches_project, github_full_name, normalize_repo_url};
+    use super::{event_repo_matches_task, github_full_name, normalize_repo_url};
 
     #[test]
-    fn event_repo_matches_project_is_host_agnostic_on_owner_repo() {
+    fn event_repo_matches_task_is_host_agnostic_on_owner_repo() {
         let event = [
             "https://github.com/NuschtOS/search.nuschtos.de.git".to_string(),
             "git@github.com:NuschtOS/search.nuschtos.de.git".to_string(),
         ];
-        for project in [
+        for task in [
             "https://github.com/NuschtOS/search.nuschtos.de",
             "https://github.com/nuschtos/search.nuschtos.de.git",
             "git@github.com:NuschtOS/search.nuschtos.de.git",
         ] {
-            assert!(event_repo_matches_project(&event, project), "{project}");
+            assert!(event_repo_matches_task(&event, task), "{task}");
         }
     }
 
     #[test]
     fn event_repo_rejects_a_sibling_repo_in_the_same_org() {
         let event = ["https://github.com/NuschtOS/search.git".to_string()];
-        assert!(!event_repo_matches_project(
+        assert!(!event_repo_matches_task(
             &event,
             "https://github.com/NuschtOS/search.nuschtos.de"
         ));
     }
 
     #[test]
-    fn event_repo_empty_urls_match_every_project() {
-        assert!(event_repo_matches_project(
+    fn event_repo_empty_urls_match_every_task() {
+        assert!(event_repo_matches_task(
             &[],
             "https://github.com/NuschtOS/search"
         ));
     }
 
     #[test]
-    fn event_repo_unparsable_project_never_matches() {
+    fn event_repo_unparsable_task_never_matches() {
         let event = ["https://github.com/NuschtOS/search".to_string()];
-        assert!(!event_repo_matches_project(&event, "not-a-url"));
+        assert!(!event_repo_matches_task(&event, "not-a-url"));
     }
 
     #[test]

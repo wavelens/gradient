@@ -9,13 +9,13 @@ use gradient_entity::evaluation::{self, EvaluationStatus};
 use gradient_types::*;
 use uuid::Uuid;
 
-pub fn make_project() -> MProject {
-    MProject {
-        id: ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
+pub fn make_task() -> MTask {
+    MTask {
+        id: TaskId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
         organization: OrganizationId::nil(),
-        name: "test-project".into(),
+        name: "test-task".into(),
         active: true,
-        display_name: "Test Project".into(),
+        display_name: "Test Task".into(),
         repository: "https://github.com/test/repo".into(),
         wildcard: "*".into(),
         created_by: UserId::nil(),
@@ -29,7 +29,7 @@ pub fn make_project() -> MProject {
 pub fn make_eval(id: EvaluationId, status: EvaluationStatus) -> evaluation::Model {
     evaluation::Model {
         id,
-        project: Some(ProjectId::new(
+        task: Some(TaskId::new(
             Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
         )),
         repository: "https://github.com/test/repo".into(),
@@ -43,7 +43,7 @@ pub fn make_eval(id: EvaluationId, status: EvaluationStatus) -> evaluation::Mode
 pub fn make_entry_point(eval_id: EvaluationId, derivation: DerivationId) -> MEntryPoint {
     MEntryPoint {
         id: EntryPointId::now_v7(),
-        project: ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
+        task: TaskId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
         evaluation: eval_id,
         derivation,
         eval: "default".into(),

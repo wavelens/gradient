@@ -14,7 +14,7 @@ pub mod ssh_key;
 pub use self::build_log::strip_nix_log_tail;
 pub use self::cache_key::*;
 pub use self::git::{
-    Libgit2Prefetcher, accept_cert, check_project_updates, fetch_options_with_ssh, get_commit_info,
+    Libgit2Prefetcher, accept_cert, check_task_updates, fetch_options_with_ssh, get_commit_info,
     resolve_head,
 };
 pub use self::nar_path::*;

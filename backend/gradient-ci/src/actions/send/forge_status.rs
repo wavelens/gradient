@@ -13,8 +13,8 @@ use crate::integration_lookup::IntegrationKind;
 use anyhow::{Context, Result, anyhow};
 use gradient_forge::reporter::{CiReporter, GithubAppReporter};
 use gradient_types::{
-    ActionConfig, ActionType, CIntegration, CProjectAction, EIntegration, EProjectAction,
-    EvaluationId, IntegrationId, ProjectId,
+    ActionConfig, ActionType, CIntegration, CTaskAction, EIntegration, ETaskAction, EvaluationId,
+    IntegrationId, TaskId,
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value as JsonValue;
@@ -60,13 +60,13 @@ pub(crate) async fn execute_forge_status_report(
 
 /// Non-mutating "Test" probe for the forge-integration actions
 /// (`ForgeStatusReport`, `OpenPr`): builds the reporter from the action's
-/// integration and confirms it can reach the project's repository. The regular
+/// integration and confirms it can reach the task's repository. The regular
 /// synthetic test-fire posts a status/PR against placeholder owner/repo/sha,
 /// which every forge rejects, so connectivity-verify is the only test these
 /// actions can meaningfully pass.
 pub async fn verify_forge_action(
     ctx: &CiContext,
-    action: &gradient_types::MProjectAction,
+    action: &gradient_types::MTaskAction,
     repository: &str,
 ) -> Result<()> {
     let integration_id = match serde_json::from_value::<ActionConfig>(action.config.clone())
@@ -87,17 +87,17 @@ pub async fn verify_forge_action(
         .context("forge connectivity check failed")
 }
 
-/// Find the project's first active `ForgeStatusReport` action and build a
+/// Find the task's first active `ForgeStatusReport` action and build a
 /// `CiReporter` from its integration. Used by the PR-approval trust probe to
 /// reuse the same forge credentials Actions already use for status reporting.
-pub async fn reporter_for_project(
+pub async fn reporter_for_task(
     ctx: &CiContext,
-    project_id: ProjectId,
+    task_id: TaskId,
 ) -> Result<Option<Arc<dyn CiReporter>>> {
-    let action = EProjectAction::find()
-        .filter(CProjectAction::Project.eq(project_id))
-        .filter(CProjectAction::Active.eq(true))
-        .filter(CProjectAction::ActionType.eq(ActionType::ForgeStatusReport))
+    let action = ETaskAction::find()
+        .filter(CTaskAction::Task.eq(task_id))
+        .filter(CTaskAction::Active.eq(true))
+        .filter(CTaskAction::ActionType.eq(ActionType::ForgeStatusReport))
         .one(&ctx.db.worker_db)
         .await
         .context("loading forge_status_report action")?;

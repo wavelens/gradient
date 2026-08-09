@@ -21,7 +21,7 @@ use tracing::{debug, warn};
 use super::DbContext;
 
 /// A simple count metric over the global `derivation_build` anchor, attributed
-/// to an owning org once per referencing `build_job` (its eval -> project join).
+/// to an owning org once per referencing `build_job` (its eval -> task join).
 struct BuildCount {
     name: &'static str,
     time_col: &'static str,
@@ -97,7 +97,7 @@ const BUILD_DURATIONS: &[BuildDuration] = &[
     },
 ];
 
-/// A count metric over `evaluation`, attributed to the org via the project join.
+/// A count metric over `evaluation`, attributed to the org via the task join.
 struct EvalCount {
     name: &'static str,
     filter: String,
@@ -305,7 +305,7 @@ fn build_count_sql(m: &BuildCount) -> String {
          FROM build_job bj \
          JOIN derivation_build b ON b.id = bj.derivation_build \
          JOIN evaluation ev ON ev.id = bj.evaluation \
-         JOIN project pr ON pr.id = ev.project \
+         JOIN task pr ON pr.id = ev.task \
          WHERE b.{col} IS NOT NULL \
            AND b.{col} >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
            AND ({filter}) \
@@ -334,7 +334,7 @@ fn build_duration_sql(m: &BuildDuration) -> String {
          FROM build_job bj \
          JOIN derivation_build b ON b.id = bj.derivation_build \
          JOIN evaluation ev ON ev.id = bj.evaluation \
-         JOIN project pr ON pr.id = ev.project \
+         JOIN task pr ON pr.id = ev.task \
          WHERE b.{end} IS NOT NULL AND b.{start} IS NOT NULL \
            AND b.{end} >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
            AND ({filter}) \
@@ -366,7 +366,7 @@ fn build_duration_attempt_sql() -> String {
          FROM build_job bj \
          JOIN derivation_build b ON b.id = bj.derivation_build \
          JOIN evaluation ev ON ev.id = bj.evaluation \
-         JOIN project pr ON pr.id = ev.project \
+         JOIN task pr ON pr.id = ev.task \
          JOIN LATERAL ( \
              SELECT ba2.build_started_at, ba2.build_finished_at \
              FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
@@ -393,7 +393,7 @@ fn eval_count_sql(m: &EvalCount) -> String {
                 jsonb_build_object('org', p.organization::text), \
                 hashtextextended(p.organization::text, 0), \
                 count(*)::bigint, 0, 0, 0, 0, NULL \
-         FROM evaluation e JOIN project p ON p.id = e.project \
+         FROM evaluation e JOIN task p ON p.id = e.task \
          WHERE e.finished_at IS NOT NULL \
            AND e.finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
            AND ({filter}) \
@@ -453,9 +453,9 @@ mod tests {
     }
 
     /// Derivations are global; build rollups must attribute org through the
-    /// build's evaluation -> project, never a (now column-less) derivation join.
+    /// build's evaluation -> task, never a (now column-less) derivation join.
     #[test]
-    fn build_rollups_attribute_org_via_project() {
+    fn build_rollups_attribute_org_via_task() {
         let counts = build_counts();
         let sqls = counts
             .iter()
@@ -463,10 +463,7 @@ mod tests {
             .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
             .chain(std::iter::once(build_duration_attempt_sql()));
         for sql in sqls {
-            assert!(
-                sql.contains("JOIN project pr"),
-                "missing project join: {sql}"
-            );
+            assert!(sql.contains("JOIN task pr"), "missing task join: {sql}");
             assert!(
                 !sql.contains("d.organization"),
                 "stale derivation org: {sql}"

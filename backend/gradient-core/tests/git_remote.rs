@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Tests for `check_project_updates` error propagation.
+//! Tests for `check_task_updates` error propagation.
 //!
 //! Issue #280: manual `POST /evaluate` used to swallow git fetch failures
 //! (DNS, connection refused, …) and bubble up a generic 500. The fix
 //! propagates the `SourceError` to the caller so the web layer can return
 //! a 4xx with a useful message.
 
-use gradient_entity::project;
-use gradient_sources::check_project_updates;
+use gradient_entity::task;
+use gradient_sources::check_task_updates;
 use gradient_test_support::state::test_state;
 use sea_orm::{DatabaseBackend, MockDatabase};
 
@@ -21,7 +21,7 @@ use sea_orm::{DatabaseBackend, MockDatabase};
 /// touching the network beyond loopback. Before the fix, this case was
 /// hidden behind `Ok((false, vec![]))`.
 #[test]
-fn check_project_updates_propagates_unreachable_remote_error() {
+fn check_task_updates_propagates_unreachable_remote_error() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -29,13 +29,13 @@ fn check_project_updates_propagates_unreachable_remote_error() {
     rt.block_on(async {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let state = test_state(db);
-        let project = project::Model {
+        let task = task::Model {
             repository: "git://127.0.0.1:1/nonexistent.git".into(),
             force_evaluation: true,
             ..Default::default()
         };
 
-        let result = check_project_updates(&state.db(), &project, None).await;
+        let result = check_task_updates(&state.db(), &task, None).await;
 
         assert!(
             result.is_err(),

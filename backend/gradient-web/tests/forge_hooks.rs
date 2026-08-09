@@ -114,8 +114,8 @@ fn org_id() -> OrganizationId {
 fn integration_id() -> IntegrationId {
     IntegrationId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000002").unwrap())
 }
-fn project_id() -> ProjectId {
-    ProjectId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000003").unwrap())
+fn task_id() -> TaskId {
+    TaskId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000003").unwrap())
 }
 fn user_id() -> UserId {
     UserId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000004").unwrap())
@@ -126,8 +126,8 @@ fn eval_id() -> EvaluationId {
 fn commit_id() -> CommitId {
     CommitId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000006").unwrap())
 }
-fn trigger_id() -> ProjectTriggerId {
-    ProjectTriggerId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000007").unwrap())
+fn trigger_id() -> TaskTriggerId {
+    TaskTriggerId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000007").unwrap())
 }
 
 const GITEA_PUSH_BODY: &str = r#"{
@@ -234,27 +234,27 @@ fn github_integration_row() -> gradient_entity::integration::Model {
     }
 }
 
-fn project_row() -> gradient_entity::project::Model {
-    project_row_with(
-        project_id(),
+fn task_row() -> gradient_entity::task::Model {
+    task_row_with(
+        task_id(),
         org_id(),
-        "test-project",
+        "test-task",
         "https://gitea.example.com/test-org/repo",
     )
 }
 
-fn project_row_with(
-    id: ProjectId,
+fn task_row_with(
+    id: TaskId,
     organization: OrganizationId,
     name: &str,
     repository: &str,
-) -> gradient_entity::project::Model {
-    gradient_entity::project::Model {
+) -> gradient_entity::task::Model {
+    gradient_entity::task::Model {
         id,
         organization,
         name: name.into(),
         active: true,
-        display_name: "Test Project".into(),
+        display_name: "Test Task".into(),
         repository: repository.into(),
         wildcard: "*".into(),
         last_check_at: fixture_date(),
@@ -267,11 +267,11 @@ fn project_row_with(
     }
 }
 
-fn github_project_row() -> gradient_entity::project::Model {
-    project_row_with(
-        project_id(),
+fn github_task_row() -> gradient_entity::task::Model {
+    task_row_with(
+        task_id(),
         org_id(),
-        "test-project",
+        "test-task",
         "https://github.com/gh-org/repo",
     )
 }
@@ -279,7 +279,7 @@ fn github_project_row() -> gradient_entity::project::Model {
 fn eval_row(status: EvaluationStatus) -> gradient_entity::evaluation::Model {
     gradient_entity::evaluation::Model {
         id: eval_id(),
-        project: Some(project_id()),
+        task: Some(task_id()),
         repository: "https://gitea.example.com/test-org/repo".into(),
         commit: commit_id(),
         wildcard: "*".into(),
@@ -335,11 +335,11 @@ fn worker_registration_row() -> gradient_entity::worker_registration::Model {
     }
 }
 
-/// Build a `project_trigger` row with the given config.
-fn trigger_row(cfg: TriggerConfig) -> gradient_entity::project_trigger::Model {
-    gradient_entity::project_trigger::Model {
+/// Build a `task_trigger` row with the given config.
+fn trigger_row(cfg: TriggerConfig) -> gradient_entity::task_trigger::Model {
+    gradient_entity::task_trigger::Model {
         id: trigger_id(),
-        project: project_id(),
+        task: task_id(),
         trigger_type: cfg.trigger_type(),
         config: cfg.to_db_json(),
         active: true,
@@ -383,18 +383,18 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
 /// `org_has_writable_cache` lookup that runs after the eval is created,
 /// the `org_has_eval_capable_worker_registration` lookup that follows it,
 /// the `touch_trigger_last_fired` update on the trigger row, and the
-/// `dispatch_evaluation_created` lookup of project actions.
+/// `dispatch_evaluation_created` lookup of task actions.
 fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]) // in-flight check
         .append_query_results([Vec::<gradient_entity::evaluation::Model>::new()]) // trigger_evaluation: in-progress check
         .append_query_results([vec![commit_row()]]) // INSERT commit
         .append_query_results([vec![eval_row(EvaluationStatus::Queued)]]) // INSERT eval
-        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()]) // snapshot flake input overrides (none)
-        .append_query_results([vec![project_row()]]) // SELECT project for update
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()]) // snapshot flake input overrides (none)
+        .append_query_results([vec![task_row()]]) // SELECT task for update
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
-        }]) // UPDATE project
+        }]) // UPDATE task
         .append_query_results([vec![org_cache_row()]]) // org_has_writable_cache: subscription rows
         .append_query_results([vec![cache_row()]]) // org_has_writable_cache: active cache rows
         .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()]) // park_if_storage_full: org_writable_caches → none → not full
@@ -404,7 +404,7 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
             last_insert_id: 0,
             rows_affected: 1,
         }]) // touch_trigger_last_fired: UPDATE
-        .append_query_results([Vec::<gradient_entity::project_action::Model>::new()]) // dispatch_evaluation_created: project_action lookup
+        .append_query_results([Vec::<gradient_entity::task_action::Model>::new()]) // dispatch_evaluation_created: task_action lookup
 }
 
 // ── Test 1: Generic forge - no matching trigger (Gitea) ───────────────────────
@@ -430,7 +430,7 @@ async fn forge_webhook_no_matching_trigger_inner() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
-        .append_query_results([Vec::<gradient_entity::project_trigger::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
@@ -452,7 +452,7 @@ async fn forge_webhook_no_matching_trigger_inner() {
     assert_eq!(json["error"], false);
     let msg = &json["message"];
     assert_eq!(msg["event"], "push");
-    assert_eq!(msg["projects_scanned"], 0);
+    assert_eq!(msg["tasks_scanned"], 0);
     assert!(msg["queued"].as_array().unwrap().is_empty());
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
@@ -477,14 +477,14 @@ async fn forge_webhook_push_fires_trigger_inner() {
     // 1. SELECT org by name → org row
     // 2. SELECT integration → integration row
     // 3. load_active_triggers → [reporter_push trigger matching this integration_id]
-    // 4. EProject::find_by_id → project row
+    // 4. ETask::find_by_id → task row
     // 5. EOrganization::find_by_id (org_name_for) → org row
     // 6–11. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
-        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![org_row("test-org")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
@@ -507,11 +507,11 @@ async fn forge_webhook_push_fires_trigger_inner() {
     assert_eq!(json["error"], false);
     let msg = &json["message"];
     assert_eq!(msg["event"], "push");
-    assert_eq!(msg["projects_scanned"], 1);
+    assert_eq!(msg["tasks_scanned"], 1);
 
     let queued = msg["queued"].as_array().unwrap();
     assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0]["project_name"], "test-project");
+    assert_eq!(queued[0]["task_name"], "test-task");
     assert_eq!(queued[0]["organization"], "test-org");
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
@@ -533,7 +533,7 @@ async fn forge_webhook_test_ping_zero_sha_is_ok_noop_inner() {
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
     // Signature verification needs the org + integration rows; the all-zero push
-    // short-circuits before any trigger/project lookup, so no further rows.
+    // short-circuits before any trigger/task lookup, so no further rows.
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
@@ -558,7 +558,7 @@ async fn forge_webhook_test_ping_zero_sha_is_ok_noop_inner() {
     assert_eq!(json["error"], false);
     let msg = &json["message"];
     assert_eq!(msg["event"], "push");
-    assert_eq!(msg["projects_scanned"], 0);
+    assert_eq!(msg["tasks_scanned"], 0);
     assert!(msg["queued"].as_array().unwrap().is_empty());
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
@@ -662,8 +662,8 @@ async fn forge_webhook_branch_glob_no_match_skipped_inner() {
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec!["release/*"]))]])
-        // project_identity lookup (for skipped entry)
-        .append_query_results([vec![project_row()]])
+        // task_identity lookup (for skipped entry)
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![org_row("test-org")]])
         .into_connection();
 
@@ -686,7 +686,7 @@ async fn forge_webhook_branch_glob_no_match_skipped_inner() {
     assert_eq!(json["error"], false);
     let msg = &json["message"];
     assert_eq!(msg["event"], "push");
-    assert_eq!(msg["projects_scanned"], 0);
+    assert_eq!(msg["tasks_scanned"], 0);
     assert!(msg["queued"].as_array().unwrap().is_empty());
 
     let skipped = msg["skipped"].as_array().unwrap();
@@ -736,7 +736,7 @@ async fn forge_webhook_pr_fires_trigger_inner() {
             "opened",
             "synchronize",
         ]))]])
-        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![org_row("test-org")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
@@ -759,11 +759,11 @@ async fn forge_webhook_pr_fires_trigger_inner() {
     assert_eq!(json["error"], false);
     let msg = &json["message"];
     assert_eq!(msg["event"], "pull_request");
-    assert_eq!(msg["projects_scanned"], 1);
+    assert_eq!(msg["tasks_scanned"], 1);
 
     let queued = msg["queued"].as_array().unwrap();
     assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0]["project_name"], "test-project");
+    assert_eq!(queued[0]["task_name"], "test-task");
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
@@ -803,8 +803,8 @@ async fn forge_webhook_pr_action_mismatch_skipped_inner() {
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_pr_trigger(vec!["opened"]))]])
-        // project_identity lookup for skipped
-        .append_query_results([vec![project_row()]])
+        // task_identity lookup for skipped
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![org_row("test-org")]])
         .into_connection();
 
@@ -827,7 +827,7 @@ async fn forge_webhook_pr_action_mismatch_skipped_inner() {
     assert_eq!(json["error"], false);
     let msg = &json["message"];
     assert_eq!(msg["event"], "pull_request");
-    assert_eq!(msg["projects_scanned"], 0);
+    assert_eq!(msg["tasks_scanned"], 0);
     assert!(msg["queued"].as_array().unwrap().is_empty());
 
     let skipped = msg["skipped"].as_array().unwrap();
@@ -870,7 +870,7 @@ async fn forge_webhook_release_fires_releases_only_trigger_inner() {
         .append_query_results([vec![org_row("test-org")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
-        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![org_row("test-org")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
@@ -893,11 +893,11 @@ async fn forge_webhook_release_fires_releases_only_trigger_inner() {
     assert_eq!(json["error"], false);
     let msg = &json["message"];
     assert_eq!(msg["event"], "release");
-    assert_eq!(msg["projects_scanned"], 1);
+    assert_eq!(msg["tasks_scanned"], 1);
 
     let queued = msg["queued"].as_array().unwrap();
     assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0]["project_name"], "test-project");
+    assert_eq!(queued[0]["task_name"], "test-task");
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
@@ -942,7 +942,7 @@ async fn forge_webhook_push_does_not_fire_releases_only_trigger_inner() {
     let json: Value = response.json();
     assert_eq!(json["error"], false);
     let msg = &json["message"];
-    assert_eq!(msg["projects_scanned"], 0);
+    assert_eq!(msg["tasks_scanned"], 0);
     assert!(msg["queued"].as_array().unwrap().is_empty());
     // silently skipped (releases_only triggers are just skipped, not added to skipped list)
     assert!(msg["skipped"].as_array().unwrap().is_empty());
@@ -966,19 +966,19 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     // Mock chain:
     // resolve_github_app_targets:
     //   1. SELECT github_installation by installation_id (.all) → [github_installation row]
-    //   2. SELECT projects for org (.all) → [project row matching webhook url]
+    //   2. SELECT tasks for org (.all) → [task row matching webhook url]
     //   3. SELECT inbound GitHub integration (.one) → integration row
     // fan_out_triggers:
     //   4. load_active_triggers → [reporter_push trigger]
-    //   5. EProject::find_by_id → project row
+    //   5. ETask::find_by_id → task row
     //   6. org_name_for → org row
     //   7+. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![github_installation_row(org_id(), 9999)]])
-        .append_query_results([vec![github_project_row()]])
+        .append_query_results([vec![github_task_row()]])
         .append_query_results([vec![github_integration_row()]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
-        .append_query_results([vec![github_project_row()]])
+        .append_query_results([vec![github_task_row()]])
         .append_query_results([vec![org_row("gh-org")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
@@ -1001,11 +1001,11 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     assert_eq!(json["error"], false);
     let msg = &json["message"];
     assert_eq!(msg["event"], "push");
-    assert_eq!(msg["projects_scanned"], 1);
+    assert_eq!(msg["tasks_scanned"], 1);
 
     let queued = msg["queued"].as_array().unwrap();
     assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0]["project_name"], "test-project");
+    assert_eq!(queued[0]["task_name"], "test-task");
     assert_eq!(queued[0]["organization"], "gh-org");
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
@@ -1046,7 +1046,7 @@ async fn github_app_webhook_ping_inner() {
     assert_eq!(json["error"], false);
     let msg = &json["message"];
     assert_eq!(msg["event"], "ping");
-    assert_eq!(msg["projects_scanned"], 0);
+    assert_eq!(msg["tasks_scanned"], 0);
     assert!(msg["queued"].as_array().unwrap().is_empty());
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
@@ -1096,7 +1096,7 @@ async fn github_app_webhook_installation_inner() {
     assert_eq!(json["error"], false);
     let msg = &json["message"];
     assert_eq!(msg["event"], "installation");
-    assert_eq!(msg["projects_scanned"], 0);
+    assert_eq!(msg["tasks_scanned"], 0);
     assert!(msg["queued"].as_array().unwrap().is_empty());
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
@@ -1148,8 +1148,8 @@ async fn github_app_webhook_multi_org_routes_to_matching_org_inner() {
     let gh_secret_path = temp_secret_file(gh_secret);
 
     // Two orgs share installation_id=9999 via separate github_installation rows.
-    // Org A's projects don't match the webhook repo URL; org B has the matching
-    // project. Only org B's integration should fire.
+    // Org A's tasks don't match the webhook repo URL; org B has the matching
+    // task. Only org B's integration should fire.
     let org_a_id =
         OrganizationId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000aa").unwrap());
     let inst_a_id = gradient_entity::ids::GithubInstallationId::new(
@@ -1165,32 +1165,32 @@ async fn github_app_webhook_multi_org_routes_to_matching_org_inner() {
     };
     let inst_b = github_installation_row(org_id(), 9999);
 
-    let org_a_project = project_row_with(
-        ProjectId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000ab").unwrap()),
+    let org_a_task = task_row_with(
+        TaskId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000ab").unwrap()),
         org_a_id,
         "unrelated",
         "https://github.com/org-a/different-repo",
     );
-    let org_b_project = github_project_row();
+    let org_b_task = github_task_row();
 
     // Mock chain:
     // resolve_github_app_targets:
     //   1. SELECT github_installation by installation_id → [inst_a, inst_b]
-    //   2. projects.all for org A → [org_a_project]   (no URL match → skipped)
-    //   3. projects.all for org B → [org_b_project]   (URL matches)
+    //   2. tasks.all for org A → [org_a_task]   (no URL match → skipped)
+    //   3. tasks.all for org B → [org_b_task]   (URL matches)
     //   4. integration.one for org B (filtered by inst_b.id) → github_integration_row
     // fan_out_triggers for org B's integration:
     //   5. load_active_triggers → [trigger]
-    //   6. EProject::find_by_id → org_b_project
+    //   6. ETask::find_by_id → org_b_task
     //   7. org_name_for → org B row
     //   8+. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![inst_a, inst_b]])
-        .append_query_results([vec![org_a_project]])
-        .append_query_results([vec![org_b_project.clone()]])
+        .append_query_results([vec![org_a_task]])
+        .append_query_results([vec![org_b_task.clone()]])
         .append_query_results([vec![github_integration_row()]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
-        .append_query_results([vec![org_b_project.clone()]])
+        .append_query_results([vec![org_b_task.clone()]])
         .append_query_results([vec![org_row("gh-org")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
@@ -1211,13 +1211,13 @@ async fn github_app_webhook_multi_org_routes_to_matching_org_inner() {
     response.assert_status_ok();
     let json: Value = response.json();
     let msg = &json["message"];
-    assert_eq!(msg["projects_scanned"], 1);
+    assert_eq!(msg["tasks_scanned"], 1);
     let queued = msg["queued"].as_array().unwrap();
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0]["organization"], "gh-org");
 }
 
-// ── Test 16: GitHub App - no project matches webhook repo URL ───────────────
+// ── Test 16: GitHub App - no task matches webhook repo URL ───────────────
 
 #[test]
 fn github_app_webhook_no_matching_repo_returns_zero() {
@@ -1232,9 +1232,9 @@ async fn github_app_webhook_no_matching_repo_returns_zero_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // Org has the installation but no project with a matching repo URL.
-    let unrelated = project_row_with(
-        project_id(),
+    // Org has the installation but no task with a matching repo URL.
+    let unrelated = task_row_with(
+        task_id(),
         org_id(),
         "unrelated",
         "https://github.com/somewhere/else",
@@ -1262,7 +1262,7 @@ async fn github_app_webhook_no_matching_repo_returns_zero_inner() {
     response.assert_status_ok();
     let json: Value = response.json();
     let msg = &json["message"];
-    assert_eq!(msg["projects_scanned"], 0);
+    assert_eq!(msg["tasks_scanned"], 0);
     assert!(msg["queued"].as_array().unwrap().is_empty());
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }

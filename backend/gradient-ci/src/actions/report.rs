@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow};
 use gradient_forge::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
 use gradient_types::{
-    BuildJobId, CEntryPoint, EBuildJob, ECommit, EEntryPoint, EEvaluation, EOrganization, EProject,
+    BuildJobId, CEntryPoint, EBuildJob, ECommit, EEntryPoint, EEvaluation, EOrganization, ETask,
     EvaluationId,
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -131,15 +131,15 @@ pub(super) async fn build_ci_report_from_payload(
         );
     };
 
-    let project_id = evaluation
-        .project
-        .ok_or_else(|| anyhow!("evaluation has no project (direct build)"))?;
+    let task_id = evaluation
+        .task
+        .ok_or_else(|| anyhow!("evaluation has no task (direct build)"))?;
 
-    let project = EProject::find_by_id(project_id)
+    let task = ETask::find_by_id(task_id)
         .one(&ctx.db.worker_db)
         .await
-        .context("loading project")?
-        .ok_or_else(|| anyhow!("project {} not found", project_id))?;
+        .context("loading task")?
+        .ok_or_else(|| anyhow!("task {} not found", task_id))?;
 
     let commit = ECommit::find_by_id(evaluation.commit)
         .one(&ctx.db.worker_db)
@@ -147,13 +147,13 @@ pub(super) async fn build_ci_report_from_payload(
         .context("loading commit")?
         .ok_or_else(|| anyhow!("commit {} not found", evaluation.commit))?;
 
-    // Always post check runs / status updates against the project's base
+    // Always post check runs / status updates against the task's base
     // repository, not `evaluation.repository`. For fork PRs the evaluation
     // URL points at the fork (so the worker can fetch the commit), but the
     // GitHub App installation lives on the base repo - calling the fork's
     // /check-runs endpoint returns 403.
-    let (owner, repo) = parse_owner_repo(&project.repository)
-        .ok_or_else(|| anyhow!("could not parse owner/repo from {}", project.repository))?;
+    let (owner, repo) = parse_owner_repo(&task.repository)
+        .ok_or_else(|| anyhow!("could not parse owner/repo from {}", task.repository))?;
 
     let entry_points = match &build_job {
         Some(b) => EEntryPoint::find()
@@ -171,7 +171,7 @@ pub(super) async fn build_ci_report_from_payload(
     // one check per derivation would spam the PR with per-dependency noise.
     let entry_point_eval = entry_points.first().map(|ep| ep.eval.clone());
 
-    let org_name = EOrganization::find_by_id(project.organization)
+    let org_name = EOrganization::find_by_id(task.organization)
         .one(&ctx.db.worker_db)
         .await
         .ok()
@@ -184,10 +184,10 @@ pub(super) async fn build_ci_report_from_payload(
     // produces `None` so the caller can skip the report entirely.
     let context = match reporting::check_context_kind_for_event(event) {
         Some(reporting::CheckContextKind::Approval) => {
-            reporting::approval_check_context(&project.name)
+            reporting::approval_check_context(&task.name)
         }
         Some(reporting::CheckContextKind::Build) => match entry_point_eval.as_deref() {
-            Some(label) => reporting::build_check_context(&project.name, label),
+            Some(label) => reporting::build_check_context(&task.name, label),
             None => return Ok(None),
         },
         Some(reporting::CheckContextKind::Evaluation) | None => {
@@ -199,8 +199,8 @@ pub(super) async fn build_ci_report_from_payload(
             }
 
             let wildcard_suffix =
-                (evaluation.wildcard != project.wildcard).then_some(evaluation.wildcard.as_str());
-            reporting::evaluation_check_context(&project.name, wildcard_suffix)
+                (evaluation.wildcard != task.wildcard).then_some(evaluation.wildcard.as_str());
+            reporting::evaluation_check_context(&task.name, wildcard_suffix)
         }
     };
 

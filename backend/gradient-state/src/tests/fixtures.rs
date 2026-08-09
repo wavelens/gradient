@@ -16,7 +16,7 @@ pub fn reporter_cfg(integration_name: &str, integrations_json: &str) -> StateCon
                 "acme": {{ "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null", "public": false, "created_by": "alice" }}
             }},
             "integrations": {integrations_json},
-            "projects": {{
+            "tasks": {{
                 "web": {{
                     "name": "web", "organization": "acme", "display_name": "Web",
                     "repository": "https://example.com/acme/web.git", "created_by": "alice",

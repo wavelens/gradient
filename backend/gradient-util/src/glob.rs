@@ -51,7 +51,7 @@ pub fn expand_overrides(
     for (n, _) in &literals {
         if !declared.contains(n.as_str()) {
             warnings.push(format!(
-                "flake input '{n}' does not exist in this project's flake - override skipped"
+                "flake input '{n}' does not exist in this task's flake - override skipped"
             ));
         }
     }

@@ -8,7 +8,7 @@ import { Routes } from '@angular/router';
 import { authGuard } from '@core/guards/auth.guard';
 import { adminGuard } from '@core/guards/admin.guard';
 import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
-import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
+import { taskAccessResolver } from '@core/resolvers/task-access.resolver';
 import { cacheAccessResolver } from '@core/resolvers/cache-access.resolver';
 import { organizationAccessResolver } from '@core/resolvers/organization-access.resolver';
 
@@ -58,74 +58,74 @@ export const routes: Routes = [
       ),
   },
 
-  // Project tree with parent layout + access resolver
+  // Task tree with parent layout + access resolver
   {
-    path: 'organization/:org/project/:project',
+    path: 'organization/:org/task/:task',
     loadComponent: () =>
-      import('./features/projects/project-layout/project-layout.component').then(
-        (m) => m.ProjectLayoutComponent,
+      import('./features/tasks/task-layout/task-layout.component').then(
+        (m) => m.TaskLayoutComponent,
       ),
-    resolve: { projectAccess: projectAccessResolver },
+    resolve: { taskAccess: taskAccessResolver },
     runGuardsAndResolvers: 'paramsChange',
     children: [
       {
         path: '',
-        title: 'Project',
+        title: 'Task',
         loadComponent: () =>
-          import('./features/projects/project-detail/project-detail.component').then(
-            (m) => m.ProjectDetailComponent,
+          import('./features/tasks/task-detail/task-detail.component').then(
+            (m) => m.TaskDetailComponent,
           ),
       },
       {
         path: 'metrics',
-        title: 'Project Metrics',
+        title: 'Task Metrics',
         loadComponent: () =>
-          import('./features/projects/project-metrics/project-metrics.component').then(
-            (m) => m.ProjectMetricsComponent,
+          import('./features/tasks/task-metrics/task-metrics.component').then(
+            (m) => m.TaskMetricsComponent,
           ),
       },
       {
         path: 'entry-point-metrics',
         title: 'Entry Point Metrics',
         loadComponent: () =>
-          import('./features/projects/entry-point-metrics/entry-point-metrics.component').then(
+          import('./features/tasks/entry-point-metrics/entry-point-metrics.component').then(
             (m) => m.EntryPointMetricsComponent,
           ),
       },
       {
         path: 'settings',
-        title: 'Project Settings',
+        title: 'Task Settings',
         canActivate: [authGuard],
         loadComponent: () =>
-          import('./features/projects/project-settings/project-settings.component').then(
-            (m) => m.ProjectSettingsComponent,
+          import('./features/tasks/task-settings/task-settings.component').then(
+            (m) => m.TaskSettingsComponent,
           ),
       },
       {
         path: 'triggers',
-        title: 'Project Triggers',
+        title: 'Task Triggers',
         canActivate: [authGuard],
         loadComponent: () =>
-          import('./features/projects/project-triggers/project-triggers.component').then(
-            (m) => m.ProjectTriggersComponent,
+          import('./features/tasks/task-triggers/task-triggers.component').then(
+            (m) => m.TaskTriggersComponent,
           ),
       },
       {
         path: 'actions',
-        title: 'Project Actions',
+        title: 'Task Actions',
         canActivate: [authGuard],
         loadComponent: () =>
-          import('./features/projects/project-actions/project-actions.component').then(
-            (m) => m.ProjectActionsComponent,
+          import('./features/tasks/task-actions/task-actions.component').then(
+            (m) => m.TaskActionsComponent,
           ),
       },
       {
         path: 'flake-inputs',
-        title: 'Project Flake Inputs',
+        title: 'Task Flake Inputs',
         canActivate: [authGuard],
         loadComponent: () =>
-          import('./features/projects/project-flake-inputs/project-flake-inputs.component').then(
-            (m) => m.ProjectFlakeInputsComponent,
+          import('./features/tasks/task-flake-inputs/task-flake-inputs.component').then(
+            (m) => m.TaskFlakeInputsComponent,
           ),
       },
     ],

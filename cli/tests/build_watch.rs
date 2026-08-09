@@ -19,7 +19,10 @@ fn help(args: &[&str]) -> String {
 #[test]
 fn build_exposes_background_flag_not_no_stream() {
     let text = help(&["build", "--help"]);
-    assert!(text.contains("--background"), "missing --background:\n{text}");
+    assert!(
+        text.contains("--background"),
+        "missing --background:\n{text}"
+    );
     assert!(text.contains("-b"), "missing -b short flag:\n{text}");
     assert!(
         !text.contains("--no-stream"),
@@ -30,7 +33,10 @@ fn build_exposes_background_flag_not_no_stream() {
 #[test]
 fn watch_command_takes_an_evaluation() {
     let text = help(&["watch", "--help"]);
-    assert!(text.contains("evaluation"), "missing evaluation arg:\n{text}");
+    assert!(
+        text.contains("evaluation"),
+        "missing evaluation arg:\n{text}"
+    );
 }
 
 #[test]

@@ -431,7 +431,10 @@ impl CachesApi<'_> {
         let narinfo_json = serde_json::to_string(&narinfo).map_err(ConnectorError::Decode)?;
         let form = reqwest::multipart::Form::new()
             .text("narinfo", narinfo_json)
-            .part("nar", reqwest::multipart::Part::bytes(nar_bytes).file_name("nar"));
+            .part(
+                "nar",
+                reqwest::multipart::Part::bytes(nar_bytes).file_name("nar"),
+            );
         let req = http::request(
             self.0.http(),
             self.0.base_url(),

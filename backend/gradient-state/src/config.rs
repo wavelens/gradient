@@ -65,7 +65,7 @@ pub struct StateOrgMemberEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateProject {
+pub struct StateTask {
     pub name: String,
     pub organization: String,
     pub display_name: String,
@@ -77,33 +77,33 @@ pub struct StateProject {
     #[serde(default = "default_true")]
     pub active: bool,
     pub created_by: String,
-    /// How many evaluations to retain per project. Must be at least 1; the
+    /// How many evaluations to retain per task. Must be at least 1; the
     /// runtime `GRADIENT_KEEP_EVALUATIONS` cap further reduces it if exceeded.
     #[serde(default = "default_keep_evaluations")]
     pub keep_evaluations: i32,
     /// Declarative trigger list. `None` leaves existing triggers untouched
-    /// (back-compat). `Some([])` is an error - a project must have at least one.
+    /// (back-compat). `Some([])` is an error - a task must have at least one.
     #[serde(default)]
     pub triggers: Option<Vec<StateTrigger>>,
-    /// Concurrency policy for this project. Defaults to `soft_abort` when omitted.
+    /// Concurrency policy for this task. Defaults to `soft_abort` when omitted.
     #[serde(default = "default_soft_abort")]
     pub concurrency: ConcurrencyPolicy,
-    /// When `false`, build outputs from this project are pushed to the cache
+    /// When `false`, build outputs from this task are pushed to the cache
     /// but their narinfo signatures are left empty, so external Nix clients
     /// won't trust them. Defaults to `true`.
     #[serde(default = "default_true")]
     pub sign_cache: bool,
     /// Declarative flake input overrides. An absent or empty map deletes all
-    /// existing override rows for this project.
+    /// existing override rows for this task.
     #[serde(default)]
     pub flake_input_overrides: HashMap<String, StateFlakeInputOverride>,
     /// Declarative action list. Re-applying state with fewer actions removes
-    /// the missing ones (matched by `name` within the project).
+    /// the missing ones (matched by `name` within the task).
     #[serde(default)]
     pub actions: Vec<StateAction>,
 }
 
-/// Declarative project action. `config` is type-specific and validated
+/// Declarative task action. `config` is type-specific and validated
 /// against `action_type` at apply time:
 ///   - `send_mail`           `{ recipients: [..], subject_template?: str }`
 ///   - `send_web_request`    `{ url: str, token_file?: str }`
@@ -321,7 +321,7 @@ pub struct StateConfiguration {
     #[serde(default)]
     pub organizations: HashMap<String, StateOrganization>,
     #[serde(default)]
-    pub projects: HashMap<String, StateProject>,
+    pub tasks: HashMap<String, StateTask>,
     #[serde(default)]
     pub caches: HashMap<String, StateCache>,
     #[serde(default)]

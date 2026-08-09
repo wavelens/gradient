@@ -54,8 +54,8 @@ pub enum InputError {
     NameInvalidCharacters,
     #[error("Name can only start and end with letters or numbers")]
     NameInvalidStartEnd,
-    #[error("This project name is reserved and cannot be used")]
-    ProjectNameReserved,
+    #[error("This task name is reserved and cannot be used")]
+    TaskNameReserved,
     #[error("Username cannot be empty")]
     UsernameEmpty,
     #[error("Username must be at least 3 characters long")]
@@ -218,15 +218,15 @@ pub fn check_index_name(s: &str) -> Result<(), InputError> {
     Ok(())
 }
 
-pub const RESERVED_PROJECT_NAMES: &[&str] = &["build-request"];
+pub const RESERVED_TASK_NAMES: &[&str] = &["build-request"];
 
-pub fn check_project_name(s: &str) -> Result<(), InputError> {
+pub fn check_task_name(s: &str) -> Result<(), InputError> {
     check_index_name(s)?;
-    if RESERVED_PROJECT_NAMES
+    if RESERVED_TASK_NAMES
         .iter()
         .any(|r| s.eq_ignore_ascii_case(r))
     {
-        return Err(InputError::ProjectNameReserved);
+        return Err(InputError::TaskNameReserved);
     }
     Ok(())
 }

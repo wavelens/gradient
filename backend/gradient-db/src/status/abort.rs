@@ -162,7 +162,7 @@ async fn abort_eval_anchors(
     let _ = ctx
         .board_events
         .send(gradient_types::BoardEvent::EvaluationProgress {
-            project: evaluation.project.map(|p| p.into_inner()),
+            task: evaluation.task.map(|p| p.into_inner()),
             evaluation_id: evaluation.id.into_inner(),
         });
 

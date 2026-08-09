@@ -90,12 +90,12 @@ pub struct Scheduler {
     /// Windowed instance metrics snapshot, recomputed periodically by
     /// `instance_metrics_loop` and read lock-free during scoring.
     pub(crate) instance: Arc<arc_swap::ArcSwap<gradient_score::InstanceContext>>,
-    /// Per-project eval-RAM prediction (p95 peak RSS), refreshed by
+    /// Per-task eval-RAM prediction (p95 peak RSS), refreshed by
     /// `instance_metrics_loop`, consumed by eval scoring.
     pub(crate) eval_history: Arc<
         arc_swap::ArcSwap<
             std::collections::HashMap<
-                gradient_types::ids::ProjectId,
+                gradient_types::ids::TaskId,
                 gradient_score::HistoryPrediction,
             >,
         >,
@@ -151,7 +151,7 @@ impl Scheduler {
         self.eval_edges.write().await.remove(&eval_id);
     }
 
-    /// Spawn background project polling, eval dispatch, and build dispatch loops.
+    /// Spawn background task polling, eval dispatch, and build dispatch loops.
     ///
     /// Call once after creating the scheduler, before serving requests.
     pub fn start(self: &Arc<Self>) {

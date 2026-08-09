@@ -30,9 +30,9 @@ use tracing::{debug, warn};
 /// invocation; remaining rows are picked up by the next scheduled pass.
 const SIGN_SWEEP_BATCH: u64 = 1000;
 
-/// Skip a `cached_path` iff every producing project has `sign_cache=false`
-/// and at least one such project exists. Paths absent from `producers`
-/// (i.e. not produced by any project - `.drv` files, direct builds) are
+/// Skip a `cached_path` iff every producing task has `sign_cache=false`
+/// and at least one such task exists. Paths absent from `producers`
+/// (i.e. not produced by any task - `.drv` files, direct builds) are
 /// signed normally.
 pub(crate) fn compute_skipped_cached_paths(
     producers: &HashMap<CachedPathId, Vec<bool>>,
@@ -87,7 +87,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
         .map(|c| (c.id, c))
         .collect();
 
-    let producers = load_producing_project_flags(&state, &cached_paths).await?;
+    let producers = load_producing_task_flags(&state, &cached_paths).await?;
     let skipped: HashSet<CachedPathId> = compute_skipped_cached_paths(&producers);
 
     // Build a per-cache signer once (one crypt-secret read + one private-key
@@ -134,7 +134,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
             debug!(
                 store_path = %store_path,
                 cache = %cache.id,
-                "sign sweep: skipping (project sign_cache=false)"
+                "sign sweep: skipping (task sign_cache=false)"
             );
             continue;
         }
@@ -222,7 +222,7 @@ fn full_backfill_due() -> bool {
 /// For every derivation built by an organization subscribed to `cache_id`
 /// whose outputs are all cached and whose dependency closure is already
 /// recorded, insert a `cache_derivation` row (org scoping mirrors
-/// `gradient_db::derivation_ids_for_org`: project -> evaluation -> build_job).
+/// `gradient_db::derivation_ids_for_org`: task -> evaluation -> build_job).
 /// Idempotent. `full = false` restricts the walk to `seed` and its dependents,
 /// layer by layer to a fixpoint; `full = true` is the unseeded hourly backfill.
 async fn record_newly_completed_derivations(
@@ -242,7 +242,7 @@ async fn record_newly_completed_derivations(
             SELECT bj.derivation
             FROM build_job bj
             JOIN evaluation ev ON ev.id = bj.evaluation
-            JOIN project p ON p.id = ev.project
+            JOIN task p ON p.id = ev.task
             JOIN organization_cache oc ON oc.organization = p.organization
             WHERE oc.cache = $1)
           AND NOT EXISTS (
@@ -276,7 +276,7 @@ async fn record_newly_completed_derivations(
             SELECT DISTINCT bj.derivation
             FROM build_job bj
             JOIN evaluation ev ON ev.id = bj.evaluation
-            JOIN project p ON p.id = ev.project
+            JOIN task p ON p.id = ev.task
             JOIN organization_cache oc ON oc.organization = p.organization
             WHERE oc.cache = $1
         )
@@ -346,10 +346,10 @@ async fn record_newly_completed_derivations(
 }
 
 /// Loads, for every cached_path in `cached_paths`, the `sign_cache` flag of
-/// every project that produced a matching `derivation_output`. Cached_paths
+/// every task that produced a matching `derivation_output`. Cached_paths
 /// whose hash matches no `derivation_output` (e.g. `.drv` files) are absent
-/// from the returned map - that means "no producing project, sign normally".
-async fn load_producing_project_flags(
+/// from the returned map - that means "no producing task, sign normally".
+async fn load_producing_task_flags(
     state: &Arc<ServerState>,
     cached_paths: &HashMap<CachedPathId, MCachedPath>,
 ) -> anyhow::Result<HashMap<CachedPathId, Vec<bool>>> {
@@ -375,11 +375,11 @@ async fn load_producing_project_flags(
     let backend = state.worker_db.get_database_backend();
     let stmt = Statement::from_sql_and_values(
         backend,
-        // The reserved per-org `build-request` project backing `gradient build`
+        // The reserved per-org `build-request` task backing `gradient build`
         // is always signable regardless of its `sign_cache` flag - its outputs
         // must be substitutable by the submitting client. Keyed on the reserved
-        // name (BUILD_REQUEST_PROJECT_NAME), not `managed`, which also marks
-        // nix-state-declared projects that may legitimately set sign_cache=false.
+        // name (BUILD_REQUEST_TASK_NAME), not `managed`, which also marks
+        // nix-state-declared tasks that may legitimately set sign_cache=false.
         r#"
             SELECT do_.hash AS hash,
                    (p.sign_cache OR p.name = 'build-request') AS sign_cache
@@ -387,7 +387,7 @@ async fn load_producing_project_flags(
             JOIN derivation d   ON d.id = do_.derivation
             JOIN build_job b    ON b.derivation = d.id
             JOIN evaluation e   ON e.id = b.evaluation
-            JOIN project p      ON p.id = e.project
+            JOIN task p      ON p.id = e.task
             WHERE do_.hash = ANY($1)
         "#,
         [hashes.into()],
@@ -413,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn skip_when_all_producing_projects_private() {
+    fn skip_when_all_producing_tasks_private() {
         let mut producers: HashMap<CachedPathId, Vec<bool>> = HashMap::new();
         producers.insert(cp(1), vec![false, false]);
         producers.insert(cp(2), vec![false, true]);

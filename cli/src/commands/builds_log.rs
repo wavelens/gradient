@@ -56,7 +56,10 @@ pub async fn handle_log(
                 Ok(value) => {
                     if value.get("done").and_then(|d| d.as_bool()) == Some(true) {
                         if !out.is_json() {
-                            let n = value.get("total_matches").and_then(|n| n.as_u64()).unwrap_or(0);
+                            let n = value
+                                .get("total_matches")
+                                .and_then(|n| n.as_u64())
+                                .unwrap_or(0);
                             out.human(format!("{n} match(es)"));
                         }
                         break;
@@ -64,7 +67,10 @@ pub async fn handle_log(
                     if out.is_json() {
                         println!("{value}");
                     } else {
-                        let line = value.get("line_number").and_then(|n| n.as_u64()).unwrap_or(0);
+                        let line = value
+                            .get("line_number")
+                            .and_then(|n| n.as_u64())
+                            .unwrap_or(0);
                         let preview = value.get("preview").and_then(|p| p.as_str()).unwrap_or("");
                         println!("{line}: {preview}");
                     }

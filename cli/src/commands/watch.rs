@@ -24,7 +24,11 @@ pub async fn handle_watch(eval_id: &str, out: Output) {
     }
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<WatchEvent>();
-    tokio::spawn(poll_metadata(client.clone(), eval_id.to_string(), tx.clone()));
+    tokio::spawn(poll_metadata(
+        client.clone(),
+        eval_id.to_string(),
+        tx.clone(),
+    ));
     tokio::spawn(stream_logs(client.clone(), eval_id.to_string(), tx));
 
     crate::tui::run(Dashboard::new(eval_id.to_string(), rx))

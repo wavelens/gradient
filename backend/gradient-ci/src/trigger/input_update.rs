@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Creates `input_update` evaluations when a trigger fires on a project that
+//! Creates `input_update` evaluations when a trigger fires on a task that
 //! has an `OpenPr` action and tracked flake inputs. The cheap server-side
 //! condition gates creation; the worker decides whether there is actually
 //! anything to bump and short-circuits empty runs.
@@ -21,14 +21,14 @@ use sea_orm::{
 /// ids, or an empty vec when the condition is not met.
 pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
     db: &C,
-    project: &MProject,
+    task: &MTask,
     base_commit_hash: Vec<u8>,
-    trigger: Option<ProjectTriggerId>,
+    trigger: Option<TaskTriggerId>,
 ) -> Result<Vec<EvaluationId>, TriggerError> {
-    let Some(action) = EProjectAction::find()
-        .filter(CProjectAction::Project.eq(project.id))
-        .filter(CProjectAction::Active.eq(true))
-        .filter(CProjectAction::ActionType.eq(ActionType::OpenPr))
+    let Some(action) = ETaskAction::find()
+        .filter(CTaskAction::Task.eq(task.id))
+        .filter(CTaskAction::Active.eq(true))
+        .filter(CTaskAction::ActionType.eq(ActionType::OpenPr))
         .one(db)
         .await?
     else {
@@ -41,11 +41,11 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         return Ok(Vec::new());
     };
 
-    let overrides = EProjectFlakeInputOverride::find()
-        .filter(CProjectFlakeInputOverride::Project.eq(project.id))
+    let overrides = ETaskFlakeInputOverride::find()
+        .filter(CTaskFlakeInputOverride::Task.eq(task.id))
         .all(db)
         .await?;
-    // Safety gate: a url-pinned override anywhere on the project blocks the run.
+    // Safety gate: a url-pinned override anywhere on the task blocks the run.
     if overrides.iter().any(|o| o.url.is_some()) {
         return Ok(Vec::new());
     }
@@ -61,7 +61,7 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
         .map(i32::from)
         .collect();
     let already_running = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project.id))
+        .filter(CEvaluation::Task.eq(task.id))
         .filter(CEvaluation::Kind.eq(EvaluationKind::InputUpdate))
         .filter(CEvaluation::Status.is_in(active_codes))
         .one(db)
@@ -89,7 +89,7 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
             all.extend(globs);
             if !all.is_empty() {
                 created.push(
-                    create_input_update_eval(db, project, base_commit, all, false, trigger).await?,
+                    create_input_update_eval(db, task, base_commit, all, false, trigger).await?,
                 );
             }
         }
@@ -98,7 +98,7 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
                 created.push(
                     create_input_update_eval(
                         db,
-                        project,
+                        task,
                         base_commit.clone(),
                         vec![lit],
                         false,
@@ -109,8 +109,7 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
             }
             if !globs.is_empty() {
                 created.push(
-                    create_input_update_eval(db, project, base_commit, globs, true, trigger)
-                        .await?,
+                    create_input_update_eval(db, task, base_commit, globs, true, trigger).await?,
                 );
             }
         }
@@ -124,11 +123,11 @@ pub async fn maybe_trigger_input_update<C: ConnectionTrait>(
 /// `discover_only` marks a glob-discovery run that opens no PR.
 pub async fn create_input_update_eval<C: ConnectionTrait>(
     db: &C,
-    project: &MProject,
+    task: &MTask,
     base_commit: String,
     target: Vec<String>,
     discover_only: bool,
-    trigger: Option<ProjectTriggerId>,
+    trigger: Option<TaskTriggerId>,
 ) -> Result<EvaluationId, TriggerError> {
     let now = gradient_types::now();
     let commit = MCommit {
@@ -141,10 +140,10 @@ pub async fn create_input_update_eval<C: ConnectionTrait>(
 
     let evaluation = MEvaluation {
         id: EvaluationId::now_v7(),
-        project: Some(project.id),
-        repository: project.repository.clone(),
+        task: Some(task.id),
+        repository: task.repository.clone(),
         commit: commit.id,
-        wildcard: project.wildcard.clone(),
+        wildcard: task.wildcard.clone(),
         status: EvaluationStatus::Queued,
         kind: EvaluationKind::InputUpdate,
         concurrent: true,
@@ -177,13 +176,13 @@ pub async fn create_input_update_eval<C: ConnectionTrait>(
 }
 
 /// Fan a discovery eval's matched inputs out into one per-input update eval each,
-/// skipping inputs that already have an active update eval for the project.
+/// skipping inputs that already have an active update eval for the task.
 pub async fn fan_out_expansion<C: ConnectionTrait>(
     db: &C,
-    project: &MProject,
+    task: &MTask,
     base_commit: String,
     matched: Vec<String>,
-    trigger: Option<ProjectTriggerId>,
+    trigger: Option<TaskTriggerId>,
 ) -> Result<Vec<EvaluationId>, TriggerError> {
     let active_codes: Vec<i32> = EvaluationStatus::ACTIVE
         .iter()
@@ -191,7 +190,7 @@ pub async fn fan_out_expansion<C: ConnectionTrait>(
         .map(i32::from)
         .collect();
     let active = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project.id))
+        .filter(CEvaluation::Task.eq(task.id))
         .filter(CEvaluation::Kind.eq(EvaluationKind::InputUpdate))
         .filter(CEvaluation::Status.is_in(active_codes))
         .all(db)
@@ -214,15 +213,8 @@ pub async fn fan_out_expansion<C: ConnectionTrait>(
             continue;
         }
         created.push(
-            create_input_update_eval(
-                db,
-                project,
-                base_commit.clone(),
-                vec![input],
-                false,
-                trigger,
-            )
-            .await?,
+            create_input_update_eval(db, task, base_commit.clone(), vec![input], false, trigger)
+                .await?,
         );
     }
 

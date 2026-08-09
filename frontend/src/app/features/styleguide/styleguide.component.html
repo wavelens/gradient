@@ -404,7 +404,7 @@
 
       <h3>Stat cards</h3>
       <div class="gr-grid-stats">
-        <app-stat-card icon="folder" [value]="42" label="Projects" />
+        <app-stat-card icon="folder" [value]="42" label="Tasks" />
         <app-stat-card icon="check_circle" [value]="128" label="Builds" />
         <app-stat-card icon="warning" [value]="3" label="Failures" />
         <app-stat-card icon="bolt" value="98%" label="Cache hit" />
@@ -614,7 +614,7 @@
       <h3>Header action slot (alternate pattern)</h3>
       <p class="text-secondary">
         For pages where the primary action belongs in the header instead of in
-        a per-section form (e.g. list pages with a "New …" button), project a
+        a per-section form (e.g. list pages with a "New …" button), task a
         button into <code>[slot=actions]</code> on <code>gr-page-layout</code>.
       </p>
       <div class="sg-page-frame">
@@ -627,7 +627,7 @@
       <h3>Settings Nav Row</h3>
       <p class="text-secondary">
         Title + description on the left, action button on the right. Used in
-        organization / project settings to send the user to a sub-page (Manage
+        organization / task settings to send the user to a sub-page (Manage
         Workers, Manage Caches, etc.). Stack rows in one card with
         <code>p-divider</code> between them.
       </p>

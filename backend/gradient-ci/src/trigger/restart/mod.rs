@@ -28,12 +28,12 @@ use sea_orm::{
 /// and the scheduler's `check_evaluation_done` closes it out.
 pub async fn trigger_restart_builds<C: ConnectionTrait>(
     db: &C,
-    project: &MProject,
+    task: &MTask,
 ) -> Result<MEvaluation, TriggerError> {
-    ensure_no_active_evaluation(db, project.id).await?;
+    ensure_no_active_evaluation(db, task.id).await?;
 
     let (prev_eval, prev_entry_points) =
-        previous_lookup::previous_evaluation_with_entry_points(db, project.id).await?;
+        previous_lookup::previous_evaluation_with_entry_points(db, task.id).await?;
 
     let now = gradient_types::now();
     let initial_status = restart_initial_status(db, &prev_entry_points).await?;
@@ -41,7 +41,7 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
     let new_eval_id = EvaluationId::now_v7();
     let aevaluation = MEvaluation {
         id: new_eval_id,
-        project: Some(project.id),
+        task: Some(task.id),
         repository: prev_eval.repository.clone(),
         commit: prev_eval.commit,
         wildcard: prev_eval.wildcard.clone(),
@@ -56,13 +56,13 @@ pub async fn trigger_restart_builds<C: ConnectionTrait>(
 
     let new_eval = aevaluation.insert(db).await?;
 
-    snapshot_flake_input_overrides(db, project.id, new_eval.id).await?;
+    snapshot_flake_input_overrides(db, task.id, new_eval.id).await?;
 
     entry_points::copy_entry_points(db, &prev_entry_points, new_eval_id, now).await?;
 
-    let mut aproject: AProject = project.clone().into();
-    aproject.last_evaluation = Set(Some(new_eval_id));
-    aproject.update(db).await?;
+    let mut atask: ATask = task.clone().into();
+    atask.last_evaluation = Set(Some(new_eval_id));
+    atask.update(db).await?;
 
     Ok(new_eval)
 }

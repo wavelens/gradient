@@ -83,7 +83,7 @@ pub enum ServerMessage {
     AbortJob { job_id: String, reason: String },
 
     /// Deliver a short-lived credential.  Sent before or alongside
-    /// [`ServerMessage::AssignJob`] for tasks that need it.
+    /// [`ServerMessage::AssignJob`] for steps that need it.
     Credential { kind: CredentialKind, data: Vec<u8> },
 
     /// One chunk of a NAR being pushed from server to worker (direct mode).

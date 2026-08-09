@@ -20,7 +20,7 @@ use tracing::{debug, error, info};
 
 use crate::Scheduler;
 use crate::jobs::PendingEvalJob;
-use gradient_types::proto::{FlakeJob, FlakeTask, RequiredPath};
+use gradient_types::proto::{FlakeJob, FlakeStep, RequiredPath};
 
 use super::DISPATCH_TICK_SECS;
 
@@ -121,20 +121,20 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             input_update,
         );
 
-        let Some(project_id) = eval.project else {
-            error!(evaluation_id = %eval.id, "evaluation has no project");
+        let Some(task_id) = eval.task else {
+            error!(evaluation_id = %eval.id, "evaluation has no task");
             continue;
         };
-        let Some(org_id) = maps.orgs.get(&project_id).copied() else {
-            error!(evaluation_id = %eval.id, %project_id, "could not determine organization for evaluation");
+        let Some(org_id) = maps.orgs.get(&task_id).copied() else {
+            error!(evaluation_id = %eval.id, %task_id, "could not determine organization for evaluation");
             continue;
         };
 
-        let history = eval_history.get(&project_id).copied().unwrap_or_default();
+        let history = eval_history.get(&task_id).copied().unwrap_or_default();
 
         let pending = PendingEvalJob {
             evaluation_id: eval.id,
-            project_id: eval.project,
+            task_id: eval.task,
             org_id,
             commit_id: eval.commit,
             repository: eval.repository.clone(),
@@ -159,7 +159,7 @@ struct EvalDispatchMaps {
     commits: HashMap<CommitId, MCommit>,
     sidecars: HashMap<EvaluationId, gradient_entity::evaluation_input_update::Model>,
     overrides: HashMap<EvaluationId, Vec<gradient_types::proto::FlakeInputOverride>>,
-    orgs: HashMap<ProjectId, OrganizationId>,
+    orgs: HashMap<TaskId, OrganizationId>,
 }
 
 impl EvalDispatchMaps {
@@ -221,15 +221,15 @@ impl EvalDispatchMaps {
             );
         }
 
-        let project_ids: Vec<ProjectId> = evals
+        let task_ids: Vec<TaskId> = evals
             .iter()
-            .filter_map(|e| e.project)
+            .filter_map(|e| e.task)
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
-        let orgs = gradient_db::fetch_in_chunks(&project_ids, |chunk| async move {
-            EProject::find()
-                .filter(CProject::Id.is_in(chunk))
+        let orgs = gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+            ETask::find()
+                .filter(CTask::Id.is_in(chunk))
                 .all(&state.worker_db)
                 .await
         })
@@ -263,17 +263,17 @@ pub(crate) fn flake_job_for_eval_source(
     use gradient_types::proto::FlakeSource;
 
     if repository.starts_with("/nix/store/") {
-        let tasks = if split_fetch {
-            vec![FlakeTask::FetchFlake]
+        let steps = if split_fetch {
+            vec![FlakeStep::FetchFlake]
         } else {
             vec![
-                FlakeTask::FetchFlake,
-                FlakeTask::EvaluateFlake,
-                FlakeTask::EvaluateDerivations,
+                FlakeStep::FetchFlake,
+                FlakeStep::EvaluateFlake,
+                FlakeStep::EvaluateDerivations,
             ]
         };
         let job = FlakeJob {
-            tasks,
+            steps,
             source: FlakeSource::Cached {
                 store_path: repository.to_owned(),
             },
@@ -290,17 +290,17 @@ pub(crate) fn flake_job_for_eval_source(
         return (job, required);
     }
 
-    let tasks = if split_fetch {
-        vec![FlakeTask::FetchFlake]
+    let steps = if split_fetch {
+        vec![FlakeStep::FetchFlake]
     } else {
         vec![
-            FlakeTask::FetchFlake,
-            FlakeTask::EvaluateFlake,
-            FlakeTask::EvaluateDerivations,
+            FlakeStep::FetchFlake,
+            FlakeStep::EvaluateFlake,
+            FlakeStep::EvaluateDerivations,
         ]
     };
     let job = FlakeJob {
-        tasks,
+        steps,
         source: FlakeSource::Repository {
             url: repository.to_owned(),
             commit: commit_sha,
@@ -318,15 +318,15 @@ pub(crate) async fn organization_id_for_eval(
     state: &Arc<ServerState>,
     eval: &MEvaluation,
 ) -> Option<OrganizationId> {
-    let project_id = eval.project.or_else(|| {
-        error!(evaluation_id = %eval.id, "evaluation has no project");
+    let task_id = eval.task.or_else(|| {
+        error!(evaluation_id = %eval.id, "evaluation has no task");
         None
     })?;
-    match EProject::find_by_id(project_id).one(&state.worker_db).await {
+    match ETask::find_by_id(task_id).one(&state.worker_db).await {
         Ok(Some(p)) => Some(p.organization),
         Ok(None) => None,
         Err(e) => {
-            error!(error = %e, %project_id, "failed to load project for eval");
+            error!(error = %e, %task_id, "failed to load task for eval");
             None
         }
     }
@@ -335,7 +335,7 @@ pub(crate) async fn organization_id_for_eval(
 #[cfg(test)]
 mod eval_source_tests {
     use super::flake_job_for_eval_source;
-    use gradient_types::proto::{FlakeSource, FlakeTask};
+    use gradient_types::proto::{FlakeSource, FlakeStep};
 
     #[test]
     fn cached_source_dispatches_with_fetch() {
@@ -349,11 +349,11 @@ mod eval_source_tests {
         );
         assert!(matches!(job.source, FlakeSource::Cached { .. }));
         assert_eq!(
-            job.tasks,
+            job.steps,
             vec![
-                FlakeTask::FetchFlake,
-                FlakeTask::EvaluateFlake,
-                FlakeTask::EvaluateDerivations
+                FlakeStep::FetchFlake,
+                FlakeStep::EvaluateFlake,
+                FlakeStep::EvaluateDerivations
             ]
         );
         assert_eq!(required.len(), 1);
@@ -374,7 +374,7 @@ mod eval_source_tests {
             None,
         );
         assert!(matches!(job.source, FlakeSource::Cached { .. }));
-        assert_eq!(job.tasks, vec![FlakeTask::FetchFlake]);
+        assert_eq!(job.steps, vec![FlakeStep::FetchFlake]);
         assert_eq!(required.len(), 1);
     }
 
@@ -389,7 +389,7 @@ mod eval_source_tests {
             None,
         );
         assert!(matches!(job.source, FlakeSource::Repository { .. }));
-        assert!(job.tasks.contains(&FlakeTask::FetchFlake));
+        assert!(job.steps.contains(&FlakeStep::FetchFlake));
         assert!(required.is_empty());
     }
 }

@@ -119,7 +119,7 @@ pub async fn get_evaluation(
     };
 
     let trigger = if let Some(trigger_id) = evaluation.trigger {
-        EProjectTrigger::find_by_id(trigger_id)
+        ETaskTrigger::find_by_id(trigger_id)
             .one(&state.web_db)
             .await?
             .map(|t| EvaluationTriggerSummary {
@@ -134,9 +134,9 @@ pub async fn get_evaluation(
         error: false,
         message: EvaluationResponse {
             id: evaluation.id,
-            project: evaluation.project,
-            project_name: ctx.project_name,
-            project_display_name: ctx.project_display_name,
+            task: evaluation.task,
+            task_name: ctx.task_name,
+            task_display_name: ctx.task_display_name,
             repository: evaluation.repository,
             commit: commit_hash,
             wildcard: evaluation.wildcard,

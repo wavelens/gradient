@@ -21,7 +21,7 @@ use tracing::{debug, error, info};
 
 use crate::Scheduler;
 use crate::jobs::PendingBuildJob;
-use gradient_types::proto::{BuildJob, BuildTask, CacheInfo, DerivationOutput, RequiredPath};
+use gradient_types::proto::{BuildJob, BuildSpec, CacheInfo, DerivationOutput, RequiredPath};
 
 use super::DISPATCH_TICK_SECS;
 
@@ -130,8 +130,8 @@ pub(crate) async fn requeue_transient_failures(scheduler: &Scheduler) -> anyhow:
 struct BuildDispatchMaps {
     derivations: HashMap<DerivationId, MDerivation>,
     evaluations: HashMap<EvaluationId, MEvaluation>,
-    /// project_id → organization_id
-    projects: HashMap<ProjectId, OrganizationId>,
+    /// task_id → organization_id
+    tasks: HashMap<TaskId, OrganizationId>,
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_names: HashMap<FeatureId, String>,
     /// derivation_id → number of direct dependencies
@@ -142,7 +142,7 @@ struct BuildDispatchMaps {
     /// live in the `.drv` file and are not stored in the scheduler DB.
     direct_inputs: HashMap<DerivationId, Vec<RequiredPath>>,
     /// derivation_id → this derivation's own output `(name, store_path)` pairs,
-    /// sent in the `external_cached` `BuildTask` so the worker substitutes the
+    /// sent in the `external_cached` `BuildSpec` so the worker substitutes the
     /// outputs without fetching the `.drv`.
     self_outputs: HashMap<DerivationId, Vec<DerivationOutput>>,
     /// derivation_id → transitive closure size (bytes). Loaded from
@@ -264,19 +264,16 @@ impl BuildDispatchMaps {
             }
         }
 
-        // org_id resolution: every evaluation must belong to a project.
-        let project_ids: Vec<ProjectId> = evaluations
+        // org_id resolution: every evaluation must belong to a task.
+        let task_ids: Vec<TaskId> = evaluations
             .values()
-            .filter_map(|e| e.project)
+            .filter_map(|e| e.task)
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-        let projects: HashMap<ProjectId, OrganizationId> =
-            gradient_db::fetch_in_chunks(&project_ids, |chunk| async move {
-                EProject::find()
-                    .filter(CProject::Id.is_in(chunk))
-                    .all(db)
-                    .await
+        let tasks: HashMap<TaskId, OrganizationId> =
+            gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+                ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
             })
             .await?
             .into_iter()
@@ -412,7 +409,7 @@ impl BuildDispatchMaps {
             direct_inputs.insert(*drv_id, paths);
         }
 
-        // This derivation's own outputs, for the external_cached BuildTask: the
+        // This derivation's own outputs, for the external_cached BuildSpec: the
         // worker substitutes these output paths directly without fetching the
         // .drv (whose build-time input_sources binary caches do not serve).
         let mut self_outputs: HashMap<DerivationId, Vec<DerivationOutput>> = HashMap::new();
@@ -437,7 +434,7 @@ impl BuildDispatchMaps {
         Ok(Self {
             derivations,
             evaluations,
-            projects,
+            tasks,
             features_by_drv,
             feature_names,
             dep_counts,
@@ -455,8 +452,7 @@ impl BuildDispatchMaps {
     /// Resolve the organization that owns this evaluation (used as `org_id`
     /// to route the job only to workers registered by that org).
     fn resolve_org_id(&self, eval: &MEvaluation) -> Option<OrganizationId> {
-        eval.project
-            .and_then(|pid| self.projects.get(&pid).copied())
+        eval.task.and_then(|pid| self.tasks.get(&pid).copied())
     }
 
     /// Return the required Nix system features for `derivation_id`.
@@ -533,7 +529,7 @@ impl BuildDispatchMaps {
             mode,
             BuildDispatchMode::SubstituteBuiltin | BuildDispatchMode::SubstituteStalled
         );
-        // The worker round-trips this anchor uuid as the opaque BuildTask.build_id.
+        // The worker round-trips this anchor uuid as the opaque BuildSpec.build_id.
         let outputs = if substitute {
             self.self_outputs
                 .get(&anchor.derivation)
@@ -543,7 +539,7 @@ impl BuildDispatchMaps {
             Vec::new()
         };
         let build_job = BuildJob {
-            builds: vec![BuildTask {
+            builds: vec![BuildSpec {
                 build_id: anchor.id.to_string(),
                 drv_path: derivation.store_path(),
                 external_cached: substitute,

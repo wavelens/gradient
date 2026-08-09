@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::context::ProjectGitContext;
+use super::context::TaskGitContext;
 use super::remote::accept_cert;
 use super::url::git_transport_url;
 use crate::SourceError;
@@ -12,11 +12,11 @@ use git2::RemoteCallbacks;
 use gradient_types::input::vec_to_hex;
 use tracing::{debug, instrument};
 
-impl ProjectGitContext<'_> {
+impl TaskGitContext<'_> {
     /// Clone the repository at `commit_hash` and extract the commit metadata.
     ///
     /// Returns `(message, author_email, author_name)`.
-    #[instrument(skip(self), fields(project_id = %self.project.id, project_name = %self.project.name, commit_hash = %vec_to_hex(commit_hash)))]
+    #[instrument(skip(self), fields(task_id = %self.task.id, task_name = %self.task.name, commit_hash = %vec_to_hex(commit_hash)))]
     pub(super) async fn commit_info(
         &self,
         commit_hash: &[u8],
@@ -24,7 +24,7 @@ impl ProjectGitContext<'_> {
         debug!("Fetching commit info");
 
         let hash_str = vec_to_hex(commit_hash);
-        let url = git_transport_url(&self.project.repository).to_string();
+        let url = git_transport_url(&self.task.repository).to_string();
         let ssh_creds = self.ssh_creds.clone();
 
         let temp_dir = tempfile::TempDir::new().map_err(|e| SourceError::FileRead {

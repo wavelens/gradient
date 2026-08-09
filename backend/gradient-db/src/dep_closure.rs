@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Incremental dependency-closure counts powering the project page (#383).
+//! Incremental dependency-closure counts powering the task page (#383).
 //!
 //! A derivation's build-time closure is content-addressed, so it is
 //! materialised once into `derivation_closure` and reused across evaluations;
@@ -35,7 +35,7 @@ const INSERT_CHUNK: usize = 1000;
 /// Whether a root's cached closure must be (re)computed. A never-computed
 /// (`None`) or stale-zero (`Some(0)`) count recomputes - the latter heals a
 /// closure materialised empty mid-eval, before its dependency edges flushed,
-/// then frozen (the project page then showed the entry point with one dep while
+/// then frozen (the task page then showed the entry point with one dep while
 /// the live graph was correct). A positive count is authoritative and skipped.
 fn should_rematerialize(dep_closure_count: Option<i64>) -> bool {
     !matches!(dep_closure_count, Some(c) if c > 0)
@@ -328,7 +328,7 @@ mod tests {
 
     /// A root materialised empty mid-eval (before its dependency edges flushed)
     /// caches `dep_closure_count = 0`; the old `is_some()` skip froze it there so
-    /// the project page showed one dep forever. Recompute `None` and `Some(0)`;
+    /// the task page showed one dep forever. Recompute `None` and `Some(0)`;
     /// trust only a positive count.
     #[test]
     fn rematerializes_null_and_stale_zero_but_trusts_positive() {

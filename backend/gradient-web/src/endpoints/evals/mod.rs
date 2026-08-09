@@ -28,14 +28,14 @@ use std::sync::Arc;
 /// Resolved access context for an evaluation.
 ///
 /// Loaded once per request: fetches the evaluation row, resolves the owning
-/// organization through the project, and enforces the access check. Returns
+/// organization through the task, and enforces the access check. Returns
 /// `not_found("Evaluation")` on any failure so callers cannot distinguish
 /// missing from forbidden.
 pub(super) struct EvalAccessContext {
     pub evaluation: MEvaluation,
     pub organization_id: OrganizationId,
-    pub project_name: Option<String>,
-    pub project_display_name: Option<String>,
+    pub task_name: Option<String>,
+    pub task_display_name: Option<String>,
 }
 
 impl EvalAccessContext {
@@ -50,24 +50,24 @@ impl EvalAccessContext {
             .await?
             .or_not_found("Evaluation")?;
 
-        let project_id = evaluation.project.ok_or_else(|| {
-            tracing::warn!(%evaluation_id, "evaluation has no project");
+        let task_id = evaluation.task.ok_or_else(|| {
+            tracing::warn!(%evaluation_id, "evaluation has no task");
             WebError::data_inconsistency("Evaluation")
         })?;
-        let project = EProject::find_by_id(project_id)
+        let task = ETask::find_by_id(task_id)
             .one(&state.web_db)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(
-                    %project_id,
+                    %task_id,
                     %evaluation_id,
-                    "Project not found for evaluation",
+                    "Task not found for evaluation",
                 );
                 WebError::data_inconsistency("Evaluation")
             })?;
-        let organization_id = project.organization;
-        let project_name = Some(project.name);
-        let project_display_name = Some(project.display_name);
+        let organization_id = task.organization;
+        let task_name = Some(task.name);
+        let task_display_name = Some(task.display_name);
 
         let organization = EOrganization::find_by_id(organization_id)
             .one(&state.web_db)
@@ -92,8 +92,8 @@ impl EvalAccessContext {
         Ok(Self {
             evaluation,
             organization_id,
-            project_name,
-            project_display_name,
+            task_name,
+            task_display_name,
         })
     }
 }

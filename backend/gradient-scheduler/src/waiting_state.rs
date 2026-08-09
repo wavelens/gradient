@@ -325,19 +325,19 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
             continue;
         }
 
-        let Some(project_id) = eval.project else {
+        let Some(task_id) = eval.task else {
             continue;
         };
-        let project = match EProject::find_by_id(project_id).one(&state.worker_db).await {
+        let task = match ETask::find_by_id(task_id).one(&state.worker_db).await {
             Ok(Some(p)) => p,
             Ok(None) => continue,
             Err(e) => {
-                warn!(evaluation_id = %eval.id, error = %e, "drv recovery: project lookup failed");
+                warn!(evaluation_id = %eval.id, error = %e, "drv recovery: task lookup failed");
                 continue;
             }
         };
 
-        match gradient_ci::trigger_drv_recovery(state.worker_db.inner(), &project, &eval).await {
+        match gradient_ci::trigger_drv_recovery(state.worker_db.inner(), &task, &eval).await {
             Ok(new_eval) => {
                 info!(stuck = %eval.id, recovery = %new_eval.id, "auto-triggered .drv-recovery re-evaluation");
                 gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &new_eval).await;

@@ -1211,7 +1211,7 @@ mod tests {
 
     fn make_flake_job(repo: &str) -> FlakeJob {
         FlakeJob {
-            tasks: vec![],
+            steps: vec![],
             source: FlakeSource::Repository {
                 url: repo.into(),
                 commit: "abc123".into(),

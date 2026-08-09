@@ -17,7 +17,7 @@ use std::time::Duration;
 /// stored log, then follows the active ones - while concurrently surfacing the
 /// eval-level messages (warnings/errors) that the build-log stream does not
 /// carry. Build output and messages are colour-coded for a TTY. Shared by
-/// `gradient build`, `gradient logs`, and `gradient project log`.
+/// `gradient build`, `gradient logs`, and `gradient task log`.
 pub async fn stream_eval_logs(client: &connector::Client, evaluation: &str, out: Output) {
     let evals = client.evals();
     let stream = match evals.stream_builds(evaluation).await {

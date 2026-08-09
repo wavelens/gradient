@@ -21,7 +21,7 @@ export class ActionsService {
   private api = inject(ApiService);
 
   private base(org: string, proj: string): string {
-    return `projects/${org}/${proj}/actions`;
+    return `tasks/${org}/${proj}/actions`;
   }
 
   list(org: string, proj: string): Observable<Action[]> {

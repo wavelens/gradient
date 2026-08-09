@@ -15,7 +15,7 @@
 //!
 //! Resource families:
 //! - Organizations: [`load_org`] with [`OrgAccess`].
-//! - Projects: [`load_project`] with [`ProjectAccess`].
+//! - Tasks: [`load_task`] with [`TaskAccess`].
 //! - Caches: [`load_cache`] with [`CacheAccess`] (owner-scoped, not org-scoped).
 //! - Org-scoped children: [`load_webhook_in_org`], [`load_integration_in_org`].
 
@@ -26,12 +26,12 @@ use crate::permissions::{
     CachePermission, Permission, PermissionMask, cache_mask_grants, mask_grants,
 };
 use gradient_core::ServerState;
-use gradient_db::{get_any_cache_by_name, get_any_organization_by_name, get_any_project_by_name};
+use gradient_db::{get_any_cache_by_name, get_any_organization_by_name, get_any_task_by_name};
 use gradient_types::ids::{CacheId, IntegrationId, OrganizationId, UserId};
 use gradient_types::{
     CCache, CCacheUser, CIntegration, COrganizationCache, COrganizationUser, ECacheRole,
     ECacheUser, EIntegration, EOrganizationCache, EOrganizationUser, ERole, MCache, MIntegration,
-    MOrganization, MOrganizationUser, MProject, MUser,
+    MOrganization, MOrganizationUser, MTask, MUser,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -69,7 +69,7 @@ impl<'a> Caller<'a> {
 pub enum OrgAccess {
     /// Anonymous callers may see public orgs; private orgs require membership
     /// (i.e. `Permission::ViewOrg`). `label` controls the not-found wording -
-    /// project endpoints pass `"Project"` so org existence isn't leaked.
+    /// task endpoints pass `"Task"` so org existence isn't leaked.
     Readable { label: &'static str },
 
     /// Caller must hold `permission`. Set `reject_managed` to true for
@@ -85,10 +85,10 @@ pub enum OrgAccess {
     Member { reject_managed: bool },
 }
 
-/// Required access level for a project-scoped operation.
+/// Required access level for a task-scoped operation.
 #[derive(Clone, Copy)]
-pub enum ProjectAccess {
-    /// Anonymous callers may see projects in public orgs; private orgs
+pub enum TaskAccess {
+    /// Anonymous callers may see tasks in public orgs; private orgs
     /// require membership.
     Readable,
     /// Caller must hold `permission` on the owning org.
@@ -176,30 +176,30 @@ pub async fn load_org(
     Ok(org)
 }
 
-// ── Project loader ───────────────────────────────────────────────────────────
+// ── Task loader ───────────────────────────────────────────────────────────
 
-pub async fn load_project(
+pub async fn load_task(
     state: &Arc<ServerState>,
     caller: Caller<'_>,
     api_key: Option<&ApiKeyContext>,
     org_name: String,
-    project_name: String,
-    access: ProjectAccess,
-) -> WebResult<(MOrganization, MProject)> {
+    task_name: String,
+    access: TaskAccess,
+) -> WebResult<(MOrganization, MTask)> {
     if api_key.is_some_and(|k| k.cache_pin.is_some()) {
         return Err(WebError::forbidden(
             "Cache-pinned API key cannot be used on this endpoint.",
         ));
     }
 
-    let label = "Project";
+    let label = "Task";
 
-    let (org, project) = get_any_project_by_name(&state.db(), org_name, project_name)
+    let (org, task) = get_any_task_by_name(&state.db(), org_name, task_name)
         .await?
         .or_not_found(label)?;
 
     match access {
-        ProjectAccess::Readable => {
+        TaskAccess::Readable => {
             if !org.public {
                 let visible = match caller.user_id() {
                     Some(uid) => is_org_member(state, uid, org.id, api_key).await?,
@@ -210,27 +210,27 @@ pub async fn load_project(
                 }
             }
         }
-        ProjectAccess::Member => {
+        TaskAccess::Member => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
             if !is_org_member(state, uid, org.id, api_key).await? {
                 return Err(WebError::not_found(label));
             }
         }
-        ProjectAccess::Require {
+        TaskAccess::Require {
             permission,
             reject_managed,
         } => {
             let uid = caller.user_id().ok_or_else(|| WebError::not_found(label))?;
             require_org_permission(state, uid, org.id, permission, label, api_key).await?;
-            if reject_managed && project.managed {
+            if reject_managed && task.managed {
                 return Err(WebError::forbidden(
-                    "Cannot modify state-managed project. This project is managed by configuration and cannot be edited through the API.",
+                    "Cannot modify state-managed task. This task is managed by configuration and cannot be edited through the API.",
                 ));
             }
         }
     }
 
-    Ok((org, project))
+    Ok((org, task))
 }
 
 // ── Cache loader ─────────────────────────────────────────────────────────────
@@ -600,7 +600,7 @@ mod tests {
     use gradient_types::consts::{
         BASE_CACHE_ROLE_VIEW_ID, BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID,
     };
-    use gradient_types::ids::{OrganizationUserId, ProjectId, RoleId};
+    use gradient_types::ids::{OrganizationUserId, RoleId, TaskId};
     use gradient_types::{ConcurrencyPolicy, RuntimeConfig};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::uuid;
@@ -627,11 +627,11 @@ mod tests {
         }
     }
 
-    fn project_fixture(managed: bool) -> gradient_entity::project::Model {
-        gradient_entity::project::Model {
-            id: ProjectId::new(uuid!("a0000000-0000-0000-0000-000000000002")),
+    fn task_fixture(managed: bool) -> gradient_entity::task::Model {
+        gradient_entity::task::Model {
+            id: TaskId::new(uuid!("a0000000-0000-0000-0000-000000000002")),
             organization: OrganizationId::new(uuid!("a0000000-0000-0000-0000-000000000001")),
-            name: "test-project".into(),
+            name: "test-task".into(),
             display_name: "Test".into(),
             repository: "git@example.com:test/test.git".into(),
             wildcard: "*".into(),
@@ -929,26 +929,26 @@ mod tests {
     }
 
     #[test]
-    fn project_editable_admin_passes() {
+    fn task_editable_admin_passes() {
         run(async {
             let user = user_fixture();
-            let access = ProjectAccess::Require {
-                permission: Permission::EditProject,
+            let access = TaskAccess::Require {
+                permission: Permission::EditTask,
                 reject_managed: true,
             };
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![org_fixture(false, false)]])
-                .append_query_results([vec![project_fixture(false)]])
+                .append_query_results([vec![task_fixture(false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
                 .append_query_results([vec![admin_role_row()]])
                 .into_connection();
             let state = make_state(db);
-            let r = load_project(
+            let r = load_task(
                 &state,
                 Caller::User(&user),
                 None,
                 "test-org".into(),
-                "test-project".into(),
+                "test-task".into(),
                 access,
             )
             .await;
@@ -957,26 +957,26 @@ mod tests {
     }
 
     #[test]
-    fn project_editable_view_forbidden() {
+    fn task_editable_view_forbidden() {
         run(async {
             let user = user_fixture();
-            let access = ProjectAccess::Require {
-                permission: Permission::EditProject,
+            let access = TaskAccess::Require {
+                permission: Permission::EditTask,
                 reject_managed: true,
             };
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![org_fixture(false, false)]])
-                .append_query_results([vec![project_fixture(false)]])
+                .append_query_results([vec![task_fixture(false)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_VIEW_ID)]])
                 .append_query_results([vec![view_role_row()]])
                 .into_connection();
             let state = make_state(db);
-            let err = load_project(
+            let err = load_task(
                 &state,
                 Caller::User(&user),
                 None,
                 "test-org".into(),
-                "test-project".into(),
+                "test-task".into(),
                 access,
             )
             .await
@@ -986,26 +986,26 @@ mod tests {
     }
 
     #[test]
-    fn project_editable_managed_forbidden() {
+    fn task_editable_managed_forbidden() {
         run(async {
             let user = user_fixture();
-            let access = ProjectAccess::Require {
-                permission: Permission::EditProject,
+            let access = TaskAccess::Require {
+                permission: Permission::EditTask,
                 reject_managed: true,
             };
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![org_fixture(false, false)]])
-                .append_query_results([vec![project_fixture(true)]])
+                .append_query_results([vec![task_fixture(true)]])
                 .append_query_results([vec![membership_fixture(BASE_ROLE_ADMIN_ID)]])
                 .append_query_results([vec![admin_role_row()]])
                 .into_connection();
             let state = make_state(db);
-            let err = load_project(
+            let err = load_task(
                 &state,
                 Caller::User(&user),
                 None,
                 "test-org".into(),
-                "test-project".into(),
+                "test-task".into(),
                 access,
             )
             .await
@@ -1015,29 +1015,29 @@ mod tests {
     }
 
     #[test]
-    fn project_missing_returns_project_label() {
+    fn task_missing_returns_task_label() {
         run(async {
             let user = user_fixture();
-            let access = ProjectAccess::Require {
-                permission: Permission::EditProject,
+            let access = TaskAccess::Require {
+                permission: Permission::EditTask,
                 reject_managed: true,
             };
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([Vec::<gradient_entity::organization::Model>::new()])
                 .into_connection();
             let state = make_state(db);
-            let err = load_project(
+            let err = load_task(
                 &state,
                 Caller::User(&user),
                 None,
                 "test-org".into(),
-                "test-project".into(),
+                "test-task".into(),
                 access,
             )
             .await
             .expect_err("missing must be rejected");
             match err {
-                WebError::NotFound(_, msg) => assert!(msg.contains("Project"), "got {}", msg),
+                WebError::NotFound(_, msg) => assert!(msg.contains("Task"), "got {}", msg),
                 other => panic!("expected NotFound, got {:?}", other),
             }
         });

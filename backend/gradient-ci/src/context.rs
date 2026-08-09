@@ -11,7 +11,7 @@ use gradient_forge::ForgeRegistry;
 use gradient_notify::EmailSender;
 
 /// CI-layer slice: the full [`DbContext`], the shared outbound HTTP client used
-/// to deliver project Actions and post forge status checks, the resolved
+/// to deliver task Actions and post forge status checks, the resolved
 /// [`ForgeRegistry`], and the outbound email sender for `send_mail` actions.
 /// Every `ci` function takes `&CiContext`, so `ci` never names the composed
 /// `AppState`.

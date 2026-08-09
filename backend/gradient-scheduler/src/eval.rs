@@ -734,12 +734,12 @@ impl<'a> EvalResultProcessor<'a> {
         }
     }
 
-    /// Insert project entry points and schedule per-project evaluation GC.
+    /// Insert task entry points and schedule per-task evaluation GC.
     /// Returns the entry-point derivation ids recorded in this batch, so the
     /// caller can announce their current anchor status to the forge.
     async fn process_entry_points(
         &self,
-        project_id: ProjectId,
+        task_id: TaskId,
         derivations: &[DiscoveredDerivation],
         drv_path_to_id: &HashMap<String, DerivationId>,
     ) -> Vec<DerivationId> {
@@ -757,7 +757,7 @@ impl<'a> EvalResultProcessor<'a> {
                 active_entry_points.push(
                     MEntryPoint {
                         id: EntryPointId::now_v7(),
-                        project: project_id,
+                        task: task_id,
                         evaluation: self.evaluation_id,
                         derivation: drv_id,
                         eval: d.attr.clone(),
@@ -780,18 +780,15 @@ impl<'a> EvalResultProcessor<'a> {
             }
         }
 
-        // GC: remove old evaluations beyond keep_evaluations for this project.
-        if let Ok(Some(project)) = EProject::find_by_id(project_id)
-            .one(&self.state.worker_db)
-            .await
-        {
+        // GC: remove old evaluations beyond keep_evaluations for this task.
+        if let Ok(Some(task)) = ETask::find_by_id(task_id).one(&self.state.worker_db).await {
             let gc_state = Arc::clone(self.state);
-            let gc_keep = project.keep_evaluations as usize;
+            let gc_keep = task.keep_evaluations as usize;
             self.state.shutdown.spawn(async move {
                 if let Err(e) =
-                    gradient_db::gc_project_evaluations(&gc_state.db(), project_id, gc_keep).await
+                    gradient_db::gc_task_evaluations(&gc_state.db(), task_id, gc_keep).await
                 {
-                    error!(error = %e, %project_id, "GC: per-project evaluation GC failed");
+                    error!(error = %e, %task_id, "GC: per-task evaluation GC failed");
                 }
             });
         }
@@ -871,9 +868,9 @@ pub async fn handle_eval_result(
     // Do NOT mark Failed here: a later batch or a previous batch may have
     // queued builds that should still run.
 
-    if let Some(project_id) = job.project_id {
+    if let Some(task_id) = job.task_id {
         let entry_point_drvs = proc
-            .process_entry_points(project_id, &derivations, &drv_path_to_id)
+            .process_entry_points(task_id, &derivations, &drv_path_to_id)
             .await;
 
         // Forge checks appear the moment each entry point evaluates, including
@@ -884,10 +881,10 @@ pub async fn handle_eval_result(
 
     // Builds and entry-points are inserted directly (no status transition), so
     // the live channels would otherwise stay silent for the whole evaluation
-    // phase. Ping subscribers so the project/eval pages refetch and grow their
+    // phase. Ping subscribers so the task/eval pages refetch and grow their
     // build totals as each batch lands.
     let _ = state.board_events.send(BoardEvent::EvaluationProgress {
-        project: job.project_id.map(|p| p.into_inner()),
+        task: job.task_id.map(|p| p.into_inner()),
         evaluation_id: evaluation_id.into_inner(),
     });
 

@@ -35,7 +35,7 @@ pub fn forge_status_payload(
 }
 
 pub(super) fn render_subject(template: Option<&str>, event: &str, payload: &JsonValue) -> String {
-    let raw = template.unwrap_or("[Gradient] {event}: {project}");
+    let raw = template.unwrap_or("[Gradient] {event}: {task}");
     let get = |k: &str| {
         payload
             .get(k)
@@ -44,7 +44,7 @@ pub(super) fn render_subject(template: Option<&str>, event: &str, payload: &Json
             .to_string()
     };
     raw.replace("{event}", event)
-        .replace("{project}", &get("project"))
+        .replace("{task}", &get("task"))
         .replace("{org}", &get("org"))
         .replace("{id}", &get("id"))
         .replace("{status}", &get("status"))
@@ -53,10 +53,10 @@ pub(super) fn render_subject(template: Option<&str>, event: &str, payload: &Json
 pub(super) fn render_default_body(event: &str, payload: &JsonValue) -> String {
     let get = |k: &str| payload.get(k).and_then(|v| v.as_str()).unwrap_or("");
     format!(
-        "Event: {}\nProject: {}/{}\nEntity: {}\nStatus: {}\nTime: {}\nLink: {}\n",
+        "Event: {}\nTask: {}/{}\nEntity: {}\nStatus: {}\nTime: {}\nLink: {}\n",
         event,
         get("org"),
-        get("project"),
+        get("task"),
         get("id"),
         get("status"),
         get("time"),

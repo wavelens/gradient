@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Typed wrappers around the `project_trigger` table's enum/jsonb columns.
+//! Typed wrappers around the `task_trigger` table's enum/jsonb columns.
 //!
 //! The `cron` crate (v0.16) expects **six-field** expressions:
 //! `sec min hour dom mon dow` - not the five-field POSIX form.
@@ -13,8 +13,8 @@ use crate::ids::IntegrationId;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use gradient_entity::project::ConcurrencyPolicy;
-pub use gradient_entity::project_trigger::TriggerType;
+pub use gradient_entity::task::ConcurrencyPolicy;
+pub use gradient_entity::task_trigger::TriggerType;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

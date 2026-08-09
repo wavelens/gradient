@@ -37,9 +37,11 @@ async fn upload_source_nar_returns_dispatch() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/v1/build-requests/source"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
-            "evaluation": "eval-1", "project": "proj-1", "commit": "commit-1", "cache": "my-cache"
-        }))))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
+                "evaluation": "eval-1", "task": "proj-1", "commit": "commit-1", "cache": "my-cache"
+            }))),
+        )
         .mount(&server)
         .await;
 

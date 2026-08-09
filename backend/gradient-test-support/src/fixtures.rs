@@ -10,7 +10,7 @@
 
 use gradient_entity::ids::{
     CacheId, CacheUpstreamId, CacheUserId, CommitId, EvaluationId, OrganizationCacheId,
-    OrganizationId, ProjectId, UserId,
+    OrganizationId, TaskId, UserId,
 };
 use gradient_entity::organization_cache::CacheSubscriptionMode;
 use gradient_entity::*;
@@ -24,8 +24,8 @@ pub fn org_id() -> OrganizationId {
 pub fn user_id() -> UserId {
     UserId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap())
 }
-pub fn project_id() -> ProjectId {
-    ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap())
+pub fn task_id() -> TaskId {
+    TaskId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap())
 }
 pub fn commit_id() -> CommitId {
     CommitId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000013").unwrap())
@@ -153,7 +153,7 @@ pub fn eval_at(id: EvaluationId, offset_secs: i64) -> evaluation::Model {
     let created_at = test_date() + chrono::Duration::seconds(offset_secs);
     evaluation::Model {
         id,
-        project: Some(project_id()),
+        task: Some(task_id()),
         repository: "https://github.com/test/repo".into(),
         commit: commit_id(),
         wildcard: "*".into(),

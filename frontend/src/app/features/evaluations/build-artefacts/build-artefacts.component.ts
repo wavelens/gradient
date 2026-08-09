@@ -32,13 +32,13 @@ export class BuildArtefactsComponent implements OnInit {
 
   orgName = '';
   buildId = '';
-  private projectName = '';
+  private taskName = '';
   private evalId = '';
 
   ngOnInit(): void {
     this.orgName     = this.route.snapshot.paramMap.get('org') || '';
     this.buildId     = this.route.snapshot.paramMap.get('buildId') || '';
-    this.projectName = this.route.snapshot.queryParamMap.get('project') || '';
+    this.taskName = this.route.snapshot.queryParamMap.get('task') || '';
     this.evalId      = this.route.snapshot.queryParamMap.get('evalId') || '';
     this.loadArtefacts();
     if (this.authService.isAuthenticated()) {
@@ -71,7 +71,7 @@ export class BuildArtefactsComponent implements OnInit {
   }
 
   goBack(): void {
-    if (this.projectName) this.router.navigate(['/organization', this.orgName, 'project', this.projectName]);
+    if (this.taskName) this.router.navigate(['/organization', this.orgName, 'task', this.taskName]);
     else if (this.evalId) this.router.navigate(['/organization', this.orgName, 'log', this.evalId]);
     else this.router.navigate(['/organization', this.orgName]);
   }

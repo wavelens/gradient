@@ -48,9 +48,9 @@ pub struct BuildsQuery {
 #[derive(Serialize, Debug)]
 pub struct EvaluationResponse {
     pub id: EvaluationId,
-    pub project: Option<ProjectId>,
-    pub project_name: Option<String>,
-    pub project_display_name: Option<String>,
+    pub task: Option<TaskId>,
+    pub task_name: Option<String>,
+    pub task_display_name: Option<String>,
     pub repository: String,
     pub commit: String,
     pub wildcard: String,
@@ -67,8 +67,8 @@ pub struct EvaluationResponse {
     pub error: Option<String>,
     pub entry_points: Vec<EntryPointBrief>,
     /// `null` for manually-triggered evaluations (Web UI / API), populated for
-    /// evaluations that fired from a project trigger (polling, schedule,
-    /// reporter push/PR). Mirrors `EvaluationSummary::trigger` on the project
+    /// evaluations that fired from a task trigger (polling, schedule,
+    /// reporter push/PR). Mirrors `EvaluationSummary::trigger` on the task
     /// list endpoint so the eval-log "Via" badge can render the same labels
     /// without falling back to "Manual" for trigger-fired runs.
     pub trigger: Option<EvaluationTriggerSummary>,
@@ -83,12 +83,12 @@ pub struct EvaluationResponse {
 }
 
 /// Trigger that fired an evaluation. Same shape as
-/// `crate::endpoints::projects::EvaluationTriggerSummary` - duplicated here to
-/// keep the `evals` endpoint module self-contained (the projects module
+/// `crate::endpoints::tasks::EvaluationTriggerSummary` - duplicated here to
+/// keep the `evals` endpoint module self-contained (the tasks module
 /// re-exports a long chain of unrelated types).
 #[derive(Serialize, Debug)]
 pub struct EvaluationTriggerSummary {
-    pub id: ProjectTriggerId,
+    pub id: TaskTriggerId,
     #[serde(rename = "type")]
     pub trigger_type: TriggerType,
 }
