@@ -68,7 +68,7 @@ pub struct StorageArgs {
     #[arg(long, env = "GRADIENT_LOG_CHUNK_BYTES", default_value_t = 262144)]
     pub log_chunk_bytes: usize,
     /// Instance-wide cap on total cached NAR bytes, in gigabytes. When the
-    /// stored compressed-NAR total leaves every writable cache for an org with
+    /// stored compressed-NAR total leaves every writable cache for a project with
     /// less than 10 MiB of headroom, new evaluations park in `Waiting`. `0`
     /// (default) disables the instance-wide limit; per-cache limits still apply.
     #[arg(long, env = "GRADIENT_MAX_STORAGE_GB", default_value_t = 0)]

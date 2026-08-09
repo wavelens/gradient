@@ -151,7 +151,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         db,
         eval,
         input.gate_approval.as_ref(),
-        task.organization,
+        task.project,
         input.instance_max_storage_gb,
     )
     .await?;

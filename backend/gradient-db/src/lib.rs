@@ -23,11 +23,11 @@ pub mod draining;
 pub mod drv_output_spec;
 pub mod gc;
 pub mod graph_sql;
-pub mod org_cache;
-pub mod org_derivations;
-pub mod org_workers;
 pub mod permissions;
 pub mod pool;
+pub mod project_cache;
+pub mod project_derivations;
+pub mod project_workers;
 pub mod promotion;
 pub mod reachability;
 pub mod reconcile;
@@ -47,12 +47,12 @@ pub use self::cache_storage::{
     MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, cache_used_bytes,
     clear_closure_complete_for_referrers, clear_gate_flags_for_hashes, demote_cached_output,
     demote_output_only_cached_deps, demote_referrers_of, demote_unbacked_trusted_outputs,
-    diagnose_missing_input, instance_used_bytes, org_caches_all_full, org_writable_caches,
+    diagnose_missing_input, instance_used_bytes, project_caches_all_full, project_writable_caches,
 };
 pub use self::cache_upstream::{
-    GradientProtoUpstream, UpstreamAccum, UpstreamEndpoint, gradient_proto_upstreams_for_org,
-    upsert_upstream_metrics, upstream_endpoints_for_org, upstream_urls_for_org,
-    upstream_urls_for_orgs,
+    GradientProtoUpstream, UpstreamAccum, UpstreamEndpoint, gradient_proto_upstreams_for_project,
+    upsert_upstream_metrics, upstream_endpoints_for_project, upstream_urls_for_project,
+    upstream_urls_for_projects,
 };
 pub use self::chunked::{IN_CHUNK_SIZE, fetch_in_chunks, for_each_chunk};
 pub use self::closure::*;
@@ -71,10 +71,10 @@ pub use self::gc::*;
 pub use self::graph_sql::{
     ClosureDirection, dependency_closure_cte, eval_closure_cte, reachable_derivations_cte,
 };
-pub use self::org_cache::org_has_writable_cache;
-pub use self::org_derivations::derivation_ids_for_org;
-pub use self::org_workers::org_has_eval_capable_worker_registration;
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
+pub use self::project_cache::project_has_writable_cache;
+pub use self::project_derivations::derivation_ids_for_project;
+pub use self::project_workers::project_has_eval_capable_worker_registration;
 pub use self::promotion::{
     cascade_dependency_failed, find_ready_anchors, mark_edges_complete_for_eval,
     promote_dependents, promote_ready, propagate_closure_complete,

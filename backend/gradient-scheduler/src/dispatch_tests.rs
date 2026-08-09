@@ -22,7 +22,7 @@
 //!   1. `EBuild::find().from_raw_sql(ready_builds_query).all()` → Q
 //!   2. Per build: `EDerivation::find_by_id(drv_id).one()` → Q
 //!   3. `EEvaluation::find_by_id(eval_id).one()` → Q
-//!   4. `organization_id_for_eval` (task lookup) → Q
+//!   4. `project_id_for_eval` (task lookup) → Q
 
 use std::sync::Arc;
 
@@ -63,10 +63,10 @@ fn make_commit(id: CommitId) -> gradient_entity::commit::Model {
     }
 }
 
-fn make_task(id: TaskId, org_id: OrganizationId) -> gradient_entity::task::Model {
+fn make_task(id: TaskId, project_id: ProjectId) -> gradient_entity::task::Model {
     gradient_entity::task::Model {
         id,
-        organization: org_id,
+        project: project_id,
         name: "test-task".into(),
         active: true,
         display_name: "Test Task".into(),
@@ -95,7 +95,7 @@ async fn dispatch_queued_eval_enqueues_job() {
     let eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
     let task_id = TaskId::now_v7();
-    let org_id = OrganizationId::now_v7();
+    let project_id = ProjectId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // 1. find Queued evaluations
@@ -106,8 +106,8 @@ async fn dispatch_queued_eval_enqueues_job() {
         .append_query_results([
             Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
         ])
-        // 4. bulk tasks → returns org_id
-        .append_query_results([vec![make_task(task_id, org_id)]])
+        // 4. bulk tasks → returns project_id
+        .append_query_results([vec![make_task(task_id, project_id)]])
         .into_connection();
 
     let scheduler = make_scheduler(db);
@@ -123,13 +123,13 @@ async fn dispatch_queued_eval_enqueues_job() {
 }
 
 /// Calling dispatch twice for the same Queued eval does not enqueue a second job.
-/// The second call sees `contains_job` = true and skips the commit/org lookup.
+/// The second call sees `contains_job` = true and skips the commit/project lookup.
 #[tokio::test]
 async fn dispatch_queued_eval_skips_already_enqueued() {
     let eval_id = EvaluationId::now_v7();
     let commit_id = CommitId::now_v7();
     let task_id = TaskId::now_v7();
-    let org_id = OrganizationId::now_v7();
+    let project_id = ProjectId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // First dispatch:
@@ -142,7 +142,7 @@ async fn dispatch_queued_eval_skips_already_enqueued() {
             Vec::<gradient_entity::evaluation_flake_input_override::Model>::new(),
         ])
         // 4. bulk tasks
-        .append_query_results([vec![make_task(task_id, org_id)]])
+        .append_query_results([vec![make_task(task_id, project_id)]])
         // Second dispatch:
         // 5. find Queued evaluations (same eval still Queued in DB)
         .append_query_results([vec![make_eval_queued(eval_id, commit_id, Some(task_id))]])
@@ -273,7 +273,7 @@ async fn dispatch_once_no_triggers_is_noop() {
 async fn dispatch_once_skips_trigger_within_interval() {
     let task_id = TaskId::now_v7();
     let trigger_id = TaskTriggerId::now_v7();
-    let org_id = OrganizationId::now_v7();
+    let project_id = ProjectId::now_v7();
 
     // last_fired_at = now (0 seconds ago) - interval = 60 s → not due
     let recent = gradient_types::now();
@@ -287,7 +287,7 @@ async fn dispatch_once_skips_trigger_within_interval() {
             Some(recent),
         )]])
         // 2. task lookup (batch)
-        .append_query_results([vec![make_task(task_id, org_id)]])
+        .append_query_results([vec![make_task(task_id, project_id)]])
         // No further queries expected (trigger not due)
         .into_connection();
 

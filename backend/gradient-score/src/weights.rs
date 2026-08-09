@@ -90,5 +90,5 @@ pub const DISK_AFFINITY_BONUS: f64 = 60.0;
 pub const DISK_HEAVY_THRESHOLD_BYTES: u64 = 100 * 1_048_576;
 pub const DISK_REFERENCE_MBPS: f64 = 500.0;
 
-/// FairShareRule: penalty scale per unit of an org's active-build share.
+/// FairShareRule: penalty scale per unit of a project's active-build share.
 pub const FAIR_SHARE_WEIGHT: f64 = 500.0;

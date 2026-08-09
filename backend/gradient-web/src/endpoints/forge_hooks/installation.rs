@@ -57,19 +57,19 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         return;
     }
 
-    // Bind to every org owning a task whose parsed `owner/repo` matches an
+    // Bind to every project owning a task whose parsed `owner/repo` matches an
     // installed repo, so flake shorthand and every clone-URL form match alike.
-    let owner_org_ids: HashSet<OrganizationId> = ETask::find()
+    let owner_project_ids: HashSet<ProjectId> = ETask::find()
         .filter(CTask::Repository.contains("github"))
         .all(&state.web_db)
         .await
         .unwrap_or_default()
         .into_iter()
         .filter(|p| github_full_name(&p.repository).is_some_and(|n| installed.contains(&n)))
-        .map(|p| p.organization)
+        .map(|p| p.project)
         .collect();
 
-    if owner_org_ids.is_empty() {
+    if owner_project_ids.is_empty() {
         let sender_login = payload
             .sender
             .as_ref()
@@ -85,18 +85,18 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         return;
     }
 
-    let orgs = EOrganization::find()
-        .filter(COrganization::Id.is_in(owner_org_ids))
+    let projects = EProject::find()
+        .filter(CProject::Id.is_in(owner_project_ids))
         .all(&state.web_db)
         .await
         .unwrap_or_default();
 
-    for org in orgs {
-        let org_id = org.id;
-        let creator = org.created_by;
+    for project in projects {
+        let project_id = project.id;
+        let creator = project.created_by;
         let inst = match gradient_ci::upsert_github_installation(
             &state.web_db,
-            org_id,
+            project_id,
             installation_id,
             Some(github_login),
             creator,
@@ -105,16 +105,16 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         {
             Ok(id) => id,
             Err(e) => {
-                warn!(error = %e, installation_id, %org_id, "Failed to upsert github_installation");
+                warn!(error = %e, installation_id, %project_id, "Failed to upsert github_installation");
                 continue;
             }
         };
 
-        info!(installation_id, %org_id, github_login = %github_login, "GitHub App installed on organization");
+        info!(installation_id, %project_id, github_login = %github_login, "GitHub App installed on project");
         let name = gradient_ci::github_integration_name(Some(github_login), installation_id);
         if let Err(e) = gradient_ci::ensure_github_app_integrations(
             &state.web_db,
-            org_id,
+            project_id,
             inst,
             &name,
             "GitHub",
@@ -122,7 +122,7 @@ async fn store_installation_id(state: &Arc<ServerState>, payload: &GitHubInstall
         )
         .await
         {
-            warn!(error = %e, %org_id, "Failed to materialise GitHub App integration rows");
+            warn!(error = %e, %project_id, "Failed to materialise GitHub App integration rows");
         }
     }
 }
@@ -159,8 +159,8 @@ fn repo_identity(url: &str) -> Option<String> {
 }
 
 /// Whether a webhook event from `event_repo_urls` targets a task tracking
-/// `task_repository`. An org-wide inbound integration (a GitHub App spans the
-/// whole org) would otherwise fan out to sibling tasks. Empty urls match all.
+/// `task_repository`. A project-wide inbound integration (a GitHub App spans the
+/// whole project) would otherwise fan out to sibling tasks. Empty urls match all.
 pub(super) fn event_repo_matches_task(event_repo_urls: &[String], task_repository: &str) -> bool {
     let mut keys = event_repo_urls
         .iter()
@@ -176,9 +176,9 @@ pub(super) fn event_repo_matches_task(event_repo_urls: &[String], task_repositor
     }
 }
 
-/// Resolve a GitHub App webhook to the inbound GitHub integrations whose org
+/// Resolve a GitHub App webhook to the inbound GitHub integrations whose project
 /// owns a task matching one of `repository_urls`. A single installation can
-/// serve multiple orgs, so the repo-URL gate selects only the matching ones.
+/// serve multiple projects, so the repo-URL gate selects only the matching ones.
 pub(super) async fn resolve_github_app_targets(
     state: &Arc<ServerState>,
     installation_id: i64,
@@ -208,15 +208,15 @@ pub(super) async fn resolve_github_app_targets(
 
     let mut integrations = Vec::new();
     for inst in installs {
-        let org_id = inst.organization;
+        let project_id = inst.project;
         let tasks = match ETask::find()
-            .filter(CTask::Organization.eq(org_id))
+            .filter(CTask::Project.eq(project_id))
             .all(&state.web_db)
             .await
         {
             Ok(rows) => rows,
             Err(e) => {
-                warn!(error = %e, %org_id, "resolve_github_app_targets: task lookup failed");
+                warn!(error = %e, %project_id, "resolve_github_app_targets: task lookup failed");
                 continue;
             }
         };
@@ -227,7 +227,7 @@ pub(super) async fn resolve_github_app_targets(
             continue;
         }
         let integration = EIntegration::find()
-            .filter(CIntegration::Organization.eq(org_id))
+            .filter(CIntegration::Project.eq(project_id))
             .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
             .filter(CIntegration::ForgeType.eq(i16::from(gradient_types::ForgeType::GitHub)))
             .filter(CIntegration::GithubInstallation.eq(inst.id))
@@ -240,7 +240,7 @@ pub(super) async fn resolve_github_app_targets(
                 let allowlist = i.allowed_ips.clone().unwrap_or_default();
                 if !ip_allowed(client_ip, &allowlist) {
                     warn!(
-                        %org_id,
+                        %project_id,
                         integration_id = %i.id,
                         %client_ip,
                         "resolve_github_app_targets: source IP not allowed, skipping integration"
@@ -250,8 +250,8 @@ pub(super) async fn resolve_github_app_targets(
                 integrations.push(i.id);
             }
             None => warn!(
-                %org_id,
-                "resolve_github_app_targets: org has matching task but no inbound github integration row"
+                %project_id,
+                "resolve_github_app_targets: project has matching task but no inbound github integration row"
             ),
         }
     }
@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn event_repo_rejects_a_sibling_repo_in_the_same_org() {
+    fn event_repo_rejects_a_sibling_repo_in_the_same_project() {
         let event = ["https://github.com/NuschtOS/search.git".to_string()];
         assert!(!event_repo_matches_task(
             &event,

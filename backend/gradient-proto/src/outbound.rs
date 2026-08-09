@@ -68,7 +68,7 @@ async fn connect_to_registered_workers(
         }
     };
 
-    // Deduplicate by worker_id - multiple orgs can register the same worker.
+    // Deduplicate by worker_id - multiple projects can register the same worker.
     let mut seen = HashSet::new();
     for reg in registrations {
         let Some(url) = reg.url.as_deref() else {

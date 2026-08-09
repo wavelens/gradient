@@ -9,7 +9,7 @@ mod fixtures;
 use super::{StateConfiguration, resolve_oidc_group_roles, resolve_scim_group_roles};
 use fixtures::{integration_cfg, reporter_cfg, worker_cfg};
 use gradient_types::triggers::ConcurrencyPolicy;
-use gradient_types::{OrganizationId, RoleId};
+use gradient_types::{ProjectId, RoleId};
 use std::collections::HashMap;
 
 #[test]
@@ -34,7 +34,7 @@ fn user_accepts_missing_password_file() {
 }
 
 #[test]
-fn org_task_cache_descriptions_optional() {
+fn project_task_cache_descriptions_optional() {
     let json = r#"{
         "users": {
             "alice": {
@@ -44,7 +44,7 @@ fn org_task_cache_descriptions_optional() {
                 "password_file": "/dev/null"
             }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme",
                 "display_name": "ACME",
@@ -57,7 +57,7 @@ fn org_task_cache_descriptions_optional() {
         "tasks": {
             "web": {
                 "name": "web",
-                "organization": "acme",
+                "project": "acme",
                 "display_name": "Web",
                 "repository": "https://example.com/acme/web.git",
                 "created_by": "alice"
@@ -74,7 +74,7 @@ fn org_task_cache_descriptions_optional() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert!(cfg.organizations["acme"].description.is_none());
+    assert!(cfg.projects["acme"].description.is_none());
     assert!(cfg.tasks["web"].description.is_none());
     assert!(cfg.caches["main"].description.is_none());
     assert!(cfg.validate().is_valid);
@@ -86,7 +86,7 @@ fn state_task_concurrency_defaults_to_soft_abort() {
         "tasks": {
             "web": {
                 "name": "web",
-                "organization": "acme",
+                "project": "acme",
                 "display_name": "Web",
                 "repository": "https://example.com/acme/web.git",
                 "created_by": "alice"
@@ -103,7 +103,7 @@ fn state_task_accepts_wildcard_field() {
         "tasks": {
             "web": {
                 "name": "web",
-                "organization": "acme",
+                "project": "acme",
                 "display_name": "Web",
                 "repository": "https://example.com/acme/web.git",
                 "wildcard": "packages.x86_64-linux.*",
@@ -123,7 +123,7 @@ fn state_task_accepts_legacy_evaluation_wildcard_alias() {
         "tasks": {
             "web": {
                 "name": "web",
-                "organization": "acme",
+                "project": "acme",
                 "display_name": "Web",
                 "repository": "https://example.com/acme/web.git",
                 "evaluation_wildcard": "checks.*",
@@ -141,7 +141,7 @@ fn state_task_keep_evaluations_defaults_to_thirty() {
         "tasks": {
             "web": {
                 "name": "web",
-                "organization": "acme",
+                "project": "acme",
                 "display_name": "Web",
                 "repository": "https://example.com/acme/web.git",
                 "created_by": "alice"
@@ -163,7 +163,7 @@ fn state_task_keep_evaluations_zero_rejected_by_validator() {
                 "password_file": "/dev/null"
             }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme",
                 "display_name": "ACME",
@@ -175,7 +175,7 @@ fn state_task_keep_evaluations_zero_rejected_by_validator() {
         "tasks": {
             "web": {
                 "name": "web",
-                "organization": "acme",
+                "project": "acme",
                 "display_name": "Web",
                 "repository": "https://example.com/acme/web.git",
                 "created_by": "alice",
@@ -201,7 +201,7 @@ fn state_task_actions_round_trip_all_types() {
         "tasks": {
             "web": {
                 "name": "web",
-                "organization": "acme",
+                "project": "acme",
                 "display_name": "Web",
                 "repository": "https://example.com/acme/web.git",
                 "created_by": "alice",
@@ -236,7 +236,7 @@ fn state_task_actions_round_trip_all_types() {
 #[test]
 fn state_reporter_trigger_accepts_declared_inbound_integration() {
     let integrations = r#"{
-        "forge": { "name": "forge", "organization": "acme", "kind": "inbound", "forge_type": "forgejo", "created_by": "alice" }
+        "forge": { "name": "forge", "project": "acme", "kind": "inbound", "forge_type": "forgejo", "created_by": "alice" }
     }"#;
     let cfg = reporter_cfg("forge", integrations);
     let v = cfg.validate();
@@ -260,7 +260,7 @@ fn state_reporter_trigger_rejects_unknown_integration() {
 #[test]
 fn state_reporter_trigger_rejects_outbound_integration() {
     let integrations = r#"{
-        "forge": { "name": "forge", "organization": "acme", "kind": "outbound", "forge_type": "forgejo", "created_by": "alice" }
+        "forge": { "name": "forge", "project": "acme", "kind": "outbound", "forge_type": "forgejo", "created_by": "alice" }
     }"#;
     let cfg = reporter_cfg("forge", integrations);
     let v = cfg.validate();
@@ -282,7 +282,7 @@ fn state_reporter_trigger_accepts_github_app_name() {
 #[test]
 fn state_github_integration_requires_installation_id() {
     let integrations = r#"{
-        "gh": { "name": "gh", "organization": "acme", "kind": "outbound", "forge_type": "github", "created_by": "alice" }
+        "gh": { "name": "gh", "project": "acme", "kind": "outbound", "forge_type": "github", "created_by": "alice" }
     }"#;
     let cfg = integration_cfg(integrations);
     let v = cfg.validate();
@@ -299,7 +299,7 @@ fn state_github_integration_requires_installation_id() {
 #[test]
 fn state_github_integration_with_installation_id_is_valid() {
     let integrations = r#"{
-        "gh": { "name": "gh", "organization": "acme", "kind": "outbound", "forge_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
+        "gh": { "name": "gh", "project": "acme", "kind": "outbound", "forge_type": "github", "installation_id": 42, "account_login": "acme", "created_by": "alice" }
     }"#;
     let cfg = integration_cfg(integrations);
     let v = cfg.validate();
@@ -312,7 +312,7 @@ fn state_action_rejects_unknown_field() {
         "tasks": {
             "web": {
                 "name": "web",
-                "organization": "acme",
+                "project": "acme",
                 "display_name": "Web",
                 "repository": "https://example.com/acme/web.git",
                 "created_by": "alice",
@@ -341,7 +341,7 @@ fn state_action_validate_rejects_unknown_type() {
                 "password_file": "/dev/null"
             }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
@@ -349,7 +349,7 @@ fn state_action_validate_rejects_unknown_type() {
         },
         "tasks": {
             "web": {
-                "name": "web", "organization": "acme", "display_name": "Web",
+                "name": "web", "project": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
                 "actions": [
                     { "name": "a", "type": "garbage", "config": {} }
@@ -378,7 +378,7 @@ fn state_action_validate_rejects_duplicate_names() {
                 "password_file": "/dev/null"
             }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
@@ -386,7 +386,7 @@ fn state_action_validate_rejects_duplicate_names() {
         },
         "tasks": {
             "web": {
-                "name": "web", "organization": "acme", "display_name": "Web",
+                "name": "web", "project": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
                 "actions": [
                     { "name": "dup", "type": "send_mail", "config": { "recipients": ["a@x.io"] } },
@@ -416,7 +416,7 @@ fn state_action_validate_rejects_events_on_forge_status_report() {
                 "password_file": "/dev/null"
             }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
@@ -424,7 +424,7 @@ fn state_action_validate_rejects_events_on_forge_status_report() {
         },
         "tasks": {
             "web": {
-                "name": "web", "organization": "acme", "display_name": "Web",
+                "name": "web", "project": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
                 "actions": [
                     { "name": "x", "type": "forge_status_report", "events": ["build.completed"], "config": { "integration": "gh" } }
@@ -453,7 +453,7 @@ fn state_action_validate_accepts_open_pr() {
                 "password_file": "/dev/null"
             }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
@@ -461,7 +461,7 @@ fn state_action_validate_accepts_open_pr() {
         },
         "tasks": {
             "web": {
-                "name": "web", "organization": "acme", "display_name": "Web",
+                "name": "web", "project": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
                 "actions": [
                     { "name": "flake-update", "type": "open_pr", "config": { "integration": "gh" } }
@@ -487,7 +487,7 @@ fn state_action_validate_rejects_events_on_open_pr() {
                 "password_file": "/dev/null"
             }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
@@ -495,7 +495,7 @@ fn state_action_validate_rejects_events_on_open_pr() {
         },
         "tasks": {
             "web": {
-                "name": "web", "organization": "acme", "display_name": "Web",
+                "name": "web", "project": "acme", "display_name": "Web",
                 "repository": "https://example.com/acme/web.git", "created_by": "alice",
                 "actions": [
                     { "name": "x", "type": "open_pr", "events": ["build.completed"], "config": { "integration": "gh" } }
@@ -523,7 +523,7 @@ fn state_task_silently_ignores_legacy_force_evaluation_field() {
         "tasks": {
             "web": {
                 "name": "web",
-                "organization": "acme",
+                "project": "acme",
                 "display_name": "Web",
                 "repository": "https://example.com/acme/web.git",
                 "created_by": "alice",
@@ -541,7 +541,7 @@ fn state_task_concurrency_hard_abort_round_trip() {
         "tasks": {
             "web": {
                 "name": "web",
-                "organization": "acme",
+                "project": "acme",
                 "display_name": "Web",
                 "repository": "https://example.com/acme/web.git",
                 "created_by": "alice",
@@ -555,25 +555,26 @@ fn state_task_concurrency_hard_abort_round_trip() {
 }
 
 #[test]
-fn state_worker_accepts_multiple_organizations() {
+fn state_worker_accepts_multiple_projects() {
     let cfg = worker_cfg(r#"["acme", "globex"]"#);
     assert_eq!(
-        cfg.workers["builder-1"].organizations,
+        cfg.workers["builder-1"].projects,
         vec!["acme".to_owned(), "globex".to_owned()]
     );
     assert!(cfg.validate().is_valid);
 }
 
 #[test]
-fn state_worker_rejects_empty_organizations() {
+fn state_worker_rejects_empty_projects() {
     let cfg = worker_cfg("[]");
     let v = cfg.validate();
     assert!(!v.is_valid);
     assert!(
-        v.errors.iter().any(|e| e.field
-            == "workers.550e8400-e29b-41d4-a716-446655440001.organizations"
-            && e.message.contains("at least one")),
-        "expected at-least-one-org error, got: {:?}",
+        v.errors.iter().any(
+            |e| e.field == "workers.550e8400-e29b-41d4-a716-446655440001.projects"
+                && e.message.contains("at least one")
+        ),
+        "expected at-least-one-project error, got: {:?}",
         v.errors
     );
 }
@@ -587,7 +588,7 @@ fn base_worker_cfg(authorize_against: &str) -> StateConfiguration {
             "workers": {{
                 "base-1": {{
                     "worker_id": "550e8400-e29b-41d4-a716-446655440001",
-                    "organizations": [],
+                    "projects": [],
                     "token_file": "/dev/null",
                     "display_name": "Base Build Server",
                     "created_by": "alice",
@@ -616,15 +617,15 @@ fn base_worker_rejects_bad_authorize_against() {
 }
 
 #[test]
-fn base_worker_accepts_valid_authorize_against_and_empty_orgs() {
+fn base_worker_accepts_valid_authorize_against_and_empty_projects() {
     let cfg = base_worker_cfg(r#""018f6f3a-0000-7000-8000-000000000001""#);
     assert!(cfg.validate().is_valid, "{:?}", cfg.validate().errors);
 }
 
 #[test]
-fn state_org_accepts_explicit_id() {
+fn state_project_accepts_explicit_id() {
     let json = r#"{
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme",
                 "display_name": "ACME",
@@ -637,15 +638,15 @@ fn state_org_accepts_explicit_id() {
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
     assert_eq!(
-        cfg.organizations["acme"].id.as_deref(),
+        cfg.projects["acme"].id.as_deref(),
         Some("018f6f3a-0000-7000-8000-000000000001")
     );
 }
 
 #[test]
-fn state_org_id_defaults_none() {
+fn state_project_id_defaults_none() {
     let json = r#"{
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme",
                 "display_name": "ACME",
@@ -656,16 +657,16 @@ fn state_org_id_defaults_none() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert!(cfg.organizations["acme"].id.is_none());
+    assert!(cfg.projects["acme"].id.is_none());
 }
 
 #[test]
-fn state_org_validator_rejects_malformed_id() {
+fn state_project_validator_rejects_malformed_id() {
     let json = r#"{
         "users": {
             "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME", "id": "not-a-uuid",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
@@ -676,19 +677,19 @@ fn state_org_validator_rejects_malformed_id() {
     let v = cfg.validate();
     assert!(!v.is_valid);
     assert!(
-        v.errors.iter().any(|e| e.field == "organizations.acme.id"),
+        v.errors.iter().any(|e| e.field == "projects.acme.id"),
         "expected invalid-id error, got: {:?}",
         v.errors
     );
 }
 
 #[test]
-fn state_org_validator_rejects_duplicate_ids() {
+fn state_project_validator_rejects_duplicate_ids() {
     let json = r#"{
         "users": {
             "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME", "id": "018f6f3a-0000-7000-8000-000000000001",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice"
@@ -705,16 +706,16 @@ fn state_org_validator_rejects_duplicate_ids() {
     assert!(
         v.errors
             .iter()
-            .any(|e| e.message.contains("Duplicate organization id")),
+            .any(|e| e.message.contains("Duplicate project id")),
         "expected duplicate-id error, got: {:?}",
         v.errors
     );
 }
 
 #[test]
-fn state_org_members_serde_round_trip() {
+fn state_project_members_serde_round_trip() {
     let json = r#"{
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme",
                 "display_name": "ACME",
@@ -729,7 +730,7 @@ fn state_org_members_serde_round_trip() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    let members = &cfg.organizations["acme"].members;
+    let members = &cfg.projects["acme"].members;
     assert_eq!(members.len(), 2);
     assert_eq!(members[0].user, "bob");
     assert_eq!(members[0].role, "Write");
@@ -738,9 +739,9 @@ fn state_org_members_serde_round_trip() {
 }
 
 #[test]
-fn state_org_members_default_empty() {
+fn state_project_members_default_empty() {
     let json = r#"{
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme",
                 "display_name": "ACME",
@@ -751,17 +752,17 @@ fn state_org_members_default_empty() {
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
-    assert!(cfg.organizations["acme"].members.is_empty());
+    assert!(cfg.projects["acme"].members.is_empty());
 }
 
 #[test]
-fn state_org_members_validator_accepts_builtin_role() {
+fn state_project_members_validator_accepts_builtin_role() {
     let json = r#"{
         "users": {
             "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" },
             "bob":   { "username": "bob",   "name": "Bob",   "email": "b@x.io", "password_file": "/dev/null" }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice",
@@ -775,12 +776,12 @@ fn state_org_members_validator_accepts_builtin_role() {
 }
 
 #[test]
-fn state_org_members_validator_accepts_custom_org_role() {
+fn state_project_members_validator_accepts_custom_project_role() {
     let json = r#"{
         "users": {
             "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice",
@@ -788,7 +789,7 @@ fn state_org_members_validator_accepts_custom_org_role() {
             }
         },
         "roles": {
-            "releaser": { "name": "releaser", "organization": "acme", "permissions": ["viewOrg"] }
+            "releaser": { "name": "releaser", "project": "acme", "permissions": ["viewProject"] }
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
@@ -797,12 +798,12 @@ fn state_org_members_validator_accepts_custom_org_role() {
 }
 
 #[test]
-fn state_org_members_validator_rejects_unknown_role() {
+fn state_project_members_validator_rejects_unknown_role() {
     let json = r#"{
         "users": {
             "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice",
@@ -816,19 +817,19 @@ fn state_org_members_validator_rejects_unknown_role() {
     assert!(
         v.errors
             .iter()
-            .any(|e| e.field == "organizations.acme.members.alice.role"),
+            .any(|e| e.field == "projects.acme.members.alice.role"),
         "expected unknown-role error, got: {:?}",
         v.errors
     );
 }
 
 #[test]
-fn state_org_members_validator_ignores_unknown_user() {
+fn state_project_members_validator_ignores_unknown_user() {
     let json = r#"{
         "users": {
             "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice",
@@ -846,12 +847,12 @@ fn state_org_members_validator_ignores_unknown_user() {
 }
 
 #[test]
-fn state_org_members_validator_rejects_duplicate_user() {
+fn state_project_members_validator_rejects_duplicate_user() {
     let json = r#"{
         "users": {
             "alice": { "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }
         },
-        "organizations": {
+        "projects": {
             "acme": {
                 "name": "acme", "display_name": "ACME",
                 "private_key_file": "/dev/null", "public": false, "created_by": "alice",
@@ -875,89 +876,90 @@ fn state_org_members_validator_rejects_duplicate_user() {
 }
 
 #[test]
-fn state_worker_rejects_unknown_organization_in_list() {
+fn state_worker_rejects_unknown_project_in_list() {
     let cfg = worker_cfg(r#"["acme", "ghost"]"#);
     let v = cfg.validate();
     assert!(!v.is_valid);
     assert!(
-        v.errors.iter().any(|e| e.field
-            == "workers.550e8400-e29b-41d4-a716-446655440001.organizations"
-            && e.message.contains("'ghost'")),
-        "expected unknown-org error mentioning 'ghost', got: {:?}",
+        v.errors.iter().any(
+            |e| e.field == "workers.550e8400-e29b-41d4-a716-446655440001.projects"
+                && e.message.contains("'ghost'")
+        ),
+        "expected unknown-project error mentioning 'ghost', got: {:?}",
         v.errors
     );
 }
 
 #[test]
-fn resolves_group_to_org_role_grants() {
+fn resolves_group_to_project_role_grants() {
     let json = r#"{
         "roles": {
             "platform": {
                 "name": "platform-admin",
-                "organization": "acme",
+                "project": "acme",
                 "permissions": ["create_task"],
                 "oidc_group": ["platform-team", "ops"]
             },
             "unmapped": {
                 "name": "viewer",
-                "organization": "acme",
+                "project": "acme",
                 "permissions": ["view_task"]
             }
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
 
-    let org = OrganizationId::now_v7();
+    let project = ProjectId::now_v7();
     let role = RoleId::now_v7();
     let mut role_ids = HashMap::new();
     role_ids.insert(
         ("acme".to_string(), "platform-admin".to_string()),
-        (org, role),
+        (project, role),
     );
     role_ids.insert(
         ("acme".to_string(), "viewer".to_string()),
-        (org, RoleId::now_v7()),
+        (project, RoleId::now_v7()),
     );
 
     let resolved = resolve_oidc_group_roles(&cfg, &role_ids);
-    assert_eq!(resolved.get("platform-team"), Some(&vec![(org, role)]));
-    assert_eq!(resolved.get("ops"), Some(&vec![(org, role)]));
+    assert_eq!(resolved.get("platform-team"), Some(&vec![(project, role)]));
+    assert_eq!(resolved.get("ops"), Some(&vec![(project, role)]));
     assert!(!resolved.contains_key("unmapped"));
 }
 
 #[test]
-fn resolves_scim_group_to_org_role_grants() {
+fn resolves_scim_group_to_project_role_grants() {
     let json = r#"{
         "roles": {
             "eng": {
                 "name": "platform-admin",
-                "organization": "acme",
+                "project": "acme",
                 "permissions": ["create_task"],
                 "scim_group": ["acme-eng", "ops"]
             },
             "unmapped": {
                 "name": "viewer",
-                "organization": "acme",
+                "project": "acme",
                 "permissions": ["view_task"]
             }
         }
     }"#;
     let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
 
-    let org = OrganizationId::now_v7();
+    let project = ProjectId::now_v7();
     let role = RoleId::now_v7();
     let mut role_ids = HashMap::new();
     role_ids.insert(
         ("acme".to_string(), "platform-admin".to_string()),
-        (org, role),
+        (project, role),
     );
     role_ids.insert(
         ("acme".to_string(), "viewer".to_string()),
-        (org, RoleId::now_v7()),
+        (project, RoleId::now_v7()),
     );
 
     let resolved = resolve_scim_group_roles(&cfg, &role_ids);
-    assert_eq!(resolved.get("acme-eng"), Some(&vec![(org, role)]));
-    assert_eq!(resolved.get("ops"), Some(&vec![(org, role)]));
+    assert_eq!(resolved.get("acme-eng"), Some(&vec![(project, role)]));
+    assert_eq!(resolved.get("ops"), Some(&vec![(project, role)]));
     assert!(!resolved.contains_key("unmapped"));
 }

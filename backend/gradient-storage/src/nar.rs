@@ -477,27 +477,32 @@ impl NarStore {
         self.delete_object(&self.eval_cache_path(fingerprint)).await
     }
 
-    /// Object-store path for a build-request blob keyed by org + BLAKE3 hash.
-    /// Layout: `<prefix>build-request-blobs/<org-uuid>/<hh>/<full-hex>`.
-    fn blob_path(&self, org: uuid::Uuid, hash: &[u8; 32]) -> Path {
+    /// Object-store path for a build-request blob keyed by project + BLAKE3 hash.
+    /// Layout: `<prefix>build-request-blobs/<project-uuid>/<hh>/<full-hex>`.
+    fn blob_path(&self, project: uuid::Uuid, hash: &[u8; 32]) -> Path {
         let hex = hex::encode(hash);
         let shard = &hex[..2];
         Path::from(format!(
             "{}build-request-blobs/{}/{}/{}",
-            self.prefix, org, shard, hex,
+            self.prefix, project, shard, hex,
         ))
     }
 
-    pub async fn put_blob(&self, org: uuid::Uuid, hash: &[u8; 32], data: Vec<u8>) -> Result<()> {
-        self.put_object(self.blob_path(org, hash), data).await
+    pub async fn put_blob(
+        &self,
+        project: uuid::Uuid,
+        hash: &[u8; 32],
+        data: Vec<u8>,
+    ) -> Result<()> {
+        self.put_object(self.blob_path(project, hash), data).await
     }
 
-    pub async fn get_blob(&self, org: uuid::Uuid, hash: &[u8; 32]) -> Result<Option<Vec<u8>>> {
-        self.get_object(&self.blob_path(org, hash)).await
+    pub async fn get_blob(&self, project: uuid::Uuid, hash: &[u8; 32]) -> Result<Option<Vec<u8>>> {
+        self.get_object(&self.blob_path(project, hash)).await
     }
 
-    pub async fn delete_blob(&self, org: uuid::Uuid, hash: &[u8; 32]) -> Result<()> {
-        self.delete_object(&self.blob_path(org, hash)).await
+    pub async fn delete_blob(&self, project: uuid::Uuid, hash: &[u8; 32]) -> Result<()> {
+        self.delete_object(&self.blob_path(project, hash)).await
     }
 
     /// Lists all NAR hashes currently present in the store (both local and S3).
@@ -540,8 +545,8 @@ impl NarStore {
     }
 
     /// Lists every build-request blob currently in storage. Returns
-    /// `(org, hash)` pairs reconstructed from the
-    /// `build-request-blobs/<org-uuid>/<shard>/<full-hex>` path layout. Entries
+    /// `(project, hash)` pairs reconstructed from the
+    /// `build-request-blobs/<project-uuid>/<shard>/<full-hex>` path layout. Entries
     /// whose name does not match the layout are skipped.
     pub async fn list_blobs(&self) -> Result<Vec<(uuid::Uuid, [u8; 32])>> {
         let prefix = Path::from(format!("{}build-request-blobs", self.prefix));
@@ -555,9 +560,9 @@ impl NarStore {
                 continue;
             }
             let hash_hex = parts[parts.len() - 1];
-            let org_part = parts[parts.len() - 3];
-            let Ok(org) = uuid::Uuid::parse_str(org_part) else {
-                tracing::debug!(path = %p, "skipping blob with non-uuid org dir");
+            let project_part = parts[parts.len() - 3];
+            let Ok(project) = uuid::Uuid::parse_str(project_part) else {
+                tracing::debug!(path = %p, "skipping blob with non-uuid project dir");
                 continue;
             };
             let Ok(hash_vec) = hex::decode(hash_hex) else {
@@ -570,7 +575,7 @@ impl NarStore {
             }
             let mut hash = [0u8; 32];
             hash.copy_from_slice(&hash_vec);
-            out.push((org, hash));
+            out.push((project, hash));
         }
         Ok(out)
     }

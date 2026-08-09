@@ -97,13 +97,13 @@ The `worker-id` enables:
 
 ## Authorization
 
-Authorization uses a challenge-response flow based on **peers**. A peer is any entity on the server that can register a worker - an **org**, a **cache**, or a **proxy**. The worker doesn't know or care what type of peer it's authenticating against - it just holds `peer_id → token` pairs.
+Authorization uses a challenge-response flow based on **peers**. A peer is any entity on the server that can register a worker - an **project**, a **cache**, or a **proxy**. The worker doesn't know or care what type of peer it's authenticating against - it just holds `peer_id → token` pairs.
 
 Mutual consent: the peer registers the worker ID (peer consents), the worker holds the peer's token (worker consents).
 
 ### Setup (before connection)
 
- 1. A peer (org admin, cache owner, or proxy) registers a worker ID → server generates a token for that `(peer, worker_id)` pair
+ 1. A peer (project admin, cache owner, or proxy) registers a worker ID → server generates a token for that `(peer, worker_id)` pair
  2. The peer gives the token to the worker operator
  3. Worker operator adds `peer_id → token` to worker config
 
@@ -111,7 +111,7 @@ Mutual consent: the peer registers the worker ID (peer consents), the worker hol
 # worker config
 id: "w-550e8400-e29b-41d4-a716-446655440000"
 peers:
-  peer-alpha: "tok_abc123"    # could be an org, cache, or proxy
+  peer-alpha: "tok_abc123"    # could be a project, cache, or proxy
   peer-beta:  "tok_def456"    # worker doesn't know or care which type
 ```
 
@@ -133,10 +133,10 @@ AuthResponse {
 
 The server validates each token independently. The worker is authorized for every peer whose token is valid. If some tokens fail, the connection continues with the successful peers - only a total failure causes `Reject`.
 
-When validating peer tokens, the server additionally checks each authorized peer that is an organization against the `organization_cache` table. If the organization has no subscribed cache, that peer is moved into `failed_peers` with reason `"organization has no cache subscribed"`. If this leaves the authorized peer set empty - i.e. the worker authenticated but every peer it presented a valid token for lacks a cache - the connection is rejected with the dedicated `495 organization has no cache subscribed` rather than a misleading `401`. A `401 no valid peer tokens provided` is only sent when no token validated at all.
+When validating peer tokens, the server additionally checks each authorized peer that is a project against the `project_cache` table. If the project has no subscribed cache, that peer is moved into `failed_peers` with reason `"project has no cache subscribed"`. If this leaves the authorized peer set empty - i.e. the worker authenticated but every peer it presented a valid token for lacks a cache - the connection is rejected with the dedicated `495 project has no cache subscribed` rather than a misleading `401`. A `401 no valid peer tokens provided` is only sent when no token validated at all.
 
 What authorization means depends on the peer type:
- - **Org** - worker receives jobs from that org's tasks
+ - **Project** - worker receives jobs from that project's tasks
  - **Cache** - worker can serve/pull from that cache
  - **Proxy** - worker is part of the proxy's pool
 
@@ -180,7 +180,7 @@ The server allows only **one WebSocket connection per worker ID per instance**. 
 
 ### Key management
 
-- Peers (org admins, cache owners, proxy operators) create worker tokens via the web API, scoped to a specific worker ID
+- Peers (project admins, cache owners, proxy operators) create worker tokens via the web API, scoped to a specific worker ID
 - Workers store tokens in config file or environment (`GRADIENT_WORKER_PEERS="peer_id:token,peer_id:token"`)
 - Keys can be rotated via reauth - no reconnect needed
 
@@ -191,7 +191,7 @@ The `GET /api/v1/workers` endpoint shows all connected workers and their status.
  - **Superuser users** - users with the `superuser` flag set on their account can always access the endpoint
  - **`GRADIENT_GLOBAL_STATS_PUBLIC=true`** - when set, the workers/stats endpoints are publicly visible without authentication
 
-The per-org listing `GET /api/v1/orgs/{org}/workers` returns one entry per worker registration owned by that org. The `live` field on each entry is only populated when the worker is currently connected **and** the org's UUID is in the worker's `authorized_peers` set (i.e. the worker actually presented a valid token for this org during the handshake). A worker that registered with several orgs but only authenticated for a subset will therefore appear as connected for the orgs it authenticated for, and as disconnected (`live: null`) for the others.
+The per-project listing `GET /api/v1/projects/{project}/workers` returns one entry per worker registration owned by that project. The `live` field on each entry is only populated when the worker is currently connected **and** the project's UUID is in the worker's `authorized_peers` set (i.e. the worker actually presented a valid token for this project during the handshake). A worker that registered with several projects but only authenticated for a subset will therefore appear as connected for the projects it authenticated for, and as disconnected (`live: null`) for the others.
 
 ---
 
@@ -316,7 +316,7 @@ The "new candidates available" signal is a level-triggered `watch` generation co
 
 Closing the loop on the worker side: after scoring a fresh `JobOffer` the worker sends a capacity-gated `RequestJob` (not just on its 10s heartbeat). Scoring is what clears the server's rescore gate, so the worker's post-completion `RequestJob` would otherwise race ahead of its own scores, miss, and idle until the next heartbeat - collapsing a serial chain to one level per ~10s.
 
-Jobs are scoped to the worker's authorized peers - a worker only receives candidates from peers (orgs, caches) it has successfully authenticated against.
+Jobs are scoped to the worker's authorized peers - a worker only receives candidates from peers (projects, caches) it has successfully authenticated against.
 
 ### Dispatch Flow
 
@@ -528,7 +528,7 @@ Fetch runs on a worker that has the `fetch` capability. The fetch step performs 
  3. **Compress and push every uncached NAR** - the worker sends `CacheQuery { mode: Push }` for every fetched path. For uncached paths, it **zstd-compresses the NAR locally** and uploads via presigned S3 PUT (S3-backed) or chunked `NarPush` (local stores); on completion it emits `NarUploaded` with the full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, `deriver`). A failed upload fails the evaluation. **NARs are never transmitted uncompressed.**
  4. **Report `FetchResult`** carrying only the archived flake source store path (not the full input list - the server already has every `cached_path` row from the `NarUploaded` stream). The server hands this path to any subsequent eval-only job via `FlakeSource::Cached { store_path }`.
 
-`nix flake archive` is all-or-nothing: one unfetchable input (e.g. a private `git+ssh` input the org has no key for) fails the whole command even though the eval targets never reference it. Since Nix evaluation is lazy, the archive is only cache population, so on that failure the worker falls back to **best-effort per-input prefetch**: it runs `nix flake prefetch --json` for the flake source (a hard error if even that fails) and then for each locked input from `flake.lock` independently, pushing the successes and turning per-input failures into `Warning` `EvalMessage`s (plus one leading warning naming the archive error). `flake_source` still carries the cached source path, so an eval-only follow-up can proceed against exactly the inputs its targets need.
+`nix flake archive` is all-or-nothing: one unfetchable input (e.g. a private `git+ssh` input the project has no key for) fails the whole command even though the eval targets never reference it. Since Nix evaluation is lazy, the archive is only cache population, so on that failure the worker falls back to **best-effort per-input prefetch**: it runs `nix flake prefetch --json` for the flake source (a hard error if even that fails) and then for each locked input from `flake.lock` independently, pushing the successes and turning per-input failures into `Warning` `EvalMessage`s (plus one leading warning naming the archive error). `flake_source` still carries the cached source path, so an eval-only follow-up can proceed against exactly the inputs its targets need.
 
 ```rust
 FetchResult {
@@ -675,7 +675,7 @@ sequenceDiagram
     Note over W: marks A,C derivations as substituted
 ```
 
-The server checks its local NAR store first. For paths not found locally, it fetches `.narinfo` from any upstream external caches configured for the org (`org → organization_cache → cache → cache_upstream`). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
+The server checks its local NAR store first. For paths not found locally, it fetches `.narinfo` from any upstream external caches configured for the project (`project → project_cache → cache → cache_upstream`). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
 
 The worker marks derivations as `substituted` for all entries with `cached: true` regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL and relays it into the Gradient cache. When the upstream payload is already zstd-compressed with a window of at least 2 MiB - the window zstd level 6 produces (`windowLog` 21) - it is **stored verbatim**: no decompress, no recompress, no rehash, reusing the upstream `file_hash`/`nar_hash` from the narinfo. Only weaker windows (zstd levels 1-2) or non-zstd formats (xz, bzip2, uncompressed) are decompressed, verified against the upstream `nar_hash`, and recompressed at level 6.
 
@@ -689,7 +689,7 @@ The flow for getting any store path (fetched flake input, evaluated `.drv`, or b
  2. **Worker zstd-compresses** the NAR. The compressed stream is the only form in which a NAR is ever transmitted or stored.
  3. **Worker uploads** the compressed NAR via `NarPush` (local mode) or S3 PUT (cloud mode), then sends a single `NarUploaded` carrying `file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`, and `deriver` (the full `.drv` path, when the daemon knows one). `nar_hash` and `nar_size` are computed locally over the uncompressed NAR; `file_hash` and `file_size` over the compressed stream. `references` is read from the local nix-daemon via harmonia's `DaemonStore::query_path_info` (no subprocess) - for build outputs this is the runtime reference set scanned out of the NAR; for `.drv` and fetched-source paths it's whatever the daemon records.
  4. **Server commits atomically on `NarUploaded`**: in local mode it pops the buffered `NarPush` chunks, validates the buffer length against the reported `file_size`, writes the compressed bytes to `nar_storage`, and **only then** records `cached_path` metadata (including `references` as a space-separated hash-name string in the `cached_path.references` column, and `deriver` in `cached_path.deriver` when the worker supplied one). If the size check fails or `nar_storage.put` errors, the server stops the worker and marks the build `FailedTransient` so the dispatcher re-queues it (bounded by the attempt cap); the WebSocket connection is left intact so the worker's other in-flight jobs continue. No `cached_path` row ever claims bytes that aren't actually stored. In S3 mode there are no buffered chunks; the worker uploaded directly to object storage and `NarUploaded` only records metadata. No local re-packing, re-compression, or re-hashing ever happens.
- 5. **Signing** happens on arrival. `mark_nar_stored` inserts one `cached_path_signature` row per org-cache with `signature = NULL`, then wakes the signature sweep (`state.sign_signal`). The sweep (`cache::cacher::sign_sweep`) finds NULL rows, reads `nar_hash` / `nar_size` / `references` from `cached_path`, computes the narinfo fingerprint, and fills in the signature - reusing one signer per cache per pass, and re-arming itself while a full batch remains. The periodic tick is now an hourly fallback (`GRADIENT_SIGN_SWEEP_INTERVAL_SECS`, default 3600) covering subscription placeholders and the `cache_derivation` backfill. Paths whose every producing task has `sign_cache = false` are skipped, except the reserved `build-request` task, which is always signed so `gradient build` outputs stay substitutable. New org ↔ cache subscriptions also enqueue NULL rows for every existing `cached_path` the org owns, back-filled by the same sweep.
+ 5. **Signing** happens on arrival. `mark_nar_stored` inserts one `cached_path_signature` row per project-cache with `signature = NULL`, then wakes the signature sweep (`state.sign_signal`). The sweep (`cache::cacher::sign_sweep`) finds NULL rows, reads `nar_hash` / `nar_size` / `references` from `cached_path`, computes the narinfo fingerprint, and fills in the signature - reusing one signer per cache per pass, and re-arming itself while a full batch remains. The periodic tick is now an hourly fallback (`GRADIENT_SIGN_SWEEP_INTERVAL_SECS`, default 3600) covering subscription placeholders and the `cache_derivation` backfill. Paths whose every producing task has `sign_cache = false` are skipped, except the reserved `build-request` task, which is always signed so `gradient build` outputs stay substitutable. New project ↔ cache subscriptions also enqueue NULL rows for every existing `cached_path` the project owns, back-filled by the same sweep.
 
 The server does **not** use `ensure_path` or GC roots. All cached content lives in the NAR store (S3 or local files), not in the server's Nix store.
 
@@ -734,13 +734,13 @@ sequenceDiagram
 
 #### BFS Subtree Pruning
 
-Before enqueuing each wave of input-derivation paths, the worker sends `QueryKnownDerivations` with all newly-discovered `.drv` paths in that wave. The server returns the subset it already has in its `derivation` table for the owning org. The worker:
+Before enqueuing each wave of input-derivation paths, the worker sends `QueryKnownDerivations` with all newly-discovered `.drv` paths in that wave. The server returns the subset it already has in its `derivation` table for the owning project. The worker:
 
  1. Pre-marks all new dep paths as visited (prevents double-enqueuing).
  2. Enqueues **unknown** paths for further BFS traversal.
  3. For **known** paths, adds a minimal `DiscoveredDerivation` entry (empty outputs/deps) directly to the batch - no further traversal needed. The server-side `DerivationInsertBatch` handles these via its `load_existing_derivations` path and creates build rows normally.
 
-This avoids redundantly re-walking the entire closure of large packages (e.g. stdenv) that were already fully recorded in a previous evaluation of the same org.
+This avoids redundantly re-walking the entire closure of large packages (e.g. stdenv) that were already fully recorded in a previous evaluation of the same project.
 
 ```mermaid
 sequenceDiagram
@@ -862,7 +862,7 @@ enum ServerMessage {
     // BFS pruning (EvaluateDerivations)
     /// Response to `QueryKnownDerivations`.  `known` is the subset of the
     /// requested `.drv` paths that are already in the server's derivation table
-    /// for the owning org.
+    /// for the owning project.
     KnownDerivations { job_id: String, known: Vec<String> },
 }
 
@@ -919,7 +919,7 @@ enum ClientMessage {
 
     // BFS pruning (EvaluateDerivations)
     /// Ask the server which of the given `.drv` paths are already recorded in
-    /// its derivation table for the org that owns `job_id`.  The server responds
+    /// its derivation table for the project that owns `job_id`.  The server responds
     /// with `KnownDerivations`.  The worker uses this to skip re-traversing
     /// subtrees that were fully recorded during a previous evaluation.
     QueryKnownDerivations { job_id: String, drv_paths: Vec<String> },
@@ -1169,31 +1169,31 @@ Builds are only eligible when all dependency builds are `Completed` or `Substitu
 
 ## Federation
 
-Federation connects Gradient instances or workers to each other. A server with `federate` enabled can connect to other servers using the same proto protocol - it authenticates using the standard challenge-response, and the remote peer (org, cache, or proxy) sees it as a single worker/cache.
+Federation connects Gradient instances or workers to each other. A server with `federate` enabled can connect to other servers using the same proto protocol - it authenticates using the standard challenge-response, and the remote peer (project, cache, or proxy) sees it as a single worker/cache.
 
 Federation can happen in two ways:
 
- - **`gradient-proxy`** - a lightweight binary that only federates. It has no local orgs, no UI, no database. Workers authenticate to it with a simple proxy-level token. It connects to upstream servers, authenticating against their peers. The proxy **detaches** the worker↔peer relationship: all its workers serve all authorized peers. The proxy itself is a peer - it registers workers and issues them tokens.
- - **A full Gradient server** - a server with its own orgs, tasks, and workers. Its orgs and caches are peers that individually control which external workers/servers get tokens, deciding what to expose.
+ - **`gradient-proxy`** - a lightweight binary that only federates. It has no local projects, no UI, no database. Workers authenticate to it with a simple proxy-level token. It connects to upstream servers, authenticating against their peers. The proxy **detaches** the worker↔peer relationship: all its workers serve all authorized peers. The proxy itself is a peer - it registers workers and issues them tokens.
+ - **A full Gradient server** - a server with its own projects, tasks, and workers. Its projects and caches are peers that individually control which external workers/servers get tokens, deciding what to expose.
 
 ### How it works
 
-A federation peer connects to a remote server as a regular worker. A peer on the remote server (org, cache, or proxy) registers the federation peer's ID and issues a token - exactly like registering any worker:
+A federation peer connects to a remote server as a regular worker. A peer on the remote server (project, cache, or proxy) registers the federation peer's ID and issues a token - exactly like registering any worker:
 
 ```mermaid
 sequenceDiagram
     participant S2 as Server B
     participant S1 as Server A
 
-    Note over S1: Org X on Server A registered Server B's ID
+    Note over S1: Project X on Server A registered Server B's ID
     S2->>S1: InitConnection { id: server-b, capabilities: {federate, build, cache} }
     S1->>S2: AuthChallenge { peers: [X] }
     S2->>S1: AuthResponse { tokens: {X: "tok_x"} }
     S1->>S2: InitAck { authorized_peers: [X] }
-    Note over S1: Org X sees Server B as a single worker/cache
+    Note over S1: Project X sees Server B as a single worker/cache
 ```
 
-From Org X's perspective, Server B is just one worker that happens to have a lot of capacity. Server B internally routes jobs to its own workers and serves its own caches - Org X doesn't see or control that.
+From Project X's perspective, Server B is just one worker that happens to have a lot of capacity. Server B internally routes jobs to its own workers and serves its own caches - Project X doesn't see or control that.
 
 ### `gradient-proxy`
 
@@ -1203,8 +1203,8 @@ The proxy detaches authorization. Workers authenticate to the proxy (which is it
 graph RL
     W1[Worker 1] -->|"proxy token"| P[gradient-proxy]
     W2[Worker 2] -->|"proxy token"| P
-    P -->|"Org X + Cache C tokens"| SA[Server A]
-    P -->|"Org Z token"| SB[Server B]
+    P -->|"Project X + Cache C tokens"| SA[Server A]
+    P -->|"Project Z token"| SB[Server B]
 ```
 
 ```yaml
@@ -1214,18 +1214,18 @@ worker_token: "tok_proxy_shared"     # workers auth with this
 upstream:
   - url: server-a.example.com
     peers:
-      org-x:   "tok_org_x"          # Org X registered proxy-001
+      project-x:   "tok_project_x"          # Project X registered proxy-001
       cache-c: "tok_cache_c"        # Cache C registered proxy-001
   - url: server-b.example.com
     peers:
-      org-z:   "tok_org_z"          # Org Z registered proxy-001
+      project-z:   "tok_project_z"          # Project Z registered proxy-001
 ```
 
-Org X's job arrives → proxy assigns to any available worker. Org Z's job arrives → same pool. The proxy doesn't distinguish - all workers serve all peers.
+Project X's job arrives → proxy assigns to any available worker. Project Z's job arrives → same pool. The proxy doesn't distinguish - all workers serve all peers.
 
 ### Full Gradient server as federation peer
 
-A full server's orgs and caches are independent peers. Each decides whether to register an external worker/server and issue a token:
+A full server's projects and caches are independent peers. Each decides whether to register an external worker/server and issue a token:
 
 ```mermaid
 graph RL
@@ -1234,7 +1234,7 @@ graph RL
     SB -->|"auth against<br/>Server A's peers"| SA[Server A]
 ```
 
-Workers authenticate against Server B's peers (its orgs and caches). Server B authenticates upstream against Server A's peers. Each peer on each server independently controls access.
+Workers authenticate against Server B's peers (its projects and caches). Server B authenticates upstream against Server A's peers. Each peer on each server independently controls access.
 
 ### Aggregation
 
@@ -1253,9 +1253,9 @@ Caches behind a federation peer are exposed upstream. When a remote peer's build
 
 | | `gradient-proxy` | Full Gradient server |
 |---|---|---|
-| Workers → peer | Proxy-level token (flat, no orgs) | Challenge-response against server's peers |
+| Workers → peer | Proxy-level token (flat, no projects) | Challenge-response against server's peers |
 | Peer → upstream | Challenge-response against upstream's peers | Challenge-response against upstream's peers |
-| What's exposed | Everything - all workers, all caches | Per-peer (org/cache) settings |
+| What's exposed | Everything - all workers, all caches | Per-peer (project/cache) settings |
 | Upstream sees peer as | One worker/cache | One worker/cache |
 
 ---
@@ -1306,7 +1306,7 @@ The server sends credentials to workers before steps that need them:
 
 | Credential | Used by | Contents |
 |------------|---------|----------|
-| `SshKey` | `FetchFlake` step on a `fetch`-capable worker | Organization's SSH private key for cloning private repos. Sent at most once per job, **only if the negotiated `fetch` capability is true for the target worker** (otherwise the worker can't run `FetchFlake` anyway). |
+| `SshKey` | `FetchFlake` step on a `fetch`-capable worker | Project's SSH private key for cloning private repos. Sent at most once per job, **only if the negotiated `fetch` capability is true for the target worker** (otherwise the worker can't run `FetchFlake` anyway). |
 
 Credentials are encrypted in transit (TLS). Workers MUST:
 
@@ -1430,7 +1430,7 @@ On receiving `ServerMessage::Draining`, workers:
 |------|---------|
 | 400  | Malformed message or unsupported protocol version |
 | 401  | Unauthorized (missing or invalid token) |
-| 495  | Organization has no cache subscribed (incomplete server setup) |
+| 495  | Project has no cache subscribed (incomplete server setup) |
 | 499  | Capability not negotiated for this session |
 | 498  | Job not found (e.g. AbortJob for unknown job_id) |
 | 497  | Job already assigned or completed |

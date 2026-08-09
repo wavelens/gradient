@@ -120,10 +120,10 @@ in {
         ```
 
         The special peer ID `*` matches any UUID the server challenges, so a
-        single token works for any org. Each token is a 48-byte random secret
+        single token works for any project. Each token is a 48-byte random secret
         (e.g. `openssl rand -base64 48`) registered via
-        `POST /api/v1/orgs/{org}/workers`. Pin the org UUID with
-        `services.gradient.state.organizations.<name>.id` to reference it here.
+        `POST /api/v1/projects/{project}/workers`. Pin the project UUID with
+        `services.gradient.state.projects.<name>.id` to reference it here.
 
         When null (default), the worker connects in open/discoverable mode and
         the server accepts it without token validation.

@@ -130,8 +130,8 @@ pub(crate) async fn requeue_transient_failures(scheduler: &Scheduler) -> anyhow:
 struct BuildDispatchMaps {
     derivations: HashMap<DerivationId, MDerivation>,
     evaluations: HashMap<EvaluationId, MEvaluation>,
-    /// task_id → organization_id
-    tasks: HashMap<TaskId, OrganizationId>,
+    /// task_id → project_id
+    tasks: HashMap<TaskId, ProjectId>,
     features_by_drv: HashMap<DerivationId, Vec<FeatureId>>,
     feature_names: HashMap<FeatureId, String>,
     /// derivation_id → number of direct dependencies
@@ -264,20 +264,20 @@ impl BuildDispatchMaps {
             }
         }
 
-        // org_id resolution: every evaluation must belong to a task.
+        // project_id resolution: every evaluation must belong to a task.
         let task_ids: Vec<TaskId> = evaluations
             .values()
             .filter_map(|e| e.task)
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-        let tasks: HashMap<TaskId, OrganizationId> =
+        let tasks: HashMap<TaskId, ProjectId> =
             gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
                 ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
             })
             .await?
             .into_iter()
-            .map(|p| (p.id, p.organization))
+            .map(|p| (p.id, p.project))
             .collect();
 
         // Required features: per-derivation list of feature names.
@@ -449,9 +449,9 @@ impl BuildDispatchMaps {
         })
     }
 
-    /// Resolve the organization that owns this evaluation (used as `org_id`
-    /// to route the job only to workers registered by that org).
-    fn resolve_org_id(&self, eval: &MEvaluation) -> Option<OrganizationId> {
+    /// Resolve the project that owns this evaluation (used as `project_id`
+    /// to route the job only to workers registered by that project).
+    fn resolve_project_id(&self, eval: &MEvaluation) -> Option<ProjectId> {
         eval.task.and_then(|pid| self.tasks.get(&pid).copied())
     }
 
@@ -480,8 +480,8 @@ impl BuildDispatchMaps {
         let Some(eval) = self.evaluations.get(&eval_id) else {
             return DispatchOutcome::Skip("driving evaluation row not found");
         };
-        let Some(org_id) = self.resolve_org_id(eval) else {
-            return DispatchOutcome::Skip("could not resolve org_id for anchor");
+        let Some(project_id) = self.resolve_project_id(eval) else {
+            return DispatchOutcome::Skip("could not resolve project_id for anchor");
         };
 
         let miss_count = self
@@ -511,7 +511,7 @@ impl BuildDispatchMaps {
             );
         }
 
-        let (job_id, pending) = self.assemble_job(anchor, derivation, eval_id, org_id, mode);
+        let (job_id, pending) = self.assemble_job(anchor, derivation, eval_id, project_id, mode);
         DispatchOutcome::Dispatch(job_id, Box::new(pending))
     }
 
@@ -521,7 +521,7 @@ impl BuildDispatchMaps {
         anchor: &MDerivationBuild,
         derivation: &MDerivation,
         eval_id: EvaluationId,
-        org_id: OrganizationId,
+        project_id: ProjectId,
         mode: BuildDispatchMode,
     ) -> (String, PendingBuildJob) {
         let job_id = format!("build:{}", anchor.id);
@@ -577,7 +577,7 @@ impl BuildDispatchMaps {
         let pending = PendingBuildJob {
             derivation_build: anchor.id,
             evaluation_id: eval_id,
-            org_id,
+            project_id,
             job: build_job,
             required_paths,
             architecture,

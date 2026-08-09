@@ -81,7 +81,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     )
     .await
     .map_err(|e| InitError::StateLoad(e.to_string()))?;
-    let pending_org_memberships = Arc::new(state_result.pending);
+    let pending_project_memberships = Arc::new(state_result.pending);
     let oidc_group_roles = Arc::new(state_result.oidc_group_roles);
     let scim_group_roles = Arc::new(state_result.scim_group_roles);
 
@@ -205,7 +205,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         shutdown: Shutdown::new(),
         jwt_secret,
         started_at: chrono::Utc::now(),
-        pending_org_memberships,
+        pending_project_memberships,
         oidc_group_roles,
         scim_group_roles,
         board_events: tokio::sync::broadcast::channel(256).0,

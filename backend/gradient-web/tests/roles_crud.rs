@@ -4,21 +4,21 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the org-scoped role-management API
-//! (`/api/v1/orgs/{org}/roles`). Covers built-in role discovery, custom role
+//! Integration tests for the project-scoped role-management API
+//! (`/api/v1/projects/{project}/roles`). Covers built-in role discovery, custom role
 //! creation, immutability of built-ins, name uniqueness, and the
 //! reassign-before-delete invariant.
 //!
 //! `MockDatabase` replays canned query results in FIFO order, so each test
-//! script is "auth (3 selects) → load_org → load_membership → load_role →
+//! script is "auth (3 selects) → load_project → load_membership → load_role →
 //! …handler-specific…". Where the handler runs `INSERT … RETURNING …` we feed
 //! the inserted row in via `append_query_results` *and* match up an
 //! `append_exec_results` with `rows_affected: 1`, otherwise SeaORM treats the
 //! insert as a no-op and short-circuits.
 
 use gradient_db::permissions::{Permission, admin_mask, view_mask, write_mask};
-use gradient_entity::{ids::*, organization_user, role};
-use gradient_test_support::fixtures::{org, org_id, user, user_id};
+use gradient_entity::{ids::*, project_user, role};
+use gradient_test_support::fixtures::{project, project_id, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
@@ -28,19 +28,19 @@ use uuid::Uuid;
 
 // ── Fixture helpers ──────────────────────────────────────────────────────────
 
-fn admin_membership() -> organization_user::Model {
-    organization_user::Model {
-        id: OrganizationUserId::now_v7(),
-        organization: org_id(),
+fn admin_membership() -> project_user::Model {
+    project_user::Model {
+        id: ProjectUserId::now_v7(),
+        project: project_id(),
         user: user_id(),
         role: BASE_ROLE_ADMIN_ID,
     }
 }
 
-fn view_membership() -> organization_user::Model {
-    organization_user::Model {
-        id: OrganizationUserId::now_v7(),
-        organization: org_id(),
+fn view_membership() -> project_user::Model {
+    project_user::Model {
+        id: ProjectUserId::now_v7(),
+        project: project_id(),
         user: user_id(),
         role: BASE_ROLE_VIEW_ID,
     }
@@ -77,7 +77,7 @@ fn custom_role_row(id: RoleId, name: &str, permission: i64) -> role::Model {
     role::Model {
         id,
         name: name.into(),
-        organization: Some(org_id()),
+        project: Some(project_id()),
         permission,
         ..Default::default()
     }
@@ -98,7 +98,7 @@ fn run<F: std::future::Future>(fut: F) -> F::Output {
         .block_on(fut)
 }
 
-// ── GET /orgs/{org}/roles ────────────────────────────────────────────────────
+// ── GET /projects/{project}/roles ────────────────────────────────────────────────────
 
 #[test]
 fn list_roles_returns_builtins_plus_custom() {
@@ -110,7 +110,7 @@ fn list_roles_returns_builtins_plus_custom() {
         // GET requires `Member` access, which is membership-existence only -
         // no role-row lookup is performed.
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![view_membership()]])
             .append_query_results([vec![
                 admin_role_row(),
@@ -121,7 +121,7 @@ fn list_roles_returns_builtins_plus_custom() {
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .get("/api/v1/orgs/test-org/roles")
+            .get("/api/v1/projects/test-project/roles")
             .add_header("authorization", format!("Bearer {}", token))
             .await;
 
@@ -152,7 +152,7 @@ fn list_roles_returns_builtins_plus_custom() {
     });
 }
 
-// ── POST /orgs/{org}/roles ───────────────────────────────────────────────────
+// ── POST /projects/{project}/roles ───────────────────────────────────────────────────
 
 #[test]
 fn create_role_persists_permission_bitmask() {
@@ -162,12 +162,12 @@ fn create_role_persists_permission_bitmask() {
         let inserted = custom_role_row(
             RoleId::now_v7(),
             "releaser",
-            Permission::TriggerEvaluation.bit() | Permission::ViewOrg.bit(),
+            Permission::TriggerEvaluation.bit() | Permission::ViewProject.bit(),
         );
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            // load_org -> Require(ManageRoles)
-            .append_query_results([vec![org()]])
+            // load_project -> Require(ManageRoles)
+            .append_query_results([vec![project()]])
             // load_membership_with_permissions: membership + role
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
@@ -182,11 +182,11 @@ fn create_role_persists_permission_bitmask() {
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .post("/api/v1/orgs/test-org/roles")
+            .post("/api/v1/projects/test-project/roles")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&json!({
                 "name": "releaser",
-                "permissions": ["triggerEvaluation", "viewOrg"],
+                "permissions": ["triggerEvaluation", "viewProject"],
             }))
             .await;
 
@@ -197,7 +197,7 @@ fn create_role_persists_permission_bitmask() {
         assert_eq!(body["message"]["builtin"], false);
         let perms = body["message"]["permissions"].as_array().unwrap();
         assert!(perms.iter().any(|p| p == "triggerEvaluation"));
-        assert!(perms.iter().any(|p| p == "viewOrg"));
+        assert!(perms.iter().any(|p| p == "viewProject"));
     });
 }
 
@@ -208,13 +208,13 @@ fn create_role_rejects_unknown_permission() {
         let token = make_token(session_id);
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .post("/api/v1/orgs/test-org/roles")
+            .post("/api/v1/projects/test-project/roles")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&json!({
                 "name": "releaser",
@@ -236,13 +236,13 @@ fn create_role_rejects_view_role_caller() {
         let token = make_token(session_id);
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![view_membership()]])
             .append_query_results([vec![view_role_row()]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .post("/api/v1/orgs/test-org/roles")
+            .post("/api/v1/projects/test-project/roles")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&json!({
                 "name": "releaser",
@@ -259,10 +259,10 @@ fn create_role_rejects_duplicate_name() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
-        let existing = custom_role_row(RoleId::now_v7(), "releaser", Permission::ViewOrg.bit());
+        let existing = custom_role_row(RoleId::now_v7(), "releaser", Permission::ViewProject.bit());
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
             // name uniqueness pre-check finds an existing custom role.
@@ -270,11 +270,11 @@ fn create_role_rejects_duplicate_name() {
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .post("/api/v1/orgs/test-org/roles")
+            .post("/api/v1/projects/test-project/roles")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&json!({
                 "name": "releaser",
-                "permissions": ["viewOrg"],
+                "permissions": ["viewProject"],
             }))
             .await;
 
@@ -282,7 +282,7 @@ fn create_role_rejects_duplicate_name() {
     });
 }
 
-// ── PATCH /orgs/{org}/roles/{id} ─────────────────────────────────────────────
+// ── PATCH /projects/{project}/roles/{id} ─────────────────────────────────────────────
 
 #[test]
 fn patch_builtin_role_is_forbidden() {
@@ -291,20 +291,20 @@ fn patch_builtin_role_is_forbidden() {
         let token = make_token(session_id);
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
-            // load_org_role returns the built-in
+            // load_project_role returns the built-in
             .append_query_results([vec![admin_role_row()]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
             .patch(&format!(
-                "/api/v1/orgs/test-org/roles/{}",
+                "/api/v1/projects/test-project/roles/{}",
                 BASE_ROLE_ADMIN_ID
             ))
             .add_header("authorization", format!("Bearer {}", token))
-            .json(&json!({"permissions": ["viewOrg"]}))
+            .json(&json!({"permissions": ["viewProject"]}))
             .await;
 
         res.assert_status(axum::http::StatusCode::FORBIDDEN);
@@ -317,15 +317,15 @@ fn patch_custom_role_updates_mask() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
         let custom_id = RoleId::now_v7();
-        let custom = custom_role_row(custom_id, "releaser", Permission::ViewOrg.bit());
+        let custom = custom_role_row(custom_id, "releaser", Permission::ViewProject.bit());
         let updated = custom_role_row(
             custom_id,
             "releaser",
-            Permission::ViewOrg.bit() | Permission::TriggerEvaluation.bit(),
+            Permission::ViewProject.bit() | Permission::TriggerEvaluation.bit(),
         );
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
             .append_query_results([vec![custom]])
@@ -337,10 +337,13 @@ fn patch_custom_role_updates_mask() {
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .patch(&format!("/api/v1/orgs/test-org/roles/{}", custom_id))
+            .patch(&format!(
+                "/api/v1/projects/test-project/roles/{}",
+                custom_id
+            ))
             .add_header("authorization", format!("Bearer {}", token))
             .json(&json!({
-                "permissions": ["viewOrg", "triggerEvaluation"],
+                "permissions": ["viewProject", "triggerEvaluation"],
             }))
             .await;
 
@@ -351,7 +354,7 @@ fn patch_custom_role_updates_mask() {
     });
 }
 
-// ── DELETE /orgs/{org}/roles/{id} ────────────────────────────────────────────
+// ── DELETE /projects/{project}/roles/{id} ────────────────────────────────────────────
 
 #[test]
 fn delete_builtin_role_is_forbidden() {
@@ -360,7 +363,7 @@ fn delete_builtin_role_is_forbidden() {
         let token = make_token(session_id);
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
             .append_query_results([vec![view_role_row()]]);
@@ -368,7 +371,7 @@ fn delete_builtin_role_is_forbidden() {
         let server = make_test_server(db.into_connection());
         let res = server
             .delete(&format!(
-                "/api/v1/orgs/test-org/roles/{}",
+                "/api/v1/projects/test-project/roles/{}",
                 BASE_ROLE_VIEW_ID
             ))
             .add_header("authorization", format!("Bearer {}", token))
@@ -384,17 +387,17 @@ fn delete_role_in_use_is_rejected() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
         let custom_id = RoleId::now_v7();
-        let custom = custom_role_row(custom_id, "releaser", Permission::ViewOrg.bit());
+        let custom = custom_role_row(custom_id, "releaser", Permission::ViewProject.bit());
 
-        let in_use_membership = organization_user::Model {
-            id: OrganizationUserId::now_v7(),
-            organization: org_id(),
+        let in_use_membership = project_user::Model {
+            id: ProjectUserId::now_v7(),
+            project: project_id(),
             user: UserId::new(Uuid::now_v7()),
             role: custom_id,
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
             .append_query_results([vec![custom]])
@@ -402,7 +405,10 @@ fn delete_role_in_use_is_rejected() {
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .delete(&format!("/api/v1/orgs/test-org/roles/{}", custom_id))
+            .delete(&format!(
+                "/api/v1/projects/test-project/roles/{}",
+                custom_id
+            ))
             .add_header("authorization", format!("Bearer {}", token))
             .await;
 
@@ -416,16 +422,14 @@ fn delete_unused_custom_role_succeeds() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
         let custom_id = RoleId::now_v7();
-        let custom = custom_role_row(custom_id, "releaser", Permission::ViewOrg.bit());
+        let custom = custom_role_row(custom_id, "releaser", Permission::ViewProject.bit());
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
             .append_query_results([vec![custom]])
-            .append_query_results::<organization_user::Model, _, _>([
-                Vec::<organization_user::Model>::new(),
-            ])
+            .append_query_results::<project_user::Model, _, _>([Vec::<project_user::Model>::new()])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -433,7 +437,10 @@ fn delete_unused_custom_role_succeeds() {
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .delete(&format!("/api/v1/orgs/test-org/roles/{}", custom_id))
+            .delete(&format!(
+                "/api/v1/projects/test-project/roles/{}",
+                custom_id
+            ))
             .add_header("authorization", format!("Bearer {}", token))
             .await;
 

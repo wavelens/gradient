@@ -6,7 +6,7 @@
 
 use super::super::ApplyInput;
 use gradient_entity::evaluation::EvaluationStatus;
-use gradient_types::ids::{CacheId, OrganizationCacheId, UserId, WorkerRegistrationId};
+use gradient_types::ids::{CacheId, ProjectCacheId, UserId, WorkerRegistrationId};
 use gradient_types::triggers::TriggerType;
 use gradient_types::*;
 use sea_orm::MockDatabase;
@@ -22,7 +22,7 @@ pub fn make_task_with_concurrency(
 ) -> MTask {
     MTask {
         id: TaskId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
-        organization: OrganizationId::nil(),
+        project: ProjectId::nil(),
         name: "test-task".into(),
         active: true,
         display_name: "Test".into(),
@@ -89,28 +89,28 @@ fn cache_row(active: bool) -> gradient_entity::cache::Model {
     }
 }
 
-fn org_cache_row(cache: CacheId) -> gradient_entity::organization_cache::Model {
-    gradient_entity::organization_cache::Model {
-        id: OrganizationCacheId::now_v7(),
-        organization: OrganizationId::nil(),
+fn project_cache_row(cache: CacheId) -> gradient_entity::project_cache::Model {
+    gradient_entity::project_cache::Model {
+        id: ProjectCacheId::now_v7(),
+        project: ProjectId::nil(),
         cache,
-        mode: gradient_entity::organization_cache::CacheSubscriptionMode::ReadWrite,
+        mode: gradient_entity::project_cache::CacheSubscriptionMode::ReadWrite,
     }
 }
 
-/// Append the two queries `org_has_writable_cache` issues for the
+/// Append the two queries `project_has_writable_cache` issues for the
 /// "writable cache exists" path.
 pub fn with_writable_cache(db: MockDatabase) -> MockDatabase {
     let cache = cache_row(true);
-    db.append_query_results([vec![org_cache_row(cache.id)]])
+    db.append_query_results([vec![project_cache_row(cache.id)]])
         .append_query_results([vec![cache]])
 }
 
 /// Append the single query `park_if_storage_full` issues for the "not
-/// full" path: `org_writable_caches` finds no org_cache rows, so
-/// `org_caches_all_full` short-circuits to `false`.
+/// full" path: `project_writable_caches` finds no project_cache rows, so
+/// `project_caches_all_full` short-circuits to `false`.
 pub fn with_storage_not_full(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
+    db.append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
 }
 
 fn worker_registration_row(
@@ -119,7 +119,7 @@ fn worker_registration_row(
 ) -> gradient_entity::worker_registration::Model {
     gradient_entity::worker_registration::Model {
         id: WorkerRegistrationId::now_v7(),
-        peer_id: OrganizationId::nil(),
+        peer_id: ProjectId::nil(),
         worker_id: "00000000-0000-4000-8000-000000000001".into(),
         active,
         enable_fetch: true,
@@ -130,7 +130,7 @@ fn worker_registration_row(
     }
 }
 
-/// Append the single query `org_has_eval_capable_worker_registration`
+/// Append the single query `project_has_eval_capable_worker_registration`
 /// issues for the "eval-capable worker exists" path.
 pub fn with_eval_worker(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![worker_registration_row(true, true)]])

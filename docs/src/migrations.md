@@ -39,4 +39,4 @@ Removing a pair leaves orphan rows in the `seaql_migrations` table on installs t
 | Pair | Removed in | Notes |
 | --- | --- | --- |
 | `add_has_artefacts_to_build_output` / `drop_has_artefacts_from_derivation_output` | issue #71 | Also removed the matching column re-declaration in `m20260408_000000_split_build_into_derivation`. |
-| `add_github_app_enabled_to_organization` / `drop_github_app_enabled_from_organization` | issue #71 | Pure pair; only the two pair-files referenced the column. |
+| `add_github_app_enabled_to_project` / `drop_github_app_enabled_from_project` | issue #71 | Pure pair; only the two pair-files referenced the column. |

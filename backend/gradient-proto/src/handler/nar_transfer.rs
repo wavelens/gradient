@@ -360,13 +360,13 @@ impl<'a> DispatchContext<'a> {
             return;
         };
 
-        // Resolve the owning org here, on the read loop, while the job is still
+        // Resolve the owning project here, on the read loop, while the job is still
         // active. The detached commit runs after this method returns, and the
         // very next message on the connection (`JobComplete`) evicts the job
-        // from the tracker - so re-resolving `org_for_job` inside the task would
+        // from the tracker - so re-resolving `project_for_job` inside the task would
         // race to `None`, drop the `cached_path_signature` placeholder, and the
         // narinfo would 404 forever with the path stuck unsigned.
-        let org_id = self.scheduler.org_for_job(&job_id).await;
+        let project_id = self.scheduler.project_for_job(&job_id).await;
 
         // The commit reads the whole staged NAR and writes it to `nar_storage`
         // (an S3 upload on object-store backends). Inline it froze this
@@ -392,7 +392,7 @@ impl<'a> DispatchContext<'a> {
                 scheduler,
                 peer_id,
                 job_id,
-                org_id,
+                project_id,
                 store_path,
                 hash,
                 file_hash,
@@ -424,7 +424,7 @@ struct CommitUploadedNar {
     scheduler: Arc<Scheduler>,
     peer_id: String,
     job_id: String,
-    org_id: Option<gradient_types::ids::OrganizationId>,
+    project_id: Option<gradient_types::ids::ProjectId>,
     store_path: String,
     hash: String,
     file_hash: String,
@@ -484,10 +484,10 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
         deriver: c.deriver.as_deref(),
         ca: c.ca.as_deref(),
     };
-    if let Err(e) = mark_nar_stored(&c.state, c.org_id, &c.store_path, &nar_record).await {
+    if let Err(e) = mark_nar_stored(&c.state, c.project_id, &c.store_path, &nar_record).await {
         warn!(store_path = %c.store_path, error = %e, "failed to mark NAR as stored");
     }
-    if let Err(e) = record_nar_push_metric(&c.state, c.org_id, file_size_i64).await {
+    if let Err(e) = record_nar_push_metric(&c.state, c.project_id, file_size_i64).await {
         debug!(error = %e, "failed to record cache metric for NarUploaded");
     }
 }

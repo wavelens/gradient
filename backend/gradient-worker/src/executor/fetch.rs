@@ -54,7 +54,7 @@ async fn abort_true(abort: &mut watch::Receiver<bool>) {
 /// `FlakeSource::Cached { store_path }`. `archived_paths` lists every store path
 /// pushed to the cache (source plus every input the archive or fallback managed
 /// to fetch) - the caller pushes and optionally signs these. The fallback may
-/// legitimately omit inputs the org has no credentials for.
+/// legitimately omit inputs the project has no credentials for.
 pub struct FetchOutcome {
     pub local_flake_path: String,
     pub flake_source: Option<String>,
@@ -185,7 +185,7 @@ pub async fn fetch_repository(
             })
         }
         // `nix flake archive` is all-or-nothing: one unfetchable input (e.g. a
-        // private `git+ssh` input the org has no key for) fails the whole
+        // private `git+ssh` input the project has no key for) fails the whole
         // command even though eval targets never reference it. Nix evaluation is
         // lazy, so fall back to prefetching the source and each locked input
         // independently as best-effort cache population.

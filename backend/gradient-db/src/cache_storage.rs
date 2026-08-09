@@ -11,8 +11,8 @@
 
 use gradient_entity::build::BuildStatus;
 use gradient_entity::cache::Model as MCache;
-use gradient_entity::organization_cache::CacheSubscriptionMode;
-use gradient_types::ids::{CacheId, DerivationId, OrganizationId};
+use gradient_entity::project_cache::CacheSubscriptionMode;
+use gradient_types::ids::{CacheId, DerivationId, ProjectId};
 use sea_orm::sea_query::{Alias, SimpleExpr};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QuerySelect, Statement,
@@ -87,16 +87,16 @@ pub async fn instance_used_bytes<C: ConnectionTrait>(db: &C) -> Result<i64, sea_
     Ok(sum.unwrap_or(0))
 }
 
-/// The active, writable (ReadWrite/WriteOnly) caches an org can push to.
-pub async fn org_writable_caches<C: ConnectionTrait>(
+/// The active, writable (ReadWrite/WriteOnly) caches a project can push to.
+pub async fn project_writable_caches<C: ConnectionTrait>(
     db: &C,
-    organization: OrganizationId,
+    project: ProjectId,
 ) -> Result<Vec<MCache>, sea_orm::DbErr> {
     use gradient_entity::cache::{Column as CCache, Entity as ECache};
-    use gradient_entity::organization_cache::{Column as COC, Entity as EOC};
+    use gradient_entity::project_cache::{Column as COC, Entity as EOC};
 
     let cache_ids: Vec<CacheId> = EOC::find()
-        .filter(COC::Organization.eq(organization))
+        .filter(COC::Project.eq(project))
         .filter(COC::Mode.is_in([
             CacheSubscriptionMode::ReadWrite,
             CacheSubscriptionMode::WriteOnly,
@@ -136,15 +136,15 @@ fn headroom(
     cache_free.min(instance_free)
 }
 
-/// `true` when the org has at least one writable cache AND every writable cache
+/// `true` when the project has at least one writable cache AND every writable cache
 /// has less than `STORAGE_HEADROOM_BYTES` free. An empty writable-cache set
 /// returns `false` (that case is owned by the NoCache gate).
-pub async fn org_caches_all_full<C: ConnectionTrait>(
+pub async fn project_caches_all_full<C: ConnectionTrait>(
     db: &C,
-    organization: OrganizationId,
+    project: ProjectId,
     instance_limit_gb: i32,
 ) -> Result<bool, sea_orm::DbErr> {
-    let caches = org_writable_caches(db, organization).await?;
+    let caches = project_writable_caches(db, project).await?;
     if caches.is_empty() {
         return Ok(false);
     }

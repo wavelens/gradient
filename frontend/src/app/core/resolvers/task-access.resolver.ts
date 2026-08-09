@@ -18,9 +18,9 @@ export interface TaskAccessData {
 
 export const taskAccessResolver: ResolveFn<TaskAccessData> = (route) => {
   const tasks = inject(TasksService);
-  const org = route.paramMap.get('org') ?? '';
+  const project = route.paramMap.get('project') ?? '';
   const task = route.paramMap.get('task') ?? '';
-  return tasks.getTask(org, task).pipe(
+  return tasks.getTask(project, task).pipe(
     map((p) => ({ task: p, access: accessFromEntity(p) })),
   );
 };

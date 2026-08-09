@@ -17,14 +17,14 @@ fn write_config(home: &TempDir, body: &str) {
     fs::write(cfg_dir.join("config.toml"), body).unwrap();
 }
 
-async fn orgs_mock(names: &[&str]) -> MockServer {
+async fn projects_mock(names: &[&str]) -> MockServer {
     let server = MockServer::start().await;
     let items: Vec<_> = names
         .iter()
         .map(|n| serde_json::json!({"id": format!("id-{n}"), "name": n}))
         .collect();
     Mock::given(method("GET"))
-        .and(path("/api/v1/orgs"))
+        .and(path("/api/v1/projects"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "error": false,
             "message": {"items": items, "total": items.len(), "page": 1, "per_page": 20}
@@ -35,14 +35,14 @@ async fn orgs_mock(names: &[&str]) -> MockServer {
 }
 
 #[test]
-fn organization_select_without_login_is_rejected() {
+fn project_select_without_login_is_rejected() {
     let home = TempDir::new().unwrap();
     write_config(&home, "Server = 'http://localhost:1'\n");
 
     Command::cargo_bin("gradient")
         .unwrap()
         .env("XDG_CONFIG_HOME", home.path())
-        .args(["organization", "select", "sandro"])
+        .args(["project", "select", "sandro"])
         .assert()
         .failure()
         .code(3)
@@ -51,8 +51,8 @@ fn organization_select_without_login_is_rejected() {
 }
 
 #[tokio::test]
-async fn organization_select_rejects_non_member() {
-    let server = orgs_mock(&["other"]).await;
+async fn project_select_rejects_non_member() {
+    let server = projects_mock(&["other"]).await;
     let home = TempDir::new().unwrap();
     write_config(
         &home,
@@ -62,7 +62,7 @@ async fn organization_select_rejects_non_member() {
     Command::cargo_bin("gradient")
         .unwrap()
         .env("XDG_CONFIG_HOME", home.path())
-        .args(["organization", "select", "sandro"])
+        .args(["project", "select", "sandro"])
         .assert()
         .failure()
         .code(2)
@@ -70,8 +70,8 @@ async fn organization_select_rejects_non_member() {
 }
 
 #[tokio::test]
-async fn organization_select_accepts_member() {
-    let server = orgs_mock(&["sandro"]).await;
+async fn project_select_accepts_member() {
+    let server = projects_mock(&["sandro"]).await;
     let home = TempDir::new().unwrap();
     write_config(
         &home,
@@ -81,8 +81,8 @@ async fn organization_select_accepts_member() {
     Command::cargo_bin("gradient")
         .unwrap()
         .env("XDG_CONFIG_HOME", home.path())
-        .args(["organization", "select", "sandro"])
+        .args(["project", "select", "sandro"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Organization selected"));
+        .stdout(predicate::str::contains("Project selected"));
 }

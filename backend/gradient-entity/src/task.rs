@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{EvaluationId, OrganizationId, TaskId, UserId};
+use crate::ids::{EvaluationId, ProjectId, TaskId, UserId};
 
 /// What happens to a task's in-flight evaluation when a new one triggers.
 #[repr(i16)]
@@ -46,7 +46,7 @@ pub enum ConcurrencyPolicy {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: TaskId,
-    pub organization: OrganizationId,
+    pub project: ProjectId,
     #[sea_orm(indexed)]
     pub name: String,
     pub active: bool,
@@ -69,11 +69,11 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::organization::Entity",
-        from = "Column::Organization",
-        to = "super::organization::Column::Id"
+        belongs_to = "super::project::Entity",
+        from = "Column::Project",
+        to = "super::project::Column::Id"
     )]
-    Organization,
+    Project,
     #[sea_orm(
         belongs_to = "super::user::Entity",
         from = "Column::CreatedBy",

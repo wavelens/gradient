@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{GithubInstallationId, IntegrationId, OrganizationId, UserId};
+use crate::ids::{GithubInstallationId, IntegrationId, ProjectId, UserId};
 
 /// Webhook direction of an integration: receives forge events (inbound) or
 /// reports statuses / opens PRs on the forge (outbound).
@@ -98,7 +98,7 @@ impl ForgeType {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: IntegrationId,
-    pub organization: OrganizationId,
+    pub project: ProjectId,
     pub name: String,
     /// Human-readable display name for this integration.
     pub display_name: String,
@@ -121,11 +121,11 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::organization::Entity",
-        from = "Column::Organization",
-        to = "super::organization::Column::Id"
+        belongs_to = "super::project::Entity",
+        from = "Column::Project",
+        to = "super::project::Column::Id"
     )]
-    Organization,
+    Project,
     #[sea_orm(
         belongs_to = "super::user::Entity",
         from = "Column::CreatedBy",
@@ -144,7 +144,7 @@ impl std::fmt::Debug for Model {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Integration")
             .field("id", &self.id)
-            .field("organization", &self.organization)
+            .field("project", &self.project)
             .field("name", &self.name)
             .field("display_name", &self.display_name)
             .field("kind", &self.kind)

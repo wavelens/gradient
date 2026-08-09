@@ -23,7 +23,7 @@ impl<'a> StateApplicator<'a> {
         &self,
         state_workers: &HashMap<String, StateWorker>,
     ) -> Result<(), DynError> {
-        let org_map = self.org_lookup().await?;
+        let project_map = self.project_lookup().await?;
         let user_map = self.user_lookup().await?;
 
         for state_worker in state_workers.values() {
@@ -37,8 +37,14 @@ impl<'a> StateApplicator<'a> {
             let created_by_id = lookup_id(&user_map, &state_worker.created_by, "User")?;
 
             if state_worker.base_worker {
-                apply_base_worker(self.db, state_worker, &org_map, created_by_id, token_hash)
-                    .await?;
+                apply_base_worker(
+                    self.db,
+                    state_worker,
+                    &project_map,
+                    created_by_id,
+                    token_hash,
+                )
+                .await?;
 
                 continue;
             }
@@ -50,8 +56,8 @@ impl<'a> StateApplicator<'a> {
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string());
 
-            for org_name in &state_worker.organizations {
-                let peer_id = lookup_id(&org_map, org_name, "Organization")?;
+            for project_name in &state_worker.projects {
+                let peer_id = lookup_id(&project_map, project_name, "Project")?;
 
                 let existing = worker_registration::Entity::find()
                     .filter(worker_registration::Column::PeerId.eq(peer_id))
@@ -72,7 +78,7 @@ impl<'a> StateApplicator<'a> {
                     reg.update(self.db).await?;
                     tracing::info!(
                         worker_id = %state_worker.worker_id,
-                        organization = %org_name,
+                        project = %project_name,
                         "Updated worker registration"
                     );
                 } else {
@@ -96,7 +102,7 @@ impl<'a> StateApplicator<'a> {
                     reg.insert(self.db).await?;
                     tracing::info!(
                         worker_id = %state_worker.worker_id,
-                        organization = %org_name,
+                        project = %project_name,
                         "Created worker registration"
                     );
                 }
@@ -110,12 +116,12 @@ impl<'a> StateApplicator<'a> {
 // ── base workers ──────────────────────────────────────────────────────────
 
 /// Upserts the server-level `base_worker` row, then pre-enables its declared
-/// orgs. Pre-enablements are only added: frontend opt-ins are not state-managed
+/// projects. Pre-enablements are only added: frontend opt-ins are not state-managed
 /// and must survive reconciliation.
 async fn apply_base_worker<C: ConnectionTrait>(
     db: &C,
     worker: &StateWorker,
-    org_map: &HashMap<String, OrganizationId>,
+    project_map: &HashMap<String, ProjectId>,
     user_id: UserId,
     token_hash: String,
 ) -> Result<(), DynError> {
@@ -167,30 +173,30 @@ async fn apply_base_worker<C: ConnectionTrait>(
         id
     };
 
-    reconcile_pre_enabled_orgs(db, base_worker_id, worker, org_map, user_id).await
+    reconcile_pre_enabled_projects(db, base_worker_id, worker, project_map, user_id).await
 }
 
-async fn reconcile_pre_enabled_orgs<C: ConnectionTrait>(
+async fn reconcile_pre_enabled_projects<C: ConnectionTrait>(
     db: &C,
     base_worker_id: BaseWorkerId,
     worker: &StateWorker,
-    org_map: &HashMap<String, OrganizationId>,
+    project_map: &HashMap<String, ProjectId>,
     user_id: UserId,
 ) -> Result<(), DynError> {
-    let existing = organization_base_worker::Entity::find()
-        .filter(organization_base_worker::Column::BaseWorker.eq(base_worker_id))
+    let existing = project_base_worker::Entity::find()
+        .filter(project_base_worker::Column::BaseWorker.eq(base_worker_id))
         .all(db)
         .await?;
 
-    for org_name in &worker.organizations {
-        let org_id = lookup_id(org_map, org_name, "Organization")?;
-        if existing.iter().any(|r| r.organization == org_id) {
+    for project_name in &worker.projects {
+        let project_id = lookup_id(project_map, project_name, "Project")?;
+        if existing.iter().any(|r| r.project == project_id) {
             continue;
         }
 
-        organization_base_worker::Model {
-            id: OrganizationBaseWorkerId::now_v7(),
-            organization: org_id,
+        project_base_worker::Model {
+            id: ProjectBaseWorkerId::now_v7(),
+            project: project_id,
             base_worker: base_worker_id,
             created_by: Some(user_id),
             created_at: now(),
@@ -200,8 +206,8 @@ async fn reconcile_pre_enabled_orgs<C: ConnectionTrait>(
         .await?;
         tracing::info!(
             worker_id = %worker.worker_id,
-            organization = %org_name,
-            "Pre-enabled base worker for organization"
+            project = %project_name,
+            "Pre-enabled base worker for project"
         );
     }
 
@@ -217,7 +223,7 @@ mod base_worker_tests {
         StateWorker {
             worker_id: "bw-1".to_string(),
             url: Some("https://bw.example".to_string()),
-            organizations: vec![],
+            projects: vec![],
             token_file: "/dev/null".to_string(),
             display_name: "Base".to_string(),
             created_by: "alice".to_string(),
@@ -240,7 +246,7 @@ mod base_worker_tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<base_worker::Model>::new()])
             .append_query_results([vec![inserted]])
-            .append_query_results([Vec::<organization_base_worker::Model>::new()])
+            .append_query_results([Vec::<project_base_worker::Model>::new()])
             .into_connection();
 
         apply_base_worker(

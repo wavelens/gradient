@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gradient_core::ServerState;
-use gradient_types::ids::OrganizationId;
+use gradient_types::ids::ProjectId;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -25,7 +25,7 @@ use gradient_scheduler::Scheduler;
 
 use super::auth::{
     BaseWorkerChallenge, aggregate_enabled_caps, expand_base_authorized,
-    filter_org_peers_without_cache, has_any_registrations, lookup_base_worker_challenge,
+    filter_project_peers_without_cache, has_any_registrations, lookup_base_worker_challenge,
     lookup_registered_peers, negotiate_capabilities, validate_tokens,
 };
 use super::dispatch::DispatchContext;
@@ -166,7 +166,7 @@ impl PeerAuthority for ServerAuthority {
 
         let had_token_authorized = !token_authorized.is_empty();
         let (authorized_peers, demoted) =
-            filter_org_peers_without_cache(&self.state, token_authorized).await;
+            filter_project_peers_without_cache(&self.state, token_authorized).await;
         let emptied_by_missing_cache =
             authorized_peers.is_empty() && had_token_authorized && !demoted.is_empty();
         failed_peers.extend(demoted);
@@ -230,7 +230,7 @@ impl ProtoSession<Authenticated> {
             return None;
         }
 
-        let authorized_peer_uuids: HashSet<OrganizationId> = authorized_peers
+        let authorized_peer_uuids: HashSet<ProjectId> = authorized_peers
             .iter()
             .filter_map(|s| s.parse().ok())
             .collect();
@@ -456,12 +456,12 @@ enum AuthDecision {
 ///
 /// - `server_initiated`: connection initiated by *us* (we know the worker).
 /// - `registered_peers_empty`: no `peer` row mentions this `worker_id` at all.
-/// - `has_any_registrations`: any cache/org has *ever* registered this worker
+/// - `has_any_registrations`: any cache/project has *ever* registered this worker
 ///   (i.e. it once existed but is now deactivated).
 /// - `authorized_peers_empty`: zero of the peers in the challenge produced a
 ///   valid token.
 /// - `emptied_by_missing_cache`: tokens validated for at least one peer, but
-///   every such peer was demoted because its organization has no subscribed
+///   every such peer was demoted because its project has no subscribed
 ///   cache. Distinguishes "incomplete server setup" from a real auth failure.
 fn decide_auth(
     server_initiated: bool,
@@ -475,7 +475,7 @@ fn decide_auth(
         return if authorized_peers_empty {
             AuthDecision::Reject {
                 code: 403,
-                reason: "base worker not enabled by any organization",
+                reason: "base worker not enabled by any project",
             }
         } else {
             AuthDecision::Accept
@@ -500,7 +500,7 @@ fn decide_auth(
         if emptied_by_missing_cache {
             AuthDecision::Reject {
                 code: 495,
-                reason: "organization has no cache subscribed",
+                reason: "project has no cache subscribed",
             }
         } else {
             AuthDecision::Reject {
@@ -580,14 +580,14 @@ mod auth_decision_tests {
     }
 
     /// Tokens validated but every authorized peer was demoted because its
-    /// organization has no cache → distinct 495, not a misleading 401.
+    /// project has no cache → distinct 495, not a misleading 401.
     #[test]
     fn registered_emptied_by_missing_cache() {
         assert_eq!(
             decide_auth(false, false, false, true, true, false),
             AuthDecision::Reject {
                 code: 495,
-                reason: "organization has no cache subscribed",
+                reason: "project has no cache subscribed",
             }
         );
     }
@@ -602,14 +602,14 @@ mod auth_decision_tests {
     }
 
     /// Base worker whose final authorized set is empty must be rejected,
-    /// otherwise it would reach the pool as an Open peer (all orgs).
+    /// otherwise it would reach the pool as an Open peer (all projects).
     #[test]
     fn base_worker_empty_authorized_rejected() {
         assert_eq!(
             decide_auth(true, false, false, true, false, true),
             AuthDecision::Reject {
                 code: 403,
-                reason: "base worker not enabled by any organization",
+                reason: "base worker not enabled by any project",
             }
         );
     }
@@ -624,11 +624,11 @@ mod auth_decision_tests {
     }
 
     /// `authorize_against` mode expands a single authorized identity to the
-    /// full enabled-org set; a non-match collapses to empty.
+    /// full enabled-project set; a non-match collapses to empty.
     #[test]
-    fn authorize_against_expands_to_enabled_orgs_when_identity_authorized() {
+    fn authorize_against_expands_to_enabled_projects_when_identity_authorized() {
         let identity = "id-1".to_string();
-        let enabled = vec!["org-1".to_string(), "org-2".to_string()];
+        let enabled = vec!["project-1".to_string(), "project-2".to_string()];
         let authorized = [identity.clone()];
         let out = if authorized.contains(&identity) {
             enabled.clone()

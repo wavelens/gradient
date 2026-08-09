@@ -11,13 +11,13 @@ use crate::CiStatus;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 
-/// `"{org}/{task}"` when both are known, falling back to `"{task}"` when
-/// the organization lookup turned up nothing. Used as the scope segment of
+/// `"{project}/{task}"` when both are known, falling back to `"{task}"` when
+/// the project lookup turned up nothing. Used as the scope segment of
 /// every CI check name so multiple Gradient tasks reporting to the same
 /// repository remain distinguishable.
-pub fn format_check_scope(org_name: Option<&str>, task_name: &str) -> String {
-    match org_name {
-        Some(org) => format!("{}/{}", org, task_name),
+pub fn format_check_scope(project_name: Option<&str>, task_name: &str) -> String {
+    match project_name {
+        Some(project) => format!("{}/{}", project, task_name),
         None => task_name.to_string(),
     }
 }
@@ -146,7 +146,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn check_scope_with_org() {
+    fn check_scope_with_project() {
         assert_eq!(
             format_check_scope(Some("wavelens"), "my-task"),
             "wavelens/my-task"
@@ -154,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn check_scope_without_org_falls_back_to_task() {
+    fn check_scope_without_project_falls_back_to_task() {
         assert_eq!(format_check_scope(None, "my-task"), "my-task");
     }
 

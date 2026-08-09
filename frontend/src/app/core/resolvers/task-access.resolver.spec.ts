@@ -56,7 +56,7 @@ describe('taskAccessResolver', () => {
   });
 
   it('fetches the task by route params and exposes access state', async () => {
-    const data = await runResolver(snap({ org: 'acme', task: 'demo' }));
+    const data = await runResolver(snap({ project: 'acme', task: 'demo' }));
     expect(getTask).toHaveBeenCalledWith('acme', 'demo');
     expect(data.task).toBe(baseTask);
     expect(data.access).toEqual({ managed: false, canEdit: true, canTrigger: true });
@@ -66,7 +66,7 @@ describe('taskAccessResolver', () => {
     getTask.mockReturnValue(
       of({ ...baseTask, managed: true, can_edit: false, can_trigger: false }),
     );
-    const data = await runResolver(snap({ org: 'acme', task: 'demo' }));
+    const data = await runResolver(snap({ project: 'acme', task: 'demo' }));
     expect(data.access).toEqual({ managed: true, canEdit: false, canTrigger: false });
   });
 
@@ -74,7 +74,7 @@ describe('taskAccessResolver', () => {
     getTask.mockReturnValue(
       of({ ...baseTask, managed: true, can_edit: false, can_trigger: true }),
     );
-    const data = await runResolver(snap({ org: 'acme', task: 'demo' }));
+    const data = await runResolver(snap({ project: 'acme', task: 'demo' }));
     expect(data.access).toEqual({ managed: true, canEdit: false, canTrigger: true });
   });
 });

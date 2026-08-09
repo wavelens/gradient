@@ -14,7 +14,7 @@ use connector::workers::MakeWorkerRequest;
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Register a new worker under the selected organization
+    /// Register a new worker under the selected project
     Register {
         /// Persistent worker identity string
         worker_id: String,
@@ -29,9 +29,9 @@ pub enum Commands {
         #[arg(short, long)]
         token: Option<String>,
     },
-    /// List all workers registered under the selected organization
+    /// List all workers registered under the selected project
     List,
-    /// Unregister a worker from the selected organization
+    /// Unregister a worker from the selected project
     Delete {
         /// Worker ID to unregister
         #[arg(add = ArgValueCompleter::new(completion::complete_workers))]
@@ -47,11 +47,11 @@ pub async fn handle(cmd: Commands, out: Output) {
             url,
             token,
         } => {
-            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
                 Some(id) => id,
                 _ => out.err(
                     ExitKind::Usage,
-                    "Organization is required. Use `gradient organization select <name>`.",
+                    "Project is required. Use `gradient project select <name>`.",
                 ),
             };
 
@@ -61,7 +61,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             match client
                 .workers()
                 .create(
-                    &organization,
+                    &project,
                     MakeWorkerRequest {
                         worker_id,
                         display_name,
@@ -88,16 +88,16 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::List => {
-            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
                 Some(id) => id,
                 _ => out.err(
                     ExitKind::Usage,
-                    "Organization is required. Use `gradient organization select <name>`.",
+                    "Project is required. Use `gradient project select <name>`.",
                 ),
             };
 
             let client = client_from_config(out);
-            match client.workers().list(&organization).await {
+            match client.workers().list(&project).await {
                 Ok(workers) => {
                     out.ok(&workers);
                     if workers.is_empty() {
@@ -123,16 +123,16 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Delete { worker_id } => {
-            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
                 Some(id) => id,
                 _ => out.err(
                     ExitKind::Usage,
-                    "Organization is required. Use `gradient organization select <name>`.",
+                    "Project is required. Use `gradient project select <name>`.",
                 ),
             };
 
             let client = client_from_config(out);
-            match client.workers().delete(&organization, &worker_id).await {
+            match client.workers().delete(&project, &worker_id).await {
                 Ok(_) => {
                     out.ok(&serde_json::json!({"deleted": true}));
                     out.human("Worker unregistered.");

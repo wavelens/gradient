@@ -27,7 +27,7 @@ const SOURCE_UPLOAD_CHUNK_SIZE: usize = 32 * 1024 * 1024;
 /// serialiser the server uses (so the store path matches), and upload the NAR.
 pub async fn dispatch_via_nar(
     client: &connector::Client,
-    organization: &str,
+    project: &str,
     entries: &[TrackedFile],
     params: &BuildParams,
     quiet: bool,
@@ -88,7 +88,7 @@ pub async fn dispatch_via_nar(
             ),
             Err(e) => out.err(
                 to_exit_kind(&e),
-                upload_error_message(&e, nar_len, file_count, organization),
+                upload_error_message(&e, nar_len, file_count, project),
             ),
         }
     }
@@ -96,7 +96,7 @@ pub async fn dispatch_via_nar(
     match requests
         .finalize_source(
             &upload,
-            organization,
+            project,
             params.target.as_deref(),
             params.system.as_deref(),
             &params.overrides,
@@ -106,7 +106,7 @@ pub async fn dispatch_via_nar(
         Ok(d) => d,
         Err(e) => out.err(
             to_exit_kind(&e),
-            upload_error_message(&e, nar_len, file_count, organization),
+            upload_error_message(&e, nar_len, file_count, project),
         ),
     }
 }
@@ -134,10 +134,10 @@ fn upload_error_message(
     err: &ConnectorError,
     nar_len: usize,
     file_count: usize,
-    organization: &str,
+    project: &str,
 ) -> String {
     let what = format!(
-        "source NAR {} from {file_count} files to organization '{organization}'",
+        "source NAR {} from {file_count} files to project '{project}'",
         human_bytes(nar_len)
     );
     match err {
@@ -167,7 +167,7 @@ fn upload_error_message(
 }
 
 /// Materialise the primary output locally and create a GC-rooted `result`
-/// symlink to it. The organisation's cache is wired into the realise as an extra
+/// symlink to it. The project's cache is wired into the realise as an extra
 /// substituter - carrying its signing key (so gradient-built paths verify even
 /// when the user has not configured the key) and a temp netrc for a private
 /// cache - so a single realise draws from the gradient cache and the user's own
@@ -221,7 +221,7 @@ pub async fn link_result(
     }
 }
 
-/// nix `--option` flags that add the organisation's cache as a substituter for
+/// nix `--option` flags that add the project's cache as a substituter for
 /// the realise: its URL, its signing key (so gradient-built paths verify without
 /// the user configuring the key), and - for a private cache - a temp netrc
 /// carrying the CLI token. Returns the flags plus the netrc guard, which must
@@ -233,7 +233,7 @@ async fn cache_substituter_opts(
     out: Output,
 ) -> (Vec<String>, Option<tempfile::NamedTempFile>) {
     let Some(cache) = dispatch.cache.as_deref() else {
-        out.human("Organization has no cache; using local substituters only.");
+        out.human("Project has no cache; using local substituters only.");
         return (Vec::new(), None);
     };
 

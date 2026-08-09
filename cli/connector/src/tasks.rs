@@ -7,7 +7,7 @@ pub struct TaskResponse {
     pub id: String,
     pub name: String,
     pub display_name: String,
-    pub organization: String,
+    pub project: String,
     pub repository: String,
     pub wildcard: String,
     pub active: bool,
@@ -132,49 +132,53 @@ pub struct PatchTriggerRequest {
 pub struct TasksApi<'a>(pub(crate) &'a Client);
 
 impl TasksApi<'_> {
-    pub async fn list(&self, org: &str) -> Result<PaginatedListResponse, ConnectorError> {
+    pub async fn list(&self, project: &str) -> Result<PaginatedListResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}"),
+            &format!("tasks/{project}"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn available(&self, org: &str) -> Result<PaginatedListResponse, ConnectorError> {
+    pub async fn available(&self, project: &str) -> Result<PaginatedListResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/available"),
+            &format!("tasks/{project}/available"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn get(&self, org: &str, proj: &str) -> Result<TaskResponse, ConnectorError> {
+    pub async fn get(&self, project: &str, proj: &str) -> Result<TaskResponse, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}"),
+            &format!("tasks/{project}/{proj}"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn create(&self, org: &str, body: MakeTaskRequest) -> Result<String, ConnectorError> {
+    pub async fn create(
+        &self,
+        project: &str,
+        body: MakeTaskRequest,
+    ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::PUT,
-            &format!("tasks/{org}"),
+            &format!("tasks/{project}"),
             true,
         )?
         .json(&body);
@@ -183,7 +187,7 @@ impl TasksApi<'_> {
 
     pub async fn update(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
         body: PatchTaskRequest,
     ) -> Result<String, ConnectorError> {
@@ -192,32 +196,32 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("tasks/{org}/{proj}"),
+            &format!("tasks/{project}/{proj}"),
             true,
         )?
         .json(&body);
         http::decode(req.send().await?).await
     }
 
-    pub async fn delete(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
+    pub async fn delete(&self, project: &str, proj: &str) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("tasks/{org}/{proj}"),
+            &format!("tasks/{project}/{proj}"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn details(&self, org: &str, proj: &str) -> Result<TaskDetails, ConnectorError> {
+    pub async fn details(&self, project: &str, proj: &str) -> Result<TaskDetails, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}/details"),
+            &format!("tasks/{project}/{proj}/details"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -225,7 +229,7 @@ impl TasksApi<'_> {
 
     pub async fn entry_points(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
     ) -> Result<Vec<EntryPoint>, ConnectorError> {
         let req = http::request(
@@ -233,31 +237,35 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}/entry-points"),
+            &format!("tasks/{project}/{proj}/entry-points"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn check_repository(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
+    pub async fn check_repository(
+        &self,
+        project: &str,
+        proj: &str,
+    ) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{org}/{proj}/check-repository"),
+            &format!("tasks/{project}/{proj}/check-repository"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn evaluate(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
+    pub async fn evaluate(&self, project: &str, proj: &str) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{org}/{proj}/evaluate"),
+            &format!("tasks/{project}/{proj}/evaluate"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -265,7 +273,7 @@ impl TasksApi<'_> {
 
     pub async fn evaluations(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
     ) -> Result<Vec<EvaluationSummary>, ConnectorError> {
         let req = http::request(
@@ -273,31 +281,31 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}/evaluations"),
+            &format!("tasks/{project}/{proj}/evaluations"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn enable(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
+    pub async fn enable(&self, project: &str, proj: &str) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{org}/{proj}/active"),
+            &format!("tasks/{project}/{proj}/active"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn disable(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
+    pub async fn disable(&self, project: &str, proj: &str) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("tasks/{org}/{proj}/active"),
+            &format!("tasks/{project}/{proj}/active"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -305,7 +313,7 @@ impl TasksApi<'_> {
 
     pub async fn integration(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
     ) -> Result<TaskIntegration, ConnectorError> {
         let req = http::request(
@@ -313,19 +321,19 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}/integration"),
+            &format!("tasks/{project}/{proj}/integration"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn metrics(&self, org: &str, proj: &str) -> Result<TaskMetrics, ConnectorError> {
+    pub async fn metrics(&self, project: &str, proj: &str) -> Result<TaskMetrics, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}/metrics"),
+            &format!("tasks/{project}/{proj}/metrics"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -333,7 +341,7 @@ impl TasksApi<'_> {
 
     pub async fn entry_point_metrics(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
     ) -> Result<Vec<EntryPointMetrics>, ConnectorError> {
         let req = http::request(
@@ -341,7 +349,7 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}/entry-point-metrics"),
+            &format!("tasks/{project}/{proj}/entry-point-metrics"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -349,7 +357,7 @@ impl TasksApi<'_> {
 
     pub async fn entry_point_downloads(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
         eval: &str,
         filename: &str,
@@ -359,7 +367,9 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}/entry-point-downloads?eval={eval}&filename={filename}"),
+            &format!(
+                "tasks/{project}/{proj}/entry-point-downloads?eval={eval}&filename={filename}"
+            ),
             false,
         )?;
         let res = req.send().await?;
@@ -376,25 +386,29 @@ impl TasksApi<'_> {
         Ok(res.bytes().await?)
     }
 
-    pub async fn badge(&self, org: &str, proj: &str) -> Result<String, ConnectorError> {
+    pub async fn badge(&self, project: &str, proj: &str) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}/badge"),
+            &format!("tasks/{project}/{proj}/badge"),
             false,
         )?;
         http::decode_raw_string(req.send().await?).await
     }
 
-    pub async fn triggers(&self, org: &str, proj: &str) -> Result<Vec<Trigger>, ConnectorError> {
+    pub async fn triggers(
+        &self,
+        project: &str,
+        proj: &str,
+    ) -> Result<Vec<Trigger>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}/triggers"),
+            &format!("tasks/{project}/{proj}/triggers"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -402,7 +416,7 @@ impl TasksApi<'_> {
 
     pub async fn create_trigger(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
         body: MakeTriggerRequest,
     ) -> Result<String, ConnectorError> {
@@ -411,7 +425,7 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{org}/{proj}/triggers"),
+            &format!("tasks/{project}/{proj}/triggers"),
             true,
         )?
         .json(&body);
@@ -420,7 +434,7 @@ impl TasksApi<'_> {
 
     pub async fn get_trigger(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
         id: &str,
     ) -> Result<Trigger, ConnectorError> {
@@ -429,7 +443,7 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("tasks/{org}/{proj}/triggers/{id}"),
+            &format!("tasks/{project}/{proj}/triggers/{id}"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -437,7 +451,7 @@ impl TasksApi<'_> {
 
     pub async fn update_trigger(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
         id: &str,
         body: PatchTriggerRequest,
@@ -447,7 +461,7 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("tasks/{org}/{proj}/triggers/{id}"),
+            &format!("tasks/{project}/{proj}/triggers/{id}"),
             true,
         )?
         .json(&body);
@@ -456,7 +470,7 @@ impl TasksApi<'_> {
 
     pub async fn delete_trigger(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
         id: &str,
     ) -> Result<String, ConnectorError> {
@@ -465,7 +479,7 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("tasks/{org}/{proj}/triggers/{id}"),
+            &format!("tasks/{project}/{proj}/triggers/{id}"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -473,7 +487,7 @@ impl TasksApi<'_> {
 
     pub async fn test_trigger(
         &self,
-        org: &str,
+        project: &str,
         proj: &str,
         id: &str,
     ) -> Result<String, ConnectorError> {
@@ -482,7 +496,7 @@ impl TasksApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("tasks/{org}/{proj}/triggers/{id}/test"),
+            &format!("tasks/{project}/{proj}/triggers/{id}/test"),
             true,
         )?;
         http::decode(req.send().await?).await

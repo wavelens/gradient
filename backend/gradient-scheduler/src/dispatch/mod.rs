@@ -27,7 +27,7 @@ mod eval;
 pub(crate) use build::dispatch_ready_builds;
 #[cfg(test)]
 pub(crate) use eval::dispatch_queued_evals;
-pub(crate) use eval::organization_id_for_eval;
+pub(crate) use eval::project_id_for_eval;
 
 /// Tick interval shared by the eval and build dispatch loops.
 pub(crate) const DISPATCH_TICK_SECS: u64 = 5;

@@ -141,7 +141,7 @@ pub struct PullRequestSnapshot {
 /// All parameters needed to report a CI status to an external provider.
 #[derive(Debug, Clone)]
 pub struct CiReport {
-    /// Repository owner (user or organisation name).
+    /// Repository owner (user or organisation name on the forge).
     pub owner: String,
     /// Repository name.
     pub repo: String,

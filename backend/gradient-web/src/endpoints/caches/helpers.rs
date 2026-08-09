@@ -68,7 +68,7 @@ async fn try_authenticate_basic(
 
 /// Returns true if `user` is allowed to read `cache`.
 /// Access is granted when the user is the cache owner, holds a direct
-/// cache-user role, or belongs to any organization that subscribes to the cache.
+/// cache-user role, or belongs to any project that subscribes to the cache.
 async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &MUser) -> bool {
     if cache.created_by == user.id {
         return true;
@@ -84,22 +84,22 @@ async fn user_can_access_cache(state: &Arc<ServerState>, cache: &MCache, user: &
         return true;
     }
 
-    let org_ids: Vec<OrganizationId> = EOrganizationUser::find()
-        .filter(COrganizationUser::User.eq(user.id))
+    let project_ids: Vec<ProjectId> = EProjectUser::find()
+        .filter(CProjectUser::User.eq(user.id))
         .all(&state.web_db)
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|ou| ou.organization)
+        .map(|ou| ou.project)
         .collect();
 
-    if org_ids.is_empty() {
+    if project_ids.is_empty() {
         return false;
     }
 
-    EOrganizationCache::find()
-        .filter(COrganizationCache::Cache.eq(cache.id))
-        .filter(COrganizationCache::Organization.is_in(org_ids))
+    EProjectCache::find()
+        .filter(CProjectCache::Cache.eq(cache.id))
+        .filter(CProjectCache::Project.is_in(project_ids))
         .one(&state.web_db)
         .await
         .unwrap_or(None)
@@ -161,7 +161,7 @@ async fn get_nar_by_hash_inner(
 
     // Access gate: the `cached_path_signature` row for this cache proves the
     // caller-authorised cache also holds the path (derivations are global, so
-    // there is no per-org ownership to check). Same rule as get_nar_by_cached_path.
+    // there is no per-project ownership to check). Same rule as get_nar_by_cached_path.
     let cached_path_row = ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash.clone()))
         .one(&state.web_db)

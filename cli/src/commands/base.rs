@@ -69,10 +69,10 @@ enum MainCommands {
     Logout,
     /// Display current user information
     Info,
-    /// Manage organizations
-    Organization {
+    /// Manage projects
+    Project {
         #[command(subcommand)]
-        cmd: organization::Commands,
+        cmd: project::Commands,
     },
     /// Manage tasks
     Task {
@@ -93,11 +93,11 @@ enum MainCommands {
     Build {
         /// Eval target attribute path (default: task's wildcard)
         target: Option<String>,
-        /// Target system (default: organization preference)
+        /// Target system (default: project preference)
         #[arg(long)]
         system: Option<String>,
-        #[arg(short, long, add = ArgValueCompleter::new(completion::complete_orgs))]
-        organization: Option<String>,
+        #[arg(short, long, add = ArgValueCompleter::new(completion::complete_projects))]
+        project: Option<String>,
         /// Dispatch and return the evaluation UUID without streaming logs
         #[arg(short, long)]
         background: bool,
@@ -128,7 +128,7 @@ enum MainCommands {
         /// Skip the eval picker; use this evaluation directly
         #[arg(long)]
         evaluation: Option<String>,
-        /// Restrict latest-eval lookup to a task (accepts `name` or `org/name`)
+        /// Restrict latest-eval lookup to a task (accepts `name` or `project/name`)
         #[arg(long, add = ArgValueCompleter::new(completion::complete_tasks))]
         task: Option<String>,
         /// Skip the product picker; comma-separated 1-based indices, ranges (`1-3`), or `all`
@@ -310,7 +310,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                         set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
                         out.ok(&serde_json::json!({"logged_in": true}));
                         out.human("Logged in.");
-                        organization::post_login_org_setup(&client_from_config(out), out).await;
+                        project::post_login_project_setup(&client_from_config(out), out).await;
                     }
                     Err(e) => out.err(to_exit_kind(&e), e),
                 }
@@ -342,7 +342,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         MainCommands::Build {
             target,
             system,
-            organization,
+            project,
             background,
             quiet,
             no_link,
@@ -355,7 +355,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
                 system,
                 overrides,
             };
-            build::handle_build(params, organization, background, quiet, no_link, out).await
+            build::handle_build(params, project, background, quiet, no_link, out).await
         }
         MainCommands::Watch { evaluation } => watch::handle_watch(&evaluation, out).await,
         MainCommands::Logs { evaluation } => logs::handle_logs(&evaluation, out).await,
@@ -366,7 +366,7 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
             products,
             out: out_dir,
         } => download::handle_download(flake_ref, evaluation, task, products, out_dir, out).await,
-        MainCommands::Organization { cmd } => organization::handle(cmd, out).await,
+        MainCommands::Project { cmd } => project::handle(cmd, out).await,
         MainCommands::Task { cmd } => task::handle(cmd, out).await,
         MainCommands::Worker { cmd } => worker::handle(cmd, out).await,
         MainCommands::Cache { cmd } => cache::handle(cmd, out).await,
@@ -429,7 +429,7 @@ async fn run_web_login(out: Output, no_browser: bool) {
                 set_get_value(ConfigKey::AuthToken, Some(token), true).unwrap();
                 out.ok(&serde_json::json!({"logged_in": true}));
                 out.human("Logged in.");
-                organization::post_login_org_setup(&client_from_config(out), out).await;
+                project::post_login_project_setup(&client_from_config(out), out).await;
                 return;
             }
             Err(e) => out.err(to_exit_kind(&e), e),

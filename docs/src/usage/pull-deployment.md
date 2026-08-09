@@ -44,7 +44,7 @@ Add `gradient.nixosModules.deploy` to the target machine's NixOS configuration:
     enable      = true;
     server      = "https://gradient.example.com";
     apiKeyFile  = "/var/lib/gradient-deploy/api-key";
-    task     = "myorg/mytask";
+    task     = "myproject/mytask";
   };
 }
 ```
@@ -53,7 +53,7 @@ Add `gradient.nixosModules.deploy` to the target machine's NixOS configuration:
 |---|---|
 | `server` | URL of your Gradient instance |
 | `apiKeyFile` | Path to a file containing an API key with read access to the task |
-| `task` | `organization/task` slug to watch |
+| `task` | `project/task` slug to watch |
 
 ### 3. Create an API Key
 

@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 /// `GET /commits/{commit}` - returns commit metadata when the caller can
-/// reach the commit through an evaluation in an organization they belong to,
-/// or the org is public. Anything else maps to `404` so the endpoint never
+/// reach the commit through an evaluation in a project they belong to,
+/// or the project is public. Anything else maps to `404` so the endpoint never
 /// confirms or denies the existence of a commit the caller can't see.
 pub async fn get_commit(
     state: State<Arc<ServerState>>,
@@ -38,7 +38,7 @@ pub async fn get_commit(
         return Err(WebError::not_found("Commit"));
     }
 
-    let mut org_ids: HashSet<OrganizationId> = HashSet::new();
+    let mut project_ids: HashSet<ProjectId> = HashSet::new();
 
     let task_ids: Vec<TaskId> = evaluations.iter().filter_map(|e| e.task).collect();
     if !task_ids.is_empty() {
@@ -47,28 +47,28 @@ pub async fn get_commit(
             ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
         })
         .await?;
-        org_ids.extend(tasks.into_iter().map(|p| p.organization));
+        project_ids.extend(tasks.into_iter().map(|p| p.project));
     }
 
-    if org_ids.is_empty() {
+    if project_ids.is_empty() {
         return Err(WebError::not_found("Commit"));
     }
 
-    let org_id_vec: Vec<OrganizationId> = org_ids.into_iter().collect();
+    let project_id_vec: Vec<ProjectId> = project_ids.into_iter().collect();
 
-    let organizations = EOrganization::find()
-        .filter(COrganization::Id.is_in(org_id_vec.clone()))
+    let projects = EProject::find()
+        .filter(CProject::Id.is_in(project_id_vec.clone()))
         .all(&state.web_db)
         .await?;
 
-    let any_public = organizations.iter().any(|o| o.public);
+    let any_public = projects.iter().any(|o| o.public);
 
     let accessible = if any_public {
         true
     } else if let Some(user) = &maybe_user {
-        EOrganizationUser::find()
-            .filter(COrganizationUser::User.eq(user.id))
-            .filter(COrganizationUser::Organization.is_in(org_id_vec))
+        EProjectUser::find()
+            .filter(CProjectUser::User.eq(user.id))
+            .filter(CProjectUser::Project.is_in(project_id_vec))
             .one(&state.web_db)
             .await?
             .is_some()

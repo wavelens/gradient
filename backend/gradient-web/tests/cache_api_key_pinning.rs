@@ -161,17 +161,17 @@ fn cache_pinned_key_rejected_on_other_cache() {
 }
 
 #[test]
-fn cache_pinned_key_rejected_on_org_endpoint() {
+fn cache_pinned_key_rejected_on_project_endpoint() {
     run(async {
         let raw = "c".repeat(64);
         let key = pinned_api_key(&raw, cache_id(), cache_admin_mask());
 
         let db = api_key_db(MockDatabase::new(DatabaseBackend::Postgres), &key)
-            .append_query_results([vec![gradient_test_support::fixtures::org()]]);
+            .append_query_results([vec![gradient_test_support::fixtures::project()]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .get("/api/v1/orgs/test-org")
+            .get("/api/v1/projects/test-project")
             .add_header("authorization", format!("Bearer GRAD{}", raw))
             .await;
 
@@ -180,7 +180,7 @@ fn cache_pinned_key_rejected_on_org_endpoint() {
 }
 
 #[test]
-fn create_key_rejects_both_org_and_cache_pin() {
+fn create_key_rejects_both_project_and_cache_pin() {
     // This uses a session JWT because API keys cannot create API keys.
     run(async {
         let session_id = gradient_types::SessionId::now_v7();
@@ -199,7 +199,7 @@ fn create_key_rejects_both_org_and_cache_pin() {
             .json(&serde_json::json!({
                 "name": "bad-key",
                 "permissions": ["viewCache"],
-                "organization": "test-org",
+                "project": "test-project",
                 "cache": "test-cache",
             }))
             .await;
@@ -217,7 +217,7 @@ fn create_cache_pinned_key_cannot_exceed_member_mask() {
         let token = gradient_test_support::web::make_token(session_id);
         let session = gradient_test_support::web::live_session(session_id);
 
-        // A View-role member (or org member, same View mask) may mint a
+        // A View-role member (or project member, same View mask) may mint a
         // read-only key, but not one granting `writeStore` beyond their mask → 403 (#334).
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![session.clone()]])

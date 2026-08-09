@@ -127,7 +127,7 @@ fn nar_serve_streams_stored_blob_byte_for_byte() {
             shutdown: gradient_util::shutdown::Shutdown::new(),
             jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
             started_at: chrono::Utc::now(),
-            pending_org_memberships: Arc::new(std::collections::HashMap::new()),
+            pending_project_memberships: Arc::new(std::collections::HashMap::new()),
             oidc_group_roles: Arc::new(std::collections::HashMap::new()),
             scim_group_roles: Arc::new(Default::default()),
             board_events: tokio::sync::broadcast::channel(256).0,

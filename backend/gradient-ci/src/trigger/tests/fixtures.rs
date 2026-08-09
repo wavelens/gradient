@@ -12,7 +12,7 @@ use uuid::Uuid;
 pub fn make_task() -> MTask {
     MTask {
         id: TaskId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
-        organization: OrganizationId::nil(),
+        project: ProjectId::nil(),
         name: "test-task".into(),
         active: true,
         display_name: "Test Task".into(),

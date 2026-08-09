@@ -75,7 +75,7 @@ pub struct JobContextView {
     pub architecture: String,
     pub missing_count: Option<u32>,
     pub missing_nar_size: Option<u64>,
-    pub org_work_share: Option<f32>,
+    pub project_work_share: Option<f32>,
     pub rescore_count: u32,
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
@@ -104,7 +104,7 @@ impl JobContextView {
             architecture,
             missing_count: ctx.missing_count,
             missing_nar_size: ctx.missing_nar_size,
-            org_work_share: ctx.org_work_share,
+            project_work_share: ctx.project_work_share,
             rescore_count: ctx.rescore_count,
             queued_at: ctx.queued_at,
             ready_at: ctx.ready_at,
@@ -153,7 +153,7 @@ impl JobContextView {
 mod tests {
     use super::*;
     use gradient_score::ScoredJob;
-    use gradient_types::ids::{DerivationBuildId, EvaluationId, OrganizationId};
+    use gradient_types::ids::{DerivationBuildId, EvaluationId, ProjectId};
     use gradient_types::proto::{BuildJob, BuildSpec};
 
     fn build_pending() -> PendingJob {
@@ -161,7 +161,7 @@ mod tests {
         PendingJob::Build(crate::jobs::PendingBuildJob {
             derivation_build: DerivationBuildId::now_v7(),
             evaluation_id: EvaluationId::now_v7(),
-            org_id: OrganizationId::now_v7(),
+            project_id: ProjectId::now_v7(),
             job: BuildJob {
                 builds: vec![BuildSpec {
                     build_id: "b1".into(),
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn build_job_context_view_carries_derivations_and_history() {
         let job = build_pending();
-        let scored = ScoredJob::new_eval("build:x", job.org_id(), false, Default::default());
+        let scored = ScoredJob::new_eval("build:x", job.project_id(), false, Default::default());
         let now = gradient_types::now();
         let ctx = JobContext {
             job: &scored,
@@ -204,7 +204,7 @@ mod tests {
             dependency_count: 3,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };

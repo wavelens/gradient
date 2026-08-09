@@ -12,12 +12,12 @@ import { of } from 'rxjs';
 import { TaskTriggersComponent } from './task-triggers.component';
 import { TriggersService } from '@core/services/triggers.service';
 import { IntegrationsService } from '@core/services/integrations.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { AccessState } from '@core/models/access.model';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
-    snapshot: { paramMap: convertToParamMap({ org: 'acme', task: 'demo' }) },
+    snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }) },
     data: of({}),
     parent: { data: of({ taskAccess: { task: {}, access } }) },
   } as unknown as ActivatedRoute;
@@ -51,8 +51,8 @@ function setup(
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
       { provide: TriggersService, useValue: { list: () => of(triggers) } },
-      { provide: IntegrationsService, useValue: { listOrgIntegrationSummaries: () => of([]) } },
-      { provide: OrganizationsService, useValue: { getOrganization: () => of({ display_name: 'Acme' }) } },
+      { provide: IntegrationsService, useValue: { listProjectIntegrationSummaries: () => of([]) } },
+      { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
     ],
   });
   const fixture = TestBed.createComponent(TaskTriggersComponent);

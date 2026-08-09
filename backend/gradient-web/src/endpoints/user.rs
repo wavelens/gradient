@@ -19,7 +19,7 @@ use axum::{Extension, Json};
 
 use chrono::Duration;
 use gradient_core::ServerState;
-use gradient_db::get_any_organization_by_name;
+use gradient_db::get_any_project_by_name;
 use gradient_types::consts::*;
 use gradient_types::input::{validate_display_name, validate_username};
 use gradient_types::*;
@@ -54,8 +54,8 @@ pub struct CreateApiKeyRequest {
     pub expires_in_days: Option<u32>,
     pub permissions: Vec<String>,
     #[serde(default)]
-    pub organization: Option<String>,
-    /// Optional cache name to pin the key to. Mutually exclusive with `organization`.
+    pub project: Option<String>,
+    /// Optional cache name to pin the key to. Mutually exclusive with `project`.
     #[serde(default)]
     pub cache: Option<String>,
     /// CIDR strings the key may be used from. Empty or omitted = any source.
@@ -69,10 +69,10 @@ pub struct PatchApiKeyRequest {
     /// Wholesale replacement of the key's permission set. Omit to leave the
     /// existing mask alone.
     pub permissions: Option<Vec<String>>,
-    /// Patch semantics for the org pin: omit to leave alone, `Some(name)` to
+    /// Patch semantics for the project pin: omit to leave alone, `Some(name)` to
     /// pin, `Some(null)` (i.e. JSON null) to unpin.
     #[serde(default, deserialize_with = "deserialize_optional_field")]
-    pub organization: Option<Option<String>>,
+    pub project: Option<Option<String>>,
     /// Wholesale replacement; `[]` clears the allowlist.
     #[serde(default)]
     pub allowed_ips: Option<Vec<String>>,
@@ -92,8 +92,8 @@ pub struct ApiKeyInfo {
     pub name: String,
     pub managed: bool,
     pub permissions: Vec<&'static str>,
-    /// Org name (resolved from the pinned org id at response time), or `null`.
-    pub organization: Option<String>,
+    /// Project name (resolved from the pinned project id at response time), or `null`.
+    pub project: Option<String>,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub expires_at: Option<String>,
@@ -267,11 +267,11 @@ fn last_used_or_none(dt: chrono::NaiveDateTime) -> Option<String> {
     }
 }
 
-async fn resolve_org_pin(
+async fn resolve_project_pin(
     state: &Arc<ServerState>,
     user_id: UserId,
     name: Option<String>,
-) -> WebResult<Option<OrganizationId>> {
+) -> WebResult<Option<ProjectId>> {
     let Some(name) = name else {
         return Ok(None);
     };
@@ -279,20 +279,16 @@ async fn resolve_org_pin(
     if trimmed.is_empty() {
         return Ok(None);
     }
-    let unknown = || {
-        WebError::bad_request(format!(
-            "Unknown organization or not a member: '{}'.",
-            trimmed
-        ))
-    };
-    let org = get_any_organization_by_name(&state.db(), trimmed.into())
+    let unknown =
+        || WebError::bad_request(format!("Unknown project or not a member: '{}'.", trimmed));
+    let project = get_any_project_by_name(&state.db(), trimmed.into())
         .await?
         .ok_or_else(unknown)?;
-    let is_member = crate::access::is_org_member(state, user_id, org.id, None).await?;
+    let is_member = crate::access::is_project_member(state, user_id, project.id, None).await?;
     if !is_member {
         return Err(unknown());
     }
-    Ok(Some(org.id))
+    Ok(Some(project.id))
 }
 
 fn forbid_via_api_key(api_key: &MaybeApiKey) -> WebResult<()> {
@@ -304,15 +300,15 @@ fn forbid_via_api_key(api_key: &MaybeApiKey) -> WebResult<()> {
     Ok(())
 }
 
-async fn org_name_lookup(
+async fn project_name_lookup(
     state: &Arc<ServerState>,
-    org_ids: &[OrganizationId],
-) -> WebResult<std::collections::HashMap<OrganizationId, String>> {
-    if org_ids.is_empty() {
+    project_ids: &[ProjectId],
+) -> WebResult<std::collections::HashMap<ProjectId, String>> {
+    if project_ids.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
-    let rows = EOrganization::find()
-        .filter(COrganization::Id.is_in(org_ids.to_vec()))
+    let rows = EProject::find()
+        .filter(CProject::Id.is_in(project_ids.to_vec()))
         .all(&state.web_db)
         .await?;
     Ok(rows.into_iter().map(|o| (o.id, o.name)).collect())
@@ -320,7 +316,7 @@ async fn org_name_lookup(
 
 fn api_key_info(
     key: gradient_entity::api::Model,
-    org_names: &std::collections::HashMap<OrganizationId, String>,
+    project_names: &std::collections::HashMap<ProjectId, String>,
 ) -> ApiKeyInfo {
     ApiKeyInfo {
         id: key.id.to_string(),
@@ -330,7 +326,7 @@ fn api_key_info(
             .into_iter()
             .map(|p| p.as_wire_name())
             .collect(),
-        organization: key.organization.and_then(|id| org_names.get(&id).cloned()),
+        project: key.project.and_then(|id| project_names.get(&id).cloned()),
         created_at: fmt_dt(key.created_at),
         last_used_at: last_used_or_none(key.last_used_at),
         expires_at: fmt_opt_dt(key.expires_at),
@@ -374,12 +370,12 @@ pub async fn get_keys(
         .all(&state.web_db)
         .await?;
 
-    let pinned: Vec<OrganizationId> = api_keys.iter().filter_map(|k| k.organization).collect();
-    let org_names = org_name_lookup(&state, &pinned).await?;
+    let pinned: Vec<ProjectId> = api_keys.iter().filter_map(|k| k.project).collect();
+    let project_names = project_name_lookup(&state, &pinned).await?;
 
     let infos: Vec<ApiKeyInfo> = api_keys
         .into_iter()
-        .map(|k| api_key_info(k, &org_names))
+        .map(|k| api_key_info(k, &project_names))
         .collect();
 
     Ok(ok_json(infos))
@@ -394,9 +390,9 @@ pub async fn post_keys(
 ) -> WebResult<Json<BaseResponse<String>>> {
     forbid_via_api_key(&api_key_caller)?;
 
-    if body.cache.is_some() && body.organization.is_some() {
+    if body.cache.is_some() && body.project.is_some() {
         return Err(WebError::bad_request(
-            "API key cannot pin to both an organization and a cache.",
+            "API key cannot pin to both a project and a cache.",
         ));
     }
 
@@ -416,7 +412,7 @@ pub async fn post_keys(
         .expires_in_days
         .map(|days| gradient_types::now() + Duration::days(days as i64));
 
-    let (mask, org_pin, cache_pin) = if let Some(cache_name) = body.cache.clone() {
+    let (mask, project_pin, cache_pin) = if let Some(cache_name) = body.cache.clone() {
         let cache = load_cache(
             &state,
             Caller::User(&user),
@@ -447,8 +443,8 @@ pub async fn post_keys(
                 "At least one permission is required for an API key.",
             ));
         }
-        let org = resolve_org_pin(&state, user.id, body.organization.clone()).await?;
-        (m, org, None)
+        let project = resolve_project_pin(&state, user.id, body.project.clone()).await?;
+        (m, project, None)
     };
 
     let allowed_ips = normalize_allowed_ips(body.allowed_ips.clone())?;
@@ -462,7 +458,7 @@ pub async fn post_keys(
         created_at: gradient_types::now(),
         expires_at,
         permission: mask,
-        organization: org_pin,
+        project: project_pin,
         cache: cache_pin,
         allowed_ips,
         ..Default::default()
@@ -481,7 +477,7 @@ pub async fn post_keys(
             "name": body.name,
             "expires_in_days": body.expires_in_days,
             "permissions_mask": mask,
-            "organization_id": org_pin.map(|id| id.to_string()),
+            "project_id": project_pin.map(|id| id.to_string()),
             "cache_id": cache_pin.map(|id| id.to_string()),
         })),
     )
@@ -517,7 +513,7 @@ pub async fn patch_key(
     }
 
     let previous_mask = api_key.permission;
-    let previous_org = api_key.organization;
+    let previous_project = api_key.project;
     let previous_name = api_key.name.clone();
     let mut active: AApi = api_key.into_active_model();
 
@@ -548,10 +544,10 @@ pub async fn patch_key(
         }
         active.permission = Set(new_mask);
     }
-    let mut new_org = previous_org;
-    if let Some(maybe_name) = body.organization {
-        new_org = resolve_org_pin(&state, user.id, maybe_name).await?;
-        active.organization = Set(new_org);
+    let mut new_project = previous_project;
+    if let Some(maybe_name) = body.project {
+        new_project = resolve_project_pin(&state, user.id, maybe_name).await?;
+        active.project = Set(new_project);
     }
     if let Some(canon) = normalize_allowed_ips(body.allowed_ips)? {
         active.allowed_ips = Set(if canon.is_empty() { None } else { Some(canon) });
@@ -570,15 +566,15 @@ pub async fn patch_key(
             "new_name": updated.name,
             "previous_permissions_mask": previous_mask,
             "new_permissions_mask": new_mask,
-            "previous_organization_id": previous_org.map(|i| i.to_string()),
-            "new_organization_id": new_org.map(|i| i.to_string()),
+            "previous_project_id": previous_project.map(|i| i.to_string()),
+            "new_project_id": new_project.map(|i| i.to_string()),
         })),
     )
     .await;
 
-    let pinned: Vec<OrganizationId> = updated.organization.iter().copied().collect();
-    let org_names = org_name_lookup(&state, &pinned).await?;
-    Ok(ok_json(api_key_info(updated, &org_names)))
+    let pinned: Vec<ProjectId> = updated.project.iter().copied().collect();
+    let project_names = project_name_lookup(&state, &pinned).await?;
+    Ok(ok_json(api_key_info(updated, &project_names)))
 }
 
 pub async fn delete_keys(

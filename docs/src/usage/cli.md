@@ -42,7 +42,7 @@ Log in and point the CLI at your Gradient server in one step:
 gradient login https://gradient.example.com
 ```
 
-Passing the URL sets it as the configured server, so a separate `gradient config server` is no longer needed. On a successful first login the CLI selects your organization automatically when you belong to exactly one, and otherwise lists them so you can pick with `gradient organization select <name>`.
+Passing the URL sets it as the configured server, so a separate `gradient config server` is no longer needed. On a successful first login the CLI selects your project automatically when you belong to exactly one, and otherwise lists them so you can pick with `gradient project select <name>`.
 
 By default this opens your browser to authorize the CLI session, which is what you want for interactive use and works the same when the Gradient server is configured for OIDC-only login. Pass `--no-browser` to print the URL instead - useful when running over SSH on a headless machine, where you can open the URL on your laptop. The browser flow asks you to confirm a short code that the CLI also prints, then issues a 30-day session token.
 
@@ -52,7 +52,7 @@ For unattended scripts you can still pass credentials directly:
 gradient login https://gradient.example.com --username alice --password "$PASSWORD"
 ```
 
-The server URL can also be set on its own with `gradient config server <url>`, and `gradient organization select` requires a valid login and only accepts an organization you belong to. Either way, the resulting token is stored in the local configuration file (`~/.config/gradient/config`).
+The server URL can also be set on its own with `gradient config server <url>`, and `gradient project select` requires a valid login and only accepts a project you belong to. Either way, the resulting token is stored in the local configuration file (`~/.config/gradient/config`).
 
 ### Self-signed certificates
 
@@ -77,12 +77,12 @@ installed system-wide yet.
 | `gradient info` | Print current user information |
 | `gradient status` | Check connectivity to the server |
 
-### Organizations
+### Projects
 
 ```sh
-gradient organization list
-gradient organization create
-gradient organization delete <name>
+gradient project list
+gradient project create
+gradient project delete <name>
 ```
 
 ### Tasks
@@ -140,8 +140,8 @@ for full upload documentation.
 server and queues a Nix evaluation against them. No Nix tooling runs on the
 client - only the files git tracks are uploaded, addressed by BLAKE3 content
 hash so unchanged blobs aren't re-sent across runs. The server materialises
-`/nix/store/<hash>-source`, signs it with the org's cache key, and dispatches
-an evaluation under a per-org reserved `build-request` task.
+`/nix/store/<hash>-source`, signs it with the project's cache key, and dispatches
+an evaluation under a per-project reserved `build-request` task.
 
 ```sh
 # Inside a git working tree
@@ -175,7 +175,7 @@ overrides](../configuration.md#flake-input-overrides), which apply to every
 run until removed.
 
 `gradient build` also fetches `git+ssh://` flake inputs during evaluation,
-using the organization's SSH key - the same key used for [private repo
+using the project's SSH key - the same key used for [private repo
 access](overview.md#ssh-keys).
 
 Requirements and limits:
@@ -195,9 +195,9 @@ output (use `--no-link` to skip it):
 
 - A CLI built with the `nix` feature realises the primary output into the local
   Nix store and creates a single GC-rooted `result` symlink to it (like
-  `nix build`). The realise wires the org cache in as an extra substituter -
+  `nix build`). The realise wires the project cache in as an extra substituter -
   carrying its signing key, and a temporary `netrc` with the CLI token when the
-  cache is private - alongside the user's own substituters, so an output the org
+  cache is private - alongside the user's own substituters, so an output the project
   cache serves and one already reachable locally both resolve. It also packs the
   source NAR locally and uploads it in one shot (`POST /build-requests/source`),
   skipping the per-file blob manifest.
@@ -341,11 +341,11 @@ gradient generate <type>
 ```
 
 Completions are dynamic: besides subcommands and flags, TAB also completes
-existing resource names (organizations, tasks, workers, and caches) by
+existing resource names (projects, tasks, workers, and caches) by
 querying the server. The resource lookups require a configured server and a
 valid login; when offline or logged out they yield nothing instead of erroring.
-Task and worker name completion uses the currently selected organization
-(`gradient organization select <name>`).
+Task and worker name completion uses the currently selected project
+(`gradient project select <name>`).
 
 ## Global Options
 

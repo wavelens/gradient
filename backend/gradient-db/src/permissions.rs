@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Permission system for org-scoped operations.
+//! Permission system for project-scoped operations.
 //!
 //! Endpoint authorization is expressed in terms of [`Permission`] capabilities,
 //! never in terms of role IDs. Each capability owns a stable bit position; a
@@ -13,44 +13,44 @@
 //!
 //! The mapping between roles and capabilities therefore lives entirely in the
 //! database. The three built-in roles (Admin/Write/View) are seeded with
-//! canonical bitmasks at startup; organizations can additionally create their
+//! canonical bitmasks at startup; projects can additionally create their
 //! own custom roles via the role-management API.
 
 use gradient_types::consts::{BASE_ROLE_ADMIN_ID, BASE_ROLE_VIEW_ID, BASE_ROLE_WRITE_ID};
 use gradient_types::ids::RoleId;
 
-/// A capability that a role may grant within an organization.
+/// A capability that a role may grant within a project.
 ///
 /// Permissions are intentionally granular so that custom roles can mix and
 /// match (e.g. a "Releaser" role could hold [`Permission::TriggerEvaluation`]
 /// without [`Permission::EditTask`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Permission {
-    // ── Org-level ────────────────────────────────────────────────────────────
-    /// View members-only content of a private organization.
-    ViewOrg,
-    /// Modify org settings (display name, description, etc.) and toggle the
+    // ── Project-level ────────────────────────────────────────────────────────────
+    /// View members-only content of a private project.
+    ViewProject,
+    /// Modify project settings (display name, description, etc.) and toggle the
     /// `public` flag.
-    ManageOrgSettings,
-    /// Delete the organization.
-    DeleteOrg,
+    ManageProjectSettings,
+    /// Delete the project.
+    DeleteProject,
     /// Add, remove, or change roles for members.
     ManageMembers,
-    /// Create, edit, or delete custom roles in the organization.
+    /// Create, edit, or delete custom roles in the project.
     ManageRoles,
-    /// CRUD on org integrations (forge credentials).
+    /// CRUD on project integrations (forge credentials).
     ManageIntegrations,
     /// CRUD on task actions.
     ManageActions,
-    /// Register/configure org-owned workers.
+    /// Register/configure project-owned workers.
     ManageWorkers,
-    /// Subscribe / unsubscribe the org from caches.
+    /// Subscribe / unsubscribe the project from caches.
     ManageSubscriptions,
-    /// Manage the org's SSH key (used for git fetches).
+    /// Manage the project's SSH key (used for git fetches).
     ManageSshKey,
 
-    // ── Task-level (within an org) ────────────────────────────────────────
-    /// Create a new task in the org.
+    // ── Task-level (within a project) ────────────────────────────────────────
+    /// Create a new task in the project.
     CreateTask,
     /// Modify or delete an existing task (settings, integration, transfer).
     EditTask,
@@ -67,9 +67,9 @@ impl Permission {
     /// All permissions in canonical order. Used by the role-management API
     /// to emit the full list of capabilities a custom role may carry.
     pub const ALL: &'static [Permission] = &[
-        Permission::ViewOrg,
-        Permission::ManageOrgSettings,
-        Permission::DeleteOrg,
+        Permission::ViewProject,
+        Permission::ManageProjectSettings,
+        Permission::DeleteProject,
         Permission::ManageMembers,
         Permission::ManageRoles,
         Permission::ManageIntegrations,
@@ -89,9 +89,9 @@ impl Permission {
     /// append new ones. Persisted role bitmasks depend on these positions.
     pub const fn bit(self) -> PermissionMask {
         let pos: u32 = match self {
-            Permission::ViewOrg => 0,
-            Permission::ManageOrgSettings => 1,
-            Permission::DeleteOrg => 2,
+            Permission::ViewProject => 0,
+            Permission::ManageProjectSettings => 1,
+            Permission::DeleteProject => 2,
             Permission::ManageMembers => 3,
             Permission::ManageRoles => 4,
             Permission::ManageIntegrations => 5,
@@ -110,9 +110,9 @@ impl Permission {
     /// Stable wire identifier (camelCase) used in the role-management API.
     pub const fn as_wire_name(self) -> &'static str {
         match self {
-            Permission::ViewOrg => "viewOrg",
-            Permission::ManageOrgSettings => "manageOrgSettings",
-            Permission::DeleteOrg => "deleteOrg",
+            Permission::ViewProject => "viewProject",
+            Permission::ManageProjectSettings => "manageProjectSettings",
+            Permission::DeleteProject => "deleteProject",
             Permission::ManageMembers => "manageMembers",
             Permission::ManageRoles => "manageRoles",
             Permission::ManageIntegrations => "manageIntegrations",
@@ -159,7 +159,7 @@ pub fn mask_to_vec(mask: PermissionMask) -> Vec<Permission> {
 /// True when the permission represents a mutation (i.e. anything other than
 /// pure viewing). Mutating permissions imply a state-managed-resource check.
 pub fn is_mutating(permission: Permission) -> bool {
-    !matches!(permission, Permission::ViewOrg)
+    !matches!(permission, Permission::ViewProject)
 }
 
 // ── Built-in role bitmasks ───────────────────────────────────────────────────
@@ -171,11 +171,11 @@ pub fn admin_mask() -> PermissionMask {
 
 /// Canonical bitmask for the built-in **Write** role: task, action, and
 /// integration management - but no member/role administration and no destruction
-/// of the organization or its settings.
+/// of the project or its settings.
 pub fn write_mask() -> PermissionMask {
     use Permission::*;
     mask_from(&[
-        ViewOrg,
+        ViewProject,
         ManageIntegrations,
         ManageActions,
         ManageWorkers,
@@ -190,14 +190,14 @@ pub fn write_mask() -> PermissionMask {
 
 /// Canonical bitmask for the built-in **View** role.
 ///
-/// Read-only on sensitive surfaces (members, tasks, actions, the org
+/// Read-only on sensitive surfaces (members, tasks, actions, the project
 /// itself), but currently retains mutation rights on a handful of non-secret
 /// sub-resources (workers, ssh key, cache subscriptions, integrations) to
 /// preserve historical behavior. Tightening these is an explicit follow-up.
 pub fn view_mask() -> PermissionMask {
     use Permission::*;
     mask_from(&[
-        ViewOrg,
+        ViewProject,
         ManageIntegrations,
         ManageWorkers,
         ManageSubscriptions,
@@ -366,8 +366,8 @@ mod tests {
         let mask = write_mask();
         assert!(!mask_grants(mask, Permission::ManageMembers));
         assert!(!mask_grants(mask, Permission::ManageRoles));
-        assert!(!mask_grants(mask, Permission::DeleteOrg));
-        assert!(!mask_grants(mask, Permission::ManageOrgSettings));
+        assert!(!mask_grants(mask, Permission::DeleteProject));
+        assert!(!mask_grants(mask, Permission::ManageProjectSettings));
         assert!(mask_grants(mask, Permission::EditTask));
         assert!(mask_grants(mask, Permission::ManageActions));
     }
@@ -379,7 +379,7 @@ mod tests {
         assert!(!mask_grants(mask, Permission::ManageActions));
         assert!(!mask_grants(mask, Permission::ManageMembers));
         assert!(!mask_grants(mask, Permission::ManageRoles));
-        assert!(mask_grants(mask, Permission::ViewOrg));
+        assert!(mask_grants(mask, Permission::ViewProject));
     }
 
     #[test]
@@ -397,8 +397,8 @@ mod tests {
     }
 
     #[test]
-    fn view_org_is_not_mutating() {
-        assert!(!is_mutating(Permission::ViewOrg));
+    fn view_project_is_not_mutating() {
+        assert!(!is_mutating(Permission::ViewProject));
         assert!(is_mutating(Permission::EditTask));
         assert!(is_mutating(Permission::ManageMembers));
         assert!(is_mutating(Permission::ManageRoles));

@@ -23,7 +23,7 @@ pub mod eval;
 pub mod generate;
 pub mod logs;
 pub mod logstream;
-pub mod organization;
+pub mod project;
 pub mod task;
 pub mod watch;
 pub mod worker;

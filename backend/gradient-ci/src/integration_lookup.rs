@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Resolve named forge integrations for organizations.
+//! Resolve named forge integrations for projects.
 
 use gradient_entity::github_installation;
 use gradient_entity::ids::GithubInstallationId;
@@ -31,11 +31,11 @@ pub fn github_integration_name(account_login: Option<&str>, installation_id: i64
     }
 }
 
-/// Find-or-create the `github_installation` row for (org, installation_id),
+/// Find-or-create the `github_installation` row for (project, installation_id),
 /// refreshing `account_login` when newly known. Returns its id.
 pub async fn upsert_github_installation<C: ConnectionTrait>(
     db: &C,
-    org: OrganizationId,
+    project: ProjectId,
     installation_id: i64,
     account_login: Option<&str>,
     creator: UserId,
@@ -43,7 +43,7 @@ pub async fn upsert_github_installation<C: ConnectionTrait>(
     let id = GithubInstallationId::now_v7();
     let model = github_installation::ActiveModel {
         id: sea_orm::ActiveValue::Set(id),
-        organization: sea_orm::ActiveValue::Set(org),
+        project: sea_orm::ActiveValue::Set(project),
         installation_id: sea_orm::ActiveValue::Set(installation_id),
         account_login: sea_orm::ActiveValue::Set(account_login.map(|s| s.to_string())),
         created_by: sea_orm::ActiveValue::Set(creator),
@@ -53,7 +53,7 @@ pub async fn upsert_github_installation<C: ConnectionTrait>(
     let res = github_installation::Entity::insert(model)
         .on_conflict(
             OnConflict::columns([
-                github_installation::Column::Organization,
+                github_installation::Column::Project,
                 github_installation::Column::InstallationId,
             ])
             .value(
@@ -70,7 +70,7 @@ pub async fn upsert_github_installation<C: ConnectionTrait>(
 
 pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
     db: &C,
-    org_id: OrganizationId,
+    project_id: ProjectId,
     installation: GithubInstallationId,
     name: &str,
     display_name: &str,
@@ -78,7 +78,7 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
 ) -> Result<(), sea_orm::DbErr> {
     for kind in [IntegrationKind::Inbound, IntegrationKind::Outbound] {
         let existing = EIntegration::find()
-            .filter(CIntegration::Organization.eq(org_id))
+            .filter(CIntegration::Project.eq(project_id))
             .filter(CIntegration::Kind.eq(kind))
             .filter(CIntegration::ForgeType.eq(ForgeType::GitHub))
             .filter(CIntegration::GithubInstallation.eq(installation))
@@ -89,19 +89,19 @@ pub async fn ensure_github_app_integrations<C: ConnectionTrait>(
         }
 
         let name_clash = EIntegration::find()
-            .filter(CIntegration::Organization.eq(org_id))
+            .filter(CIntegration::Project.eq(project_id))
             .filter(CIntegration::Kind.eq(kind))
             .filter(CIntegration::Name.eq(name))
             .one(db)
             .await?;
         if name_clash.is_some() {
-            warn!(%org_id, kind = ?kind, name, "GitHub App integration name already taken; skipping");
+            warn!(%project_id, kind = ?kind, name, "GitHub App integration name already taken; skipping");
             continue;
         }
 
         MIntegration {
             id: IntegrationId::now_v7(),
-            organization: org_id,
+            project: project_id,
             name: name.to_string(),
             display_name: display_name.to_string(),
             kind,
@@ -143,8 +143,8 @@ mod ensure_tests {
     use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::Uuid;
 
-    fn org() -> OrganizationId {
-        OrganizationId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
+    fn project() -> ProjectId {
+        ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
     }
     fn user() -> UserId {
         UserId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap())
@@ -156,7 +156,7 @@ mod ensure_tests {
     fn github_row(kind: IntegrationKind) -> gradient_entity::integration::Model {
         gradient_entity::integration::Model {
             id: IntegrationId::now_v7(),
-            organization: org(),
+            project: project(),
             name: "github-acme-corp".into(),
             display_name: GITHUB_APP_INTEGRATION_DISPLAY_NAME.into(),
             kind,
@@ -187,7 +187,7 @@ mod ensure_tests {
 
         ensure_github_app_integrations(
             &db,
-            org(),
+            project(),
             installation(),
             "github-acme-corp",
             GITHUB_APP_INTEGRATION_DISPLAY_NAME,
@@ -209,7 +209,7 @@ mod ensure_tests {
 
         ensure_github_app_integrations(
             &db,
-            org(),
+            project(),
             installation(),
             "github-acme-corp",
             GITHUB_APP_INTEGRATION_DISPLAY_NAME,

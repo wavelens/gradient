@@ -28,7 +28,7 @@ async fn storage_gate_ignores_non_queued_eval() {
         EvaluationStatus::Waiting,
     );
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-    let out = park_if_storage_full(&db, already_waiting.clone(), OrganizationId::nil(), 0)
+    let out = park_if_storage_full(&db, already_waiting.clone(), ProjectId::nil(), 0)
         .await
         .unwrap();
     assert_eq!(out.status, EvaluationStatus::Waiting);
@@ -528,7 +528,7 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
     }
 }
 
-/// When the task's organisation has no writable cache subscription, a
+/// When the task's project has no writable cache subscription, a
 /// freshly-created evaluation is parked in `Waiting` with the `NoCache`
 /// reason - no jobs are spawned and the scheduler's reconciler must leave
 /// the row alone until the cache-create endpoint re-queues it.
@@ -579,8 +579,8 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // org_has_writable_cache: no organization_cache rows → returns false
-        .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
+        // project_has_writable_cache: no project_cache rows → returns false
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         // Park: update eval read-back + exec, returns the parked row
         .append_query_results([vec![parked_eval.clone()]])
         .append_exec_results([MockExecResult {
@@ -609,7 +609,7 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
     assert!(matches!(reason, WaitingReason::NoCache));
 }
 
-/// When the task's organisation has a writable cache but no active
+/// When the task's project has a writable cache but no active
 /// worker registration with `enable_eval`, `apply_trigger` parks the
 /// freshly-created evaluation in `Waiting + Workers { connected_workers: 0 }`.
 /// Without this gate the eval would sit `Queued` forever - the
@@ -667,9 +667,9 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
     // park_if_storage_full: no writable cache rows → not full.
     let db = with_storage_not_full(db)
         // park_if_no_workers: no eval-capable registration and no base worker
-        // enabled for this org → park.
+        // enabled for this project → park.
         .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::organization_base_worker::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::project_base_worker::Model>::new()])
         // Park: update eval read-back + exec, returns the parked row.
         .append_query_results([vec![parked_eval.clone()]])
         .append_exec_results([MockExecResult {

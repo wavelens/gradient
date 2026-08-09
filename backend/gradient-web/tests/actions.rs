@@ -13,12 +13,12 @@
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use gradient_entity::{ids::*, organization_user, task, task_action, task_action_delivery};
+use gradient_entity::{ids::*, project_user, task, task_action, task_action_delivery};
 use gradient_notify::EmailSender;
 use gradient_storage::NarStore;
 use gradient_test_support::cli::{test_cli, test_cli_with_crypt};
 use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::fixtures::{org, org_id, task_id, test_date, user, user_id};
+use gradient_test_support::fixtures::{project, project_id, task_id, test_date, user, user_id};
 use gradient_test_support::log_storage::NoopLogStorage;
 use gradient_test_support::web::{
     TEST_JWT_SECRET, live_session, make_test_server_with, make_token,
@@ -39,7 +39,7 @@ fn action_id() -> TaskActionId {
 fn task_row() -> task::Model {
     task::Model {
         id: task_id(),
-        organization: org_id(),
+        project: project_id(),
         name: "test-task".into(),
         active: true,
         display_name: "Test Task".into(),
@@ -55,12 +55,10 @@ fn task_row() -> task::Model {
     }
 }
 
-fn admin_membership() -> organization_user::Model {
-    organization_user::Model {
-        id: OrganizationUserId::new(
-            Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap(),
-        ),
-        organization: org_id(),
+fn admin_membership() -> project_user::Model {
+    project_user::Model {
+        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap()),
+        project: project_id(),
         user: user_id(),
         role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
     }
@@ -127,13 +125,13 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
 }
 
 fn with_task_member(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![org()]])
+    db.append_query_results([vec![project()]])
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
 }
 
 fn with_task_edit(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![org()]])
+    db.append_query_results([vec![project()]])
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
         .append_query_results([vec![admin_role_row()]])
@@ -168,7 +166,7 @@ fn server_with_email(
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new(TEST_JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -179,7 +177,7 @@ fn server_with_email(
     TestServer::new(create_router(state).expect("router"))
 }
 
-const BASE_URL: &str = "/api/v1/tasks/test-org/test-task/actions";
+const BASE_URL: &str = "/api/v1/tasks/test-project/test-task/actions";
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 

@@ -10,7 +10,7 @@
 //! cache stays hidden. Regression for #527.
 
 use gradient_entity::cache_upstream::CacheUpstreamKind;
-use gradient_entity::organization_cache::CacheSubscriptionMode;
+use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::{cache, cache_upstream, ids::*};
 use gradient_test_support::fixtures::{test_date, user_id};
 use gradient_test_support::web::make_test_server;

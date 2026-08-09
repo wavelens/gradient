@@ -125,8 +125,8 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             error!(evaluation_id = %eval.id, "evaluation has no task");
             continue;
         };
-        let Some(org_id) = maps.orgs.get(&task_id).copied() else {
-            error!(evaluation_id = %eval.id, %task_id, "could not determine organization for evaluation");
+        let Some(project_id) = maps.projects.get(&task_id).copied() else {
+            error!(evaluation_id = %eval.id, %task_id, "could not determine project for evaluation");
             continue;
         };
 
@@ -135,7 +135,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
         let pending = PendingEvalJob {
             evaluation_id: eval.id,
             task_id: eval.task,
-            org_id,
+            project_id,
             commit_id: eval.commit,
             repository: eval.repository.clone(),
             job: flake_job,
@@ -159,7 +159,7 @@ struct EvalDispatchMaps {
     commits: HashMap<CommitId, MCommit>,
     sidecars: HashMap<EvaluationId, gradient_entity::evaluation_input_update::Model>,
     overrides: HashMap<EvaluationId, Vec<gradient_types::proto::FlakeInputOverride>>,
-    orgs: HashMap<TaskId, OrganizationId>,
+    projects: HashMap<TaskId, ProjectId>,
 }
 
 impl EvalDispatchMaps {
@@ -227,7 +227,7 @@ impl EvalDispatchMaps {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
-        let orgs = gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+        let projects = gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
             ETask::find()
                 .filter(CTask::Id.is_in(chunk))
                 .all(&state.worker_db)
@@ -235,14 +235,14 @@ impl EvalDispatchMaps {
         })
         .await?
         .into_iter()
-        .map(|p| (p.id, p.organization))
+        .map(|p| (p.id, p.project))
         .collect();
 
         Ok(Self {
             commits,
             sidecars,
             overrides,
-            orgs,
+            projects,
         })
     }
 }
@@ -251,7 +251,7 @@ impl EvalDispatchMaps {
 /// recorded source. A `/nix/store/...` repository is an already-materialised
 /// build-request source: dispatch it as `FlakeSource::Cached` (the worker
 /// substitutes the NAR and evaluates via `path:`), but still run `FetchFlake`
-/// so flake inputs are resolved with the org SSH key.
+/// so flake inputs are resolved with the project SSH key.
 pub(crate) fn flake_job_for_eval_source(
     repository: &str,
     commit_sha: String,
@@ -314,16 +314,16 @@ pub(crate) fn flake_job_for_eval_source(
     (job, Vec::new())
 }
 
-pub(crate) async fn organization_id_for_eval(
+pub(crate) async fn project_id_for_eval(
     state: &Arc<ServerState>,
     eval: &MEvaluation,
-) -> Option<OrganizationId> {
+) -> Option<ProjectId> {
     let task_id = eval.task.or_else(|| {
         error!(evaluation_id = %eval.id, "evaluation has no task");
         None
     })?;
     match ETask::find_by_id(task_id).one(&state.worker_db).await {
-        Ok(Some(p)) => Some(p.organization),
+        Ok(Some(p)) => Some(p.project),
         Ok(None) => None,
         Err(e) => {
             error!(error = %e, %task_id, "failed to load task for eval");

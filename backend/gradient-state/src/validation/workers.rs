@@ -8,10 +8,10 @@ use super::helpers::{EntityLookup, ErrorCollector};
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     for worker in lookup.config.workers.values() {
-        if !worker.base_worker && worker.organizations.is_empty() {
+        if !worker.base_worker && worker.projects.is_empty() {
             errors.push(
-                format!("workers.{}.organizations", worker.worker_id),
-                "Worker must be registered under at least one organization",
+                format!("workers.{}.projects", worker.worker_id),
+                "Worker must be registered under at least one project",
             );
         }
 
@@ -25,11 +25,11 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
 
-        for org in &worker.organizations {
-            if !lookup.org_exists(org) {
+        for project in &worker.projects {
+            if !lookup.project_exists(project) {
                 errors.push(
-                    format!("workers.{}.organizations", worker.worker_id),
-                    format!("Organization '{}' does not exist", org),
+                    format!("workers.{}.projects", worker.worker_id),
+                    format!("Project '{}' does not exist", project),
                 );
             }
         }

@@ -168,7 +168,7 @@ impl<'a> EvalResultProcessor<'a> {
     /// Load derivations that already exist in the DB so we don't re-insert them.
     ///
     /// Filters by `hash` only (Nix store hashes are content-addressed, so
-    /// `(organization, hash)` is unique in practice) to keep the IN clause
+    /// `(project, hash)` is unique in practice) to keep the IN clause
     /// bounded by the number of distinct hashes rather than full drv paths.
     async fn load_existing_derivations(
         &self,
@@ -555,8 +555,8 @@ impl<'a> EvalResultProcessor<'a> {
         Ok(substituted)
     }
 
-    /// Org-scoped upstream substitutability probe. For derivations not already in
-    /// the gradient cache, look up each output's `.narinfo` on the org's
+    /// Project-scoped upstream substitutability probe. For derivations not already in
+    /// the gradient cache, look up each output's `.narinfo` on the project's
     /// configured upstream caches and persist hits onto `derivation_output`
     /// (`external_url` + narinfo metadata) so the lookup runs once and the worker
     /// downloads directly from that URL. Returns the derivations whose *every*
@@ -573,14 +573,14 @@ impl<'a> EvalResultProcessor<'a> {
         }
 
         let db = &self.state.worker_db;
-        let Some(org_id) =
-            crate::dispatch::organization_id_for_eval(self.state, &self.evaluation).await
+        let Some(project_id) =
+            crate::dispatch::project_id_for_eval(self.state, &self.evaluation).await
         else {
             return Ok(HashSet::new());
         };
         const UPSTREAM_WINDOW_MINUTES: i64 = 60;
         let endpoints =
-            gradient_db::upstream_endpoints_for_org(db, org_id, UPSTREAM_WINDOW_MINUTES)
+            gradient_db::upstream_endpoints_for_project(db, project_id, UPSTREAM_WINDOW_MINUTES)
                 .await
                 .unwrap_or_default();
         if endpoints.is_empty() {
@@ -1360,7 +1360,7 @@ async fn heal_corrupt_eval_cache(
 }
 
 /// Derivations whose *every* output hash is in `available` (cached in the
-/// gradient cache or resolved at an org upstream). All-or-nothing: a derivation
+/// gradient cache or resolved at a project upstream). All-or-nothing: a derivation
 /// is substitutable only when none of its outputs would still have to be built.
 fn derivations_all_outputs_available(
     outputs: &[MDerivationOutput],

@@ -18,7 +18,7 @@ use anyhow::Result;
 use futures::StreamExt;
 use gradient_core::ServerState;
 use gradient_entity::evaluation::Entity as EEvaluation;
-use gradient_types::ids::{DerivationBuildId, DerivationId, OrganizationId};
+use gradient_types::ids::{DerivationBuildId, DerivationId, ProjectId};
 use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
@@ -53,18 +53,19 @@ pub async fn substitute_log(
         return Ok(());
     }
 
-    let Some(org_id) = org_for_derivation(&state, derivation_id).await else {
+    let Some(project_id) = project_for_derivation(&state, derivation_id).await else {
         return Ok(());
     };
 
-    let upstream_urls = match gradient_db::upstream_urls_for_org(&state.worker_db, org_id).await {
-        Ok(urls) if !urls.is_empty() => urls,
-        Ok(_) => return Ok(()),
-        Err(e) => {
-            warn!(error = %e, "substitute_log: upstream URL lookup failed");
-            return Ok(());
-        }
-    };
+    let upstream_urls =
+        match gradient_db::upstream_urls_for_project(&state.worker_db, project_id).await {
+            Ok(urls) if !urls.is_empty() => urls,
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                warn!(error = %e, "substitute_log: upstream URL lookup failed");
+                return Ok(());
+            }
+        };
 
     let Some(drv_basename) = std::path::Path::new(&drv_path)
         .file_name()
@@ -92,11 +93,11 @@ pub async fn substitute_log(
     Ok(())
 }
 
-/// Resolve an organization that owns the derivation via any referencing eval.
-async fn org_for_derivation(
+/// Resolve a project that owns the derivation via any referencing eval.
+async fn project_for_derivation(
     state: &Arc<ServerState>,
     derivation: DerivationId,
-) -> Option<OrganizationId> {
+) -> Option<ProjectId> {
     let jobs = gradient_db::build_jobs_for_derivation(&state.worker_db, derivation)
         .await
         .ok()?;
@@ -104,9 +105,9 @@ async fn org_for_derivation(
         if let Ok(Some(eval)) = EEvaluation::find_by_id(job.evaluation)
             .one(&state.worker_db)
             .await
-            && let Some(org) = crate::dispatch::organization_id_for_eval(state, &eval).await
+            && let Some(project) = crate::dispatch::project_id_for_eval(state, &eval).await
         {
-            return Some(org);
+            return Some(project);
         }
     }
 

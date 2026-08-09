@@ -17,27 +17,27 @@ import {
 export class FlakeInputOverridesService {
   private api = inject(ApiService);
 
-  private base(org: string, proj: string): string {
-    return `tasks/${org}/${proj}/flake-inputs`;
+  private base(project: string, proj: string): string {
+    return `tasks/${project}/${proj}/flake-inputs`;
   }
 
-  list(org: string, proj: string): Observable<FlakeInputOverride[]> {
-    return this.api.get<FlakeInputOverride[]>(this.base(org, proj));
+  list(project: string, proj: string): Observable<FlakeInputOverride[]> {
+    return this.api.get<FlakeInputOverride[]>(this.base(project, proj));
   }
 
-  create(org: string, proj: string, body: CreateFlakeInputOverrideBody): Observable<FlakeInputOverride> {
-    return this.api.post<FlakeInputOverride>(this.base(org, proj), body);
+  create(project: string, proj: string, body: CreateFlakeInputOverrideBody): Observable<FlakeInputOverride> {
+    return this.api.post<FlakeInputOverride>(this.base(project, proj), body);
   }
 
-  get(org: string, proj: string, id: string): Observable<FlakeInputOverride> {
-    return this.api.get<FlakeInputOverride>(`${this.base(org, proj)}/${id}`);
+  get(project: string, proj: string, id: string): Observable<FlakeInputOverride> {
+    return this.api.get<FlakeInputOverride>(`${this.base(project, proj)}/${id}`);
   }
 
-  update(org: string, proj: string, id: string, body: UpdateFlakeInputOverrideBody): Observable<FlakeInputOverride> {
-    return this.api.patch<FlakeInputOverride>(`${this.base(org, proj)}/${id}`, body);
+  update(project: string, proj: string, id: string, body: UpdateFlakeInputOverrideBody): Observable<FlakeInputOverride> {
+    return this.api.patch<FlakeInputOverride>(`${this.base(project, proj)}/${id}`, body);
   }
 
-  delete(org: string, proj: string, id: string): Observable<boolean> {
-    return this.api.delete<boolean>(`${this.base(org, proj)}/${id}`);
+  delete(project: string, proj: string, id: string): Observable<boolean> {
+    return this.api.delete<boolean>(`${this.base(project, proj)}/${id}`);
   }
 }

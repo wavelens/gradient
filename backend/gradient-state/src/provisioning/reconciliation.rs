@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 /// overridden away from the attrset key (e.g. `tasks.foo = { name = "main"; }`).
 pub(crate) struct ManagedKeepSets<'a> {
     usernames: HashSet<&'a String>,
-    org_names: HashSet<&'a String>,
+    project_names: HashSet<&'a String>,
     task_names: HashSet<&'a String>,
     cache_names: HashSet<&'a String>,
     api_key_names: HashSet<&'a String>,
@@ -31,7 +31,7 @@ pub(crate) struct ManagedKeepSets<'a> {
 pub(crate) fn managed_keep_sets(config: &StateConfiguration) -> ManagedKeepSets<'_> {
     ManagedKeepSets {
         usernames: config.users.values().map(|u| &u.username).collect(),
-        org_names: config.organizations.values().map(|o| &o.name).collect(),
+        project_names: config.projects.values().map(|o| &o.name).collect(),
         task_names: config.tasks.values().map(|p| &p.name).collect(),
         cache_names: config.caches.values().map(|c| &c.name).collect(),
         api_key_names: config.api_keys.values().map(|k| &k.name).collect(),
@@ -76,17 +76,17 @@ impl<'a> StateApplicator<'a> {
     ) -> Result<(), DynError> {
         let ManagedKeepSets {
             usernames,
-            org_names,
+            project_names,
             task_names,
             cache_names,
             api_key_names,
         } = managed_keep_sets(config);
-        let worker_keys: HashSet<(String, OrganizationId)> = {
-            let map = self.org_lookup().await?;
+        let worker_keys: HashSet<(String, ProjectId)> = {
+            let map = self.project_lookup().await?;
             let mut set = HashSet::new();
             for worker in config.workers.values() {
-                for org in &worker.organizations {
-                    if let Some(peer_id) = map.get(org) {
+                for project in &worker.projects {
+                    if let Some(peer_id) = map.get(project) {
                         set.insert((worker.worker_id.clone(), *peer_id));
                     }
                 }
@@ -97,40 +97,33 @@ impl<'a> StateApplicator<'a> {
         let db = self.db;
 
         unmark_managed!(db, user, usernames, username, delete_state, "user");
-        unmark_managed!(
-            db,
-            organization,
-            org_names,
-            name,
-            delete_state,
-            "organization"
-        );
+        unmark_managed!(db, project, project_names, name, delete_state, "project");
         unmark_managed!(db, task, task_names, name, delete_state, "task");
         unmark_managed!(db, cache, cache_names, name, delete_state, "cache");
         unmark_managed!(db, api, api_key_names, name, delete_state, "API key");
 
-        // Roles: identified by (organization, name) so we can't use the
+        // Roles: identified by (project, name) so we can't use the
         // single-column `unmark_managed!` helper.
         let role_keys: HashSet<(String, String)> = config
             .roles
             .values()
-            .map(|r| (r.organization.clone(), r.name.clone()))
+            .map(|r| (r.project.clone(), r.name.clone()))
             .collect();
-        let org_lookup = self.org_lookup().await?;
-        let mut org_name_by_id: HashMap<OrganizationId, String> = HashMap::new();
-        for (name, id) in &org_lookup {
-            org_name_by_id.insert(*id, name.clone());
+        let project_lookup = self.project_lookup().await?;
+        let mut project_name_by_id: HashMap<ProjectId, String> = HashMap::new();
+        for (name, id) in &project_lookup {
+            project_name_by_id.insert(*id, name.clone());
         }
         let managed_roles = role::Entity::find()
             .filter(role::Column::Managed.eq(true))
             .all(db)
             .await?;
         for managed in managed_roles {
-            let owner_org = match managed.organization {
+            let owner_project = match managed.project {
                 Some(id) => id,
                 None => continue,
             };
-            let owner_name = match org_name_by_id.get(&owner_org) {
+            let owner_name = match project_name_by_id.get(&owner_project) {
                 Some(n) => n.clone(),
                 None => continue,
             };
@@ -182,8 +175,8 @@ impl<'a> StateApplicator<'a> {
             if base_worker_ids.contains(&bw.worker_id) {
                 continue;
             }
-            organization_base_worker::Entity::delete_many()
-                .filter(organization_base_worker::Column::BaseWorker.eq(bw.id))
+            project_base_worker::Entity::delete_many()
+                .filter(project_base_worker::Column::BaseWorker.eq(bw.id))
                 .exec(db)
                 .await?;
             let worker_id = bw.worker_id.clone();
@@ -214,7 +207,7 @@ mod keep_set_tests {
                     "password_file": "/dev/null"
                 }
             },
-            "organizations": {
+            "projects": {
                 "acme-key": {
                     "name": "acme",
                     "display_name": "ACME",
@@ -226,7 +219,7 @@ mod keep_set_tests {
             "tasks": {
                 "foo-key": {
                     "name": "main",
-                    "organization": "acme",
+                    "project": "acme",
                     "display_name": "Main",
                     "repository": "https://example.com/r.git",
                     "created_by": "alice"
@@ -246,7 +239,7 @@ mod keep_set_tests {
                     "name": "ci-runner",
                     "key_file": "/dev/null",
                     "owned_by": "alice",
-                    "permissions": ["viewOrg"]
+                    "permissions": ["viewProject"]
                 }
             }
         });
@@ -260,8 +253,8 @@ mod keep_set_tests {
 
         let acme = "acme".to_string();
         let acme_key = "acme-key".to_string();
-        assert!(sets.org_names.contains(&acme));
-        assert!(!sets.org_names.contains(&acme_key));
+        assert!(sets.project_names.contains(&acme));
+        assert!(!sets.project_names.contains(&acme_key));
 
         let main = "main".to_string();
         let foo_key = "foo-key".to_string();

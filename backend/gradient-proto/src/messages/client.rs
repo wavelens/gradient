@@ -265,7 +265,7 @@ pub enum ClientMessage {
     },
 
     /// Query which of the given `.drv` paths the server already has recorded in
-    /// its derivation table for the org that owns `job_id`.
+    /// its derivation table for the project that owns `job_id`.
     ///
     /// Server responds with [`super::server::ServerMessage::KnownDerivations`].
     /// The worker uses the response to prune BFS subtrees: if a derivation is

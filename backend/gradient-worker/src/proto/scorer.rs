@@ -14,7 +14,7 @@
 //!
 //! Source paths (`inputSrcs`) are not included in `required_paths` - they
 //! live only in the `.drv` file and are not stored server-side. They tend
-//! to be roughly equivalent across workers in the same org so their absence
+//! to be roughly equivalent across workers in the same project so their absence
 //! does not skew scoring meaningfully.
 
 use anyhow::Result;

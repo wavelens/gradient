@@ -15,7 +15,7 @@ const apiUrl = environment.apiUrl;
 
 const sampleEval: ExpensiveEval = {
   evaluation: 'eval-1',
-  organization: 'org-1',
+  project: 'project-1',
   name: 'nixpkgs#hello',
   value: 1234,
   unit: 'MB',

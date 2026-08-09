@@ -113,8 +113,8 @@ in {
                 };
               };
 
-              organizations = {
-                org = {
+              projects = {
+                project = {
                   private_key_file = "/etc/gradient/secrets/corp_ssh_key";
                   created_by = "admin";
                 };
@@ -122,7 +122,7 @@ in {
 
               tasks = {
                 task = {
-                  organization = "org";
+                  project = "project";
                   repository = "git://server/test";
                   created_by = "admin";
                   triggers = [
@@ -137,7 +137,7 @@ in {
               caches = {
                 main = {
                   signing_key_file = "/etc/gradient/secrets/main_cache_key";
-                  organizations = [ "org" ];
+                  projects = [ "project" ];
                   public = true;
                   created_by = "admin";
                 };
@@ -146,7 +146,7 @@ in {
               workers = {
                 builder = {
                   worker_id = "a0000000-0000-0000-0000-000000000001";
-                  organizations = [ "org" ];
+                  projects = [ "project" ];
                   token_file = "/etc/gradient/secrets/worker_token";
                   created_by = "admin";
                 };
@@ -346,7 +346,7 @@ in {
 
       server.succeed(f"{CLI} config Server http://gradient.local")
       server.succeed(f"{CLI} config AuthToken {token}")
-      server.succeed(f"{CLI} organization select org")
+      server.succeed(f"{CLI} project select project")
       server.succeed(f"{CLI} task select task")
 
       # First `task show` is best-effort: the task may already have a
@@ -385,11 +385,11 @@ in {
           assert_no_server_panic(since_seconds=15)
 
           print("  DEBUG get_task: " + server.succeed(
-              f'{CURL} -s -w " [HTTP %{{http_code}}]" -H "Authorization: Bearer {token}" {API}/tasks/org/task'
+              f'{CURL} -s -w " [HTTP %{{http_code}}]" -H "Authorization: Bearer {token}" {API}/tasks/project/task'
           ))
           eval_id = server.succeed(
               f'{CURL} -sf -H "Authorization: Bearer {token}" '
-              f'{API}/tasks/org/task | {JQ} -rj ".message.last_evaluation // empty"'
+              f'{API}/tasks/project/task | {JQ} -rj ".message.last_evaluation // empty"'
           ).strip()
           if not eval_id:
               if attempt % 3 == 0:

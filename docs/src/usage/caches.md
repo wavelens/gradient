@@ -6,7 +6,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Caches
 
-Gradient serves build outputs from per-organization binary caches. Each cache
+Gradient serves build outputs from per-project binary caches. Each cache
 exposes a substituter URL and a set of trusted public keys that clients add to
 their Nix configuration. The cache detail page renders the exact snippet for a
 given cache.

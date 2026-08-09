@@ -6,14 +6,14 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_entity::organization::Model as MOrganization;
+use gradient_entity::project::Model as MProject;
 use gradient_sources::{FlakePrefetcher, PrefetchedFlake};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub struct PrefetchCall {
     pub repository: String,
-    pub organization_id: uuid::Uuid,
+    pub project_id: uuid::Uuid,
 }
 
 /// In-memory `FlakePrefetcher` for tests. Records each call and always returns
@@ -40,11 +40,11 @@ impl FlakePrefetcher for FakeFlakePrefetcher {
         _crypt_secret_file: String,
         _serve_url: String,
         repository: String,
-        organization: MOrganization,
+        project: MProject,
     ) -> Result<Option<PrefetchedFlake>> {
         self.calls.lock().unwrap().push(PrefetchCall {
             repository,
-            organization_id: organization.id,
+            project_id: project.id,
         });
         Ok(None)
     }

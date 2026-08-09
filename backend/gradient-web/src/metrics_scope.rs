@@ -6,8 +6,8 @@
 
 //! Per-request visibility envelope for the Job Board / metrics surfaces.
 //!
-//! Superusers see every org; members see their orgs plus public orgs; anonymous
-//! callers see public orgs only. Cross-org infrastructure data is shown to
+//! Superusers see every project; members see their projects plus public projects; anonymous
+//! callers see public projects only. Cross-project infrastructure data is shown to
 //! non-superusers only in anonymized aggregate (see the board endpoints).
 
 use crate::error::WebError;
@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 pub enum MetricsScope {
     All,
-    Orgs(Vec<String>),
+    Projects(Vec<String>),
 }
 
 impl MetricsScope {
@@ -29,53 +29,54 @@ impl MetricsScope {
             return Ok(MetricsScope::All);
         }
 
-        let mut orgs: Vec<String> = Vec::new();
+        let mut projects: Vec<String> = Vec::new();
         for row in db
             .query_all(Statement::from_string(
                 DatabaseBackend::Postgres,
-                "SELECT id FROM organization WHERE public = true".to_owned(),
+                "SELECT id FROM project WHERE public = true".to_owned(),
             ))
             .await?
         {
-            orgs.push(row.try_get::<Uuid>("", "id")?.to_string());
+            projects.push(row.try_get::<Uuid>("", "id")?.to_string());
         }
         if let Some(u) = user {
             for row in db
                 .query_all(Statement::from_sql_and_values(
                     DatabaseBackend::Postgres,
-                    "SELECT organization AS id FROM organization_user WHERE \"user\" = $1",
+                    "SELECT project AS id FROM project_user WHERE \"user\" = $1",
                     [Value::from(Uuid::from(u.id))],
                 ))
                 .await?
             {
-                orgs.push(row.try_get::<Uuid>("", "id")?.to_string());
+                projects.push(row.try_get::<Uuid>("", "id")?.to_string());
             }
         }
 
-        orgs.sort();
-        orgs.dedup();
-        Ok(MetricsScope::Orgs(orgs))
+        projects.sort();
+        projects.dedup();
+        Ok(MetricsScope::Projects(projects))
     }
 
     pub fn is_all(&self) -> bool {
         matches!(self, MetricsScope::All)
     }
 
-    /// True when the caller may see unmasked detail for `org`.
-    pub fn allows(&self, org: &Uuid) -> bool {
+    /// True when the caller may see unmasked detail for `project`.
+    pub fn allows(&self, project: &Uuid) -> bool {
         match self {
             MetricsScope::All => true,
-            MetricsScope::Orgs(orgs) => orgs.contains(&org.to_string()),
+            MetricsScope::Projects(projects) => projects.contains(&project.to_string()),
         }
     }
 
-    /// SQL `IN (...)` fragment of accessible org UUID literals, or `None` for
+    /// SQL `IN (...)` fragment of accessible project UUID literals, or `None` for
     /// the unrestricted (superuser) scope. Values are DB-sourced UUIDs.
-    pub fn org_in_list(&self) -> Option<String> {
+    pub fn project_in_list(&self) -> Option<String> {
         match self {
             MetricsScope::All => None,
-            MetricsScope::Orgs(orgs) => Some(
-                orgs.iter()
+            MetricsScope::Projects(projects) => Some(
+                projects
+                    .iter()
                     .map(|o| format!("'{o}'"))
                     .collect::<Vec<_>>()
                     .join(","),

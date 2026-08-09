@@ -156,12 +156,12 @@ impl ScoreRule for ResourceSaturationRule {
 mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, ScoredJob, Windowed, WorkerMetricsView};
-    use gradient_types::ids::OrganizationId;
+    use gradient_types::ids::ProjectId;
 
     fn job_with_history(h: HistoryPrediction) -> ScoredJob<'static> {
         ScoredJob::new_build(
             "test",
-            OrganizationId::now_v7(),
+            ProjectId::now_v7(),
             "x86_64-linux",
             false,
             false,
@@ -172,7 +172,7 @@ mod tests {
     }
 
     fn eval_job_with_history(h: HistoryPrediction) -> ScoredJob<'static> {
-        ScoredJob::new_eval("eval", OrganizationId::now_v7(), true, h)
+        ScoredJob::new_eval("eval", ProjectId::now_v7(), true, h)
     }
 
     fn ctx<'a>(job: &'a ScoredJob<'a>) -> JobContext<'a> {
@@ -183,7 +183,7 @@ mod tests {
             dependency_count: 0,
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now: gradient_types::now(),
         }
@@ -398,7 +398,7 @@ mod tests {
     fn builtin_job() -> ScoredJob<'static> {
         ScoredJob::new_build(
             "test",
-            OrganizationId::now_v7(),
+            ProjectId::now_v7(),
             "builtin",
             false,
             false,

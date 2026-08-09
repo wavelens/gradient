@@ -7,7 +7,7 @@
 //! Infrastructure board pages backed by aggregates rather than per-job rows:
 //! Cache (traffic/storage), Network & API (NAR egress, worker speeds, HTTP),
 //! Workers fleet time-series, and superuser System Health. Cache/NAR traffic is
-//! shown as an anonymized infra aggregate; worker rows are org-scoped; HTTP and
+//! shown as an anonymized infra aggregate; worker rows are project-scoped; HTTP and
 //! process stats are superuser-only.
 
 use crate::authorization::MaybeUser;
@@ -234,12 +234,12 @@ pub async fn get_board_upstreams(
         }
     }
 
-    if let Some(list) = scope.org_in_list() {
+    if let Some(list) = scope.project_in_list() {
         if list.is_empty() {
             return Ok(ok_json(BoardUpstreamStats { upstreams: vec![] }));
         }
 
-        let allowed = gradient_db::upstream_urls_for_orgs(&state.web_db, &list).await?;
+        let allowed = gradient_db::upstream_urls_for_projects(&state.web_db, &list).await?;
         by_upstream.retain(|url, _| allowed.contains(url));
     }
 
@@ -271,8 +271,8 @@ pub async fn get_board_upstreams(
         } else {
             None
         };
-        // Rows are already scoped to URLs the caller's org uses (or all, for
-        // superusers), so the URL is the caller's own - no cross-org mask needed.
+        // Rows are already scoped to URLs the caller's project uses (or all, for
+        // superusers), so the URL is the caller's own - no cross-project mask needed.
         let display_name = upstream_host(&uid);
 
         upstreams.push(BoardUpstream {
@@ -322,7 +322,7 @@ pub async fn get_board_network(
          WHERE at >= (now() AT TIME ZONE 'UTC') - interval '1 hour'",
     );
 
-    if let Some(list) = scope.org_in_list() {
+    if let Some(list) = scope.project_in_list() {
         if list.is_empty() {
             return Ok(ok_json(BoardNetworkStats {
                 nar_egress,
@@ -331,7 +331,7 @@ pub async fn get_board_network(
             }));
         }
 
-        sql.push_str(&format!(" AND organization IN ({list})"));
+        sql.push_str(&format!(" AND project IN ({list})"));
     }
 
     sql.push_str(" ORDER BY worker_id, at DESC");
@@ -390,12 +390,12 @@ pub async fn get_board_fleet(
         draining = i16::from(gradient_entity::worker_sample::WorkerSampleState::Draining),
     );
 
-    if let Some(list) = scope.org_in_list() {
+    if let Some(list) = scope.project_in_list() {
         if list.is_empty() {
             return Ok(ok_json(vec![]));
         }
 
-        sql.push_str(&format!(" AND organization IN ({list})"));
+        sql.push_str(&format!(" AND project IN ({list})"));
     }
 
     sql.push_str(" GROUP BY bucket ORDER BY bucket");
@@ -440,7 +440,7 @@ pub struct DurationsHeatmap {
 
 /// 2D build-duration distribution (duration band × hour) for the Durations page.
 /// Build times live on the most recent `build_attempt` after the split.
-/// Org-scoped.
+/// Project-scoped.
 pub async fn get_board_durations_heatmap(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -458,7 +458,7 @@ pub async fn get_board_durations_heatmap(
         format!("ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"),
     ];
 
-    if let Some(list) = scope.org_in_list() {
+    if let Some(list) = scope.project_in_list() {
         if list.is_empty() {
             return Ok(ok_json(DurationsHeatmap {
                 times: vec![],
@@ -466,7 +466,7 @@ pub async fn get_board_durations_heatmap(
             }));
         }
 
-        clauses.push(format!("pr.organization IN ({list})"));
+        clauses.push(format!("pr.project IN ({list})"));
     }
 
     let sql = format!(

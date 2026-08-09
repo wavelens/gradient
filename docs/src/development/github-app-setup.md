@@ -27,7 +27,7 @@ that registers the App and produces the credentials Gradient needs.
      `GRADIENT_GITHUB_APP_PRIVATE_KEY_FILE` (e.g. `/run/secrets/gradient-github-app.pem`).
    - **Webhook secret** - write to a file and set the path as
      `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
-8. Restart Gradient. The GitHub App toggle now appears on org Integration pages.
+8. Restart Gradient. The GitHub App toggle now appears on project Integration pages.
 
 The credentials are returned **once**. If you navigate away before copying,
 re-run the manifest flow to generate a fresh App.

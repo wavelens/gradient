@@ -57,7 +57,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.maxProtoConnections` | `256` | Max simultaneous worker WebSocket connections; further upgrades return `503 Service Unavailable` with `Retry-After: 10` until a slot frees |
 | `settings.keepEvaluations` | `30` | Global maximum of evaluations kept per task. Caps the per-task setting, and a new task starts at the lower of `30` and this. `0` disables the cap. (`GRADIENT_KEEP_EVALUATIONS`) |
 | `settings.logChunkBytes` | `262144` (256 KiB) | Target uncompressed size for each zstd build-log chunk written on finalize. Chunks split on line boundaries, so an over-long line may exceed this. (`GRADIENT_LOG_CHUNK_BYTES`) |
-| `settings.maxStorageGb` | `0` | Instance-wide cap on total cached NAR storage, in GB. When all writable caches for an org have less than 10 MiB headroom, new evaluations park in `Waiting`. `0` = unlimited; per-cache `max_storage_gb` limits still apply. (`GRADIENT_MAX_STORAGE_GB`) |
+| `settings.maxStorageGb` | `0` | Instance-wide cap on total cached NAR storage, in GB. When all writable caches for a project have less than 10 MiB headroom, new evaluations park in `Waiting`. `0` = unlimited; per-cache `max_storage_gb` limits still apply. (`GRADIENT_MAX_STORAGE_GB`) |
 | `settings.evalCacheMaxTotalBytes` | `10737418240` (10 GiB) | Total byte cap for fleet-shared eval-cache blobs. The eviction sweep drops oldest-`updated_at` rows until the surviving total is at or under this. (`GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES`) |
 | `settings.evalCacheMaxAgeDays` | `30` | Max age in days for an eval-cache blob; older blobs are evicted by the sweep regardless of the size cap. (`GRADIENT_EVAL_CACHE_MAX_AGE_DAYS`) |
 | `settings.evalCacheSweepIntervalSecs` | `3600` | Interval in seconds between eval-cache eviction sweeps. (`GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS`) |
@@ -70,7 +70,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.logLevel.proto` | null | `gradient_proto` log level override (null inherits default) |
 | `settings.logLevel.scheduler` | null | `gradient_scheduler` log level override (null inherits default) |
 | `settings.enableRegistration` | `true` | Allow new user self-registration |
-| `settings.createOrg` | `everyone` | Who may create organizations via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Organization" button accordingly. (`GRADIENT_CREATE_ORG`) |
+| `settings.createProject` | `everyone` | Who may create projects via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Project" button accordingly. (`GRADIENT_CREATE_PROJECT`) |
 | `settings.createCache` | `everyone` | Who may create caches via the API: `none` (only the declarative state), `superusers`, or `everyone`. The frontend hides the "Create Cache" button accordingly. (`GRADIENT_CREATE_CACHE`) |
 | `settings.prCommitName` | `null` | Git author/committer name for the commits the `open_pr` action pushes. `null` lets each forge pick attribution: GitHub credits the App bot and signs it verified; Gitea/Forgejo and GitLab use the token owner (needs the `read:user` / `read_user` scope), falling back to a `Gradient <gradient@users.noreply.HOST>` bot identity when that scope is missing. Set both this and `prCommitEmail` to force an explicit identity. (`GRADIENT_PR_COMMIT_NAME`) |
 | `settings.prCommitEmail` | `null` | Git author/committer email for `open_pr` commits; see `prCommitName`. (`GRADIENT_PR_COMMIT_EMAIL`) |
@@ -99,7 +99,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.buildRetryBackoffSecs` | `30` | Base back-off in seconds before retrying a transient build failure; doubled after each prior attempt (exponential). (`GRADIENT_BUILD_RETRY_BACKOFF_SECS`) |
 | `settings.buildDefaultTimeoutSecs` | `14400` | Default wall-clock timeout (seconds) for builds whose `.drv` does not set a `timeout` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_TIMEOUT_SECS`) |
 | `settings.buildDefaultMaxSilentSecs` | `3600` | Default silent-output timeout (seconds) for builds whose `.drv` does not set a `maxSilent` attribute. `0` disables. (`GRADIENT_BUILD_DEFAULT_MAX_SILENT_SECS`) |
-| `settings.schedulerScoringPolicy` | `resource-aware` | Scheduler scoring policy ranking queued jobs against a requesting worker (`GRADIENT_SCHEDULER_SCORING_POLICY`). Values: `simple`, `resource-aware`. `simple` is the basic rule set, weighing path availability, NAR size, dependency count, wait-time anti-starvation, builtin de-prioritization and fetch-worker reservation. `resource-aware` adds RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and per-org fair-share on top, and is the default. Unknown values fall back to `resource-aware`. See [scheduler scoring](development/scheduler-scoring.md). |
+| `settings.schedulerScoringPolicy` | `resource-aware` | Scheduler scoring policy ranking queued jobs against a requesting worker (`GRADIENT_SCHEDULER_SCORING_POLICY`). Values: `simple`, `resource-aware`. `simple` is the basic rule set, weighing path availability, NAR size, dependency count, wait-time anti-starvation, builtin de-prioritization and fetch-worker reservation. `resource-aware` adds RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and per-project fair-share on top, and is the default. Unknown values fall back to `resource-aware`. See [scheduler scoring](development/scheduler-scoring.md). |
 
 ### Build failure states and retries
 
@@ -160,7 +160,7 @@ services.gradient.metricsTokenFile = "/run/secrets/gradient-metrics";
 
 Generate a token with `openssl rand -base64 32`. Configure your Prometheus scraper with `bearer_token_file: /run/secrets/gradient-metrics` (or pass the token directly via `Authorization: Bearer <token>` for ad-hoc curls). The endpoint is rate-limited at 6 req/s with a burst of 5; a 15s scrape interval is comfortable.
 
-The MVP exposes build/evaluation status counts, scheduler queue depth, connected workers, and cache totals. Per-org/cache labels and histograms are tracked as a follow-up.
+The MVP exposes build/evaluation status counts, scheduler queue depth, connected workers, and cache totals. Per-project/cache labels and histograms are tracked as a follow-up.
 
 ### Metrics pipeline & retention
 
@@ -196,7 +196,7 @@ services.gradient.oidc = {
 
 Gradient uses PKCE (S256) and discovers all provider endpoints from `discoveryUrl/.well-known/openid-configuration` and callback url is at `https://$domain/api/v1/auth/oidc/callback`. Set `required` to `true` to disable basic auth and require OIDC for all users. Because PKCE is sent on every request, providers that gate it (e.g. kanidm) do not need `allowInsecureClientDisablePkce`.
 
-To map OIDC groups to organization roles, request the `groups` scope (add `"groups"` to `scopes`) so the ID token carries the user's group claims, then attach `oidc_group` lists to state-managed roles (see [Declarative State](usage/state.md)).
+To map OIDC groups to project roles, request the `groups` scope (add `"groups"` to `scopes`) so the ID token carries the user's group claims, then attach `oidc_group` lists to state-managed roles (see [Declarative State](usage/state.md)).
 
 ## SCIM
 
@@ -233,7 +233,7 @@ services.gradient.email = {
 
 ## GitHub App
 
-A GitHub App provides automatic webhook delivery and CI status reporting without per-task tokens. One App covers all organizations on the instance.
+A GitHub App provides automatic webhook delivery and CI status reporting without per-task tokens. One App covers all projects on the instance.
 
 ### Setup
 
@@ -256,15 +256,15 @@ services.gradient.githubApp = {
 };
 ```
 
-4. Install the App on each GitHub organization. Gradient auto-creates the `github-<account>` integration pair from the install webhook. Alternatively, org admins can create integrations manually via the UI by entering the installation id (one per GitHub account; multiple per org are supported).
+4. Install the App on each GitHub organization. Gradient auto-creates the `github-<account>` integration pair from the install webhook. Alternatively, project admins can create integrations manually via the UI by entering the installation id (one per GitHub account; multiple per project are supported).
 
 5. Once installed, push events automatically trigger evaluations (no polling) and CI statuses are reported using the installation token instead of a per-task PAT.
 
 ## Forge Webhooks (Gitea / Forgejo / GitLab / GitHub without App)
 
-For non-GitHub forges or GitHub without the App, configure a per-organization webhook secret via the UI:
+For non-GitHub forges or GitHub without the App, configure a per-project webhook secret via the UI:
 
-1. Open **Organization → Settings → Forge Webhooks** and click **Generate Webhook Secret**.
+1. Open **Project → Settings → Forge Webhooks** and click **Generate Webhook Secret**.
 2. Copy the displayed **Webhook URL** and **Secret**.
 3. In your forge, create a push webhook pointing to the URL, using the secret for HMAC-SHA256 signing.
 
@@ -272,9 +272,9 @@ Forge path by type:
 
 | Forge | URL path segment | Signature header |
 |---|---|---|
-| Gitea / Forgejo | `/hooks/gitea/{org}` or `/hooks/forgejo/{org}` | `X-Gitea-Signature` |
-| GitLab | `/hooks/gitlab/{org}` | `X-Gitlab-Token` |
-| GitHub (no App) | `/hooks/github/{org}` | `X-Hub-Signature-256` |
+| Gitea / Forgejo | `/hooks/gitea/{project}` or `/hooks/forgejo/{project}` | `X-Gitea-Signature` |
+| GitLab | `/hooks/gitlab/{project}` | `X-Gitlab-Token` |
+| GitHub (no App) | `/hooks/github/{project}` | `X-Hub-Signature-256` |
 
 Gradient matches the incoming push payload's clone URL against active tasks and queues an evaluation immediately.
 
@@ -306,14 +306,14 @@ services.gradient.worker = {
 
 ### Remote Workers
 
-Deploy `gradient-worker` on dedicated build machines. First register the worker under an organization - either declaratively via `state.workers` (see below) or via the API. The `worker_id` must be a **UUID v4**. The worker auto-generates one on first start and persists it to `/var/lib/gradient-worker/worker-id`:
+Deploy `gradient-worker` on dedicated build machines. First register the worker under a project - either declaratively via `state.workers` (see below) or via the API. The `worker_id` must be a **UUID v4**. The worker auto-generates one on first start and persists it to `/var/lib/gradient-worker/worker-id`:
 
 ```sh
 cat /var/lib/gradient-worker/worker-id
 ```
 
 ```sh
-curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
+curl -X POST https://gradient.example.com/api/v1/projects/myproject/workers \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"worker_id": "550e8400-e29b-41d4-a716-446655440001"}'
@@ -413,7 +413,7 @@ BLAKE3-prefixed (`blake3:{nix32}`) hashes are still accepted on the read path so
 
 ## Declarative State
 
-Users, organizations, tasks, integrations, caches, API keys, custom roles, and workers can be declared in `services.gradient.state` and reconciled on every startup. See [Declarative State](usage/state.md) for the full options reference.
+Users, projects, tasks, integrations, caches, API keys, custom roles, and workers can be declared in `services.gradient.state` and reconciled on every startup. See [Declarative State](usage/state.md) for the full options reference.
 
 ### API keys
 
@@ -425,7 +425,7 @@ State-managed API keys are declared under `state.api_keys.<name>`:
 - `permissions` (required, list of strings): permission identifiers the key
   grants. See `gradient_db::permissions::Permission` (or
   `GET /user/keys/permissions`) for the full list.
-- `organization` (optional, string): organization name to pin the key to.
+- `project` (optional, string): project name to pin the key to.
   Omit for an unscoped key.
 
 ### Roles
@@ -433,9 +433,9 @@ State-managed API keys are declared under `state.api_keys.<name>`:
 State-managed custom roles are declared under `state.roles.<name>`:
 
 - `name` (defaults to attrset key): role name. Must be unique within the
-  organization and must not collide with built-in role names
+  project and must not collide with built-in role names
   (`Admin`, `Write`, `View`).
-- `organization` (required, string): the organization this role belongs to.
+- `project` (required, string): the project this role belongs to.
 - `permissions` (required, list of strings): the capabilities the role grants.
 
 Managed roles cannot be modified or deleted via the API.

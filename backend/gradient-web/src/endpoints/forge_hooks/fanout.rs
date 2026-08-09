@@ -266,13 +266,13 @@ where
             continue;
         }
 
-        let org_name = org_name_for(state, task.organization)
+        let project_name = project_name_for(state, task.project)
             .await
             .unwrap_or_default();
 
         let pr_require_approval = match filter_result {
             FilterResult::SkipFilter => {
-                push_skipped(&mut outcome, &task, org_name, "filter");
+                push_skipped(&mut outcome, &task, project_name, "filter");
                 continue;
             }
             FilterResult::Fire => false,
@@ -307,7 +307,7 @@ where
             &task,
             &trig,
             input,
-            org_name,
+            project_name,
             &mut outcome,
         )
         .await;
@@ -347,7 +347,7 @@ async fn apply_and_record(
     task: &MTask,
     trig: &ept::Model,
     input: ApplyInput,
-    org_name: String,
+    project_name: String,
     outcome: &mut WebhookTriggerOutcome,
 ) {
     let apply_result = apply_trigger(&state.web_db, task, input).await;
@@ -372,26 +372,33 @@ async fn apply_and_record(
             outcome.queued.push(QueuedEvaluation {
                 task_id: task.id,
                 task_name: task.name.clone(),
-                organization: org_name,
+                project: project_name,
                 evaluation_id: eval.id,
             });
         }
-        Ok(ApplyOutcome::SkippedSameCommit) => push_skipped(outcome, task, org_name, "same_commit"),
+        Ok(ApplyOutcome::SkippedSameCommit) => {
+            push_skipped(outcome, task, project_name, "same_commit")
+        }
         Ok(ApplyOutcome::SkippedConcurrency) => {
-            push_skipped(outcome, task, org_name, "concurrency")
+            push_skipped(outcome, task, project_name, "concurrency")
         }
         Err(e) => {
             warn!(error = %e, task_id = %task.id, "apply_trigger failed in webhook fan-out");
-            push_skipped(outcome, task, org_name, "error");
+            push_skipped(outcome, task, project_name, "error");
         }
     }
 }
 
-fn push_skipped(outcome: &mut WebhookTriggerOutcome, task: &MTask, org_name: String, reason: &str) {
+fn push_skipped(
+    outcome: &mut WebhookTriggerOutcome,
+    task: &MTask,
+    project_name: String,
+    reason: &str,
+) {
     outcome.skipped.push(SkippedTask {
         task_id: task.id,
         task_name: task.name.clone(),
-        organization: org_name,
+        project: project_name,
         reason: reason.into(),
     });
 }
@@ -444,7 +451,7 @@ async fn load_active_triggers_for_integration(
     integration_id: IntegrationId,
     trigger_type: TriggerType,
 ) -> Result<Vec<ept::Model>, sea_orm::DbErr> {
-    // Match by org (each org has one inbound integration per forge_type), not by
+    // Match by project (each project has one inbound integration per forge_type), not by
     // config integration_id: the GitHub App seed migration rewrites integration
     // rows, so a pre-migration trigger's stale UUID would stop matching.
     let stmt = Statement::from_sql_and_values(
@@ -452,7 +459,7 @@ async fn load_active_triggers_for_integration(
         format!(
             "SELECT pt.* FROM task_trigger pt \
              JOIN task p ON pt.task = p.id \
-             JOIN integration i ON i.organization = p.organization \
+             JOIN integration i ON i.project = p.project \
              WHERE pt.active = true \
                AND pt.trigger_type = {} \
                AND i.id = $1",
@@ -514,8 +521,8 @@ fn glob_match_recursive(p: &[char], t: &[char], pi: usize, ti: usize) -> bool {
     }
 }
 
-async fn org_name_for(state: &Arc<ServerState>, org_id: OrganizationId) -> Option<String> {
-    EOrganization::find_by_id(org_id)
+async fn project_name_for(state: &Arc<ServerState>, project_id: ProjectId) -> Option<String> {
+    EProject::find_by_id(project_id)
         .one(&state.web_db)
         .await
         .ok()

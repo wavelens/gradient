@@ -6,7 +6,7 @@
 
 //! Reconstruct a [`StateConfiguration`] from the live database - the inverse of
 //! the provisioner in [`super::provisioning`]. Powers `GET /admin/state`, which
-//! lets operators read the current users / orgs / tasks / caches / etc. back
+//! lets operators read the current users / projects / tasks / caches / etc. back
 //! into a declarative `services.gradient.state` block.
 //!
 //! Secrets are never recoverable from the DB (passwords and worker tokens are
@@ -16,7 +16,7 @@
 
 use super::{
     StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry, StateConfiguration,
-    StateFlakeInputOverride, StateIntegration, StateOrgMemberEntry, StateOrganization, StateRole,
+    StateFlakeInputOverride, StateIntegration, StateProject, StateProjectMemberEntry, StateRole,
     StateTask, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use gradient_ci::IntegrationKind;
@@ -45,16 +45,14 @@ const SECRET_KEYS: &[&str] = &[
 /// Build the full declarative state from every relevant table.
 ///
 /// This is a snapshot of the live system, not just state-managed rows: every
-/// user, org, task, cache, custom role, api key, worker and integration is
+/// user, project, task, cache, custom role, api key, worker and integration is
 /// included so the operator can codify the current system into nix. Rows the
 /// operator cannot hand-author are excluded - the auto-managed `build-request`
 /// task, the server-managed GitHub integration rows, and the built-in
 /// `Admin`/`Write`/`View` roles.
 pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfiguration, DbErr> {
     let users = gradient_entity::user::Entity::find().all(db).await?;
-    let orgs = gradient_entity::organization::Entity::find()
-        .all(db)
-        .await?;
+    let projects = gradient_entity::project::Entity::find().all(db).await?;
     let tasks = gradient_entity::task::Entity::find().all(db).await?;
     let caches = gradient_entity::cache::Entity::find().all(db).await?;
     let roles = gradient_entity::role::Entity::find().all(db).await?;
@@ -64,15 +62,15 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         .all(db)
         .await?;
     let base_workers = gradient_entity::base_worker::Entity::find().all(db).await?;
-    let base_worker_orgs = gradient_entity::organization_base_worker::Entity::find()
+    let base_worker_projects = gradient_entity::project_base_worker::Entity::find()
         .all(db)
         .await?;
     let integrations = gradient_entity::integration::Entity::find().all(db).await?;
-    let org_users = gradient_entity::organization_user::Entity::find()
+    let project_users = gradient_entity::project_user::Entity::find()
         .all(db)
         .await?;
     let cache_users = gradient_entity::cache_user::Entity::find().all(db).await?;
-    let org_caches = gradient_entity::organization_cache::Entity::find()
+    let project_caches = gradient_entity::project_cache::Entity::find()
         .all(db)
         .await?;
     let upstreams = gradient_entity::cache_upstream::Entity::find()
@@ -90,7 +88,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         .await?;
 
     let username = id_name_map(users.iter().map(|u| (u.id, u.username.clone())));
-    let org_name = id_name_map(orgs.iter().map(|o| (o.id, o.name.clone())));
+    let project_name = id_name_map(projects.iter().map(|o| (o.id, o.name.clone())));
     let cache_name = id_name_map(caches.iter().map(|c| (c.id, c.name.clone())));
     let role_name = id_name_map(roles.iter().map(|r| (r.id, r.name.clone())));
     let cache_role_name = id_name_map(cache_roles.iter().map(|r| (r.id, r.name.clone())));
@@ -99,7 +97,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
 
     let mut config = StateConfiguration {
         users: HashMap::new(),
-        organizations: HashMap::new(),
+        projects: HashMap::new(),
         tasks: HashMap::new(),
         caches: HashMap::new(),
         roles: HashMap::new(),
@@ -122,20 +120,20 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         );
     }
 
-    for o in &orgs {
-        let members = org_users
+    for o in &projects {
+        let members = project_users
             .iter()
-            .filter(|ou| ou.organization == o.id)
+            .filter(|ou| ou.project == o.id)
             .filter_map(|ou| {
-                Some(StateOrgMemberEntry {
+                Some(StateProjectMemberEntry {
                     user: username.get(&ou.user)?.clone(),
                     role: role_name.get(&ou.role)?.clone(),
                 })
             })
             .collect();
-        config.organizations.insert(
+        config.projects.insert(
             o.name.clone(),
-            StateOrganization {
+            StateProject {
                 name: o.name.clone(),
                 display_name: o.display_name.clone(),
                 id: Some(o.id.to_string()),
@@ -180,7 +178,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             p.name.clone(),
             StateTask {
                 name: p.name.clone(),
-                organization: name_or_blank(&org_name, p.organization),
+                project: name_or_blank(&project_name, p.project),
                 display_name: p.display_name.clone(),
                 description: opt(&p.description),
                 repository: p.repository.clone(),
@@ -198,10 +196,10 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     }
 
     for c in &caches {
-        let organizations = org_caches
+        let projects = project_caches
             .iter()
             .filter(|oc| oc.cache == c.id)
-            .filter_map(|oc| org_name.get(&oc.organization).cloned())
+            .filter_map(|oc| project_name.get(&oc.project).cloned())
             .collect();
         let cache_upstreams = upstreams
             .iter()
@@ -240,7 +238,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 local_priority: c.local_priority,
                 max_storage_gb: c.max_storage_gb,
                 signing_key_file: String::new(),
-                organizations,
+                projects,
                 upstreams: cache_upstreams,
                 public: c.public,
                 created_by: name_or_blank(&username, c.created_by),
@@ -251,7 +249,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     }
 
     for r in &roles {
-        let Some(org_id) = r.organization else {
+        let Some(project_id) = r.project else {
             continue;
         };
         if is_builtin_role(r.id) {
@@ -261,7 +259,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             r.name.clone(),
             StateRole {
                 name: r.name.clone(),
-                organization: name_or_blank(&org_name, org_id),
+                project: name_or_blank(&project_name, project_id),
                 permissions: mask_to_vec(r.permission)
                     .into_iter()
                     .map(|p| p.as_wire_name().to_string())
@@ -286,20 +284,20 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                     .into_iter()
                     .map(|p| p.as_wire_name().to_string())
                     .collect(),
-                organization: k.organization.and_then(|id| org_name.get(&id).cloned()),
+                project: k.project.and_then(|id| project_name.get(&id).cloned()),
             },
         );
     }
 
-    // One `worker_registration` row exists per (worker_id, org); fold them back
-    // into a single StateWorker carrying the list of orgs.
-    let mut worker_orgs: HashMap<String, Vec<String>> = HashMap::new();
+    // One `worker_registration` row exists per (worker_id, project); fold them back
+    // into a single StateWorker carrying the list of projects.
+    let mut worker_projects: HashMap<String, Vec<String>> = HashMap::new();
     for reg in &registrations {
-        if let Some(org) = org_name.get(&reg.peer_id) {
-            worker_orgs
+        if let Some(project) = project_name.get(&reg.peer_id) {
+            worker_projects
                 .entry(reg.worker_id.clone())
                 .or_default()
-                .push(org.clone());
+                .push(project.clone());
         }
     }
     let mut seen_worker: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -312,7 +310,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             StateWorker {
                 worker_id: reg.worker_id.clone(),
                 url: reg.url.clone(),
-                organizations: worker_orgs.remove(&reg.worker_id).unwrap_or_default(),
+                projects: worker_projects.remove(&reg.worker_id).unwrap_or_default(),
                 token_file: String::new(),
                 display_name: reg.display_name.clone(),
                 created_by: reg
@@ -330,11 +328,11 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     }
 
     // Server-level base workers live in their own table; emit them with their
-    // pre-enabled orgs so `base_worker = true` entries survive a state round-trip.
+    // pre-enabled projects so `base_worker = true` entries survive a state round-trip.
     for bw in &base_workers {
         config.workers.insert(
             bw.worker_id.clone(),
-            export_base_worker(bw, &base_worker_orgs, &org_name, &username),
+            export_base_worker(bw, &base_worker_projects, &project_name, &username),
         );
     }
 
@@ -348,7 +346,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
             StateIntegration {
                 name: i.name.clone(),
                 display_name: Some(i.display_name.clone()),
-                organization: name_or_blank(&org_name, i.organization),
+                project: name_or_blank(&project_name, i.project),
                 kind: match i.kind {
                     IntegrationKind::Inbound => "inbound",
                     IntegrationKind::Outbound => "outbound",
@@ -368,25 +366,25 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     Ok(config)
 }
 
-/// Reconstruct a base-worker [`StateWorker`] from its row plus the per-org
+/// Reconstruct a base-worker [`StateWorker`] from its row plus the per-project
 /// opt-ins. `token_file` is unrecoverable from the stored hash, so it is blank
 /// (redacted to `null`), same as the registered-worker export.
 fn export_base_worker(
     bw: &gradient_entity::base_worker::Model,
-    org_links: &[gradient_entity::organization_base_worker::Model],
-    org_name: &HashMap<OrganizationId, String>,
+    project_links: &[gradient_entity::project_base_worker::Model],
+    project_name: &HashMap<ProjectId, String>,
     username: &HashMap<UserId, String>,
 ) -> StateWorker {
-    let organizations = org_links
+    let projects = project_links
         .iter()
         .filter(|l| l.base_worker == bw.id)
-        .filter_map(|l| org_name.get(&l.organization).cloned())
+        .filter_map(|l| project_name.get(&l.project).cloned())
         .collect();
 
     StateWorker {
         worker_id: bw.worker_id.clone(),
         url: bw.url.clone(),
-        organizations,
+        projects,
         token_file: String::new(),
         display_name: bw.display_name.clone(),
         created_by: bw
@@ -708,9 +706,9 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn export_base_worker_emits_flag_orgs_and_authorize_against() {
-        let org_a = OrganizationId::now_v7();
-        let org_b = OrganizationId::now_v7();
+    fn export_base_worker_emits_flag_projects_and_authorize_against() {
+        let project_a = ProjectId::now_v7();
+        let project_b = ProjectId::now_v7();
         let user = UserId::now_v7();
         let bw_id = BaseWorkerId::now_v7();
         let auth = uuid::Uuid::now_v7();
@@ -730,28 +728,31 @@ mod tests {
             ..Default::default()
         };
         let links = vec![
-            gradient_entity::organization_base_worker::Model {
-                organization: org_a,
+            gradient_entity::project_base_worker::Model {
+                project: project_a,
                 base_worker: bw_id,
                 ..Default::default()
             },
-            gradient_entity::organization_base_worker::Model {
-                organization: org_b,
+            gradient_entity::project_base_worker::Model {
+                project: project_b,
                 base_worker: BaseWorkerId::now_v7(),
                 ..Default::default()
             },
         ];
-        let org_name = HashMap::from([(org_a, "org-a".to_string()), (org_b, "org-b".to_string())]);
+        let project_name = HashMap::from([
+            (project_a, "project-a".to_string()),
+            (project_b, "project-b".to_string()),
+        ]);
         let username = HashMap::from([(user, "alice".to_string())]);
 
-        let sw = export_base_worker(&bw, &links, &org_name, &username);
+        let sw = export_base_worker(&bw, &links, &project_name, &username);
 
         assert!(sw.base_worker);
         assert!(sw.enabled);
         assert!(!sw.enable_eval);
         assert_eq!(sw.created_by, "alice");
         assert_eq!(sw.authorize_against, Some(auth.to_string()));
-        assert_eq!(sw.organizations, vec!["org-a".to_string()]);
+        assert_eq!(sw.projects, vec!["project-a".to_string()]);
         assert!(sw.token_file.is_empty());
     }
 

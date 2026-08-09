@@ -10,16 +10,16 @@ export interface AccessState {
   /// (start/abort evaluations) remain available.
   managed: boolean;
   /// True when the caller may edit configuration (Permission::EditTask /
-  /// Write or Admin org role / etc.).
+  /// Write or Admin project role / etc.).
   canEdit: boolean;
   /// True when the caller may run trigger-style actions on the resource. For
   /// tasks this is Permission::TriggerEvaluation. For resources without a
-  /// distinct trigger permission (caches, orgs) this mirrors `canEdit`.
+  /// distinct trigger permission (caches, projects) this mirrors `canEdit`.
   canTrigger: boolean;
 }
 
 /// Lifts a backend entity into an `AccessState`. `can_trigger` is optional on
-/// the wire - entities without their own trigger permission (caches, orgs)
+/// the wire - entities without their own trigger permission (caches, projects)
 /// fall back to `can_edit`, preserving the previous single-permission model.
 export function accessFromEntity(e: {
   managed: boolean;

@@ -16,7 +16,7 @@ import { TooltipModule } from 'primeng/tooltip';
 import { MenuItem } from 'primeng/api';
 import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
@@ -47,7 +47,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private host = inject(ElementRef);
   protected authService = inject(AuthService);
-  private orgsService = inject(OrganizationsService);
+  private projectsService = inject(ProjectsService);
   private tasksService = inject(TasksService);
   private accessService = inject(AccessService);
   private live = inject(LiveService);
@@ -65,8 +65,8 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   abortTarget = signal<string | null>(null);
   tick = signal(Date.now());
 
-  orgName = '';
-  orgDisplayName = signal('');
+  projectName = '';
+  projectDisplayName = signal('');
   taskName = '';
 
   private liveSub?: Subscription;
@@ -100,11 +100,11 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   });
 
   ngOnInit(): void {
-    this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     this.selectedId.set(this.route.snapshot.queryParamMap.get('eval'));
-    this.orgsService.getOrganization(this.orgName).subscribe({
-      next: (org) => this.orgDisplayName.set(org.display_name),
+    this.projectsService.getProject(this.projectName).subscribe({
+      next: (project) => this.projectDisplayName.set(project.display_name),
       error: () => {},
     });
     this.loadTaskData();
@@ -119,7 +119,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   loadTaskData(showLoading = true, live = false): void {
     if (showLoading) this.loading.set(true);
-    this.tasksService.getTask(this.orgName, this.taskName).subscribe({
+    this.tasksService.getTask(this.projectName, this.taskName).subscribe({
       next: (task) => {
         const sig = this.taskSignature(task);
         if (sig !== this.taskSig) {
@@ -189,7 +189,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     }
     this.lastEntryPointsFetch = Date.now();
     if (evaluationId !== this.entryPointsEvalId) this.entryPointsLoading.set(true);
-    this.tasksService.getEntryPoints(this.orgName, this.taskName, evaluationId).subscribe({
+    this.tasksService.getEntryPoints(this.projectName, this.taskName, evaluationId).subscribe({
       next: (eps) => {
         // Drop out-of-order responses: only apply the fetch for the still-selected
         // evaluation, so a slow earlier request can't clobber a newer selection.
@@ -214,7 +214,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   startEvaluation(): void {
     this.starting.set(true);
     this.errorMessage.set(null);
-    this.tasksService.startEvaluation(this.orgName, this.taskName).subscribe({
+    this.tasksService.startEvaluation(this.projectName, this.taskName).subscribe({
       next: () => this.loadTaskData(false),
       error: (error) => {
         this.errorMessage.set(error?.message || 'Failed to start evaluation.');
@@ -226,7 +226,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   restartFailedBuilds(): void {
     this.starting.set(true);
     this.errorMessage.set(null);
-    this.tasksService.restartFailedBuilds(this.orgName, this.taskName).subscribe({
+    this.tasksService.restartFailedBuilds(this.projectName, this.taskName).subscribe({
       next: () => this.loadTaskData(false),
       error: (error) => {
         this.errorMessage.set(error?.message || 'Failed to restart failed builds.');
@@ -239,7 +239,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const id = this.abortTarget();
     this.abortTarget.set(null);
     if (!id) return;
-    this.tasksService.abortEvaluation(this.orgName, this.taskName, id).subscribe({
+    this.tasksService.abortEvaluation(this.projectName, this.taskName, id).subscribe({
       next: () => this.loadTaskData(false),
       error: (error) => console.error('Failed to abort evaluation:', error),
     });
@@ -249,7 +249,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   private startLiveUpdates(): void {
     this.liveSub = this.live
-      .connect(`/tasks/${this.orgName}/${this.taskName}/live`)
+      .connect(`/tasks/${this.projectName}/${this.taskName}/live`)
       .pipe(auditTime(500))
       .subscribe(() => this.loadTaskData(false, true));
   }
@@ -355,7 +355,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   panelMenuModel = computed<MenuItem[]>(() => [
     { label: 'Metrics', icon: 'pi pi-chart-line',
-      routerLink: ['/organization', this.orgName, 'task', this.taskName, 'metrics'] },
+      routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
   ]);
 
   private buildPkgMenu(ep: EntryPointSummary, evalId: string): MenuItem[] {
@@ -363,17 +363,17 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     return [
       {
         label: 'Artefacts', icon: 'pi pi-download', disabled: !canArtefacts,
-        routerLink: canArtefacts ? ['/organization', this.orgName, 'artefacts', ep.build_id] : undefined,
+        routerLink: canArtefacts ? ['/project', this.projectName, 'artefacts', ep.build_id] : undefined,
         queryParams: canArtefacts ? { task: this.taskName } : undefined,
       },
       {
         label: 'Dependency graph', icon: 'pi pi-sitemap',
-        routerLink: ['/organization', this.orgName, 'graph', ep.build_id],
+        routerLink: ['/project', this.projectName, 'graph', ep.build_id],
         queryParams: { evalId: evalId, task: this.taskName },
       },
       {
         label: 'Entry-point metrics', icon: 'pi pi-chart-line',
-        routerLink: ['/organization', this.orgName, 'task', this.taskName, 'entry-point-metrics'],
+        routerLink: ['/project', this.projectName, 'task', this.taskName, 'entry-point-metrics'],
         queryParams: { eval: ep.eval },
       },
     ];

@@ -53,22 +53,22 @@ pub enum Commands {
 pub async fn handle(cmd: Commands, out: Output) {
     match cmd {
         Commands::Select { task } => {
-            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
                 Some(id) => id,
-                None => out.err(ExitKind::Usage, "Organization is required for command."),
+                None => out.err(ExitKind::Usage, "Project is required for command."),
             };
 
             set_get_value(
                 ConfigKey::SelectedTask,
-                Some(format!("{}/{}", organization, task)),
+                Some(format!("{}/{}", project, task)),
                 true,
             )
             .unwrap();
-            out.human("Task selected in current Organization.");
+            out.human("Task selected in current Project.");
         }
 
         Commands::Show => {
-            let (organization, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
+            let (project, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
                 Some(id) => {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
@@ -78,7 +78,7 @@ pub async fn handle(cmd: Commands, out: Output) {
 
             let client = client_from_config(out);
 
-            let details = match client.tasks().details(&organization, &task).await {
+            let details = match client.tasks().details(&project, &task).await {
                 Ok(d) => d,
                 Err(e) => out.err(to_exit_kind(&e), e),
             };
@@ -141,7 +141,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Log => {
-            let (organization, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
+            let (project, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
                 Some(id) => {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
@@ -150,7 +150,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             };
 
             let client = client_from_config(out);
-            let details = match client.tasks().details(&organization, &task).await {
+            let details = match client.tasks().details(&project, &task).await {
                 Ok(d) => d,
                 Err(e) => out.err(to_exit_kind(&e), e),
             };
@@ -167,9 +167,9 @@ pub async fn handle(cmd: Commands, out: Output) {
             repository,
             wildcard,
         } => {
-            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
                 Some(id) => id,
-                _ => out.err(ExitKind::Usage, "Organization is required for command."),
+                _ => out.err(ExitKind::Usage, "Project is required for command."),
             };
 
             let input_fields = [
@@ -190,7 +190,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             match client
                 .tasks()
                 .create(
-                    &organization,
+                    &project,
                     MakeTaskRequest {
                         name: name.clone(),
                         display_name: input.get("Display Name").unwrap().clone(),
@@ -204,7 +204,7 @@ pub async fn handle(cmd: Commands, out: Output) {
                 Ok(_) => {
                     set_get_value(
                         ConfigKey::SelectedTask,
-                        Some(format!("{}/{}", organization, name)),
+                        Some(format!("{}/{}", project, name)),
                         true,
                     )
                     .unwrap();
@@ -216,13 +216,13 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::List => {
-            let organization = match set_get_value(ConfigKey::SelectedOrganization, None, true) {
+            let project = match set_get_value(ConfigKey::SelectedProject, None, true) {
                 Some(id) => id,
-                _ => out.err(ExitKind::Usage, "Organization is required for command."),
+                _ => out.err(ExitKind::Usage, "Project is required for command."),
             };
 
             let client = client_from_config(out);
-            match client.tasks().list(&organization).await {
+            match client.tasks().list(&project).await {
                 Ok(res) => {
                     out.ok(&res);
                     if res.items.is_empty() {
@@ -244,7 +244,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             repository,
             wildcard,
         } => {
-            let (organization, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
+            let (project, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
                 Some(id) => {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
@@ -253,7 +253,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             };
 
             let client = client_from_config(out);
-            let current = match client.tasks().details(&organization, &task).await {
+            let current = match client.tasks().details(&project, &task).await {
                 Ok(d) => d,
                 Err(e) => out.err(to_exit_kind(&e), e),
             };
@@ -280,7 +280,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             match client
                 .tasks()
                 .update(
-                    &organization,
+                    &project,
                     &task,
                     PatchTaskRequest {
                         name: input.get("Name").cloned(),
@@ -301,7 +301,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Delete => {
-            let (organization, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
+            let (project, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
                 Some(id) => {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
@@ -310,7 +310,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             };
 
             let client = client_from_config(out);
-            match client.tasks().delete(&organization, &task).await {
+            match client.tasks().delete(&project, &task).await {
                 Ok(_) => {
                     out.ok(&serde_json::json!({"deleted": true}));
                     out.human("Task deleted.");
@@ -320,7 +320,7 @@ pub async fn handle(cmd: Commands, out: Output) {
         }
 
         Commands::Evaluate => {
-            let (organization, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
+            let (project, task) = match set_get_value(ConfigKey::SelectedTask, None, true) {
                 Some(id) => {
                     let parts: Vec<&str> = id.split('/').collect();
                     (parts[0].to_string(), parts[1].to_string())
@@ -329,7 +329,7 @@ pub async fn handle(cmd: Commands, out: Output) {
             };
 
             let client = client_from_config(out);
-            match client.tasks().evaluate(&organization, &task).await {
+            match client.tasks().evaluate(&project, &task).await {
                 Ok(eval_id) => {
                     out.ok(&serde_json::json!({"evaluation_id": eval_id}));
                     out.human("Task evaluation started.");

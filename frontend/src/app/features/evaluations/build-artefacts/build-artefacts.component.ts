@@ -8,7 +8,7 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { EvaluationsService, BuildProduct, isHtmlArtefact } from '@core/services/evaluations.service';
 import { AuthService } from '@core/services/auth.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { environment } from '@environments/environment';
 
@@ -24,27 +24,27 @@ export class BuildArtefactsComponent implements OnInit {
   private router = inject(Router);
   private evalService = inject(EvaluationsService);
   private authService = inject(AuthService);
-  private orgsService = inject(OrganizationsService);
+  private projectsService = inject(ProjectsService);
 
   loading = signal(true);
   artefacts = signal<BuildProduct[]>([]);
   private downloadToken = signal<string | null>(null);
 
-  orgName = '';
+  projectName = '';
   buildId = '';
   private taskName = '';
   private evalId = '';
 
   ngOnInit(): void {
-    this.orgName     = this.route.snapshot.paramMap.get('org') || '';
+    this.projectName     = this.route.snapshot.paramMap.get('project') || '';
     this.buildId     = this.route.snapshot.paramMap.get('buildId') || '';
     this.taskName = this.route.snapshot.queryParamMap.get('task') || '';
     this.evalId      = this.route.snapshot.queryParamMap.get('evalId') || '';
     this.loadArtefacts();
     if (this.authService.isAuthenticated()) {
-      this.orgsService.getOrganization(this.orgName).subscribe({
-        next: (org) => {
-          if (!org.public) {
+      this.projectsService.getProject(this.projectName).subscribe({
+        next: (project) => {
+          if (!project.public) {
             this.evalService.getDownloadToken(this.buildId).subscribe({
               next: (token) => this.downloadToken.set(token),
             });
@@ -71,9 +71,9 @@ export class BuildArtefactsComponent implements OnInit {
   }
 
   goBack(): void {
-    if (this.taskName) this.router.navigate(['/organization', this.orgName, 'task', this.taskName]);
-    else if (this.evalId) this.router.navigate(['/organization', this.orgName, 'log', this.evalId]);
-    else this.router.navigate(['/organization', this.orgName]);
+    if (this.taskName) this.router.navigate(['/project', this.projectName, 'task', this.taskName]);
+    else if (this.evalId) this.router.navigate(['/project', this.projectName, 'log', this.evalId]);
+    else this.router.navigate(['/project', this.projectName]);
   }
 
   buildShortId(): string {

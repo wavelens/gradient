@@ -16,25 +16,25 @@ use sea_orm::{
 };
 use tracing::{debug, info, warn};
 
-use gradient_types::ids::OrganizationId;
+use gradient_types::ids::ProjectId;
 use gradient_types::proto::GradientCapabilities;
 
 use crate::Scheduler;
 use crate::build;
 
 /// Insert a `worker_sample` time-series row for a connected worker. Best-effort;
-/// skipped when the worker's owning org is unknown. Called from the heartbeat loop.
+/// skipped when the worker's owning project is unknown. Called from the heartbeat loop.
 pub(crate) async fn record_worker_sample(
     db: &impl sea_orm::ConnectionTrait,
     info: &crate::WorkerInfo,
 ) {
-    let Some(org) = info.organization else {
+    let Some(project) = info.project else {
         return;
     };
     let sample = gradient_entity::worker_sample::Model {
         id: gradient_entity::ids::WorkerSampleId::now_v7(),
         worker_id: info.id.clone(),
-        organization: org,
+        project: project,
         at: gradient_types::now(),
         cpu_usage_pct: info.cpu_usage_pct,
         ram_free_mb: info.ram_free_mb.map(|v| v as i64),
@@ -78,12 +78,12 @@ impl Scheduler {
             .stale_worker_ids(now_ms, timeout_ms)
     }
 
-    pub async fn worker_authorized_for_org(&self, worker_id: &str, org: OrganizationId) -> bool {
+    pub async fn worker_authorized_for_project(&self, worker_id: &str, project: ProjectId) -> bool {
         self.worker_pool
             .read()
             .await
             .peer_auth_for(worker_id)
-            .map(|a| a.contains(&org))
+            .map(|a| a.contains(&project))
             .unwrap_or(false)
     }
 
@@ -91,7 +91,7 @@ impl Scheduler {
         &self,
         worker_id: &str,
         capabilities: GradientCapabilities,
-        authorized_peers: HashSet<OrganizationId>,
+        authorized_peers: HashSet<ProjectId>,
     ) -> (
         Arc<tokio::sync::Notify>,
         tokio::sync::mpsc::UnboundedReceiver<(String, String)>,
@@ -107,7 +107,7 @@ impl Scheduler {
         (notify, abort_rx)
     }
 
-    /// Resolve the worker's owning org from `worker_registration`, cache it on
+    /// Resolve the worker's owning project from `worker_registration`, cache it on
     /// the pool for sample attribution, and open a `worker_connection` row.
     async fn record_worker_connection(&self, worker_id: &str, capabilities: serde_json::Value) {
         let reg = gradient_entity::worker_registration::Entity::find()
@@ -121,11 +121,11 @@ impl Scheduler {
         self.worker_pool
             .write()
             .await
-            .set_worker_org(worker_id, reg.peer_id);
+            .set_worker_project(worker_id, reg.peer_id);
         let conn = gradient_entity::worker_connection::Model {
             id: gradient_entity::ids::WorkerConnectionId::now_v7(),
             worker_id: worker_id.to_string(),
-            organization: reg.peer_id,
+            project: reg.peer_id,
             display_name: reg.display_name,
             connected_at: gradient_types::now(),
             capabilities,
@@ -143,7 +143,7 @@ impl Scheduler {
             .state
             .board_events
             .send(crate::BoardEvent::WorkerConnected {
-                organization: reg.peer_id.into(),
+                project: reg.peer_id.into(),
                 worker_id: worker_id.to_owned(),
             });
     }
@@ -168,7 +168,7 @@ impl Scheduler {
     pub async fn update_authorized_peers(
         &self,
         worker_id: &str,
-        authorized_peers: HashSet<OrganizationId>,
+        authorized_peers: HashSet<ProjectId>,
     ) {
         self.worker_pool
             .write()
@@ -179,10 +179,10 @@ impl Scheduler {
 
     /// Abort all active jobs on `worker_id` that belong to any of `revoked_peers`.
     /// Jobs are moved back to pending so they can be re-assigned to another worker.
-    pub async fn abort_org_jobs_on_worker(
+    pub async fn abort_project_jobs_on_worker(
         &self,
         worker_id: &str,
-        revoked_peers: &HashSet<OrganizationId>,
+        revoked_peers: &HashSet<ProjectId>,
     ) {
         if revoked_peers.is_empty() {
             return;
@@ -200,13 +200,13 @@ impl Scheduler {
             pool.send_abort(
                 worker_id,
                 job_id.clone(),
-                "org deactivated worker".to_owned(),
+                "project deactivated worker".to_owned(),
             );
         }
         info!(
             %worker_id,
             aborted = job_ids.len(),
-            "aborted jobs for revoked org(s) on worker"
+            "aborted jobs for revoked project(s) on worker"
         );
         // Notify other workers that these jobs are available again.
         self.job_notify.send_modify(|g| *g = g.wrapping_add(1));

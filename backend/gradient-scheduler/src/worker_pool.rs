@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use tokio::sync::{Notify, mpsc};
 
-use gradient_types::ids::OrganizationId;
+use gradient_types::ids::ProjectId;
 use gradient_types::proto::{GradientCapabilities, JobKind};
 
 use crate::peer_auth::PeerAuth;
@@ -74,9 +74,9 @@ impl std::fmt::Debug for WorkerSlot {
 #[derive(Debug, Default)]
 pub struct WorkerPool {
     workers: HashMap<String, WorkerSlot>,
-    /// Owning organization per worker, resolved from `worker_registration` at
+    /// Owning project per worker, resolved from `worker_registration` at
     /// connect time. Used to attribute worker_sample / worker_connection rows.
-    worker_orgs: HashMap<String, OrganizationId>,
+    worker_projects: HashMap<String, ProjectId>,
 }
 
 impl WorkerPool {
@@ -92,7 +92,7 @@ impl WorkerPool {
         &mut self,
         id: String,
         capabilities: GradientCapabilities,
-        authorized_peers: HashSet<OrganizationId>,
+        authorized_peers: HashSet<ProjectId>,
     ) -> (Arc<Notify>, mpsc::UnboundedReceiver<(String, String)>) {
         // Carry the prior connection's reported capabilities into the new slot.
         // Architectures/features/sizing arrive once per session via a separate
@@ -141,9 +141,9 @@ impl WorkerPool {
         (notify, abort_rx)
     }
 
-    /// Record the owning organization for a connected worker.
-    pub fn set_worker_org(&mut self, id: &str, org: OrganizationId) {
-        self.worker_orgs.insert(id.to_owned(), org);
+    /// Record the owning project for a connected worker.
+    pub fn set_worker_project(&mut self, id: &str, project: ProjectId) {
+        self.worker_projects.insert(id.to_owned(), project);
     }
 
     /// Signal a connected worker that its registrations have changed and it
@@ -164,7 +164,7 @@ impl WorkerPool {
         }
     }
 
-    pub fn update_authorized_peers(&mut self, id: &str, authorized_peers: HashSet<OrganizationId>) {
+    pub fn update_authorized_peers(&mut self, id: &str, authorized_peers: HashSet<ProjectId>) {
         if let Some(slot) = self.workers.get_mut(id) {
             slot.shared_mut().peer_auth = PeerAuth::from_peers(authorized_peers);
         }
@@ -259,7 +259,7 @@ impl WorkerPool {
     }
 
     pub fn unregister(&mut self, id: &str) -> Vec<String> {
-        self.worker_orgs.remove(id);
+        self.worker_projects.remove(id);
         self.workers
             .remove(id)
             .map(|slot| slot.shared().assigned_jobs.iter().cloned().collect())
@@ -380,7 +380,7 @@ impl WorkerPool {
             assigned_job_count: s.assigned_jobs.len(),
             draining: slot.is_draining(),
             authorized_peers: s.peer_auth.as_filter().cloned(),
-            organization: self.worker_orgs.get(id).copied(),
+            project: self.worker_projects.get(id).copied(),
             cpu_usage_pct: s.cpu_usage_pct,
             ram_free_mb: s.ram_free_mb,
             ram_total_mb: s.ram_total_mb,
@@ -429,15 +429,15 @@ pub struct WorkerInfo {
     pub max_concurrent_builds: u32,
     pub assigned_job_count: usize,
     pub draining: bool,
-    /// Peer (org) UUIDs the worker successfully authenticated for. `None`
+    /// Peer (project) UUIDs the worker successfully authenticated for. `None`
     /// means the worker is in open mode (no registrations) and is implicitly
     /// authorized for all peers; this should not happen in normal operation
-    /// because workers must register with at least one org.
-    pub authorized_peers: Option<HashSet<OrganizationId>>,
+    /// because workers must register with at least one project.
+    pub authorized_peers: Option<HashSet<ProjectId>>,
     /// Internal sampling fields (skipped in API output - surfaced via the
     /// access-controlled Job Board APIs, not the existing workers endpoint).
     #[serde(skip)]
-    pub organization: Option<OrganizationId>,
+    pub project: Option<ProjectId>,
     #[serde(skip)]
     pub cpu_usage_pct: Option<f32>,
     #[serde(skip)]
@@ -675,8 +675,8 @@ mod tests {
     #[test]
     fn test_authorized_peers_for() {
         let mut pool = WorkerPool::new();
-        let peer_a = OrganizationId::now_v7();
-        let peer_b = OrganizationId::now_v7();
+        let peer_a = ProjectId::now_v7();
+        let peer_b = ProjectId::now_v7();
 
         pool.register("w1".into(), caps(), HashSet::from([peer_a, peer_b]));
         let auth = pool.peer_auth_for("w1").unwrap();
@@ -690,8 +690,8 @@ mod tests {
     #[test]
     fn test_update_authorized_peers() {
         let mut pool = WorkerPool::new();
-        let peer_a = OrganizationId::now_v7();
-        let peer_b = OrganizationId::now_v7();
+        let peer_a = ProjectId::now_v7();
+        let peer_b = ProjectId::now_v7();
 
         pool.register("w1".into(), caps(), HashSet::from([peer_a]));
         assert!(matches!(
@@ -793,11 +793,11 @@ mod tests {
     #[test]
     fn test_all_workers_info_exposes_authorized_peers() {
         let mut pool = WorkerPool::new();
-        let org_a = OrganizationId::now_v7();
-        let org_b = OrganizationId::now_v7();
+        let project_a = ProjectId::now_v7();
+        let project_b = ProjectId::now_v7();
 
-        // Restricted: worker authorized for org_a only.
-        pool.register("w1".into(), caps(), HashSet::from([org_a]));
+        // Restricted: worker authorized for project_a only.
+        pool.register("w1".into(), caps(), HashSet::from([project_a]));
         // Open: no registrations.
         pool.register("w2".into(), caps(), HashSet::new());
 
@@ -808,8 +808,8 @@ mod tests {
             .authorized_peers
             .as_ref()
             .expect("restricted worker should expose authorized peers");
-        assert!(w1_peers.contains(&org_a));
-        assert!(!w1_peers.contains(&org_b));
+        assert!(w1_peers.contains(&project_a));
+        assert!(!w1_peers.contains(&project_b));
 
         assert!(
             workers[1].authorized_peers.is_none(),

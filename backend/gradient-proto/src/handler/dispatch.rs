@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use gradient_core::ServerState;
 use gradient_exec::strip_nix_store_prefix;
-use gradient_types::ids::{DerivationId, OrganizationId};
+use gradient_types::ids::{DerivationId, ProjectId};
 use gradient_types::*;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
@@ -399,25 +399,25 @@ impl<'a> DispatchContext<'a> {
         let authorized_peers = expand_base_authorized(&base, token_authorized);
 
         // A base worker must never reach PeerAuth::Open (empty == Open). If it has no
-        // authorized orgs (toggled off everywhere, or globally disabled), disconnect.
+        // authorized projects (toggled off everywhere, or globally disabled), disconnect.
         let is_base =
             gradient_db::base_workers::worker_id_is_base(&self.state.worker_db, self.peer_id)
                 .await
                 .unwrap_or(false);
         if is_base && authorized_peers.is_empty() {
-            info!(peer_id = %self.peer_id, "base worker not enabled by any organization - disconnecting");
+            info!(peer_id = %self.peer_id, "base worker not enabled by any project - disconnecting");
             let _ = send_server_msg(
                 self.writer,
                 &ServerMessage::Reject {
                     code: 403,
-                    reason: "base worker not enabled by any organization".into(),
+                    reason: "base worker not enabled by any project".into(),
                 },
             )
             .await;
             return false;
         }
 
-        let updated_uuids: HashSet<OrganizationId> = authorized_peers
+        let updated_uuids: HashSet<ProjectId> = authorized_peers
             .iter()
             .filter_map(|s| s.parse().ok())
             .collect();
@@ -524,7 +524,7 @@ impl<'a> DispatchContext<'a> {
                 self.scheduler,
                 self.peer_id,
                 &assignment.job,
-                assignment.org_id,
+                assignment.project_id,
             )
             .await;
             if send_server_msg(
@@ -788,7 +788,7 @@ impl RpcContext {
         mode: gradient_types::proto::QueryMode,
     ) {
         debug!(peer_id = %self.peer_id, %job_id, %query_id, count = paths.len(), ?mode, "CacheQuery");
-        let org_id = self.scheduler.org_for_job(&job_id).await;
+        let project_id = self.scheduler.project_for_job(&job_id).await;
 
         // A DB error or an over-budget handler is *indeterminate*, never
         // "absent": reply `CacheError` so the worker retries transiently instead
@@ -796,7 +796,7 @@ impl RpcContext {
         // `InputsUnavailable`, which fails the whole eval).
         let reply = match tokio::time::timeout(
             CACHE_QUERY_BUDGET,
-            handle_cache_query(&self.state, org_id, &paths, mode),
+            handle_cache_query(&self.state, project_id, &paths, mode),
         )
         .await
         {
@@ -840,7 +840,7 @@ impl RpcContext {
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
-        let known = match self.scheduler.org_for_job(&job_id).await {
+        let known = match self.scheduler.project_for_job(&job_id).await {
             // A degraded DB read must prune NOTHING (the worker re-walks, which
             // is always safe), never masquerade as "no rows": an empty
             // `edges_unresolved` set from a failed query would re-prune an
@@ -853,7 +853,7 @@ impl RpcContext {
                 }
             },
             None => {
-                warn!(peer_id = %self.peer_id, %job_id, "QueryKnownDerivations: no org for job");
+                warn!(peer_id = %self.peer_id, %job_id, "QueryKnownDerivations: no project for job");
                 vec![]
             }
         };

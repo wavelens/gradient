@@ -28,17 +28,17 @@ impl<'a> StateApplicator<'a> {
             return Ok(());
         }
 
-        let org_map = self.org_lookup().await?;
+        let project_map = self.project_lookup().await?;
         let user_map = self.user_lookup().await?;
 
         for state_int in state_integrations.values() {
-            let org_id = org_map
-                .get(&state_int.organization)
+            let project_id = project_map
+                .get(&state_int.project)
                 .copied()
                 .ok_or_else(|| {
                     format!(
-                        "Integration '{}' references unknown organization '{}'",
-                        state_int.name, state_int.organization
+                        "Integration '{}' references unknown project '{}'",
+                        state_int.name, state_int.project
                     )
                 })?;
 
@@ -73,7 +73,7 @@ impl<'a> StateApplicator<'a> {
                     })?;
                 let fk = gradient_ci::upsert_github_installation(
                     self.db,
-                    org_id,
+                    project_id,
                     installation_id,
                     state_int.account_login.as_deref(),
                     created_by_id,
@@ -103,7 +103,7 @@ impl<'a> StateApplicator<'a> {
                 .filter(|s| !s.is_empty());
 
             let existing = integration::Entity::find()
-                .filter(integration::Column::Organization.eq(org_id))
+                .filter(integration::Column::Project.eq(project_id))
                 .filter(integration::Column::Kind.eq(kind))
                 .filter(integration::Column::Name.eq(&state_int.name))
                 .one(self.db)
@@ -128,7 +128,7 @@ impl<'a> StateApplicator<'a> {
             } else {
                 let row = integration::Model {
                     id: IntegrationId::now_v7(),
-                    organization: org_id,
+                    project: project_id,
                     name: state_int.name.clone(),
                     display_name,
                     kind,

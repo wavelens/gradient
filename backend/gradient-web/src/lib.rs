@@ -171,7 +171,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
                 .get("x-request-id")
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            // `MatchedPath` carries the route pattern (e.g. `/orgs/{organization}`)
+            // `MatchedPath` carries the route pattern (e.g. `/projects/{project}`)
             // rather than the concrete path, so spans group by route in dashboards
             // and don't blow up cardinality with concrete ids.
             let route = request
@@ -216,120 +216,120 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
 
     // ── Routes that always require a valid session ────────────────────────────
     let auth_api = Router::new()
-        .route("/orgs", get(orgs::get).put(orgs::put))
-        .route("/orgs/available", get(orgs::get_org_name_available))
+        .route("/projects", get(projects::get).put(projects::put))
+        .route(
+            "/projects/available",
+            get(projects::get_project_name_available),
+        )
         .route("/board/health", get(board_metrics::get_board_health))
         .route(
-            "/board/expensive/top-orgs",
-            get(board::get_top_orgs_by_buildtime),
+            "/board/expensive/top-projects",
+            get(board::get_top_projects_by_buildtime),
         )
         // Superuser-only: needs MUser, so it lives on the authenticated tier
         // (the optional-auth tier only provides MaybeUser).
         .route("/board/jobs/decisions", get(board::get_dispatch_decisions))
         .route(
-            "/orgs/{organization}",
-            patch(orgs::patch_organization).delete(orgs::delete_organization),
+            "/projects/{project}",
+            patch(projects::patch_project).delete(projects::delete_project),
         )
         .route(
-            "/orgs/{organization}/public",
-            post(orgs::post_organization_public).delete(orgs::delete_organization_public),
+            "/projects/{project}/public",
+            post(projects::post_project_public).delete(projects::delete_project_public),
         )
         .route(
-            "/orgs/{organization}/users",
-            post(orgs::post_organization_users)
-                .patch(orgs::patch_organization_users)
-                .delete(orgs::delete_organization_users),
+            "/projects/{project}/users",
+            post(projects::post_project_users)
+                .patch(projects::patch_project_users)
+                .delete(projects::delete_project_users),
         )
         .route(
-            "/orgs/{organization}/roles",
-            get(orgs::get_organization_roles).post(orgs::post_organization_role),
+            "/projects/{project}/roles",
+            get(projects::get_project_roles).post(projects::post_project_role),
         )
         .route(
-            "/orgs/{organization}/roles/{role_id}",
-            get(orgs::get_organization_role)
-                .patch(orgs::patch_organization_role)
-                .delete(orgs::delete_organization_role),
+            "/projects/{project}/roles/{role_id}",
+            get(projects::get_project_role)
+                .patch(projects::patch_project_role)
+                .delete(projects::delete_project_role),
         )
         .route(
-            "/orgs/{organization}/ssh",
-            get(orgs::get_organization_ssh).post(orgs::post_organization_ssh),
+            "/projects/{project}/ssh",
+            get(projects::get_project_ssh).post(projects::post_project_ssh),
         )
         .route(
-            "/orgs/{organization}/subscribe",
-            get(orgs::get_organization_subscribe),
+            "/projects/{project}/subscribe",
+            get(projects::get_project_subscribe),
         )
         .route(
-            "/orgs/{organization}/subscribe/{cache}",
-            post(orgs::post_organization_subscribe_cache)
-                .delete(orgs::delete_organization_subscribe_cache),
+            "/projects/{project}/subscribe/{cache}",
+            post(projects::post_project_subscribe_cache)
+                .delete(projects::delete_project_subscribe_cache),
         )
         .route(
-            "/orgs/{organization}/workers",
-            get(orgs::get_org_workers).post(orgs::post_org_worker),
+            "/projects/{project}/workers",
+            get(projects::get_project_workers).post(projects::post_project_worker),
         )
         .route(
-            "/orgs/{organization}/workers/{worker_id}",
-            patch(orgs::patch_org_worker).delete(orgs::delete_org_worker),
+            "/projects/{project}/workers/{worker_id}",
+            patch(projects::patch_project_worker).delete(projects::delete_project_worker),
         )
         .route(
-            "/orgs/{organization}/workers/{worker_id}/metrics",
-            get(orgs::get_org_worker_metrics),
+            "/projects/{project}/workers/{worker_id}/metrics",
+            get(projects::get_project_worker_metrics),
         )
         .route(
-            "/orgs/{organization}/workers/{worker_id}/test",
-            post(orgs::post_org_worker_test),
+            "/projects/{project}/workers/{worker_id}/test",
+            post(projects::post_project_worker_test),
         )
         .route(
-            "/orgs/{organization}/integrations",
-            get(orgs::get_integrations).put(orgs::put_integration),
+            "/projects/{project}/integrations",
+            get(projects::get_integrations).put(projects::put_integration),
         )
         .route(
-            "/orgs/{organization}/integrations/summary",
-            get(orgs::get_integration_summaries),
+            "/projects/{project}/integrations/summary",
+            get(projects::get_integration_summaries),
         )
         .route(
-            "/orgs/{organization}/integrations/{id}",
-            get(orgs::get_integration)
-                .patch(orgs::patch_integration)
-                .delete(orgs::delete_integration),
+            "/projects/{project}/integrations/{id}",
+            get(projects::get_integration)
+                .patch(projects::patch_integration)
+                .delete(projects::delete_integration),
         )
-        .route("/tasks/{organization}", put(tasks::put))
+        .route("/tasks/{project}", put(tasks::put))
         .route(
-            "/tasks/{organization}/available",
+            "/tasks/{project}/available",
             get(tasks::get_task_name_available),
         )
         .route(
-            "/tasks/{organization}/{task}",
+            "/tasks/{project}/{task}",
             patch(tasks::patch_task).delete(tasks::delete_task),
         )
         .route(
-            "/tasks/{organization}/{task}/transfer",
+            "/tasks/{project}/{task}/transfer",
             post(tasks::post_task_transfer),
         )
         .route(
-            "/tasks/{organization}/{task}/check-repository",
+            "/tasks/{project}/{task}/check-repository",
             post(tasks::post_task_check_repository),
         )
         .route(
-            "/tasks/{organization}/{task}/evaluate",
+            "/tasks/{project}/{task}/evaluate",
             post(tasks::post_task_evaluate),
         )
         .route(
-            "/tasks/{organization}/{task}/active",
+            "/tasks/{project}/{task}/active",
             post(tasks::post_task_active).delete(tasks::delete_task_active),
         )
         .nest(
-            "/tasks/{organization}/{task}/flake-inputs",
+            "/tasks/{project}/{task}/flake-inputs",
             tasks::flake_inputs::router(),
         )
         .nest(
-            "/tasks/{organization}/{task}/triggers",
+            "/tasks/{project}/{task}/triggers",
             tasks::triggers::router(),
         )
-        .nest(
-            "/tasks/{organization}/{task}/actions",
-            tasks::actions::router(),
-        )
+        .nest("/tasks/{project}/{task}/actions", tasks::actions::router())
         .route("/evals/{evaluation}", post(evals::post_evaluation))
         .route(
             "/evals/{evaluation}/builds",
@@ -456,41 +456,38 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
 
     // ── Routes that accept optional auth (public resources browsable without login) ──
     let optional_api = Router::new()
-        .route("/orgs/{organization}", get(orgs::get_organization))
+        .route("/projects/{project}", get(projects::get_project))
         .route(
-            "/orgs/{organization}/users",
-            get(orgs::get_organization_users),
+            "/projects/{project}/users",
+            get(projects::get_project_users),
         )
-        .route("/tasks/{organization}", get(tasks::get))
-        .route("/tasks/{organization}/{task}", get(tasks::get_task))
+        .route("/tasks/{project}", get(tasks::get))
+        .route("/tasks/{project}/{task}", get(tasks::get_task))
         .route(
-            "/tasks/{organization}/{task}/evaluations",
+            "/tasks/{project}/{task}/evaluations",
             get(tasks::get_task_evaluations),
         )
         .route(
-            "/tasks/{organization}/{task}/details",
+            "/tasks/{project}/{task}/details",
             get(tasks::get_task_details),
         )
         .route(
-            "/tasks/{organization}/{task}/entry-points",
+            "/tasks/{project}/{task}/entry-points",
             get(tasks::get_task_entry_points),
         )
         .route(
-            "/tasks/{organization}/{task}/metrics",
+            "/tasks/{project}/{task}/metrics",
             get(tasks::get_task_metrics),
         )
         .route(
-            "/tasks/{organization}/{task}/entry-point-metrics",
+            "/tasks/{project}/{task}/entry-point-metrics",
             get(tasks::get_entry_point_metrics),
         )
         .route(
-            "/tasks/{organization}/{task}/entry-point-downloads",
+            "/tasks/{project}/{task}/entry-point-downloads",
             get(tasks::get_entry_point_download),
         )
-        .route(
-            "/tasks/{organization}/{task}/badge",
-            get(badges::get_task_badge),
-        )
+        .route("/tasks/{project}/{task}/badge", get(badges::get_task_badge))
         .route("/evals/{evaluation}", get(evals::get_evaluation))
         .route(
             "/evals/{evaluation}/messages",
@@ -567,11 +564,11 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/metrics/catalog", get(metrics_query::get_metrics_catalog))
         .route("/metrics/query", get(metrics_query::get_metrics_query))
         .route(
-            "/metrics/tasks/{organization}/{task}/evaluations",
+            "/metrics/tasks/{project}/{task}/evaluations",
             get(tasks::get_task_metrics),
         )
         .route(
-            "/metrics/tasks/{organization}/{task}/entry-point",
+            "/metrics/tasks/{project}/{task}/entry-point",
             get(tasks::get_entry_point_metrics),
         )
         .route("/board/jobs/dispatched", get(board::get_dispatched_jobs))
@@ -603,7 +600,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/board/workers/load", get(board::get_board_worker_load))
         .route("/board/live", get(board::board_live_ws))
         .route("/board/cache/live", get(live::cache_live_ws))
-        .route("/tasks/{organization}/{task}/live", get(live::task_live_ws))
+        .route("/tasks/{project}/{task}/live", get(live::task_live_ws))
         .route("/evals/{evaluation}/live", get(live::evaluation_live_ws))
         .route("/builds/{build}/live", get(live::build_live_ws))
         .route_layer(middleware::from_fn_with_state(
@@ -637,7 +634,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
     let webhook_routes = Router::new()
         .route("/hooks/github", post(forge_hooks::github_app_webhook))
         .route(
-            "/hooks/{forge}/{org}/{integration_name}",
+            "/hooks/{forge}/{project}/{integration_name}",
             post(forge_hooks::forge_webhook),
         )
         .route_layer(GovernorLayer::new(rl_per_second(1, 30)?));
@@ -648,7 +645,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .merge(auth_sensitive)
         .merge(webhook_routes)
         // ── Fully public (no auth required) ─────────────────────────────────
-        .route("/orgs/public", get(orgs::get_public_organizations))
+        .route("/projects/public", get(projects::get_public_projects))
         .route("/caches/public", get(caches::get_public_caches))
         .route("/auth/logout", post(auth::post_logout))
         .route("/health", get(get_health))

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Integration {
     pub id: String,
-    pub organization: String,
+    pub project: String,
     pub name: String,
     pub display_name: String,
     pub kind: String,
@@ -49,13 +49,13 @@ pub struct PatchIntegrationRequest {
 pub struct IntegrationsApi<'a>(pub(crate) &'a Client);
 
 impl IntegrationsApi<'_> {
-    pub async fn list(&self, org: &str) -> Result<Vec<Integration>, ConnectorError> {
+    pub async fn list(&self, project: &str) -> Result<Vec<Integration>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("orgs/{org}/integrations"),
+            &format!("projects/{project}/integrations"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -63,7 +63,7 @@ impl IntegrationsApi<'_> {
 
     pub async fn create(
         &self,
-        org: &str,
+        project: &str,
         body: MakeIntegrationRequest,
     ) -> Result<Integration, ConnectorError> {
         let req = http::request(
@@ -71,32 +71,32 @@ impl IntegrationsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PUT,
-            &format!("orgs/{org}/integrations"),
+            &format!("projects/{project}/integrations"),
             true,
         )?
         .json(&body);
         http::decode(req.send().await?).await
     }
 
-    pub async fn summary(&self, org: &str) -> Result<Vec<IntegrationSummary>, ConnectorError> {
+    pub async fn summary(&self, project: &str) -> Result<Vec<IntegrationSummary>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("orgs/{org}/integrations/summary"),
+            &format!("projects/{project}/integrations/summary"),
             true,
         )?;
         http::decode(req.send().await?).await
     }
 
-    pub async fn get(&self, org: &str, id: &str) -> Result<Integration, ConnectorError> {
+    pub async fn get(&self, project: &str, id: &str) -> Result<Integration, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("orgs/{org}/integrations/{id}"),
+            &format!("projects/{project}/integrations/{id}"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -104,7 +104,7 @@ impl IntegrationsApi<'_> {
 
     pub async fn update(
         &self,
-        org: &str,
+        project: &str,
         id: &str,
         body: PatchIntegrationRequest,
     ) -> Result<Integration, ConnectorError> {
@@ -113,20 +113,20 @@ impl IntegrationsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("orgs/{org}/integrations/{id}"),
+            &format!("projects/{project}/integrations/{id}"),
             true,
         )?
         .json(&body);
         http::decode(req.send().await?).await
     }
 
-    pub async fn delete_one(&self, org: &str, id: &str) -> Result<bool, ConnectorError> {
+    pub async fn delete_one(&self, project: &str, id: &str) -> Result<bool, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("orgs/{org}/integrations/{id}"),
+            &format!("projects/{project}/integrations/{id}"),
             true,
         )?;
         http::decode(req.send().await?).await

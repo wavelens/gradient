@@ -14,7 +14,7 @@ use chrono::Utc;
 use gradient_db::permissions::PermissionMask;
 use gradient_entity::ids::*;
 use gradient_entity::role;
-use gradient_test_support::fixtures::{org_id, user, user_id};
+use gradient_test_support::fixtures::{project_id, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use gradient_types::{ConcurrencyPolicy, SessionId};
@@ -31,12 +31,10 @@ fn write_role_row() -> role::Model {
     }
 }
 
-fn membership() -> gradient_entity::organization_user::Model {
-    gradient_entity::organization_user::Model {
-        id: OrganizationUserId::new(
-            Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap(),
-        ),
-        organization: org_id(),
+fn membership() -> gradient_entity::project_user::Model {
+    gradient_entity::project_user::Model {
+        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
+        project: project_id(),
         user: user_id(),
         role: BASE_ROLE_WRITE_ID,
     }
@@ -49,8 +47,8 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-fn with_org_access(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![gradient_test_support::fixtures::org()]])
+fn with_project_access(db: MockDatabase) -> MockDatabase {
+    db.append_query_results([vec![gradient_test_support::fixtures::project()]])
         .append_query_results([vec![membership()]])
         .append_query_results([vec![write_role_row()]])
 }
@@ -58,7 +56,7 @@ fn with_org_access(db: MockDatabase) -> MockDatabase {
 fn task_row(id: TaskId) -> gradient_entity::task::Model {
     gradient_entity::task::Model {
         id,
-        organization: org_id(),
+        project: project_id(),
         name: "build-request".into(),
         active: true,
         display_name: "Build Requests".into(),
@@ -116,7 +114,7 @@ fn eval_row(task: TaskId, commit: CommitId) -> gradient_entity::evaluation::Mode
 }
 
 fn source_url() -> String {
-    "/api/v1/build-requests/source?organization=test-org".to_string()
+    "/api/v1/build-requests/source?project=test-project".to_string()
 }
 
 fn run<F: std::future::Future>(fut: F) -> F::Output {
@@ -139,7 +137,7 @@ fn source_upload_creates_queued_eval() {
         let eval_model = eval_row(task_id, commit_model.id);
         let cp_row = cached_path_row("00000000000000000000000000000000");
 
-        let db = with_org_access(with_auth(
+        let db = with_project_access(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -150,8 +148,8 @@ fn source_upload_creates_queued_eval() {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // queue_signature_placeholders → org caches (empty)
-        .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
+        // queue_signature_placeholders → project caches (empty)
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         // ensure_build_request_task → SELECT (None) then INSERT
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![task_model.clone()]])
@@ -171,8 +169,8 @@ fn source_upload_creates_queued_eval() {
             last_insert_id: 0,
             rows_affected: 1,
         }])
-        // resolve_org_cache_name → org-cache link lookup (none → cache=null)
-        .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()]);
+        // resolve_project_cache_name → project-cache link lookup (none → cache=null)
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
 
@@ -204,7 +202,7 @@ fn source_upload_missing_nar_is_400() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_org_access(with_auth(
+        let db = with_project_access(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use super::organization_cache::CacheSubscriptionMode;
+use super::project_cache::CacheSubscriptionMode;
 use crate::ids::{CacheId, CacheUpstreamId};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};

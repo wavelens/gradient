@@ -678,7 +678,7 @@ Derive(
 **File:** `backend/web/src/endpoints/badges.rs`  
 **Run:** `cargo test -p web`
 
-Tests for the SVG badge renderer used by `GET /tasks/{org}/{task}/badge`.
+Tests for the SVG badge renderer used by `GET /tasks/{project}/{task}/badge`.
 
 | Test | What it checks |
 |------|---------------|
@@ -942,7 +942,7 @@ contribution, the lazy `ScoringCtx` providers, and the composed `default` /
 | `ram_overshoot_is_negative_and_scales_with_overshoot` / `higher_oom_rate_is_more_negative_for_same_overshoot` | `ResourceFitRule`: RAM overshoot penalty scales with overshoot and past OOM rate |
 | `cpu_heavy_on_strong_worker_is_positive_and_capped` / `no_samples_is_zero` / `no_metrics_is_zero` | `ResourceFitRule`: CPU-heavy bonus capped; no-op without history samples or worker metrics |
 | `local_worker_with_full_cache_gets_full_bonus` / `more_missing_paths_lowers_bonus_floored_at_zero` / `unknown_missing_count_is_zero` / `not_prefer_local_is_zero_regardless_of_missing_count` | `PreferLocalBuildRule`: full bonus on cached local worker, decays to a floor of 0, no-op without `preferLocalBuild` |
-| `busier_org_scores_more_negative` / `zero_share_and_none_score_zero` / `fair_share_overrides_wait_gradient` | `FairShareRule` (currently disabled in policy): busier org penalised; fair-share dominates the wait-time gradient |
+| `busier_project_scores_more_negative` / `zero_share_and_none_score_zero` / `fair_share_overrides_wait_gradient` | `FairShareRule` (currently disabled in policy): busier project penalised; fair-share dominates the wait-time gradient |
 | `network_rule_prefers_fast_net_for_fod` / `network_rule_zero_for_non_fod` / `network_rule_zero_without_metric` | `NetworkAffinityRule`: FODs prefer faster-network workers; no-op for non-FOD or missing metric |
 | `disk_rule_prefers_fast_disk_for_heavy_build` / `disk_rule_zero_for_light_build` / `disk_rule_zero_without_history` | `DiskAffinityRule`: disk-heavy jobs prefer faster-disk workers; no-op below threshold or without history |
 | `resource_aware_prefers_fast_net_for_fod` | Composed `resource-aware` policy steers a FOD to the faster-network worker |
@@ -1270,7 +1270,7 @@ Tests use `RecordingJobReporter` - no real git server or WebSocket needed.
 |------|---------------|
 | `format_public_key_strips_https` | `https://host` → hostname only |
 | `format_public_key_strips_path` | `https://host/api/v1` → host only (path stripped) |
-| `format_public_key_format` | Output is `"{pubkey} {hostname}-{orgname}"` |
+| `format_public_key_format` | Output is `"{pubkey} {hostname}-{projectname}"` |
 
 ---
 
@@ -1424,7 +1424,7 @@ call the pending job count is asserted directly on the scheduler.
        └─ for each eval (if not already in scheduler):
                ├─ 2. ECommit::find_by_id(commit_id).one()          Q
                │
-               └─ 3. organization_id_for_eval:
+               └─ 3. project_id_for_eval:
                        ├─ if eval.task = Some(pid):
                        │     ETask::find_by_id(pid).one()       Q
                        └─ else (direct build):
@@ -1443,7 +1443,7 @@ call the pending job count is asserted directly on the scheduler.
        └─ for each build (if not already in scheduler):
                ├─ 2. EDerivation::find_by_id(drv_id).one()         Q
                ├─ 3. EEvaluation::find_by_id(eval_id).one()        Q
-               └─ 4. organization_id_for_eval (see above)          Q
+               └─ 4. project_id_for_eval (see above)          Q
 ```
 
 ### Group F: `dispatch_queued_evals`
@@ -1453,7 +1453,7 @@ call the pending job count is asserted directly on the scheduler.
 | `dispatch_queued_eval_enqueues_job` | One Queued eval with valid commit and task | `scheduler.pending_job_count() == 1` after dispatch |
 | `dispatch_queued_eval_skips_already_enqueued` | Same eval dispatched twice | Second call is a no-op; job count stays at 1 |
 | `dispatch_queued_eval_skips_missing_commit` | Commit row not found in DB | Eval is skipped; no job enqueued |
-| `dispatch_queued_eval_via_direct_build_org` | Eval with `task: None` (direct build) | Org ID looked up via `DirectBuild`; job enqueued |
+| `dispatch_queued_eval_via_direct_build_project` | Eval with `task: None` (direct build) | Project ID looked up via `DirectBuild`; job enqueued |
 
 ### Group F: `dispatch_ready_builds`
 
@@ -1649,7 +1649,7 @@ captured by `RecordingWebhookClient` (returned alongside the state by
          │
          ├─ update_build_status(Completed)
          │     spawns ──► fire_build_webhook(Completed)
-         │                    ├─ get_build_org_id → eval → task → org
+         │                    ├─ get_build_project_id → eval → task → project
          │                    ├─ find_by_id(derivation) [best-effort]
          │                    └─ fire_webhooks → decrypt → sign → deliver
          │                                                  ↓
@@ -1657,7 +1657,7 @@ captured by `RecordingWebhookClient` (returned alongside the state by
          │
          └─ update_evaluation_status(Completed)
                spawns ──► fire_evaluation_webhook(Completed)
-                              ├─ eval.task = Some → find task → org
+                              ├─ eval.task = Some → find task → project
                               └─ fire_webhooks → subscription check → deliver
 ```
 
@@ -1731,7 +1731,7 @@ scheduler persistence + RAM routing -> board read endpoints -> frontend panel):
   `eval_metric_expr_known_keys_have_units` / `eval_metric_expr_unknown_is_none`
   cover the closed metric allow-list (so `metric` can never inject SQL);
   `flake_output_node_maps_to_graph_node` maps a `flake_output_node::Model` to the
-  `FlakeGraphNode` DTO field-for-field. The org-scoping SQL of
+  `FlakeGraphNode` DTO field-for-field. The project-scoping SQL of
   `get_expensive_evals_by_resource` and the `EvalAccessContext` auth path of
   `get_eval_flake_graph` have no local DB harness and are covered by E2E CI.
 - **Frontend `board.service`** (`board.service.spec.ts`) -
@@ -1764,8 +1764,8 @@ authentication flow that workers use to connect to the server:
 
 **`gradient-building`** - API-based worker registration:
 1. Worker boots and generates a persistent UUID
-2. User creates an organization via CLI
-3. Worker's UUID is registered with the org via `POST /api/v1/orgs/{org}/workers`
+2. User creates a project via CLI
+3. Worker's UUID is registered with the project via `POST /api/v1/projects/{project}/workers`
 4. **Negative sub-test**: Worker restarts WITHOUT a peers file → server challenges,
    worker has no tokens → `Reject(401)`. Test asserts rejection in journalctl.
 5. **Positive sub-test**: Peers file is written with `{peer_id}:{token}`, worker
@@ -1776,7 +1776,7 @@ authentication flow that workers use to connect to the server:
 **`gradient-cache`** - Declarative state-managed worker registration:
 1. Worker UUID is pre-seeded via `systemd.tmpfiles.rules` to a known value
 2. Server state config registers the worker with a shared token (hashed and stored)
-3. Worker's `peersFile` contains `*:{token}` (wildcard matches any org UUID)
+3. Worker's `peersFile` contains `*:{token}` (wildcard matches any project UUID)
 4. On boot, worker authenticates via challenge-response with the pre-shared token
 5. Test asserts `"handshake successful"` in journalctl before proceeding to builds
 6. **Phase 9 (`gradient cache upload`, regression #509)**: adds a unique leaf path
@@ -1787,9 +1787,9 @@ authentication flow that workers use to connect to the server:
    would fail its signature check, so the realize passing proves both fixes.
 
 **`gradient-api`** - Worker registration CRUD:
-- Tests `POST /api/v1/orgs/{org}/workers` returns a valid 64-character base64 token
-- Tests `GET /api/v1/orgs/{org}/workers` lists the registered worker
-- Tests `DELETE /api/v1/orgs/{org}/workers/{id}` removes the registration
+- Tests `POST /api/v1/projects/{project}/workers` returns a valid 64-character base64 token
+- Tests `GET /api/v1/projects/{project}/workers` lists the registered worker
+- Tests `DELETE /api/v1/projects/{project}/workers/{id}` removes the registration
 
 **`gradient-eval`** - Cursor-driven flake discovery/resolution (single node, drives
 the `--eval-worker` subprocess directly over its line-delimited JSON protocol against

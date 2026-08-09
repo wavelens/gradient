@@ -25,8 +25,8 @@ use uuid::Uuid;
 fn cache_id() -> CacheId {
     CacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap())
 }
-fn org_id() -> OrganizationId {
-    OrganizationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap())
+fn project_id() -> ProjectId {
+    ProjectId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap())
 }
 fn deriv_id() -> DerivationId {
     DerivationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000003").unwrap())
@@ -81,7 +81,7 @@ async fn narinfo_served_from_db_inner() {
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
-        created_by: UserId::new(org_id().into_inner()),
+        created_by: UserId::new(project_id().into_inner()),
         created_at: test_date(),
         ..Default::default()
     };
@@ -130,7 +130,7 @@ async fn narinfo_served_from_db_inner() {
 
     // Query order driven by CacheContext::load + get_nar_by_hash. Derivations
     // are global, so access is gated on the cached_path_signature row for this
-    // cache, not a derivation->org subscription check:
+    // cache, not a derivation->project subscription check:
     //   0. ECache::find (by name)              → cache_row
     //   1. EDerivationOutput::find (by hash)   → drv_output_row
     //   2. ECachedPath::find (by hash)         → cached_path_row
@@ -164,7 +164,7 @@ async fn narinfo_served_from_db_inner() {
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -239,7 +239,7 @@ async fn narinfo_unsigned_inner() {
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
-        created_by: UserId::new(org_id().into_inner()),
+        created_by: UserId::new(project_id().into_inner()),
         created_at: test_date(),
         ..Default::default()
     };
@@ -307,7 +307,7 @@ async fn narinfo_unsigned_inner() {
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,

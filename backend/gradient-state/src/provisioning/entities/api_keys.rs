@@ -22,7 +22,7 @@ impl<'a> StateApplicator<'a> {
         state_api_keys: &HashMap<String, StateApiKey>,
     ) -> Result<(), DynError> {
         let user_lookup = self.user_lookup().await?;
-        let org_lookup = self.org_lookup().await?;
+        let project_lookup = self.project_lookup().await?;
         let now = now();
 
         for state_api_key in state_api_keys.values() {
@@ -57,11 +57,11 @@ impl<'a> StateApplicator<'a> {
             }
             let mask = gradient_db::permissions::mask_from(&perms);
 
-            let pinned_org = match &state_api_key.organization {
+            let pinned_project = match &state_api_key.project {
                 None => None,
-                Some(name) => Some(org_lookup.get(name).copied().ok_or_else(|| {
+                Some(name) => Some(project_lookup.get(name).copied().ok_or_else(|| {
                     format!(
-                        "Organization '{}' referenced by API key '{}' not found",
+                        "Project '{}' referenced by API key '{}' not found",
                         name, state_api_key.name
                     )
                 })?),
@@ -82,7 +82,7 @@ impl<'a> StateApplicator<'a> {
                 api_key.key = Set(key_hash);
                 api_key.managed = Set(true);
                 api_key.permission = Set(mask);
-                api_key.organization = Set(pinned_org);
+                api_key.project = Set(pinned_project);
                 api_key.update(self.db).await?;
                 tracing::info!(name = %state_api_key.name, "Updated managed API key");
             } else {
@@ -95,7 +95,7 @@ impl<'a> StateApplicator<'a> {
                     created_at: now,
                     managed: true,
                     permission: mask,
-                    organization: pinned_org,
+                    project: pinned_project,
                     ..Default::default()
                 }
                 .into_active_model();

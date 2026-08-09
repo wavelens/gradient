@@ -9,7 +9,7 @@
 //! A worker operates in one of two modes:
 //!
 //! - [`PeerAuth::Open`] - no peers have registered this worker; job candidates
-//!   are not filtered by peer/org.
+//!   are not filtered by peer/project.
 //! - [`PeerAuth::Restricted`] - one or more peer UUIDs have registered this
 //!   worker; only jobs belonging to those peers are offered.
 //!
@@ -20,7 +20,7 @@
 
 use std::collections::HashSet;
 
-use gradient_types::ids::OrganizationId;
+use gradient_types::ids::ProjectId;
 
 /// Peer authorization mode for a connected worker.
 #[derive(Debug, Clone)]
@@ -28,7 +28,7 @@ pub enum PeerAuth {
     /// No peers registered - worker accepts jobs from all peers.
     Open,
     /// One or more peers registered - worker only sees jobs from these peers.
-    Restricted(HashSet<OrganizationId>),
+    Restricted(HashSet<ProjectId>),
 }
 
 impl PeerAuth {
@@ -36,7 +36,7 @@ impl PeerAuth {
     ///
     /// An empty set becomes [`PeerAuth::Open`]; a non-empty set becomes
     /// [`PeerAuth::Restricted`].
-    pub fn from_peers(peers: HashSet<OrganizationId>) -> Self {
+    pub fn from_peers(peers: HashSet<ProjectId>) -> Self {
         if peers.is_empty() {
             Self::Open
         } else {
@@ -51,7 +51,7 @@ impl PeerAuth {
 
     /// Returns `true` when `id` is in the restricted set, or when the worker
     /// is in open mode (all peers are implicitly authorized).
-    pub fn contains(&self, id: &OrganizationId) -> bool {
+    pub fn contains(&self, id: &ProjectId) -> bool {
         match self {
             Self::Open => true,
             Self::Restricted(set) => set.contains(id),
@@ -60,7 +60,7 @@ impl PeerAuth {
 
     /// Returns the inner peer set for filtering job candidates, or `None` when
     /// the worker is in open mode (no filtering needed).
-    pub fn as_filter(&self) -> Option<&HashSet<OrganizationId>> {
+    pub fn as_filter(&self) -> Option<&HashSet<ProjectId>> {
         match self {
             Self::Open => None,
             Self::Restricted(set) => Some(set),
@@ -82,7 +82,7 @@ mod tests {
 
     #[test]
     fn non_empty_set_yields_restricted() {
-        let peer = OrganizationId::now_v7();
+        let peer = ProjectId::now_v7();
         assert!(matches!(
             PeerAuth::from_peers(HashSet::from([peer])),
             PeerAuth::Restricted(_)
@@ -92,20 +92,20 @@ mod tests {
     #[test]
     fn open_contains_any_peer() {
         let auth = PeerAuth::Open;
-        assert!(auth.contains(&OrganizationId::now_v7()));
+        assert!(auth.contains(&ProjectId::now_v7()));
     }
 
     #[test]
     fn restricted_contains_registered_peer() {
-        let peer = OrganizationId::now_v7();
+        let peer = ProjectId::now_v7();
         let auth = PeerAuth::Restricted(HashSet::from([peer]));
         assert!(auth.contains(&peer));
     }
 
     #[test]
     fn restricted_does_not_contain_other_peer() {
-        let peer = OrganizationId::now_v7();
-        let other = OrganizationId::now_v7();
+        let peer = ProjectId::now_v7();
+        let other = ProjectId::now_v7();
         let auth = PeerAuth::Restricted(HashSet::from([peer]));
         assert!(!auth.contains(&other));
     }
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn restricted_as_filter_is_some() {
-        let peer = OrganizationId::now_v7();
+        let peer = ProjectId::now_v7();
         let auth = PeerAuth::Restricted(HashSet::from([peer]));
         assert!(auth.as_filter().is_some());
     }

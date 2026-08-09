@@ -1,12 +1,12 @@
 # Declarative State
 
-`services.gradient.state` lets you declare users, organizations, tasks, caches, and API keys in Nix. Gradient reconciles this state on every startup.
+`services.gradient.state` lets you declare users, projects, tasks, caches, and API keys in Nix. Gradient reconciles this state on every startup.
 
 When `settings.deleteState = true` (default), entities that are removed from `state` are also deleted from the database. Set it to `false` to make them editable by users in the frontend instead.
 
 ## Build-time validation
 
-`services.gradient.validateState` (default `true`) checks the generated state at **build time** by running the server binary's `--validate-state` over it. Schema and cross-reference errors - unknown organizations or users, reporter triggers pointing at an undeclared inbound integration, duplicate org ids, and so on - then fail the Nix build instead of the server on first start. No database is touched and no secret files are required, so it is safe to run in CI. Set it to `false` to skip the check.
+`services.gradient.validateState` (default `true`) checks the generated state at **build time** by running the server binary's `--validate-state` over it. Schema and cross-reference errors - unknown projects or users, reporter triggers pointing at an undeclared inbound integration, duplicate project ids, and so on - then fail the Nix build instead of the server on first start. No database is touched and no secret files are required, so it is safe to run in CI. Set it to `false` to skip the check.
 
 To validate a state file by hand:
 
@@ -16,7 +16,7 @@ gradient-server --state-file ./gradient-state.json --validate-state
 
 ## State-Managed Resources
 
-Users, organizations, and caches created by the NixOS module configuration carry `managed = true`. The API rejects mutations and deletions of these records with `403 Forbidden`. This allows declarative configuration to be the source of truth without Gradient's UI overwriting it.
+Users, projects, and caches created by the NixOS module configuration carry `managed = true`. The API rejects mutations and deletions of these records with `403 Forbidden`. This allows declarative configuration to be the source of truth without Gradient's UI overwriting it.
 
 ### How the UI surfaces this
 
@@ -27,10 +27,10 @@ Managed-resource and read-only access show up consistently across the dashboard:
   by Nix - edit via declarative config") so you can see what the
   resource looks like and what actions exist, you just can't trigger
   them here. Update the Nix config instead.
-- **Read-only access** (your organization role doesn't grant write
+- **Read-only access** (your project role doesn't grant write
   permission) shows form fields as disabled with a "You have read-only
   access" tooltip; write buttons are **hidden entirely** - they don't
-  exist for you. Contact an organization admin to make changes.
+  exist for you. Contact a project admin to make changes.
 
 The pages themselves are always navigable. A state-managed cache's
 upstreams subpage, for example, is reachable so you can see what
@@ -106,10 +106,10 @@ supported way to **bootstrap an OIDC superuser**: declare the user with
 | `email_verified` | `true` | Mark the email as verified at provision time |
 | `superuser` | `false` | Grant instance-wide admin |
 
-## Organizations
+## Projects
 
 ```nix
-services.gradient.state.organizations = {
+services.gradient.state.projects = {
   acme = {
     display_name     = "ACME Corp";
     description      = "Internal builds for ACME";
@@ -120,21 +120,21 @@ services.gradient.state.organizations = {
 };
 ```
 
-The SSH private key is the organization's identity key used to clone Git repositories over SSH. Generate one with:
+The SSH private key is the project's identity key used to clone Git repositories over SSH. Generate one with:
 
 ```sh
 ssh-keygen -t ed25519 -N "" -f /run/secrets/acme-ssh-key
 # Add the public key (.pub) to your Git host as a deploy key
 ```
 
-To pin the organization UUID for a fully declarative deployment (so a worker's `peersFile` can reference it before the server first starts), generate one with `uuidgen` and set it as `id`:
+To pin the project UUID for a fully declarative deployment (so a worker's `peersFile` can reference it before the server first starts), generate one with `uuidgen` and set it as `id`:
 
 ```sh
 uuidgen   # e.g. 018f6f3a-0000-7000-8000-000000000001
 ```
 
 ```nix
-services.gradient.state.organizations.acme = {
+services.gradient.state.projects.acme = {
   id               = "018f6f3a-0000-7000-8000-000000000001";
   display_name     = "ACME Corp";
   private_key_file = "/run/secrets/acme-ssh-key";
@@ -142,32 +142,32 @@ services.gradient.state.organizations.acme = {
 };
 ```
 
-### Organization options
+### Project options
 
 | Option | Default | Description |
 |---|---|---|
-| `name` | `<attrset key>` | Unique organization name |
+| `name` | `<attrset key>` | Unique project name |
 | `display_name` | `<name>` | Display name |
-| `id` | `null` | Explicit organization UUID, applied on create only. Pin it to reference the org in a worker's `peersFile` (`<id>:<token>`) without first looking up the server-generated id. Immutable - a value conflicting with an existing org is rejected |
+| `id` | `null` | Explicit project UUID, applied on create only. Pin it to reference the project in a worker's `peersFile` (`<id>:<token>`) without first looking up the server-generated id. Immutable - a value conflicting with an existing project is rejected |
 | `description` | `null` | Optional description |
 | `private_key_file` | - | Path to SSH private key (required) |
 | `public` | `false` | Visible to all users |
 | `created_by` | - | Username of creator (required) |
-| `members` | `[]` | Per-org membership list. When non-empty, the list is authoritative (drift removes unlisted memberships, the implicit creator-Admin step is skipped). Empty preserves the legacy behavior. Members referencing not-yet-registered users are skipped silently and backfilled on registration / OIDC first-login |
+| `members` | `[]` | Per-project membership list. When non-empty, the list is authoritative (drift removes unlisted memberships, the implicit creator-Admin step is skipped). Empty preserves the legacy behavior. Members referencing not-yet-registered users are skipped silently and backfilled on registration / OIDC first-login |
 
-### Organization members
+### Project members
 
-Declare per-org membership inline:
+Declare per-project membership inline:
 
 ```nix
-services.gradient.state.organizations.acme = {
+services.gradient.state.projects.acme = {
   display_name     = "ACME Corp";
   private_key_file = "/run/secrets/acme-ssh-key";
   created_by       = "alice";
   members = [
     { user = "alice"; role = "Admin"; }
     { user = "bob";   role = "Write"; }
-    { user = "carol"; role = "releaser"; }   # custom org role from state.roles
+    { user = "carol"; role = "releaser"; }   # custom project role from state.roles
   ];
 };
 ```
@@ -176,7 +176,7 @@ When `members` is **empty** (the default), the `created_by` user is added as Adm
 
 When `members` is **non-empty**, the list is the source of truth:
 
-- Built-in roles (`Admin`, `Write`, `View`) and state-managed custom org roles are both accepted.
+- Built-in roles (`Admin`, `Write`, `View`) and state-managed custom project roles are both accepted.
 - Members referencing **unknown users are skipped silently** at provision time. The membership is applied automatically the instant that user registers (`POST /user`) or first-logs-in via OIDC.
 - Memberships no longer in the list are removed on next state apply (drift reconciliation, mirroring cache members).
 - The implicit "creator becomes Admin" rule does **not** fire - list yourself explicitly if you want it.
@@ -184,14 +184,14 @@ When `members` is **non-empty**, the list is the source of truth:
 | Option | Default | Description |
 |---|---|---|
 | `members.*.user` | - | Username (required) |
-| `members.*.role` | - | `Admin`/`Write`/`View` or a custom org role declared in `state.roles` for the same organization (required) |
+| `members.*.role` | - | `Admin`/`Write`/`View` or a custom project role declared in `state.roles` for the same project (required) |
 
 ## Tasks
 
 ```nix
 services.gradient.state.tasks = {
   web-app = {
-    organization         = "acme";
+    project         = "acme";
     display_name         = "Web App";
     description          = "Production web application";
     repository           = "git@github.com:acme/web-app.git";
@@ -209,7 +209,7 @@ services.gradient.state.tasks = {
 | Option | Default | Description |
 |---|---|---|
 | `name` | `<attrset key>` | Unique task name |
-| `organization` | - | Owning organization (required) |
+| `project` | - | Owning project (required) |
 | `display_name` | `<name>` | Display name |
 | `description` | `null` | Optional description |
 | `repository` | - | Git URL (required) |
@@ -221,7 +221,7 @@ services.gradient.state.tasks = {
 | `outbound_integration` | `null` | Name of an `outbound` integration that receives CI status reports |
 | `created_by` | - | Username of creator (required) |
 
-`outbound_integration` must reference an entry in `services.gradient.state.integrations` belonging to the same organization. See [Integrations](#integrations) below.
+`outbound_integration` must reference an entry in `services.gradient.state.integrations` belonging to the same project. See [Integrations](#integrations) below.
 
 To route inbound forge webhooks to a task, declare one or more `reporter_push` or `reporter_pull_request` triggers referencing the integration. See the [Triggers](#triggers) section below.
 
@@ -232,7 +232,7 @@ Forge integrations either receive push webhooks from the forge (`inbound`) or pu
 ```nix
 services.gradient.state.integrations = {
   acme-prod-inbound = {
-    organization = "acme";
+    project = "acme";
     kind         = "inbound";
     forge_type   = "gitea";          # gitea | forgejo | gitlab | github
     secret_file  = "/run/secrets/acme-inbound-hmac";
@@ -240,7 +240,7 @@ services.gradient.state.integrations = {
   };
 
   acme-status-reports = {
-    organization      = "acme";
+    project      = "acme";
     kind              = "outbound";
     forge_type        = "gitea";
     endpoint_url      = "https://gitea.example.com";
@@ -249,7 +249,7 @@ services.gradient.state.integrations = {
   };
 
   acme-github-out = {
-    organization    = "acme";
+    project    = "acme";
     kind            = "outbound";
     forge_type      = "github";
     installation_id = 12345678;       # required for github, no secret/token
@@ -263,9 +263,9 @@ services.gradient.state.integrations = {
 
 | Option | Default | Description |
 |---|---|---|
-| `name` | `<attrset key>` | Unique within `(organization, kind)` |
+| `name` | `<attrset key>` | Unique within `(project, kind)` |
 | `display_name` | `null` (= `name`) | Human-readable label |
-| `organization` | - | Owning organization (required) |
+| `project` | - | Owning project (required) |
 | `kind` | - | `inbound` (forge → Gradient) or `outbound` (Gradient → forge) |
 | `forge_type` | - | `gitea`, `forgejo`, `gitlab`, or `github` |
 | `secret_file` | `null` | HMAC secret for inbound webhooks. Encrypted into the DB at startup |
@@ -275,7 +275,7 @@ services.gradient.state.integrations = {
 | `account_login` | `null` | GitHub account login for the installation; naming metadata only |
 | `created_by` | - | Username of creator (required) |
 
-A single inbound integration row serves Gitea, Forgejo and GitLab simultaneously - the actual forge is selected by the `/hooks/{forge}/{org}` URL path. The `forge_type` field is display metadata for inbound entries. A `github` entry instead carries an `installation_id`; the same installation is also auto-created when the GitHub App is installed on the org, so a declared row reconciles additively.
+A single inbound integration row serves Gitea, Forgejo and GitLab simultaneously - the actual forge is selected by the `/hooks/{forge}/{project}` URL path. The `forge_type` field is display metadata for inbound entries. A `github` entry instead carries an `installation_id`; the same installation is also auto-created when the GitHub App is installed on the project, so a declared row reconciles additively.
 
 ## Caches
 
@@ -289,7 +289,7 @@ services.gradient.state.caches = {
     max_storage_gb   = 0;    # 0 = unlimited
     public           = false;
     signing_key_file = "/run/secrets/cache-signing-key";
-    organizations    = [ "acme" ];
+    projects    = [ "acme" ];
     upstreams = [
       {
         type        = "external";
@@ -339,10 +339,10 @@ Without this, startup fails with
 | `active` | `true` | Set false to disable serving without deleting |
 | `priority` | `10` | Higher wins when multiple caches contain the same path |
 | `local_priority` | `null` | Alternate priority returned in `nix-cache-info` for clients whose IP matches `services.gradient.settings.localIps`. Null or 0 disables the override. |
-| `max_storage_gb` | `0` | Max storage for this cache in GB. When all writable caches for an org have less than 10 MiB headroom, new evaluations park in `Waiting`. 0 = unlimited. |
+| `max_storage_gb` | `0` | Max storage for this cache in GB. When all writable caches for a project have less than 10 MiB headroom, new evaluations park in `Waiting`. 0 = unlimited. |
 | `signing_key_file` | - | Path to the (de-prefixed) base64 Ed25519 signing key (required) |
-| `organizations` | `[]` | Organization names allowed to use this cache |
-| `public` | `false` | Available to every organization |
+| `projects` | `[]` | Project names allowed to use this cache |
+| `public` | `false` | Available to every project |
 | `upstreams` | `[ cache.nixos.org ]` | Substituters consulted on cache miss. See below |
 | `created_by` | - | Username of creator (required) |
 
@@ -368,14 +368,14 @@ can attribute traffic and build allowlists or per-client metrics around it.
 
 ## Roles
 
-State files can declare custom org-scoped roles via the `roles` attribute.
-Each role targets one organization and grants a fixed permission set:
+State files can declare custom project-scoped roles via the `roles` attribute.
+Each role targets one project and grants a fixed permission set:
 
 ```nix
 services.gradient.state.roles = {
   releaser = {
-    organization = "acme";
-    permissions  = [ "viewOrg" "triggerEvaluation" ];
+    project = "acme";
+    permissions  = [ "viewProject" "triggerEvaluation" ];
   };
 };
 ```
@@ -385,14 +385,14 @@ Managed roles are immutable through the role-management API: `PATCH` and
 unmarks the role (or deletes it, when `settings.deleteState = true`).
 
 Role names must not collide with the built-in roles (`Admin`, `Write`,
-`View`) or with another state-managed role in the same organization -
+`View`) or with another state-managed role in the same project -
 startup fails on collision.
 
 ### Mapping OIDC groups to roles
 
 A role may list `oidc_group` values. On each OIDC login, a user whose
 `groups` claim contains any listed group is granted that role in the role's
-organization (creating the membership if missing, upgrading the role if it
+project (creating the membership if missing, upgrading the role if it
 differs). Grants are **additive**: OIDC groups only ever add or upgrade a
 membership, never remove one - removal stays with explicit `members` lists
 and the API. This targets state-managed custom roles only; to grant
@@ -402,8 +402,8 @@ and an `oidc_group`. Requires the `groups` scope on the OIDC client (add
 
 ```nix
 services.gradient.state.roles.platform-admin = {
-  organization = "acme";
-  permissions  = [ "viewOrg" "triggerEvaluation" ];
+  project = "acme";
+  permissions  = [ "viewProject" "triggerEvaluation" ];
   oidc_group   = [ "platform-team" "ops" ];
 };
 ```
@@ -412,14 +412,14 @@ services.gradient.state.roles.platform-admin = {
 
 A role may list `scim_group` values: IdP group names provisioned via SCIM. When
 the IdP adds a user to a listed SCIM group, that user is granted this role in the
-role's organization; removal from the group removes the membership. Grants are
+role's project; removal from the group removes the membership. Grants are
 additive across groups. A SCIM group whose name matches no `scim_group` entry is
 unknown and returns `404`. See [SCIM](scim.md).
 
 ```nix
 services.gradient.state.roles.acme-engineer = {
-  organization = "acme";
-  permissions  = [ "viewOrg" "triggerEvaluation" ];
+  project = "acme";
+  permissions  = [ "viewProject" "triggerEvaluation" ];
   scim_group   = [ "acme-eng" ];
 };
 ```
@@ -428,8 +428,8 @@ services.gradient.state.roles.acme-engineer = {
 
 | Option | Default | Description |
 |---|---|---|
-| `name` | `<attrset key>` | Role name. Must be unique within the organization and must not collide with a built-in role |
-| `organization` | - | Owning organization name (required) |
+| `name` | `<attrset key>` | Role name. Must be unique within the project and must not collide with a built-in role |
+| `project` | - | Owning project name (required) |
 | `permissions` | - | List of capability identifiers granted by the role (required, see `GET /user/keys/permissions` for the catalogue) |
 | `oidc_group` | `[]` | OIDC group claims that grant this role on login (additive). Requires the `groups` scope |
 | `scim_group` | `[]` | SCIM group names whose members are granted this role (additive). Requires SCIM enabled |
@@ -441,8 +441,8 @@ services.gradient.state.api_keys = {
   ci-runner = {
     key_file     = "/run/secrets/ci-api-key";
     owned_by     = "alice";
-    permissions  = [ "viewOrg" "triggerEvaluation" ];
-    organization = "acme";        # optional - omit for an unscoped key
+    permissions  = [ "viewProject" "triggerEvaluation" ];
+    project = "acme";        # optional - omit for an unscoped key
   };
 };
 ```
@@ -461,7 +461,7 @@ Hand `GRAD$TOKEN` to the user/CI pipeline; the server will hash it on the way
 in and compare against the digest in `key_file`.
 
 The `permissions` list is **required** - there is no safe default. When
-`organization` is set, the key is rejected for every other org (404, so org
+`project` is set, the key is rejected for every other project (404, so project
 existence isn't leaked).
 
 ### API-key options
@@ -472,7 +472,7 @@ existence isn't leaked).
 | `key_file` | - | Path to a file containing the lowercase 64-char SHA-256 hex digest of the token (required) |
 | `owned_by` | - | Username that owns the key (required) |
 | `permissions` | - | Capability identifiers the key grants (required, non-empty). See `GET /user/keys/permissions` for the catalogue |
-| `organization` | `null` | Organization name to pin the key to. Omit for an unscoped key |
+| `project` | `null` | Project name to pin the key to. Omit for an unscoped key |
 
 ## Workers
 
@@ -483,7 +483,7 @@ services.gradient.state.workers = {
   builder-1 = {
     display_name  = "Primary Build Server";  # defaults to attrset key
     worker_id     = "550e8400-e29b-41d4-a716-446655440001";
-    organizations = [ "acme" ];               # one row per (worker_id, org)
+    projects = [ "acme" ];               # one row per (worker_id, project)
     token_file    = "/run/secrets/builder-1-token";
     created_by    = "alice";
 
@@ -513,40 +513,40 @@ To ensure the worker uses the same ID that was pre-registered, set `workerId` in
 services.gradient.worker.workerId = "550e8400-e29b-41d4-a716-446655440001";
 ```
 
-State-managed worker registrations are deleted automatically when removed from `state.workers`, and per-(worker_id, organization) rows are deleted when an organization is dropped from `organizations` (subject to `settings.deleteState`).
+State-managed worker registrations are deleted automatically when removed from `state.workers`, and per-(worker_id, project) rows are deleted when a project is dropped from `projects` (subject to `settings.deleteState`).
 
-On the worker machine, the `peersFile` authenticates with `<org_id>:<token>` lines. The `org_id` is the organization's UUID - to know it ahead of the first server start, pin it with `state.organizations.<name>.id` and reference that same value in the worker's `peersFile`. The `*:<token>` wildcard remains the alternative when a single token may serve any org.
+On the worker machine, the `peersFile` authenticates with `<project_id>:<token>` lines. The `project_id` is the project's UUID - to know it ahead of the first server start, pin it with `state.projects.<name>.id` and reference that same value in the worker's `peersFile`. The `*:<token>` wildcard remains the alternative when a single token may serve any project.
 
 ### Base workers
 
-Setting `base_worker = true` makes the entry a server-level worker that appears in every organization's worker list, disabled by default. Organizations can enable or disable it from the UI but cannot edit or delete it (it is state-managed).
+Setting `base_worker = true` makes the entry a server-level worker that appears in every project's worker list, disabled by default. Projects can enable or disable it from the UI but cannot edit or delete it (it is state-managed).
 
 ```nix
 services.gradient.state.workers = {
   shared-builder = {
     worker_id    = "550e8400-e29b-41d4-a716-446655440099";
     base_worker  = true;
-    enabled      = true;   # global gate; false removes it from all orgs
-    organizations = [ "acme" ];  # pre-enable for these orgs; may be empty
+    enabled      = true;   # global gate; false removes it from all projects
+    projects = [ "acme" ];  # pre-enable for these projects; may be empty
     token_file   = "/run/secrets/shared-builder-token";
     created_by   = "alice";
   };
 };
 ```
 
-`organizations` for a base worker lists orgs to pre-enable at provisioning time. It may be empty - orgs can still enable the worker later from the UI.
+`projects` for a base worker lists projects to pre-enable at provisioning time. It may be empty - projects can still enable the worker later from the UI.
 
-`enabled` is a global gate: setting it to `false` hides the base worker from every org until it is turned back on.
+`enabled` is a global gate: setting it to `false` hides the base worker from every project until it is turned back on.
 
-If an organization already has a normal worker registered under the same `worker_id`, that registration shadows the base worker: the base entry is hidden from that org's list and deleting the worker removes the org's own registration instead of erroring about state management.
+If a project already has a normal worker registered under the same `worker_id`, that registration shadows the base worker: the base entry is hidden from that project's list and deleting the worker removes the project's own registration instead of erroring about state management.
 
-`authorize_against` pins the UUID identity the base worker authenticates as. When set, the worker's `peersFile` only needs a single `<authorize_against>:<token>` line rather than per-org entries. When omitted the worker must present per-org tokens or use the `*:<token>` wildcard form.
+`authorize_against` pins the UUID identity the base worker authenticates as. When set, the worker's `peersFile` only needs a single `<authorize_against>:<token>` line rather than per-project entries. When omitted the worker must present per-project tokens or use the `*:<token>` wildcard form.
 
 The `peerFile` options for a base worker in order of preference:
 
-- `*:<token>` - one token answers any org challenge (simplest).
+- `*:<token>` - one token answers any project challenge (simplest).
 - `<authorize_against>:<token>` - single fixed identity, set `authorize_against` to that UUID in state.
-- Per-org lines `<org_id>:<token>` - one line per organization.
+- Per-project lines `<project_id>:<token>` - one line per project.
 
 ### Worker options
 
@@ -554,13 +554,13 @@ The `peerFile` options for a base worker in order of preference:
 |---|---|---|
 | `display_name` | `<attrset key>` | Display name shown in the workers list |
 | `worker_id` | - | Persistent worker identity. Must match the worker's `GRADIENT_WORKER_ID` (required) |
-| `organizations` | `[]` | Organizations to register under (non-base) or pre-enable (base worker). Non-base workers must list at least one |
+| `projects` | `[]` | Projects to register under (non-base) or pre-enable (base worker). Non-base workers must list at least one |
 | `token_file` | - | Plaintext token file. Hashed at provision time (required) |
 | `url` | `null` | When set, the server dials the worker at this WebSocket URL instead of waiting for an inbound connection |
 | `enable_fetch` | `true` | Server-side gate for the `fetch` capability |
 | `enable_eval` | `true` | Server-side gate for the `eval` capability |
 | `enable_build` | `true` | Server-side gate for the `build` capability |
-| `base_worker` | `false` | When true, makes this a server-level base worker visible to every org |
+| `base_worker` | `false` | When true, makes this a server-level base worker visible to every project |
 | `enabled` | `true` | Global on/off for a base worker. Ignored for non-base workers |
 | `authorize_against` | `null` | Fixed UUID identity a base worker authenticates as. Ignored for non-base workers |
 | `created_by` | - | Username of creator (required) |
@@ -583,7 +583,7 @@ services.gradient.state.tasks.my-task = {
     }
     {
       type = "reporter_push";
-      integration = "gitea-prod";          # name of an inbound integration in the same org
+      integration = "gitea-prod";          # name of an inbound integration in the same project
       config = {
         branches = [ "main" "release/*" ];
         tags = [];
@@ -633,7 +633,7 @@ The implicit fallback poll for tasks with an inbound integration (the legacy `WE
 
 ## Exporting current state
 
-When the live system has drifted from your Nix config - users registered through the UI, organizations or tasks created via the API - `GET /admin/state` reconstructs the current users, organizations, tasks, caches, custom roles, API keys, workers and integrations into the same shape as `services.gradient.state`, so you can codify the running system back into Nix.
+When the live system has drifted from your Nix config - users registered through the UI, projects or tasks created via the API - `GET /admin/state` reconstructs the current users, projects, tasks, caches, custom roles, API keys, workers and integrations into the same shape as `services.gradient.state`, so you can codify the running system back into Nix.
 
 The endpoint requires `superuser` and supports two formats:
 

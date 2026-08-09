@@ -148,18 +148,18 @@ pub struct DeletedResponse {
     pub deleted: bool,
 }
 
-/// `GET /tasks/{org}/{task}/triggers` - list all triggers for the task.
+/// `GET /tasks/{project}/{task}/triggers` - list all triggers for the task.
 pub async fn list(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<TriggerOut>>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Member,
     )
@@ -179,19 +179,19 @@ pub async fn list(
     ))
 }
 
-/// `POST /tasks/{org}/{task}/triggers` - create a new trigger.
+/// `POST /tasks/{project}/{task}/triggers` - create a new trigger.
 pub async fn create(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     Json(body): Json<CreateBody>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::ManageTriggers,
@@ -227,18 +227,18 @@ pub async fn create(
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
-/// `GET /tasks/{org}/{task}/triggers/{id}` - fetch one trigger.
+/// `GET /tasks/{project}/{task}/triggers/{id}` - fetch one trigger.
 pub async fn read(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, TaskTriggerId)>,
+    Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Member,
     )
@@ -256,19 +256,19 @@ pub async fn read(
     Ok(ok_json(TriggerOut::build(row, &integrations)))
 }
 
-/// `PATCH /tasks/{org}/{task}/triggers/{id}` - update a trigger.
+/// `PATCH /tasks/{project}/{task}/triggers/{id}` - update a trigger.
 pub async fn update(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, TaskTriggerId)>,
+    Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
     Json(body): Json<UpdateBody>,
 ) -> WebResult<Json<BaseResponse<TriggerOut>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::ManageTriggers,
@@ -307,18 +307,18 @@ pub async fn update(
     Ok(ok_json(TriggerOut::build(updated, &integrations)))
 }
 
-/// `DELETE /tasks/{org}/{task}/triggers/{id}` - hard delete the trigger.
+/// `DELETE /tasks/{project}/{task}/triggers/{id}` - hard delete the trigger.
 pub async fn delete_one(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, TaskTriggerId)>,
+    Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::ManageTriggers,
@@ -340,19 +340,19 @@ pub async fn delete_one(
     Ok(ok_json(DeletedResponse { deleted: true }))
 }
 
-/// `POST /tasks/{org}/{task}/triggers/{id}/test` - manually fire a trigger.
+/// `POST /tasks/{project}/{task}/triggers/{id}/test` - manually fire a trigger.
 pub async fn fire_now(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
-    Path((organization, task, id)): Path<(String, String, TaskTriggerId)>,
+    Path((project, task, id)): Path<(String, String, TaskTriggerId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::TriggerEvaluation,

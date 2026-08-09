@@ -7,7 +7,7 @@
 use crate::ingest::{IngestInput, SignTargets, ingest_metadata_only};
 use chrono::Timelike;
 use gradient_core::ServerState;
-use gradient_types::ids::{CacheId, OrganizationId};
+use gradient_types::ids::{CacheId, ProjectId};
 use gradient_types::*;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
@@ -28,25 +28,25 @@ pub(super) struct NarUploadRecord<'a> {
     pub ca: Option<&'a str>,
 }
 
-/// Resolves the org's cache and increments the traffic counter. `org_id` is
+/// Resolves the project's cache and increments the traffic counter. `project_id` is
 /// resolved on the session read loop before the commit detaches, so it stays
 /// valid even after the job is evicted from the tracker on completion.
 pub(super) async fn record_nar_push_metric(
     state: &ServerState,
-    org_id: Option<OrganizationId>,
+    project_id: Option<ProjectId>,
     bytes: i64,
 ) -> anyhow::Result<()> {
-    let Some(org_id) = org_id else {
+    let Some(project_id) = project_id else {
         return Ok(());
     };
 
-    let org_cache = EOrganizationCache::find()
-        .filter(COrganizationCache::Organization.eq(org_id))
+    let project_cache = EProjectCache::find()
+        .filter(CProjectCache::Project.eq(project_id))
         .one(&state.worker_db)
         .await?
-        .ok_or_else(|| anyhow::anyhow!("no cache for org {}", org_id))?;
+        .ok_or_else(|| anyhow::anyhow!("no cache for project {}", project_id))?;
 
-    let cache_id = org_cache.cache;
+    let cache_id = project_cache.cache;
     let now = gradient_types::now();
     let bucket = now
         .with_second(0)
@@ -87,7 +87,7 @@ async fn upsert_cache_metric(
 
 pub(super) async fn mark_nar_stored(
     state: &ServerState,
-    org_id: Option<OrganizationId>,
+    project_id: Option<ProjectId>,
     store_path: &str,
     record: &NarUploadRecord<'_>,
 ) -> anyhow::Result<()> {
@@ -98,8 +98,8 @@ pub(super) async fn mark_nar_stored(
         return Ok(());
     }
 
-    let targets = match org_id {
-        Some(org_id) => SignTargets::OrgCaches(org_id),
+    let targets = match project_id {
+        Some(project_id) => SignTargets::ProjectCaches(project_id),
         None => SignTargets::None,
     };
 
@@ -143,9 +143,9 @@ pub(super) async fn mark_nar_stored(
 
     // Sign this specific path in place so its narinfo is servable immediately,
     // rather than waking a whole-table sweep. Placeholder rows only exist when a
-    // cache took it (OrgCaches); the periodic sweep stays the backfill for
+    // cache took it (ProjectCaches); the periodic sweep stays the backfill for
     // subscription placeholders and anything left NULL.
-    if org_id.is_some() {
+    if project_id.is_some() {
         crate::signing::sign_cached_path(
             &state.worker_db,
             &state.config.secrets.crypt_secret_file,

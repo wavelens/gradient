@@ -18,10 +18,10 @@ fn parse_integration_kind(s: &str) -> Option<IntegrationKind> {
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     for integration in lookup.config.integrations.values() {
-        if !lookup.org_exists(&integration.organization) {
+        if !lookup.project_exists(&integration.project) {
             errors.push(
-                format!("integrations.{}.organization", integration.name),
-                format!("Organization '{}' does not exist", integration.organization),
+                format!("integrations.{}.project", integration.name),
+                format!("Project '{}' does not exist", integration.project),
             );
         }
         if !lookup.user_exists(&integration.created_by) {

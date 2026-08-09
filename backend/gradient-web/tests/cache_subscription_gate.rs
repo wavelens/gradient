@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the bilateral permission gate on org→cache subscription.
+//! Integration tests for the bilateral permission gate on project→cache subscription.
 //!
-//! Each POST /orgs/{org}/subscribe/{cache} requires:
-//!   - ManageSubscriptions on the org (org-side)
+//! Each POST /projects/{project}/subscribe/{cache} requires:
+//!   - ManageSubscriptions on the project (project-side)
 //!   - ManageCacheSubscriptions on the cache (cache-side)
 //!
 //! Auth query sequence (authorize middleware):
@@ -15,9 +15,9 @@
 //!   2. UPDATE session (last_used_at)
 //!   3. SELECT user
 //!
-//! load_org with Require(ManageSubscriptions):
-//!   4. SELECT organization (by name)
-//!   5. SELECT organization_user (membership)
+//! load_project with Require(ManageSubscriptions):
+//!   4. SELECT project (by name)
+//!   5. SELECT project_user (membership)
 //!   6. SELECT role (bitmask)
 //!
 //! load_cache with Require(ManageCacheSubscriptions):
@@ -26,10 +26,8 @@
 //!   9. SELECT cache_role (bitmask)  - only when member exists
 
 use gradient_db::permissions::{admin_mask, cache_admin_mask, cache_view_mask, mask_from};
-use gradient_entity::{
-    cache, cache_role, cache_user, ids::*, organization_cache, organization_user, role,
-};
-use gradient_test_support::fixtures::{org, org_id, test_date, user, user_id};
+use gradient_entity::{cache, cache_role, cache_user, ids::*, project_cache, project_user, role};
+use gradient_test_support::fixtures::{project, project_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;
 use gradient_types::consts::{
@@ -44,8 +42,8 @@ fn cache_id() -> CacheId {
     CacheId::new(Uuid::parse_str("c1000000-0000-0000-0000-000000000001").unwrap())
 }
 
-fn org_user_id() -> OrganizationUserId {
-    OrganizationUserId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap())
+fn project_user_id() -> ProjectUserId {
+    ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap())
 }
 
 fn cache_row(public: bool) -> cache::Model {
@@ -64,35 +62,35 @@ fn cache_row(public: bool) -> cache::Model {
     }
 }
 
-fn admin_org_membership() -> organization_user::Model {
-    organization_user::Model {
-        id: org_user_id(),
-        organization: org_id(),
+fn admin_project_membership() -> project_user::Model {
+    project_user::Model {
+        id: project_user_id(),
+        project: project_id(),
         user: user_id(),
         role: BASE_ROLE_ADMIN_ID,
     }
 }
 
-fn view_only_org_role() -> role::Model {
+fn view_only_project_role() -> role::Model {
     role::Model {
         id: RoleId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000f1").unwrap()),
         name: "ViewOnly".into(),
-        organization: Some(org_id()),
-        permission: mask_from(&[gradient_db::permissions::Permission::ViewOrg]),
+        project: Some(project_id()),
+        permission: mask_from(&[gradient_db::permissions::Permission::ViewProject]),
         ..Default::default()
     }
 }
 
-fn view_only_org_membership() -> organization_user::Model {
-    organization_user::Model {
-        id: org_user_id(),
-        organization: org_id(),
+fn view_only_project_membership() -> project_user::Model {
+    project_user::Model {
+        id: project_user_id(),
+        project: project_id(),
         user: user_id(),
-        role: view_only_org_role().id,
+        role: view_only_project_role().id,
     }
 }
 
-fn admin_org_role() -> role::Model {
+fn admin_project_role() -> role::Model {
     role::Model {
         id: BASE_ROLE_ADMIN_ID,
         name: "Admin".into(),
@@ -157,20 +155,20 @@ fn run<F: std::future::Future>(fut: F) -> F::Output {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[test]
-fn subscribe_requires_org_manage_subscriptions() {
+fn subscribe_requires_project_manage_subscriptions() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // User has ViewOrg-only on the org (no ManageSubscriptions) → 403.
+        // User has ViewProject-only on the project (no ManageSubscriptions) → 403.
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
-            .append_query_results([vec![view_only_org_membership()]])
-            .append_query_results([vec![view_only_org_role()]]);
+            .append_query_results([vec![project()]])
+            .append_query_results([vec![view_only_project_membership()]])
+            .append_query_results([vec![view_only_project_role()]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .post("/api/v1/orgs/test-org/subscribe/test-cache")
+            .post("/api/v1/projects/test-project/subscribe/test-cache")
             .add_header("authorization", format!("Bearer {}", token))
             .await;
 
@@ -184,19 +182,19 @@ fn subscribe_requires_cache_manage_subscriptions() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // User has Admin on org (ManageSubscriptions passes) but only View on
+        // User has Admin on project (ManageSubscriptions passes) but only View on
         // the cache (no ManageCacheSubscriptions) → 403.
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
-            .append_query_results([vec![admin_org_membership()]])
-            .append_query_results([vec![admin_org_role()]])
+            .append_query_results([vec![project()]])
+            .append_query_results([vec![admin_project_membership()]])
+            .append_query_results([vec![admin_project_role()]])
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![view_cache_member()]])
             .append_query_results([vec![view_cache_role()]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .post("/api/v1/orgs/test-org/subscribe/test-cache")
+            .post("/api/v1/projects/test-project/subscribe/test-cache")
             .add_header("authorization", format!("Bearer {}", token))
             .await;
 
@@ -210,38 +208,38 @@ fn subscribe_succeeds_when_both_granted() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let inserted_link = organization_cache::Model {
-            id: OrganizationCacheId::now_v7(),
-            organization: org_id(),
+        let inserted_link = project_cache::Model {
+            id: ProjectCacheId::now_v7(),
+            project: project_id(),
             cache: cache_id(),
-            mode: organization_cache::CacheSubscriptionMode::ReadWrite,
+            mode: project_cache::CacheSubscriptionMode::ReadWrite,
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            // load_org
-            .append_query_results([vec![org()]])
-            .append_query_results([vec![admin_org_membership()]])
-            .append_query_results([vec![admin_org_role()]])
+            // load_project
+            .append_query_results([vec![project()]])
+            .append_query_results([vec![admin_project_membership()]])
+            .append_query_results([vec![admin_project_role()]])
             // load_cache
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_cache_member()]])
             .append_query_results([vec![admin_cache_role()]])
             // already-subscribed check → empty
-            .append_query_results([Vec::<organization_cache::Model>::new()])
-            // insert organization_cache row
+            .append_query_results([Vec::<project_cache::Model>::new()])
+            // insert project_cache row
             .append_query_results([vec![inserted_link]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // unpark_no_cache_for_org: tasks query → empty (short-circuits)
+            // unpark_no_cache_for_project: tasks query → empty (short-circuits)
             .append_query_results([Vec::<gradient_entity::task::Model>::new()])
             // enqueue_backfill_signatures: derivations query → empty (short-circuits)
             .append_query_results([Vec::<gradient_entity::derivation::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .post("/api/v1/orgs/test-org/subscribe/test-cache")
+            .post("/api/v1/projects/test-project/subscribe/test-cache")
             .add_header("authorization", format!("Bearer {}", token))
             .await;
 
@@ -261,15 +259,15 @@ fn subscribe_public_cache_still_requires_cache_permission() {
         // Require(ManageCacheSubscriptions) returns 404 (not_found) because
         // the member lookup finds no row and the label is "Cache".
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
-            .append_query_results([vec![admin_org_membership()]])
-            .append_query_results([vec![admin_org_role()]])
+            .append_query_results([vec![project()]])
+            .append_query_results([vec![admin_project_membership()]])
+            .append_query_results([vec![admin_project_role()]])
             .append_query_results([vec![cache_row(true)]])
             .append_query_results([Vec::<cache_user::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .post("/api/v1/orgs/test-org/subscribe/test-cache")
+            .post("/api/v1/projects/test-project/subscribe/test-cache")
             .add_header("authorization", format!("Bearer {}", token))
             .await;
 

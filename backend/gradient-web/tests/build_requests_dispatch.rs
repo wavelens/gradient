@@ -14,7 +14,7 @@ use chrono::{Duration, Utc};
 use gradient_db::permissions::PermissionMask;
 use gradient_entity::ids::*;
 use gradient_entity::role;
-use gradient_test_support::fixtures::{org_id, user, user_id};
+use gradient_test_support::fixtures::{project_id, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
 use gradient_types::{ConcurrencyPolicy, SessionId};
@@ -31,12 +31,10 @@ fn write_role_row() -> role::Model {
     }
 }
 
-fn membership() -> gradient_entity::organization_user::Model {
-    gradient_entity::organization_user::Model {
-        id: OrganizationUserId::new(
-            Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap(),
-        ),
-        organization: org_id(),
+fn membership() -> gradient_entity::project_user::Model {
+    gradient_entity::project_user::Model {
+        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
+        project: project_id(),
         user: user_id(),
         role: BASE_ROLE_WRITE_ID,
     }
@@ -63,7 +61,7 @@ fn upload_session(
     };
     gradient_entity::upload_session::Model {
         id,
-        organization: org_id(),
+        project: project_id(),
         manifest: json!([]),
         missing: serde_json::to_value(missing).unwrap(),
         created_at: now,
@@ -76,7 +74,7 @@ fn upload_session(
 fn task_row(id: TaskId, managed: bool) -> gradient_entity::task::Model {
     gradient_entity::task::Model {
         id,
-        organization: org_id(),
+        project: project_id(),
         name: "build-request".into(),
         active: true,
         display_name: "Build Requests".into(),
@@ -267,8 +265,8 @@ fn happy_path_creates_task_commit_and_evaluation() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // queue_signature_placeholders → list org caches (empty, early return)
-            .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
+            // queue_signature_placeholders → list project caches (empty, early return)
+            .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             // ensure_build_request_task → SELECT existing (None)
             .append_query_results([Vec::<gradient_entity::task::Model>::new()])
             // ensure_build_request_task → INSERT task (returns row)
@@ -289,8 +287,8 @@ fn happy_path_creates_task_commit_and_evaluation() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // resolve_org_cache_name → org-cache link lookup (none → cache=null)
-            .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
+            // resolve_project_cache_name → project-cache link lookup (none → cache=null)
+            .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             // After tx commit: UPDATE upload_session
             .append_query_results([vec![updated]])
             .append_exec_results([MockExecResult {
@@ -377,8 +375,8 @@ fn happy_path_reuses_existing_build_request_task() {
             .append_query_results([vec![write_role_row()]])
             // ensure_cached_path → SELECT existing returns the row
             .append_query_results([vec![cp_row]])
-            // queue_signature_placeholders → org caches (empty)
-            .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
+            // queue_signature_placeholders → project caches (empty)
+            .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             // ensure_build_request_task → SELECT existing returns the row
             .append_query_results([vec![task_model.clone()]])
             .append_query_results([vec![commit_model.clone()]])
@@ -391,8 +389,8 @@ fn happy_path_reuses_existing_build_request_task() {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
-            // resolve_org_cache_name → org-cache link lookup (none → cache=null)
-            .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
+            // resolve_project_cache_name → project-cache link lookup (none → cache=null)
+            .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             .append_query_results([vec![updated]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,

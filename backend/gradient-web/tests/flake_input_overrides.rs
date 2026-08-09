@@ -6,7 +6,7 @@
 
 use gradient_entity::ids::*;
 use gradient_entity::task_flake_input_override;
-use gradient_test_support::fixtures::{org, org_id, task_id, test_date, user, user_id};
+use gradient_test_support::fixtures::{project, project_id, task_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::{ConcurrencyPolicy, SessionId};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
@@ -22,7 +22,7 @@ fn override_id() -> FlakeInputOverrideId {
 fn task_row() -> gradient_entity::task::Model {
     gradient_entity::task::Model {
         id: task_id(),
-        organization: org_id(),
+        project: project_id(),
         name: "test-task".into(),
         active: true,
         display_name: "Test Task".into(),
@@ -45,12 +45,10 @@ fn managed_task_row() -> gradient_entity::task::Model {
     }
 }
 
-fn admin_membership() -> gradient_entity::organization_user::Model {
-    gradient_entity::organization_user::Model {
-        id: OrganizationUserId::new(
-            Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap(),
-        ),
-        organization: org_id(),
+fn admin_membership() -> gradient_entity::project_user::Model {
+    gradient_entity::project_user::Model {
+        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap()),
+        project: project_id(),
         user: user_id(),
         role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
     }
@@ -84,26 +82,26 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
 }
 
 fn with_task_member(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![org()]])
+    db.append_query_results([vec![project()]])
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
 }
 
 fn with_task_edit(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![org()]])
+    db.append_query_results([vec![project()]])
         .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
         .append_query_results([vec![admin_role_row()]])
 }
 
 fn with_managed_task_edit(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![org()]])
+    db.append_query_results([vec![project()]])
         .append_query_results([vec![managed_task_row()]])
         .append_query_results([vec![admin_membership()]])
         .append_query_results([vec![admin_role_row()]])
 }
 
-const BASE_URL: &str = "/api/v1/tasks/test-org/test-task/flake-inputs";
+const BASE_URL: &str = "/api/v1/tasks/test-project/test-task/flake-inputs";
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 

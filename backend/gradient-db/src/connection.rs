@@ -253,7 +253,7 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
 
 /// Insert or refresh a built-in role.
 ///
-/// Built-in roles are global (`organization = NULL`) and their canonical
+/// Built-in roles are global (`project = NULL`) and their canonical
 /// permission bitmasks are owned by [`crate::permissions`]. Refreshing on every
 /// startup means upgrades that add new capabilities propagate to existing
 /// installations without a manual migration; the role name is also kept in
@@ -377,49 +377,46 @@ pub async fn add_features(
     Ok(())
 }
 
-pub async fn get_organization_by_name(
+pub async fn get_project_by_name(
     ctx: &DbContext,
     user_id: UserId,
     name: String,
-) -> Result<Option<MOrganization>> {
-    EOrganization::find()
+) -> Result<Option<MProject>> {
+    EProject::find()
         .join_rev(
             JoinType::InnerJoin,
-            EOrganizationUser::belongs_to(gradient_entity::organization::Entity)
-                .from(COrganizationUser::Organization)
-                .to(COrganization::Id)
+            EProjectUser::belongs_to(gradient_entity::project::Entity)
+                .from(CProjectUser::Project)
+                .to(CProject::Id)
                 .into(),
         )
         .filter(
             Condition::all()
-                .add(COrganizationUser::User.eq(user_id))
-                .add(COrganization::Name.eq(name)),
+                .add(CProjectUser::User.eq(user_id))
+                .add(CProject::Name.eq(name)),
         )
         .one(&ctx.web_db)
         .await
-        .context("Failed to query organization")
+        .context("Failed to query project")
 }
 
-pub async fn get_any_organization_by_name(
-    ctx: &DbContext,
-    name: String,
-) -> Result<Option<MOrganization>> {
-    EOrganization::find()
-        .filter(COrganization::Name.eq(name))
+pub async fn get_any_project_by_name(ctx: &DbContext, name: String) -> Result<Option<MProject>> {
+    EProject::find()
+        .filter(CProject::Name.eq(name))
         .one(&ctx.web_db)
         .await
-        .context("Failed to query organization")
+        .context("Failed to query project")
 }
 
 pub async fn get_task_by_name(
     ctx: &DbContext,
     user_id: UserId,
-    organization_name: String,
+    project_name: String,
     task_name: String,
-) -> Result<Option<(MOrganization, MTask)>> {
-    match get_organization_by_name(ctx, user_id, organization_name).await? {
+) -> Result<Option<(MProject, MTask)>> {
+    match get_project_by_name(ctx, user_id, project_name).await? {
         Some(o) => Ok(ETask::find()
-            .filter(CTask::Organization.eq(o.id))
+            .filter(CTask::Project.eq(o.id))
             .filter(CTask::Name.eq(task_name))
             .one(&ctx.web_db)
             .await
@@ -431,12 +428,12 @@ pub async fn get_task_by_name(
 
 pub async fn get_any_task_by_name(
     ctx: &DbContext,
-    organization_name: String,
+    project_name: String,
     task_name: String,
-) -> Result<Option<(MOrganization, MTask)>> {
-    match get_any_organization_by_name(ctx, organization_name).await? {
+) -> Result<Option<(MProject, MTask)>> {
+    match get_any_project_by_name(ctx, project_name).await? {
         Some(o) => Ok(ETask::find()
-            .filter(CTask::Organization.eq(o.id))
+            .filter(CTask::Project.eq(o.id))
             .filter(CTask::Name.eq(task_name))
             .one(&ctx.web_db)
             .await

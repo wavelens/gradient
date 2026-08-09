@@ -39,8 +39,8 @@ export class UserService {
   createApiKey(
     name: string,
     expiresInDays?: number | null,
-    permissions: string[] = ['viewOrg'],
-    organization: string | null = null,
+    permissions: string[] = ['viewProject'],
+    project: string | null = null,
     cache: string | null = null,
     allowedIps: string[] = [],
   ): Observable<string> {
@@ -48,10 +48,10 @@ export class UserService {
       name: string;
       expires_in_days?: number;
       permissions: string[];
-      organization: string | null;
+      project: string | null;
       cache: string | null;
       allowed_ips: string[];
-    } = { name, permissions, organization, cache, allowed_ips: allowedIps };
+    } = { name, permissions, project, cache, allowed_ips: allowedIps };
     if (expiresInDays !== null && expiresInDays !== undefined) {
       body.expires_in_days = expiresInDays;
     }
@@ -63,7 +63,7 @@ export class UserService {
     body: {
       name?: string;
       permissions?: string[];
-      organization?: string | null;
+      project?: string | null;
       cache?: string | null;
       allowed_ips?: string[];
     },

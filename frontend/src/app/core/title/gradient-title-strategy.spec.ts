@@ -26,11 +26,11 @@ describe('composeTitle', () => {
   });
 
   it('collapses redundant entity-only page titles', () => {
-    // The detail page's static title ("Task"/"Cache"/"Organization") is implied
+    // The detail page's static title ("Task"/"Cache"/"Project") is implied
     // by the entity name itself, so it drops out to avoid "Demo · Task · Gradient".
     expect(composeTitle('Demo', 'Task')).toBe('Demo · Gradient');
     expect(composeTitle('Demo', 'Cache')).toBe('Demo · Gradient');
-    expect(composeTitle('Demo', 'Organization')).toBe('Demo · Gradient');
+    expect(composeTitle('Demo', 'Project')).toBe('Demo · Gradient');
   });
 
   it('falls back to page + brand when no entity is in the tree', () => {
@@ -57,8 +57,8 @@ describe('findEntityName', () => {
     expect(find(tree)).toBe('main');
   });
 
-  it('returns the organization display_name from resolved data', () => {
-    const tree = snap({ organizationAccess: { organization: { display_name: 'Wavelens' } } });
+  it('returns the project display_name from resolved data', () => {
+    const tree = snap({ projectAccess: { project: { display_name: 'Wavelens' } } });
     expect(find(tree)).toBe('Wavelens');
   });
 
@@ -66,8 +66,8 @@ describe('findEntityName', () => {
     expect(find(snap())).toBeUndefined();
   });
 
-  it('returns undefined when an organizationAccess resolves to null (404)', () => {
-    const tree = snap({ organizationAccess: { organization: null } });
+  it('returns undefined when an projectAccess resolves to null (404)', () => {
+    const tree = snap({ projectAccess: { project: null } });
     expect(find(tree)).toBeUndefined();
   });
 });

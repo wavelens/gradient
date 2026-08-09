@@ -15,12 +15,12 @@ use chrono::{Duration, Utc};
 use gradient_core::ServerState;
 use gradient_db::permissions::admin_mask;
 use gradient_db::{WebDb, WorkerDb};
-use gradient_entity::{ids::*, organization_user, role, session, task, task_trigger};
+use gradient_entity::{ids::*, project_user, role, session, task, task_trigger};
 use gradient_notify::EmailSender;
 use gradient_storage::NarStore;
 use gradient_test_support::cli::test_cli;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::fixtures::{org, org_id, task_id, test_date, user, user_id};
+use gradient_test_support::fixtures::{project, project_id, task_id, test_date, user, user_id};
 use gradient_test_support::log_storage::NoopLogStorage;
 use gradient_types::{ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId};
 use gradient_web::create_router;
@@ -89,7 +89,7 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new(JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -100,12 +100,10 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
     TestServer::new(create_router(state).expect("router"))
 }
 
-fn admin_membership() -> organization_user::Model {
-    organization_user::Model {
-        id: OrganizationUserId::new(
-            Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap(),
-        ),
-        organization: org_id(),
+fn admin_membership() -> project_user::Model {
+    project_user::Model {
+        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000aa").unwrap()),
+        project: project_id(),
         user: user_id(),
         role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
     }
@@ -123,7 +121,7 @@ fn admin_role_row() -> role::Model {
 fn task_with(sign_cache: bool) -> task::Model {
     task::Model {
         id: task_id(),
-        organization: org_id(),
+        project: project_id(),
         name: "test-task".into(),
         active: true,
         display_name: "Test Task".into(),
@@ -157,9 +155,9 @@ fn get_task_includes_sign_cache() {
         let token = make_token(session_id);
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![task_with(false)]])
-            // is_org_member (Readable access)
+            // is_project_member (Readable access)
             .append_query_results([vec![admin_membership()]])
             // has_permission(EditTask): membership + role
             .append_query_results([vec![admin_membership()]])
@@ -170,7 +168,7 @@ fn get_task_includes_sign_cache() {
 
         let server = make_server(db.into_connection());
         let res = server
-            .get("/api/v1/tasks/test-org/test-task")
+            .get("/api/v1/tasks/test-project/test-task")
             .add_header("authorization", format!("Bearer {}", token))
             .await;
 
@@ -195,7 +193,7 @@ fn patch_task_writes_sign_cache_false() {
         let token = make_token(session_id);
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![task_with(true)]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
@@ -203,7 +201,7 @@ fn patch_task_writes_sign_cache_false() {
 
         let server = make_server(db.into_connection());
         let res = server
-            .patch("/api/v1/tasks/test-org/test-task")
+            .patch("/api/v1/tasks/test-project/test-task")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({ "sign_cache": false }))
             .await;
@@ -235,7 +233,7 @@ fn create_task_accepts_sign_cache_false() {
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
             .append_query_results([Vec::<task::Model>::new()])
@@ -244,7 +242,7 @@ fn create_task_accepts_sign_cache_false() {
 
         let server = make_server(db.into_connection());
         let res = server
-            .put("/api/v1/tasks/test-org")
+            .put("/api/v1/tasks/test-project")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({
                 "name": "test-task",

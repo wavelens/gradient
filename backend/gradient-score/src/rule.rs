@@ -15,9 +15,9 @@ pub struct JobContext<'a> {
     pub dependency_count: u32,
     pub queued_at: chrono::NaiveDateTime,
     pub ready_at: chrono::NaiveDateTime,
-    /// Owning org's work share of currently-active builds (0.0..=1.0), computed
+    /// Owning project's work share of currently-active builds (0.0..=1.0), computed
     /// by the scheduler at request time only when the policy consumes it.
-    pub org_work_share: Option<f32>,
+    pub project_work_share: Option<f32>,
     pub rescore_count: u32,
     /// Scoring-time clock, threaded in so rules are deterministic functions of
     /// their inputs instead of reading the wall clock.
@@ -59,10 +59,10 @@ pub trait ScoreRule: Send + Sync + std::fmt::Debug {
     ) -> bool {
         false
     }
-    /// Whether this rule reads `JobContext::org_work_share`; the scheduler only
+    /// Whether this rule reads `JobContext::project_work_share`; the scheduler only
     /// computes the share (an O(active builds) pass) when some enabled rule
     /// consumes it.
-    fn uses_org_work_share(&self) -> bool {
+    fn uses_project_work_share(&self) -> bool {
         false
     }
     /// Human-readable explanation of what the rule rewards or penalizes, surfaced

@@ -17,7 +17,7 @@ import { SelectModule } from 'primeng/select';
 import { SelectButtonModule } from 'primeng/selectbutton';
 import { TooltipModule } from 'primeng/tooltip';
 import { UserService } from '@core/services/user.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ApiKey } from '@core/models';
 import { PermissionDescriptor } from '@core/models/permission.model';
@@ -25,7 +25,7 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 
-type ScopeType = 'none' | 'organization' | 'cache';
+type ScopeType = 'none' | 'project' | 'cache';
 
 interface SelectOption {
   label: string;
@@ -55,7 +55,7 @@ interface SelectOption {
 })
 export class ApiKeysComponent implements OnInit {
   private userService = inject(UserService);
-  private organizationsService = inject(OrganizationsService);
+  private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);
 
   loading = signal(true);
@@ -67,12 +67,12 @@ export class ApiKeysComponent implements OnInit {
   keys = signal<ApiKey[]>([]);
   availablePermissions = signal<PermissionDescriptor[]>([]);
   availableCachePermissions = signal<PermissionDescriptor[]>([]);
-  orgOptions = signal<SelectOption[]>([{ label: 'Any organization', value: null }]);
+  projectOptions = signal<SelectOption[]>([{ label: 'Any project', value: null }]);
   cacheOptions = signal<SelectOption[]>([]);
 
   scopeOptions: { label: string; value: ScopeType }[] = [
     { label: 'None', value: 'none' },
-    { label: 'Organization', value: 'organization' },
+    { label: 'Project', value: 'project' },
     { label: 'Cache', value: 'cache' },
   ];
 
@@ -86,7 +86,7 @@ export class ApiKeysComponent implements OnInit {
   formExpiresInDays: number | null = null;
   formPermissions: Record<string, boolean> = {};
   formScope: ScopeType = 'none';
-  formOrganization: string | null = null;
+  formProject: string | null = null;
   formCache: string | null = null;
   formAllowedIps = '';
 
@@ -99,13 +99,13 @@ export class ApiKeysComponent implements OnInit {
       },
       error: () => {},
     });
-    this.organizationsService.getOrganizations(1, 100).subscribe({
+    this.projectsService.getProjects(1, 100).subscribe({
       next: (paginated) => {
         const options: SelectOption[] = [
-          { label: 'Any organization', value: null },
+          { label: 'Any project', value: null },
           ...paginated.items.map((o) => ({ label: o.name, value: o.name })),
         ];
-        this.orgOptions.set(options);
+        this.projectOptions.set(options);
       },
       error: () => {},
     });
@@ -133,10 +133,10 @@ export class ApiKeysComponent implements OnInit {
     this.formName = '';
     this.formExpiresInDays = null;
     this.formScope = 'none';
-    this.formOrganization = null;
+    this.formProject = null;
     this.formCache = null;
     this.formPermissions = this.permissionTemplate(false);
-    this.formPermissions['viewOrg'] = true;
+    this.formPermissions['viewProject'] = true;
     this.formAllowedIps = '';
     this.errorMessage.set(null);
     this.showDialog.set(true);
@@ -151,14 +151,14 @@ export class ApiKeysComponent implements OnInit {
     if (key.cache) {
       this.formScope = 'cache';
       this.formCache = key.cache;
-      this.formOrganization = null;
-    } else if (key.organization) {
-      this.formScope = 'organization';
-      this.formOrganization = key.organization;
+      this.formProject = null;
+    } else if (key.project) {
+      this.formScope = 'project';
+      this.formProject = key.project;
       this.formCache = null;
     } else {
       this.formScope = 'none';
-      this.formOrganization = null;
+      this.formProject = null;
       this.formCache = null;
     }
     this.formAllowedIps = (key.allowed_ips ?? []).join('\n');
@@ -174,14 +174,14 @@ export class ApiKeysComponent implements OnInit {
   }
 
   onScopeChange(): void {
-    this.formOrganization = null;
+    this.formProject = null;
     this.formCache = null;
     const isCacheScope = this.formScope === 'cache';
     const perms = isCacheScope ? this.availableCachePermissions() : this.availablePermissions();
     const out: Record<string, boolean> = {};
     for (const p of perms) out[p.id] = false;
     this.formPermissions = out;
-    if (!isCacheScope) this.formPermissions['viewOrg'] = true;
+    if (!isCacheScope) this.formPermissions['viewProject'] = true;
   }
 
   activePermissions(): PermissionDescriptor[] {
@@ -211,7 +211,7 @@ export class ApiKeysComponent implements OnInit {
       this.errorMessage.set('Select at least one permission.');
       return;
     }
-    const organization = this.formScope === 'organization' ? this.formOrganization : null;
+    const project = this.formScope === 'project' ? this.formProject : null;
     const cache = this.formScope === 'cache' ? this.formCache : null;
     const allowedIps = this.parseAllowedIps();
     const editing = this.editingKey();
@@ -221,7 +221,7 @@ export class ApiKeysComponent implements OnInit {
         .updateApiKey(editing.id, {
           name,
           permissions: perms,
-          organization,
+          project,
           cache,
           allowed_ips: allowedIps,
         })
@@ -239,7 +239,7 @@ export class ApiKeysComponent implements OnInit {
     } else {
       this.creating.set(true);
       this.userService
-        .createApiKey(name, this.formExpiresInDays, perms, organization, cache, allowedIps)
+        .createApiKey(name, this.formExpiresInDays, perms, project, cache, allowedIps)
         .subscribe({
           next: (keyValue) => {
             this.creating.set(false);
@@ -289,8 +289,8 @@ export class ApiKeysComponent implements OnInit {
 
   scopeBadge(key: ApiKey): string {
     if (key.cache) return key.cache;
-    if (key.organization) return key.organization;
-    return 'Any org';
+    if (key.project) return key.project;
+    return 'Any project';
   }
 
   rowAccess(key: ApiKey): AccessState {

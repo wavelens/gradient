@@ -140,7 +140,7 @@ fn render_subject_with_custom_template() {
 #[test]
 fn render_default_body_includes_fields() {
     let payload = json!({
-        "org": "o", "task": "p", "id": "i",
+        "project": "o", "task": "p", "id": "i",
         "status": "s", "time": "t", "link": "l",
     });
     let b = render_default_body("build.completed", &payload);

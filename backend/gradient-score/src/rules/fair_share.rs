@@ -7,10 +7,10 @@
 use crate::context::InstanceContext;
 use crate::rule::{JobContext, ScoreRule, WorkerContext};
 
-/// Penalizes a job proportional to its owning org's share of currently-active
-/// builds, so a quiet org's job is picked promptly even when a busy org floods
+/// Penalizes a job proportional to its owning project's share of currently-active
+/// builds, so a quiet project's job is picked promptly even when a busy project floods
 /// the queue (#111). Only bites under contention - when every worker is busy -
-/// so a single busy org is never penalized into leaving the cluster idle (#419).
+/// so a single busy project is never penalized into leaving the cluster idle (#419).
 #[derive(Debug)]
 pub struct FairShareRule {
     pub weight: f64,
@@ -35,25 +35,25 @@ impl ScoreRule for FairShareRule {
         _worker: &WorkerContext<'_>,
         instance: &InstanceContext,
     ) -> f64 {
-        // Spare capacity means no org is starving another: dispatch freely.
-        // Penalizing here would only push a lone busy org's jobs below the
+        // Spare capacity means no project is starving another: dispatch freely.
+        // Penalizing here would only push a lone busy project's jobs below the
         // dispatcher's zero floor and leave workers idle.
         if instance.idle_workers > 0 {
             return 0.0;
         }
 
-        match job.org_work_share {
+        match job.project_work_share {
             Some(share) => -self.weight * share as f64,
             None => 0.0,
         }
     }
 
-    fn uses_org_work_share(&self) -> bool {
+    fn uses_project_work_share(&self) -> bool {
         true
     }
 
     fn description(&self) -> &'static str {
-        "Penalizes a job by how large a share of currently-active builds its organization already holds, so a busy org cannot starve a quiet one; only applied when every worker is busy so it never idles the cluster."
+        "Penalizes a job by how large a share of currently-active builds its project already holds, so a busy project cannot starve a quiet one; only applied when every worker is busy so it never idles the cluster."
     }
 }
 
@@ -62,13 +62,13 @@ mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, ScoredJob};
     use crate::rules::builtin::WaitTimeRule;
-    use gradient_types::ids::OrganizationId;
+    use gradient_types::ids::ProjectId;
     use gradient_types::now;
 
     fn build_job() -> ScoredJob<'static> {
         ScoredJob::new_build(
             "j",
-            OrganizationId::now_v7(),
+            ProjectId::now_v7(),
             "x86_64-linux",
             false,
             false,
@@ -78,7 +78,7 @@ mod tests {
         )
     }
 
-    fn ctx<'a>(job: &'a ScoredJob<'a>, org_work_share: Option<f32>) -> JobContext<'a> {
+    fn ctx<'a>(job: &'a ScoredJob<'a>, project_work_share: Option<f32>) -> JobContext<'a> {
         JobContext {
             job,
             missing_count: None,
@@ -86,7 +86,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now(),
             ready_at: now(),
-            org_work_share,
+            project_work_share,
             rescore_count: 0,
             now: gradient_types::now(),
         }
@@ -102,13 +102,16 @@ mod tests {
     }
 
     #[test]
-    fn busier_org_scores_more_negative() {
+    fn busier_project_scores_more_negative() {
         let rule = FairShareRule::default();
         let job = build_job();
         let w = worker();
         let busy = rule.score(&ctx(&job, Some(0.99)), &w, &InstanceContext::default());
         let quiet = rule.score(&ctx(&job, Some(0.01)), &w, &InstanceContext::default());
-        assert!(busy < quiet, "busy org must score lower: {busy} vs {quiet}");
+        assert!(
+            busy < quiet,
+            "busy project must score lower: {busy} vs {quiet}"
+        );
     }
 
     #[test]
@@ -125,7 +128,7 @@ mod tests {
         };
         assert!(
             rule.score(&busy, &w, &saturated) < 0.0,
-            "a saturated cluster still rations a busy org"
+            "a saturated cluster still rations a busy project"
         );
 
         let spare = InstanceContext {
@@ -155,7 +158,7 @@ mod tests {
         );
     }
 
-    // Among jobs with equal wait, the quieter org's job must score higher.
+    // Among jobs with equal wait, the quieter project's job must score higher.
     #[test]
     fn fair_share_breaks_tie_at_equal_wait() {
         let fair = FairShareRule::default();
@@ -180,7 +183,7 @@ mod tests {
         let busy_total = fair.score(&busy, &w, &inst) + wait.score(&busy, &w, &inst);
         assert!(
             quiet_total > busy_total,
-            "at equal wait the quiet org wins: quiet={quiet_total} busy={busy_total}"
+            "at equal wait the quiet project wins: quiet={quiet_total} busy={busy_total}"
         );
     }
 }

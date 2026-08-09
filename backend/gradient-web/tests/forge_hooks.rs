@@ -89,7 +89,7 @@ fn make_state(
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -108,8 +108,8 @@ fn fixture_date() -> chrono::NaiveDateTime {
         .unwrap()
 }
 
-fn org_id() -> OrganizationId {
-    OrganizationId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000001").unwrap())
+fn project_id() -> ProjectId {
+    ProjectId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000001").unwrap())
 }
 fn integration_id() -> IntegrationId {
     IntegrationId::new(Uuid::parse_str("a0000000-0000-0000-0000-000000000002").unwrap())
@@ -174,11 +174,11 @@ const GITHUB_PUSH_BODY: &str = r#"{
     "installation": { "id": 9999 }
 }"#;
 
-fn org_row(name: &str) -> gradient_entity::organization::Model {
-    gradient_entity::organization::Model {
-        id: org_id(),
+fn project_row(name: &str) -> gradient_entity::project::Model {
+    gradient_entity::project::Model {
+        id: project_id(),
         name: name.to_string(),
-        display_name: "Test Org".into(),
+        display_name: "Test Project".into(),
         public_key: "ssh-ed25519 AAAA test".into(),
         private_key: "encrypted".into(),
         created_by: user_id(),
@@ -194,14 +194,14 @@ fn github_installation_id() -> gradient_entity::ids::GithubInstallationId {
 }
 
 fn github_installation_row(
-    organization: gradient_types::ids::OrganizationId,
+    project: gradient_types::ids::ProjectId,
     installation_id: i64,
 ) -> gradient_entity::github_installation::Model {
     gradient_entity::github_installation::Model {
         id: github_installation_id(),
-        organization,
+        project,
         installation_id,
-        account_login: Some("gh-org".into()),
+        account_login: Some("gh-project".into()),
         created_by: user_id(),
         created_at: fixture_date(),
     }
@@ -210,7 +210,7 @@ fn github_installation_row(
 fn integration_row(secret_ciphertext: &str) -> gradient_entity::integration::Model {
     gradient_entity::integration::Model {
         id: integration_id(),
-        organization: org_id(),
+        project: project_id(),
         name: "my-hook".into(),
         display_name: "my-hook".into(),
         secret: Some(secret_ciphertext.to_string()),
@@ -223,7 +223,7 @@ fn integration_row(secret_ciphertext: &str) -> gradient_entity::integration::Mod
 fn github_integration_row() -> gradient_entity::integration::Model {
     gradient_entity::integration::Model {
         id: integration_id(),
-        organization: org_id(),
+        project: project_id(),
         name: "github-app".into(),
         display_name: "GitHub App".into(),
         forge_type: ForgeType::GitHub,
@@ -237,7 +237,7 @@ fn github_integration_row() -> gradient_entity::integration::Model {
 fn task_row() -> gradient_entity::task::Model {
     task_row_with(
         task_id(),
-        org_id(),
+        project_id(),
         "test-task",
         "https://gitea.example.com/test-org/repo",
     )
@@ -245,13 +245,13 @@ fn task_row() -> gradient_entity::task::Model {
 
 fn task_row_with(
     id: TaskId,
-    organization: OrganizationId,
+    project: ProjectId,
     name: &str,
     repository: &str,
 ) -> gradient_entity::task::Model {
     gradient_entity::task::Model {
         id,
-        organization,
+        project,
         name: name.into(),
         active: true,
         display_name: "Test Task".into(),
@@ -270,7 +270,7 @@ fn task_row_with(
 fn github_task_row() -> gradient_entity::task::Model {
     task_row_with(
         task_id(),
-        org_id(),
+        project_id(),
         "test-task",
         "https://github.com/gh-org/repo",
     )
@@ -311,19 +311,19 @@ fn cache_row() -> gradient_entity::cache::Model {
     }
 }
 
-fn org_cache_row() -> gradient_entity::organization_cache::Model {
-    gradient_entity::organization_cache::Model {
-        id: OrganizationCacheId::now_v7(),
-        organization: org_id(),
+fn project_cache_row() -> gradient_entity::project_cache::Model {
+    gradient_entity::project_cache::Model {
+        id: ProjectCacheId::now_v7(),
+        project: project_id(),
         cache: CacheId::now_v7(),
-        mode: gradient_entity::organization_cache::CacheSubscriptionMode::ReadWrite,
+        mode: gradient_entity::project_cache::CacheSubscriptionMode::ReadWrite,
     }
 }
 
 fn worker_registration_row() -> gradient_entity::worker_registration::Model {
     gradient_entity::worker_registration::Model {
         id: gradient_types::ids::WorkerRegistrationId::now_v7(),
-        peer_id: org_id(),
+        peer_id: project_id(),
         worker_id: "00000000-0000-4000-8000-000000000001".into(),
         active: true,
         enable_fetch: true,
@@ -380,8 +380,8 @@ fn reporter_pr_trigger(actions: Vec<&str>) -> TriggerConfig {
 
 /// Mock DB chain for a successful `apply_trigger` call with no prior evaluation
 /// (skips same-commit dedup) and no in-flight evaluation. Includes the
-/// `org_has_writable_cache` lookup that runs after the eval is created,
-/// the `org_has_eval_capable_worker_registration` lookup that follows it,
+/// `project_has_writable_cache` lookup that runs after the eval is created,
+/// the `project_has_eval_capable_worker_registration` lookup that follows it,
 /// the `touch_trigger_last_fired` update on the trigger row, and the
 /// `dispatch_evaluation_created` lookup of task actions.
 fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
@@ -395,10 +395,10 @@ fn apply_trigger_db_chain(db: MockDatabase) -> MockDatabase {
             last_insert_id: 0,
             rows_affected: 1,
         }]) // UPDATE task
-        .append_query_results([vec![org_cache_row()]]) // org_has_writable_cache: subscription rows
-        .append_query_results([vec![cache_row()]]) // org_has_writable_cache: active cache rows
-        .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()]) // park_if_storage_full: org_writable_caches → none → not full
-        .append_query_results([vec![worker_registration_row()]]) // org_has_eval_capable_worker_registration
+        .append_query_results([vec![project_cache_row()]]) // project_has_writable_cache: subscription rows
+        .append_query_results([vec![cache_row()]]) // project_has_writable_cache: active cache rows
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()]) // park_if_storage_full: project_writable_caches → none → not full
+        .append_query_results([vec![worker_registration_row()]]) // project_has_eval_capable_worker_registration
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]]) // touch_trigger_last_fired: SELECT for UPDATE
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
@@ -424,11 +424,11 @@ async fn forge_webhook_no_matching_trigger_inner() {
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
     // Mock chain:
-    // 1. SELECT org by name → org row
+    // 1. SELECT project by name → project row
     // 2. SELECT integration → integration row
     // 3. load_active_triggers_for_integration → empty (no trigger rows)
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
         .into_connection();
@@ -441,7 +441,7 @@ async fn forge_webhook_no_matching_trigger_inner() {
     let sig = gitea_signature(plaintext_secret, body);
 
     let response = server
-        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
         .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", &sig)
         .bytes(body.into())
@@ -474,18 +474,18 @@ async fn forge_webhook_push_fires_trigger_inner() {
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
     // Mock chain:
-    // 1. SELECT org by name → org row
+    // 1. SELECT project by name → project row
     // 2. SELECT integration → integration row
     // 3. load_active_triggers → [reporter_push trigger matching this integration_id]
     // 4. ETask::find_by_id → task row
-    // 5. EOrganization::find_by_id (org_name_for) → org row
+    // 5. EProject::find_by_id (project_name_for) → project row
     // 6–11. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
         .append_query_results([vec![task_row()]])
-        .append_query_results([vec![org_row("test-org")]]);
+        .append_query_results([vec![project_row("test-project")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
@@ -496,7 +496,7 @@ async fn forge_webhook_push_fires_trigger_inner() {
     let sig = gitea_signature(plaintext_secret, body);
 
     let response = server
-        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
         .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", &sig)
         .bytes(body.into())
@@ -512,7 +512,7 @@ async fn forge_webhook_push_fires_trigger_inner() {
     let queued = msg["queued"].as_array().unwrap();
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0]["task_name"], "test-task");
-    assert_eq!(queued[0]["organization"], "test-org");
+    assert_eq!(queued[0]["project"], "test-project");
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
@@ -532,10 +532,10 @@ async fn forge_webhook_test_ping_zero_sha_is_ok_noop_inner() {
     let crypt_path = temp_secret_file("this-is-a-32-byte-crypt-key!!!!"); // 32 bytes
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
-    // Signature verification needs the org + integration rows; the all-zero push
+    // Signature verification needs the project + integration rows; the all-zero push
     // short-circuits before any trigger/task lookup, so no further rows.
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .into_connection();
 
@@ -547,7 +547,7 @@ async fn forge_webhook_test_ping_zero_sha_is_ok_noop_inner() {
     let sig = gitea_signature(plaintext_secret, body);
 
     let response = server
-        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
         .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", &sig)
         .bytes(body.into())
@@ -579,7 +579,7 @@ async fn forge_webhook_invalid_signature_inner() {
     let ciphertext = encrypt_webhook_secret(&crypt_path, "correct-secret").expect("encrypt");
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .into_connection();
 
@@ -591,7 +591,7 @@ async fn forge_webhook_invalid_signature_inner() {
     let wrong_sig = gitea_signature("wrong-secret", body);
 
     let response = server
-        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
         .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", &wrong_sig)
         .bytes(body.into())
@@ -616,7 +616,7 @@ fn forge_webhook_integration_not_found() {
 
 async fn forge_webhook_integration_not_found_inner() {
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
         .into_connection();
 
@@ -629,7 +629,7 @@ async fn forge_webhook_integration_not_found_inner() {
     let server = TestServer::new(router);
 
     let response = server
-        .post("/api/v1/hooks/gitea/test-org/missing-hook")
+        .post("/api/v1/hooks/gitea/test-project/missing-hook")
         .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", "doesnotmatter")
         .bytes(GITEA_PUSH_BODY.as_bytes().into())
@@ -659,12 +659,12 @@ async fn forge_webhook_branch_glob_no_match_skipped_inner() {
 
     // Trigger only allows "release/*" branches; push is to "feature/new-thing"
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec!["release/*"]))]])
         // task_identity lookup (for skipped entry)
         .append_query_results([vec![task_row()]])
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
@@ -675,7 +675,7 @@ async fn forge_webhook_branch_glob_no_match_skipped_inner() {
     let sig = gitea_signature(plaintext_secret, body);
 
     let response = server
-        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
         .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", &sig)
         .bytes(body.into())
@@ -730,14 +730,14 @@ async fn forge_webhook_pr_fires_trigger_inner() {
     );
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_pr_trigger(vec![
             "opened",
             "synchronize",
         ]))]])
         .append_query_results([vec![task_row()]])
-        .append_query_results([vec![org_row("test-org")]]);
+        .append_query_results([vec![project_row("test-project")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
@@ -748,7 +748,7 @@ async fn forge_webhook_pr_fires_trigger_inner() {
     let sig = gitea_signature(plaintext_secret, &body_bytes);
 
     let response = server
-        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
         .add_header("X-Gitea-Event", "pull_request")
         .add_header("X-Gitea-Signature", &sig)
         .bytes(body_bytes.into())
@@ -800,12 +800,12 @@ async fn forge_webhook_pr_action_mismatch_skipped_inner() {
     );
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_pr_trigger(vec!["opened"]))]])
         // task_identity lookup for skipped
         .append_query_results([vec![task_row()]])
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
@@ -816,7 +816,7 @@ async fn forge_webhook_pr_action_mismatch_skipped_inner() {
     let sig = gitea_signature(plaintext_secret, &body_bytes);
 
     let response = server
-        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
         .add_header("X-Gitea-Event", "pull_request")
         .add_header("X-Gitea-Signature", &sig)
         .bytes(body_bytes.into())
@@ -867,11 +867,11 @@ async fn forge_webhook_release_fires_releases_only_trigger_inner() {
     );
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
         .append_query_results([vec![task_row()]])
-        .append_query_results([vec![org_row("test-org")]]);
+        .append_query_results([vec![project_row("test-project")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, Some(crypt_path), None);
@@ -882,7 +882,7 @@ async fn forge_webhook_release_fires_releases_only_trigger_inner() {
     let sig = gitea_signature(plaintext_secret, &body_bytes);
 
     let response = server
-        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
         .add_header("X-Gitea-Event", "release")
         .add_header("X-Gitea-Signature", &sig)
         .bytes(body_bytes.into())
@@ -918,7 +918,7 @@ async fn forge_webhook_push_does_not_fire_releases_only_trigger_inner() {
     let ciphertext = encrypt_webhook_secret(&crypt_path, plaintext_secret).expect("encrypt");
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![org_row("test-org")]])
+        .append_query_results([vec![project_row("test-project")]])
         .append_query_results([vec![integration_row(&ciphertext)]])
         // releases_only trigger returned; push handler should skip it
         .append_query_results([vec![trigger_row(reporter_push_releases_only_trigger())]])
@@ -932,7 +932,7 @@ async fn forge_webhook_push_does_not_fire_releases_only_trigger_inner() {
     let sig = gitea_signature(plaintext_secret, body);
 
     let response = server
-        .post("/api/v1/hooks/gitea/test-org/my-hook")
+        .post("/api/v1/hooks/gitea/test-project/my-hook")
         .add_header("X-Gitea-Event", "push")
         .add_header("X-Gitea-Signature", &sig)
         .bytes(body.into())
@@ -966,20 +966,20 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     // Mock chain:
     // resolve_github_app_targets:
     //   1. SELECT github_installation by installation_id (.all) → [github_installation row]
-    //   2. SELECT tasks for org (.all) → [task row matching webhook url]
+    //   2. SELECT tasks for project (.all) → [task row matching webhook url]
     //   3. SELECT inbound GitHub integration (.one) → integration row
     // fan_out_triggers:
     //   4. load_active_triggers → [reporter_push trigger]
     //   5. ETask::find_by_id → task row
-    //   6. org_name_for → org row
+    //   6. project_name_for → project row
     //   7+. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![github_installation_row(org_id(), 9999)]])
+        .append_query_results([vec![github_installation_row(project_id(), 9999)]])
         .append_query_results([vec![github_task_row()]])
         .append_query_results([vec![github_integration_row()]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
         .append_query_results([vec![github_task_row()]])
-        .append_query_results([vec![org_row("gh-org")]]);
+        .append_query_results([vec![project_row("gh-project")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
@@ -1006,7 +1006,7 @@ async fn github_app_webhook_push_fires_trigger_inner() {
     let queued = msg["queued"].as_array().unwrap();
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0]["task_name"], "test-task");
-    assert_eq!(queued[0]["organization"], "gh-org");
+    assert_eq!(queued[0]["project"], "gh-project");
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
@@ -1051,7 +1051,7 @@ async fn github_app_webhook_ping_inner() {
     assert!(msg["skipped"].as_array().unwrap().is_empty());
 }
 
-// ── Test 12: GitHub App - installation (org not found, just warns) ─────────────
+// ── Test 12: GitHub App - installation (project not found, just warns) ─────────────
 
 #[test]
 fn github_app_webhook_installation() {
@@ -1077,7 +1077,7 @@ async fn github_app_webhook_installation_inner() {
         "action": "created",
         "installation": {
             "id": 9999,
-            "account": { "login": "gh-org" }
+            "account": { "login": "gh-project" }
         },
         "sender": { "login": "some-user" }
     }))
@@ -1132,66 +1132,68 @@ async fn github_app_webhook_not_configured_inner() {
     assert_eq!(json["message"], "github app integration not configured");
 }
 
-// ── Test 15: GitHub App - multi-org installation routes by repo URL ─────────
+// ── Test 15: GitHub App - multi-project installation routes by repo URL ─────────
 
 #[test]
-fn github_app_webhook_multi_org_routes_to_matching_org() {
+fn github_app_webhook_multi_project_routes_to_matching_project() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
-    rt.block_on(async { github_app_webhook_multi_org_routes_to_matching_org_inner().await });
+    rt.block_on(async {
+        github_app_webhook_multi_project_routes_to_matching_project_inner().await
+    });
 }
 
-async fn github_app_webhook_multi_org_routes_to_matching_org_inner() {
+async fn github_app_webhook_multi_project_routes_to_matching_project_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // Two orgs share installation_id=9999 via separate github_installation rows.
-    // Org A's tasks don't match the webhook repo URL; org B has the matching
-    // task. Only org B's integration should fire.
-    let org_a_id =
-        OrganizationId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000aa").unwrap());
+    // Two projects share installation_id=9999 via separate github_installation rows.
+    // Project A's tasks don't match the webhook repo URL; project B has the matching
+    // task. Only project B's integration should fire.
+    let project_a_id =
+        ProjectId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000aa").unwrap());
     let inst_a_id = gradient_entity::ids::GithubInstallationId::new(
         Uuid::parse_str("a0000000-0000-0000-0000-0000000000a8").unwrap(),
     );
     let inst_a = gradient_entity::github_installation::Model {
         id: inst_a_id,
-        organization: org_a_id,
+        project: project_a_id,
         installation_id: 9999,
-        account_login: Some("org-a".into()),
+        account_login: Some("project-a".into()),
         created_by: user_id(),
         created_at: fixture_date(),
     };
-    let inst_b = github_installation_row(org_id(), 9999);
+    let inst_b = github_installation_row(project_id(), 9999);
 
-    let org_a_task = task_row_with(
+    let project_a_task = task_row_with(
         TaskId::new(Uuid::parse_str("a0000000-0000-0000-0000-0000000000ab").unwrap()),
-        org_a_id,
+        project_a_id,
         "unrelated",
         "https://github.com/org-a/different-repo",
     );
-    let org_b_task = github_task_row();
+    let project_b_task = github_task_row();
 
     // Mock chain:
     // resolve_github_app_targets:
     //   1. SELECT github_installation by installation_id → [inst_a, inst_b]
-    //   2. tasks.all for org A → [org_a_task]   (no URL match → skipped)
-    //   3. tasks.all for org B → [org_b_task]   (URL matches)
-    //   4. integration.one for org B (filtered by inst_b.id) → github_integration_row
-    // fan_out_triggers for org B's integration:
+    //   2. tasks.all for project A → [project_a_task]   (no URL match → skipped)
+    //   3. tasks.all for project B → [project_b_task]   (URL matches)
+    //   4. integration.one for project B (filtered by inst_b.id) → github_integration_row
+    // fan_out_triggers for project B's integration:
     //   5. load_active_triggers → [trigger]
-    //   6. ETask::find_by_id → org_b_task
-    //   7. org_name_for → org B row
+    //   6. ETask::find_by_id → project_b_task
+    //   7. project_name_for → project B row
     //   8+. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![inst_a, inst_b]])
-        .append_query_results([vec![org_a_task]])
-        .append_query_results([vec![org_b_task.clone()]])
+        .append_query_results([vec![project_a_task]])
+        .append_query_results([vec![project_b_task.clone()]])
         .append_query_results([vec![github_integration_row()]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
-        .append_query_results([vec![org_b_task.clone()]])
-        .append_query_results([vec![org_row("gh-org")]]);
+        .append_query_results([vec![project_b_task.clone()]])
+        .append_query_results([vec![project_row("gh-project")]]);
     let db = apply_trigger_db_chain(db).into_connection();
 
     let state = make_state(db, None, Some(gh_secret_path));
@@ -1214,7 +1216,7 @@ async fn github_app_webhook_multi_org_routes_to_matching_org_inner() {
     assert_eq!(msg["tasks_scanned"], 1);
     let queued = msg["queued"].as_array().unwrap();
     assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0]["organization"], "gh-org");
+    assert_eq!(queued[0]["project"], "gh-project");
 }
 
 // ── Test 16: GitHub App - no task matches webhook repo URL ───────────────
@@ -1232,16 +1234,16 @@ async fn github_app_webhook_no_matching_repo_returns_zero_inner() {
     let gh_secret = "github-webhook-secret";
     let gh_secret_path = temp_secret_file(gh_secret);
 
-    // Org has the installation but no task with a matching repo URL.
+    // Project has the installation but no task with a matching repo URL.
     let unrelated = task_row_with(
         task_id(),
-        org_id(),
+        project_id(),
         "unrelated",
         "https://github.com/somewhere/else",
     );
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![github_installation_row(org_id(), 9999)]])
+        .append_query_results([vec![github_installation_row(project_id(), 9999)]])
         .append_query_results([vec![unrelated]])
         .into_connection();
 

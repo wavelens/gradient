@@ -8,7 +8,7 @@ use super::{
     BuildStatusCounts, EntryPointSummary, EvaluationSummary, EvaluationTriggerSummary,
     QueueSummary, TaskDetailsResponse,
 };
-use crate::access::{Caller, TaskAccess, has_permission, is_org_member, load_task};
+use crate::access::{Caller, TaskAccess, has_permission, is_project_member, load_task};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::content_type_for_filename;
 use crate::error::{ErrorCode, WebError, WebResult};
@@ -19,7 +19,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::get_any_organization_by_name;
+use gradient_db::get_any_project_by_name;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_sources::{check_task_updates, get_commit_info, get_path_from_derivation_output};
@@ -177,14 +177,14 @@ pub async fn post_task_evaluate(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     body: Option<Json<EvaluateRequest>>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, task) = load_task(
+    let (_project, task) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::TriggerEvaluation,
@@ -261,21 +261,21 @@ pub async fn post_task_evaluate(
         gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
     })?;
 
-    let eval = gradient_ci::park_if_no_cache(&state.web_db, eval, task.organization).await?;
+    let eval = gradient_ci::park_if_no_cache(&state.web_db, eval, task.project).await?;
     let eval = gradient_ci::park_if_storage_full(
         &state.web_db,
         eval,
-        task.organization,
+        task.project,
         state.config.storage.max_storage_gb,
     )
     .await?;
-    let eval = gradient_ci::park_if_no_workers(&state.web_db, eval, task.organization).await?;
+    let eval = gradient_ci::park_if_no_workers(&state.web_db, eval, task.project).await?;
     gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
 
     Ok(ok_json("Evaluation started".to_string()))
 }
 
-/// `GET /tasks/{organization}/{task}/evaluations`
+/// `GET /tasks/{project}/{task}/evaluations`
 ///
 /// Returns the `keep_evaluations` most recent evaluations for the task,
 /// newest first. Identical access rules as other task endpoints.
@@ -283,14 +283,14 @@ pub async fn get_task_evaluations(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     Query(params): Query<EvaluationsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EvaluationSummary>>>> {
-    let (_organization, task) = load_task(
+    let (_project, task) = load_task(
         &state,
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Readable,
     )
@@ -313,14 +313,14 @@ pub async fn get_task_details(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<TaskDetailsResponse>>> {
     let api_key_ref = api_key.as_ref();
-    let (organization, task) = load_task(
+    let (project, task) = load_task(
         &state,
         Caller::from_option(&maybe_user),
         api_key_ref,
-        organization,
+        project,
         task,
         TaskAccess::Readable,
     )
@@ -342,7 +342,7 @@ pub async fn get_task_details(
             has_permission(
                 &state,
                 user.id,
-                organization.id,
+                project.id,
                 Permission::EditTask,
                 api_key_ref,
             )
@@ -350,7 +350,7 @@ pub async fn get_task_details(
             has_permission(
                 &state,
                 user.id,
-                organization.id,
+                project.id,
                 Permission::TriggerEvaluation,
                 api_key_ref,
             )
@@ -399,14 +399,14 @@ pub async fn get_task_entry_points(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     Query(params): Query<EntryPointsQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<EntryPointSummary>>>> {
-    let (_organization, task) = load_task(
+    let (_project, task) = load_task(
         &state,
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Readable,
     )
@@ -667,7 +667,7 @@ pub struct EntryPointDownloadQuery {
     pub eval: String,
     /// Filename listed in `nix-support/hydra-build-products`.
     pub filename: String,
-    /// API key (`GRADxxxx`) or JWT.  Required when the owning organisation is private.
+    /// API key (`GRADxxxx`) or JWT.  Required when the owning project is private.
     /// Pass via this parameter for static/permalink URLs; omit if you already have a
     /// session cookie or `Authorization: Bearer` header.
     pub token: Option<String>,
@@ -800,23 +800,23 @@ async fn serve_hydra_artifact(
 /// matching `eval`, and serves the named file from `nix-support/hydra-build-products`.
 ///
 /// Authentication:
-/// - Public organisations: no credentials required.
-/// - Private organisations: supply `?token=GRADxxxx` (API key) or a JWT, **or** authenticate
+/// - Public projects: no credentials required.
+/// - Private projects: supply `?token=GRADxxxx` (API key) or a JWT, **or** authenticate
 ///   via the `Authorization: Bearer` header / `jwt_token` session cookie.
 pub async fn get_entry_point_download(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Extension(crate::client_ip::ClientIp(client_ip)): Extension<crate::client_ip::ClientIp>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     Query(params): Query<EntryPointDownloadQuery>,
 ) -> Result<Response, WebError> {
-    let organization = get_any_organization_by_name(&state.db(), organization)
+    let project = get_any_project_by_name(&state.db(), project)
         .await?
-        .or_not_found("Organization")?;
+        .or_not_found("Project")?;
 
     let task = ETask::find()
-        .filter(CTask::Organization.eq(organization.id))
+        .filter(CTask::Project.eq(project.id))
         .filter(CTask::Name.eq(&task))
         .one(&state.web_db)
         .await?
@@ -845,10 +845,10 @@ pub async fn get_entry_point_download(
         (maybe_user, api_key.as_ref().cloned())
     };
 
-    if !organization.public {
+    if !project.public {
         match resolved_user {
             Some(ref user) => {
-                if !is_org_member(&state, user.id, organization.id, resolved_key.as_ref()).await? {
+                if !is_project_member(&state, user.id, project.id, resolved_key.as_ref()).await? {
                     return Err(WebError::not_found("Task"));
                 }
             }

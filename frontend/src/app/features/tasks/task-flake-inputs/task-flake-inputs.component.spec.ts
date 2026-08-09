@@ -11,13 +11,13 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { TaskFlakeInputsComponent } from './task-flake-inputs.component';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { AccessState } from '@core/models/access.model';
 import { FlakeInputOverride } from '@core/models';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
-    snapshot: { paramMap: convertToParamMap({ org: 'acme', task: 'demo' }) },
+    snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }) },
     data: of({}),
     parent: { data: of({ taskAccess: { task: {}, access } }) },
   } as unknown as ActivatedRoute;
@@ -71,7 +71,7 @@ function setup(
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
       { provide: FlakeInputOverridesService, useValue: defaultService },
-      { provide: OrganizationsService, useValue: { getOrganization: () => of({ display_name: 'Acme' }) } },
+      { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
     ],
   });
   const fixture = TestBed.createComponent(TaskFlakeInputsComponent);
@@ -99,7 +99,7 @@ describe('TaskFlakeInputsComponent', () => {
     let capturedBody: any;
     const svc: Partial<FlakeInputOverridesService> = {
       list: () => of([]),
-      create: (org, proj, body) => { capturedBody = body; return of(override); },
+      create: (project, proj, body) => { capturedBody = body; return of(override); },
     };
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [], svc);
     const comp = fixture.componentInstance;
@@ -116,7 +116,7 @@ describe('TaskFlakeInputsComponent', () => {
     let capturedBody: any;
     const svc: Partial<FlakeInputOverridesService> = {
       list: () => of([]),
-      create: (org, proj, body) => { capturedBody = body; return of(override); },
+      create: (project, proj, body) => { capturedBody = body; return of(override); },
     };
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [], svc);
     const comp = fixture.componentInstance;
@@ -144,7 +144,7 @@ describe('TaskFlakeInputsComponent', () => {
     let deletedId: string | undefined;
     const svc: Partial<FlakeInputOverridesService> = {
       list: () => of([override]),
-      delete: (org, proj, id) => { deletedId = id; return of(true); },
+      delete: (project, proj, id) => { deletedId = id; return of(true); },
     };
     const fixture = setup({ managed: false, canEdit: true, canTrigger: true }, [override], svc);
     const comp = fixture.componentInstance;

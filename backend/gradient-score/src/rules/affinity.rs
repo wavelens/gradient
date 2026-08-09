@@ -107,12 +107,12 @@ impl ScoreRule for DiskAffinityRule {
 mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, ScoredJob, WorkerMetricsView};
-    use gradient_types::ids::OrganizationId;
+    use gradient_types::ids::ProjectId;
 
     fn job(is_fixed_output: bool, h: HistoryPrediction) -> ScoredJob<'static> {
         ScoredJob::new_build(
             "t",
-            OrganizationId::now_v7(),
+            ProjectId::now_v7(),
             "x86_64-linux",
             false,
             is_fixed_output,
@@ -130,7 +130,7 @@ mod tests {
             dependency_count: 0,
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now: gradient_types::now(),
         }

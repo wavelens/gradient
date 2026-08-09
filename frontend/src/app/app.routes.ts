@@ -10,7 +10,7 @@ import { adminGuard } from '@core/guards/admin.guard';
 import { unsavedChangesGuard } from '@core/guards/unsaved-changes.guard';
 import { taskAccessResolver } from '@core/resolvers/task-access.resolver';
 import { cacheAccessResolver } from '@core/resolvers/cache-access.resolver';
-import { organizationAccessResolver } from '@core/resolvers/organization-access.resolver';
+import { projectAccessResolver } from '@core/resolvers/project-access.resolver';
 
 export const routes: Routes = [
   // Authentication routes (public)
@@ -47,20 +47,20 @@ export const routes: Routes = [
     ],
   },
 
-  // Organization detail (public)
+  // Project detail (public)
   {
-    path: 'organization/:org',
-    title: 'Organization',
-    resolve: { organizationAccess: organizationAccessResolver },
+    path: 'project/:project',
+    title: 'Project',
+    resolve: { projectAccess: projectAccessResolver },
     loadComponent: () =>
-      import('./features/organizations/organization-detail/organization-detail.component').then(
-        (m) => m.OrganizationDetailComponent
+      import('./features/projects/project-detail/project-detail.component').then(
+        (m) => m.ProjectDetailComponent
       ),
   },
 
   // Task tree with parent layout + access resolver
   {
-    path: 'organization/:org/task/:task',
+    path: 'project/:project/task/:task',
     loadComponent: () =>
       import('./features/tasks/task-layout/task-layout.component').then(
         (m) => m.TaskLayoutComponent,
@@ -133,7 +133,7 @@ export const routes: Routes = [
 
   // Build / evaluation utility routes (no layout)
   {
-    path: 'organization/:org/artefacts/:buildId',
+    path: 'project/:project/artefacts/:buildId',
     title: 'Build Artefacts',
     data: { hideFooter: true },
     loadComponent: () =>
@@ -142,7 +142,7 @@ export const routes: Routes = [
       ),
   },
   {
-    path: 'organization/:org/graph/:buildId',
+    path: 'project/:project/graph/:buildId',
     title: 'Dependency Graph',
     data: { hideFooter: true },
     loadComponent: () =>
@@ -151,7 +151,7 @@ export const routes: Routes = [
       ),
   },
   {
-    path: 'organization/:org/closure/:kind/:id',
+    path: 'project/:project/closure/:kind/:id',
     title: 'Closure',
     data: { hideFooter: true },
     loadComponent: () =>
@@ -160,7 +160,7 @@ export const routes: Routes = [
       ),
   },
   {
-    path: 'organization/:org/log/:evaluationId',
+    path: 'project/:project/log/:evaluationId',
     title: 'Evaluation Log',
     data: { hideFooter: true },
     loadComponent: () =>
@@ -169,7 +169,7 @@ export const routes: Routes = [
       ),
   },
   {
-    path: 'organization/:org/log',
+    path: 'project/:project/log',
     title: 'Evaluation Log',
     data: { hideFooter: true },
     loadComponent: () =>
@@ -236,11 +236,11 @@ export const routes: Routes = [
 
   // Public-browsable list routes
   {
-    path: 'organizations',
-    title: 'Organizations',
+    path: 'projects',
+    title: 'Projects',
     loadComponent: () =>
-      import('./features/organizations/organization-list/organization-list.component').then(
-        (m) => m.OrganizationListComponent
+      import('./features/projects/project-list/project-list.component').then(
+        (m) => m.ProjectListComponent
       ),
   },
   {
@@ -359,64 +359,64 @@ export const routes: Routes = [
         ],
       },
 
-      // Organizations
+      // Projects
       {
-        path: 'organization/:org/settings',
-        title: 'Organization Settings',
-        resolve: { organizationAccess: organizationAccessResolver },
+        path: 'project/:project/settings',
+        title: 'Project Settings',
+        resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
-          import('./features/organizations/organization-settings/organization-settings.component').then(
-            (m) => m.OrganizationSettingsComponent
+          import('./features/projects/project-settings/project-settings.component').then(
+            (m) => m.ProjectSettingsComponent
           ),
       },
       {
-        path: 'organization/:org/members',
+        path: 'project/:project/members',
         title: 'Members & Roles',
-        resolve: { organizationAccess: organizationAccessResolver },
+        resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
-          import('./features/organizations/members-roles/members-roles.component').then(
+          import('./features/projects/members-roles/members-roles.component').then(
             (m) => m.MembersRolesComponent
           ),
       },
 
       // Workers
       {
-        path: 'organization/:org/workers',
+        path: 'project/:project/workers',
         title: 'Workers',
-        resolve: { organizationAccess: organizationAccessResolver },
+        resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
-          import('./features/organizations/workers/workers.component').then(
+          import('./features/projects/workers/workers.component').then(
             (m) => m.WorkersComponent
           ),
       },
       {
-        path: 'organization/:org/workers/:workerId/metrics',
+        path: 'project/:project/workers/:workerId/metrics',
         title: 'Worker Statistics',
-        resolve: { organizationAccess: organizationAccessResolver },
+        resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
-          import('./features/organizations/workers/worker-metrics/worker-metrics.component').then(
+          import('./features/projects/workers/worker-metrics/worker-metrics.component').then(
             (m) => m.WorkerMetricsComponent
           ),
       },
 
       // Integrations
       {
-        path: 'organization/:org/integrations',
+        path: 'project/:project/integrations',
         title: 'Integrations',
-        resolve: { organizationAccess: organizationAccessResolver },
+        resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
-          import('./features/organizations/integrations/integrations.component').then(
+          import('./features/projects/integrations/integrations.component').then(
             (m) => m.IntegrationsComponent
           ),
       },
 
       // Cache Subscriptions
       {
-        path: 'organization/:org/caches',
+        path: 'project/:project/caches',
         title: 'Cache Subscriptions',
-        resolve: { organizationAccess: organizationAccessResolver },
+        resolve: { projectAccess: projectAccessResolver },
         loadComponent: () =>
-          import('./features/organizations/cache-subscriptions/cache-subscriptions.component').then(
+          import('./features/projects/cache-subscriptions/cache-subscriptions.component').then(
             (m) => m.CacheSubscriptionsComponent
           ),
       },

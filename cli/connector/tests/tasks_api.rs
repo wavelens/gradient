@@ -10,7 +10,7 @@ fn ok<T: serde::Serialize>(m: T) -> serde_json::Value {
 async fn list_tasks_returns_paginated() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/tasks/my-org"))
+        .and(path("/api/v1/tasks/my-project"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
                 "items": [{"id": "p1", "name": "proj"}],
@@ -25,7 +25,7 @@ async fn list_tasks_returns_paginated() {
         .token("t")
         .build()
         .unwrap();
-    let res = client.tasks().list("my-org").await.unwrap();
+    let res = client.tasks().list("my-project").await.unwrap();
     assert_eq!(res.items.len(), 1);
 }
 
@@ -33,7 +33,7 @@ async fn list_tasks_returns_paginated() {
 async fn badge_returns_svg_string() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/tasks/org/proj/badge"))
+        .and(path("/api/v1/tasks/project/proj/badge"))
         .respond_with(ResponseTemplate::new(200).set_body_string("<svg>ok</svg>"))
         .mount(&server)
         .await;
@@ -43,6 +43,6 @@ async fn badge_returns_svg_string() {
         .token("t")
         .build()
         .unwrap();
-    let svg = client.tasks().badge("org", "proj").await.unwrap();
+    let svg = client.tasks().badge("project", "proj").await.unwrap();
     assert!(svg.contains("<svg>"));
 }

@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DispatchedJobId, EvaluationId, OrganizationId, TaskId};
+use crate::ids::{DispatchedJobId, EvaluationId, ProjectId, TaskId};
 
 /// Kind of dispatched work this telemetry row records.
 #[repr(i16)]
@@ -44,7 +44,7 @@ pub struct Model {
     pub id: DispatchedJobId,
     pub kind: DispatchedJobKind,
     pub evaluation_id: EvaluationId,
-    pub organization: OrganizationId,
+    pub project: ProjectId,
     pub task: Option<TaskId>,
     pub worker_id: String,
     pub score: f64,

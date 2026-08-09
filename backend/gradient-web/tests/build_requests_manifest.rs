@@ -8,13 +8,13 @@
 //!
 //! Covers the four validation surfaces (oversized total, bad paths, bad
 //! hashes, duplicates) and the happy-path response shape - `session` is a
-//! UUID and `missing` is the subset of hex hashes the org doesn't have yet.
+//! UUID and `missing` is the subset of hex hashes the project doesn't have yet.
 
 use axum::http::StatusCode;
 use gradient_db::permissions::PermissionMask;
 use gradient_entity::ids::*;
 use gradient_entity::role;
-use gradient_test_support::fixtures::{org, user, user_id};
+use gradient_test_support::fixtures::{project, user, user_id};
 use gradient_test_support::web::{
     live_session, make_test_server, make_test_server_configured, make_token,
 };
@@ -35,12 +35,10 @@ fn write_role_row() -> role::Model {
     }
 }
 
-fn membership() -> gradient_entity::organization_user::Model {
-    gradient_entity::organization_user::Model {
-        id: OrganizationUserId::new(
-            Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap(),
-        ),
-        organization: gradient_test_support::fixtures::org_id(),
+fn membership() -> gradient_entity::project_user::Model {
+    gradient_entity::project_user::Model {
+        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
+        project: gradient_test_support::fixtures::project_id(),
         user: user_id(),
         role: BASE_ROLE_WRITE_ID,
     }
@@ -53,8 +51,8 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-fn with_org_access(db: MockDatabase) -> MockDatabase {
-    db.append_query_results([vec![org()]])
+fn with_project_access(db: MockDatabase) -> MockDatabase {
+    db.append_query_results([vec![project()]])
         .append_query_results([vec![membership()]])
         .append_query_results([vec![write_role_row()]])
 }
@@ -81,7 +79,7 @@ fn rejects_oversized_total() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_org_access(with_auth(
+        let db = with_project_access(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));
@@ -93,7 +91,7 @@ fn rejects_oversized_total() {
 
         // 20 MiB + 1 byte triggers the cap.
         let body = json!({
-            "organization": "test-org",
+            "project": "test-project",
             "files": [
                 {"path": "a", "hash": hex_hash(0xaa), "size": 20 * 1024 * 1024 + 1i64 },
             ]
@@ -129,14 +127,14 @@ fn rejects_bad_paths() {
             let session_id = SessionId::now_v7();
             let token = make_token(session_id);
 
-            let db = with_org_access(with_auth(
+            let db = with_project_access(with_auth(
                 MockDatabase::new(DatabaseBackend::Postgres),
                 session_id,
             ));
             let server = make_test_server(db.into_connection());
 
             let body = json!({
-                "organization": "test-org",
+                "project": "test-project",
                 "files": [
                     {"path": path, "hash": hex_hash(0xaa), "size": 1i64 },
                 ]
@@ -171,14 +169,14 @@ fn rejects_bad_hashes() {
             let session_id = SessionId::now_v7();
             let token = make_token(session_id);
 
-            let db = with_org_access(with_auth(
+            let db = with_project_access(with_auth(
                 MockDatabase::new(DatabaseBackend::Postgres),
                 session_id,
             ));
             let server = make_test_server(db.into_connection());
 
             let body = json!({
-                "organization": "test-org",
+                "project": "test-project",
                 "files": [
                     {"path": "foo.txt", "hash": hash, "size": 1i64 },
                 ]
@@ -203,14 +201,14 @@ fn rejects_duplicate_paths() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_org_access(with_auth(
+        let db = with_project_access(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));
         let server = make_test_server(db.into_connection());
 
         let body = json!({
-            "organization": "test-org",
+            "project": "test-project",
             "files": [
                 {"path": "a", "hash": hex_hash(0xaa), "size": 1i64 },
                 {"path": "a", "hash": hex_hash(0xbb), "size": 1i64 },
@@ -236,7 +234,7 @@ fn happy_path_returns_session_and_missing() {
         let now_ts = chrono::Utc::now().naive_utc();
         let inserted_session = gradient_entity::upload_session::Model {
             id: UploadSessionId::now_v7(),
-            organization: gradient_test_support::fixtures::org_id(),
+            project: gradient_test_support::fixtures::project_id(),
             manifest: json!([]),
             missing: json!([]),
             total_size: 300,
@@ -245,10 +243,10 @@ fn happy_path_returns_session_and_missing() {
             ..Default::default()
         };
 
-        // After auth+org access, the handler runs:
-        //   SELECT build_request_blob WHERE org=... AND hash IN (...) → empty
+        // After auth+project access, the handler runs:
+        //   SELECT build_request_blob WHERE project=... AND hash IN (...) → empty
         //   INSERT upload_session  (RETURNING + rows_affected)
-        let db = with_org_access(with_auth(
+        let db = with_project_access(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -264,7 +262,7 @@ fn happy_path_returns_session_and_missing() {
         let hash_a = hex_hash(0xaa);
         let hash_b = hex_hash(0xbb);
         let body = json!({
-            "organization": "test-org",
+            "project": "test-project",
             "files": [
                 {"path": "flake.nix", "hash": hash_a, "size": 100i64 },
                 {"path": "src/main.rs", "hash": hash_b, "size": 200i64 },

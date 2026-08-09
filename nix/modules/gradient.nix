@@ -37,7 +37,7 @@
     lib.optional (user.password_file != null)
       "gradient_user_${user.username}_password:${user.password_file}"
   ) cfg.state.users);
-  orgPrivateKeyFiles = lib.mapAttrsToList (_: org: "gradient_org_${org.name}_private_key:${org.private_key_file}") cfg.state.organizations;
+  projectPrivateKeyFiles = lib.mapAttrsToList (_: project: "gradient_project_${project.name}_private_key:${project.private_key_file}") cfg.state.projects;
   cacheSigningKeyFiles = lib.mapAttrsToList (_: cache: "gradient_cache_${cache.name}_signing_key:${cache.signing_key_file}") cfg.state.caches;
   apiKeyFiles = lib.mapAttrsToList (_: api_key: "gradient_api_${api_key.name}_key:${api_key.key_file}") cfg.state.api_keys;
   workerTokenFiles = lib.mapAttrsToList (_: worker: "gradient_worker_${worker.worker_id}_token:${worker.token_file}") cfg.state.workers;
@@ -78,7 +78,7 @@ in {
         description = ''
           Validate the generated `state` configuration at build time by running
           the server binary's `--validate-state` over it. Schema and
-          cross-reference errors (unknown organizations, reporter triggers
+          cross-reference errors (unknown projects, reporter triggers
           pointing at undeclared integrations, …) then fail the Nix build
           instead of the server on first start. No database is touched.
         '';
@@ -455,7 +455,7 @@ in {
         };
 
         maxStorageGb = lib.mkOption {
-          description = "Instance-wide cap on total cached NAR storage in GB. When all writable caches for an org have less than 10 MiB headroom, new evaluations park in Waiting. 0 = unlimited; per-cache limits still apply.";
+          description = "Instance-wide cap on total cached NAR storage in GB. When all writable caches for a project have less than 10 MiB headroom, new evaluations park in Waiting. 0 = unlimited; per-cache limits still apply.";
           type = lib.types.ints.unsigned;
           default = 0;
         };
@@ -586,7 +586,7 @@ in {
             requesting worker. `simple` weighs path availability, NAR size,
             dependency count, anti-starvation, builtin de-prioritization and
             fetch-worker reservation; `resource-aware` (the default) also adds
-            RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and per-org
+            RAM/OOM-fit, CPU affinity, preferLocalBuild affinity and per-project
             fair-share.
           '';
           type = lib.types.enum [ "simple" "resource-aware" ];
@@ -683,7 +683,7 @@ in {
         };
 
         deleteState = lib.mkOption {
-          description = "Delete all state (users, organizations, caches) if not manged anymore by state";
+          description = "Delete all state (users, projects, caches) if not manged anymore by state";
           type = lib.types.bool;
           default = true;
         };
@@ -831,8 +831,8 @@ in {
           default = null;
         };
 
-        createOrg = lib.mkOption {
-          description = "Who may create organizations through the API. `none` disables API creation (organizations are then managed only by the declarative state), `superusers` restricts it to superusers, `everyone` allows any authenticated user.";
+        createProject = lib.mkOption {
+          description = "Who may create projects through the API. `none` disables API creation (projects are then managed only by the declarative state), `superusers` restricts it to superusers, `everyone` allows any authenticated user.";
           type = lib.types.enum [ "none" "superusers" "everyone" ];
           default = "everyone";
         };
@@ -908,7 +908,7 @@ in {
           "gradient_github_app_webhook_secret:${cfg.githubApp.webhookSecretFile}"
         ] ++ lib.optional (cfg.metricsTokenFile != null)
           "gradient_metrics_token:${cfg.metricsTokenFile}"
-        ++ userPasswordFiles ++ orgPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
+        ++ userPasswordFiles ++ projectPrivateKeyFiles ++ cacheSigningKeyFiles ++ apiKeyFiles
           ++ workerTokenFiles ++ integrationSecretFiles ++ integrationTokenFiles
           ++ actionTokenFiles;
       };
@@ -988,7 +988,7 @@ in {
         GRADIENT_WORKER_HEARTBEAT_TIMEOUT_SECS = toString cfg.settings.workerHeartbeatTimeoutSecs;
         GRADIENT_PROTO_ALLOW_ANONYMOUS_CACHE = lib.boolToString cfg.settings.allowAnonymousCache;
         GRADIENT_PROTO_ANON_MAX_CONNECTIONS_PER_IP = toString cfg.settings.anonMaxConnectionsPerIp;
-        GRADIENT_CREATE_ORG = cfg.settings.createOrg;
+        GRADIENT_CREATE_PROJECT = cfg.settings.createProject;
         GRADIENT_CREATE_CACHE = cfg.settings.createCache;
         GRADIENT_LOCAL_IPS = builtins.concatStringsSep "," cfg.settings.localIps;
         GRADIENT_TRUSTED_PROXIES = builtins.concatStringsSep "," cfg.settings.trustedProxies;

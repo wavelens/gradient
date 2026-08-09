@@ -28,7 +28,7 @@ pub use self::log_chunks::{
 };
 pub use self::query::{BuildWithOutputs, get_build};
 
-use crate::access::is_org_member;
+use crate::access::is_project_member;
 use crate::authorization::ApiKeyContext;
 use crate::error::{WebError, WebResult};
 use crate::helpers::OptionExt;
@@ -42,16 +42,16 @@ use std::sync::Arc;
 ///
 /// The public build identity is the `build_job` id; build state lives on the
 /// shared `derivation_build` anchor. Walks build_job -> evaluation -> task ->
-/// organization and enforces the access check. Returns `not_found("Build")` on
+/// project and enforces the access check. Returns `not_found("Build")` on
 /// any failure so callers cannot distinguish missing from forbidden.
 pub(super) struct BuildAccessContext {
     pub build_job: MBuildJob,
     pub anchor: MDerivationBuild,
-    pub organization: MOrganization,
+    pub project: MProject,
 }
 
 impl BuildAccessContext {
-    /// Load build_job + anchor + organization without enforcing an access check.
+    /// Load build_job + anchor + project without enforcing an access check.
     ///
     /// Use this when access is gated by custom logic (e.g. download tokens).
     pub(super) async fn load_unguarded(
@@ -91,7 +91,7 @@ impl BuildAccessContext {
             tracing::warn!(evaluation_id = %evaluation.id, "evaluation has no task");
             WebError::data_inconsistency("Evaluation")
         })?;
-        let organization_id = ETask::find_by_id(task_id)
+        let project_id = ETask::find_by_id(task_id)
             .one(&state.web_db)
             .await?
             .ok_or_else(|| {
@@ -102,28 +102,28 @@ impl BuildAccessContext {
                 );
                 WebError::data_inconsistency("Evaluation")
             })?
-            .organization;
+            .project;
 
-        let organization = EOrganization::find_by_id(organization_id)
+        let project = EProject::find_by_id(project_id)
             .one(&state.web_db)
             .await?
             .ok_or_else(|| {
-                tracing::warn!(%organization_id, "Organization not found");
-                WebError::data_inconsistency("Organization")
+                tracing::warn!(%project_id, "Project not found");
+                WebError::data_inconsistency("Project")
             })?;
 
         Ok(Self {
             build_job,
             anchor,
-            organization,
+            project,
         })
     }
 
-    /// Load build_job + organization and enforce public/member access.
+    /// Load build_job + project and enforce public/member access.
     ///
     /// Returns `not_found("Build")` when the build does not exist, the
-    /// organization is private, and `maybe_user` is neither a direct member nor
-    /// a member of another org whose evaluations also reference the derivation.
+    /// project is private, and `maybe_user` is neither a direct member nor
+    /// a member of another project whose evaluations also reference the derivation.
     pub(super) async fn load(
         state: &Arc<ServerState>,
         build_job_id: BuildJobId,
@@ -132,11 +132,11 @@ impl BuildAccessContext {
     ) -> WebResult<Self> {
         let ctx = Self::load_unguarded(state, build_job_id).await?;
 
-        let direct_access = if ctx.organization.public {
+        let direct_access = if ctx.project.public {
             true
         } else {
             match maybe_user {
-                Some(user) => is_org_member(state, user.id, ctx.organization.id, api_key).await?,
+                Some(user) => is_project_member(state, user.id, ctx.project.id, api_key).await?,
                 None => false,
             }
         };
@@ -145,7 +145,7 @@ impl BuildAccessContext {
         }
 
         if let Some(user) = maybe_user
-            && reachable_orgs_accessible(state, user, api_key, ctx.build_job.derivation).await?
+            && reachable_projects_accessible(state, user, api_key, ctx.build_job.derivation).await?
         {
             return Ok(ctx);
         }
@@ -154,10 +154,10 @@ impl BuildAccessContext {
     }
 }
 
-/// True when `user` belongs to any org whose evaluations also reference
-/// `derivation` (a `build_job` exists for it in that org). The derivation is
-/// global and content-addressed, so any org that built it may read its log.
-async fn reachable_orgs_accessible(
+/// True when `user` belongs to any project whose evaluations also reference
+/// `derivation` (a `build_job` exists for it in that project). The derivation is
+/// global and content-addressed, so any project that built it may read its log.
+async fn reachable_projects_accessible(
     state: &Arc<ServerState>,
     user: &MUser,
     api_key: Option<&ApiKeyContext>,
@@ -174,18 +174,18 @@ async fn reachable_orgs_accessible(
         .all(&state.web_db)
         .await?;
 
-    let mut org_ids: std::collections::HashSet<OrganizationId> = std::collections::HashSet::new();
+    let mut project_ids: std::collections::HashSet<ProjectId> = std::collections::HashSet::new();
     for ev in evals {
         let Some(task_id) = ev.task else {
             continue;
         };
         if let Some(p) = ETask::find_by_id(task_id).one(&state.web_db).await? {
-            org_ids.insert(p.organization);
+            project_ids.insert(p.project);
         }
     }
 
-    for org_id in org_ids {
-        if is_org_member(state, user.id, org_id, api_key).await? {
+    for project_id in project_ids {
+        if is_project_member(state, user.id, project_id, api_key).await? {
             return Ok(true);
         }
     }

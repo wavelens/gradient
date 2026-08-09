@@ -10,7 +10,7 @@ use super::super::{lookup_id, read_credential};
 use crate::config::*;
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose};
-use gradient_entity::organization_cache::CacheSubscriptionMode;
+use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::*;
 use gradient_types::consts::{
     BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID, BASE_CACHE_ROLE_WRITE_ID,
@@ -27,7 +27,7 @@ impl<'a> StateApplicator<'a> {
         state_caches: &HashMap<String, StateCache>,
     ) -> Result<(), DynError> {
         let user_map = self.user_lookup().await?;
-        let org_map = self.org_lookup().await?;
+        let project_map = self.project_lookup().await?;
 
         for state_cache in state_caches.values() {
             let (signing_key, _) = read_credential(
@@ -113,34 +113,34 @@ impl<'a> StateApplicator<'a> {
             self.apply_cache_upstreams(cache_id, &state_cache.name, &state_cache.upstreams)
                 .await?;
 
-            for org_name in &state_cache.organizations {
-                let org_id = org_map.get(org_name).copied().ok_or_else(|| {
+            for project_name in &state_cache.projects {
+                let project_id = project_map.get(project_name).copied().ok_or_else(|| {
                     format!(
-                        "Organization '{}' not found for cache '{}'",
-                        org_name, state_cache.name
+                        "Project '{}' not found for cache '{}'",
+                        project_name, state_cache.name
                     )
                 })?;
 
-                let existing_association = organization_cache::Entity::find()
-                    .filter(organization_cache::Column::Organization.eq(org_id))
-                    .filter(organization_cache::Column::Cache.eq(cache_id))
+                let existing_association = project_cache::Entity::find()
+                    .filter(project_cache::Column::Project.eq(project_id))
+                    .filter(project_cache::Column::Cache.eq(cache_id))
                     .one(self.db)
                     .await?;
 
                 if existing_association.is_none() {
-                    let org_cache_model = organization_cache::Model {
-                        id: OrganizationCacheId::now_v7(),
-                        organization: org_id,
+                    let project_cache_model = project_cache::Model {
+                        id: ProjectCacheId::now_v7(),
+                        project: project_id,
                         cache: cache_id,
-                        mode: organization_cache::CacheSubscriptionMode::ReadWrite,
+                        mode: project_cache::CacheSubscriptionMode::ReadWrite,
                     }
                     .into_active_model();
 
-                    org_cache_model.insert(self.db).await?;
+                    project_cache_model.insert(self.db).await?;
                     tracing::info!(
-                        organization = %org_name,
+                        project = %project_name,
                         cache = %state_cache.name,
-                        "Created organization_cache association"
+                        "Created project_cache association"
                     );
                 }
             }

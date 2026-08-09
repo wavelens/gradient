@@ -80,15 +80,15 @@ api("POST", "auth/basic/register", expect_error=True, body=json.dumps({
 api("POST", "auth/check-username", expect_error=True,
     body=json.dumps({"username": "operator"}))  # now taken
 
-api("GET", "orgs", expect_error=True)  # no token -> rejected
+api("GET", "projects", expect_error=True)  # no token -> rejected
 
 token = api("POST", "auth/basic/login", body=json.dumps({
     "loginname": "operator", "password": "SecureTest123!",
 }))
 assert token, "login returned empty token"
-api("GET", "orgs", token=token)  # token authorizes
+api("GET", "projects", token=token)  # token authorizes
 
-# A second user, used later for org/cache membership flows. Lookup is by username.
+# A second user, used later for project/cache membership flows. Lookup is by username.
 # The auth surface is rate-limited (burst 5, one token refilled every 6s); the
 # calls above exhaust the burst, so wait for a token before this 6th request.
 member = "teammate"
@@ -116,162 +116,162 @@ api("GET", "user/audit-log", token=token)
 api("GET", "user/search?q=operator", token=token)
 
 key_token = api("POST", "user/keys", token=token, body=json.dumps({
-    "name": "ci-key", "permissions": ["viewOrg"]}))
+    "name": "ci-key", "permissions": ["viewProject"]}))
 assert key_token.startswith("GRAD"), key_token
 api("POST", "user/keys", token=token, expect_error=True,
-    body=json.dumps({"name": "ci-key", "permissions": ["viewOrg"]}))  # duplicate name
+    body=json.dumps({"name": "ci-key", "permissions": ["viewProject"]}))  # duplicate name
 api("POST", "user/keys", token=token, expect_error=True,
     body=json.dumps({"name": "no-perms", "permissions": []}))  # empty permission mask
 keys = api("GET", "user/keys", token=token)
 key_id = next(k["id"] for k in keys if k["name"] == "ci-key")
 # The created key authorizes API calls just like a session token.
-api("GET", "orgs", token=key_token)
+api("GET", "projects", token=key_token)
 api("POST", f"user/keys/{key_id}/revoke", token=token)
 api("DELETE", "user/keys", token=token, body=json.dumps({"name": "ci-key"}))
 
-# ── Phase 3: organizations (direct + CLI) ─────────────────────────────────────
-banner("Phase 3: organizations")
-org_id = api("PUT", "orgs", token=token, body=json.dumps({
-    "name": "myorg", "display_name": "My Org", "description": "desc"}))
-api("PUT", "orgs", token=token, expect_error=True, body=json.dumps({
-    "name": "myorg", "display_name": "Dup", "description": "d"}))  # duplicate name
-assert api("GET", "orgs/myorg", token=token)["id"] == org_id
-orgs = api("GET", "orgs", token=token)["items"]
-assert any(o["id"] == org_id for o in orgs)
-api("GET", "orgs/available", token=token)
-api("GET", "orgs/public", token=token)
-api("PATCH", "orgs/myorg", token=token, body=json.dumps({"display_name": "My Org 2"}))
-assert api("GET", "orgs/myorg", token=token)["display_name"] == "My Org 2"
+# ── Phase 3: projects (direct + CLI) ─────────────────────────────────────
+banner("Phase 3: projects")
+project_id = api("PUT", "projects", token=token, body=json.dumps({
+    "name": "myproject", "display_name": "My Project", "description": "desc"}))
+api("PUT", "projects", token=token, expect_error=True, body=json.dumps({
+    "name": "myproject", "display_name": "Dup", "description": "d"}))  # duplicate name
+assert api("GET", "projects/myproject", token=token)["id"] == project_id
+projects = api("GET", "projects", token=token)["items"]
+assert any(o["id"] == project_id for o in projects)
+api("GET", "projects/available", token=token)
+api("GET", "projects/public", token=token)
+api("PATCH", "projects/myproject", token=token, body=json.dumps({"display_name": "My Project 2"}))
+assert api("GET", "projects/myproject", token=token)["display_name"] == "My Project 2"
 
-ssh_key = api("GET", "orgs/myorg/ssh", token=token)
+ssh_key = api("GET", "projects/myproject/ssh", token=token)
 assert ssh_key.startswith("ssh-ed25519 "), ssh_key
-assert api("POST", "orgs/myorg/ssh", token=token) != ssh_key, "ssh key should rotate"
+assert api("POST", "projects/myproject/ssh", token=token) != ssh_key, "ssh key should rotate"
 
-api("GET", "orgs/myorg/users", token=token)
-api("GET", "orgs/myorg/subscribe", token=token)
+api("GET", "projects/myproject/users", token=token)
+api("GET", "projects/myproject/subscribe", token=token)
 
-role_id = api("POST", "orgs/myorg/roles", token=token, body=json.dumps({
-    "name": "viewers", "permissions": ["viewOrg"]}))["id"]
-api("POST", "orgs/myorg/roles", token=token, expect_error=True,
-    body=json.dumps({"name": "viewers", "permissions": ["viewOrg"]}))  # duplicate name
-api("GET", "orgs/myorg/roles", token=token)
-api("GET", f"orgs/myorg/roles/{role_id}", token=token)
-api("PATCH", f"orgs/myorg/roles/{role_id}", token=token, body=json.dumps({"name": "viewers2"}))
-api("DELETE", f"orgs/myorg/roles/{role_id}", token=token)
+role_id = api("POST", "projects/myproject/roles", token=token, body=json.dumps({
+    "name": "viewers", "permissions": ["viewProject"]}))["id"]
+api("POST", "projects/myproject/roles", token=token, expect_error=True,
+    body=json.dumps({"name": "viewers", "permissions": ["viewProject"]}))  # duplicate name
+api("GET", "projects/myproject/roles", token=token)
+api("GET", f"projects/myproject/roles/{role_id}", token=token)
+api("PATCH", f"projects/myproject/roles/{role_id}", token=token, body=json.dumps({"name": "viewers2"}))
+api("DELETE", f"projects/myproject/roles/{role_id}", token=token)
 
-# Org membership: add the second user, change their role, then remove them.
+# Project membership: add the second user, change their role, then remove them.
 # Members are referenced by username; "View"/"Write" are built-in roles.
-api("POST", "orgs/myorg/users", token=token,
+api("POST", "projects/myproject/users", token=token,
     body=json.dumps({"user": member, "role": "View"}))
-api("POST", "orgs/myorg/users", token=token, expect_error=True,
+api("POST", "projects/myproject/users", token=token, expect_error=True,
     body=json.dumps({"user": member, "role": "View"}))  # already a member
-assert any(m["id"] == member for m in api("GET", "orgs/myorg/users", token=token)), "member not added"
-api("PATCH", "orgs/myorg/users", token=token,
+assert any(m["id"] == member for m in api("GET", "projects/myproject/users", token=token)), "member not added"
+api("PATCH", "projects/myproject/users", token=token,
     body=json.dumps({"user": member, "role": "Write"}))
-api("DELETE", "orgs/myorg/users", token=token, body=json.dumps({"user": member}))
-assert not any(m["id"] == member for m in api("GET", "orgs/myorg/users", token=token)), "member not removed"
+api("DELETE", "projects/myproject/users", token=token, body=json.dumps({"user": member}))
+assert not any(m["id"] == member for m in api("GET", "projects/myproject/users", token=token)), "member not removed"
 
-# CLI: configure, then create/list/show/delete a second org.
+# CLI: configure, then create/list/show/delete a second project.
 machine.succeed(f"{CLI} config Server http://gradient.local")
 machine.succeed(f"{CLI} config AuthToken {token}")
-cli("organization create --name cliorg --display-name 'CLI Org' --description d")
-api("GET", "orgs/cliorg", token=token)  # CLI-created org visible via API
-cli("organization list")
-cli("organization select cliorg")
-cli("organization show")
-cli("organization delete")
-api("GET", "orgs/cliorg", token=token, expect_error=True)  # gone
-machine.succeed(f"{CLI} organization select myorg")
+cli("project create --name cliproject --display-name 'CLI Project' --description d")
+api("GET", "projects/cliproject", token=token)  # CLI-created project visible via API
+cli("project list")
+cli("project select cliproject")
+cli("project show")
+cli("project delete")
+api("GET", "projects/cliproject", token=token, expect_error=True)  # gone
+machine.succeed(f"{CLI} project select myproject")
 
 # ── Phase 4: tasks (direct + CLI) ──────────────────────────────────────────
 banner("Phase 4: tasks")
-proj_id = api("PUT", "tasks/myorg", token=token, body=json.dumps({
+proj_id = api("PUT", "tasks/myproject", token=token, body=json.dumps({
     "name": "mytask", "display_name": "My Task", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))
-api("PUT", "tasks/myorg", token=token, expect_error=True, body=json.dumps({
+api("PUT", "tasks/myproject", token=token, expect_error=True, body=json.dumps({
     "name": "mytask", "display_name": "Dup", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # duplicate name
-api("PUT", "tasks/myorg", token=token, expect_error=True, body=json.dumps({
+api("PUT", "tasks/myproject", token=token, expect_error=True, body=json.dumps({
     "name": "build-request", "display_name": "Reserved", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # reserved name
-assert api("GET", "tasks/myorg/mytask", token=token)["id"] == proj_id
-assert any(p["id"] == proj_id for p in api("GET", "tasks/myorg", token=token)["items"])
+assert api("GET", "tasks/myproject/mytask", token=token)["id"] == proj_id
+assert any(p["id"] == proj_id for p in api("GET", "tasks/myproject", token=token)["items"])
 
 # A new task must not start above GRADIENT_KEEP_EVALUATIONS (5 here). It used
 # to be created at the hardcoded 30, so the very first save - the frontend sends
 # the whole form back - was rejected by the server's own value (#561).
-fresh = api("GET", "tasks/myorg/mytask", token=token)
+fresh = api("GET", "tasks/myproject/mytask", token=token)
 assert fresh["keep_evaluations"] == 5, fresh
-api("PATCH", "tasks/myorg/mytask", token=token,
+api("PATCH", "tasks/myproject/mytask", token=token,
     body=json.dumps({"keep_evaluations": fresh["keep_evaluations"]}))
-api("PATCH", "tasks/myorg/mytask", token=token, expect_error=True,
+api("PATCH", "tasks/myproject/mytask", token=token, expect_error=True,
     body=json.dumps({"keep_evaluations": 6}))  # above the server maximum
-api("PATCH", "tasks/myorg/mytask", token=token, expect_error=True,
+api("PATCH", "tasks/myproject/mytask", token=token, expect_error=True,
     body=json.dumps({"keep_evaluations": 0}))  # below the floor
-api("GET", "tasks/myorg/available", token=token)
-api("GET", "tasks/myorg/mytask/details", token=token)
-api("PATCH", "tasks/myorg/mytask", token=token, body=json.dumps({"display_name": "MP2"}))
-api("GET", "tasks/myorg/mytask/entry-points", token=token)
-api("GET", "tasks/myorg/mytask/metrics", token=token)
-assert api("GET", "tasks/myorg/mytask/evaluations", token=token) == [], \
+api("GET", "tasks/myproject/available", token=token)
+api("GET", "tasks/myproject/mytask/details", token=token)
+api("PATCH", "tasks/myproject/mytask", token=token, body=json.dumps({"display_name": "MP2"}))
+api("GET", "tasks/myproject/mytask/entry-points", token=token)
+api("GET", "tasks/myproject/mytask/metrics", token=token)
+assert api("GET", "tasks/myproject/mytask/evaluations", token=token) == [], \
     "fresh task should have no evaluations"
 
-api("POST", "tasks/myorg/mytask/triggers", token=token, body=json.dumps({
+api("POST", "tasks/myproject/mytask/triggers", token=token, body=json.dumps({
     "config": {"type": "polling", "interval_secs": 3600}}))
-api("GET", "tasks/myorg/mytask/triggers", token=token)
+api("GET", "tasks/myproject/mytask/triggers", token=token)
 
-api("GET", "tasks/myorg/mytask/actions", token=token)
-api("POST", "tasks/myorg/mytask/active", token=token)   # enable
-api("DELETE", "tasks/myorg/mytask/active", token=token)  # disable
+api("GET", "tasks/myproject/mytask/actions", token=token)
+api("POST", "tasks/myproject/mytask/active", token=token)   # enable
+api("DELETE", "tasks/myproject/mytask/active", token=token)  # disable
 # These reach out to / depend on a completed evaluation or return non-JSON
 # (SVG badge); just confirm the endpoints respond rather than asserting a body.
-machine.execute(f"curl -sS -X POST -H 'Authorization: Bearer {token}' {API}/tasks/myorg/mytask/check-repository")
-machine.execute(f"curl -sS -H 'Authorization: Bearer {token}' {API}/tasks/myorg/mytask/flake-inputs")
-machine.execute(f"curl -sS -H 'Authorization: Bearer {token}' {API}/tasks/myorg/mytask/badge")
+machine.execute(f"curl -sS -X POST -H 'Authorization: Bearer {token}' {API}/tasks/myproject/mytask/check-repository")
+machine.execute(f"curl -sS -H 'Authorization: Bearer {token}' {API}/tasks/myproject/mytask/flake-inputs")
+machine.execute(f"curl -sS -H 'Authorization: Bearer {token}' {API}/tasks/myproject/mytask/badge")
 
-# CLI: create/list/show/delete a second task under the selected org.
+# CLI: create/list/show/delete a second task under the selected project.
 machine.succeed(f"{CLI} task select mytask")
 cli("task create --name clitask --display-name 'CLI Task' --description d "
     "--repository git@github.com:Wavelens/Gradient.git --wildcard 'packages.*'")
-api("GET", "tasks/myorg/clitask", token=token)
+api("GET", "tasks/myproject/clitask", token=token)
 cli("task list")
 machine.succeed(f"{CLI} task select clitask")
 cli("task show")
 cli("task delete")
-api("GET", "tasks/myorg/clitask", token=token, expect_error=True)
+api("GET", "tasks/myproject/clitask", token=token, expect_error=True)
 machine.succeed(f"{CLI} task select mytask")
 
-# Task transfer: move a throwaway task to a second org owned by the caller.
-api("PUT", "orgs", token=token, body=json.dumps({
-    "name": "destorg", "display_name": "Dest", "description": "d"}))
-api("PUT", "tasks/myorg", token=token, body=json.dumps({
+# Task transfer: move a throwaway task to a second project owned by the caller.
+api("PUT", "projects", token=token, body=json.dumps({
+    "name": "destproject", "display_name": "Dest", "description": "d"}))
+api("PUT", "tasks/myproject", token=token, body=json.dumps({
     "name": "transferme", "display_name": "Transfer", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))
-api("POST", "tasks/myorg/transferme/transfer", token=token,
-    body=json.dumps({"organization": "destorg"}))
-api("GET", "tasks/destorg/transferme", token=token)               # now under destorg
-api("GET", "tasks/myorg/transferme", token=token, expect_error=True)  # gone from myorg
+api("POST", "tasks/myproject/transferme/transfer", token=token,
+    body=json.dumps({"project": "destproject"}))
+api("GET", "tasks/destproject/transferme", token=token)               # now under destproject
+api("GET", "tasks/myproject/transferme", token=token, expect_error=True)  # gone from myproject
 
 # ── Phase 5: workers (direct + CLI) ───────────────────────────────────────────
 banner("Phase 5: workers")
 api_worker = "b0000000-0000-4000-8000-000000000001"
-reg = api("POST", "orgs/myorg/workers", token=token, body=json.dumps({
+reg = api("POST", "projects/myproject/workers", token=token, body=json.dumps({
     "worker_id": api_worker, "display_name": "api-worker"}))
 assert reg.get("token") and len(reg["token"]) == 64, reg
 assert any(w["worker_id"] == api_worker
-           for w in api("GET", "orgs/myorg/workers", token=token))
-api("PATCH", f"orgs/myorg/workers/{api_worker}", token=token,
+           for w in api("GET", "projects/myproject/workers", token=token))
+api("PATCH", f"projects/myproject/workers/{api_worker}", token=token,
     body=json.dumps({"display_name": "api-worker-2"}))
-api("DELETE", f"orgs/myorg/workers/{api_worker}", token=token)
+api("DELETE", f"projects/myproject/workers/{api_worker}", token=token)
 
 cli_worker = "c0000000-0000-4000-8000-000000000002"
 cli(f"worker register {cli_worker} --display-name cli-worker")
 assert any(w["worker_id"] == cli_worker
-           for w in api("GET", "orgs/myorg/workers", token=token))
+           for w in api("GET", "projects/myproject/workers", token=token))
 cli("worker list")
 cli(f"worker delete {cli_worker}")
 assert not any(w["worker_id"] == cli_worker
-               for w in api("GET", "orgs/myorg/workers", token=token))
+               for w in api("GET", "projects/myproject/workers", token=token))
 
 # ── Phase 6: caches (direct + CLI) ────────────────────────────────────────────
 banner("Phase 6: caches")
@@ -290,9 +290,9 @@ api("GET", "caches/maincache/members", token=token)
 api("GET", "caches/maincache/roles", token=token)
 api("GET", "caches/maincache/upstreams", token=token)
 api("PATCH", "caches/maincache", token=token, body=json.dumps({"priority": 20}))
-# Subscribe the org so the cache is usable in org context.
-api("POST", "orgs/myorg/subscribe/maincache", token=token)
-api("POST", "orgs/myorg/subscribe/maincache", token=token, expect_error=True)  # already subscribed
+# Subscribe the project so the cache is usable in project context.
+api("POST", "projects/myproject/subscribe/maincache", token=token)
+api("POST", "projects/myproject/subscribe/maincache", token=token, expect_error=True)  # already subscribed
 
 cli("cache create --name clicache --display-name 'CLI Cache' --description d --priority 5")
 api("GET", "caches/clicache", token=token)
@@ -338,9 +338,9 @@ api("PATCH", f"caches/maincache/upstreams/{up_id}", token=token, body=json.dumps
     "public_key": "mirror.example.com-1:" + "B" * 44}))
 api("DELETE", f"caches/maincache/upstreams/{up_id}", token=token)
 
-# Org subscription removal then restore.
-api("DELETE", "orgs/myorg/subscribe/maincache", token=token)
-api("POST", "orgs/myorg/subscribe/maincache", token=token)
+# Project subscription removal then restore.
+api("DELETE", "projects/myproject/subscribe/maincache", token=token)
+api("POST", "projects/myproject/subscribe/maincache", token=token)
 
 # ── Phase 7: cache NAR upload surface (direct + CLI) ──────────────────────────
 # No nix store is needed: the endpoint validates byte length, store-path shape,
@@ -420,35 +420,35 @@ api("GET", f"commits/{missing}", token=token, expect_error=True)
 
 # ── Phase 8b: permissions (multi-actor) ───────────────────────────────────────
 # The second user logs in and acts with their own token. The built-in "View"
-# role grants read access but none of the org-management permissions, so those
+# role grants read access but none of the project-management permissions, so those
 # mutations must be rejected; promotion to "Admin" then unlocks them.
 banner("Phase 8b: permissions (multi-actor)")
 team_token = api("POST", "auth/basic/login", body=json.dumps({
     "loginname": member, "password": "SecureTest123!"}))
 assert team_token, "second-user login returned empty token"
 
-# Non-member cannot read a private org.
-api("GET", "orgs/myorg", token=team_token, expect_error=True)
+# Non-member cannot read a private project.
+api("GET", "projects/myproject", token=team_token, expect_error=True)
 
 # Operator grants "View"; the member can read but cannot manage.
-api("POST", "orgs/myorg/users", token=token, body=json.dumps({"user": member, "role": "View"}))
-api("GET", "orgs/myorg", token=team_token)                                    # ViewOrg granted
-api("PATCH", "orgs/myorg", token=team_token, expect_error=True,
-    body=json.dumps({"display_name": "hijack"}))                              # no ManageOrgSettings
-api("PUT", "tasks/myorg", token=team_token, expect_error=True, body=json.dumps({
+api("POST", "projects/myproject/users", token=token, body=json.dumps({"user": member, "role": "View"}))
+api("GET", "projects/myproject", token=team_token)                                    # ViewProject granted
+api("PATCH", "projects/myproject", token=team_token, expect_error=True,
+    body=json.dumps({"display_name": "hijack"}))                              # no ManageProjectSettings
+api("PUT", "tasks/myproject", token=team_token, expect_error=True, body=json.dumps({
     "name": "sneak", "display_name": "x", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # no CreateTask
-api("POST", "orgs/myorg/users", token=team_token, expect_error=True,
+api("POST", "projects/myproject/users", token=team_token, expect_error=True,
     body=json.dumps({"user": "operator", "role": "View"}))                    # no ManageMembers
-api("DELETE", "orgs/myorg", token=team_token, expect_error=True)              # no DeleteOrg
+api("DELETE", "projects/myproject", token=team_token, expect_error=True)              # no DeleteProject
 
 # Promote to "Admin": the same mutation now succeeds.
-api("PATCH", "orgs/myorg/users", token=token, body=json.dumps({"user": member, "role": "Admin"}))
-api("PATCH", "orgs/myorg", token=team_token, body=json.dumps({"display_name": "Admin Edit OK"}))
+api("PATCH", "projects/myproject/users", token=token, body=json.dumps({"user": member, "role": "Admin"}))
+api("PATCH", "projects/myproject", token=team_token, body=json.dumps({"display_name": "Admin Edit OK"}))
 
 # Remove the member; read access is revoked again.
-api("DELETE", "orgs/myorg/users", token=token, body=json.dumps({"user": member}))
-api("GET", "orgs/myorg", token=team_token, expect_error=True)
+api("DELETE", "projects/myproject/users", token=token, body=json.dumps({"user": member}))
+api("GET", "projects/myproject", token=team_token, expect_error=True)
 
 # ── Phase 8c: admin state export (superuser) ──────────────────────────────────
 # The export endpoint mirrors the live system back into a declarative
@@ -470,16 +470,16 @@ machine.succeed("su postgres -c 'psql -d gradient -f /tmp/superuser.sql'")
 # JSON format returns the full StateConfiguration shape with secrets redacted.
 state = api("GET", "admin/state?format=json", token=token)
 assert "operator" in state["users"], state["users"]
-assert "myorg" in state["organizations"], state["organizations"]
+assert "myproject" in state["projects"], state["projects"]
 assert "mytask" in state["tasks"], state["tasks"]
 assert "maincache" in state["caches"], state["caches"]
-assert state["organizations"]["myorg"]["private_key_file"] is None
+assert state["projects"]["myproject"]["private_key_file"] is None
 assert state["caches"]["maincache"]["signing_key_file"] is None
 
 # Default (nix) format renders a pasteable expression carrying the same resources.
 nix_out = machine.succeed(f"curl -sS -H 'Authorization: Bearer {token}' {API}/admin/state")
 assert nix_out.startswith("# Generated by"), nix_out
-for needle in ["myorg = {", "mytask = {", "maincache = {", "signing_key_file = null;"]:
+for needle in ["myproject = {", "mytask = {", "maincache = {", "signing_key_file = null;"]:
     assert needle in nix_out, f"missing {needle!r} in nix export:\n{nix_out}"
 
 # ── Phase 8d: declarative state apply (#347) ──────────────────────────────────
@@ -500,24 +500,24 @@ sa_token = api("POST", "auth/basic/login", body=json.dumps({
 assert sa_token, "state admin login returned empty token"
 status("GET", "admin/state", token=sa_token, code=200)  # superuser applied
 
-org = api("GET", "orgs/stateorg", token=sa_token)
-assert org["display_name"] == "State Org" and org["description"] == "Provisioned by state", org
+project = api("GET", "projects/stateproject", token=sa_token)
+assert project["display_name"] == "State Project" and project["description"] == "Provisioned by state", project
 
 # Membership + custom role applied (statemember holds the state-managed role).
-# The org-users list returns the role name in the `name` field.
-members = {m["id"]: m["name"] for m in api("GET", "orgs/stateorg/users", token=sa_token)}
+# The project-users list returns the role name in the `name` field.
+members = {m["id"]: m["name"] for m in api("GET", "projects/stateproject/users", token=sa_token)}
 assert members.get("stateadmin") == "Admin", members
 assert members.get("statemember") == "releaser", members
-releaser = next(r for r in api("GET", "orgs/stateorg/roles", token=sa_token)["roles"]
+releaser = next(r for r in api("GET", "projects/stateproject/roles", token=sa_token)["roles"]
                 if r["name"] == "releaser")
-assert set(releaser["permissions"]) == {"viewOrg", "triggerEvaluation"}, releaser
+assert set(releaser["permissions"]) == {"viewProject", "triggerEvaluation"}, releaser
 
 # Task applied with its non-default fields and both triggers.
-proj = api("GET", "tasks/stateorg/statetask", token=sa_token)
+proj = api("GET", "tasks/stateproject/statetask", token=sa_token)
 assert proj["concurrency"] == "hard_abort", proj
 assert proj["sign_cache"] is False and proj["keep_evaluations"] == 5, proj
 assert proj["wildcard"] == "packages.x86_64-linux.*", proj
-trig_types = {t["type"] for t in api("GET", "tasks/stateorg/statetask/triggers", token=sa_token)}
+trig_types = {t["type"] for t in api("GET", "tasks/stateproject/statetask/triggers", token=sa_token)}
 assert {"polling", "time"} <= trig_types, trig_types
 
 # Cache applied with members, custom role and upstream.
@@ -530,7 +530,7 @@ assert any(u["url"] == "https://cache.nixos.org"
            for u in api("GET", "caches/statecache/upstreams", token=sa_token))
 
 # Worker registration applied with its capability gates.
-worker = next(w for w in api("GET", "orgs/stateorg/workers", token=sa_token)
+worker = next(w for w in api("GET", "projects/stateproject/workers", token=sa_token)
               if w["worker_id"] == "a0000000-0000-0000-0000-0000000000aa")
 assert worker["enable_eval"] is True and worker["enable_fetch"] is False, worker
 
@@ -538,38 +538,38 @@ assert worker["enable_eval"] is True and worker["enable_fetch"] is False, worker
 base_id = "a0000000-0000-0000-0000-0000000000bb"
 base_id2 = "a0000000-0000-0000-0000-0000000000cc"
 
-sa_workers = api("GET", "orgs/stateorg/workers", token=sa_token)
+sa_workers = api("GET", "projects/stateproject/workers", token=sa_token)
 base = next(w for w in sa_workers if w["worker_id"] == base_id)
 assert base["is_base"] is True, base
-assert base["active"] is True, "base worker pre-enabled via organizations should be active"
+assert base["active"] is True, "base worker pre-enabled via projects should be active"
 
 base2 = next(w for w in sa_workers if w["worker_id"] == base_id2)
 assert base2["is_base"] is True and base2["active"] is False, base2
 
-api("PATCH", f"orgs/stateorg/workers/{base_id2}", token=sa_token, body=json.dumps({"active": True}))
-assert next(w for w in api("GET", "orgs/stateorg/workers", token=sa_token)
+api("PATCH", f"projects/stateproject/workers/{base_id2}", token=sa_token, body=json.dumps({"active": True}))
+assert next(w for w in api("GET", "projects/stateproject/workers", token=sa_token)
             if w["worker_id"] == base_id2)["active"] is True, "enable failed"
-api("PATCH", f"orgs/stateorg/workers/{base_id2}", token=sa_token, body=json.dumps({"active": False}))
-assert next(w for w in api("GET", "orgs/stateorg/workers", token=sa_token)
+api("PATCH", f"projects/stateproject/workers/{base_id2}", token=sa_token, body=json.dumps({"active": False}))
+assert next(w for w in api("GET", "projects/stateproject/workers", token=sa_token)
             if w["worker_id"] == base_id2)["active"] is False, "disable failed"
 
-api("PATCH", f"orgs/stateorg/workers/{base_id}", token=sa_token, expect_error=True,
+api("PATCH", f"projects/stateproject/workers/{base_id}", token=sa_token, expect_error=True,
     body=json.dumps({"display_name": "nope"}))
-api("DELETE", f"orgs/stateorg/workers/{base_id}", token=sa_token, expect_error=True)
+api("DELETE", f"projects/stateproject/workers/{base_id}", token=sa_token, expect_error=True)
 
-test_res = api("POST", f"orgs/stateorg/workers/{base_id}/test", token=sa_token)
+test_res = api("POST", f"projects/stateproject/workers/{base_id}/test", token=sa_token)
 assert test_res["connected"] is False and test_res["ok"] is False, test_res
 
 # Both integration kinds applied.
-ints = {(i["name"], i["kind"]) for i in api("GET", "orgs/stateorg/integrations", token=sa_token)}
+ints = {(i["name"], i["kind"]) for i in api("GET", "projects/stateproject/integrations", token=sa_token)}
 assert ("state-inbound", "inbound") in ints and ("state-outbound", "outbound") in ints, ints
 
-# API key applied: the bearer `GRAD<raw>` authorizes, and its `viewOrg`-only
+# API key applied: the bearer `GRAD<raw>` authorizes, and its `viewProject`-only
 # mask is enforced (a settings mutation is rejected).
 state_key = "GRADstatecitokenrawvalue"
-api("GET", "orgs/stateorg", token=state_key)  # viewOrg granted -> authorizes
-api("PATCH", "orgs/stateorg", token=state_key, expect_error=True,
-    body=json.dumps({"display_name": "hijack"}))  # mask lacks ManageOrgSettings
+api("GET", "projects/stateproject", token=state_key)  # viewProject granted -> authorizes
+api("PATCH", "projects/stateproject", token=state_key, expect_error=True,
+    body=json.dumps({"display_name": "hijack"}))  # mask lacks ManageProjectSettings
 
 # ── Phase 9: logout ───────────────────────────────────────────────────────────
 banner("Phase 9: logout")

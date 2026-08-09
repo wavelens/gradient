@@ -11,10 +11,10 @@ use std::collections::HashSet;
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
     let config = lookup.config;
     for task in config.tasks.values() {
-        if !lookup.org_exists(&task.organization) {
+        if !lookup.project_exists(&task.project) {
             errors.push(
-                format!("tasks.{}.organization", task.name),
-                format!("Organization '{}' does not exist", task.organization),
+                format!("tasks.{}.project", task.name),
+                format!("Project '{}' does not exist", task.project),
             );
         }
 
@@ -74,7 +74,7 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             }
         }
 
-        // Reporter triggers resolve their `integration` against the org's
+        // Reporter triggers resolve their `integration` against the project's
         // inbound integrations at apply time; catch a missing/outbound/typo
         // reference here so it fails validation instead of mid-apply (#332).
         for trigger in task.triggers.iter().flatten() {
@@ -94,15 +94,16 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             if name == "github" || name.starts_with("github-") {
                 continue;
             }
-            let declared_inbound = config.integrations.values().any(|i| {
-                i.name == *name && i.organization == task.organization && i.kind == "inbound"
-            });
+            let declared_inbound = config
+                .integrations
+                .values()
+                .any(|i| i.name == *name && i.project == task.project && i.kind == "inbound");
             if !declared_inbound {
                 errors.push(
                     format!("tasks.{}.triggers", task.name),
                     format!(
-                        "Reporter trigger references integration '{}' which is not a declared inbound integration in organization '{}'",
-                        name, task.organization
+                        "Reporter trigger references integration '{}' which is not a declared inbound integration in project '{}'",
+                        name, task.project
                     ),
                 );
             }

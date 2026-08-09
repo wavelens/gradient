@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{BuildRequestBlobId, OrganizationId};
+use crate::ids::{BuildRequestBlobId, ProjectId};
 
 /// Content-addressed source-file blob uploaded as part of a build request.
 /// The 32-byte BLAKE3 `hash` identifies the payload on the configured
@@ -18,7 +18,7 @@ use crate::ids::{BuildRequestBlobId, OrganizationId};
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: BuildRequestBlobId,
-    pub organization: OrganizationId,
+    pub project: ProjectId,
     pub hash: Vec<u8>,
     pub size: i64,
     pub created_at: NaiveDateTime,
@@ -28,17 +28,17 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::organization::Entity",
-        from = "Column::Organization",
-        to = "super::organization::Column::Id",
+        belongs_to = "super::project::Entity",
+        from = "Column::Project",
+        to = "super::project::Column::Id",
         on_delete = "Cascade"
     )]
-    Organization,
+    Project,
 }
 
-impl Related<super::organization::Entity> for Entity {
+impl Related<super::project::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Organization.def()
+        Relation::Project.def()
     }
 }
 

@@ -18,7 +18,7 @@ interface ServerConfig {
   registration_enabled: boolean;
   email_verification_enabled: boolean;
   smtp_enabled: boolean;
-  create_org: CreatePermission;
+  create_project: CreatePermission;
   create_cache: CreatePermission;
 }
 
@@ -33,7 +33,7 @@ export class ConfigService {
   registrationDisabled = false;
   emailVerificationEnabled = false;
   smtpEnabled = false;
-  createOrg: CreatePermission = 'everyone';
+  createProject: CreatePermission = 'everyone';
   createCache: CreatePermission = 'everyone';
 
   canCreate(permission: CreatePermission, isSuperuser: boolean): boolean {
@@ -61,7 +61,7 @@ export class ConfigService {
           this.registrationDisabled = !res.message.registration_enabled;
           this.emailVerificationEnabled = res.message.email_verification_enabled;
           this.smtpEnabled = res.message.smtp_enabled;
-          this.createOrg = res.message.create_org ?? 'everyone';
+          this.createProject = res.message.create_project ?? 'everyone';
           this.createCache = res.message.create_cache ?? 'everyone';
         }
       })

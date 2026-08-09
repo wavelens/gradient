@@ -74,10 +74,10 @@ One module per database table using SeaORM derive macros. The naming convention 
 Key entities and their relationships:
 
 ```text
-organization
+project
   ├── worker_registration[]    registered worker auth tokens
   ├── cache[]                  binary caches (via subscription)
-  ├── derivation[]             immutable per-org "what to build" records
+  ├── derivation[]             immutable per-project "what to build" records
   │     ├── derivation_output[]         (one per Nix output: out, dev, doc, ...)
   │     ├── derivation_dependency[]     (edges: derivation → dependency)
   │     └── derivation_feature[]
@@ -94,7 +94,7 @@ The `build` row is the "attempt" - it carries `status`, `log_id`, and `build_tim
 
 `cache_derivation` (cache, derivation) records that a cache holds the **complete closure** of a derivation. The cacher only inserts a row once every output of the derivation is `is_cached = true` AND every transitive dependency already has a matching `cache_derivation` row for the same cache.
 
-`worker_registration` stores `(peer_id, worker_id, token_hash)` - the challenge-response auth tokens issued when a peer (org, cache, or proxy) registers a worker.
+`worker_registration` stores `(peer_id, worker_id, token_hash)` - the challenge-response auth tokens issued when a peer (project, cache, or proxy) registers a worker.
 
 ### `builder`
 
@@ -134,7 +134,7 @@ caches.rs        Cache CRUD + Nix cache protocol handlers
 commits.rs       Commit lookup
 evals.rs         Evaluation detail, abort, log streaming
 mod.rs           Health, config, 404 handler
-orgs/            Org CRUD, members, SSH key, cache subscriptions, worker registration
+projects/            Project CRUD, members, SSH key, cache subscriptions, worker registration
 tasks.rs      Task CRUD, entry points, evaluate trigger
 user.rs          Profile, API keys, settings
 workers.rs       Connected worker list (superuser / global stats)

@@ -14,7 +14,7 @@ import { DispatchedJobSummary, PendingJobSummary } from '@core/services/board.se
 
 const PENDING: PendingJobSummary = {
   kind: 1,
-  organization: 'o1',
+  project: 'o1',
   evaluation_id: 'e1abc123',
   build_id: 'b1',
   queued_at: '2026-06-08T00:00:00Z',
@@ -48,7 +48,7 @@ function setup(): ComponentFixture<BoardLiveJobsComponent> {
 const DISPATCHED: DispatchedJobSummary = {
   id: 'd1abc123-0000-0000-0000-000000000001',
   kind: 1,
-  organization: 'o1',
+  project: 'o1',
   worker_id: 'worker-1',
   score: 42.0,
   dispatched_at: '2026-06-08T00:00:00Z',
@@ -119,8 +119,8 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
                   kind: 1,
                   winner: 'j1',
                   candidates: [
-                    { job_id: 'j1', kind: 1, organization: 'o1', build_id: 'b1', evaluation_id: 'e1', pname: 'win', score: 12 },
-                    { job_id: 'j2', kind: 1, organization: 'o2', build_id: 'b2', evaluation_id: 'e2', pname: 'loser', score: -8 },
+                    { job_id: 'j1', kind: 1, project: 'o1', build_id: 'b1', evaluation_id: 'e1', pname: 'win', score: 12 },
+                    { job_id: 'j2', kind: 1, project: 'o2', build_id: 'b2', evaluation_id: 'e2', pname: 'loser', score: -8 },
                   ],
                 },
               ]),

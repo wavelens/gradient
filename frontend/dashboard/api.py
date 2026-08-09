@@ -45,8 +45,8 @@ def register(request, username, name, email, password):
 def login(loginname, password):
     return get_client(None, "user/login", body={'loginname': loginname, 'password': password})
 
-def post_organization(request, name, description, use_nix_store):
-    return get_client(request.user, "organization", body={'name': name, 'description': description, 'use_nix_store': use_nix_store})
+def post_project(request, name, description, use_nix_store):
+    return get_client(request.user, "project", body={'name': name, 'description': description, 'use_nix_store': use_nix_store})
 
 def get_user_info(request):
     return get_client(request.user, f"user/info", post=False)

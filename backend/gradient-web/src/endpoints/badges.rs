@@ -6,16 +6,16 @@
 
 //! Task status badge endpoint.
 //!
-//! `GET /api/v1/tasks/{org}/{task}/badge` returns a shields.io-compatible
+//! `GET /api/v1/tasks/{project}/{task}/badge` returns a shields.io-compatible
 //! SVG badge reflecting the task's latest evaluation status. Private
-//! organisations require a `?token=GRADxxxx` or JWT (same mechanism as the
+//! projects require a `?token=GRADxxxx` or JWT (same mechanism as the
 //! entry-point download endpoint).
 //!
 //! Supported query parameters:
 //! - `style`: `flat` (default) or `flat-square`
 //! - `label`: left-hand label text (default `"build"`)
 //! - `eval`: UUID of a specific evaluation to use instead of the task's latest
-//! - `token`: API key or JWT for private organisations
+//! - `token`: API key or JWT for private projects
 
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
@@ -26,12 +26,12 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::access::is_org_member;
+use crate::access::is_project_member;
 use crate::authorization::{ApiKeyContext, MaybeApiKey, MaybeUser};
 use crate::error::WebError;
 use crate::helpers::OptionExt;
 use gradient_core::ServerState;
-use gradient_db::get_any_organization_by_name;
+use gradient_db::get_any_project_by_name;
 use gradient_types::*;
 
 // ── Query parameters ─────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ pub struct BadgeParams {
     /// When set the badge reflects that entry point's build status from the latest completed
     /// evaluation instead of the overall task status.
     pub eval: Option<String>,
-    /// API key (`GRADxxxx`) or JWT for accessing a private organisation badge
+    /// API key (`GRADxxxx`) or JWT for accessing a private project badge
     /// without a session. Embed in the image URL so external services (GitHub
     /// README, Grafana, …) can fetch it without interactive login.
     pub token: Option<String>,
@@ -262,20 +262,20 @@ async fn resolve_badge_user(
     }
 }
 
-/// For private orgs, verify the resolved user is a member.
-async fn check_badge_org_access(
+/// For private projects, verify the resolved user is a member.
+async fn check_badge_project_access(
     state: &Arc<ServerState>,
-    org: &MOrganization,
+    project: &MProject,
     resolved_user: &Option<MUser>,
     api_key: Option<&ApiKeyContext>,
 ) -> Result<(), WebError> {
-    if org.public {
+    if project.public {
         return Ok(());
     }
     match resolved_user {
         Some(user) => {
-            if !is_org_member(state, user.id, org.id, api_key).await? {
-                return Err(WebError::not_found("Organization"));
+            if !is_project_member(state, user.id, project.id, api_key).await? {
+                return Err(WebError::not_found("Project"));
             }
         }
         None => return Err(WebError::unauthorized("Authorization required")),
@@ -378,8 +378,8 @@ async fn badge_status_for_latest_eval(
 
 /// Returns a shields.io-compatible SVG status badge for the named task.
 ///
-/// For public organisations the badge is accessible without credentials.
-/// For private organisations supply `?token=GRADxxxx` (an API key) or a JWT
+/// For public projects the badge is accessible without credentials.
+/// For private projects supply `?token=GRADxxxx` (an API key) or a JWT
 /// so the URL can be embedded in external tools (GitHub README, Grafana …)
 /// without exposing a session cookie.
 pub async fn get_task_badge(
@@ -389,19 +389,19 @@ pub async fn get_task_badge(
     axum::Extension(crate::client_ip::ClientIp(client_ip)): axum::Extension<
         crate::client_ip::ClientIp,
     >,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     Query(params): Query<BadgeParams>,
 ) -> Result<Response, WebError> {
-    let organization = get_any_organization_by_name(&state.db(), organization)
+    let project = get_any_project_by_name(&state.db(), project)
         .await?
-        .or_not_found("Organization")?;
+        .or_not_found("Project")?;
 
     let (resolved_user, resolved_key) =
         resolve_badge_user(&state, maybe_user, api_key, params.token, client_ip).await?;
-    check_badge_org_access(&state, &organization, &resolved_user, resolved_key.as_ref()).await?;
+    check_badge_project_access(&state, &project, &resolved_user, resolved_key.as_ref()).await?;
 
     let task = ETask::find()
-        .filter(CTask::Organization.eq(organization.id))
+        .filter(CTask::Project.eq(project.id))
         .filter(CTask::Name.eq(&task))
         .one(&state.web_db)
         .await?

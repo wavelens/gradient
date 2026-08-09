@@ -158,20 +158,20 @@ pub enum JobKindContext<'a> {
 
 pub struct ScoredJob<'a> {
     pub job_id: &'a str,
-    pub org_id: gradient_types::ids::OrganizationId,
+    pub project_id: gradient_types::ids::ProjectId,
     kind: JobKindContext<'a>,
 }
 
 impl<'a> ScoredJob<'a> {
     pub fn new_eval(
         job_id: &'a str,
-        org_id: gradient_types::ids::OrganizationId,
+        project_id: gradient_types::ids::ProjectId,
         fetch_flake: bool,
         history: HistoryPrediction,
     ) -> Self {
         Self {
             job_id,
-            org_id,
+            project_id,
             kind: JobKindContext::Eval(EvalContext {
                 fetch_flake,
                 history,
@@ -185,7 +185,7 @@ impl<'a> ScoredJob<'a> {
     )]
     pub fn new_build(
         job_id: &'a str,
-        org_id: gradient_types::ids::OrganizationId,
+        project_id: gradient_types::ids::ProjectId,
         architecture: &'a str,
         prefer_local_build: bool,
         is_fixed_output: bool,
@@ -195,7 +195,7 @@ impl<'a> ScoredJob<'a> {
     ) -> Self {
         Self {
             job_id,
-            org_id,
+            project_id,
             kind: JobKindContext::Build(ScoredBuild {
                 architecture,
                 prefer_local_build,
@@ -229,12 +229,12 @@ impl<'a> ScoredJob<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_types::ids::OrganizationId;
+    use gradient_types::ids::ProjectId;
 
     fn make_job() -> ScoredJob<'static> {
         ScoredJob::new_build(
             "test-job",
-            OrganizationId::now_v7(),
+            ProjectId::now_v7(),
             "x86_64-linux",
             false,
             false,

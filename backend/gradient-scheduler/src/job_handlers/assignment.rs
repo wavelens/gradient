@@ -97,20 +97,20 @@ impl Scheduler {
         info!(%worker_id, %job_id, "job rejected; re-queued");
     }
 
-    /// Return the org UUID that owns the active job, if found.
-    pub async fn org_for_job(&self, job_id: &str) -> Option<OrganizationId> {
+    /// Return the project UUID that owns the active job, if found.
+    pub async fn project_for_job(&self, job_id: &str) -> Option<ProjectId> {
         self.job_tracker
             .read()
             .await
             .active_job(job_id)
-            .map(|j| j.org_id())
+            .map(|j| j.project_id())
     }
 
     /// Fetch the peer auth filter and capabilities for a worker from the pool.
     pub(super) async fn worker_auth_and_caps(
         &self,
         worker_id: &str,
-    ) -> (Option<HashSet<OrganizationId>>, Option<WorkerCaps>) {
+    ) -> (Option<HashSet<ProjectId>>, Option<WorkerCaps>) {
         let pool = self.worker_pool.read().await;
         let authorized = pool
             .peer_auth_for(worker_id)
@@ -124,7 +124,7 @@ impl Scheduler {
     async fn try_assign(
         &self,
         worker_id: &str,
-        authorized: Option<&HashSet<OrganizationId>>,
+        authorized: Option<&HashSet<ProjectId>>,
         caps: Option<&WorkerCaps>,
         kind: &JobKind,
     ) -> Option<Assignment> {
@@ -145,7 +145,7 @@ impl Scheduler {
                     .state
                     .board_events
                     .send(crate::BoardEvent::JobDispatched {
-                        organization: record.organization.into(),
+                        project: record.project.into(),
                         worker_id: worker_id.to_owned(),
                         kind: i16::from(record.kind),
                         score: record.score,
@@ -173,7 +173,7 @@ async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: 
         id: dispatched_job_id,
         kind: rec.kind,
         evaluation_id: rec.evaluation_id,
-        organization: rec.organization,
+        project: rec.project,
         task: rec.task,
         worker_id: worker_id.to_owned(),
         score: rec.score,

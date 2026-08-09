@@ -105,7 +105,7 @@ pub fn make_test_server_with(
 }
 
 /// Variant of [`make_test_server`] that lets callers tweak the parsed `Cli`
-/// (e.g. tighten `create_org` / `create_cache`) before the `RuntimeConfig` is
+/// (e.g. tighten `create_project` / `create_cache`) before the `RuntimeConfig` is
 /// resolved.
 pub fn make_test_server_configured(
     db: DatabaseConnection,
@@ -134,7 +134,7 @@ fn server_from_cli(db: DatabaseConnection, cli: gradient_types::Cli) -> TestServ
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new(TEST_JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,

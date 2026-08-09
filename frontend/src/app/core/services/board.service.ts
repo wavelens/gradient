@@ -11,7 +11,7 @@ import { ApiService } from './api.service';
 export interface DispatchedJobSummary {
   id: string;
   kind: number;
-  organization: string;
+  project: string;
   worker_id: string;
   score: number;
   dispatched_at: string;
@@ -27,7 +27,7 @@ export interface DispatchedJobsResponse {
 
 export interface PendingJobSummary {
   kind: number;
-  organization: string;
+  project: string;
   evaluation_id: string;
   build_id: string | null;
   queued_at: string;
@@ -44,7 +44,7 @@ export interface DecisionCandidateView {
   id: string;
   job_id: string;
   kind: number;
-  organization: string;
+  project: string;
   build_id: string | null;
   evaluation_id: string;
   pname: string | null;
@@ -91,7 +91,7 @@ export interface JobContextView {
   architecture: string;
   missing_count: number | null;
   missing_nar_size: number | null;
-  org_work_share: number | null;
+  project_work_share: number | null;
   rescore_count: number;
   queued_at: string;
   ready_at: string;
@@ -126,7 +126,7 @@ export interface InstanceContextView {
 }
 
 export interface DispatchedJobDetail extends DispatchedJobSummary {
-  organization_name: string;
+  project_name: string;
   queued_at: string;
   finished_at: string | null;
   score_breakdown: { rules: Record<string, number>; total: number };
@@ -147,7 +147,7 @@ export interface DispatchedJobDetail extends DispatchedJobSummary {
 
 export interface BoardWorker {
   id: string | null;
-  organization: string | null;
+  project: string | null;
   draining: boolean;
   assigned_jobs: number;
   max_concurrent_builds: number;
@@ -175,7 +175,7 @@ export interface WorkerLoad {
 
 export interface ExpensiveBuild {
   build_id: string;
-  organization: string;
+  project: string;
   name: string;
   build_time_ms: number;
   worker: string | null;
@@ -315,15 +315,15 @@ export interface DurationsHeatmap {
   bands: { band: string; counts: number[] }[];
 }
 
-export interface TopOrgBuildTime {
-  organization: string;
+export interface TopProjectBuildTime {
+  project: string;
   total_build_ms: number;
   build_count: number;
 }
 
 export interface ExpensiveResource {
   derivation: string;
-  organization: string;
+  project: string;
   name: string;
   value: number;
   unit: string;
@@ -332,7 +332,7 @@ export interface ExpensiveResource {
 
 export interface ExpensiveEval {
   evaluation: string;
-  organization: string;
+  project: string;
   name: string;
   value: number;
   unit: string;
@@ -423,8 +423,8 @@ export class BoardService {
     return this.api.get<DurationsHeatmap>(`board/durations/heatmap?window_hours=${windowHours}`);
   }
 
-  getTopOrgs(windowDays = 30): Observable<TopOrgBuildTime[]> {
-    return this.api.get<TopOrgBuildTime[]>(`board/expensive/top-orgs?window_days=${windowDays}`);
+  getTopProjects(windowDays = 30): Observable<TopProjectBuildTime[]> {
+    return this.api.get<TopProjectBuildTime[]>(`board/expensive/top-projects?window_days=${windowDays}`);
   }
 
   getExpensiveByResource(
@@ -449,10 +449,10 @@ export class BoardService {
     return this.api.get<FlakeGraphNode[]>(`evals/${evaluationId}/flake-graph`);
   }
 
-  query(metric: string, granularity = 'hour', org?: string): Observable<MetricPoint[]> {
+  query(metric: string, granularity = 'hour', project?: string): Observable<MetricPoint[]> {
     let url = `metrics/query?metric=${encodeURIComponent(metric)}&granularity=${granularity}`;
-    if (org) {
-      url += `&org=${org}`;
+    if (project) {
+      url += `&project=${project}`;
     }
     return this.api.get<MetricPoint[]>(url);
   }

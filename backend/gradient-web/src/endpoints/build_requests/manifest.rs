@@ -6,13 +6,13 @@
 
 //! `POST /build-requests/manifest` - first step of the build-request upload
 //! flow. The client submits the full `(path, hash, size)` list; the server
-//! validates paths/sizes, looks up which blobs the org already has, persists
+//! validates paths/sizes, looks up which blobs the project already has, persists
 //! an `upload_session` row, and returns the missing-hash set so the client
 //! knows exactly what to upload next.
 
 use super::types::ManifestEntry;
 use super::validation::{decode_blake3_hex, validate_manifest_path};
-use crate::access::{Caller, OrgAccess, load_org};
+use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -37,7 +37,7 @@ use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ManifestRequest {
-    pub organization: String,
+    pub project: String,
     pub files: Vec<ManifestEntry>,
 }
 
@@ -53,12 +53,12 @@ pub async fn post_manifest(
     Extension(api_key): Extension<MaybeApiKey>,
     Json(body): Json<ManifestRequest>,
 ) -> WebResult<Json<BaseResponse<ManifestResponse>>> {
-    let org = load_org(
+    let project = load_project(
         &state.0,
         Caller::User(&user),
         api_key.as_ref(),
-        body.organization.clone(),
-        OrgAccess::Require {
+        body.project.clone(),
+        ProjectAccess::Require {
             permission: Permission::TriggerEvaluation,
             reject_managed: false,
         },
@@ -113,7 +113,7 @@ pub async fn post_manifest(
     let existing = EBuildRequestBlob::find()
         .filter(
             Condition::all()
-                .add(CBuildRequestBlob::Organization.eq(org.id))
+                .add(CBuildRequestBlob::Project.eq(project.id))
                 .add(CBuildRequestBlob::Hash.is_in(unique_hashes.clone())),
         )
         .all(&state.web_db)
@@ -146,7 +146,7 @@ pub async fn post_manifest(
 
     MUploadSession {
         id: session_id,
-        organization: org.id,
+        project: project.id,
         manifest: manifest_value,
         missing: missing_value,
         total_size: total,

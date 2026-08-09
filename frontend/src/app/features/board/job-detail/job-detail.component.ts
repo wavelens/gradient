@@ -52,7 +52,7 @@ interface RuleRow {
       <section class="ids">
         <div>
           <span class="label">Worker</span>
-          <a class="mono worker-link" [routerLink]="['/organization', j.organization_name, 'workers', j.worker_id, 'metrics']">{{ j.worker_id }}</a>
+          <a class="mono worker-link" [routerLink]="['/project', j.project_name, 'workers', j.worker_id, 'metrics']">{{ j.worker_id }}</a>
         </div>
         <div><span class="label">Evaluation</span><span class="mono">{{ j.evaluation_id }}</span></div>
       </section>
@@ -126,7 +126,7 @@ interface RuleRow {
             }
             <tr><td class="label">Missing count</td><td class="mono">{{ j.job_context.missing_count ?? '-' }}</td></tr>
             <tr><td class="label">Missing NAR size</td><td class="mono">{{ j.job_context.missing_nar_size != null ? (j.job_context.missing_nar_size | number) : '-' }}</td></tr>
-            <tr><td class="label">Org work share</td><td class="mono">{{ j.job_context.org_work_share != null ? (j.job_context.org_work_share | number: '1.0-3') : '-' }}</td></tr>
+            <tr><td class="label">Project work share</td><td class="mono">{{ j.job_context.project_work_share != null ? (j.job_context.project_work_share | number: '1.0-3') : '-' }}</td></tr>
             <tr><td class="label">Rescore count</td><td class="mono">{{ j.job_context.rescore_count }}</td></tr>
             <tr><td class="label">Queued</td><td class="mono">{{ j.job_context.queued_at | date: 'medium' }}</td></tr>
             <tr><td class="label">Ready</td><td class="mono">{{ j.job_context.ready_at | date: 'medium' }}</td></tr>

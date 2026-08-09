@@ -66,20 +66,20 @@ fn frame(ev: &BoardEvent) -> Option<String> {
     serde_json::to_string(ev).ok()
 }
 
-/// `GET /tasks/{organization}/{task}/live` - evaluation and entry-point
+/// `GET /tasks/{project}/{task}/live` - evaluation and entry-point
 /// build status changes for one task.
 pub async fn task_live_ws(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     ws: WebSocketUpgrade,
 ) -> WebResult<Response> {
-    let (_org, task) = load_task(
+    let (_project, task) = load_task(
         &state,
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Readable,
     )

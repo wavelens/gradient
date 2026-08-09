@@ -30,21 +30,21 @@ pub(crate) use lookups::{inbound_integrations_by_name, lookup_id, outbound_integ
 
 pub(crate) type DynError = Box<dyn std::error::Error>;
 
-/// Org membership declared in state for a user who did not exist at apply
+/// Project membership declared in state for a user who did not exist at apply
 /// time. Drained per-username when the user is later registered or signs
 /// in via OIDC for the first time.
 #[derive(Debug, Clone)]
-pub struct PendingOrgMembership {
-    pub organization: OrganizationId,
+pub struct PendingProjectMembership {
+    pub project: ProjectId,
     pub role: RoleId,
 }
 
-pub type PendingOrgMemberships = HashMap<String, Vec<PendingOrgMembership>>;
+pub type PendingProjectMemberships = HashMap<String, Vec<PendingProjectMembership>>;
 
 /// Outcome of applying declarative state: memberships deferred until their user
 /// exists, and the OIDC/SCIM group → role grants resolved from `StateRole`.
 pub struct StateApplyResult {
-    pub pending: PendingOrgMemberships,
+    pub pending: PendingProjectMemberships,
     pub oidc_group_roles: crate::OidcGroupRoles,
     pub scim_group_roles: crate::ScimGroupRoles,
 }
@@ -64,13 +64,12 @@ pub(super) async fn apply_state_to_database(
         email_enabled,
     };
 
-    let mut pending: PendingOrgMemberships = HashMap::new();
+    let mut pending: PendingProjectMemberships = HashMap::new();
 
     app.apply_users(&config.users).await?;
-    app.apply_organizations_without_members(&config.organizations)
-        .await?;
+    app.apply_projects_without_members(&config.projects).await?;
     let role_ids = app.apply_roles(&config.roles).await?;
-    app.apply_organization_members(&config.organizations, &mut pending)
+    app.apply_project_members(&config.projects, &mut pending)
         .await?;
     // Integrations must land before tasks: task triggers
     // (reporter_push/reporter_pull_request) and `forge_status_report` actions
@@ -103,7 +102,7 @@ struct StateApplicator<'a> {
     email_enabled: bool,
 }
 
-/// Apply any pending state-managed org memberships for `username` against
+/// Apply any pending state-managed project memberships for `username` against
 /// `user_id`. Idempotent: existing rows are updated to the declared role,
 /// missing rows are inserted. Returns the number of memberships applied
 /// (`Ok(0)` when the username has no pending entries).
@@ -111,9 +110,9 @@ struct StateApplicator<'a> {
 /// Called from the user-creation paths (`POST /user` and OIDC first-login)
 /// so a member declared in state for a not-yet-registered user becomes
 /// effective the instant that user joins.
-pub async fn apply_pending_org_memberships<C: ConnectionTrait>(
+pub async fn apply_pending_project_memberships<C: ConnectionTrait>(
     db: &C,
-    pending: &PendingOrgMemberships,
+    pending: &PendingProjectMemberships,
     username: &str,
     user_id: UserId,
 ) -> Result<usize, sea_orm::DbErr> {
@@ -122,23 +121,23 @@ pub async fn apply_pending_org_memberships<C: ConnectionTrait>(
     };
     let mut applied = 0usize;
     for entry in entries {
-        let existing = organization_user::Entity::find()
-            .filter(organization_user::Column::Organization.eq(entry.organization))
-            .filter(organization_user::Column::User.eq(user_id))
+        let existing = project_user::Entity::find()
+            .filter(project_user::Column::Project.eq(entry.project))
+            .filter(project_user::Column::User.eq(user_id))
             .one(db)
             .await?;
         match existing {
             Some(row) if row.role == entry.role => {}
             Some(row) => {
-                let mut active: organization_user::ActiveModel = row.into();
+                let mut active: project_user::ActiveModel = row.into();
                 active.role = Set(entry.role);
                 active.update(db).await?;
                 applied += 1;
             }
             None => {
-                organization_user::Model {
-                    id: OrganizationUserId::now_v7(),
-                    organization: entry.organization,
+                project_user::Model {
+                    id: ProjectUserId::now_v7(),
+                    project: entry.project,
                     user: user_id,
                     role: entry.role,
                 }
@@ -153,7 +152,7 @@ pub async fn apply_pending_org_memberships<C: ConnectionTrait>(
         tracing::info!(
             username,
             count = applied,
-            "Applied pending state-managed org memberships for newly-registered user"
+            "Applied pending state-managed project memberships for newly-registered user"
         );
     }
     Ok(applied)
@@ -167,8 +166,8 @@ mod pending_membership_tests {
     #[tokio::test]
     async fn apply_pending_returns_zero_for_unknown_user() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-        let pending: PendingOrgMemberships = HashMap::new();
-        let count = apply_pending_org_memberships(&db, &pending, "ghost", UserId::now_v7())
+        let pending: PendingProjectMemberships = HashMap::new();
+        let count = apply_pending_project_memberships(&db, &pending, "ghost", UserId::now_v7())
             .await
             .unwrap();
         assert_eq!(count, 0);

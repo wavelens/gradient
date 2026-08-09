@@ -67,7 +67,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   loading = signal(true);
   errorMsg = signal<string | null>(null);
 
-  orgName = '';
+  projectName = '';
   buildId = '';
   rootId = signal('');
   nodeCount = signal(0);
@@ -110,7 +110,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
-    this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.buildId = this.route.snapshot.paramMap.get('buildId') || '';
     this.loadGraph();
   }
@@ -371,7 +371,7 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       const evalId = this.route.snapshot.queryParamMap.get('evalId');
       if (evalId) {
         this.zone.run(() =>
-          this.router.navigate(['/organization', this.orgName, 'log', evalId], {
+          this.router.navigate(['/project', this.projectName, 'log', evalId], {
             queryParams: { build: node.id },
           })
         );
@@ -624,8 +624,8 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
   goBack(): void {
     const task = this.route.snapshot.queryParamMap.get('task');
     const evalId  = this.route.snapshot.queryParamMap.get('evalId');
-    if (task) this.router.navigate(['/organization', this.orgName, 'task', task]);
-    else if (evalId) this.router.navigate(['/organization', this.orgName, 'log', evalId]);
-    else this.router.navigate(['/organization', this.orgName]);
+    if (task) this.router.navigate(['/project', this.projectName, 'task', task]);
+    else if (evalId) this.router.navigate(['/project', this.projectName, 'log', evalId]);
+    else this.router.navigate(['/project', this.projectName]);
   }
 }

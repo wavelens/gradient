@@ -7,7 +7,7 @@
 //! Typed newtype wrappers around `Uuid` for every entity primary key.
 //!
 //! These exist so the compiler can reject argument swaps such as
-//! `user_is_org_member(state, org_id, user_id)`. Wire format is unchanged via
+//! `user_is_project_member(state, project_id, user_id)`. Wire format is unchanged via
 //! `#[serde(transparent)]`; SeaORM column type is unchanged via
 //! `#[derive(DeriveValueType)]`.
 
@@ -123,9 +123,9 @@ id_newtype!(FlakeInputOverrideId);
 id_newtype!(GithubInstallationId);
 id_newtype!(IntegrationId);
 id_newtype!(OpenPrStateId);
-id_newtype!(OrganizationId);
-id_newtype!(OrganizationCacheId);
-id_newtype!(OrganizationUserId);
+id_newtype!(ProjectId);
+id_newtype!(ProjectCacheId);
+id_newtype!(ProjectUserId);
 id_newtype!(TaskId);
 id_newtype!(TaskActionId);
 id_newtype!(TaskActionDeliveryId);
@@ -145,7 +145,7 @@ id_newtype!(PhaseEventId);
 id_newtype!(WorkerConnectionId);
 id_newtype!(WorkerSampleId);
 id_newtype!(BaseWorkerId);
-id_newtype!(OrganizationBaseWorkerId);
+id_newtype!(ProjectBaseWorkerId);
 
 #[cfg(test)]
 mod tests {
@@ -198,20 +198,20 @@ mod tests {
     #[test]
     fn try_from_u64_returns_error_for_uuid_pk() {
         assert!(<UserId as TryFromU64>::try_from_u64(0).is_err());
-        assert!(<OrganizationId as TryFromU64>::try_from_u64(42).is_err());
+        assert!(<ProjectId as TryFromU64>::try_from_u64(42).is_err());
     }
 
     #[test]
     fn default_id_is_nil() {
         assert_eq!(UserId::default(), UserId::nil());
-        assert_eq!(OrganizationId::default().into_inner(), Uuid::nil());
+        assert_eq!(ProjectId::default().into_inner(), Uuid::nil());
     }
 
     #[test]
     fn distinct_types_compile_to_different_types() {
         let u = Uuid::now_v7();
         let user: UserId = u.into();
-        let _org: OrganizationId = user.into_inner().into();
+        let _project: ProjectId = user.into_inner().into();
     }
 
     #[test]
@@ -234,6 +234,6 @@ mod tests {
     fn base_worker_ids_round_trip() {
         let u = Uuid::now_v7();
         assert_eq!(Uuid::from(BaseWorkerId::from(u)), u);
-        assert_eq!(Uuid::from(OrganizationBaseWorkerId::from(u)), u);
+        assert_eq!(Uuid::from(ProjectBaseWorkerId::from(u)), u);
     }
 }

@@ -53,14 +53,14 @@ pub async fn cleanup_stale_build_request_blobs(state: Arc<ServerState>) -> Resul
         let mut hash = [0u8; 32];
         hash.copy_from_slice(&blob.hash);
         let blob_id = blob.id;
-        let org_id = blob.organization;
+        let project_id = blob.project;
         if let Err(e) = blob.into_active_model().delete(&state.worker_db).await {
             warn!(error = %e, %blob_id, "failed to delete build_request_blob row");
             continue;
         }
         if let Err(e) = state
             .nar_storage
-            .delete_blob(org_id.into_inner(), &hash)
+            .delete_blob(project_id.into_inner(), &hash)
             .await
         {
             warn!(error = %e, %blob_id, "failed to delete build-request blob payload");
@@ -709,14 +709,14 @@ mod tests {
     /// deleted and the underlying NAR-storage payload is removed.
     #[tokio::test]
     async fn build_request_blob_sweep_evicts_stale() {
-        use gradient_entity::ids::{BuildRequestBlobId, OrganizationId};
+        use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
 
         let tmp = tempfile::tempdir().unwrap();
-        let org = OrganizationId::now_v7();
+        let project = ProjectId::now_v7();
         let hash = [0xABu8; 32];
         let stale = gradient_entity::build_request_blob::Model {
             id: BuildRequestBlobId::now_v7(),
-            organization: org,
+            project: project,
             hash: hash.to_vec(),
             size: 1,
             created_at: now() - chrono::Duration::days(30),
@@ -734,7 +734,7 @@ mod tests {
 
         state
             .nar_storage
-            .put_blob(org.into_inner(), &hash, b"payload".to_vec())
+            .put_blob(project.into_inner(), &hash, b"payload".to_vec())
             .await
             .unwrap();
 
@@ -745,7 +745,7 @@ mod tests {
         assert!(
             state
                 .nar_storage
-                .get_blob(org.into_inner(), &hash)
+                .get_blob(project.into_inner(), &hash)
                 .await
                 .unwrap()
                 .is_none(),
@@ -771,12 +771,12 @@ mod tests {
     /// rather than panicking on `copy_from_slice`.
     #[tokio::test]
     async fn build_request_blob_sweep_skips_malformed_hash() {
-        use gradient_entity::ids::{BuildRequestBlobId, OrganizationId};
+        use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
 
         let tmp = tempfile::tempdir().unwrap();
         let bad = gradient_entity::build_request_blob::Model {
             id: BuildRequestBlobId::now_v7(),
-            organization: OrganizationId::now_v7(),
+            project: ProjectId::now_v7(),
             hash: vec![1, 2, 3],
             size: 1,
             created_at: now() - chrono::Duration::days(30),

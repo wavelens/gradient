@@ -33,7 +33,7 @@ pub struct ApiKey {
     pub name: String,
     pub managed: bool,
     pub permissions: Vec<String>,
-    pub organization: Option<String>,
+    pub project: Option<String>,
     pub created_at: String,
     pub last_used_at: Option<String>,
     pub expires_at: Option<String>,
@@ -45,7 +45,7 @@ pub struct MakeApiKeyRequest {
     pub name: String,
     pub permissions: Vec<String>,
     pub expires_in_days: Option<u32>,
-    pub organization: Option<String>,
+    pub project: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -8,8 +8,8 @@ Actions are per-task. Four types ship in v1:
 |---|---|---|
 | `send_mail` | Email one or more recipients | Server SMTP configured |
 | `send_web_request` | HTTP POST to an external URL | None |
-| `forge_status_report` | Post commit status to a forge | Outbound integration in the org |
-| `open_pr` | Open/update a flake.lock-update pull request | Outbound integration in the org |
+| `forge_status_report` | Post commit status to a forge | Outbound integration in the project |
+| `open_pr` | Open/update a flake.lock-update pull request | Outbound integration in the project |
 
 ## Events
 
@@ -42,7 +42,7 @@ Uses the server-global SMTP configuration (`services.gradient.email.*`). If SMTP
 | `recipients` | yes | List of email addresses |
 | `subject_template` | no | Subject line with placeholders |
 
-**Subject placeholders:** `{event}`, `{task}`, `{org}`, `{id}`, `{status}`
+**Subject placeholders:** `{event}`, `{task}`, `{project}`, `{id}`, `{status}`
 
 Default subject: `[Gradient] {event}: {task}`
 
@@ -73,7 +73,7 @@ Authorization: Bearer <token>   # only if token is set
 {
   "event": "build.completed",
   "task": "my-task",
-  "organization": "acme",
+  "project": "acme",
   "id": "<eval-or-build-uuid>",
   "status": "completed"
 }
@@ -95,7 +95,7 @@ A run that targets a wildcard other than the task default - e.g. `/gradient run 
 
 | Field | Required | Description |
 |---|---|---|
-| `integration_id` | yes | UUID of an outbound integration in the same org |
+| `integration_id` | yes | UUID of an outbound integration in the same project |
 
 The integration must be `kind: outbound`. The forge type determines the API call format (Gitea, GitLab, GitHub App).
 
@@ -109,7 +109,7 @@ Opens (or updates) a pull request that bumps the task's flake inputs, driven by 
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `integration_id` | yes | (none) | UUID of an outbound integration in the same org |
+| `integration_id` | yes | (none) | UUID of an outbound integration in the same project |
 | `generator` | no | `flake_lock` | Update generator; only the native flake.lock updater exists in v1 |
 | `granularity` | no | `per_run` | `per_run` opens one PR for the whole run; `per_input` opens one PR per tracked input |
 | `verify_gate` | no | `build` | How far the candidate lock is verified before the PR opens. `eval`/`none` open once the flake evaluates (`evaluation.building`); `build` waits until the whole evaluation completes, i.e. every build succeeded (`evaluation.completed`) |
@@ -118,7 +118,7 @@ Opens (or updates) a pull request that bumps the task's flake inputs, driven by 
 | `body_template` | no | (none) | PR body with placeholders |
 | `update_existing` | no | `true` | Update an already-open PR in place instead of opening a duplicate |
 
-**Tracked inputs.** The set of inputs to bump is declared with flake-input override rows on the task. An override whose `url` is unset marks that input as *tracked*, and it will be bumped to its newest revision. As a safety gate, the presence of *any* override with a `url` set (a pinned input) blocks the run, so a task cannot accidentally open a PR while an input is being held at a fixed revision. v1 supports `github`, `gitlab`, and `git` flake inputs, including `git` inputs served over `ssh://` - the updater clones them with the organization's SSH key, the same key used for [private repo access](overview.md#ssh-keys).
+**Tracked inputs.** The set of inputs to bump is declared with flake-input override rows on the task. An override whose `url` is unset marks that input as *tracked*, and it will be bumped to its newest revision. As a safety gate, the presence of *any* override with a `url` set (a pinned input) blocks the run, so a task cannot accidentally open a PR while an input is being held at a fixed revision. v1 supports `github`, `gitlab`, and `git` flake inputs, including `git` inputs served over `ssh://` - the updater clones them with the project's SSH key, the same key used for [private repo access](overview.md#ssh-keys).
 
 **Wildcards.** An override name may be a glob (`*`, `?`), e.g. `nixpkgs*` or a bare `*` for every input, so one row tracks many inputs. Globs are expanded worker-side against the task's `flake.lock`; a literal override always wins over a glob. Under `per_input` granularity a glob still opens one PR per matched input (the worker discovers the matches, then the server fans out one update per input).
 

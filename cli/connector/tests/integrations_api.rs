@@ -10,7 +10,7 @@ fn ok<T: serde::Serialize>(m: T) -> serde_json::Value {
 async fn list_integrations_returns_vec() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/orgs/my-org/integrations"))
+        .and(path("/api/v1/projects/my-project/integrations"))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!([]))))
         .mount(&server)
         .await;
@@ -20,7 +20,7 @@ async fn list_integrations_returns_vec() {
         .token("t")
         .build()
         .unwrap();
-    let integrations = client.integrations().list("my-org").await.unwrap();
+    let integrations = client.integrations().list("my-project").await.unwrap();
     assert!(integrations.is_empty());
 }
 
@@ -28,7 +28,7 @@ async fn list_integrations_returns_vec() {
 async fn summary_returns_vec() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/orgs/my-org/integrations/summary"))
+        .and(path("/api/v1/projects/my-project/integrations/summary"))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!([]))))
         .mount(&server)
         .await;
@@ -38,6 +38,6 @@ async fn summary_returns_vec() {
         .token("t")
         .build()
         .unwrap();
-    let summaries = client.integrations().summary("my-org").await.unwrap();
+    let summaries = client.integrations().summary("my-project").await.unwrap();
     assert!(summaries.is_empty());
 }

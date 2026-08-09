@@ -12,13 +12,13 @@ pub fn reporter_cfg(integration_name: &str, integrations_json: &str) -> StateCon
             "users": {{
                 "alice": {{ "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }}
             }},
-            "organizations": {{
+            "projects": {{
                 "acme": {{ "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null", "public": false, "created_by": "alice" }}
             }},
             "integrations": {integrations_json},
             "tasks": {{
                 "web": {{
-                    "name": "web", "organization": "acme", "display_name": "Web",
+                    "name": "web", "project": "acme", "display_name": "Web",
                     "repository": "https://example.com/acme/web.git", "created_by": "alice",
                     "triggers": [
                         {{ "type": "reporter_push", "integration": "{integration_name}", "config": {{ "branches": ["main"] }} }}
@@ -36,7 +36,7 @@ pub fn integration_cfg(integrations_json: &str) -> StateConfiguration {
             "users": {{
                 "alice": {{ "username": "alice", "name": "Alice", "email": "a@x.io", "password_file": "/dev/null" }}
             }},
-            "organizations": {{
+            "projects": {{
                 "acme": {{ "name": "acme", "display_name": "ACME", "private_key_file": "/dev/null", "public": false, "created_by": "alice" }}
             }},
             "integrations": {integrations_json}
@@ -45,7 +45,7 @@ pub fn integration_cfg(integrations_json: &str) -> StateConfiguration {
     serde_json::from_str(&json).unwrap()
 }
 
-pub fn worker_cfg(orgs_json: &str) -> StateConfiguration {
+pub fn worker_cfg(projects_json: &str) -> StateConfiguration {
     let json = format!(
         r#"{{
             "users": {{
@@ -56,7 +56,7 @@ pub fn worker_cfg(orgs_json: &str) -> StateConfiguration {
                     "password_file": "/dev/null"
                 }}
             }},
-            "organizations": {{
+            "projects": {{
                 "acme": {{
                     "name": "acme",
                     "display_name": "ACME",
@@ -75,7 +75,7 @@ pub fn worker_cfg(orgs_json: &str) -> StateConfiguration {
             "workers": {{
                 "builder-1": {{
                     "worker_id": "550e8400-e29b-41d4-a716-446655440001",
-                    "organizations": {orgs_json},
+                    "projects": {projects_json},
                     "token_file": "/dev/null",
                     "display_name": "Primary Build Server",
                     "created_by": "alice"

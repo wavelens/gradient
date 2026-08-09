@@ -29,12 +29,12 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 );
             }
         }
-        if let Some(org) = &api_key.organization
-            && !lookup.org_exists(org)
+        if let Some(project) = &api_key.project
+            && !lookup.project_exists(project)
         {
             errors.push(
-                format!("api_keys.{}.organization", api_key.name),
-                format!("Organization '{}' does not exist", org),
+                format!("api_keys.{}.project", api_key.name),
+                format!("Project '{}' does not exist", project),
             );
         }
     }

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the `create_org` / `create_cache` permission gate on
-//! `PUT /api/v1/orgs` and `PUT /api/v1/caches` (issue #470).
+//! Integration tests for the `create_project` / `create_cache` permission gate on
+//! `PUT /api/v1/projects` and `PUT /api/v1/caches` (issue #470).
 //!
 //! Each gate short-circuits before any DB write, so the rejection paths need
 //! only the auth query chain. The allow path is proven by reaching the
@@ -13,7 +13,7 @@
 
 use axum::http::StatusCode;
 use gradient_entity::ids::*;
-use gradient_entity::{cache, organization};
+use gradient_entity::{cache, project};
 use gradient_test_support::fixtures::{superuser_user, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server_configured, make_token};
 use gradient_types::{CreatePermission, SessionId};
@@ -31,9 +31,9 @@ fn with_auth(
         .append_query_results([vec![actor]])
 }
 
-fn org_row(name: &str) -> organization::Model {
-    organization::Model {
-        id: OrganizationId::now_v7(),
+fn project_row(name: &str) -> project::Model {
+    project::Model {
+        id: ProjectId::now_v7(),
         name: name.to_string(),
         display_name: format!("{} display", name),
         created_by: user_id(),
@@ -61,7 +61,7 @@ fn run<F: std::future::Future>(f: F) -> F::Output {
         .block_on(f)
 }
 
-fn org_body() -> Value {
+fn project_body() -> Value {
     json!({ "name": "acme", "display_name": "Acme", "description": "", "public": false })
 }
 
@@ -73,7 +73,7 @@ fn cache_body() -> Value {
 }
 
 #[test]
-fn create_org_superusers_rejects_regular_user() {
+fn create_project_superusers_rejects_regular_user() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
@@ -83,13 +83,13 @@ fn create_org_superusers_rejects_regular_user() {
             user(),
         );
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_org = CreatePermission::Superusers;
+            cli.server.create_project = CreatePermission::Superusers;
         });
 
         let res = server
-            .put("/api/v1/orgs")
+            .put("/api/v1/projects")
             .add_header("authorization", format!("Bearer {}", token))
-            .json(&org_body())
+            .json(&project_body())
             .await;
 
         res.assert_status(StatusCode::FORBIDDEN);
@@ -99,7 +99,7 @@ fn create_org_superusers_rejects_regular_user() {
 }
 
 #[test]
-fn create_org_none_rejects_superuser() {
+fn create_project_none_rejects_superuser() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
@@ -109,13 +109,13 @@ fn create_org_none_rejects_superuser() {
             superuser_user(),
         );
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_org = CreatePermission::None;
+            cli.server.create_project = CreatePermission::None;
         });
 
         let res = server
-            .put("/api/v1/orgs")
+            .put("/api/v1/projects")
             .add_header("authorization", format!("Bearer {}", token))
-            .json(&org_body())
+            .json(&project_body())
             .await;
 
         res.assert_status(StatusCode::FORBIDDEN);
@@ -125,7 +125,7 @@ fn create_org_none_rejects_superuser() {
 }
 
 #[test]
-fn create_org_superusers_allows_superuser_past_gate() {
+fn create_project_superusers_allows_superuser_past_gate() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
@@ -134,15 +134,15 @@ fn create_org_superusers_allows_superuser_past_gate() {
             session_id,
             superuser_user(),
         )
-        .append_query_results([vec![org_row("acme")]]);
+        .append_query_results([vec![project_row("acme")]]);
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_org = CreatePermission::Superusers;
+            cli.server.create_project = CreatePermission::Superusers;
         });
 
         let res = server
-            .put("/api/v1/orgs")
+            .put("/api/v1/projects")
             .add_header("authorization", format!("Bearer {}", token))
-            .json(&org_body())
+            .json(&project_body())
             .await;
 
         res.assert_status(StatusCode::CONFLICT);

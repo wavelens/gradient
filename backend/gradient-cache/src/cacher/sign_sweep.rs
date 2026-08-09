@@ -171,7 +171,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 
     // Update cache_derivation where this pass's newly signed paths complete a
     // derivation closure. Seeded by the signed outputs and walked up through
-    // dependents; the unseeded full scan of every org derivation runs hourly
+    // dependents; the unseeded full scan of every project derivation runs hourly
     // as the backfill (fresh subscriptions, rows a crashed sweep missed).
     let seed: Vec<uuid::Uuid> = if signed_hashes.is_empty() {
         vec![]
@@ -196,7 +196,7 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
     Ok(())
 }
 
-/// The full backfill scans every derivation of every subscribed org (minutes
+/// The full backfill scans every derivation of every subscribed project (minutes
 /// on a large DB), so it runs at most once per hour; the per-sweep frontier
 /// walk covers everything the sweep itself changed.
 const FULL_BACKFILL_SECS: u64 = 3600;
@@ -219,10 +219,10 @@ fn full_backfill_due() -> bool {
     }
 }
 
-/// For every derivation built by an organization subscribed to `cache_id`
+/// For every derivation built by a project subscribed to `cache_id`
 /// whose outputs are all cached and whose dependency closure is already
-/// recorded, insert a `cache_derivation` row (org scoping mirrors
-/// `gradient_db::derivation_ids_for_org`: task -> evaluation -> build_job).
+/// recorded, insert a `cache_derivation` row (project scoping mirrors
+/// `gradient_db::derivation_ids_for_project`: task -> evaluation -> build_job).
 /// Idempotent. `full = false` restricts the walk to `seed` and its dependents,
 /// layer by layer to a fixpoint; `full = true` is the unseeded hourly backfill.
 async fn record_newly_completed_derivations(
@@ -243,7 +243,7 @@ async fn record_newly_completed_derivations(
             FROM build_job bj
             JOIN evaluation ev ON ev.id = bj.evaluation
             JOIN task p ON p.id = ev.task
-            JOIN organization_cache oc ON oc.organization = p.organization
+            JOIN project_cache oc ON oc.project = p.project
             WHERE oc.cache = $1)
           AND NOT EXISTS (
             SELECT 1 FROM derivation_output o
@@ -272,17 +272,17 @@ async fn record_newly_completed_derivations(
         WITH have AS MATERIALIZED (
             SELECT derivation FROM cache_derivation WHERE cache = $1
         ),
-        org_drvs AS (
+        project_drvs AS (
             SELECT DISTINCT bj.derivation
             FROM build_job bj
             JOIN evaluation ev ON ev.id = bj.evaluation
             JOIN task p ON p.id = ev.task
-            JOIN organization_cache oc ON oc.organization = p.organization
+            JOIN project_cache oc ON oc.project = p.project
             WHERE oc.cache = $1
         )
         INSERT INTO cache_derivation (id, cache, derivation, cached_at)
         SELECT uuidv7(), $1, c.derivation, $2
-        FROM org_drvs c
+        FROM project_drvs c
         LEFT JOIN have ON have.derivation = c.derivation
         WHERE have.derivation IS NULL
           AND NOT EXISTS (
@@ -375,7 +375,7 @@ async fn load_producing_task_flags(
     let backend = state.worker_db.get_database_backend();
     let stmt = Statement::from_sql_and_values(
         backend,
-        // The reserved per-org `build-request` task backing `gradient build`
+        // The reserved per-project `build-request` task backing `gradient build`
         // is always signable regardless of its `sign_cache` flag - its outputs
         // must be substitutable by the submitting client. Keyed on the reserved
         // name (BUILD_REQUEST_TASK_NAME), not `managed`, which also marks

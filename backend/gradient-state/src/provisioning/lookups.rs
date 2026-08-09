@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! User / organization / integration name lookups.
+//! User / project / integration name lookups.
 
 use super::DynError;
 use super::StateApplicator;
@@ -24,20 +24,20 @@ pub(crate) fn lookup_id<T: Copy>(
         .ok_or_else(|| format!("{} '{}' not found", kind, name).into())
 }
 
-/// Loads the org's inbound integrations keyed by name.
+/// Loads the project's inbound integrations keyed by name.
 ///
 /// `reporter_push` and `reporter_pull_request` triggers reference an inbound
-/// integration by name. Auto-managed GitHub App rows are seeded once per org as
+/// integration by name. Auto-managed GitHub App rows are seeded once per project as
 /// **two** integrations sharing `name = "github"` (one `Inbound`, one
 /// `Outbound`), so a collect that ignores `kind` collapses them into a single
 /// arbitrary entry - sometimes the outbound id, which makes the webhook
 /// resolver's inbound lookup miss and the trigger never fires.
 pub(crate) async fn inbound_integrations_by_name<C: ConnectionTrait>(
     db: &C,
-    org_id: OrganizationId,
+    project_id: ProjectId,
 ) -> Result<HashMap<String, IntegrationId>, sea_orm::DbErr> {
     Ok(integration::Entity::find()
-        .filter(integration::Column::Organization.eq(org_id))
+        .filter(integration::Column::Project.eq(project_id))
         .filter(integration::Column::Kind.eq(i16::from(IntegrationKind::Inbound)))
         .all(db)
         .await?
@@ -48,10 +48,10 @@ pub(crate) async fn inbound_integrations_by_name<C: ConnectionTrait>(
 
 pub(crate) async fn outbound_integrations_by_name<C: ConnectionTrait>(
     db: &C,
-    org_id: OrganizationId,
+    project_id: ProjectId,
 ) -> Result<HashMap<String, IntegrationId>, sea_orm::DbErr> {
     Ok(integration::Entity::find()
-        .filter(integration::Column::Organization.eq(org_id))
+        .filter(integration::Column::Project.eq(project_id))
         .filter(integration::Column::Kind.eq(i16::from(IntegrationKind::Outbound)))
         .all(db)
         .await?
@@ -68,9 +68,9 @@ impl<'a> StateApplicator<'a> {
         Ok(users.into_iter().map(|u| (u.username, u.id)).collect())
     }
 
-    pub(crate) async fn org_lookup(&self) -> Result<HashMap<String, OrganizationId>, DynError> {
-        let orgs = organization::Entity::find().all(self.db).await?;
-        Ok(orgs.into_iter().map(|o| (o.name, o.id)).collect())
+    pub(crate) async fn project_lookup(&self) -> Result<HashMap<String, ProjectId>, DynError> {
+        let projects = project::Entity::find().all(self.db).await?;
+        Ok(projects.into_iter().map(|o| (o.name, o.id)).collect())
     }
 }
 
@@ -80,13 +80,13 @@ mod inbound_integration_lookup_tests {
     use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::Uuid;
 
-    pub(crate) fn org_id() -> OrganizationId {
-        OrganizationId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
+    pub(crate) fn project_id() -> ProjectId {
+        ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
     }
 
     /// Regression: the SELECT behind `inbound_integrations_by_name` must
     /// restrict to `kind = Inbound`. The auto-managed GitHub App seeds two
-    /// rows per org sharing `name = "github"` (one inbound, one outbound). A
+    /// rows per project sharing `name = "github"` (one inbound, one outbound). A
     /// query that ignores `kind` collapses them in the resulting HashMap and
     /// silently stores the outbound id on `reporter_push`/`reporter_pull_request`
     /// triggers, so the webhook resolver's inbound lookup never matches.
@@ -96,7 +96,9 @@ mod inbound_integration_lookup_tests {
             .append_query_results([Vec::<integration::Model>::new()])
             .into_connection();
 
-        inbound_integrations_by_name(&db, org_id()).await.unwrap();
+        inbound_integrations_by_name(&db, project_id())
+            .await
+            .unwrap();
 
         let logs = db.into_transaction_log();
         let select = logs

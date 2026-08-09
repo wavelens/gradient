@@ -20,7 +20,7 @@ use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::{CacheDb, DbContext, StatusReactor, WebDb, WorkerDb};
 use gradient_forge::ForgeRegistry;
 use gradient_notify::EmailSender;
-use gradient_state::{OidcGroupRoles, PendingOrgMemberships, ScimGroupRoles};
+use gradient_state::{OidcGroupRoles, PendingProjectMemberships, ScimGroupRoles};
 use gradient_storage::{LogStorage, NarStore, StorageCtx};
 use gradient_types::{BoardEvent, RuntimeConfig, SecretString};
 use gradient_util::shutdown::Shutdown;
@@ -62,12 +62,12 @@ pub struct AppState {
     pub jwt_secret: SecretString,
     /// Wall-clock time the process bootstrapped; drives `gradient_uptime_seconds`.
     pub started_at: DateTime<Utc>,
-    /// Org memberships declared in state for users who did not exist at apply
+    /// Project memberships declared in state for users who did not exist at apply
     /// time, drained per-username on first registration/OIDC login.
-    pub pending_org_memberships: Arc<PendingOrgMemberships>,
-    /// OIDC group -> (organization, role) grants resolved from state at startup.
+    pub pending_project_memberships: Arc<PendingProjectMemberships>,
+    /// OIDC group -> (project, role) grants resolved from state at startup.
     pub oidc_group_roles: Arc<OidcGroupRoles>,
-    /// SCIM group -> (organization, role) grants resolved from state at startup.
+    /// SCIM group -> (project, role) grants resolved from state at startup.
     pub scim_group_roles: Arc<ScimGroupRoles>,
     /// Broadcast of live board events to WebSocket subscribers.
     pub board_events: broadcast::Sender<BoardEvent>,

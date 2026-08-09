@@ -10,7 +10,7 @@
   <div class="pp-head pad">
     <div>
       <div class="breadcrumb">
-        <a [routerLink]="['/organization', orgName]">{{ orgDisplayName() || orgName }}</a>
+        <a [routerLink]="['/project', projectName]">{{ projectDisplayName() || projectName }}</a>
       </div>
       <div class="title-row">
         <h1>{{ proj.display_name }}</h1>
@@ -26,11 +26,11 @@
                 severity="secondary" (click)="restartFailedBuilds()" [disabled]="starting()"></button>
         @if (proj.name !== 'build-request') {
           <button pButton label="Settings" icon="pi pi-cog" severity="secondary"
-                  [routerLink]="['/organization', orgName, 'task', taskName, 'settings']"></button>
+                  [routerLink]="['/project', projectName, 'task', taskName, 'settings']"></button>
         }
       }
       <button pButton label="Metrics" icon="pi pi-chart-line" severity="secondary"
-              [routerLink]="['/organization', orgName, 'task', taskName, 'metrics']"></button>
+              [routerLink]="['/project', projectName, 'task', taskName, 'metrics']"></button>
     </div>
   </div>
 
@@ -104,12 +104,12 @@
                 <span><b>{{ doneCount(sel.builds) }} / {{ totalCount(sel.builds) }}</b> builds</span>
                 <span class="dur"><span class="material-symbols-outlined">timer</span> <b>{{ evalDuration(sel) }}</b></span>
                 @if (sel.errors > 0) {
-                  <a class="msg-chip error" [routerLink]="['/organization', orgName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
+                  <a class="msg-chip error" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
                     {{ sel.errors }} {{ sel.errors === 1 ? 'error' : 'errors' }}
                   </a>
                 }
                 @if (sel.warnings > 0) {
-                  <a class="msg-chip warn" [routerLink]="['/organization', orgName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
+                  <a class="msg-chip warn" [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ eval: 1 }">
                     {{ sel.warnings }} {{ sel.warnings === 1 ? 'warning' : 'warnings' }}
                   </a>
                 }
@@ -133,7 +133,7 @@
             <div class="pkg-list">
               @for (ep of entryPoints(); track ep.id) {
                 <div class="pkg {{ buildStatusClass(ep.build_status) }}" [style.animation-delay.ms]="$index * 18"
-                     [routerLink]="['/organization', orgName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }">
+                     [routerLink]="['/project', projectName, 'log', sel.id]" [queryParams]="{ build: ep.build_id }">
                   <span class="si {{ buildStatusClass(ep.build_status) }} material-symbols-outlined">{{ buildStatusIcon(ep.build_status) }}</span>
                   <span class="pkg-name" [title]="ep.derivation_path">{{ getDerivationName(ep.derivation_path) }}</span>
                   <span class="chip-arch mono">{{ ep.architecture }}</span>

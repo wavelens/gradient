@@ -1,0 +1,261 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  @if (loading()) {
+    <app-loading-spinner message="Loading project settings..." />
+  } @else if (project(); as project) {
+    <div class="page-header">
+      <div>
+        <div class="breadcrumb">
+          <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ project.display_name }}</a>
+          <span class="breadcrumb-separator">/</span>
+          <span class="breadcrumb-current">Settings</span>
+        </div>
+        <h1>Project Settings</h1>
+      </div>
+    </div>
+
+    <!-- General Settings -->
+    <div class="settings-section">
+      <h2>General</h2>
+      <div class="settings-card">
+        <div class="form-group">
+          <label for="project-name">Name</label>
+          <input
+            pInputText
+            id="project-name"
+            [value]="project.name"
+            disabled
+            class="w-full"
+          />
+          <small class="text-secondary">Project name cannot be changed</small>
+        </div>
+
+        <div class="form-group">
+          <label for="display-name">Display Name</label>
+          <input
+            pInputText
+            id="display-name"
+            [(ngModel)]="formData.display_name"
+            class="w-full"
+            [appManagedDisable]="access()"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="description">Description</label>
+          <textarea
+            pInputTextarea
+            id="description"
+            [(ngModel)]="formData.description"
+            rows="3"
+            class="w-full"
+            [appManagedDisable]="access()"
+          ></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="visibility">Visibility</label>
+          <select id="visibility" [(ngModel)]="formData.public" class="role-select" [appManagedDisable]="access()">
+            <option [ngValue]="false">Private</option>
+            <option [ngValue]="true">Public</option>
+          </select>
+          <small class="text-secondary">Public projects are visible and readable by all users</small>
+        </div>
+
+        <div class="form-group checkbox-group">
+          <p-checkbox
+            inputId="hide-build-requests"
+            [(ngModel)]="formData.hide_build_requests"
+            [binary]="true"
+            [appManagedDisable]="access()"
+          />
+          <label for="hide-build-requests">Hide Build Requests task</label>
+          <small class="text-secondary">When enabled, the auto-managed <code>build-request</code> task that receives CLI build artefacts is hidden from task listings.</small>
+        </div>
+
+        @if (saveError()) {
+          <div class="message-banner error">
+            <span class="material-symbols-outlined">error</span>
+            {{ saveError() }}
+          </div>
+        }
+        @if (saveSuccess()) {
+          <div class="message-banner success">
+            <span class="material-symbols-outlined">check_circle</span>
+            Changes saved.
+          </div>
+        }
+        <div class="form-actions">
+          <button
+            *appWritable="access()"
+            pButton
+            label="Save Changes"
+            icon="pi pi-check"
+            (click)="saveSettings()"
+            [loading]="saving()"
+            [appManagedDisable]="access()"
+          ></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Members & Roles -->
+    <div class="settings-section">
+      <h2>Access</h2>
+      <div class="settings-card">
+        <div class="nav-row">
+          <div>
+            <h3>Members & Roles</h3>
+            <p class="text-secondary">Manage who is in this project and what they can do</p>
+          </div>
+          <a pButton label="Manage Members" icon="pi pi-users" severity="secondary" [routerLink]="['/project', projectName, 'members']"></a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Infrastructure -->
+    <div class="settings-section">
+      <h2>Infrastructure</h2>
+      <div class="settings-card">
+        <div class="nav-row">
+          <div>
+            <h3>Workers</h3>
+            <p class="text-secondary">Manage build workers for this project</p>
+          </div>
+          <button pButton label="Manage Workers" icon="pi pi-cog" severity="secondary" [routerLink]="['/project', projectName, 'workers']"></button>
+        </div>
+        <p-divider />
+        <div class="nav-row">
+          <div>
+            <h3>Cache Subscriptions</h3>
+            <p class="text-secondary">Nix binary caches this project pushes builds to</p>
+          </div>
+          <button pButton label="Manage Caches" icon="pi pi-database" severity="secondary" [routerLink]="['/project', projectName, 'caches']"></button>
+        </div>
+        <p-divider />
+        <div class="nav-row">
+          <div>
+            <h3>Integrations</h3>
+            <p class="text-secondary">Inbound forge webhooks and outbound status reporters</p>
+          </div>
+          <a pButton label="Manage Integrations" icon="pi pi-sitemap" severity="secondary" [routerLink]="['/project', projectName, 'integrations']"></a>
+        </div>
+      </div>
+    </div>
+
+    <!-- SSH Key -->
+    <div class="settings-section">
+      <h2>SSH Key</h2>
+      @if (sshLoading()) {
+        <app-loading-spinner message="Loading SSH key..." />
+      } @else {
+        <div class="settings-card">
+          <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
+          @if (sshKey()) {
+            <div class="form-group">
+              <label>Public Key</label>
+              <textarea
+                pInputTextarea
+                [value]="sshKey()"
+                readonly
+                rows="4"
+                class="w-full ssh-key-area"
+              ></textarea>
+            </div>
+            <div class="form-actions">
+              <button pButton label="Copy Key" icon="pi pi-copy" severity="secondary" (click)="copySSHKey()"></button>
+            </div>
+          } @else {
+            <p class="text-secondary">No SSH key generated yet.</p>
+            <button
+              pButton
+              label="Generate SSH Key"
+              icon="pi pi-key"
+              (click)="generateSSHKey()"
+              [loading]="generatingSSH()"
+              [disabled]="generatingSSH()"
+            ></button>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Danger Zone -->
+    @if (access().canEdit) {
+      <div class="settings-section danger-section">
+        <h2>Danger Zone</h2>
+        <div class="settings-card danger-card">
+          @if (sshKey()) {
+            <div class="danger-row">
+              <div>
+                <h3>Regenerate SSH Key</h3>
+                <p class="text-secondary">Generate a new SSH key. The existing key will stop working immediately.</p>
+              </div>
+              <button
+                pButton
+                label="Regenerate Key"
+                icon="pi pi-refresh"
+                severity="danger"
+                (click)="showRegenerateKeyDialog.set(true)"
+                [disabled]="generatingSSH()"
+                [appManagedDisable]="access()"
+              ></button>
+            </div>
+            <p-divider />
+          }
+          <div class="danger-row">
+            <div>
+              <h3>Delete Project</h3>
+              <p class="text-secondary">Permanently delete this project and all its tasks.</p>
+            </div>
+            <button
+              pButton
+              label="Delete Project"
+              icon="pi pi-trash"
+              severity="danger"
+              (click)="showDeleteDialog.set(true)"
+              [appManagedDisable]="access()"
+            ></button>
+          </div>
+        </div>
+      </div>
+    }
+  }
+</div>
+
+<!-- Regenerate SSH Key Confirmation Dialog -->
+<p-dialog
+  header="Regenerate SSH Key"
+  [(visible)]="showRegenerateKeyDialog"
+  [modal]="true"
+  [style]="{ width: '400px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <p>Are you sure you want to regenerate the SSH key? The existing key will stop working immediately and any repositories using it will lose access.</p>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showRegenerateKeyDialog.set(false)" [disabled]="generatingSSH()"></button>
+    <button pButton label="Regenerate" severity="danger" icon="pi pi-refresh" (click)="confirmRegenerateSSHKey()" [loading]="generatingSSH()" [disabled]="generatingSSH()"></button>
+  </ng-template>
+</p-dialog>
+
+<!-- Delete Confirmation Dialog -->
+<p-dialog
+  header="Delete Project"
+  [(visible)]="showDeleteDialog"
+  [modal]="true"
+  [style]="{ width: '400px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  <p>Are you sure you want to delete <strong>{{ project()?.display_name }}</strong>? This action cannot be undone.</p>
+  <ng-template pTemplate="footer">
+    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
+    <button pButton label="Delete" severity="danger" (click)="deleteProject()" [loading]="deleting()" [disabled]="deleting()"></button>
+  </ng-template>
+</p-dialog>

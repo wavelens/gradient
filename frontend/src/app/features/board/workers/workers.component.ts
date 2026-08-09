@@ -75,13 +75,13 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
 
     <table class="workers">
       <thead>
-        <tr><th>Worker</th><th>Org</th><th>State</th><th>Load</th><th>CPU%</th><th>RAM free</th><th>Arch</th></tr>
+        <tr><th>Worker</th><th>Project</th><th>State</th><th>Load</th><th>CPU%</th><th>RAM free</th><th>Arch</th></tr>
       </thead>
       <tbody>
         @for (w of workers(); track $index) {
           <tr>
             <td class="mono">{{ w.id ?? '-' }}</td>
-            <td class="mono">{{ w.organization ?? '-' }}</td>
+            <td class="mono">{{ w.project ?? '-' }}</td>
             <td>{{ w.draining ? 'draining' : 'active' }}</td>
             <td>{{ w.assigned_jobs }}/{{ w.max_concurrent_builds }}</td>
             <td>{{ w.cpu_usage_pct !== null ? (w.cpu_usage_pct | number: '1.0-0') : '-' }}</td>

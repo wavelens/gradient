@@ -131,18 +131,18 @@ fn to_response(m: MTaskAction) -> ActionResponse {
     }
 }
 
-/// `GET /tasks/{org}/{task}/actions` - list all actions for the task.
+/// `GET /tasks/{project}/{task}/actions` - list all actions for the task.
 pub async fn list_actions(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<ActionResponse>>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Member,
     )
@@ -156,7 +156,7 @@ pub async fn list_actions(
     Ok(ok_json(rows.into_iter().map(to_response).collect()))
 }
 
-/// `POST /tasks/{org}/{task}/actions` - create a new action. For
+/// `POST /tasks/{project}/{task}/actions` - create a new action. For
 /// `send_web_request` configs the supplied plaintext token is returned
 /// exactly once in the response and stored encrypted with the server's
 /// crypt key; all later reads omit it entirely.
@@ -164,14 +164,14 @@ pub async fn create_action(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     Json(body): Json<CreateActionRequest>,
 ) -> WebResult<Json<BaseResponse<CreateActionResponse>>> {
-    let (org, proj) = load_task(
+    let (project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::ManageActions,
@@ -219,7 +219,7 @@ pub async fn create_action(
     if let Some(integration_id) = integration_id {
         let integration = EIntegration::find()
             .filter(CIntegration::Id.eq(integration_id))
-            .filter(CIntegration::Organization.eq(org.id))
+            .filter(CIntegration::Project.eq(project.id))
             .one(&state.web_db)
             .await?;
         match integration {
@@ -310,13 +310,13 @@ pub async fn read_action(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, TaskActionId)>,
+    Path((project, task, id)): Path<(String, String, TaskActionId)>,
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Member,
     )
@@ -336,14 +336,14 @@ pub async fn update_action(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, TaskActionId)>,
+    Path((project, task, id)): Path<(String, String, TaskActionId)>,
     Json(body): Json<UpdateActionRequest>,
 ) -> WebResult<Json<BaseResponse<ActionResponse>>> {
-    let (org, proj) = load_task(
+    let (project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::ManageActions,
@@ -382,7 +382,7 @@ pub async fn update_action(
             | ActionConfig::OpenPr { integration_id, .. } => {
                 let integration = EIntegration::find()
                     .filter(CIntegration::Id.eq(*integration_id))
-                    .filter(CIntegration::Organization.eq(org.id))
+                    .filter(CIntegration::Project.eq(project.id))
                     .one(&state.web_db)
                     .await?;
                 match integration {
@@ -483,13 +483,13 @@ pub async fn delete_action(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, TaskActionId)>,
+    Path((project, task, id)): Path<(String, String, TaskActionId)>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::ManageActions,
@@ -515,13 +515,13 @@ pub async fn test_action(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, TaskActionId)>,
+    Path((project, task, id)): Path<(String, String, TaskActionId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization.clone(),
+        project.clone(),
         task.clone(),
         TaskAccess::Require {
             permission: Permission::ManageActions,
@@ -565,12 +565,12 @@ pub async fn test_action(
     let payload = serde_json::json!({
         "synthetic": true,
         "event": event,
-        "org": organization,
+        "project": project,
         "task": task,
         "id": "00000000-0000-0000-0000-000000000000",
         "status": "ok",
         "time": now.to_rfc3339(),
-        "link": format!("https://gradient.example/tasks/{}/{}", organization, task),
+        "link": format!("https://gradient.example/tasks/{}/{}", project, task),
         "owner": "gradient-test",
         "repo": task,
         "sha": "0000000000000000000000000000000000000000",
@@ -588,16 +588,16 @@ pub async fn regenerate_token(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, TaskActionId)>,
+    Path((project, task, id)): Path<(String, String, TaskActionId)>,
 ) -> WebResult<Json<BaseResponse<serde_json::Value>>> {
     use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use rand::RngExt as _;
 
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::ManageActions,
@@ -685,14 +685,14 @@ pub async fn list_deliveries(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, TaskActionId)>,
+    Path((project, task, id)): Path<(String, String, TaskActionId)>,
     Query(q): Query<DeliveryListQuery>,
 ) -> WebResult<Json<BaseResponse<Vec<DeliveryListItem>>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Member,
     )
@@ -725,18 +725,18 @@ pub async fn get_delivery(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, action_id, delivery_id)): Path<(
+    Path((project, task, action_id, delivery_id)): Path<(
         String,
         String,
         TaskActionId,
         TaskActionDeliveryId,
     )>,
 ) -> WebResult<Json<BaseResponse<DeliveryDetail>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Member,
     )

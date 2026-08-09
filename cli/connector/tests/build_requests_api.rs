@@ -52,7 +52,12 @@ async fn upload_source_nar_returns_dispatch() {
         .unwrap();
     let resp = client
         .build_requests()
-        .upload_source_nar("my-org", Some("pkg"), Some("x86_64-linux"), b"nar".to_vec())
+        .upload_source_nar(
+            "my-project",
+            Some("pkg"),
+            Some("x86_64-linux"),
+            b"nar".to_vec(),
+        )
         .await
         .unwrap();
     assert_eq!(resp.evaluation, "eval-1");
@@ -80,7 +85,7 @@ async fn submit_manifest_returns_session() {
     let session = client
         .build_requests()
         .submit_manifest(connector::build_requests::BuildManifestRequest {
-            organization: "my-org".into(),
+            project: "my-project".into(),
             files: vec![],
         })
         .await

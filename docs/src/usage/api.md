@@ -61,13 +61,13 @@ On errors, `error` is `true` and `message` is a string describing the problem.
 | `POST` | `/user/keys` | Create API key |
 | `DELETE` | `/user/keys` | Delete API key |
 | `GET` | `/user/keys/permissions` | List the permission catalogue |
-| `PATCH` | `/user/keys/{api_id}` | Update an API key's name / permissions / org pin |
+| `PATCH` | `/user/keys/{api_id}` | Update an API key's name / permissions / project pin |
 | `GET` | `/user/settings` | Get profile settings |
 | `PATCH` | `/user/settings` | Update profile settings |
 
 ### Configuring API-key options
 
-Each API key carries its own permission set and an optional organization pin:
+Each API key carries its own permission set and an optional project pin:
 
 ```bash
 curl -X POST $API/user/keys \
@@ -75,15 +75,15 @@ curl -X POST $API/user/keys \
   -H "Content-Type: application/json" \
   -d '{
         "name": "ci-runner",
-        "permissions": ["triggerEvaluation", "viewOrg"],
-        "organization": "acme",
+        "permissions": ["triggerEvaluation", "viewProject"],
+        "project": "acme",
         "expires_in_days": 90
       }'
 ```
 
 The key's effective authority on every request is `user_role_mask & key_mask`,
-intersected with the org's role assignment for the caller. A key pinned to an
-organization 404s for every other org. The full permission catalogue is at
+intersected with the project's role assignment for the caller. A key pinned to an
+project 404s for every other project. The full permission catalogue is at
 `GET /user/keys/permissions`.
 
 To tighten an existing key without rotating the secret:
@@ -92,7 +92,7 @@ To tighten an existing key without rotating the secret:
 curl -X PATCH $API/user/keys/$KEY_ID \
   -H "Authorization: Bearer $SESSION" \
   -H "Content-Type: application/json" \
-  -d '{ "permissions": ["viewOrg"] }'
+  -d '{ "permissions": ["viewProject"] }'
 ```
 
 API-key-authenticated requests **cannot** create, edit, revoke, or delete API
@@ -124,26 +124,26 @@ honored only when the peer is in `GRADIENT_NETWORK_TRUSTED_PROXIES`.
 
 ### Cache pinning
 
-A key may be pinned to a single cache as an alternative to organization
+A key may be pinned to a single cache as an alternative to project
 pinning (the two are mutually exclusive). Cache-pinned keys carry a
 `CachePermission` bitmask and can be used only on routes targeting the pinned
 cache. Creating a cache-pinned key requires the `manageCacheMembers` permission
 on the target cache. Use the `availableCache` field on
 `GET /user/keys/permissions` to enumerate valid capability names.
 
-### Organizations
+### Projects
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/orgs` | List organizations |
-| `PUT` | `/orgs` | Create organization |
-| `GET` | `/orgs/{org}` | Get organization |
-| `PATCH` | `/orgs/{org}` | Update organization |
-| `DELETE` | `/orgs/{org}` | Delete organization |
-| `GET/POST/PATCH/DELETE` | `/orgs/{org}/users` | Manage members |
-| `GET/POST` | `/orgs/{org}/ssh` | Get / regenerate SSH key |
-| `GET` | `/orgs/{org}/subscribe` | List subscribed caches |
-| `POST/DELETE` | `/orgs/{org}/subscribe/{cache}` | Subscribe / unsubscribe |
+| `GET` | `/projects` | List projects |
+| `PUT` | `/projects` | Create project |
+| `GET` | `/projects/{project}` | Get project |
+| `PATCH` | `/projects/{project}` | Update project |
+| `DELETE` | `/projects/{project}` | Delete project |
+| `GET/POST/PATCH/DELETE` | `/projects/{project}/users` | Manage members |
+| `GET/POST` | `/projects/{project}/ssh` | Get / regenerate SSH key |
+| `GET` | `/projects/{project}/subscribe` | List subscribed caches |
+| `POST/DELETE` | `/projects/{project}/subscribe/{cache}` | Subscribe / unsubscribe |
 
 ### Workers
 
@@ -151,9 +151,9 @@ Workers are `gradient-worker` processes that connect to the server over WebSocke
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/orgs/{org}/workers` | Register a worker - returns `peer_id` and optionally a one-time `token` |
-| `GET` | `/orgs/{org}/workers` | List registered workers (merges live state) |
-| `DELETE` | `/orgs/{org}/workers/{worker_id}` | Unregister a worker |
+| `POST` | `/projects/{project}/workers` | Register a worker - returns `peer_id` and optionally a one-time `token` |
+| `GET` | `/projects/{project}/workers` | List registered workers (merges live state) |
+| `DELETE` | `/projects/{project}/workers/{worker_id}` | Unregister a worker |
 | `GET` | `/admin/workers` | List all currently connected workers (superuser or `GRADIENT_GLOBAL_STATS_PUBLIC`) |
 
 All endpoints under `/admin/*` require the calling user to have the
@@ -169,7 +169,7 @@ cat /var/lib/gradient-worker/worker-id
 
 ```sh
 # Server generates the token (returned once, store it immediately)
-curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
+curl -X POST https://gradient.example.com/api/v1/projects/myproject/workers \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"worker_id": "550e8400-e29b-41d4-a716-446655440001"}'
@@ -190,7 +190,7 @@ Response (server-generated token):
 Alternatively, supply a pre-generated token (`openssl rand -base64 48` - exactly 64 standard base64 characters). The server stores its hash and **does not** return it in the response:
 
 ```sh
-curl -X POST https://gradient.example.com/api/v1/orgs/myorg/workers \
+curl -X POST https://gradient.example.com/api/v1/projects/myproject/workers \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"worker_id\": \"550e8400-e29b-41d4-a716-446655440001\", \"token\": \"$(openssl rand -base64 48)\"}"
@@ -217,7 +217,7 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 
 **List workers:**
 
-`GET /orgs/{org}/workers` returns registered workers merged with live connection info:
+`GET /projects/{project}/workers` returns registered workers merged with live connection info:
 
 ```json
 {
@@ -242,21 +242,21 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 
 **Unregister a worker:**
 
-`DELETE /orgs/{org}/workers/{worker_id}` removes the registration. The worker stays connected until it disconnects, then cannot reconnect.
+`DELETE /projects/{project}/workers/{worker_id}` removes the registration. The worker stays connected until it disconnects, then cannot reconnect.
 
 ### Tasks
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/tasks/{org}` | List tasks |
-| `PUT` | `/tasks/{org}` | Create task |
-| `GET/PATCH/DELETE` | `/tasks/{org}/{task}` | Get / update / delete |
-| `GET` | `/tasks/{org}/{task}/details` | Aggregated task data |
-| `GET` | `/tasks/{org}/{task}/evaluations` | List recent evaluations (optional `?limit=`) |
-| `GET` | `/tasks/{org}/{task}/entry-points` | Root builds |
-| `POST` | `/tasks/{org}/{task}/check-repository` | Test repo access |
-| `POST` | `/tasks/{org}/{task}/evaluate` | Trigger evaluation |
-| `POST/DELETE` | `/tasks/{org}/{task}/active` | Enable / disable |
+| `GET` | `/tasks/{project}` | List tasks |
+| `PUT` | `/tasks/{project}` | Create task |
+| `GET/PATCH/DELETE` | `/tasks/{project}/{task}` | Get / update / delete |
+| `GET` | `/tasks/{project}/{task}/details` | Aggregated task data |
+| `GET` | `/tasks/{project}/{task}/evaluations` | List recent evaluations (optional `?limit=`) |
+| `GET` | `/tasks/{project}/{task}/entry-points` | Root builds |
+| `POST` | `/tasks/{project}/{task}/check-repository` | Test repo access |
+| `POST` | `/tasks/{project}/{task}/evaluate` | Trigger evaluation |
+| `POST/DELETE` | `/tasks/{project}/{task}/active` | Enable / disable |
 
 ### Evaluations
 
@@ -312,7 +312,7 @@ channel only forwards events for its resource (authorized at connect).
 | Path | Events |
 |---|---|
 | `/board/live` | `queue_depth`, `job_dispatched`, `worker_connected`, `worker_disconnected` (scope-masked) |
-| `/tasks/{org}/{task}/live` | `evaluation_status_changed`, `build_status_changed`, `evaluation_progress` for the task |
+| `/tasks/{project}/{task}/live` | `evaluation_status_changed`, `build_status_changed`, `evaluation_progress` for the task |
 | `/evals/{evaluation}/live` | `evaluation_status_changed`, `build_status_changed`, `evaluation_progress` for the evaluation |
 | `/builds/{build}/live` | `build_status_changed` for the build's evaluation (its dependency graph) |
 | `/board/cache/live` | `cache_changed` (content-free ping; refetch `/board/cache`) |
@@ -384,7 +384,7 @@ TOKEN=$(curl -s -X POST https://gradient.example.com/api/v1/auth/basic/login \
   -H 'Content-Type: application/json' \
   -d '{"loginname":"alice","password":"secret"}' | jq -r .message)
 
-curl -X POST "https://gradient.example.com/api/v1/tasks/my-org/my-task/evaluate" \
+curl -X POST "https://gradient.example.com/api/v1/tasks/my-project/my-task/evaluate" \
   -H "Authorization: Bearer $TOKEN"
 ```
 

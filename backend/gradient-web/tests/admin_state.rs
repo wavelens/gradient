@@ -48,7 +48,7 @@ fn with_user(
 /// Append the nineteen (all-empty) table reads `export_state` issues, in order.
 fn with_empty_export(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<gradient_entity::user::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::organization::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::project::Model>::new()])
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([Vec::<gradient_entity::cache::Model>::new()])
         .append_query_results([Vec::<gradient_entity::role::Model>::new()])
@@ -56,11 +56,11 @@ fn with_empty_export(db: MockDatabase) -> MockDatabase {
         .append_query_results([Vec::<gradient_entity::api::Model>::new()])
         .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
         .append_query_results([Vec::<gradient_entity::base_worker::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::organization_base_worker::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::project_base_worker::Model>::new()])
         .append_query_results([Vec::<gradient_entity::integration::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::organization_user::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::project_user::Model>::new()])
         .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         .append_query_results([Vec::<gradient_entity::cache_upstream::Model>::new()])
         .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
         .append_query_results([Vec::<gradient_entity::task_action::Model>::new()])
@@ -132,7 +132,7 @@ fn export_state_json_returns_empty_shape() {
         assert_eq!(body["error"], false);
         for key in [
             "users",
-            "organizations",
+            "projects",
             "tasks",
             "caches",
             "roles",
