@@ -57,7 +57,10 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum UserCommands {
     List,
-    Add { user: String, role: Option<String> },
+    Add {
+        user: String,
+        role: Option<String>,
+    },
     Remove {
         #[arg(add = ArgValueCompleter::new(completion::complete_org_users))]
         user: String,

@@ -328,10 +328,10 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
                 .append_query_results([vec![key.clone()]])
                 .append_query_results([vec![user()]])
                 .append_query_results([vec![org()]])
-                .append_query_results([vec![gradient_entity::project::Model {
-                    id: gradient_test_support::fixtures::project_id(),
+                .append_query_results([vec![gradient_entity::task::Model {
+                    id: gradient_test_support::fixtures::task_id(),
                     organization: org_id(),
-                    name: "test-project".into(),
+                    name: "test-task".into(),
                     display_name: "Test".into(),
                     repository: "git@example.com:test/test.git".into(),
                     wildcard: "*".into(),
@@ -355,7 +355,7 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
         });
 
         let res = s
-            .post("/api/v1/projects/test-org/test-project/evaluate")
+            .post("/api/v1/tasks/test-org/test-task/evaluate")
             .add_header("authorization", format!("Bearer GRAD{}", raw))
             .await;
         res.assert_status(axum::http::StatusCode::FORBIDDEN);

@@ -8,7 +8,7 @@
 //!
 //! The stream only ever wrote to its socket, so a closed browser tab was
 //! noticed only if some later event happened to fail the send. A channel that
-//! stays quiet - a finished project, an idle cache - therefore kept its task
+//! stays quiet - a finished task, an idle cache - therefore kept its task
 //! and its file descriptor forever, and the server accumulated CLOSE-WAIT
 //! sockets (258 of them over a few hours in production) until it would have
 //! run out of descriptors.

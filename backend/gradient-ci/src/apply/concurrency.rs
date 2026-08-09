@@ -9,7 +9,7 @@ use gradient_types::triggers::ConcurrencyPolicy;
 use gradient_types::*;
 use sea_orm::ConnectionTrait;
 
-/// Outcome of applying the project's [`ConcurrencyPolicy`] to the in-flight
+/// Outcome of applying the task's [`ConcurrencyPolicy`] to the in-flight
 /// evaluation: whether the new run is allowed to be concurrent, plus any
 /// evaluation/builds the policy aborted to make room.
 pub(super) struct ConcurrencyDecision {
@@ -18,16 +18,16 @@ pub(super) struct ConcurrencyDecision {
     pub aborted_anchors: Vec<DerivationBuildId>,
 }
 
-/// Applies the project's concurrency policy against `in_flight`. Returns `None`
+/// Applies the task's concurrency policy against `in_flight`. Returns `None`
 /// when the `Skip` policy says to drop this trigger entirely; otherwise a
 /// [`ConcurrencyDecision`] describing the abort side-effects and the
 /// `concurrent` flag to pass through to `trigger_evaluation`.
 pub(super) async fn resolve_concurrency<C: ConnectionTrait>(
     db: &C,
-    project: &MProject,
+    task: &MTask,
     in_flight: Option<MEvaluation>,
 ) -> Result<Option<ConcurrencyDecision>, sea_orm::DbErr> {
-    let concurrency = project.concurrency;
+    let concurrency = task.concurrency;
 
     let mut aborted_evaluation: Option<EvaluationId> = None;
     let mut aborted_anchors: Vec<DerivationBuildId> = Vec::new();

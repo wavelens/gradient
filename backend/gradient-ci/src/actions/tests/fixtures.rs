@@ -4,14 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_types::{ActionType, MProjectAction, ProjectId};
+use gradient_types::{ActionType, MTaskAction, TaskId};
 use serde_json::json;
 use uuid::Uuid;
 
-pub fn action_with(action_type: ActionType, events: Vec<&str>) -> MProjectAction {
-    MProjectAction {
-        id: gradient_types::ProjectActionId::now_v7(),
-        project: ProjectId::new(Uuid::nil()),
+pub fn action_with(action_type: ActionType, events: Vec<&str>) -> MTaskAction {
+    MTaskAction {
+        id: gradient_types::TaskActionId::now_v7(),
+        task: TaskId::new(Uuid::nil()),
         name: "t".into(),
         action_type,
         config: json!({}),

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for project_trigger CRUD endpoints.
+//! Integration tests for task_trigger CRUD endpoints.
 //!
 //! Pattern: manual Tokio runtime + `axum_test::TestServer` + `MockDatabase`.
 //! Uses manual runtimes because `#[tokio::test]` expands to `::gradient_core::…`
@@ -15,13 +15,13 @@
 //!   2. UPDATE session (last_used_at)
 //!   3. SELECT user (by id)
 //!
-//! Then per `load_project`:
+//! Then per `load_task`:
 //!   4. SELECT org (by name)
-//!   5. SELECT project (by org + name)
+//!   5. SELECT task (by org + name)
 //!   6. SELECT org_user membership (permission check)
 
-use gradient_entity::{ids::*, integration, organization_user, project, project_trigger};
-use gradient_test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
+use gradient_entity::{ids::*, integration, organization_user, task, task_trigger};
+use gradient_test_support::fixtures::{org, org_id, task_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::{ConcurrencyPolicy, ForgeType, SessionId, TriggerType};
 use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
@@ -30,17 +30,17 @@ use uuid::Uuid;
 
 // ── Fixture helpers ────────────────────────────────────────────────────────────
 
-fn trigger_id() -> ProjectTriggerId {
-    ProjectTriggerId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000099").unwrap())
+fn trigger_id() -> TaskTriggerId {
+    TaskTriggerId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000099").unwrap())
 }
 
-fn project_row() -> gradient_entity::project::Model {
-    gradient_entity::project::Model {
-        id: project_id(),
+fn task_row() -> gradient_entity::task::Model {
+    gradient_entity::task::Model {
+        id: task_id(),
         organization: org_id(),
-        name: "test-project".into(),
+        name: "test-task".into(),
         active: true,
-        display_name: "Test Project".into(),
+        display_name: "Test Task".into(),
         repository: "https://github.com/test/repo".into(),
         wildcard: "*".into(),
         last_check_at: test_date(),
@@ -73,10 +73,10 @@ fn admin_role_row() -> gradient_entity::role::Model {
     }
 }
 
-fn polling_trigger_row() -> project_trigger::Model {
-    project_trigger::Model {
+fn polling_trigger_row() -> task_trigger::Model {
+    task_trigger::Model {
         id: trigger_id(),
-        project: project_id(),
+        task: task_id(),
         config: serde_json::json!({"interval_secs": 60}),
         active: true,
         created_at: test_date(),
@@ -102,10 +102,10 @@ fn github_inbound_integration_row() -> integration::Model {
     }
 }
 
-fn reporter_push_trigger_row() -> project_trigger::Model {
-    project_trigger::Model {
+fn reporter_push_trigger_row() -> task_trigger::Model {
+    task_trigger::Model {
         id: trigger_id(),
-        project: project_id(),
+        task: task_id(),
         trigger_type: TriggerType::ReporterPush,
         config: serde_json::json!({
             "integration_id": github_integration_id().to_string(),
@@ -131,29 +131,29 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-/// Append a `load_project` sequence with Member access (no permission row needed):
+/// Append a `load_task` sequence with Member access (no permission row needed):
 /// 1. SELECT org
-/// 2. SELECT project
+/// 2. SELECT task
 /// 3. SELECT org_user (membership check)
-fn with_project_member(db: MockDatabase) -> MockDatabase {
+fn with_task_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![org()]])
-        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
 }
 
-/// Append a `load_project` sequence with Require(EditProject) access:
+/// Append a `load_task` sequence with Require(EditTask) access:
 /// 1. SELECT org
-/// 2. SELECT project
+/// 2. SELECT task
 /// 3. SELECT org_user (permission check)
 /// 4. SELECT role (bitmask lookup behind `mask_grants`)
-fn with_project_edit(db: MockDatabase) -> MockDatabase {
+fn with_task_edit(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![org()]])
-        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
         .append_query_results([vec![admin_role_row()]])
 }
 
-const BASE_URL: &str = "/api/v1/projects/test-org/test-project/triggers";
+const BASE_URL: &str = "/api/v1/tasks/test-org/test-task/triggers";
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -167,7 +167,7 @@ fn list_triggers_returns_rows() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -200,7 +200,7 @@ fn get_trigger_returns_row() {
         let token = make_token(session_id);
         let tid = trigger_id();
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -229,13 +229,13 @@ fn get_trigger_not_found_returns_404() {
     rt.block_on(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
-        let tid = ProjectTriggerId::now_v7();
+        let tid = TaskTriggerId::now_v7();
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_trigger::Model>::new()]);
+        .append_query_results([Vec::<task_trigger::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -257,7 +257,7 @@ fn create_polling_trigger_valid() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -289,7 +289,7 @@ fn create_polling_trigger_interval_too_small_returns_400() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));
@@ -324,7 +324,7 @@ fn create_invalid_cron_returns_400() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));
@@ -357,7 +357,7 @@ fn patch_trigger_updates_fields() {
 
         let updated = polling_trigger_row();
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -389,13 +389,13 @@ fn patch_trigger_config_type_change() {
         let token = make_token(session_id);
         let tid = trigger_id();
 
-        let updated = project_trigger::Model {
+        let updated = task_trigger::Model {
             trigger_type: TriggerType::Time,
             config: serde_json::json!({"cron": "0 0 2 * * *"}),
             ..polling_trigger_row()
         };
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -429,7 +429,7 @@ fn delete_trigger_removes_row() {
         let token = make_token(session_id);
         let tid = trigger_id();
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -461,13 +461,13 @@ fn delete_trigger_not_found_returns_404() {
     rt.block_on(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
-        let tid = ProjectTriggerId::now_v7();
+        let tid = TaskTriggerId::now_v7();
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_trigger::Model>::new()]);
+        .append_query_results([Vec::<task_trigger::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -490,12 +490,12 @@ fn fire_now_on_inactive_trigger_returns_400() {
         let token = make_token(session_id);
         let tid = trigger_id();
 
-        let inactive_trigger = project_trigger::Model {
+        let inactive_trigger = task_trigger::Model {
             active: false,
             ..polling_trigger_row()
         };
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -522,7 +522,7 @@ fn fire_now_on_inactive_trigger_returns_400() {
 // which makes actual git network requests - it will be exercised by E2E smoke tests.
 
 #[test]
-fn create_project_seeds_default_polling_trigger() {
+fn create_task_seeds_default_polling_trigger() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -531,12 +531,12 @@ fn create_project_seeds_default_polling_trigger() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let created_project = project::Model {
-            id: project_id(),
+        let created_task = task::Model {
+            id: task_id(),
             organization: org_id(),
-            name: "new-project".into(),
+            name: "new-task".into(),
             active: true,
-            display_name: "New Project".into(),
+            display_name: "New Task".into(),
             repository: "https://github.com/test/repo".into(),
             wildcard: "*".into(),
             last_check_at: test_date(),
@@ -548,9 +548,9 @@ fn create_project_seeds_default_polling_trigger() {
             ..Default::default()
         };
 
-        let seeded_trigger = project_trigger::Model {
+        let seeded_trigger = task_trigger::Model {
             id: trigger_id(),
-            project: project_id(),
+            task: task_id(),
             config: serde_json::json!({"interval_secs": 300}),
             active: true,
             created_at: test_date(),
@@ -561,24 +561,24 @@ fn create_project_seeds_default_polling_trigger() {
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             // load_org: SELECT org
             .append_query_results([vec![org()]])
-            // load_org: SELECT org_user (require CreateProject permission)
+            // load_org: SELECT org_user (require CreateTask permission)
             .append_query_results([vec![admin_membership()]])
             // load_org: SELECT role (bitmask lookup)
             .append_query_results([vec![admin_role_row()]])
-            // check existing project: returns empty
-            .append_query_results([Vec::<project::Model>::new()])
-            // INSERT project RETURNING
-            .append_query_results([vec![created_project]])
+            // check existing task: returns empty
+            .append_query_results([Vec::<task::Model>::new()])
+            // INSERT task RETURNING
+            .append_query_results([vec![created_task]])
             // INSERT trigger RETURNING
             .append_query_results([vec![seeded_trigger]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .put("/api/v1/projects/test-org")
+            .put("/api/v1/tasks/test-org")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({
-                "name": "new-project",
-                "display_name": "New Project",
+                "name": "new-task",
+                "display_name": "New Task",
                 "description": "",
                 "repository": "https://github.com/test/repo",
                 "wildcard": "*"
@@ -588,12 +588,12 @@ fn create_project_seeds_default_polling_trigger() {
         res.assert_status_ok();
         let body: Value = res.json();
         assert_eq!(body["error"], false);
-        assert_eq!(body["message"], project_id().to_string());
+        assert_eq!(body["message"], task_id().to_string());
     });
 }
 
 #[test]
-fn create_project_with_all_concurrency_returns_id() {
+fn create_task_with_all_concurrency_returns_id() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -602,12 +602,12 @@ fn create_project_with_all_concurrency_returns_id() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let created_project = project::Model {
-            id: project_id(),
+        let created_task = task::Model {
+            id: task_id(),
             organization: org_id(),
-            name: "new-project".into(),
+            name: "new-task".into(),
             active: true,
-            display_name: "New Project".into(),
+            display_name: "New Task".into(),
             repository: "https://github.com/test/repo".into(),
             wildcard: "*".into(),
             last_check_at: test_date(),
@@ -619,9 +619,9 @@ fn create_project_with_all_concurrency_returns_id() {
             ..Default::default()
         };
 
-        let seeded_trigger = gradient_entity::project_trigger::Model {
+        let seeded_trigger = gradient_entity::task_trigger::Model {
             id: trigger_id(),
-            project: project_id(),
+            task: task_id(),
             config: serde_json::json!({"interval_secs": 300}),
             active: true,
             created_at: test_date(),
@@ -633,17 +633,17 @@ fn create_project_with_all_concurrency_returns_id() {
             .append_query_results([vec![org()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
-            .append_query_results([Vec::<project::Model>::new()])
-            .append_query_results([vec![created_project]])
+            .append_query_results([Vec::<task::Model>::new()])
+            .append_query_results([vec![created_task]])
             .append_query_results([vec![seeded_trigger]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .put("/api/v1/projects/test-org")
+            .put("/api/v1/tasks/test-org")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({
-                "name": "new-project",
-                "display_name": "New Project",
+                "name": "new-task",
+                "display_name": "New Task",
                 "description": "",
                 "repository": "https://github.com/test/repo",
                 "wildcard": "*",
@@ -654,12 +654,12 @@ fn create_project_with_all_concurrency_returns_id() {
         res.assert_status_ok();
         let body: Value = res.json();
         assert_eq!(body["error"], false);
-        assert_eq!(body["message"], project_id().to_string());
+        assert_eq!(body["message"], task_id().to_string());
     });
 }
 
 #[test]
-fn create_project_with_hard_abort_concurrency_returns_id() {
+fn create_task_with_hard_abort_concurrency_returns_id() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -668,12 +668,12 @@ fn create_project_with_hard_abort_concurrency_returns_id() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let created_project = project::Model {
-            id: project_id(),
+        let created_task = task::Model {
+            id: task_id(),
             organization: org_id(),
-            name: "new-project".into(),
+            name: "new-task".into(),
             active: true,
-            display_name: "New Project".into(),
+            display_name: "New Task".into(),
             repository: "https://github.com/test/repo".into(),
             wildcard: "*".into(),
             last_check_at: test_date(),
@@ -684,9 +684,9 @@ fn create_project_with_hard_abort_concurrency_returns_id() {
             ..Default::default()
         };
 
-        let seeded_trigger = gradient_entity::project_trigger::Model {
+        let seeded_trigger = gradient_entity::task_trigger::Model {
             id: trigger_id(),
-            project: project_id(),
+            task: task_id(),
             config: serde_json::json!({"interval_secs": 300}),
             active: true,
             created_at: test_date(),
@@ -698,17 +698,17 @@ fn create_project_with_hard_abort_concurrency_returns_id() {
             .append_query_results([vec![org()]])
             .append_query_results([vec![admin_membership()]])
             .append_query_results([vec![admin_role_row()]])
-            .append_query_results([Vec::<project::Model>::new()])
-            .append_query_results([vec![created_project]])
+            .append_query_results([Vec::<task::Model>::new()])
+            .append_query_results([vec![created_task]])
             .append_query_results([vec![seeded_trigger]]);
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .put("/api/v1/projects/test-org")
+            .put("/api/v1/tasks/test-org")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({
-                "name": "new-project",
-                "display_name": "New Project",
+                "name": "new-task",
+                "display_name": "New Task",
                 "description": "",
                 "repository": "https://github.com/test/repo",
                 "wildcard": "*",
@@ -719,12 +719,12 @@ fn create_project_with_hard_abort_concurrency_returns_id() {
         res.assert_status_ok();
         let body: Value = res.json();
         assert_eq!(body["error"], false);
-        assert_eq!(body["message"], project_id().to_string());
+        assert_eq!(body["message"], task_id().to_string());
     });
 }
 
 #[test]
-fn patch_project_concurrency_to_skip() {
+fn patch_task_concurrency_to_skip() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -733,12 +733,12 @@ fn patch_project_concurrency_to_skip() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        // aproject.update() - read-back then exec
-        .append_query_results([vec![project_row()]])
+        // atask.update() - read-back then exec
+        .append_query_results([vec![task_row()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -746,7 +746,7 @@ fn patch_project_concurrency_to_skip() {
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .patch("/api/v1/projects/test-org/test-project")
+            .patch("/api/v1/tasks/test-org/test-task")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({"concurrency": "skip"}))
             .await;
@@ -758,7 +758,7 @@ fn patch_project_concurrency_to_skip() {
 }
 
 #[test]
-fn patch_project_all_concurrency_returns_ok() {
+fn patch_task_all_concurrency_returns_ok() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -767,11 +767,11 @@ fn patch_project_all_concurrency_returns_ok() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![task_row()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -779,7 +779,7 @@ fn patch_project_all_concurrency_returns_ok() {
 
         let server = make_test_server(db.into_connection());
         let res = server
-            .patch("/api/v1/projects/test-org/test-project")
+            .patch("/api/v1/tasks/test-org/test-task")
             .add_header("authorization", format!("Bearer {}", token))
             .json(&serde_json::json!({"concurrency": "all"}))
             .await;
@@ -807,7 +807,7 @@ fn list_reporter_trigger_includes_integration_metadata() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -847,7 +847,7 @@ fn list_reporter_trigger_with_missing_integration_returns_null() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -879,7 +879,7 @@ fn list_polling_trigger_has_null_integration_and_skips_lookup() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -909,7 +909,7 @@ fn get_reporter_trigger_includes_integration_metadata() {
         let token = make_token(session_id);
         let tid = trigger_id();
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))

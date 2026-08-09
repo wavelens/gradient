@@ -10,7 +10,7 @@ Key functions inside each crate.
 
 **GitHub App** (`POST /api/v1/hooks/github`):
 - Verifies `X-Hub-Signature-256` against `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
-- `push` → calls `core::evaluation_trigger::trigger_evaluation` for each matching project.
+- `push` → calls `core::evaluation_trigger::trigger_evaluation` for each matching task.
 - `installation` / `installation_repositories` → upserts or clears `github_installation` rows and seeds the `github-<account>` integration pair.
 
 **Generic forges** (`POST /api/v1/hooks/{forge}/{org}/{integration_name}`):
@@ -18,16 +18,16 @@ Key functions inside each crate.
 - Looks up the integration by `(organization, kind=inbound, name=integration_name)` - `forge_type` is **not** part of the filter, so one inbound row can serve all three generic forges.
 - Decrypts `integration.secret` (same `crypt_secret_file` infrastructure as SSH keys).
 - Picks the HMAC scheme from the `{forge}` path segment (`X-Gitea-Signature`, `X-Gitlab-Token`, etc).
-- `push` → calls `trigger_evaluation` for each matching project.
+- `push` → calls `trigger_evaluation` for each matching task.
 
 **Shared trigger** (`core::evaluation_trigger::trigger_evaluation`):
 1. Checks no evaluation is already in progress (returns `TriggerError::AlreadyInProgress` if so).
 2. Inserts a `Commit` row with the push SHA.
 3. Inserts an `Evaluation` row with status `Queued`.
-4. Sets `project.force_evaluation = true` and resets `last_check_at` to the epoch.
+4. Sets `task.force_evaluation = true` and resets `last_check_at` to the epoch.
 5. The scheduler picks it up on its next tick (≤ 60 s) via the existing pre-created `Queued` evaluation path.
 
-Repository matching normalises URLs by stripping trailing `.git` and compares against all active projects.
+Repository matching normalises URLs by stripping trailing `.git` and compares against all active tasks.
 
 ---
 

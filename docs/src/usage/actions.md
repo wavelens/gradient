@@ -2,7 +2,7 @@
 
 Actions are the response-side counterpart of Triggers. Where a Trigger fires an evaluation when an event arrives, an Action reacts to evaluation and build lifecycle events and does something: sends an email, calls a webhook, or posts a commit status back to a forge.
 
-Actions are per-project. Four types ship in v1:
+Actions are per-task. Four types ship in v1:
 
 | Type | Summary | Prerequisite |
 |---|---|---|
@@ -42,11 +42,11 @@ Uses the server-global SMTP configuration (`services.gradient.email.*`). If SMTP
 | `recipients` | yes | List of email addresses |
 | `subject_template` | no | Subject line with placeholders |
 
-**Subject placeholders:** `{event}`, `{project}`, `{org}`, `{id}`, `{status}`
+**Subject placeholders:** `{event}`, `{task}`, `{org}`, `{id}`, `{status}`
 
-Default subject: `[Gradient] {event}: {project}`
+Default subject: `[Gradient] {event}: {task}`
 
-Default body includes: event name, project slug, entity id (eval/build UUID), status, and a link to the Gradient UI.
+Default body includes: event name, task slug, entity id (eval/build UUID), status, and a link to the Gradient UI.
 
 ## Send Web Request
 
@@ -72,7 +72,7 @@ Authorization: Bearer <token>   # only if token is set
 ```json
 {
   "event": "build.completed",
-  "project": "my-project",
+  "task": "my-task",
   "organization": "acme",
   "id": "<eval-or-build-uuid>",
   "status": "completed"
@@ -83,11 +83,11 @@ Token management: the plaintext token is revealed exactly once - on create or af
 
 ## Forge Status Report
 
-Posts commit status (pending / success / failure / action-required) back to the forge as three separate check runs per PR - `gradient/{project}: Approval` (fork-PR gate), `gradient/{project}: Evaluation` (eval phase), and `gradient/{project}: Build {label}` (one per entry point, labelled by its entry-point name). Each check is updated in place as the phase progresses; the Approval check flips to Success when a maintainer clears the gate, and the Evaluation check is posted as Pending at the same instant so the PR immediately reflects that the pipeline is in flight.
+Posts commit status (pending / success / failure / action-required) back to the forge as three separate check runs per PR - `gradient/{task}: Approval` (fork-PR gate), `gradient/{task}: Evaluation` (eval phase), and `gradient/{task}: Build {label}` (one per entry point, labelled by its entry-point name). Each check is updated in place as the phase progresses; the Approval check flips to Success when a maintainer clears the gate, and the Evaluation check is posted as Pending at the same instant so the PR immediately reflects that the pipeline is in flight.
 
 Each `Build {label}` check tracks its entry point's whole lifecycle, not just the final result: Pending when the build is queued, Running while it builds, then Success when it completes or is substituted from cache. A build that fails reports Failure - and a dependency failure or an abort surfaces as a failed Build check too, rather than leaving the check stuck on Pending. (The graph transitions that queue, dependency-fail, or abort a build run as bulk SQL updates outside the per-build status path, so the reporter is notified for the affected entry points explicitly.)
 
-A run that targets a wildcard other than the project default - e.g. `/gradient run packages.x86_64-linux.foo` - reports under `gradient/{project}: Evaluation: {wildcard}` so the custom run shows as its own check line instead of overwriting the default evaluation check.
+A run that targets a wildcard other than the task default - e.g. `/gradient run packages.x86_64-linux.foo` - reports under `gradient/{task}: Evaluation: {wildcard}` so the custom run shows as its own check line instead of overwriting the default evaluation check.
 
 **Maintainer-initiated runs skip the fork-PR approval gate.** The gate only exists to hold untrusted external contributions; when the action comes from a repo writer it is not needed. The Evaluation runs immediately (no `Approval` check) when any of these happen: a maintainer issues `/gradient run` / `/gradient approve` on the PR, a maintainer submits an approving review through the forge's native PR-review UI (GitHub / Gitea / Forgejo `pull_request_review`), or a maintainer force-pushes onto the contributor's branch. In every case the actor is verified as a repo writer via the forge API before the gate is cleared. GitLab is the exception - it emits no webhook on merge-request approval, so use `/gradient approve` there.
 
@@ -99,11 +99,11 @@ A run that targets a wildcard other than the project default - e.g. `/gradient r
 
 The integration must be `kind: outbound`. The forge type determines the API call format (Gitea, GitLab, GitHub App).
 
-The **Test** button does not post a synthetic status (a forge rejects a status against a placeholder commit); it runs a non-mutating connectivity check that confirms the integration's credentials can reach the project repository. The same applies to **Open PR**.
+The **Test** button does not post a synthetic status (a forge rejects a status against a placeholder commit); it runs a non-mutating connectivity check that confirms the integration's credentials can reach the task repository. The same applies to **Open PR**.
 
 ## Open PR
 
-Opens (or updates) a pull request that bumps the project's flake inputs, driven by a native `flake.lock` updater. Unlike the other actions it does not react to a project's ordinary runs and has no user-selectable event triggers: it fires only for `input_update` evaluations, at the point fixed by `verify_gate`.
+Opens (or updates) a pull request that bumps the task's flake inputs, driven by a native `flake.lock` updater. Unlike the other actions it does not react to a task's ordinary runs and has no user-selectable event triggers: it fires only for `input_update` evaluations, at the point fixed by `verify_gate`.
 
 **Config fields:**
 
@@ -118,22 +118,22 @@ Opens (or updates) a pull request that bumps the project's flake inputs, driven 
 | `body_template` | no | (none) | PR body with placeholders |
 | `update_existing` | no | `true` | Update an already-open PR in place instead of opening a duplicate |
 
-**Tracked inputs.** The set of inputs to bump is declared with flake-input override rows on the project. An override whose `url` is unset marks that input as *tracked*, and it will be bumped to its newest revision. As a safety gate, the presence of *any* override with a `url` set (a pinned input) blocks the run, so a project cannot accidentally open a PR while an input is being held at a fixed revision. v1 supports `github`, `gitlab`, and `git` flake inputs, including `git` inputs served over `ssh://` - the updater clones them with the organization's SSH key, the same key used for [private repo access](overview.md#ssh-keys).
+**Tracked inputs.** The set of inputs to bump is declared with flake-input override rows on the task. An override whose `url` is unset marks that input as *tracked*, and it will be bumped to its newest revision. As a safety gate, the presence of *any* override with a `url` set (a pinned input) blocks the run, so a task cannot accidentally open a PR while an input is being held at a fixed revision. v1 supports `github`, `gitlab`, and `git` flake inputs, including `git` inputs served over `ssh://` - the updater clones them with the organization's SSH key, the same key used for [private repo access](overview.md#ssh-keys).
 
-**Wildcards.** An override name may be a glob (`*`, `?`), e.g. `nixpkgs*` or a bare `*` for every input, so one row tracks many inputs. Globs are expanded worker-side against the project's `flake.lock`; a literal override always wins over a glob. Under `per_input` granularity a glob still opens one PR per matched input (the worker discovers the matches, then the server fans out one update per input).
+**Wildcards.** An override name may be a glob (`*`, `?`), e.g. `nixpkgs*` or a bare `*` for every input, so one row tracks many inputs. Globs are expanded worker-side against the task's `flake.lock`; a literal override always wins over a glob. Under `per_input` granularity a glob still opens one PR per matched input (the worker discovers the matches, then the server fans out one update per input).
 
 This is distinct from `gradient build`'s per-run [`--override-input`](cli.md#build-requests), which overrides an input for a single build request rather than declaring it tracked for the updater.
 
-**When it runs.** An `input_update` evaluation is created whenever a project trigger fires - the periodic polling/time schedule (on every due tick, independent of whether the repository has a new commit, since upstream input bumps never move `HEAD`), a manual *Run trigger*, or a *Start Evaluation* - provided the project has an `open_pr` action and at least one tracked input. It is self-gated, so triggers on projects without the action are unaffected. The update run is concurrent: it runs alongside the project's normal CI evaluation for the same trigger, and neither aborts the other regardless of the project's concurrency policy.
+**When it runs.** An `input_update` evaluation is created whenever a task trigger fires - the periodic polling/time schedule (on every due tick, independent of whether the repository has a new commit, since upstream input bumps never move `HEAD`), a manual *Run trigger*, or a *Start Evaluation* - provided the task has an `open_pr` action and at least one tracked input. It is self-gated, so triggers on tasks without the action are unaffected. The update run is concurrent: it runs alongside the task's normal CI evaluation for the same trigger, and neither aborts the other regardless of the task's concurrency policy.
 
 **PR lifecycle.** Gradient creates the `input_update` evaluation; the worker bumps each tracked input to its newest revision with a natively recomputed `narHash`, and the candidate lock is verified by a normal eval/build per `verify_gate`. The gate keys off the evaluation's own terminal transition, not a per-build event: `build` opens the PR at `evaluation.completed` (which is reached only if every build succeeded), `eval`/`none` at `evaluation.building`. This is robust to a candidate whose closure is already built or substitutable from cache - that fires no fresh build event, yet the evaluation still completes. An empty or no-change patch opens no PR.
 
-The branch is **force-pushed** to a single clean commit on the current base every run, so re-runs never stack commits or leave the branch behind a moved base (the branch is replaced, not appended). The evaluation's own commit stays blank until that push, then is repointed at the generated `flake.lock` commit - so the project shows the actual update commit and never the unrelated base commit it was seeded from.
+The branch is **force-pushed** to a single clean commit on the current base every run, so re-runs never stack commits or leave the branch behind a moved base (the branch is replaced, not appended). The evaluation's own commit stays blank until that push, then is repointed at the generated `flake.lock` commit - so the task shows the actual update commit and never the unrelated base commit it was seeded from.
 
 ## Declarative configuration via Nix
 
 ```nix
-services.gradient.state.projects.web-app = {
+services.gradient.state.tasks.web-app = {
   actions = [
     {
       name = "notify-failures";
@@ -141,7 +141,7 @@ services.gradient.state.projects.web-app = {
       events = [ "evaluation.failed" "build.failed" ];
       config = {
         recipients = [ "ops@example.com" ];
-        subject_template = "[Gradient] {event}: {project}";
+        subject_template = "[Gradient] {event}: {task}";
       };
     }
     {
@@ -174,7 +174,7 @@ services.gradient.state.projects.web-app = {
 };
 ```
 
-`token_file` is read at activation time and stored encrypted. It is not re-read on reload; rotate with `services.gradient.state.projects.<name>.actions.<n>.config.token_file` and `systemctl restart gradient`.
+`token_file` is read at activation time and stored encrypted. It is not re-read on reload; rotate with `services.gradient.state.tasks.<name>.actions.<n>.config.token_file` and `systemctl restart gradient`.
 
 State-managed actions (`managed: true`) cannot be mutated through the API; remove or change them via NixOS config.
 

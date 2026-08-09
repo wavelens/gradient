@@ -12,18 +12,18 @@ use gradient_types::*;
 use sea_orm::MockDatabase;
 use uuid::Uuid;
 
-pub fn make_project_with_last_eval(last: Option<EvaluationId>) -> MProject {
-    make_project_with_concurrency(last, ConcurrencyPolicy::Skip)
+pub fn make_task_with_last_eval(last: Option<EvaluationId>) -> MTask {
+    make_task_with_concurrency(last, ConcurrencyPolicy::Skip)
 }
 
-pub fn make_project_with_concurrency(
+pub fn make_task_with_concurrency(
     last: Option<EvaluationId>,
     concurrency: ConcurrencyPolicy,
-) -> MProject {
-    MProject {
-        id: ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
+) -> MTask {
+    MTask {
+        id: TaskId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()),
         organization: OrganizationId::nil(),
-        name: "test-project".into(),
+        name: "test-task".into(),
         active: true,
         display_name: "Test".into(),
         repository: "https://example/r".into(),
@@ -39,13 +39,13 @@ pub fn make_project_with_concurrency(
 
 pub fn make_eval(
     id: EvaluationId,
-    project: ProjectId,
+    task: TaskId,
     commit: CommitId,
     status: EvaluationStatus,
 ) -> gradient_entity::evaluation::Model {
     gradient_entity::evaluation::Model {
         id,
-        project: Some(project),
+        task: Some(task),
         commit,
         wildcard: "*".into(),
         status,
@@ -61,12 +61,7 @@ pub fn make_commit(id: CommitId, hash: Vec<u8>) -> gradient_entity::commit::Mode
     }
 }
 
-pub fn input(
-    trig: ProjectTriggerId,
-    ttype: TriggerType,
-    hash: Vec<u8>,
-    manual: bool,
-) -> ApplyInput {
+pub fn input(trig: TaskTriggerId, ttype: TriggerType, hash: Vec<u8>, manual: bool) -> ApplyInput {
     ApplyInput {
         trigger_id: trig,
         trigger_type: ttype,

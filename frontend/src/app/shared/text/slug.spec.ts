@@ -24,7 +24,7 @@ describe('slugify', () => {
   });
 
   it('lowercases, collapses separators to single hyphens and trims them', () => {
-    expect(slugify('My  Cool__Project!!')).toBe('my-cool-project');
+    expect(slugify('My  Cool__Task!!')).toBe('my-cool-task');
     expect(slugify('  spaced  ')).toBe('spaced');
   });
 

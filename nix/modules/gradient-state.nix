@@ -141,9 +141,9 @@
         type = types.bool;
         default = false;
         description = ''
-          When `true`, the auto-managed `build-request` project for this
-          organization is hidden from project listings in the web UI. The
-          project still exists and continues to receive evaluations from the
+          When `true`, the auto-managed `build-request` task for this
+          organization is hidden from task listings in the web UI. The
+          task still exists and continues to receive evaluations from the
           `gradient build` CLI; this is a UI-only opt-out.
         '';
       };
@@ -190,7 +190,7 @@
         description = ''
           Flake reference to use as the override for this input. When
           null and `keep_url` is true, the input is force-updated using
-          the URL declared in the project's flake.nix.
+          the URL declared in the task's flake.nix.
         '';
       };
       keep_url = mkOption {
@@ -205,36 +205,36 @@
     };
   });
 
-  projectType = types.submodule ({ config, name, ... }: {
+  taskType = types.submodule ({ config, name, ... }: {
     options = {
       name = mkOption {
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Unique name for the project";
+        description = "Unique name for the task";
       };
 
       organization = mkOption {
         type = types.str;
-        description = "Name of the organization this project belongs to";
+        description = "Name of the organization this task belongs to";
       };
 
       display_name = mkOption {
         type = types.str;
         default = config.name;
         defaultText = "config.name";
-        description = "Display name for the project";
+        description = "Display name for the task";
       };
 
       description = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Description of the project";
+        description = "Description of the task";
       };
 
       repository = mkOption {
         type = types.str;
-        description = "Git repository URL for the project";
+        description = "Git repository URL for the task";
       };
 
       wildcard = mkOption {
@@ -246,17 +246,17 @@
       active = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the project is active";
+        description = "Whether the task is active";
       };
 
       keep_evaluations = mkOption {
         type = types.ints.positive;
         default = 1;
         description = ''
-          Number of finished evaluations to retain per project for metrics
+          Number of finished evaluations to retain per task for metrics
           and history. The most recent finished evaluations are kept regardless
           of outcome (completed, failed, or aborted), and GC is skipped while the
-          project has an in-progress evaluation. Older evaluations beyond this
+          task has an in-progress evaluation. Older evaluations beyond this
           count are garbage-collected. Must be at least 1; capped at runtime by
           the global `services.gradient.settings.keepEvaluations`.
         '';
@@ -266,11 +266,11 @@
         type = types.bool;
         default = true;
         description = ''
-          When `false`, build outputs from this project are pushed to the
+          When `false`, build outputs from this task are pushed to the
           cache but their narinfo signatures are left empty, so external
-          Nix clients won't trust them - keeping the project's outputs
+          Nix clients won't trust them - keeping the task's outputs
           private even when the cache itself is public. A path co-produced
-          by another `sign_cache = true` project is still signed.
+          by another `sign_cache = true` task is still signed.
         '';
       };
 
@@ -278,7 +278,7 @@
         type = types.enum [ "hard_abort" "soft_abort" "skip" "all" ];
         default = "soft_abort";
         description = ''
-          Project-level policy for handling new trigger events while an
+          Task-level policy for handling new trigger events while an
           evaluation is in flight.
 
           - `hard_abort` cancels the running evaluation (and its in-flight
@@ -288,7 +288,7 @@
             outputs flow into the new evaluation.
           - `skip` discards the new trigger event.
           - `all` runs a new evaluation alongside the in-flight one
-            (multi-eval per project).
+            (multi-eval per task).
         '';
       };
 
@@ -296,14 +296,14 @@
         type = types.nullOr (types.listOf triggerType);
         default = null;
         description = ''
-          List of evaluation triggers for the project. Each trigger declares
+          List of evaluation triggers for the task. Each trigger declares
           *how* and *when* an evaluation runs (polling, forge push, forge PR,
           cron schedule). When `null`, existing trigger rows are left
           untouched (back-compat for state files predating this option). When
-          set to `[]`, provisioning errors out - every project must have at
+          set to `[]`, provisioning errors out - every task must have at
           least one trigger.
 
-          A new project always receives a default polling trigger
+          A new task always receives a default polling trigger
           (interval 300s) automatically; declaring `triggers` here replaces
           that default with the listed set.
         '';
@@ -346,10 +346,10 @@
         type = types.listOf actionType;
         default = [];
         description = ''
-          Project actions (email notifications, outbound web requests, forge
+          Task actions (email notifications, outbound web requests, forge
           status reports, pull-request automation). Re-applying state with
           fewer actions removes the missing ones (matched by `name` within
-          the project).
+          the task).
 
           Token files for `send_web_request` actions must live at the systemd
           credential path
@@ -400,7 +400,7 @@
 
       created_by = mkOption {
         type = types.str;
-        description = "Username of the user who created this project";
+        description = "Username of the user who created this task";
       };
     };
   });
@@ -555,8 +555,8 @@
       name = mkOption {
         type = types.str;
         description = ''
-          Action name unique within the project. The provisioner upserts on
-          (project_id, name); changing this string creates a new action and
+          Action name unique within the task. The provisioner upserts on
+          (task_id, name); changing this string creates a new action and
           deletes the old one on next reconciliation.
         '';
       };
@@ -909,7 +909,7 @@
           non-empty. The full catalogue is defined in
           `gradient_core::permissions::Permission` and exposed at runtime via
           `GET /user/keys/permissions`. Common identifiers include
-          `viewOrg`, `triggerEvaluation`, `editProject`, `manageMembers`.
+          `viewOrg`, `triggerEvaluation`, `editTask`, `manageMembers`.
         '';
         example = [ "viewOrg" "triggerEvaluation" ];
       };
@@ -998,10 +998,10 @@
         description = "Attribute set of organizations to create, keyed by name";
       };
 
-      projects = mkOption {
-        type = types.attrsOf projectType;
+      tasks = mkOption {
+        type = types.attrsOf taskType;
         default = { };
-        description = "Attribute set of projects to create, keyed by name";
+        description = "Attribute set of tasks to create, keyed by name";
       };
 
       integrations = mkOption {
@@ -1096,7 +1096,7 @@ in
     state = mkOption {
       type = stateType;
       default = { };
-      description = "Gradient state configuration for users, organizations, projects, and caches";
+      description = "Gradient state configuration for users, organizations, tasks, and caches";
       example = literalExpression ''
         {
           users = {
@@ -1116,7 +1116,7 @@ in
               created_by = "alice";
             };
           };
-          projects = {
+          tasks = {
             web-app = {
               organization = "acme-corp";
               display_name = "Web Application";
@@ -1166,33 +1166,33 @@ in
     let
       bad = flatten (mapAttrsToList (pName: p:
         mapAttrsToList (iName: o: {
-          project = pName;
+          task = pName;
           input = iName;
           valid = (o.url != null) != o.keep_url;
         }) p.flake_input_overrides
-      ) config.services.gradient.state.projects);
+      ) config.services.gradient.state.tasks);
       invalid = filter (b: !b.valid) bad;
 
       badActions = flatten (mapAttrsToList (pName: p:
         map (a: {
-          project = pName;
+          task = pName;
           action = a.name;
           valid = !(a.type == "forge_status_report" && a.events != []);
         }) p.actions
-      ) config.services.gradient.state.projects);
+      ) config.services.gradient.state.tasks);
       invalidActions = filter (b: !b.valid) badActions;
     in
     map (b: {
       assertion = false;
       message = ''
-        services.gradient.state.projects.${b.project}.flake_input_overrides.${b.input}: \
+        services.gradient.state.tasks.${b.task}.flake_input_overrides.${b.input}: \
         exactly one of `url` (string) or `keep_url = true` must be set.
       '';
     }) invalid
     ++ map (b: {
       assertion = false;
       message = ''
-        services.gradient.state.projects.${b.project}.actions.${b.action}: \
+        services.gradient.state.tasks.${b.task}.actions.${b.action}: \
         forge_status_report actions cannot declare custom `events`.
       '';
     }) invalidActions;

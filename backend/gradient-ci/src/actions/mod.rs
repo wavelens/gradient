@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Project Actions dispatch and execution. This module fans build/evaluation
+//! Task Actions dispatch and execution. This module fans build/evaluation
 //! events out to the configured actions ([`dispatch_event`]); the execution and
 //! per-config executors live in [`executor`] and [`send`].
 
@@ -16,7 +16,7 @@ mod report;
 mod send;
 
 use crate::context::CiContext;
-use gradient_types::{ActionType, CProjectAction, EProjectAction, ProjectId};
+use gradient_types::{ActionType, CTaskAction, ETaskAction, TaskId};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use serde_json::Value as JsonValue;
 use tracing::{error, warn};
@@ -28,12 +28,12 @@ pub use crypto::{
 pub use executor::execute_action;
 pub use matchers::{FORGE_STATUS_EVENTS, forge_status_for_event, matches_event};
 pub use payload::forge_status_payload;
-pub use send::{reporter_for_project, verify_forge_action};
+pub use send::{reporter_for_task, verify_forge_action};
 
 pub const MAX_BODY_BYTES: usize = 64 * 1024;
 
 /// Successful action delivery: the executor's HTTP/SMTP status and any response
-/// body, recorded on the `project_action_delivery` row.
+/// body, recorded on the `task_action_delivery` row.
 pub(crate) struct ExecutorOk {
     pub(crate) status_code: Option<i32>,
     pub(crate) response_body: Option<String>,
@@ -52,17 +52,17 @@ fn truncate(mut s: String, max: usize) -> String {
 
 pub async fn dispatch_evaluation_event(
     ctx: &CiContext,
-    project_id: ProjectId,
+    task_id: TaskId,
     event: &str,
     payload: JsonValue,
 ) {
-    dispatch_event(ctx, project_id, event, payload).await;
+    dispatch_event(ctx, task_id, event, payload).await;
 }
 
 /// Dispatch the first forge-status event for a freshly-created evaluation.
 ///
 /// Replaces the legacy `spawn_pending_ci_for_eval` reporter that was removed
-/// alongside the per-project outbound integration: an eval row that has just
+/// alongside the per-task outbound integration: an eval row that has just
 /// been INSERTed (Queued, or Waiting+Approval/NoCache/Workers due to the
 /// trigger-time gates) never transitions through `update_evaluation_status`,
 /// so the terminal-status reactor would not fire for it. Without
@@ -80,7 +80,7 @@ pub async fn dispatch_evaluation_created(ctx: &CiContext, eval: &gradient_types:
     use gradient_entity::evaluation::EvaluationStatus;
     use gradient_types::waiting_reason::WaitingReason;
 
-    let Some(project_id) = eval.project else {
+    let Some(task_id) = eval.task else {
         return;
     };
 
@@ -118,7 +118,7 @@ pub async fn dispatch_evaluation_created(ctx: &CiContext, eval: &gradient_types:
 
     let mut payload = serde_json::json!({
         "evaluation_id": eval.id,
-        "project_id": eval.project,
+        "task_id": eval.task,
         "repository": eval.repository,
         "status": event,
     });
@@ -126,28 +126,28 @@ pub async fn dispatch_evaluation_created(ctx: &CiContext, eval: &gradient_types:
         payload["description"] = JsonValue::String(text.to_string());
     }
 
-    dispatch_evaluation_event(ctx, project_id, event, payload).await;
+    dispatch_evaluation_event(ctx, task_id, event, payload).await;
 }
 
 pub async fn dispatch_build_event(
     ctx: &CiContext,
-    project_id: ProjectId,
+    task_id: TaskId,
     event: &str,
     payload: JsonValue,
 ) {
-    dispatch_event(ctx, project_id, event, payload).await;
+    dispatch_event(ctx, task_id, event, payload).await;
 }
 
-async fn dispatch_event(ctx: &CiContext, project_id: ProjectId, event: &str, payload: JsonValue) {
-    let actions = match EProjectAction::find()
-        .filter(CProjectAction::Project.eq(project_id))
-        .filter(CProjectAction::Active.eq(true))
+async fn dispatch_event(ctx: &CiContext, task_id: TaskId, event: &str, payload: JsonValue) {
+    let actions = match ETaskAction::find()
+        .filter(CTaskAction::Task.eq(task_id))
+        .filter(CTaskAction::Active.eq(true))
         .all(&ctx.db.worker_db)
         .await
     {
         Ok(a) => a,
         Err(e) => {
-            error!(error = %e, %project_id, "Failed to load project actions");
+            error!(error = %e, %task_id, "Failed to load task actions");
             return;
         }
     };
@@ -188,7 +188,7 @@ async fn dispatch_event(ctx: &CiContext, project_id: ProjectId, event: &str, pay
     }
 }
 
-/// Process-wide bound on concurrently executing project actions.
+/// Process-wide bound on concurrently executing task actions.
 static ACTION_PERMITS: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
     std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(8)));
 

@@ -5,7 +5,7 @@
  */
 
 use gradient_forge::reporter::{APPROVAL_ACTION_ID, CiStatus, RequestedAction};
-use gradient_types::{ActionConfig, ActionType, MProjectAction, VerifyGate};
+use gradient_types::{ActionConfig, ActionType, MTaskAction, VerifyGate};
 
 pub const FORGE_STATUS_EVENTS: &[&str] = &[
     "build.created",
@@ -24,7 +24,7 @@ pub const FORGE_STATUS_EVENTS: &[&str] = &[
     "evaluation.approval_granted",
 ];
 
-pub fn matches_event(action: &MProjectAction, event: &str) -> bool {
+pub fn matches_event(action: &MTaskAction, event: &str) -> bool {
     if action.action_type == ActionType::ForgeStatusReport {
         return FORGE_STATUS_EVENTS.contains(&event);
     }
@@ -45,7 +45,7 @@ pub fn matches_event(action: &MProjectAction, event: &str) -> bool {
 /// `Building`/`Completed`. `Build` waits for `evaluation.completed` (every build
 /// succeeded, else the eval is `Failed` and emits nothing); `Eval`/`None` open at
 /// `evaluation.building` (the flake evaluated, builds not awaited).
-pub fn open_pr_gate_events(action: &MProjectAction) -> Option<&'static [&'static str]> {
+pub fn open_pr_gate_events(action: &MTaskAction) -> Option<&'static [&'static str]> {
     const BUILD_GATE: &[&str] = &["evaluation.completed"];
     const EVAL_GATE: &[&str] = &["evaluation.building"];
 

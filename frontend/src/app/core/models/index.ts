@@ -8,7 +8,7 @@ export * from './api-response.model';
 export * from './user.model';
 export * from './organization.model';
 export * from './permission.model';
-export * from './project.model';
+export * from './task.model';
 export * from './build.model';
 export * from './cache.model';
 export * from './worker.model';

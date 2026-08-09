@@ -45,7 +45,7 @@ pub mod events {
     pub const ORG_ROLE_CREATE: &str = "organization.role.create";
     pub const ORG_ROLE_UPDATE: &str = "organization.role.update";
     pub const ORG_ROLE_DELETE: &str = "organization.role.delete";
-    pub const PROJECT_DELETE: &str = "project.delete";
+    pub const TASK_DELETE: &str = "task.delete";
     pub const CACHE_DELETE: &str = "cache.delete";
     pub const CACHE_NAR_DELETE: &str = "cache.nar.delete";
     pub const CACHE_NAR_UPLOAD: &str = "cache.nar.upload";

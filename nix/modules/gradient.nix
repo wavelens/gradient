@@ -49,13 +49,13 @@
     lib.optional (int.access_token_file != null)
       "gradient_integration_${int.name}_token:${int.access_token_file}"
   ) cfg.state.integrations);
-  actionTokenFiles = lib.concatLists (lib.mapAttrsToList (_: project:
+  actionTokenFiles = lib.concatLists (lib.mapAttrsToList (_: task:
     lib.concatMap (action:
       let tokenFile = action.config.token_file or null; in
       lib.optional (action.type == "send_web_request" && tokenFile != null)
         "gradient_action_${action.name}_token:${tokenFile}"
-    ) project.actions
-  ) cfg.state.projects);
+    ) task.actions
+  ) cfg.state.tasks);
 in {
   # disabledModules = [
   #   "services/gradient/default.nix"
@@ -443,7 +443,7 @@ in {
         };
 
         keepEvaluations = lib.mkOption {
-          description = "Global maximum of evaluations kept per project. Caps the per-project setting, and a new project starts at the lower of 30 and this. 0 disables the cap.";
+          description = "Global maximum of evaluations kept per task. Caps the per-task setting, and a new task starts at the lower of 30 and this. 0 disables the cap.";
           type = lib.types.ints.unsigned;
           default = 30;
         };
@@ -725,7 +725,7 @@ in {
         };
 
         gcWedgedEvalHours = lib.mkOption {
-          description = "Hours after which an untouched active evaluation is presumed wedged and stops blocking the per-project evaluation GC. 0 = block forever.";
+          description = "Hours after which an untouched active evaluation is presumed wedged and stops blocking the per-task evaluation GC. 0 = block forever.";
           type = lib.types.ints.unsigned;
           default = 24;
         };

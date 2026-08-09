@@ -16,7 +16,7 @@ async fn all_accessors_compile() {
     let _ = client.evals();
     let _ = client.integrations();
     let _ = client.orgs();
-    let _ = client.projects();
+    let _ = client.tasks();
     let _ = client.server();
     let _ = client.user();
     let _ = client.webhooks();

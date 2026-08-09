@@ -20,7 +20,7 @@ pub struct RecoveryReport {
     pub builds_requeued: u64,
     pub builds_aborted: u64,
     pub evals_aborted: u64,
-    pub projects_forced: u64,
+    pub tasks_forced: u64,
 }
 
 pub async fn recover_interrupted_work<C: ConnectionTrait>(
@@ -86,21 +86,21 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         report.builds_aborted = abort_anchors_for_evals(conn, &eval_ids).await?;
     }
 
-    // 3d. Force re-evaluation of the affected projects.
-    let project_ids: Vec<ProjectId> = inflight_evals
+    // 3d. Force re-evaluation of the affected tasks.
+    let task_ids: Vec<TaskId> = inflight_evals
         .into_iter()
-        .filter_map(|e| e.project)
+        .filter_map(|e| e.task)
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
 
-    if !project_ids.is_empty() {
-        let res = EProject::update_many()
-            .col_expr(CProject::ForceEvaluation, Expr::value(true))
-            .filter(CProject::Id.is_in(project_ids))
+    if !task_ids.is_empty() {
+        let res = ETask::update_many()
+            .col_expr(CTask::ForceEvaluation, Expr::value(true))
+            .filter(CTask::Id.is_in(task_ids))
             .exec(conn)
             .await?;
-        report.projects_forced = res.rows_affected;
+        report.tasks_forced = res.rows_affected;
     }
 
     Ok(report)
@@ -153,13 +153,13 @@ async fn abort_anchors_for_evals<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use gradient_entity::evaluation::Model as MEval;
-    use gradient_entity::ids::{CommitId, EvaluationId, ProjectId};
+    use gradient_entity::ids::{CommitId, EvaluationId, TaskId};
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
-    fn eval_row(status: EvaluationStatus, project: Option<ProjectId>) -> MEval {
+    fn eval_row(status: EvaluationStatus, task: Option<TaskId>) -> MEval {
         MEval {
             id: EvaluationId::now_v7(),
-            project,
+            task,
             status,
             repository: "git+https://example.com/repo".into(),
             commit: CommitId::now_v7(),
@@ -172,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn all_operations_populate_report() {
-        let project_id = ProjectId::now_v7();
+        let task_id = TaskId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // 1. abort orphaned attempts
             .append_exec_results([MockExecResult {
@@ -185,7 +185,7 @@ mod tests {
                 rows_affected: 2,
             }])
             // 3a. SELECT pre-build inflight evals
-            .append_query_results([vec![eval_row(EvaluationStatus::Fetching, Some(project_id))]])
+            .append_query_results([vec![eval_row(EvaluationStatus::Fetching, Some(task_id))]])
             // 3b. abort those evals
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -196,7 +196,7 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 4,
             }])
-            // 3d. force-eval their projects
+            // 3d. force-eval their tasks
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
@@ -209,11 +209,11 @@ mod tests {
         assert_eq!(report.builds_requeued, 2);
         assert_eq!(report.builds_aborted, 4);
         assert_eq!(report.evals_aborted, 1);
-        assert_eq!(report.projects_forced, 1);
+        assert_eq!(report.tasks_forced, 1);
     }
 
     #[tokio::test]
-    async fn project_force_step_skipped_when_no_pre_build_evals() {
+    async fn task_force_step_skipped_when_no_pre_build_evals() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // 1. abort orphaned attempts (none)
             .append_exec_results([MockExecResult {
@@ -235,6 +235,6 @@ mod tests {
         assert_eq!(report.builds_requeued, 0);
         assert_eq!(report.builds_aborted, 0);
         assert_eq!(report.evals_aborted, 0);
-        assert_eq!(report.projects_forced, 0);
+        assert_eq!(report.tasks_forced, 0);
     }
 }

@@ -943,7 +943,7 @@ impl CiReporter for GitlabReporter {
         // `synchronize`-style PR webhook does (via `object_attributes.source`),
         // but the GET endpoint omits it. For the comment-driven path we leave
         // `head_clone_url` unset for forks - the existing fan-out keeps using
-        // `project.repository` for the worker fetch. Same-project MRs (the
+        // `task.repository` for the worker fetch. Same-task MRs (the
         // common case) are unaffected.
         Ok(Some(PullRequestSnapshot {
             head_sha: mr.sha,
@@ -1925,11 +1925,11 @@ impl CiReporter for GithubAppReporter {
 
 // ── factory ──────────────────────────────────────────────────────────────────
 
-/// Builds a `CiReporter` from a project's CI configuration fields.
+/// Builds a `CiReporter` from a task's CI configuration fields.
 ///
 /// Returns `NoopCiReporter` when CI reporting is not configured or the
 /// reporter type is unrecognised.
-pub fn reporter_for_project(
+pub fn reporter_for_task(
     http: reqwest::Client,
     ci_type: Option<&str>,
     ci_url: Option<&str>,
@@ -2277,9 +2277,9 @@ mod tests {
     }
 
     #[test]
-    fn reporter_for_project_unsafe_url_falls_back_to_noop() {
+    fn reporter_for_task_unsafe_url_falls_back_to_noop() {
         // Bad base_url should not crash callers - the factory logs and returns Noop.
-        let r = reporter_for_project(
+        let r = reporter_for_task(
             test_client(),
             Some("gitea"),
             Some("http://169.254.169.254/"),
@@ -2288,33 +2288,33 @@ mod tests {
         assert!(is_noop(&r));
     }
 
-    // ── reporter_for_project factory ─────────────────────────────────────────
+    // ── reporter_for_task factory ─────────────────────────────────────────
 
     fn is_noop(r: &Arc<dyn CiReporter>) -> bool {
         format!("{:?}", r).contains("NoopCiReporter")
     }
 
     #[test]
-    fn reporter_for_project_no_token_is_noop() {
-        let r = reporter_for_project(test_client(), Some("github"), Some("https://x"), None);
+    fn reporter_for_task_no_token_is_noop() {
+        let r = reporter_for_task(test_client(), Some("github"), Some("https://x"), None);
         assert!(is_noop(&r));
     }
 
     #[test]
-    fn reporter_for_project_no_type_is_noop() {
-        let r = reporter_for_project(test_client(), None, None, Some("tok"));
+    fn reporter_for_task_no_type_is_noop() {
+        let r = reporter_for_task(test_client(), None, None, Some("tok"));
         assert!(is_noop(&r));
     }
 
     #[test]
-    fn reporter_for_project_unknown_type_is_noop() {
-        let r = reporter_for_project(test_client(), Some("bitbucket"), None, Some("tok"));
+    fn reporter_for_task_unknown_type_is_noop() {
+        let r = reporter_for_task(test_client(), Some("bitbucket"), None, Some("tok"));
         assert!(is_noop(&r));
     }
 
     #[test]
-    fn reporter_for_project_gitea_builds_gitea() {
-        let r = reporter_for_project(
+    fn reporter_for_task_gitea_builds_gitea() {
+        let r = reporter_for_task(
             test_client(),
             Some("gitea"),
             Some("https://gitea.example.com"),
@@ -2324,8 +2324,8 @@ mod tests {
     }
 
     #[test]
-    fn reporter_for_project_gitlab_builds_gitlab() {
-        let r = reporter_for_project(
+    fn reporter_for_task_gitlab_builds_gitlab() {
+        let r = reporter_for_task(
             test_client(),
             Some("gitlab"),
             Some("https://gitlab.example.com"),
@@ -2335,8 +2335,8 @@ mod tests {
     }
 
     #[test]
-    fn reporter_for_project_github_builds_github() {
-        let r = reporter_for_project(test_client(), Some("github"), None, Some("tok"));
+    fn reporter_for_task_github_builds_github() {
+        let r = reporter_for_task(test_client(), Some("github"), None, Some("tok"));
         assert!(format!("{:?}", r).contains("GithubReporter"));
     }
 

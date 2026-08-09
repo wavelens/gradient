@@ -31,7 +31,11 @@ impl GraphTree {
         for (id, label) in nodes {
             map.insert(
                 (*id).to_string(),
-                Node { label: (*label).to_string(), children: Vec::new(), expanded: false },
+                Node {
+                    label: (*label).to_string(),
+                    children: Vec::new(),
+                    expanded: false,
+                },
             );
         }
         for (parent, child) in edges {
@@ -39,7 +43,12 @@ impl GraphTree {
                 n.children.push((*child).to_string());
             }
         }
-        let mut t = Self { roots, nodes: map, flat: Vec::new(), selected: 0 };
+        let mut t = Self {
+            roots,
+            nodes: map,
+            flat: Vec::new(),
+            selected: 0,
+        };
         t.rebuild_flat();
         t
     }
@@ -63,13 +72,23 @@ impl GraphTree {
             .edges
             .iter()
             .filter_map(|e| {
-                Some((e.get("source")?.as_str()?.to_string(), e.get("target")?.as_str()?.to_string()))
+                Some((
+                    e.get("source")?.as_str()?.to_string(),
+                    e.get("target")?.as_str()?.to_string(),
+                ))
             })
             .collect();
 
         let mut map: HashMap<NodeId, Node> = HashMap::new();
         for (id, label) in &nodes {
-            map.insert(id.clone(), Node { label: label.clone(), children: Vec::new(), expanded: false });
+            map.insert(
+                id.clone(),
+                Node {
+                    label: label.clone(),
+                    children: Vec::new(),
+                    expanded: false,
+                },
+            );
         }
         for (source, target) in &edges {
             if let Some(n) = map.get_mut(source) {
@@ -77,7 +96,12 @@ impl GraphTree {
             }
         }
         let roots = vec![g.root.clone()];
-        let mut t = Self { roots, nodes: map, flat: Vec::new(), selected: 0 };
+        let mut t = Self {
+            roots,
+            nodes: map,
+            flat: Vec::new(),
+            selected: 0,
+        };
         t.rebuild_flat();
         t
     }
@@ -95,11 +119,19 @@ impl GraphTree {
         }
     }
 
-    fn dfs(&self, id: &str, depth: usize, flat: &mut Vec<(NodeId, usize)>, on_path: &mut Vec<NodeId>) {
+    fn dfs(
+        &self,
+        id: &str,
+        depth: usize,
+        flat: &mut Vec<(NodeId, usize)>,
+        on_path: &mut Vec<NodeId>,
+    ) {
         if on_path.iter().any(|p| p == id) {
             return;
         }
-        let Some(node) = self.nodes.get(id) else { return };
+        let Some(node) = self.nodes.get(id) else {
+            return;
+        };
         flat.push((id.to_string(), depth));
         if node.expanded {
             on_path.push(id.to_string());
@@ -112,15 +144,27 @@ impl GraphTree {
     }
 
     #[cfg(test)]
-    pub fn flat_len(&self) -> usize { self.flat.len() }
-    pub fn move_down(&mut self) { if self.selected + 1 < self.flat.len() { self.selected += 1; } }
-    pub fn move_up(&mut self) { self.selected = self.selected.saturating_sub(1); }
+    pub fn flat_len(&self) -> usize {
+        self.flat.len()
+    }
+    pub fn move_down(&mut self) {
+        if self.selected + 1 < self.flat.len() {
+            self.selected += 1;
+        }
+    }
+    pub fn move_up(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
     #[cfg(test)]
-    pub fn contains(&self, id: &str) -> bool { self.flat.iter().any(|(i, _)| i == id) }
+    pub fn contains(&self, id: &str) -> bool {
+        self.flat.iter().any(|(i, _)| i == id)
+    }
 
     pub fn toggle_expand(&mut self) {
         if let Some((id, _)) = self.flat.get(self.selected).cloned() {
-            if let Some(n) = self.nodes.get_mut(&id) && !n.children.is_empty() {
+            if let Some(n) = self.nodes.get_mut(&id)
+                && !n.children.is_empty()
+            {
                 n.expanded = !n.expanded;
             }
             self.rebuild_flat();
@@ -136,7 +180,13 @@ impl View for GraphTree {
             .iter()
             .map(|(id, depth)| {
                 let n = &self.nodes[id];
-                let marker = if n.children.is_empty() { "  " } else if n.expanded { "v " } else { "> " };
+                let marker = if n.children.is_empty() {
+                    "  "
+                } else if n.expanded {
+                    "v "
+                } else {
+                    "> "
+                };
                 ListItem::new(format!("{}{}{}", "  ".repeat(*depth), marker, n.label))
             })
             .collect();
@@ -145,7 +195,11 @@ impl View for GraphTree {
             state.select(Some(self.selected));
         }
         let list = List::new(rows)
-            .block(Block::default().borders(Borders::ALL).title("Dependency graph (Enter/Space expand, Esc quit)"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Dependency graph (Enter/Space expand, Esc quit)"),
+            )
             .highlight_symbol("* ");
         frame.render_stateful_widget(list, frame.area(), &mut state);
     }
@@ -168,7 +222,12 @@ mod tests {
 
     fn tree() -> GraphTree {
         GraphTree::from_edges(
-            &[("root", "root-pkg"), ("a", "a-pkg"), ("b", "b-pkg"), ("c", "c-pkg")],
+            &[
+                ("root", "root-pkg"),
+                ("a", "a-pkg"),
+                ("b", "b-pkg"),
+                ("c", "c-pkg"),
+            ],
             &[("root", "a"), ("root", "b"), ("a", "c")],
             vec!["root".into()],
         )

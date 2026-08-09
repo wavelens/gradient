@@ -56,9 +56,9 @@ export type TriggerConfig =
   | ReporterPullRequestTriggerConfig
   | TimeTriggerConfig;
 
-export interface ProjectTrigger {
+export interface TaskTrigger {
   id: string;
-  project: string;
+  task: string;
   type: TriggerType;
   config: TriggerConfig;
   active: boolean;

@@ -133,9 +133,9 @@ in {
             created_by = "admin";
           };
 
-          projects.testproject = {
+          tasks.testtask = {
             organization = "testorg";
-            display_name = "MyProject";
+            display_name = "MyTask";
             description = "Just a test";
             repository = "git://server/test";
             wildcard = "packages.*.buildWait5Sec,packages.*.deployment";

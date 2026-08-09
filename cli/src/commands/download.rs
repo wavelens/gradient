@@ -16,7 +16,7 @@ use std::process::exit;
 pub async fn handle_download(
     flake_ref: Option<String>,
     evaluation: Option<String>,
-    project: Option<String>,
+    task: Option<String>,
     products: Option<String>,
     out_dir_arg: Option<String>,
     out: Output,
@@ -29,7 +29,7 @@ pub async fn handle_download(
 
     let eval_id = match evaluation {
         Some(id) => id,
-        None => pick_latest_evaluation(&client, project.as_deref(), out).await,
+        None => pick_latest_evaluation(&client, task.as_deref(), out).await,
     };
 
     out.human(format!(
@@ -285,28 +285,28 @@ fn human_size(bytes: i64) -> String {
 
 async fn pick_latest_evaluation(
     client: &connector::Client,
-    project: Option<&str>,
+    task: Option<&str>,
     out: Output,
 ) -> String {
-    let (organization, project) = resolve_project(project, out);
-    let evaluations = match client.projects().evaluations(&organization, &project).await {
+    let (organization, task) = resolve_task(task, out);
+    let evaluations = match client.tasks().evaluations(&organization, &task).await {
         Ok(evals) => evals,
         Err(e) => out.err(to_exit_kind(&e), e),
     };
     let latest = evaluations.into_iter().next().unwrap_or_else(|| {
         out.err(
             ExitKind::Api,
-            format!("No evaluations found for {}/{}.", organization, project),
+            format!("No evaluations found for {}/{}.", organization, task),
         );
     });
     out.human(format!(
-        "Using latest evaluation {} for project {}/{}.",
-        latest.id, organization, project
+        "Using latest evaluation {} for task {}/{}.",
+        latest.id, organization, task
     ));
     latest.id
 }
 
-fn resolve_project(arg: Option<&str>, out: Output) -> (String, String) {
+fn resolve_task(arg: Option<&str>, out: Output) -> (String, String) {
     if let Some(spec) = arg {
         if let Some((org, proj)) = spec.split_once('/') {
             return (org.to_string(), proj.to_string());
@@ -316,7 +316,7 @@ fn resolve_project(arg: Option<&str>, out: Output) -> (String, String) {
                 out.err(
                     ExitKind::Usage,
                     format!(
-                        "--project '{}' has no org prefix and no organization is selected.",
+                        "--task '{}' has no org prefix and no organization is selected.",
                         spec
                     ),
                 );
@@ -324,7 +324,7 @@ fn resolve_project(arg: Option<&str>, out: Output) -> (String, String) {
         return (organization, spec.to_string());
     }
 
-    if let Some(selected) = set_get_value(ConfigKey::SelectedProject, None, true)
+    if let Some(selected) = set_get_value(ConfigKey::SelectedTask, None, true)
         && let Some((org, proj)) = selected.split_once('/')
     {
         return (org.to_string(), proj.to_string());
@@ -332,7 +332,7 @@ fn resolve_project(arg: Option<&str>, out: Output) -> (String, String) {
 
     out.err(
         ExitKind::Usage,
-        "No project selected. Pass --project <name> or run 'gradient project select <name>' first.",
+        "No task selected. Pass --task <name> or run 'gradient task select <name>' first.",
     );
 }
 

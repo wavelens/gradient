@@ -15,7 +15,7 @@ export interface LiveEvent {
     | 'evaluation_progress'
     | 'cache_changed'
     | string;
-  project?: string | null;
+  task?: string | null;
   evaluation_id?: string;
   build_id?: string;
   status?: number;

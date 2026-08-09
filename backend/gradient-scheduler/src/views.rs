@@ -8,7 +8,7 @@
 //! onto the dispatched-job record so the frontend can show every collected value.
 
 use gradient_score::{DerivationRef, HistoryPrediction, JobContext, WorkerContext};
-use gradient_types::proto::{FlakeTask, GradientCapabilities};
+use gradient_types::proto::{FlakeStep, GradientCapabilities};
 use serde::Serialize;
 
 use crate::jobs::PendingJob;
@@ -142,7 +142,7 @@ impl JobContextView {
                 ..common("Build", b.architecture.clone())
             },
             PendingJob::Eval(e) => Self {
-                fetch_flake: Some(e.job.tasks.contains(&FlakeTask::FetchFlake)),
+                fetch_flake: Some(e.job.steps.contains(&FlakeStep::FetchFlake)),
                 ..common("Eval", String::new())
             },
         }
@@ -154,7 +154,7 @@ mod tests {
     use super::*;
     use gradient_score::ScoredJob;
     use gradient_types::ids::{DerivationBuildId, EvaluationId, OrganizationId};
-    use gradient_types::proto::{BuildJob, BuildTask};
+    use gradient_types::proto::{BuildJob, BuildSpec};
 
     fn build_pending() -> PendingJob {
         let now = gradient_types::now();
@@ -163,7 +163,7 @@ mod tests {
             evaluation_id: EvaluationId::now_v7(),
             org_id: OrganizationId::now_v7(),
             job: BuildJob {
-                builds: vec![BuildTask {
+                builds: vec![BuildSpec {
                     build_id: "b1".into(),
                     drv_path: "/nix/store/aaa-curl.drv".into(),
                     external_cached: false,

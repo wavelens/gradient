@@ -21,7 +21,7 @@ pub mod log_limit;
 use std::sync::Arc;
 
 use anyhow::Result;
-use gradient_proto::messages::{BuildJob, FlakeJob, FlakeTask};
+use gradient_proto::messages::{BuildJob, FlakeJob, FlakeStep};
 use tokio::sync::watch;
 use tracing::instrument;
 
@@ -263,10 +263,10 @@ impl JobExecutor {
 
     /// Execute a `FlakeJob` (fetch → eval-flake → eval-derivations).
     ///
-    /// When `FetchFlake` and eval tasks are in the same job, the local clone
+    /// When `FetchFlake` and eval steps are in the same job, the local clone
     /// path from the fetch is reused for evaluation - the repo is cloned
     /// exactly once.
-    #[instrument(skip_all, fields(tasks = ?job.tasks))]
+    #[instrument(skip_all, fields(steps = ?job.steps))]
     pub async fn execute_flake_job(
         &self,
         job: FlakeJob,
@@ -275,12 +275,12 @@ impl JobExecutor {
         abort: watch::Receiver<bool>,
     ) -> Result<()> {
         // If FetchFlake runs, it stores the local checkout path here so
-        // subsequent eval tasks use it instead of the remote URL.
+        // subsequent eval steps use it instead of the remote URL.
         let mut local_flake_path: Option<String> = None;
 
-        for task in &job.tasks {
-            match task {
-                FlakeTask::FetchFlake => {
+        for step in &job.steps {
+            match step {
+                FlakeStep::FetchFlake => {
                     // A Cached build source lives only in the gradient cache;
                     // substitute it locally so `nix flake archive path:<store_path>`
                     // can read it before archiving its inputs with credentials.
@@ -309,8 +309,8 @@ impl JobExecutor {
                         .await?;
                     local_flake_path = Some(outcome.local_flake_path);
                 }
-                FlakeTask::EvaluateFlake => eval::evaluate_flake(&job, updater).await?,
-                FlakeTask::EvaluateDerivations => {
+                FlakeStep::EvaluateFlake => eval::evaluate_flake(&job, updater).await?,
+                FlakeStep::EvaluateDerivations => {
                     // A `Cached` source was archived to a *different* worker's
                     // store and pushed to the cache; substitute it locally
                     // before eval, since nix won't pull a `path:` flake ref

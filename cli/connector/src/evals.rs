@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EvaluationResponse {
     pub id: String,
-    pub project: Option<String>,
+    pub task: Option<String>,
     pub repository: String,
     pub commit: String,
     pub wildcard: String,
@@ -196,8 +196,8 @@ mod tests {
     fn deserializes_eval_without_updated_at_or_error() {
         let body = r#"{
             "id":"019ed787-8325-7441-9343-118e6285488e",
-            "project":"019ed787-8321-7703-ab8d-e79cc2da3d88",
-            "project_name":"build-request",
+            "task":"019ed787-8321-7703-ab8d-e79cc2da3d88",
+            "task_name":"build-request",
             "repository":"/nix/store/abc-source",
             "commit":"0000000000000000000000000000000000000000",
             "wildcard":".#dig",

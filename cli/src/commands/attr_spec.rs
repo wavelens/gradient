@@ -36,7 +36,10 @@ pub fn default_nix_system() -> String {
 /// prefixed with `packages.<system>.`; an empty attr becomes the whole-package
 /// wildcard `packages.<system>.#`. A leading `!` exclusion is preserved.
 pub fn qualify_attr(attr: &str, system: &str) -> String {
-    let (excl, body) = attr.strip_prefix('!').map(|r| ("!", r)).unwrap_or(("", attr));
+    let (excl, body) = attr
+        .strip_prefix('!')
+        .map(|r| ("!", r))
+        .unwrap_or(("", attr));
     if body.is_empty() {
         return format!("{excl}packages.{system}.#");
     }

@@ -110,12 +110,12 @@ tags:
     description: Current user profile, API keys, and settings
   - name: orgs
     description: Organization management, members, SSH keys, cache subscriptions
-  - name: projects
-    description: Project management and evaluation triggers
+  - name: tasks
+    description: Task management and evaluation triggers
   - name: triggers
-    description: Per-project evaluation triggers (polling, reporter_push, reporter_pull_request, time)
+    description: Per-task evaluation triggers (polling, reporter_push, reporter_pull_request, time)
   - name: flake-inputs
-    description: Per-project flake input URL overrides applied during evaluation fetch.
+    description: Per-task flake input URL overrides applied during evaluation fetch.
   - name: evals
     description: Evaluation details, status, and log streaming
   - name: builds
@@ -123,7 +123,7 @@ tags:
   - name: build-requests
     description: >-
       Ad-hoc build requests from `gradient build` - CLI-uploaded source
-      evaluated under a per-org build-request project. Flake inputs served
+      evaluated under a per-org build-request task. Flake inputs served
       over `git+ssh://` are fetched using the organization's SSH key, and
       `input_overrides` can override remote flake inputs for the run.
   - name: workers
@@ -133,7 +133,7 @@ tags:
   - name: commits
     description: Commit records
   - name: actions
-    description: Per-project Actions (Send Mail, Send Web Request, Forge Status Report)
+    description: Per-task Actions (Send Mail, Send Web Request, Forge Status Report)
   - name: forge-webhooks
     description: Incoming forge webhooks (external forges → Gradient push triggers)
   - name: integrations
@@ -1646,19 +1646,19 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  # ── Projects ─────────────────────────────────────────────────────────────────
+  # ── Tasks ─────────────────────────────────────────────────────────────────
 
-  /projects/{organization}:
+  /tasks/{organization}:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
     get:
-      tags: [projects]
-      summary: List projects
-      description: Returns all projects in the given organization with full details.
-      operationId: listProjects
+      tags: [tasks]
+      summary: List tasks
+      description: Returns all tasks in the given organization with full details.
+      operationId: listTasks
       responses:
         '200':
-          description: Project list
+          description: Task list
           content:
             application/json:
               schema:
@@ -1669,31 +1669,31 @@ paths:
                       message:
                         type: array
                         items:
-                          $ref: '#/components/schemas/Project'
+                          $ref: '#/components/schemas/Task'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
     put:
-      tags: [projects]
-      summary: Create project
-      description: Creates a new project in the organization. `wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.
-      operationId: createProject
+      tags: [tasks]
+      summary: Create task
+      description: Creates a new task in the organization. `wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.
+      operationId: createTask
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MakeProjectRequest'
+              $ref: '#/components/schemas/MakeTaskRequest'
             example:
-              name: my-project
-              display_name: My Project
+              name: my-task
+              display_name: My Task
               repository: "https://github.com/example/repo.git"
               branch: main
               wildcard: "packages.x86_64-linux"
       responses:
         '200':
-          description: Project UUID
+          description: Task UUID
           content:
             application/json:
               schema:
@@ -1710,17 +1710,17 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
-  /projects/{organization}/{project}:
+  /tasks/{organization}/{task}:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
-      tags: [projects]
-      summary: Get project
-      operationId: getProject
+      tags: [tasks]
+      summary: Get task
+      operationId: getTask
       responses:
         '200':
-          description: Project details
+          description: Task details
           content:
             application/json:
               schema:
@@ -1729,22 +1729,22 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/Project'
+                        $ref: '#/components/schemas/Task'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
-      tags: [projects]
-      summary: Update project
-      description: Updates one or more project fields.
-      operationId: patchProject
+      tags: [tasks]
+      summary: Update task
+      description: Updates one or more task fields.
+      operationId: patchTask
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchProjectRequest'
+              $ref: '#/components/schemas/PatchTaskRequest'
       responses:
         '200':
           description: Updated
@@ -1761,9 +1761,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
-      tags: [projects]
-      summary: Delete project
-      operationId: deleteProject
+      tags: [tasks]
+      summary: Delete task
+      operationId: deleteTask
       responses:
         '200':
           description: Deleted
@@ -1778,15 +1778,15 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/evaluations:
+  /tasks/{organization}/{task}/evaluations:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
-      tags: [projects]
+      tags: [tasks]
       summary: List recent evaluations
-      description: Returns the `keep_evaluations` most recent evaluations for the project, newest first.
-      operationId: getProjectEvaluations
+      description: Returns the `keep_evaluations` most recent evaluations for the task, newest first.
+      operationId: getTaskEvaluations
       security:
         - {}
         - cookieAuth: []
@@ -1795,7 +1795,7 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Max evaluations to return, newest first. Defaults to the project's keep_evaluations.
+          description: Max evaluations to return, newest first. Defaults to the task's keep_evaluations.
           schema:
             type: integer
             minimum: 1
@@ -1817,18 +1817,18 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/details:
+  /tasks/{organization}/{task}/details:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
-      tags: [projects]
-      summary: Get project details
-      description: Returns aggregated project data including the latest evaluation, recent evaluation history, and current entry points.
-      operationId: getProjectDetails
+      tags: [tasks]
+      summary: Get task details
+      description: Returns aggregated task data including the latest evaluation, recent evaluation history, and current entry points.
+      operationId: getTaskDetails
       responses:
         '200':
-          description: Project details
+          description: Task details
           content:
             application/json:
               schema:
@@ -1837,28 +1837,28 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ProjectDetailsResponse'
+                        $ref: '#/components/schemas/TaskDetailsResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/entry-points:
+  /tasks/{organization}/{task}/entry-points:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
-      tags: [projects]
+      tags: [tasks]
       summary: List entry points
       description: >
-        Returns the root builds (entry points) for the project from the last evaluation by default.
+        Returns the root builds (entry points) for the task from the last evaluation by default.
         Pass `evaluation_id` to retrieve entry points from a specific evaluation instead.
-      operationId: listProjectEntryPoints
+      operationId: listTaskEntryPoints
       parameters:
         - name: evaluation_id
           in: query
           required: false
-          description: UUID of a specific evaluation to retrieve entry points from. Defaults to the project's last evaluation.
+          description: UUID of a specific evaluation to retrieve entry points from. Defaults to the task's last evaluation.
           schema:
             type: string
             format: uuid
@@ -1881,21 +1881,21 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/check-repository:
+  /tasks/{organization}/{task}/check-repository:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     post:
-      tags: [projects]
+      tags: [tasks]
       summary: Check repository accessibility
       description: >-
-        Tests whether Gradient can clone the project's repository using the
+        Tests whether Gradient can clone the task's repository using the
         organization's SSH key. Requires Admin or Write role; rejects
-        state-managed projects.
+        state-managed tasks.
 
         Returns `400` with `code: "repository_unreachable"` and the underlying
         git error when the repository cannot be fetched.
-      operationId: checkProjectRepository
+      operationId: checkTaskRepository
       responses:
         '200':
           description: Repository is accessible
@@ -1918,15 +1918,15 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/evaluate:
+  /tasks/{organization}/{task}/evaluate:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     post:
-      tags: [projects]
+      tags: [tasks]
       summary: Trigger evaluation
       description: >-
-        Queues a new evaluation for the project. Returns the new evaluation UUID.
+        Queues a new evaluation for the task. Returns the new evaluation UUID.
 
         Returns `400` with `code: "repository_unreachable"` when the repository
         cannot be fetched (DNS failure, authentication failure, unreachable host,
@@ -1959,17 +1959,17 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/active:
+  /tasks/{organization}/{task}/active:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     post:
-      tags: [projects]
-      summary: Enable project
+      tags: [tasks]
+      summary: Enable task
       description: >-
-        Sets the project's active flag to true so it will be evaluated on new
-        commits. Requires Admin or Write role; rejects state-managed projects.
-      operationId: enableProject
+        Sets the task's active flag to true so it will be evaluated on new
+        commits. Requires Admin or Write role; rejects state-managed tasks.
+      operationId: enableTask
       responses:
         '200':
           description: Enabled
@@ -1984,12 +1984,12 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
-      tags: [projects]
-      summary: Disable project
+      tags: [tasks]
+      summary: Disable task
       description: >-
-        Sets the project's active flag to false, pausing automatic evaluations.
-        Requires Admin or Write role; rejects state-managed projects.
-      operationId: disableProject
+        Sets the task's active flag to false, pausing automatic evaluations.
+        Requires Admin or Write role; rejects state-managed tasks.
+      operationId: disableTask
       responses:
         '200':
           description: Disabled
@@ -2004,14 +2004,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/actions:
+  /tasks/{organization}/{task}/actions:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [actions]
-      summary: List project actions
-      operationId: listProjectActions
+      summary: List task actions
+      operationId: listTaskActions
       responses:
         '200':
           description: List of actions
@@ -2032,8 +2032,8 @@ paths:
           $ref: '#/components/responses/NotFound'
     post:
       tags: [actions]
-      summary: Create project action
-      operationId: createProjectAction
+      summary: Create task action
+      operationId: createTaskAction
       requestBody:
         required: true
         content:
@@ -2061,10 +2061,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/actions/{id}:
+  /tasks/{organization}/{task}/actions/{id}:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
         required: true
@@ -2074,8 +2074,8 @@ paths:
         description: Action UUID
     get:
       tags: [actions]
-      summary: Get project action
-      operationId: getProjectAction
+      summary: Get task action
+      operationId: getTaskAction
       responses:
         '200':
           description: Action (token stripped)
@@ -2094,8 +2094,8 @@ paths:
           $ref: '#/components/responses/NotFound'
     patch:
       tags: [actions]
-      summary: Update project action
-      operationId: updateProjectAction
+      summary: Update task action
+      operationId: updateTaskAction
       requestBody:
         required: true
         content:
@@ -2124,8 +2124,8 @@ paths:
           $ref: '#/components/responses/NotFound'
     delete:
       tags: [actions]
-      summary: Delete project action
-      operationId: deleteProjectAction
+      summary: Delete task action
+      operationId: deleteTaskAction
       responses:
         '200':
           description: Action deleted
@@ -2140,10 +2140,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/actions/{id}/test:
+  /tasks/{organization}/{task}/actions/{id}/test:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
         required: true
@@ -2154,11 +2154,11 @@ paths:
     post:
       tags: [actions]
       summary: Fire action now (synthetic test)
-      operationId: testProjectAction
+      operationId: testTaskAction
       description: >-
         Fires the action immediately with a synthetic test event, bypassing event matching.
         Forge-integration actions (`forge_status_report`, `open_pr`) instead run a non-mutating
-        connectivity check against the project's repository, since a synthetic status/PR posted
+        connectivity check against the task's repository, since a synthetic status/PR posted
         against a placeholder commit is always rejected by the forge.
       responses:
         '200':
@@ -2174,10 +2174,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/actions/{id}/regenerate-token:
+  /tasks/{organization}/{task}/actions/{id}/regenerate-token:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
         required: true
@@ -2212,10 +2212,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/actions/{id}/deliveries:
+  /tasks/{organization}/{task}/actions/{id}/deliveries:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
         required: true
@@ -2261,10 +2261,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/actions/{id}/deliveries/{delivery_id}:
+  /tasks/{organization}/{task}/actions/{id}/deliveries/{delivery_id}:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
         required: true
@@ -2302,18 +2302,18 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/metrics:
+  /tasks/{organization}/{task}/metrics:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
-      tags: [projects]
-      summary: Get project metrics
+      tags: [tasks]
+      summary: Get task metrics
       description: Returns per-evaluation metric points for the last `keep_evaluations` completed evaluations.
-      operationId: getProjectMetrics
+      operationId: getTaskMetrics
       responses:
         '200':
-          description: Project metrics
+          description: Task metrics
           content:
             application/json:
               schema:
@@ -2322,18 +2322,18 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ProjectMetricsResponse'
+                        $ref: '#/components/schemas/TaskMetricsResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/entry-point-metrics:
+  /tasks/{organization}/{task}/entry-point-metrics:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
-      tags: [projects]
+      tags: [tasks]
       summary: Get entry point metrics
       description: |-
         Returns per-evaluation build metrics for a single entry point identified by its
@@ -2371,17 +2371,17 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/entry-point-downloads:
+  /tasks/{organization}/{task}/entry-point-downloads:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
-      tags: [projects]
+      tags: [tasks]
       summary: Download newest-commit entry point build output
       description: |-
         Serves the named file from `nix-support/hydra-build-products` for the build of
-        the given entry point in the project's **newest-commit evaluation**
-        (`project.last_evaluation`). Designed as a stable permalink - retriggering an
+        the given entry point in the task's **newest-commit evaluation**
+        (`task.last_evaluation`). Designed as a stable permalink - retriggering an
         older commit does not shadow the latest one. Returns `404` if no evaluation
         has been recorded yet, or if the entry point / file is missing from the
         newest evaluation.
@@ -2435,15 +2435,15 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/badge:
+  /tasks/{organization}/{task}/badge:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
-      tags: [projects]
-      summary: Project status badge (SVG)
+      tags: [tasks]
+      summary: Task status badge (SVG)
       description: |-
-        Returns a shields.io-compatible SVG badge reflecting the project's latest
+        Returns a shields.io-compatible SVG badge reflecting the task's latest
         evaluation status. Designed to be embedded in GitHub READMEs, Grafana
         dashboards, or any tool that renders SVG images from a URL.
 
@@ -2464,7 +2464,7 @@ paths:
 
         Responses include `Cache-Control: no-cache` so badge aggregator CDNs always
         fetch the live status rather than serving a stale image.
-      operationId: getProjectBadge
+      operationId: getTaskBadge
       security: []
       parameters:
         - name: style
@@ -2489,7 +2489,7 @@ paths:
           description: |-
             Nix attribute path of a specific entry point, e.g. `packages."x86_64-linux".hello`.
             When provided the badge reflects that entry point's build status from the most
-            recent completed evaluation instead of the overall project status.
+            recent completed evaluation instead of the overall task status.
             URL-encode `"` as `%22` when constructing static links.
           schema:
             type: string
@@ -2519,14 +2519,14 @@ paths:
 
   # ── Triggers ─────────────────────────────────────────────────────────────────
 
-  /projects/{organization}/{project}/triggers:
+  /tasks/{organization}/{task}/triggers:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [triggers]
-      summary: List project triggers
-      operationId: listProjectTriggers
+      summary: List task triggers
+      operationId: listTaskTriggers
       responses:
         '200':
           description: List of triggers
@@ -2540,15 +2540,15 @@ paths:
                       message:
                         type: array
                         items:
-                          $ref: '#/components/schemas/ProjectTrigger'
+                          $ref: '#/components/schemas/TaskTrigger'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
     post:
       tags: [triggers]
-      summary: Create project trigger
-      operationId: createProjectTrigger
+      summary: Create task trigger
+      operationId: createTaskTrigger
       requestBody:
         required: true
         content:
@@ -2573,7 +2573,7 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ProjectTrigger'
+                        $ref: '#/components/schemas/TaskTrigger'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2583,10 +2583,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/triggers/{id}:
+  /tasks/{organization}/{task}/triggers/{id}:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
         required: true
@@ -2596,8 +2596,8 @@ paths:
         description: Trigger UUID
     get:
       tags: [triggers]
-      summary: Get project trigger
-      operationId: getProjectTrigger
+      summary: Get task trigger
+      operationId: getTaskTrigger
       responses:
         '200':
           description: Trigger
@@ -2609,15 +2609,15 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ProjectTrigger'
+                        $ref: '#/components/schemas/TaskTrigger'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
       tags: [triggers]
-      summary: Update project trigger
-      operationId: updateProjectTrigger
+      summary: Update task trigger
+      operationId: updateTaskTrigger
       requestBody:
         required: true
         content:
@@ -2640,7 +2640,7 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/ProjectTrigger'
+                        $ref: '#/components/schemas/TaskTrigger'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2651,8 +2651,8 @@ paths:
           $ref: '#/components/responses/NotFound'
     delete:
       tags: [triggers]
-      summary: Delete project trigger
-      operationId: deleteProjectTrigger
+      summary: Delete task trigger
+      operationId: deleteTaskTrigger
       responses:
         '200':
           description: Trigger deleted
@@ -2667,10 +2667,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/triggers/{id}/test:
+  /tasks/{organization}/{task}/triggers/{id}/test:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
         required: true
@@ -2681,9 +2681,9 @@ paths:
     post:
       tags: [triggers]
       summary: Manually fire trigger
-      operationId: testProjectTrigger
+      operationId: testTaskTrigger
       description: >-
-        Resolves the project HEAD and applies the trigger immediately, bypassing
+        Resolves the task HEAD and applies the trigger immediately, bypassing
         commit dedup. Returns the apply outcome.
       responses:
         '200':
@@ -2707,10 +2707,10 @@ paths:
 
   # ── Flake Input Overrides ─────────────────────────────────────────────────────
 
-  /projects/{organization}/{project}/flake-inputs:
+  /tasks/{organization}/{task}/flake-inputs:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [flake-inputs]
       summary: List flake input overrides
@@ -2764,10 +2764,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/{project}/flake-inputs/{id}:
+  /tasks/{organization}/{task}/flake-inputs/{id}:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
-      - $ref: '#/components/parameters/ProjectSlug'
+      - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
         required: true
@@ -3263,8 +3263,8 @@ paths:
         Step 3. After all `missing` blobs have been uploaded, the client posts
         here to materialise `/nix/store/<hash>-source` from the staged files,
         sign it with the org's cache key, lazily create the per-org reserved
-        `build-request` project on first use, and queue a new evaluation
-        targeting the supplied `target` attribute path (or the project's
+        `build-request` task on first use, and queue a new evaluation
+        targeting the supplied `target` attribute path (or the task's
         wildcard when omitted).
       operationId: postBuildRequestDispatch
       requestBody:
@@ -3306,7 +3306,7 @@ paths:
         One-shot alternative to the manifest/blob flow for clients built with
         the `nix` feature. The client NAR-packs the git-tracked source itself
         and uploads it here; the server computes the `/nix/store/<hash>-source`
-        path, signs it, lazily creates the per-org `build-request` project, and
+        path, signs it, lazily creates the per-org `build-request` task, and
         queues an evaluation. The whole NAR is one request, bounded by
         `max_source_upload_size`; large sources should use the chunked
         `POST /build-requests/source/{upload}/chunk` + `finalize` flow instead.
@@ -3336,7 +3336,7 @@ paths:
                     Eval target: a gradient attr-path wildcard
                     (`packages.x86_64-linux.#`) or a nix-style installable
                     (`.#foo`, expanded client-side to `packages.<system>.foo`).
-                    Defaults to the project wildcard.
+                    Defaults to the task wildcard.
                 system:
                   type: string
                   description: Target system.
@@ -3426,7 +3426,7 @@ paths:
       description: |-
         Reassembles the staged source NAR for `upload`, computes its
         `/nix/store/<hash>-source` path, signs it, lazily creates the per-org
-        `build-request` project, queues an evaluation, and drops the partial.
+        `build-request` task, queues an evaluation, and drops the partial.
       operationId: postBuildRequestSourceFinalize
       parameters:
         - name: upload
@@ -3454,7 +3454,7 @@ paths:
                     Eval target: a gradient attr-path wildcard
                     (`packages.x86_64-linux.#`) or a nix-style installable
                     (`.#foo`, expanded client-side to `packages.<system>.foo`).
-                    Defaults to the project wildcard.
+                    Defaults to the task wildcard.
                 system:
                   type: string
                   description: Target system.
@@ -3945,21 +3945,21 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /projects/{organization}/available:
+  /tasks/{organization}/available:
     parameters:
       - $ref: '#/components/parameters/OrganizationSlug'
     get:
-      tags: [projects]
-      summary: Check project name availability
-      description: Returns `true` if no project with the given name exists in the organization, `false` if it is already taken.
-      operationId: checkProjectNameAvailable
+      tags: [tasks]
+      summary: Check task name availability
+      description: Returns `true` if no task with the given name exists in the organization, `false` if it is already taken.
+      operationId: checkTaskNameAvailable
       parameters:
         - name: name
           in: query
           required: true
           schema:
             type: string
-          description: Project name to check
+          description: Task name to check
       responses:
         '200':
           description: Availability result
@@ -4266,7 +4266,7 @@ paths:
       tags: [admin]
       summary: Export the live state configuration
       description: |
-        Reconstructs the current users, organizations, projects, caches,
+        Reconstructs the current users, organizations, tasks, caches,
         custom roles, API keys, workers (including server-level base workers
         with their pre-enabled organizations) and integrations into a
         declarative `services.gradient.state` shape, so operators can codify
@@ -4277,7 +4277,7 @@ paths:
         `access_token_file`) is redacted to `null` - the hashed/encrypted
         secrets cannot be recovered and must be filled in by hand. GitHub
         integration rows are exported with their `installation_id` /
-        `account_login`. The auto-managed `build-request` project and the
+        `account_login`. The auto-managed `build-request` task and the
         built-in `Admin`/`Write`/`View` roles are omitted.
 
         Requires `superuser`.
@@ -4711,7 +4711,7 @@ paths:
             example:
               name: my-cache
               display_name: My Cache
-              description: "Packages for my projects"
+              description: "Packages for my tasks"
               priority: 40
       responses:
         '200':
@@ -5888,7 +5888,7 @@ paths:
         the `has_secret` / `has_access_token` booleans so non-admin members
         cannot fingerprint credential state. Intended for UIs that only need
         an integration's name and forge type - e.g. populating the trigger
-        create/edit dropdown for users who hold `EditProject` but not
+        create/edit dropdown for users who hold `EditTask` but not
         `ManageIntegrations`.
       operationId: listOrgIntegrationSummaries
       responses:
@@ -5980,7 +5980,7 @@ paths:
       tags: [integrations]
       summary: Delete integration
       description: >-
-        Deletes an integration. Any project `project_integration` rows
+        Deletes an integration. Any task `task_integration` rows
         referencing it are cleared via `ON DELETE SET NULL`.
         `forge_type=github` rows can be deleted; deleting removes the
         installation binding for that account.
@@ -6011,7 +6011,7 @@ paths:
         `GRADIENT_GITHUB_APP_WEBHOOK_SECRET_FILE`.
 
         **Handled events:**
-        - `push` / `pull_request` / `release` - trigger an evaluation on any project whose
+        - `push` / `pull_request` / `release` - trigger an evaluation on any task whose
           repository URL matches the matching trigger. A `push` carrying an
           all-zero `after` SHA (a branch/tag deletion or a forge "test" delivery)
           is accepted as a `200` no-op rather than rejected.
@@ -6103,8 +6103,8 @@ paths:
         - `gitea` / `forgejo`: `X-Gitea-Signature` (HMAC-SHA256 hex)
         - `gitlab`: `X-Gitlab-Token` (plain token comparison)
 
-        On a matching push, queues an evaluation for every active project whose
-        `project_integration.inbound_integration` points at this row and whose
+        On a matching push, queues an evaluation for every active task whose
+        `task_integration.inbound_integration` points at this row and whose
         repository URL matches the webhook payload's clone URL.
 
         A push carrying an all-zero `after` SHA (a branch/tag deletion or a
@@ -6206,20 +6206,20 @@ paths:
         '404':
           description: Unknown metric or org out of scope
 
-  /metrics/projects/{organization}/{project}/evaluations:
+  /metrics/tasks/{organization}/{task}/evaluations:
     get:
       tags: [board]
-      summary: Per-evaluation project metrics
-      description: Per-evaluation series (build time, eval time, output/closure sizes, dependencies) for the project's recent completed evaluations.
-      operationId: getProjectEvaluationMetrics
+      summary: Per-evaluation task metrics
+      description: Per-evaluation series (build time, eval time, output/closure sizes, dependencies) for the task's recent completed evaluations.
+      operationId: getTaskEvaluationMetrics
       parameters:
         - { name: organization, in: path, required: true, schema: { type: string } }
-        - { name: project, in: path, required: true, schema: { type: string } }
+        - { name: task, in: path, required: true, schema: { type: string } }
       responses:
         '200':
           description: Per-evaluation metric points
 
-  /metrics/projects/{organization}/{project}/entry-point:
+  /metrics/tasks/{organization}/{task}/entry-point:
     get:
       tags: [board]
       summary: Per-evaluation entry-point metrics
@@ -6227,7 +6227,7 @@ paths:
       operationId: getEntryPointEvaluationMetrics
       parameters:
         - { name: organization, in: path, required: true, schema: { type: string } }
-        - { name: project, in: path, required: true, schema: { type: string } }
+        - { name: task, in: path, required: true, schema: { type: string } }
         - { name: eval, in: query, required: true, schema: { type: string } }
       responses:
         '200':
@@ -6330,7 +6330,7 @@ paths:
     get:
       tags: [board]
       summary: Most expensive evaluations by resource
-      description: Top evaluations by a captured per-eval resource (peak RSS/heap, thunks, fn calls, allocated bytes, or total eval time) from `evaluation_metric`. Org-scoped through the evaluation's project.
+      description: Top evaluations by a captured per-eval resource (peak RSS/heap, thunks, fn calls, allocated bytes, or total eval time) from `evaluation_metric`. Org-scoped through the evaluation's task.
       operationId: getBoardExpensiveEvalsByResource
       parameters:
         - { name: metric, in: query, required: true, schema: { type: string, enum: [rss, heap, thunks, fncalls, alloc, time] } }
@@ -6490,21 +6490,21 @@ paths:
         '101':
           description: Switching Protocols - WebSocket upgrade successful
 
-  /projects/{organization}/{project}/live:
+  /tasks/{organization}/{task}/live:
     get:
-      tags: [projects]
-      summary: Project live updates (WebSocket)
+      tags: [tasks]
+      summary: Task live updates (WebSocket)
       description: |-
         Upgrades to a WebSocket emitting `evaluation_status_changed`,
-        `build_status_changed` and `evaluation_progress` events for this project,
-        so the project page refetches on change instead of polling.
+        `build_status_changed` and `evaluation_progress` events for this task,
+        so the task page refetches on change instead of polling.
         `evaluation_progress` fires as builds and entry-points are persisted
         during the evaluation phase, before any build changes status, so the
         build/dependency totals grow live. Requires read access.
-      operationId: projectLive
+      operationId: taskLive
       parameters:
         - { name: organization, in: path, required: true, schema: { type: string } }
-        - { name: project, in: path, required: true, schema: { type: string } }
+        - { name: task, in: path, required: true, schema: { type: string } }
       responses:
         '101':
           description: Switching Protocols - WebSocket upgrade successful
@@ -6918,15 +6918,15 @@ components:
         example: my-org
       description: Organization name (slug)
 
-    ProjectSlug:
-      name: project
+    TaskSlug:
+      name: task
       in: path
       required: true
       schema:
         type: string
         pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
-        example: my-project
-      description: Project name (slug)
+        example: my-task
+      description: Task name (slug)
 
     CacheSlug:
       name: cache
@@ -7681,7 +7681,7 @@ components:
             `api_key.revoke`, `api_key.delete`, `session.revoke`, `auth.deny`,
             `organization.delete`, `organization.member.add`,
             `organization.member.remove`, `organization.member.role_change`,
-            `project.delete`, `cache.delete`.
+            `task.delete`, `cache.delete`.
         ip: { type: string, nullable: true }
         user_agent: { type: string, nullable: true }
         metadata:
@@ -7862,8 +7862,8 @@ components:
         hide_build_requests:
           type: boolean
           description: >-
-            When `true`, the auto-managed `build-request` project is hidden
-            from project listings in the web UI. The project still exists and
+            When `true`, the auto-managed `build-request` task is hidden
+            from task listings in the web UI. The task still exists and
             continues to receive CLI build artefacts; this is a UI-only
             opt-out.
 
@@ -7881,7 +7881,7 @@ components:
           type: boolean
           description: >-
             UI-only flag controlling whether the auto-managed `build-request`
-            project is hidden from project listings.
+            task is hidden from task listings.
 
     AddUserRequest:
       type: object
@@ -7996,8 +7996,8 @@ components:
         - manageWorkers
         - manageSubscriptions
         - manageSshKey
-        - createProject
-        - editProject
+        - createTask
+        - editTask
         - triggerEvaluation
 
     Organization:
@@ -8024,19 +8024,19 @@ components:
             Clients should hide GitHub-related integration UI when this is
             false.
 
-    # ── Projects ──────────────────────────────────────────────────────────────
+    # ── Tasks ──────────────────────────────────────────────────────────────
 
-    MakeProjectRequest:
+    MakeTaskRequest:
       type: object
       required: [name, display_name, repository, wildcard]
       properties:
         name:
           type: string
           pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
-          example: my-project
+          example: my-task
         display_name:
           type: string
-          example: My Project
+          example: My Task
         repository:
           type: string
           description: Git repository URL (SSH or HTTPS)
@@ -8055,14 +8055,14 @@ components:
           type: boolean
           default: true
           description: |
-            When false, build outputs from this project are pushed to the
+            When false, build outputs from this task are pushed to the
             cache but their narinfo signatures are left empty. External Nix
             clients won't trust the cache for these paths, effectively
-            keeping the project's outputs private even within a public
-            cache. A path also produced by a `sign_cache=true` project is
+            keeping the task's outputs private even within a public
+            cache. A path also produced by a `sign_cache=true` task is
             still signed (the public producer wins).
 
-    PatchProjectRequest:
+    PatchTaskRequest:
       type: object
       properties:
         name:
@@ -8087,9 +8087,9 @@ components:
         sign_cache:
           type: boolean
           description: |
-            See `MakeProjectRequest.sign_cache`. Omit to leave unchanged.
+            See `MakeTaskRequest.sign_cache`. Omit to leave unchanged.
 
-    Project:
+    Task:
       type: object
       required: [id, name, display_name, organization, repository, wildcard, active, created_by, created_at, managed, can_edit, can_trigger]
       properties:
@@ -8116,13 +8116,13 @@ components:
           type: integer
           description: >-
             Number of completed evaluations retained for metrics and history. A
-            new project starts at the lower of 30 and the instance-wide maximum
+            new task starts at the lower of 30 and the instance-wide maximum
             (`GRADIENT_KEEP_EVALUATIONS`).
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
         sign_cache:
           type: boolean
-          description: See `MakeProjectRequest.sign_cache`.
+          description: See `MakeTaskRequest.sign_cache`.
         created_by:
           type: string
           format: uuid
@@ -8131,13 +8131,13 @@ components:
           format: date-time
         managed:
           type: boolean
-          description: True when the project is managed by declarative Nix state and cannot be edited via the UI.
+          description: True when the task is managed by declarative Nix state and cannot be edited via the UI.
         can_edit:
           type: boolean
-          description: True when the caller has Permission::EditProject - may edit project configuration.
+          description: True when the caller has Permission::EditTask - may edit task configuration.
         can_trigger:
           type: boolean
-          description: True when the caller has Permission::TriggerEvaluation - may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed projects retain trigger access.
+          description: True when the caller has Permission::TriggerEvaluation - may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed tasks retain trigger access.
 
     EntryPointSummary:
       type: object
@@ -8241,7 +8241,7 @@ components:
           type: string
           format: date-time
 
-    ProjectDetailsResponse:
+    TaskDetailsResponse:
       type: object
       required:
         - id
@@ -8287,13 +8287,13 @@ components:
             $ref: '#/components/schemas/EvaluationSummary'
         can_edit:
           type: boolean
-          description: True when the caller has Permission::EditProject - may edit project configuration.
+          description: True when the caller has Permission::EditTask - may edit task configuration.
         can_trigger:
           type: boolean
-          description: True when the caller has Permission::TriggerEvaluation - may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed projects retain trigger access even though their config is read-only.
+          description: True when the caller has Permission::TriggerEvaluation - may start, restart, or abort evaluations. Independent of can_edit so users granted only trigger rights can act and managed tasks retain trigger access even though their config is read-only.
         managed:
           type: boolean
-          description: True when the project is managed by declarative Nix state and cannot be edited via the UI.
+          description: True when the task is managed by declarative Nix state and cannot be edited via the UI.
         last_check_at:
           type: string
           format: date-time
@@ -8302,19 +8302,19 @@ components:
         queue:
           $ref: '#/components/schemas/QueueSummary'
 
-    ProjectMetricsResponse:
+    TaskMetricsResponse:
       type: object
       required: [keep_evaluations, points]
       properties:
         keep_evaluations:
           type: integer
-          description: Configured retention limit for this project
+          description: Configured retention limit for this task
         points:
           type: array
           items:
-            $ref: '#/components/schemas/ProjectMetricPoint'
+            $ref: '#/components/schemas/TaskMetricPoint'
 
-    ProjectMetricPoint:
+    TaskMetricPoint:
       type: object
       required: [evaluation_id, created_at, build_time_total_ms, eval_time_ms, dependencies_count]
       properties:
@@ -8356,7 +8356,7 @@ components:
           example: "packages.x86_64-linux.hello"
         keep_evaluations:
           type: integer
-          description: Configured retention limit for this project
+          description: Configured retention limit for this task
         points:
           type: array
           items:
@@ -8412,7 +8412,7 @@ components:
       description: |-
         | Value | Meaning |
         |---|---|
-        | `normal` | Ordinary evaluation of the project's flake |
+        | `normal` | Ordinary evaluation of the task's flake |
         | `input_update` | Evaluation of a candidate flake.lock with tracked inputs bumped, driving an `open_pr` action |
 
     EvaluationStatus:
@@ -8438,11 +8438,11 @@ components:
         id:
           type: string
           format: uuid
-        project:
+        task:
           type: string
           format: uuid
           nullable: true
-          description: Associated project UUID, or null for direct builds
+          description: Associated task UUID, or null for direct builds
         repository:
           type: string
           description: Repository path or URL that was evaluated
@@ -8516,10 +8516,10 @@ components:
           run" on the GitHub Check or comments `/gradient approve` (or
           `/gradient run`) on the PR. `/gradient run` optionally accepts a
           wildcard (`/gradient run packages.x86_64-linux.foo`) that
-          overrides the project's wildcard for this run only. With no
+          overrides the task's wildcard for this run only. With no
           parked gate, `/gradient run` from a maintainer creates a fresh
           evaluation for the PR head.
-        - `no_cache`: the project's organisation has no writable cache
+        - `no_cache`: the task's organisation has no writable cache
           subscription, so build outputs would have nowhere to land. The
           evaluation auto-unparks the moment a writable cache is
           subscribed.
@@ -8863,7 +8863,7 @@ components:
           nullable: true
           description: |-
             Eval target attribute path (e.g. `checks.x86_64-linux.foo`).
-            When null, defaults to the `build-request` project's wildcard.
+            When null, defaults to the `build-request` task's wildcard.
         system:
           type: string
           nullable: true
@@ -8893,16 +8893,16 @@ components:
 
     DispatchResponse:
       type: object
-      required: [evaluation, project, commit]
+      required: [evaluation, task, commit]
       properties:
         evaluation:
           type: string
           format: uuid
-        project:
+        task:
           type: string
           format: uuid
           description: |-
-            ID of the per-org reserved `build-request` project. Lazily created
+            ID of the per-org reserved `build-request` task. Lazily created
             on first dispatch and reused thereafter.
         commit:
           type: string
@@ -9277,7 +9277,7 @@ components:
           example: My Cache
         description:
           type: string
-          example: "Packages for my projects"
+          example: "Packages for my tasks"
         priority:
           type: integer
           description: Nix substituter priority (lower number = higher priority; typical range 1–100)
@@ -9831,7 +9831,7 @@ components:
       type: string
       enum: [hard_abort, soft_abort, all, skip]
       default: soft_abort
-      description: 'Project-level policy for handling new trigger events while an evaluation is in flight. Defaults to `soft_abort`: marks the running evaluation Aborted but lets its in-flight builds finish so the new evaluation can reuse cached outputs. `all` runs a new evaluation alongside the in-flight one.'
+      description: 'Task-level policy for handling new trigger events while an evaluation is in flight. Defaults to `soft_abort`: marks the running evaluation Aborted but lets its in-flight builds finish so the new evaluation can reuse cached outputs. `all` runs a new evaluation alongside the in-flight one.'
 
     PollingTriggerConfig:
       type: object
@@ -9893,7 +9893,7 @@ components:
             or comments `/gradient approve` (or `/gradient run`) on the PR.
             `/gradient run` optionally accepts a wildcard
             (`/gradient run packages.x86_64-linux.foo`) that overrides the
-            project's wildcard for this run only. With no parked gate,
+            task's wildcard for this run only. With no parked gate,
             `/gradient run` from a maintainer creates a fresh evaluation
             for the PR head. Set this to `false` to disable the gate and
             run every PR build automatically.
@@ -9932,14 +9932,14 @@ components:
           type: string
           enum: [gitea, forgejo, gitlab, github]
 
-    ProjectTrigger:
+    TaskTrigger:
       type: object
-      required: [id, project, type, config, active, created_at, updated_at]
+      required: [id, task, type, config, active, created_at, updated_at]
       properties:
         id:
           type: string
           format: uuid
-        project:
+        task:
           type: string
           format: uuid
         type:
@@ -9969,12 +9969,12 @@ components:
 
     FlakeInputOverride:
       type: object
-      required: [id, project, input_name, url, created_at, updated_at]
+      required: [id, task, input_name, url, created_at, updated_at]
       properties:
         id:
           type: string
           format: uuid
-        project:
+        task:
           type: string
           format: uuid
         input_name:
@@ -9982,7 +9982,7 @@ components:
           description: >-
             A declared flake input name, or a glob (`*`, `?`, e.g. `nixpkgs*`
             or `*`) matching several inputs. Globs are expanded against the
-            project's flake.lock at evaluation time; a literal name wins over a
+            task's flake.lock at evaluation time; a literal name wins over a
             glob.
         url:
           type: string
@@ -10036,7 +10036,7 @@ components:
 
     WebhookResponse:
       type: object
-      required: [event, repository_urls, projects_scanned, queued, skipped]
+      required: [event, repository_urls, tasks_scanned, queued, skipped]
       properties:
         event:
           type: string
@@ -10045,7 +10045,7 @@ components:
           type: array
           items:
             type: string
-        projects_scanned:
+        tasks_scanned:
           type: integer
           format: int32
         queued:
@@ -10055,29 +10055,29 @@ components:
         skipped:
           type: array
           items:
-            $ref: '#/components/schemas/SkippedProject'
+            $ref: '#/components/schemas/SkippedTask'
     QueuedEvaluation:
       type: object
-      required: [project_id, project_name, organization, evaluation_id]
+      required: [task_id, task_name, organization, evaluation_id]
       properties:
-        project_id:
+        task_id:
           type: string
           format: uuid
-        project_name:
+        task_name:
           type: string
         organization:
           type: string
         evaluation_id:
           type: string
           format: uuid
-    SkippedProject:
+    SkippedTask:
       type: object
-      required: [project_id, project_name, organization, reason]
+      required: [task_id, task_name, organization, reason]
       properties:
-        project_id:
+        task_id:
           type: string
           format: uuid
-        project_name:
+        task_name:
           type: string
         organization:
           type: string

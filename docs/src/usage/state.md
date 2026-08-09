@@ -1,6 +1,6 @@
 # Declarative State
 
-`services.gradient.state` lets you declare users, organizations, projects, caches, and API keys in Nix. Gradient reconciles this state on every startup.
+`services.gradient.state` lets you declare users, organizations, tasks, caches, and API keys in Nix. Gradient reconciles this state on every startup.
 
 When `settings.deleteState = true` (default), entities that are removed from `state` are also deleted from the database. Set it to `false` to make them editable by users in the frontend instead.
 
@@ -186,10 +186,10 @@ When `members` is **non-empty**, the list is the source of truth:
 | `members.*.user` | - | Username (required) |
 | `members.*.role` | - | `Admin`/`Write`/`View` or a custom org role declared in `state.roles` for the same organization (required) |
 
-## Projects
+## Tasks
 
 ```nix
-services.gradient.state.projects = {
+services.gradient.state.tasks = {
   web-app = {
     organization         = "acme";
     display_name         = "Web App";
@@ -204,30 +204,30 @@ services.gradient.state.projects = {
 };
 ```
 
-### Project options
+### Task options
 
 | Option | Default | Description |
 |---|---|---|
-| `name` | `<attrset key>` | Unique project name |
+| `name` | `<attrset key>` | Unique task name |
 | `organization` | - | Owning organization (required) |
 | `display_name` | `<name>` | Display name |
 | `description` | `null` | Optional description |
 | `repository` | - | Git URL (required) |
 | `wildcard` | `packages.x86_64-linux.*` | Attr-path pattern picked up by the evaluator. The legacy name `evaluation_wildcard` is still accepted as an alias |
 | `active` | `true` | Disable to pause polling/evaluations without deleting |
-| `keep_evaluations` | `30` | Number of finished evaluations to retain per project. The most recent finished evaluations are kept regardless of outcome - completed, failed, and aborted runs are treated equally, since failed/aborted runs can still hold successfully-built NARs. GC is skipped entirely while the project has any in-progress evaluation, so an in-flight run never loses NARs it is about to reuse. Must be at least 1. Capped at runtime by the global `services.gradient.settings.keepEvaluations` |
-| `concurrency` | `"skip"` | Policy for handling new trigger events while an evaluation is in flight (`hard_abort`, `soft_abort`, `skip`, `all`). Applies to all triggers on the project |
-| `sign_cache` | `true` | When `false`, build outputs from this project are pushed to the cache but their narinfo signatures are left empty. External Nix clients won't trust them, keeping the project's outputs private even when the cache itself is public. A path co-produced by another `sign_cache=true` project is still signed |
+| `keep_evaluations` | `30` | Number of finished evaluations to retain per task. The most recent finished evaluations are kept regardless of outcome - completed, failed, and aborted runs are treated equally, since failed/aborted runs can still hold successfully-built NARs. GC is skipped entirely while the task has any in-progress evaluation, so an in-flight run never loses NARs it is about to reuse. Must be at least 1. Capped at runtime by the global `services.gradient.settings.keepEvaluations` |
+| `concurrency` | `"skip"` | Policy for handling new trigger events while an evaluation is in flight (`hard_abort`, `soft_abort`, `skip`, `all`). Applies to all triggers on the task |
+| `sign_cache` | `true` | When `false`, build outputs from this task are pushed to the cache but their narinfo signatures are left empty. External Nix clients won't trust them, keeping the task's outputs private even when the cache itself is public. A path co-produced by another `sign_cache=true` task is still signed |
 | `outbound_integration` | `null` | Name of an `outbound` integration that receives CI status reports |
 | `created_by` | - | Username of creator (required) |
 
 `outbound_integration` must reference an entry in `services.gradient.state.integrations` belonging to the same organization. See [Integrations](#integrations) below.
 
-To route inbound forge webhooks to a project, declare one or more `reporter_push` or `reporter_pull_request` triggers referencing the integration. See the [Triggers](#triggers) section below.
+To route inbound forge webhooks to a task, declare one or more `reporter_push` or `reporter_pull_request` triggers referencing the integration. See the [Triggers](#triggers) section below.
 
 ## Integrations
 
-Forge integrations either receive push webhooks from the forge (`inbound`) or push CI status updates back to it (`outbound`). They are referenced from projects via `inbound_integration` / `outbound_integration`.
+Forge integrations either receive push webhooks from the forge (`inbound`) or push CI status updates back to it (`outbound`). They are referenced from tasks via `inbound_integration` / `outbound_integration`.
 
 ```nix
 services.gradient.state.integrations = {
@@ -567,14 +567,14 @@ The `peerFile` options for a base worker in order of preference:
 
 ## Triggers
 
-Each project can have one or more triggers that decide *when* an evaluation runs.
+Each task can have one or more triggers that decide *when* an evaluation runs.
 Triggers are configurable via the API or declaratively in state files.
 
-The concurrency policy - what happens when a new trigger event arrives while an evaluation is already in flight - is a **project-level** setting, not per-trigger. Set it on the project with `concurrency` (see [Project options](#project-options) above).
+The concurrency policy - what happens when a new trigger event arrives while an evaluation is already in flight - is a **task-level** setting, not per-trigger. Set it on the task with `concurrency` (see [Task options](#task-options) above).
 
 ```nix
-services.gradient.state.projects.my-project = {
-  # ... other project options ...
+services.gradient.state.tasks.my-task = {
+  # ... other task options ...
   concurrency = "hard_abort";   # applies to all triggers below
   triggers = [
     {
@@ -611,29 +611,29 @@ services.gradient.state.projects.my-project = {
 - **polling** - periodically check the git repository for new commits. `interval_secs` minimum 10, default 300. Each cycle is jittered by up to 10% of `interval_secs` (deterministic per trigger and cycle) so that triggers created together don't pile onto the same upstream tick. **branch** (optional) - track a specific branch; leave unset to follow the remote HEAD (the repo's default branch).
 - **reporter_push** - fires on forge push events. Filters: `branches`, `tags` (glob patterns; empty = match all), `releases_only` (only fires on explicit forge release events).
 - **reporter_pull_request** - fires on PR/MR events. Filters: `branches`, `actions` (default: opened/synchronize/reopened).
-- **time** - fires on a six-field cron schedule (UTC). Re-evaluates the project HEAD even if the commit hasn't changed.
+- **time** - fires on a six-field cron schedule (UTC). Re-evaluates the task HEAD even if the commit hasn't changed.
 
-`reporter_push` and `reporter_pull_request` triggers must reference an **`inbound`** integration - the row whose `secret_file` validates incoming forge webhooks. Pointing one at an `outbound` integration is rejected at startup; outbound integrations are wired up separately via the project's `outbound_integration` or a `forge_status_report` action. For non-GitHub forges this usually means declaring two integration rows (one `inbound`, one `outbound`).
+`reporter_push` and `reporter_pull_request` triggers must reference an **`inbound`** integration - the row whose `secret_file` validates incoming forge webhooks. Pointing one at an `outbound` integration is rejected at startup; outbound integrations are wired up separately via the task's `outbound_integration` or a `forge_status_report` action. For non-GitHub forges this usually means declaring two integration rows (one `inbound`, one `outbound`).
 
 ### Concurrency policies
 
-Each project has a single concurrency policy that applies to all of its triggers:
+Each task has a single concurrency policy that applies to all of its triggers:
 
 - **hard_abort** - cancel the in-flight evaluation and its in-flight builds, then start a new evaluation. Workers running affected builds receive cancellation through the existing job lifecycle.
 - **soft_abort** - mark the in-flight evaluation `Aborted` so the new one becomes canonical, but let already-running builds finish; their cached outputs flow into the new evaluation.
 - **skip** - discard the new trigger event; keep the running evaluation.
-- **all** - run a new evaluation alongside the in-flight one. The new eval is flagged `concurrent` so it bypasses the "one active eval per project" guard while leaving that guard intact for `hard_abort` / `soft_abort` / `skip`.
+- **all** - run a new evaluation alongside the in-flight one. The new eval is flagged `concurrent` so it bypasses the "one active eval per task" guard while leaving that guard intact for `hard_abort` / `soft_abort` / `skip`.
 
 ### Defaults
 
-- New projects automatically get a default `polling` trigger (interval 300s). Existing projects were backfilled by the same logic during the migration.
+- New tasks automatically get a default `polling` trigger (interval 300s). Existing tasks were backfilled by the same logic during the migration.
 - Concurrency defaults to `soft_abort` - a new trigger event marks the running evaluation Aborted while letting its in-flight builds finish; the new evaluation reuses any cached outputs they produce. Switch to `hard_abort` to also cancel the running builds, `skip` to drop the new event, or `all` to run multiple evaluations concurrently.
 
-The implicit fallback poll for projects with an inbound integration (the legacy `WEBHOOK_BACKUP_POLL_SECS` behavior) has been removed; webhook-driven projects must declare an explicit `reporter_push` trigger to receive evaluations from forge pushes.
+The implicit fallback poll for tasks with an inbound integration (the legacy `WEBHOOK_BACKUP_POLL_SECS` behavior) has been removed; webhook-driven tasks must declare an explicit `reporter_push` trigger to receive evaluations from forge pushes.
 
 ## Exporting current state
 
-When the live system has drifted from your Nix config - users registered through the UI, organizations or projects created via the API - `GET /admin/state` reconstructs the current users, organizations, projects, caches, custom roles, API keys, workers and integrations into the same shape as `services.gradient.state`, so you can codify the running system back into Nix.
+When the live system has drifted from your Nix config - users registered through the UI, organizations or tasks created via the API - `GET /admin/state` reconstructs the current users, organizations, tasks, caches, custom roles, API keys, workers and integrations into the same shape as `services.gradient.state`, so you can codify the running system back into Nix.
 
 The endpoint requires `superuser` and supports two formats:
 
@@ -645,4 +645,4 @@ curl -H "Authorization: Bearer $TOKEN" https://gradient.example.com/api/v1/admin
 curl -H "Authorization: Bearer $TOKEN" "https://gradient.example.com/api/v1/admin/state?format=json"
 ```
 
-Secrets are never recoverable from the database (passwords and worker tokens are hashed, signing keys and integration secrets are encrypted). Every credential-file field - `password_file`, `private_key_file`, `signing_key_file`, `token_file`, `key_file`, `secret_file`, `access_token_file` - is therefore exported as `null`; fill in the credential paths on your host before applying. The auto-managed `build-request` project, server-managed GitHub integration rows, and the built-in `Admin`/`Write`/`View` roles are omitted.
+Secrets are never recoverable from the database (passwords and worker tokens are hashed, signing keys and integration secrets are encrypted). Every credential-file field - `password_file`, `private_key_file`, `signing_key_file`, `token_file`, `key_file`, `secret_file`, `access_token_file` - is therefore exported as `null`; fill in the credential paths on your host before applying. The auto-managed `build-request` task, server-managed GitHub integration rows, and the built-in `Admin`/`Write`/`View` roles are omitted.

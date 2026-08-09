@@ -22,13 +22,13 @@ function find(s: FakeSnapshot): string | undefined {
 
 describe('composeTitle', () => {
   it('uses entity + page + brand when both are present', () => {
-    expect(composeTitle('Demo', 'Project Settings')).toBe('Demo · Project Settings · Gradient');
+    expect(composeTitle('Demo', 'Task Settings')).toBe('Demo · Task Settings · Gradient');
   });
 
   it('collapses redundant entity-only page titles', () => {
-    // The detail page's static title ("Project"/"Cache"/"Organization") is implied
-    // by the entity name itself, so it drops out to avoid "Demo · Project · Gradient".
-    expect(composeTitle('Demo', 'Project')).toBe('Demo · Gradient');
+    // The detail page's static title ("Task"/"Cache"/"Organization") is implied
+    // by the entity name itself, so it drops out to avoid "Demo · Task · Gradient".
+    expect(composeTitle('Demo', 'Task')).toBe('Demo · Gradient');
     expect(composeTitle('Demo', 'Cache')).toBe('Demo · Gradient');
     expect(composeTitle('Demo', 'Organization')).toBe('Demo · Gradient');
   });
@@ -43,9 +43,9 @@ describe('composeTitle', () => {
 });
 
 describe('findEntityName', () => {
-  it('returns the project display_name from resolved data', () => {
+  it('returns the task display_name from resolved data', () => {
     const tree = snap({}, [
-      snap({ projectAccess: { project: { display_name: 'Test Gradient' } } }),
+      snap({ taskAccess: { task: { display_name: 'Test Gradient' } } }),
     ]);
     expect(find(tree)).toBe('Test Gradient');
   });

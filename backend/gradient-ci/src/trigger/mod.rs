@@ -23,7 +23,7 @@ pub use restart::trigger_restart_builds;
 
 #[derive(Debug, Error)]
 pub enum TriggerError {
-    #[error("evaluation already in progress for this project")]
+    #[error("evaluation already in progress for this task")]
     AlreadyInProgress,
     #[error("no previous evaluation found to restart from")]
     NoPreviousEvaluation,

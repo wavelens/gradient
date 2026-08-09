@@ -4,17 +4,17 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Project status badge endpoint.
+//! Task status badge endpoint.
 //!
-//! `GET /api/v1/projects/{org}/{project}/badge` returns a shields.io-compatible
-//! SVG badge reflecting the project's latest evaluation status. Private
+//! `GET /api/v1/tasks/{org}/{task}/badge` returns a shields.io-compatible
+//! SVG badge reflecting the task's latest evaluation status. Private
 //! organisations require a `?token=GRADxxxx` or JWT (same mechanism as the
 //! entry-point download endpoint).
 //!
 //! Supported query parameters:
 //! - `style`: `flat` (default) or `flat-square`
 //! - `label`: left-hand label text (default `"build"`)
-//! - `eval`: UUID of a specific evaluation to use instead of the project's latest
+//! - `eval`: UUID of a specific evaluation to use instead of the task's latest
 //! - `token`: API key or JWT for private organisations
 
 use axum::extract::{Path, Query, State};
@@ -46,7 +46,7 @@ pub struct BadgeParams {
     pub label: String,
     /// Nix attribute path of a specific entry point (e.g. `packages."x86_64-linux".hello`).
     /// When set the badge reflects that entry point's build status from the latest completed
-    /// evaluation instead of the overall project status.
+    /// evaluation instead of the overall task status.
     pub eval: Option<String>,
     /// API key (`GRADxxxx`) or JWT for accessing a private organisation badge
     /// without a session. Embed in the image URL so external services (GitHub
@@ -287,11 +287,11 @@ async fn check_badge_org_access(
 /// build status in the latest completed evaluation.
 async fn badge_status_for_entry_point(
     state: &Arc<ServerState>,
-    project_id: ProjectId,
+    task_id: TaskId,
     eval_attr: &str,
 ) -> Result<(Option<EvaluationStatus>, bool), WebError> {
     let evaluation = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project_id))
+        .filter(CEvaluation::Task.eq(task_id))
         .filter(CEvaluation::Status.eq(EvaluationStatus::Completed))
         .order_by_desc(CEvaluation::CreatedAt)
         .one(&state.web_db)
@@ -335,13 +335,13 @@ async fn badge_status_for_entry_point(
     Ok((Some(eval_status), has_failed))
 }
 
-/// Badge status for the overall project: use the last evaluation's status and
+/// Badge status for the overall task: use the last evaluation's status and
 /// check whether any entry-point builds failed.
 async fn badge_status_for_latest_eval(
     state: &Arc<ServerState>,
-    project: &MProject,
+    task: &MTask,
 ) -> Result<(Option<EvaluationStatus>, bool), WebError> {
-    let Some(eval_id) = project.last_evaluation else {
+    let Some(eval_id) = task.last_evaluation else {
         return Ok((None, false));
     };
 
@@ -376,20 +376,20 @@ async fn badge_status_for_latest_eval(
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
-/// Returns a shields.io-compatible SVG status badge for the named project.
+/// Returns a shields.io-compatible SVG status badge for the named task.
 ///
 /// For public organisations the badge is accessible without credentials.
 /// For private organisations supply `?token=GRADxxxx` (an API key) or a JWT
 /// so the URL can be embedded in external tools (GitHub README, Grafana …)
 /// without exposing a session cookie.
-pub async fn get_project_badge(
+pub async fn get_task_badge(
     state: State<Arc<ServerState>>,
     axum::Extension(MaybeUser(maybe_user)): axum::Extension<MaybeUser>,
     axum::Extension(api_key): axum::Extension<MaybeApiKey>,
     axum::Extension(crate::client_ip::ClientIp(client_ip)): axum::Extension<
         crate::client_ip::ClientIp,
     >,
-    Path((organization, project)): Path<(String, String)>,
+    Path((organization, task)): Path<(String, String)>,
     Query(params): Query<BadgeParams>,
 ) -> Result<Response, WebError> {
     let organization = get_any_organization_by_name(&state.db(), organization)
@@ -400,17 +400,17 @@ pub async fn get_project_badge(
         resolve_badge_user(&state, maybe_user, api_key, params.token, client_ip).await?;
     check_badge_org_access(&state, &organization, &resolved_user, resolved_key.as_ref()).await?;
 
-    let project = EProject::find()
-        .filter(CProject::Organization.eq(organization.id))
-        .filter(CProject::Name.eq(&project))
+    let task = ETask::find()
+        .filter(CTask::Organization.eq(organization.id))
+        .filter(CTask::Name.eq(&task))
         .one(&state.web_db)
         .await?
-        .or_not_found("Project")?;
+        .or_not_found("Task")?;
 
     let (status, has_failed_builds) = if let Some(ref eval_attr) = params.eval {
-        badge_status_for_entry_point(&state, project.id, eval_attr).await?
+        badge_status_for_entry_point(&state, task.id, eval_attr).await?
     } else {
-        badge_status_for_latest_eval(&state, &project).await?
+        badge_status_for_latest_eval(&state, &task).await?
     };
 
     let content = badge_for_status(status, has_failed_builds);

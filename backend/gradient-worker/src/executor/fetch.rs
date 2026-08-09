@@ -873,12 +873,12 @@ fn declared_inputs_from_lock(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gradient_proto::messages::FlakeTask;
+    use gradient_proto::messages::FlakeStep;
     use gradient_test_support::fakes::job_reporter::{RecordingJobReporter, ReportedEvent};
 
     fn make_flake_job() -> FlakeJob {
         FlakeJob {
-            tasks: vec![FlakeTask::FetchFlake],
+            steps: vec![FlakeStep::FetchFlake],
             source: FlakeSource::Repository {
                 url: "https://example.com/repo.git".into(),
                 commit: "abc123".into(),
@@ -932,7 +932,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_cached_source_does_not_bail_on_kind() {
         let job = FlakeJob {
-            tasks: vec![FlakeTask::FetchFlake],
+            steps: vec![FlakeStep::FetchFlake],
             source: FlakeSource::Cached {
                 store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source".into(),
             },
@@ -1008,7 +1008,7 @@ mod tests {
         assert!(sha.len() == 40, "expected 40-char SHA, got: {sha}");
 
         let job = FlakeJob {
-            tasks: vec![FlakeTask::FetchFlake],
+            steps: vec![FlakeStep::FetchFlake],
             source: FlakeSource::Repository {
                 url: format!("file://{}", repo_dir.display()),
                 commit: sha,

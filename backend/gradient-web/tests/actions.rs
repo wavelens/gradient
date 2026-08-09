@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for project_action CRUD endpoints.
+//! Integration tests for task_action CRUD endpoints.
 //!
 //! Same pattern as `triggers.rs`: manual Tokio runtime + `axum_test::TestServer`
 //! + `MockDatabase`. The SMTP-disabled test builds its own `ServerState` so it
@@ -13,14 +13,12 @@
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use gradient_entity::{
-    ids::*, organization_user, project, project_action, project_action_delivery,
-};
+use gradient_entity::{ids::*, organization_user, task, task_action, task_action_delivery};
 use gradient_notify::EmailSender;
 use gradient_storage::NarStore;
 use gradient_test_support::cli::{test_cli, test_cli_with_crypt};
 use gradient_test_support::fakes::email::InMemoryEmailSender;
-use gradient_test_support::fixtures::{org, org_id, project_id, test_date, user, user_id};
+use gradient_test_support::fixtures::{org, org_id, task_id, test_date, user, user_id};
 use gradient_test_support::log_storage::NoopLogStorage;
 use gradient_test_support::web::{
     TEST_JWT_SECRET, live_session, make_test_server_with, make_token,
@@ -34,17 +32,17 @@ use uuid::Uuid;
 
 // ── Fixture helpers ────────────────────────────────────────────────────────────
 
-fn action_id() -> ProjectActionId {
-    ProjectActionId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000a1").unwrap())
+fn action_id() -> TaskActionId {
+    TaskActionId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000a1").unwrap())
 }
 
-fn project_row() -> project::Model {
-    project::Model {
-        id: project_id(),
+fn task_row() -> task::Model {
+    task::Model {
+        id: task_id(),
         organization: org_id(),
-        name: "test-project".into(),
+        name: "test-task".into(),
         active: true,
-        display_name: "Test Project".into(),
+        display_name: "Test Task".into(),
         repository: "https://github.com/test/repo".into(),
         wildcard: "*".into(),
         last_check_at: test_date(),
@@ -77,10 +75,10 @@ fn admin_role_row() -> gradient_entity::role::Model {
     }
 }
 
-fn send_mail_action_row() -> project_action::Model {
-    project_action::Model {
+fn send_mail_action_row() -> task_action::Model {
+    task_action::Model {
         id: action_id(),
-        project: project_id(),
+        task: task_id(),
         name: "ops-mail".into(),
         config: json!({
             "type": "send_mail",
@@ -95,10 +93,10 @@ fn send_mail_action_row() -> project_action::Model {
     }
 }
 
-fn web_request_action_row() -> project_action::Model {
-    project_action::Model {
+fn web_request_action_row() -> task_action::Model {
+    task_action::Model {
         id: action_id(),
-        project: project_id(),
+        task: task_id(),
         name: "hook".into(),
         action_type: ActionType::SendWebRequest,
         config: json!({
@@ -128,15 +126,15 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
-fn with_project_member(db: MockDatabase) -> MockDatabase {
+fn with_task_member(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![org()]])
-        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
 }
 
-fn with_project_edit(db: MockDatabase) -> MockDatabase {
+fn with_task_edit(db: MockDatabase) -> MockDatabase {
     db.append_query_results([vec![org()]])
-        .append_query_results([vec![project_row()]])
+        .append_query_results([vec![task_row()]])
         .append_query_results([vec![admin_membership()]])
         .append_query_results([vec![admin_role_row()]])
 }
@@ -181,7 +179,7 @@ fn server_with_email(
     TestServer::new(create_router(state).expect("router"))
 }
 
-const BASE_URL: &str = "/api/v1/projects/test-org/test-project/actions";
+const BASE_URL: &str = "/api/v1/tasks/test-org/test-task/actions";
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -195,11 +193,11 @@ fn list_actions_empty() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_action::Model>::new()]);
+        .append_query_results([Vec::<task_action::Model>::new()]);
 
         let server = make_test_server_with(db.into_connection(), None);
         let res = server
@@ -225,11 +223,11 @@ fn create_send_mail_returns_201_when_smtp_enabled() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_action::Model>::new()])
+        .append_query_results([Vec::<task_action::Model>::new()])
         .append_query_results([vec![send_mail_action_row()]]);
 
         let server = make_test_server_with(db.into_connection(), None);
@@ -265,7 +263,7 @@ fn create_send_mail_422_when_smtp_disabled() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));
@@ -308,11 +306,11 @@ fn create_send_web_request_returns_token_once() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_action::Model>::new()])
+        .append_query_results([Vec::<task_action::Model>::new()])
         .append_query_results([vec![web_request_action_row()]]);
 
         let server = make_test_server_with(db.into_connection(), Some(temp_crypt_secret_file()));
@@ -353,7 +351,7 @@ fn create_forge_status_report_rejects_nonempty_events() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ));
@@ -397,7 +395,7 @@ fn read_action_strips_token_from_config() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -433,7 +431,7 @@ fn update_rejects_action_type_change() {
         let token = make_token(session_id);
 
         // Existing row is send_mail (action_type = 0); PATCH with send_web_request config.
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -484,7 +482,7 @@ fn regenerate_token_returns_new_plaintext() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -517,7 +515,7 @@ fn regenerate_token_rejects_non_web_request_action() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -544,12 +542,12 @@ fn regenerate_token_rejects_non_web_request_action() {
     });
 }
 
-fn delivery_id() -> ProjectActionDeliveryId {
-    ProjectActionDeliveryId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000d1").unwrap())
+fn delivery_id() -> TaskActionDeliveryId {
+    TaskActionDeliveryId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000d1").unwrap())
 }
 
-fn delivery_row() -> project_action_delivery::Model {
-    project_action_delivery::Model {
+fn delivery_row() -> task_action_delivery::Model {
+    task_action_delivery::Model {
         id: delivery_id(),
         action_id: action_id(),
         event: "build.completed".into(),
@@ -573,7 +571,7 @@ fn list_deliveries_excludes_bodies() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -615,7 +613,7 @@ fn get_delivery_detail_includes_bodies() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
@@ -649,14 +647,14 @@ fn list_deliveries_404_on_unknown_action() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_member(with_auth(
+        let db = with_task_member(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_action::Model>::new()]);
+        .append_query_results([Vec::<task_action::Model>::new()]);
 
         let server = make_test_server_with(db.into_connection(), None);
-        let unknown_id = ProjectActionId::now_v7();
+        let unknown_id = TaskActionId::now_v7();
         let url = format!("{}/{}/deliveries", BASE_URL, unknown_id);
         let res = server
             .get(&url)
@@ -679,14 +677,14 @@ fn delete_returns_404_when_unknown() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        let db = with_project_edit(with_auth(
+        let db = with_task_edit(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        .append_query_results([Vec::<project_action::Model>::new()]);
+        .append_query_results([Vec::<task_action::Model>::new()]);
 
         let server = make_test_server_with(db.into_connection(), None);
-        let unknown_id = ProjectActionId::now_v7();
+        let unknown_id = TaskActionId::now_v7();
         let url = format!("{}/{}", BASE_URL, unknown_id);
         let res = server
             .delete(&url)

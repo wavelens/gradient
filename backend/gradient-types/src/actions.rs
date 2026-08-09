@@ -7,7 +7,7 @@
 use crate::ids::IntegrationId;
 use serde::{Deserialize, Serialize};
 
-pub use gradient_entity::project_action::ActionType;
+pub use gradient_entity::task_action::ActionType;
 
 /// Which [`crate::actions`] patch generator an `OpenPr` action runs.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

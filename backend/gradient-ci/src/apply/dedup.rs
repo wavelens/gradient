@@ -19,7 +19,7 @@ use sea_orm::{ConnectionTrait, EntityTrait};
 /// Time triggers and manual fires bypass the check entirely (returns `false`).
 pub(super) async fn skip_for_same_commit<C: ConnectionTrait>(
     db: &C,
-    project: &MProject,
+    task: &MTask,
     input: &ApplyInput,
     in_flight: Option<&MEvaluation>,
 ) -> Result<bool, sea_orm::DbErr> {
@@ -35,7 +35,7 @@ pub(super) async fn skip_for_same_commit<C: ConnectionTrait>(
         return Ok(true);
     }
 
-    if let Some(prev) = project.last_evaluation
+    if let Some(prev) = task.last_evaluation
         && let Some(prev_eval) = EEvaluation::find_by_id(prev).one(db).await?
         && let Some(prev_commit) = ECommit::find_by_id(prev_eval.commit).one(db).await?
         && prev_commit.hash == input.commit_hash

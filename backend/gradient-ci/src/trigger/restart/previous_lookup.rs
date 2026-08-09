@@ -8,16 +8,16 @@ use crate::trigger::TriggerError;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
 
-/// Loads the most recent evaluation for `project_id` together with its entry
+/// Loads the most recent evaluation for `task_id` together with its entry
 /// points. Restart no longer pre-creates per-eval build rows; the new eval
 /// re-resolves anchors when it runs, so we only need the entry-point
 /// derivations to seed it.
 pub(super) async fn previous_evaluation_with_entry_points<C: ConnectionTrait>(
     db: &C,
-    project_id: ProjectId,
+    task_id: TaskId,
 ) -> Result<(MEvaluation, Vec<MEntryPoint>), TriggerError> {
     let prev_eval = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project_id))
+        .filter(CEvaluation::Task.eq(task_id))
         .order_by_desc(CEvaluation::CreatedAt)
         .one(db)
         .await?

@@ -45,7 +45,7 @@ Chain multiple `.append_query_results` for handlers that run several queries.
 
 ### External Processes - trait injection
 
-`execute_build` (builder) and `check_project_updates` (core) shell out to `nix` and `git`
+`execute_build` (builder) and `check_task_updates` (core) shell out to `nix` and `git`
 via `tokio::process::Command`. These cannot be tested without real binaries **unless** the
 call site is abstracted behind a trait.
 
@@ -100,17 +100,17 @@ Do NOT assert every JSON field - that re-tests serde. Only assert on values the 
 computes (aggregations, transformations, IDs it creates).
 
 ```rust
-// web/tests/projects.rs
+// web/tests/tasks.rs
 #[tokio::test]
-async fn get_project_metrics_empty_returns_empty_points() {
-    // DB: project found, then no completed evaluations
+async fn get_task_metrics_empty_returns_empty_points() {
+    // DB: task found, then no completed evaluations
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![common::project(common::org().id)]])
+        .append_query_results([vec![common::task(common::org().id)]])
         .append_query_results([Vec::<evaluation::Model>::new()])
         .into_connection();
 
     let resp = common::server(db).await
-        .get("/api/v1/projects/test-org/test-project/metrics")
+        .get("/api/v1/tasks/test-org/test-task/metrics")
         .add_header("Authorization", common::bearer_token())
         .await;
 
@@ -125,7 +125,7 @@ async fn get_project_metrics_empty_returns_empty_points() {
 | Function | What to cover |
 |---|---|
 | `builder::scheduler::evaluation::gc_old_evaluations` | Keeps exactly `keep` evals; deletes oldest; nulls cross-references before deleting to avoid cascade issues |
-| `web::endpoints::projects` - metrics aggregation | `build_time_total_ms` sums only Completed builds; falls back to timestamp diff when `build_time_ms` is NULL |
+| `web::endpoints::tasks` - metrics aggregation | `build_time_total_ms` sums only Completed builds; falls back to timestamp diff when `build_time_ms` is NULL |
 | `web::endpoints::auth` - login | Wrong password → 401; correct → response contains token |
 
 ---
@@ -200,9 +200,9 @@ pub fn db_with<T: sea_orm::IntoMockRow>(rows: Vec<T>) -> DatabaseConnection {
 
 // Fixture builders - deterministic values, easy to read in assertions
 pub fn org() -> organization::Model { ... }
-pub fn project(org_id: Uuid) -> project::Model { ... }
+pub fn task(org_id: Uuid) -> task::Model { ... }
 pub fn user() -> user::Model { ... }
-pub fn evaluation(project_id: Uuid) -> evaluation::Model { ... }
+pub fn evaluation(task_id: Uuid) -> evaluation::Model { ... }
 pub fn build(eval_id: Uuid) -> build::Model { ... }
 ```
 
@@ -251,7 +251,7 @@ web/
       mod.rs        ← test_cli(), test_state(), server(), bearer_token(), fixtures
     auth.rs         ← register / login / logout flows
     orgs.rs         ← CRUD, member management, auth enforcement
-    projects.rs     ← CRUD, metrics, keep_evaluations GC
+    tasks.rs     ← CRUD, metrics, keep_evaluations GC
     builds.rs       ← status queries, log endpoints
     evals.rs        ← evaluation actions, build listing
 
@@ -275,4 +275,4 @@ entity/
 3. For a handler test: pre-load **only** the DB rows that handler will query, in order.
 4. Assert on **computed values** only - not on IDs or timestamps you inserted.
 5. Name the test `<subject>_<condition>_<expected_outcome>`, e.g.
-   `get_project_metrics_no_evals_returns_empty_points`.
+   `get_task_metrics_no_evals_returns_empty_points`.

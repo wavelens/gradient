@@ -29,10 +29,10 @@ in {
         description = "Path to file containing the API key for authenticating deployment requests";
       };
 
-      project = lib.mkOption {
+      task = lib.mkOption {
         type = lib.types.str;
-        description = "Project identifier for the deployments";
-        example = "my-org/my-project";
+        description = "Task identifier for the deployments";
+        example = "my-org/my-task";
       };
 
       # TODO:
@@ -119,16 +119,16 @@ in {
 
           API_KEY=$(cat ${cfg.apiKeyFile})
 
-          # Entry points of the project's latest evaluation are the candidate deployments.
+          # Entry points of the task's latest evaluation are the candidate deployments.
           ENTRY_POINTS=$(curl --silent --fail --max-time 10 \
             --header "Authorization: Bearer $API_KEY" \
-            "${cfg.server}/api/v1/projects/${cfg.project}/entry-points"
+            "${cfg.server}/api/v1/tasks/${cfg.task}/entry-points"
             )
 
           BUILD_IDS=$(echo "$ENTRY_POINTS" | jq -r \
             '.message[] | select(.build_status == "Completed" or .build_status == "Substituted") | .build_id')
           if [ -z "$BUILD_IDS" ]; then
-            echo "No successfully built entry points for project ${cfg.project}"
+            echo "No successfully built entry points for task ${cfg.task}"
             exit 0
           fi
 
@@ -153,7 +153,7 @@ in {
           done
 
           if [ -z "$DEPLOYMENT_STORE_PATH" ]; then
-            echo "No deployment found for project ${cfg.project} and server ${cfg.deployFor}"
+            echo "No deployment found for task ${cfg.task} and server ${cfg.deployFor}"
             exit 0
           fi
 

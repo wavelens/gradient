@@ -51,7 +51,7 @@ pub enum ApplyError {
 }
 
 pub struct ApplyInput {
-    pub trigger_id: ProjectTriggerId,
+    pub trigger_id: TaskTriggerId,
     pub trigger_type: TriggerType,
     pub commit_hash: Vec<u8>,
     pub commit_message: Option<String>,
@@ -66,13 +66,13 @@ pub struct ApplyInput {
     pub gate_approval: Option<ApprovalInfo>,
     /// Override the evaluation's `repository` URL. Used by the PR webhook layer
     /// so commits on a fork are fetched from the fork's clone URL instead of
-    /// `project.repository` (which only has the base repo's history). `None`
-    /// falls back to `project.repository`.
+    /// `task.repository` (which only has the base repo's history). `None`
+    /// falls back to `task.repository`.
     pub repository_override: Option<String>,
     /// Override the evaluation's `wildcard` attribute pattern. Used by
     /// `/gradient run <wildcard>` so a maintainer can re-target a single
-    /// run without editing project config. `None` falls back to
-    /// `project.wildcard`.
+    /// run without editing task config. `None` falls back to
+    /// `task.wildcard`.
     pub wildcard_override: Option<String>,
     /// Records the PR comment that triggered this evaluation. Persisted
     /// in `evaluation.source_comment` so the terminal-status reporter can
@@ -93,14 +93,14 @@ pub struct ApprovalInfo {
 
 pub async fn apply_trigger<C: ConnectionTrait>(
     db: &C,
-    project: &MProject,
+    task: &MTask,
     input: ApplyInput,
 ) -> Result<ApplyOutcome, ApplyError> {
     // Find any in-flight evaluation up-front; we use it for dedup against the
     // currently-running commit AND for the concurrency policy below. Scoped to
     // non-concurrent evals: a concurrent run (e.g. an `input_update` flake bump)
     // is orthogonal to normal CI and must not be aborted by, or dedup-block, a
-    // normal trigger. Mirrors the `uq_evaluation_one_active_per_project` partial
+    // normal trigger. Mirrors the `uq_evaluation_one_active_per_task` partial
     // index, which likewise excludes `concurrent` rows.
     let active_codes: Vec<i32> = EvaluationStatus::ACTIVE
         .iter()
@@ -108,23 +108,23 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         .map(i32::from)
         .collect();
     let in_flight = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project.id))
+        .filter(CEvaluation::Task.eq(task.id))
         .filter(CEvaluation::Status.is_in(active_codes))
         .filter(CEvaluation::Concurrent.eq(false))
         .one(db)
         .await?;
 
-    if dedup::skip_for_same_commit(db, project, &input, in_flight.as_ref()).await? {
+    if dedup::skip_for_same_commit(db, task, &input, in_flight.as_ref()).await? {
         return Ok(ApplyOutcome::SkippedSameCommit);
     }
 
-    let Some(decision) = concurrency::resolve_concurrency(db, project, in_flight).await? else {
+    let Some(decision) = concurrency::resolve_concurrency(db, task, in_flight).await? else {
         return Ok(ApplyOutcome::SkippedConcurrency);
     };
 
     let eval = match trigger_evaluation(
         db,
-        project,
+        task,
         input.commit_hash,
         input.commit_message,
         input.author_name,
@@ -140,8 +140,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         Ok(e) => e,
         Err(TriggerError::AlreadyInProgress) => return Ok(ApplyOutcome::SkippedConcurrency),
         Err(TriggerError::Db(ref e))
-            if e.to_string()
-                .contains("uq_evaluation_one_active_per_project") =>
+            if e.to_string().contains("uq_evaluation_one_active_per_task") =>
         {
             return Ok(ApplyOutcome::SkippedConcurrency);
         }
@@ -152,7 +151,7 @@ pub async fn apply_trigger<C: ConnectionTrait>(
         db,
         eval,
         input.gate_approval.as_ref(),
-        project.organization,
+        task.organization,
         input.instance_max_storage_gb,
     )
     .await?;

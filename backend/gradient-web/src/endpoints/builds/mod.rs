@@ -41,7 +41,7 @@ use std::sync::Arc;
 /// Resolved access context for a per-eval build (`build_job`).
 ///
 /// The public build identity is the `build_job` id; build state lives on the
-/// shared `derivation_build` anchor. Walks build_job -> evaluation -> project ->
+/// shared `derivation_build` anchor. Walks build_job -> evaluation -> task ->
 /// organization and enforces the access check. Returns `not_found("Build")` on
 /// any failure so callers cannot distinguish missing from forbidden.
 pub(super) struct BuildAccessContext {
@@ -87,18 +87,18 @@ impl BuildAccessContext {
                 WebError::data_inconsistency("Build")
             })?;
 
-        let project_id = evaluation.project.ok_or_else(|| {
-            tracing::warn!(evaluation_id = %evaluation.id, "evaluation has no project");
+        let task_id = evaluation.task.ok_or_else(|| {
+            tracing::warn!(evaluation_id = %evaluation.id, "evaluation has no task");
             WebError::data_inconsistency("Evaluation")
         })?;
-        let organization_id = EProject::find_by_id(project_id)
+        let organization_id = ETask::find_by_id(task_id)
             .one(&state.web_db)
             .await?
             .ok_or_else(|| {
                 tracing::warn!(
-                    %project_id,
+                    %task_id,
                     evaluation_id = %evaluation.id,
-                    "Project not found for evaluation",
+                    "Task not found for evaluation",
                 );
                 WebError::data_inconsistency("Evaluation")
             })?
@@ -176,10 +176,10 @@ async fn reachable_orgs_accessible(
 
     let mut org_ids: std::collections::HashSet<OrganizationId> = std::collections::HashSet::new();
     for ev in evals {
-        let Some(project_id) = ev.project else {
+        let Some(task_id) = ev.task else {
             continue;
         };
-        if let Some(p) = EProject::find_by_id(project_id).one(&state.web_db).await? {
+        if let Some(p) = ETask::find_by_id(task_id).one(&state.web_db).await? {
             org_ids.insert(p.organization);
         }
     }

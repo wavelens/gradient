@@ -47,7 +47,7 @@ pub struct GradientCapabilities {
 
 // ── Job types ────────────────────────────────────────────────────────────────
 
-/// A job is an ordered sequence of tasks.  If any task fails, the rest are
+/// A job is an ordered sequence of steps.  If any step fails, the rest are
 /// skipped and the job is reported as failed.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
@@ -59,7 +59,7 @@ pub enum Job {
 /// Where to obtain the flake source for a [`FlakeJob`].
 ///
 /// `Repository` requires the worker to have the `fetch` capability and the
-/// `FetchFlake` task in `tasks`. `Cached` is used for eval-only follow-up
+/// `FetchFlake` step in `steps`. `Cached` is used for eval-only follow-up
 /// jobs dispatched after a fetch-capable worker has already archived the
 /// source into the cache.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -74,7 +74,7 @@ pub enum FlakeSource {
 #[rkyv(derive(Debug, PartialEq))]
 pub struct FlakeInputOverride {
     pub input_name: String,
-    /// `None` keeps the URL from the project's flake but still forces an update.
+    /// `None` keeps the URL from the task's flake but still forces an update.
     pub url: Option<String>,
 }
 
@@ -106,7 +106,7 @@ pub struct BumpedInputWire {
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct FlakeJob {
-    pub tasks: Vec<FlakeTask>,
+    pub steps: Vec<FlakeStep>,
     pub source: FlakeSource,
     pub wildcards: Vec<String>,
     pub timeout_secs: Option<u64>,
@@ -118,7 +118,7 @@ pub struct FlakeJob {
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
-pub enum FlakeTask {
+pub enum FlakeStep {
     FetchFlake,
     EvaluateFlake,
     EvaluateDerivations,
@@ -130,12 +130,12 @@ pub enum FlakeTask {
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
 pub struct BuildJob {
-    pub builds: Vec<BuildTask>,
+    pub builds: Vec<BuildSpec>,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[rkyv(derive(Debug, PartialEq))]
-pub struct BuildTask {
+pub struct BuildSpec {
     pub build_id: String,
     pub drv_path: String,
     /// When `true` the build's outputs are known to be available from an

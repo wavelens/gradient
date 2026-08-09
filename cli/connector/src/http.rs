@@ -1,5 +1,5 @@
-use crate::auth::CliPollOutcome;
 use crate::ConnectorError;
+use crate::auth::CliPollOutcome;
 use reqwest::{Method, RequestBuilder, Response};
 use serde::de::DeserializeOwned;
 

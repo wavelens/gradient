@@ -7,11 +7,11 @@
 //! Generic webhook fan-out: match active triggers, gate on approval, apply.
 
 use super::approval::{PullRequestApprovalContext, sender_is_trusted};
-use super::installation::event_repo_matches_project;
-use super::response::{QueuedEvaluation, SkippedProject, WebhookTriggerOutcome};
+use super::installation::event_repo_matches_task;
+use super::response::{QueuedEvaluation, SkippedTask, WebhookTriggerOutcome};
 use gradient_ci::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, parse_owner_repo};
 use gradient_core::ServerState;
-use gradient_entity::project_trigger as ept;
+use gradient_entity::task_trigger as ept;
 use gradient_scheduler::Scheduler;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
@@ -253,11 +253,11 @@ where
         let Some(cfg) = parse_trigger_config(&trig) else {
             continue;
         };
-        let Some(project) = load_trigger_project(state, &trig).await else {
+        let Some(task) = load_trigger_task(state, &trig).await else {
             continue;
         };
 
-        if !event_repo_matches_project(event_repo_urls, &project.repository) {
+        if !event_repo_matches_task(event_repo_urls, &task.repository) {
             continue;
         }
 
@@ -266,23 +266,23 @@ where
             continue;
         }
 
-        let org_name = org_name_for(state, project.organization)
+        let org_name = org_name_for(state, task.organization)
             .await
             .unwrap_or_default();
 
         let pr_require_approval = match filter_result {
             FilterResult::SkipFilter => {
-                push_skipped(&mut outcome, &project, org_name, "filter");
+                push_skipped(&mut outcome, &task, org_name, "filter");
                 continue;
             }
             FilterResult::Fire => false,
             FilterResult::FirePr { require_approval } => require_approval,
             FilterResult::Skip => continue,
         };
-        outcome.projects_scanned += 1;
+        outcome.tasks_scanned += 1;
 
         let gate_approval = if pr_require_approval {
-            decide_pr_gate(state, &project, approval_ctx.as_ref()).await
+            decide_pr_gate(state, &task, approval_ctx.as_ref()).await
         } else {
             None
         };
@@ -304,7 +304,7 @@ where
         apply_and_record(
             state,
             scheduler,
-            &project,
+            &task,
             &trig,
             input,
             org_name,
@@ -325,15 +325,15 @@ fn parse_trigger_config(trig: &ept::Model) -> Option<TriggerConfig> {
     }
 }
 
-async fn load_trigger_project(state: &Arc<ServerState>, trig: &ept::Model) -> Option<MProject> {
-    match EProject::find_by_id(trig.project).one(&state.web_db).await {
+async fn load_trigger_task(state: &Arc<ServerState>, trig: &ept::Model) -> Option<MTask> {
+    match ETask::find_by_id(trig.task).one(&state.web_db).await {
         Ok(Some(p)) => Some(p),
         Ok(None) => {
-            warn!(trigger_id = %trig.id, project_id = %trig.project, "project not found for trigger");
+            warn!(trigger_id = %trig.id, task_id = %trig.task, "task not found for trigger");
             None
         }
         Err(e) => {
-            warn!(error = %e, trigger_id = %trig.id, "DB error fetching project for trigger");
+            warn!(error = %e, trigger_id = %trig.id, "DB error fetching task for trigger");
             None
         }
     }
@@ -344,13 +344,13 @@ async fn load_trigger_project(state: &Arc<ServerState>, trig: &ept::Model) -> Op
 async fn apply_and_record(
     state: &Arc<ServerState>,
     scheduler: &Arc<Scheduler>,
-    project: &MProject,
+    task: &MTask,
     trig: &ept::Model,
     input: ApplyInput,
     org_name: String,
     outcome: &mut WebhookTriggerOutcome,
 ) {
-    let apply_result = apply_trigger(&state.web_db, project, input).await;
+    let apply_result = apply_trigger(&state.web_db, task, input).await;
     touch_trigger_last_fired(state, trig).await;
     match apply_result {
         Ok(ApplyOutcome::Created {
@@ -364,40 +364,33 @@ async fn apply_and_record(
                     .await;
             }
             info!(
-                project_id = %project.id,
+                task_id = %task.id,
                 evaluation_id = %eval.id,
                 "forge webhook trigger fired"
             );
             gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
             outcome.queued.push(QueuedEvaluation {
-                project_id: project.id,
-                project_name: project.name.clone(),
+                task_id: task.id,
+                task_name: task.name.clone(),
                 organization: org_name,
                 evaluation_id: eval.id,
             });
         }
-        Ok(ApplyOutcome::SkippedSameCommit) => {
-            push_skipped(outcome, project, org_name, "same_commit")
-        }
+        Ok(ApplyOutcome::SkippedSameCommit) => push_skipped(outcome, task, org_name, "same_commit"),
         Ok(ApplyOutcome::SkippedConcurrency) => {
-            push_skipped(outcome, project, org_name, "concurrency")
+            push_skipped(outcome, task, org_name, "concurrency")
         }
         Err(e) => {
-            warn!(error = %e, project_id = %project.id, "apply_trigger failed in webhook fan-out");
-            push_skipped(outcome, project, org_name, "error");
+            warn!(error = %e, task_id = %task.id, "apply_trigger failed in webhook fan-out");
+            push_skipped(outcome, task, org_name, "error");
         }
     }
 }
 
-fn push_skipped(
-    outcome: &mut WebhookTriggerOutcome,
-    project: &MProject,
-    org_name: String,
-    reason: &str,
-) {
-    outcome.skipped.push(SkippedProject {
-        project_id: project.id,
-        project_name: project.name.clone(),
+fn push_skipped(outcome: &mut WebhookTriggerOutcome, task: &MTask, org_name: String, reason: &str) {
+    outcome.skipped.push(SkippedTask {
+        task_id: task.id,
+        task_name: task.name.clone(),
         organization: org_name,
         reason: reason.into(),
     });
@@ -408,15 +401,15 @@ fn push_skipped(
 /// repo writer (a maintainer force-push / command runs without re-parking).
 async fn decide_pr_gate(
     state: &Arc<ServerState>,
-    project: &MProject,
+    task: &MTask,
     ctx: Option<&PullRequestApprovalContext>,
 ) -> Option<ApprovalInfo> {
     let ctx = ctx?;
     let sender_trusted = match ctx.sender.as_deref() {
         Some(sender) if !matches!(ctx.is_fork, Some(false)) => {
-            match parse_owner_repo(&project.repository) {
+            match parse_owner_repo(&task.repository) {
                 Some((owner, repo)) => {
-                    sender_is_trusted(state, project.id, &owner, &repo, sender).await
+                    sender_is_trusted(state, task.id, &owner, &repo, sender).await
                 }
                 None => false,
             }
@@ -457,8 +450,8 @@ async fn load_active_triggers_for_integration(
     let stmt = Statement::from_sql_and_values(
         DbBackend::Postgres,
         format!(
-            "SELECT pt.* FROM project_trigger pt \
-             JOIN project p ON pt.project = p.id \
+            "SELECT pt.* FROM task_trigger pt \
+             JOIN task p ON pt.task = p.id \
              JOIN integration i ON i.organization = p.organization \
              WHERE pt.active = true \
                AND pt.trigger_type = {} \
@@ -467,7 +460,7 @@ async fn load_active_triggers_for_integration(
         ),
         [Value::Uuid(Some(Box::new(integration_id.into_inner())))],
     );
-    EProjectTrigger::find()
+    ETaskTrigger::find()
         .from_raw_sql(stmt)
         .all(&state.web_db)
         .await
@@ -585,7 +578,7 @@ mod tests {
     #[test]
     fn trigger_outcome_default_is_empty() {
         let o = WebhookTriggerOutcome::default();
-        assert_eq!(o.projects_scanned, 0);
+        assert_eq!(o.tasks_scanned, 0);
         assert!(o.queued.is_empty());
         assert!(o.skipped.is_empty());
     }

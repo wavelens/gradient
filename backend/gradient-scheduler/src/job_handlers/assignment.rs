@@ -174,7 +174,7 @@ async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: 
         kind: rec.kind,
         evaluation_id: rec.evaluation_id,
         organization: rec.organization,
-        project: rec.project,
+        task: rec.task,
         worker_id: worker_id.to_owned(),
         score: rec.score,
         queued_at: rec.queued_at,

@@ -31,7 +31,7 @@ impl ErrorCollector {
 }
 
 /// Read-only view over the configuration shared by every per-entity validator,
-/// providing the cross-entity existence checks (a project's organization, a
+/// providing the cross-entity existence checks (a task's organization, a
 /// role's owning user, …) and direct access to the maps for in-entity checks.
 pub(super) struct EntityLookup<'a> {
     pub(super) config: &'a StateConfiguration,

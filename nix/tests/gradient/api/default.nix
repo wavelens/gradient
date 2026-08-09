@@ -50,7 +50,7 @@ in {
             cryptSecretFile = toString (pkgs.writeText "cryptSecret" "aW52YWxpZC1pbnZhbGlkLWludmFsaWQK");
             settings = {
               logLevel.default = "debug";
-              # Below the per-project default, so a freshly created project is
+              # Below the per-task default, so a freshly created task is
               # forced to start at the maximum rather than above it (#561).
               keepEvaluations = 5;
             };
@@ -86,9 +86,9 @@ in {
                 permissions = [ "viewOrg" "triggerEvaluation" ];
               };
 
-              projects.stateproject = {
+              tasks.statetask = {
                 organization = "stateorg";
-                display_name = "State Project";
+                display_name = "State Task";
                 repository = "git@github.com:Wavelens/Gradient.git";
                 wildcard = "packages.x86_64-linux.*";
                 concurrency = "hard_abort";

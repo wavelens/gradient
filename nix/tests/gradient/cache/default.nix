@@ -120,8 +120,8 @@ in {
                 };
               };
 
-              projects = {
-                project = {
+              tasks = {
+                task = {
                   organization = "org";
                   repository = "git://server/test";
                   created_by = "admin";
@@ -336,7 +336,7 @@ in {
       print(server.succeed(f"{GIT} ls-remote git://server/test"))
 
       # ── Phase 3: log in and configure the CLI ─────────────────────────────
-      banner("Phase 3: authenticate and select project")
+      banner("Phase 3: authenticate and select task")
       login_body = '{"loginname": "admin", "password": "admin_password"}'
       token = server.succeed(
           f"{CURL} -X POST -H 'Content-Type: application/json' "
@@ -347,17 +347,17 @@ in {
       server.succeed(f"{CLI} config Server http://gradient.local")
       server.succeed(f"{CLI} config AuthToken {token}")
       server.succeed(f"{CLI} organization select org")
-      server.succeed(f"{CLI} project select project")
+      server.succeed(f"{CLI} task select task")
 
-      # First `project show` is best-effort: the project may already have a
+      # First `task show` is best-effort: the task may already have a
       # Queued evaluation, which the CLI exits 1 on. Use `execute` so a
       # transient non-zero exit doesn't abort the whole test.
       server.sleep(10)
-      _, output = server.execute(f"{CLI} project show")
+      _, output = server.execute(f"{CLI} task show")
       print(output)
 
       # ── Phase 4: wait for the server to notice the new commit ─────────────
-      # Project poll cycle is configured to 10 s in the state above; we poll
+      # Task poll cycle is configured to 10 s in the state above; we poll
       # in 15 s slices so a panic shows up instantly instead of after the
       # full timeout.
       banner("Phase 4: wait for repository detection")
@@ -384,12 +384,12 @@ in {
           server.sleep(10)
           assert_no_server_panic(since_seconds=15)
 
-          print("  DEBUG get_project: " + server.succeed(
-              f'{CURL} -s -w " [HTTP %{{http_code}}]" -H "Authorization: Bearer {token}" {API}/projects/org/project'
+          print("  DEBUG get_task: " + server.succeed(
+              f'{CURL} -s -w " [HTTP %{{http_code}}]" -H "Authorization: Bearer {token}" {API}/tasks/org/task'
           ))
           eval_id = server.succeed(
               f'{CURL} -sf -H "Authorization: Bearer {token}" '
-              f'{API}/projects/org/project | {JQ} -rj ".message.last_evaluation // empty"'
+              f'{API}/tasks/org/task | {JQ} -rj ".message.last_evaluation // empty"'
           ).strip()
           if not eval_id:
               if attempt % 3 == 0:
@@ -449,7 +449,7 @@ in {
 
       # ── Phase 6: extract hello's `.drv` from the eval's build list ────────
       # We hit `/evals/{id}/builds` directly with the eval_id already pinned
-      # by Phase 5; screen-scraping `gradient project show` is too brittle
+      # by Phase 5; screen-scraping `gradient task show` is too brittle
       # (polling can rotate `last_evaluations[0]` to a fresh Queued eval
       # between phases, and the CLI then errors on the eval-detail fetch
       # before reaching the Building section).

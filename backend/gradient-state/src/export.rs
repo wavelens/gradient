@@ -6,7 +6,7 @@
 
 //! Reconstruct a [`StateConfiguration`] from the live database - the inverse of
 //! the provisioner in [`super::provisioning`]. Powers `GET /admin/state`, which
-//! lets operators read the current users / orgs / projects / caches / etc. back
+//! lets operators read the current users / orgs / tasks / caches / etc. back
 //! into a declarative `services.gradient.state` block.
 //!
 //! Secrets are never recoverable from the DB (passwords and worker tokens are
@@ -16,8 +16,8 @@
 
 use super::{
     StateApiKey, StateCache, StateCacheMemberEntry, StateCacheRoleEntry, StateConfiguration,
-    StateFlakeInputOverride, StateIntegration, StateOrgMemberEntry, StateOrganization,
-    StateProject, StateRole, StateTrigger, StateUpstream, StateUser, StateWorker,
+    StateFlakeInputOverride, StateIntegration, StateOrgMemberEntry, StateOrganization, StateRole,
+    StateTask, StateTrigger, StateUpstream, StateUser, StateWorker,
 };
 use gradient_ci::IntegrationKind;
 use gradient_db::permissions::{
@@ -45,17 +45,17 @@ const SECRET_KEYS: &[&str] = &[
 /// Build the full declarative state from every relevant table.
 ///
 /// This is a snapshot of the live system, not just state-managed rows: every
-/// user, org, project, cache, custom role, api key, worker and integration is
+/// user, org, task, cache, custom role, api key, worker and integration is
 /// included so the operator can codify the current system into nix. Rows the
 /// operator cannot hand-author are excluded - the auto-managed `build-request`
-/// project, the server-managed GitHub integration rows, and the built-in
+/// task, the server-managed GitHub integration rows, and the built-in
 /// `Admin`/`Write`/`View` roles.
 pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfiguration, DbErr> {
     let users = gradient_entity::user::Entity::find().all(db).await?;
     let orgs = gradient_entity::organization::Entity::find()
         .all(db)
         .await?;
-    let projects = gradient_entity::project::Entity::find().all(db).await?;
+    let tasks = gradient_entity::task::Entity::find().all(db).await?;
     let caches = gradient_entity::cache::Entity::find().all(db).await?;
     let roles = gradient_entity::role::Entity::find().all(db).await?;
     let cache_roles = gradient_entity::cache_role::Entity::find().all(db).await?;
@@ -78,13 +78,11 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let upstreams = gradient_entity::cache_upstream::Entity::find()
         .all(db)
         .await?;
-    let triggers = gradient_entity::project_trigger::Entity::find()
+    let triggers = gradient_entity::task_trigger::Entity::find()
         .all(db)
         .await?;
-    let actions = gradient_entity::project_action::Entity::find()
-        .all(db)
-        .await?;
-    let overrides = gradient_entity::project_flake_input_override::Entity::find()
+    let actions = gradient_entity::task_action::Entity::find().all(db).await?;
+    let overrides = gradient_entity::task_flake_input_override::Entity::find()
         .all(db)
         .await?;
     let github_installs = gradient_entity::github_installation::Entity::find()
@@ -102,7 +100,7 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
     let mut config = StateConfiguration {
         users: HashMap::new(),
         organizations: HashMap::new(),
-        projects: HashMap::new(),
+        tasks: HashMap::new(),
         caches: HashMap::new(),
         roles: HashMap::new(),
         api_keys: HashMap::new(),
@@ -151,23 +149,23 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
         );
     }
 
-    for p in &projects {
+    for p in &tasks {
         if p.managed && p.name == "build-request" {
             continue;
         }
-        let project_triggers: Vec<StateTrigger> = triggers
+        let task_triggers: Vec<StateTrigger> = triggers
             .iter()
-            .filter(|t| t.project == p.id)
+            .filter(|t| t.task == p.id)
             .filter_map(|t| export_trigger(t, &integration_name))
             .collect();
-        let project_actions = actions
+        let task_actions = actions
             .iter()
-            .filter(|a| a.project == p.id)
+            .filter(|a| a.task == p.id)
             .filter_map(|a| export_action(a, &integration_name))
             .collect();
         let flake_input_overrides = overrides
             .iter()
-            .filter(|o| o.project == p.id)
+            .filter(|o| o.task == p.id)
             .map(|o| {
                 (
                     o.input_name.clone(),
@@ -178,9 +176,9 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 )
             })
             .collect();
-        config.projects.insert(
+        config.tasks.insert(
             p.name.clone(),
-            StateProject {
+            StateTask {
                 name: p.name.clone(),
                 organization: name_or_blank(&org_name, p.organization),
                 display_name: p.display_name.clone(),
@@ -190,11 +188,11 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 active: p.active,
                 created_by: name_or_blank(&username, p.created_by),
                 keep_evaluations: p.keep_evaluations,
-                triggers: (!project_triggers.is_empty()).then_some(project_triggers),
+                triggers: (!task_triggers.is_empty()).then_some(task_triggers),
                 concurrency: p.concurrency,
                 sign_cache: p.sign_cache,
                 flake_input_overrides,
-                actions: project_actions,
+                actions: task_actions,
             },
         );
     }
@@ -405,7 +403,7 @@ fn export_base_worker(
 }
 
 fn export_trigger(
-    t: &gradient_entity::project_trigger::Model,
+    t: &gradient_entity::task_trigger::Model,
     integration_name: &HashMap<IntegrationId, String>,
 ) -> Option<StateTrigger> {
     let cfg = TriggerConfig::parse_row(t.trigger_type, &t.config).ok()?;
@@ -476,7 +474,7 @@ fn enum_str<T: serde::Serialize>(value: &T) -> String {
 }
 
 fn export_action(
-    a: &gradient_entity::project_action::Model,
+    a: &gradient_entity::task_action::Model,
     integration_name: &HashMap<IntegrationId, String>,
 ) -> Option<super::StateAction> {
     let cfg: ActionConfig = serde_json::from_value(a.config.clone()).ok()?;

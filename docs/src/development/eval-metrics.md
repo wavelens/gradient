@@ -32,9 +32,9 @@ served back as a `nix flake show`-like tree for frontend rendering.
 
 ## Self-tuning RAM-to-machine routing
 
-A per-project rolling window takes the p95 of eval `peak_rss_mb` over the last
+A per-task rolling window takes the p95 of eval `peak_rss_mb` over the last
 24h and feeds it to the scheduler's `ResourceFitRule` (see
-[scheduler scoring](scheduler-scoring.md)). A project whose evaluations have
+[scheduler scoring](scheduler-scoring.md)). A task whose evaluations have
 historically needed lots of RAM is routed to big-RAM eval machines, and the
 prediction re-tunes itself as new evals complete - there are no manual
 thresholds.

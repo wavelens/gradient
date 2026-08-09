@@ -72,7 +72,10 @@ mod tests {
 
     #[test]
     fn entry_uses_token_as_password() {
-        assert_eq!(entry("h", "GRADabc"), "machine h\nlogin gradient\npassword GRADabc\n");
+        assert_eq!(
+            entry("h", "GRADabc"),
+            "machine h\nlogin gradient\npassword GRADabc\n"
+        );
     }
 
     #[test]

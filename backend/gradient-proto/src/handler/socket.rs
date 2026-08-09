@@ -58,14 +58,14 @@ pub(super) async fn send_credentials_for_job(
     job: &gradient_types::proto::Job,
     org_id: OrganizationId,
 ) {
-    use gradient_types::proto::{FlakeTask, Job};
+    use gradient_types::proto::{FlakeStep, Job};
 
     let caps = scheduler.worker_gradient_caps(worker_id).await;
     let worker_can_fetch = caps.as_ref().map(|c| c.fetch).unwrap_or(false);
 
     match job {
         Job::Flake(flake_job) => {
-            if worker_can_fetch && flake_job.tasks.contains(&FlakeTask::FetchFlake) {
+            if worker_can_fetch && flake_job.steps.contains(&FlakeStep::FetchFlake) {
                 send_ssh_key_credential(writer, state, org_id).await;
             }
         }

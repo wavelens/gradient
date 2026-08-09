@@ -10,9 +10,7 @@ use super::send::{
 use super::{MAX_BODY_BYTES, truncate};
 use crate::context::CiContext;
 use anyhow::{Context, Result};
-use gradient_types::{
-    ActionConfig, MProjectAction, MProjectActionDelivery, ProjectActionDeliveryId,
-};
+use gradient_types::{ActionConfig, MTaskAction, MTaskActionDelivery, TaskActionDeliveryId};
 use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseBackend, IntoActiveModel, Statement};
 use serde_json::Value as JsonValue;
 use std::time::Instant;
@@ -20,14 +18,14 @@ use tracing::warn;
 
 pub async fn execute_action(
     ctx: &CiContext,
-    action: MProjectAction,
+    action: MTaskAction,
     event: &str,
     payload: JsonValue,
 ) -> Result<()> {
     let cfg: ActionConfig =
         serde_json::from_value(action.config.clone()).context("decoding action config")?;
     let action_id_for_pr = action.id;
-    let project_for_pr = action.project;
+    let task_for_pr = action.task;
     let started = Instant::now();
     let request_body = truncate(
         serde_json::to_string(&payload).unwrap_or_default(),
@@ -67,7 +65,7 @@ pub async fn execute_action(
                 event,
                 &payload,
                 action_id_for_pr,
-                project_for_pr,
+                task_for_pr,
                 integration_id,
                 &branch_pattern,
                 title_template.as_deref(),
@@ -92,8 +90,8 @@ pub async fn execute_action(
     };
 
     let action_id = action.id;
-    let delivery = MProjectActionDelivery {
-        id: ProjectActionDeliveryId::now_v7(),
+    let delivery = MTaskActionDelivery {
+        id: TaskActionDeliveryId::now_v7(),
         action_id,
         event: event.to_string(),
         request_body,
@@ -117,8 +115,8 @@ pub async fn execute_action(
         let stamp = gradient_types::now();
         let update = Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            "UPDATE project_action SET last_fired_at = $1, updated_at = $1 \
-             WHERE id IN (SELECT id FROM project_action WHERE id = $2 FOR UPDATE SKIP LOCKED)",
+            "UPDATE task_action SET last_fired_at = $1, updated_at = $1 \
+             WHERE id IN (SELECT id FROM task_action WHERE id = $2 FOR UPDATE SKIP LOCKED)",
             [
                 stamp.into(),
                 sea_orm::Value::Uuid(Some(Box::new(action_id.into_inner()))),

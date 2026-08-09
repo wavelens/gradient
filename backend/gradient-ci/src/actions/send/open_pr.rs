@@ -16,8 +16,8 @@ use gradient_forge::reporter::parse_owner_repo;
 use gradient_forge::{BranchCommit, CommitFile, CommitIdent};
 use gradient_types::{
     AOpenPrState, CEvaluationInputUpdate, COpenPrState, ECommit, EEvaluation,
-    EEvaluationInputUpdate, EOpenPrState, EProject, EvaluationId, IntegrationId, OpenPrStateId,
-    ProjectActionId, ProjectId,
+    EEvaluationInputUpdate, EOpenPrState, ETask, EvaluationId, IntegrationId, OpenPrStateId,
+    TaskActionId, TaskId,
 };
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
@@ -39,8 +39,8 @@ pub(crate) async fn execute_open_pr(
     ctx: &CiContext,
     _event: &str,
     payload: &JsonValue,
-    action_id: ProjectActionId,
-    project_id: ProjectId,
+    action_id: TaskActionId,
+    task_id: TaskId,
     integration_id: IntegrationId,
     branch_pattern: &str,
     title_template: Option<&str>,
@@ -77,13 +77,13 @@ pub(crate) async fn execute_open_pr(
         return Ok(no_op());
     }
 
-    let project = EProject::find_by_id(project_id)
+    let task = ETask::find_by_id(task_id)
         .one(&ctx.db.worker_db)
         .await
-        .context("loading project")?
-        .ok_or_else(|| anyhow!("project {project_id} not found"))?;
-    let (owner, repo) = parse_owner_repo(&project.repository)
-        .ok_or_else(|| anyhow!("cannot parse owner/repo from {}", project.repository))?;
+        .context("loading task")?
+        .ok_or_else(|| anyhow!("task {task_id} not found"))?;
+    let (owner, repo) = parse_owner_repo(&task.repository)
+        .ok_or_else(|| anyhow!("cannot parse owner/repo from {}", task.repository))?;
 
     let reporter = build_reporter_for_integration(ctx, integration_id).await?;
     let base_branch = reporter
@@ -131,7 +131,7 @@ pub(crate) async fn execute_open_pr(
         .await
         .context("opening pull request")?;
 
-    upsert_open_pr_state(ctx, project_id, action_id, &branch, pr.number, &head_commit).await?;
+    upsert_open_pr_state(ctx, task_id, action_id, &branch, pr.number, &head_commit).await?;
     point_eval_at_pushed_commit(ctx, evaluation_id, &head_commit, &title).await?;
 
     Ok(ExecutorOk {
@@ -165,8 +165,8 @@ fn configured_commit_ident(name: &Option<String>, email: &Option<String>) -> Opt
 
 async fn upsert_open_pr_state(
     ctx: &CiContext,
-    project_id: ProjectId,
-    action_id: ProjectActionId,
+    task_id: TaskId,
+    action_id: TaskActionId,
     branch: &str,
     pr_number: i64,
     head_commit: &str,
@@ -191,7 +191,7 @@ async fn upsert_open_pr_state(
     } else {
         AOpenPrState {
             id: Set(OpenPrStateId::now_v7()),
-            project: Set(project_id),
+            task: Set(task_id),
             action: Set(action_id),
             branch: Set(branch.to_owned()),
             forge_pr_number: Set(Some(pr_number)),
@@ -209,7 +209,7 @@ async fn upsert_open_pr_state(
 }
 
 /// Repoint the `input_update` evaluation at the flake.lock-update commit pushed
-/// to the PR branch, so the project shows the generated commit instead of the
+/// to the PR branch, so the task shows the generated commit instead of the
 /// unrelated base commit it was seeded from.
 async fn point_eval_at_pushed_commit(
     ctx: &CiContext,

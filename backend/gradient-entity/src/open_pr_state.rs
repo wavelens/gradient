@@ -5,22 +5,22 @@
  */
 
 //! PR lifecycle for the `OpenPr` action. One row per
-//! `(project, action, branch)` tracks the open PR so updates reuse the branch
+//! `(task, action, branch)` tracks the open PR so updates reuse the branch
 //! instead of opening duplicates.
 
 use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{OpenPrStateId, ProjectActionId, ProjectId};
+use crate::ids::{OpenPrStateId, TaskActionId, TaskId};
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "open_pr_state")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: OpenPrStateId,
-    pub project: ProjectId,
-    pub action: ProjectActionId,
+    pub task: TaskId,
+    pub action: TaskActionId,
     pub branch: String,
     pub forge_pr_number: Option<i64>,
     pub head_commit: Option<String>,
@@ -33,16 +33,16 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::project::Entity",
-        from = "Column::Project",
-        to = "super::project::Column::Id",
+        belongs_to = "super::task::Entity",
+        from = "Column::Task",
+        to = "super::task::Column::Id",
         on_delete = "Cascade"
     )]
-    Project,
+    Task,
     #[sea_orm(
-        belongs_to = "super::project_action::Entity",
+        belongs_to = "super::task_action::Entity",
         from = "Column::Action",
-        to = "super::project_action::Column::Id",
+        to = "super::task_action::Column::Id",
         on_delete = "Cascade"
     )]
     Action,

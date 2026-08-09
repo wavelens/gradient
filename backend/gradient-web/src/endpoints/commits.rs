@@ -40,17 +40,14 @@ pub async fn get_commit(
 
     let mut org_ids: HashSet<OrganizationId> = HashSet::new();
 
-    let project_ids: Vec<ProjectId> = evaluations.iter().filter_map(|e| e.project).collect();
-    if !project_ids.is_empty() {
+    let task_ids: Vec<TaskId> = evaluations.iter().filter_map(|e| e.task).collect();
+    if !task_ids.is_empty() {
         let db = &state.web_db;
-        let projects = gradient_db::fetch_in_chunks(&project_ids, |chunk| async move {
-            EProject::find()
-                .filter(CProject::Id.is_in(chunk))
-                .all(db)
-                .await
+        let tasks = gradient_db::fetch_in_chunks(&task_ids, |chunk| async move {
+            ETask::find().filter(CTask::Id.is_in(chunk)).all(db).await
         })
         .await?;
-        org_ids.extend(projects.into_iter().map(|p| p.organization));
+        org_ids.extend(tasks.into_iter().map(|p| p.organization));
     }
 
     if org_ids.is_empty() {

@@ -93,18 +93,18 @@ pub async fn cleanup_expired_upload_sessions(state: Arc<ServerState>) -> Result<
 }
 
 pub async fn cleanup_old_evaluations(state: Arc<ServerState>) -> Result<()> {
-    let projects = EProject::find()
+    let tasks = ETask::find()
         .all(&state.worker_db)
         .await
-        .context("Failed to query projects for evaluation GC")?;
+        .context("Failed to query tasks for evaluation GC")?;
 
-    for project in projects {
-        let keep = project.keep_evaluations as usize;
+    for task in tasks {
+        let keep = task.keep_evaluations as usize;
         if keep == 0 {
             continue;
         }
-        if let Err(e) = gradient_db::gc_project_evaluations(&state.db(), project.id, keep).await {
-            warn!(error = %e, project_id = %project.id, "Evaluation GC failed for project");
+        if let Err(e) = gradient_db::gc_task_evaluations(&state.db(), task.id, keep).await {
+            warn!(error = %e, task_id = %task.id, "Evaluation GC failed for task");
         }
     }
 

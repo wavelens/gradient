@@ -19,7 +19,7 @@
 //!   worker provides that capability.
 //! - `Approval` - pull-request evaluation from a contributor who is not a
 //!   forge writer on the repo, gated until a maintainer approves.
-//! - `NoCache` - the project's organisation has no active cache configured,
+//! - `NoCache` - the task's organisation has no active cache configured,
 //!   so the build outputs would have nowhere to land.
 //! - `CacheStorageFull` - every writable cache for the organisation is within
 //!   the headroom threshold of its (or the instance-wide) max-storage limit.

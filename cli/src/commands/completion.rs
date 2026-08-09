@@ -19,12 +19,12 @@ pub fn complete_orgs(current: &OsStr) -> Vec<CompletionCandidate> {
     })
 }
 
-pub fn complete_projects(current: &OsStr) -> Vec<CompletionCandidate> {
+pub fn complete_tasks(current: &OsStr) -> Vec<CompletionCandidate> {
     run(current, |client, prefix| async move {
         let Some(org) = selected_org() else {
             return Vec::new();
         };
-        project_names(&client, &org, &prefix).await
+        task_names(&client, &org, &prefix).await
     })
 }
 
@@ -68,8 +68,8 @@ async fn org_names(client: &Client, prefix: &str) -> Vec<String> {
     }
 }
 
-async fn project_names(client: &Client, org: &str, prefix: &str) -> Vec<String> {
-    match client.projects().list(org).await {
+async fn task_names(client: &Client, org: &str, prefix: &str) -> Vec<String> {
+    match client.tasks().list(org).await {
         Ok(res) => matching(res.items.into_iter().map(|i| i.name), prefix),
         Err(_) => Vec::new(),
     }
@@ -236,11 +236,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_names_uses_selected_org() {
+    async fn task_names_uses_selected_org() {
         let server = MockServer::start().await;
         mount_json(
             &server,
-            "/api/v1/projects/acme",
+            "/api/v1/tasks/acme",
             serde_json::json!({
                 "error": false,
                 "message": {
@@ -252,7 +252,7 @@ mod tests {
         .await;
         let client = client(&server.uri());
 
-        assert_eq!(project_names(&client, "acme", "").await, vec!["web"]);
+        assert_eq!(task_names(&client, "acme", "").await, vec!["web"]);
     }
 
     #[tokio::test]
@@ -276,7 +276,10 @@ mod tests {
         .await;
         let client = client(&server.uri());
 
-        assert_eq!(worker_ids(&client, "acme", "build").await, vec!["builder-1"]);
+        assert_eq!(
+            worker_ids(&client, "acme", "build").await,
+            vec!["builder-1"]
+        );
         assert!(worker_ids(&client, "acme", "zzz").await.is_empty());
     }
 

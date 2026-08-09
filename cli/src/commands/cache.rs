@@ -285,4 +285,3 @@ fn parse_max_storage_gb(raw: &str, out: Output) -> i32 {
         Err(_) => out.err(ExitKind::Usage, "Max storage must be an integer."),
     }
 }
-

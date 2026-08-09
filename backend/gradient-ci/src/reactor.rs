@@ -25,7 +25,7 @@ fn eval_kind_str(kind: EvaluationKind) -> &'static str {
     }
 }
 
-use crate::actions::{dispatch_build_event, dispatch_evaluation_event, reporter_for_project};
+use crate::actions::{dispatch_build_event, dispatch_evaluation_event, reporter_for_task};
 use crate::context::CiContext;
 use crate::{ReactionKind, ReactionTarget};
 use gradient_db::{DbContext, StatusReactor};
@@ -89,7 +89,7 @@ impl StatusReactor for CiStatusReactor {
             }
         };
 
-        let project_id = match evaluation.project {
+        let task_id = match evaluation.task {
             Some(id) => id,
             None => return,
         };
@@ -109,7 +109,7 @@ impl StatusReactor for CiStatusReactor {
             "evaluation_kind": eval_kind_str(evaluation.kind),
         });
 
-        dispatch_build_event(&ctx, project_id, event, payload).await;
+        dispatch_build_event(&ctx, task_id, event, payload).await;
     }
 
     async fn on_eval_terminal(
@@ -130,7 +130,7 @@ impl StatusReactor for CiStatusReactor {
             EvaluationStatus::Aborted => "evaluation.aborted",
         };
 
-        let project_id = match evaluation.project {
+        let task_id = match evaluation.task {
             Some(id) => id,
             None => return,
         };
@@ -139,15 +139,15 @@ impl StatusReactor for CiStatusReactor {
 
         let payload = serde_json::json!({
             "evaluation_id": evaluation.id,
-            "project_id": evaluation.project,
+            "task_id": evaluation.task,
             "repository": evaluation.repository,
             "status": event,
             "evaluation_kind": eval_kind_str(evaluation.kind),
         });
 
-        dispatch_evaluation_event(&ctx, project_id, event, payload).await;
+        dispatch_evaluation_event(&ctx, task_id, event, payload).await;
 
-        react_to_source_comment_on_terminal(&ctx, project_id, &evaluation, status).await;
+        react_to_source_comment_on_terminal(&ctx, task_id, &evaluation, status).await;
     }
 }
 
@@ -155,7 +155,7 @@ impl StatusReactor for CiStatusReactor {
 /// this evaluation, once it reaches a terminal status. Best-effort.
 async fn react_to_source_comment_on_terminal(
     ctx: &CiContext,
-    project_id: ProjectId,
+    task_id: TaskId,
     evaluation: &MEvaluation,
     status: EvaluationStatus,
 ) {
@@ -180,16 +180,16 @@ async fn react_to_source_comment_on_terminal(
         );
         return;
     };
-    let reporter = match reporter_for_project(ctx, project_id).await {
+    let reporter = match reporter_for_task(ctx, task_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return,
         Err(e) => {
-            warn!(error = %e, %project_id, "resolving reporter for terminal-status reaction");
+            warn!(error = %e, %task_id, "resolving reporter for terminal-status reaction");
             return;
         }
     };
     if let Err(e) = reporter.add_reaction(&target, kind).await {
-        warn!(error = %e, %project_id, ?kind, "/gradient terminal reaction post failed");
+        warn!(error = %e, %task_id, ?kind, "/gradient terminal reaction post failed");
     }
 }
 

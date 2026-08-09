@@ -8,7 +8,7 @@ import { Signal, computed, inject } from '@angular/core';
 import { ActivatedRoute, Data } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Observable, map, of } from 'rxjs';
-import { ProjectAccessData } from './project-access.resolver';
+import { TaskAccessData } from './task-access.resolver';
 import { CacheAccessData } from './cache-access.resolver';
 import { AccessState } from '@core/models/access.model';
 
@@ -16,7 +16,7 @@ const DEFAULT_ACCESS: AccessState = { managed: false, canEdit: false, canTrigger
 
 function parentDataSignal<T>(
   route: ActivatedRoute,
-  key: 'projectAccess' | 'cacheAccess',
+  key: 'taskAccess' | 'cacheAccess',
 ): Signal<T | undefined> {
   const source: Observable<T | undefined> = route.parent
     ? route.parent.data.pipe(map((d: Data) => d[key] as T | undefined))
@@ -24,9 +24,9 @@ function parentDataSignal<T>(
   return toSignal(source, { initialValue: undefined });
 }
 
-export function injectProjectAccessData(): Signal<ProjectAccessData | undefined> {
+export function injectTaskAccessData(): Signal<TaskAccessData | undefined> {
   const route = inject(ActivatedRoute);
-  return parentDataSignal<ProjectAccessData>(route, 'projectAccess');
+  return parentDataSignal<TaskAccessData>(route, 'taskAccess');
 }
 
 export function injectCacheAccessData(): Signal<CacheAccessData | undefined> {
@@ -34,8 +34,8 @@ export function injectCacheAccessData(): Signal<CacheAccessData | undefined> {
   return parentDataSignal<CacheAccessData>(route, 'cacheAccess');
 }
 
-export function injectProjectAccess(): Signal<AccessState> {
-  const data = injectProjectAccessData();
+export function injectTaskAccess(): Signal<AccessState> {
+  const data = injectTaskAccessData();
   return computed(() => data()?.access ?? DEFAULT_ACCESS);
 }
 

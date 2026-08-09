@@ -183,74 +183,74 @@ cli("organization delete")
 api("GET", "orgs/cliorg", token=token, expect_error=True)  # gone
 machine.succeed(f"{CLI} organization select myorg")
 
-# ── Phase 4: projects (direct + CLI) ──────────────────────────────────────────
-banner("Phase 4: projects")
-proj_id = api("PUT", "projects/myorg", token=token, body=json.dumps({
-    "name": "myproject", "display_name": "My Project", "description": "d",
+# ── Phase 4: tasks (direct + CLI) ──────────────────────────────────────────
+banner("Phase 4: tasks")
+proj_id = api("PUT", "tasks/myorg", token=token, body=json.dumps({
+    "name": "mytask", "display_name": "My Task", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))
-api("PUT", "projects/myorg", token=token, expect_error=True, body=json.dumps({
-    "name": "myproject", "display_name": "Dup", "description": "d",
+api("PUT", "tasks/myorg", token=token, expect_error=True, body=json.dumps({
+    "name": "mytask", "display_name": "Dup", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # duplicate name
-api("PUT", "projects/myorg", token=token, expect_error=True, body=json.dumps({
+api("PUT", "tasks/myorg", token=token, expect_error=True, body=json.dumps({
     "name": "build-request", "display_name": "Reserved", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # reserved name
-assert api("GET", "projects/myorg/myproject", token=token)["id"] == proj_id
-assert any(p["id"] == proj_id for p in api("GET", "projects/myorg", token=token)["items"])
+assert api("GET", "tasks/myorg/mytask", token=token)["id"] == proj_id
+assert any(p["id"] == proj_id for p in api("GET", "tasks/myorg", token=token)["items"])
 
-# A new project must not start above GRADIENT_KEEP_EVALUATIONS (5 here). It used
+# A new task must not start above GRADIENT_KEEP_EVALUATIONS (5 here). It used
 # to be created at the hardcoded 30, so the very first save - the frontend sends
 # the whole form back - was rejected by the server's own value (#561).
-fresh = api("GET", "projects/myorg/myproject", token=token)
+fresh = api("GET", "tasks/myorg/mytask", token=token)
 assert fresh["keep_evaluations"] == 5, fresh
-api("PATCH", "projects/myorg/myproject", token=token,
+api("PATCH", "tasks/myorg/mytask", token=token,
     body=json.dumps({"keep_evaluations": fresh["keep_evaluations"]}))
-api("PATCH", "projects/myorg/myproject", token=token, expect_error=True,
+api("PATCH", "tasks/myorg/mytask", token=token, expect_error=True,
     body=json.dumps({"keep_evaluations": 6}))  # above the server maximum
-api("PATCH", "projects/myorg/myproject", token=token, expect_error=True,
+api("PATCH", "tasks/myorg/mytask", token=token, expect_error=True,
     body=json.dumps({"keep_evaluations": 0}))  # below the floor
-api("GET", "projects/myorg/available", token=token)
-api("GET", "projects/myorg/myproject/details", token=token)
-api("PATCH", "projects/myorg/myproject", token=token, body=json.dumps({"display_name": "MP2"}))
-api("GET", "projects/myorg/myproject/entry-points", token=token)
-api("GET", "projects/myorg/myproject/metrics", token=token)
-assert api("GET", "projects/myorg/myproject/evaluations", token=token) == [], \
-    "fresh project should have no evaluations"
+api("GET", "tasks/myorg/available", token=token)
+api("GET", "tasks/myorg/mytask/details", token=token)
+api("PATCH", "tasks/myorg/mytask", token=token, body=json.dumps({"display_name": "MP2"}))
+api("GET", "tasks/myorg/mytask/entry-points", token=token)
+api("GET", "tasks/myorg/mytask/metrics", token=token)
+assert api("GET", "tasks/myorg/mytask/evaluations", token=token) == [], \
+    "fresh task should have no evaluations"
 
-api("POST", "projects/myorg/myproject/triggers", token=token, body=json.dumps({
+api("POST", "tasks/myorg/mytask/triggers", token=token, body=json.dumps({
     "config": {"type": "polling", "interval_secs": 3600}}))
-api("GET", "projects/myorg/myproject/triggers", token=token)
+api("GET", "tasks/myorg/mytask/triggers", token=token)
 
-api("GET", "projects/myorg/myproject/actions", token=token)
-api("POST", "projects/myorg/myproject/active", token=token)   # enable
-api("DELETE", "projects/myorg/myproject/active", token=token)  # disable
+api("GET", "tasks/myorg/mytask/actions", token=token)
+api("POST", "tasks/myorg/mytask/active", token=token)   # enable
+api("DELETE", "tasks/myorg/mytask/active", token=token)  # disable
 # These reach out to / depend on a completed evaluation or return non-JSON
 # (SVG badge); just confirm the endpoints respond rather than asserting a body.
-machine.execute(f"curl -sS -X POST -H 'Authorization: Bearer {token}' {API}/projects/myorg/myproject/check-repository")
-machine.execute(f"curl -sS -H 'Authorization: Bearer {token}' {API}/projects/myorg/myproject/flake-inputs")
-machine.execute(f"curl -sS -H 'Authorization: Bearer {token}' {API}/projects/myorg/myproject/badge")
+machine.execute(f"curl -sS -X POST -H 'Authorization: Bearer {token}' {API}/tasks/myorg/mytask/check-repository")
+machine.execute(f"curl -sS -H 'Authorization: Bearer {token}' {API}/tasks/myorg/mytask/flake-inputs")
+machine.execute(f"curl -sS -H 'Authorization: Bearer {token}' {API}/tasks/myorg/mytask/badge")
 
-# CLI: create/list/show/delete a second project under the selected org.
-machine.succeed(f"{CLI} project select myproject")
-cli("project create --name cliproject --display-name 'CLI Project' --description d "
+# CLI: create/list/show/delete a second task under the selected org.
+machine.succeed(f"{CLI} task select mytask")
+cli("task create --name clitask --display-name 'CLI Task' --description d "
     "--repository git@github.com:Wavelens/Gradient.git --wildcard 'packages.*'")
-api("GET", "projects/myorg/cliproject", token=token)
-cli("project list")
-machine.succeed(f"{CLI} project select cliproject")
-cli("project show")
-cli("project delete")
-api("GET", "projects/myorg/cliproject", token=token, expect_error=True)
-machine.succeed(f"{CLI} project select myproject")
+api("GET", "tasks/myorg/clitask", token=token)
+cli("task list")
+machine.succeed(f"{CLI} task select clitask")
+cli("task show")
+cli("task delete")
+api("GET", "tasks/myorg/clitask", token=token, expect_error=True)
+machine.succeed(f"{CLI} task select mytask")
 
-# Project transfer: move a throwaway project to a second org owned by the caller.
+# Task transfer: move a throwaway task to a second org owned by the caller.
 api("PUT", "orgs", token=token, body=json.dumps({
     "name": "destorg", "display_name": "Dest", "description": "d"}))
-api("PUT", "projects/myorg", token=token, body=json.dumps({
+api("PUT", "tasks/myorg", token=token, body=json.dumps({
     "name": "transferme", "display_name": "Transfer", "description": "d",
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))
-api("POST", "projects/myorg/transferme/transfer", token=token,
+api("POST", "tasks/myorg/transferme/transfer", token=token,
     body=json.dumps({"organization": "destorg"}))
-api("GET", "projects/destorg/transferme", token=token)               # now under destorg
-api("GET", "projects/myorg/transferme", token=token, expect_error=True)  # gone from myorg
+api("GET", "tasks/destorg/transferme", token=token)               # now under destorg
+api("GET", "tasks/myorg/transferme", token=token, expect_error=True)  # gone from myorg
 
 # ── Phase 5: workers (direct + CLI) ───────────────────────────────────────────
 banner("Phase 5: workers")
@@ -435,9 +435,9 @@ api("POST", "orgs/myorg/users", token=token, body=json.dumps({"user": member, "r
 api("GET", "orgs/myorg", token=team_token)                                    # ViewOrg granted
 api("PATCH", "orgs/myorg", token=team_token, expect_error=True,
     body=json.dumps({"display_name": "hijack"}))                              # no ManageOrgSettings
-api("PUT", "projects/myorg", token=team_token, expect_error=True, body=json.dumps({
+api("PUT", "tasks/myorg", token=team_token, expect_error=True, body=json.dumps({
     "name": "sneak", "display_name": "x", "description": "d",
-    "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # no CreateProject
+    "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # no CreateTask
 api("POST", "orgs/myorg/users", token=team_token, expect_error=True,
     body=json.dumps({"user": "operator", "role": "View"}))                    # no ManageMembers
 api("DELETE", "orgs/myorg", token=team_token, expect_error=True)              # no DeleteOrg
@@ -471,7 +471,7 @@ machine.succeed("su postgres -c 'psql -d gradient -f /tmp/superuser.sql'")
 state = api("GET", "admin/state?format=json", token=token)
 assert "operator" in state["users"], state["users"]
 assert "myorg" in state["organizations"], state["organizations"]
-assert "myproject" in state["projects"], state["projects"]
+assert "mytask" in state["tasks"], state["tasks"]
 assert "maincache" in state["caches"], state["caches"]
 assert state["organizations"]["myorg"]["private_key_file"] is None
 assert state["caches"]["maincache"]["signing_key_file"] is None
@@ -479,7 +479,7 @@ assert state["caches"]["maincache"]["signing_key_file"] is None
 # Default (nix) format renders a pasteable expression carrying the same resources.
 nix_out = machine.succeed(f"curl -sS -H 'Authorization: Bearer {token}' {API}/admin/state")
 assert nix_out.startswith("# Generated by"), nix_out
-for needle in ["myorg = {", "myproject = {", "maincache = {", "signing_key_file = null;"]:
+for needle in ["myorg = {", "mytask = {", "maincache = {", "signing_key_file = null;"]:
     assert needle in nix_out, f"missing {needle!r} in nix export:\n{nix_out}"
 
 # ── Phase 8d: declarative state apply (#347) ──────────────────────────────────
@@ -512,12 +512,12 @@ releaser = next(r for r in api("GET", "orgs/stateorg/roles", token=sa_token)["ro
                 if r["name"] == "releaser")
 assert set(releaser["permissions"]) == {"viewOrg", "triggerEvaluation"}, releaser
 
-# Project applied with its non-default fields and both triggers.
-proj = api("GET", "projects/stateorg/stateproject", token=sa_token)
+# Task applied with its non-default fields and both triggers.
+proj = api("GET", "tasks/stateorg/statetask", token=sa_token)
 assert proj["concurrency"] == "hard_abort", proj
 assert proj["sign_cache"] is False and proj["keep_evaluations"] == 5, proj
 assert proj["wildcard"] == "packages.x86_64-linux.*", proj
-trig_types = {t["type"] for t in api("GET", "projects/stateorg/stateproject/triggers", token=sa_token)}
+trig_types = {t["type"] for t in api("GET", "tasks/stateorg/statetask/triggers", token=sa_token)}
 assert {"polling", "time"} <= trig_types, trig_types
 
 # Cache applied with members, custom role and upstream.

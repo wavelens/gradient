@@ -28,7 +28,9 @@ impl Narinfo {
         let mut deriver = None;
 
         for line in text.lines() {
-            let Some((key, value)) = line.split_once(':') else { continue };
+            let Some((key, value)) = line.split_once(':') else {
+                continue;
+            };
             let value = value.trim();
             match key.trim() {
                 "StorePath" => store_path = Some(value.to_string()),
@@ -77,11 +79,17 @@ Deriver: dddddddddddddddddddddddddddddddd-hello-2.12.drv\n";
     #[test]
     fn parses_full_narinfo() {
         let ni = Narinfo::parse(SAMPLE).expect("parse");
-        assert_eq!(ni.store_path, "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12");
+        assert_eq!(
+            ni.store_path,
+            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12"
+        );
         assert_eq!(ni.file_size, 42);
         assert_eq!(ni.nar_size, 99);
         assert_eq!(ni.references.len(), 2);
-        assert_eq!(ni.deriver.as_deref(), Some("dddddddddddddddddddddddddddddddd-hello-2.12.drv"));
+        assert_eq!(
+            ni.deriver.as_deref(),
+            Some("dddddddddddddddddddddddddddddddd-hello-2.12.drv")
+        );
     }
 
     #[test]

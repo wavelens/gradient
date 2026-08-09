@@ -243,32 +243,31 @@ struct CommentDispatch<'a> {
 /// unpark path and fall back to a fresh `/gradient run`. Returns whether any
 /// action fired.
 async fn handle_comment_for_integration(ctx: &CommentDispatch<'_>) -> bool {
-    let project_ids = match active_project_ids_for_integration(ctx.state, ctx.integration_id).await
-    {
+    let task_ids = match active_task_ids_for_integration(ctx.state, ctx.integration_id).await {
         Ok(rows) => rows,
         Err(e) => {
-            warn!(error = %e, "comment webhook: failed to load project list");
+            warn!(error = %e, "comment webhook: failed to load task list");
             return false;
         }
     };
-    let Some(probe_project) = first_project_with_reporter(ctx.state, &project_ids).await else {
+    let Some(probe_task) = first_task_with_reporter(ctx.state, &task_ids).await else {
         warn!(
             integration_id = %ctx.integration_id,
             pr_number = ctx.pr_number,
-            projects = project_ids.len(),
-            "/gradient comment ignored: integration has no project with a usable forge reporter (needs an API token)"
+            tasks = task_ids.len(),
+            "/gradient comment ignored: integration has no task with a usable forge reporter (needs an API token)"
         );
         return false;
     };
     let is_maintainer =
-        sender_is_trusted(ctx.state, probe_project, ctx.owner, ctx.repo, ctx.sender).await;
+        sender_is_trusted(ctx.state, probe_task, ctx.owner, ctx.repo, ctx.sender).await;
     if let Some(target) = ctx.reaction_target {
         let kind = if is_maintainer {
             gradient_ci::ReactionKind::Eyes
         } else {
             gradient_ci::ReactionKind::Confused
         };
-        fire_reaction_via_project(ctx.state, probe_project, target, kind).await;
+        fire_reaction_via_task(ctx.state, probe_task, target, kind).await;
     }
     if !is_maintainer {
         warn!(
@@ -280,22 +279,22 @@ async fn handle_comment_for_integration(ctx: &CommentDispatch<'_>) -> bool {
         return false;
     }
 
-    if unpark_existing_approvals(ctx, &project_ids).await {
+    if unpark_existing_approvals(ctx, &task_ids).await {
         return true;
     }
     if !matches!(ctx.cmd, GradientCommand::Run { .. }) {
         return false;
     }
-    run_fresh_evaluation(ctx, &project_ids).await
+    run_fresh_evaluation(ctx, &task_ids).await
 }
 
 /// Unpark any approval-gated evaluation already parked for this PR. Returns
 /// whether at least one eval was released.
-async fn unpark_existing_approvals(ctx: &CommentDispatch<'_>, project_ids: &[ProjectId]) -> bool {
+async fn unpark_existing_approvals(ctx: &CommentDispatch<'_>, task_ids: &[TaskId]) -> bool {
     let mut unparked_any = false;
-    for project_id in project_ids {
+    for task_id in task_ids {
         let Ok(Some(eval)) =
-            find_approval_gated_eval(&ctx.state.web_db, *project_id, ctx.pr_number).await
+            find_approval_gated_eval(&ctx.state.web_db, *task_id, ctx.pr_number).await
         else {
             continue;
         };
@@ -329,7 +328,7 @@ async fn unpark_existing_approvals(ctx: &CommentDispatch<'_>, project_ids: &[Pro
                 if matches!(ctx.cmd, GradientCommand::Approve) {
                     submit_pr_approval_review(
                         ctx.state,
-                        *project_id,
+                        *task_id,
                         ctx.owner,
                         ctx.repo,
                         ctx.pr_number,
@@ -350,14 +349,14 @@ async fn unpark_existing_approvals(ctx: &CommentDispatch<'_>, project_ids: &[Pro
 /// Fetch the PR head and fire a fresh evaluation. The maintainer is already
 /// trust-verified, so `sender` lets `decide_pr_gate` treat the command itself as
 /// the approval, even on a fork PR. Returns whether the fan-out queued anything.
-async fn run_fresh_evaluation(ctx: &CommentDispatch<'_>, project_ids: &[ProjectId]) -> bool {
+async fn run_fresh_evaluation(ctx: &CommentDispatch<'_>, task_ids: &[TaskId]) -> bool {
     let Some(snapshot) =
-        fetch_pr_snapshot(ctx.state, project_ids, ctx.owner, ctx.repo, ctx.pr_number).await
+        fetch_pr_snapshot(ctx.state, task_ids, ctx.owner, ctx.repo, ctx.pr_number).await
     else {
         warn!(
             integration_id = %ctx.integration_id,
             pr_number = ctx.pr_number,
-            "/gradient run: could not fetch PR head via any project reporter"
+            "/gradient run: could not fetch PR head via any task reporter"
         );
         return false;
     };
@@ -420,61 +419,58 @@ async fn run_fresh_evaluation(ctx: &CommentDispatch<'_>, project_ids: &[ProjectI
     }
 }
 
-/// Post a reaction on a PR/MR comment via the given project's reporter.
+/// Post a reaction on a PR/MR comment via the given task's reporter.
 /// Best-effort: failures are logged and swallowed.
-async fn fire_reaction_via_project(
+async fn fire_reaction_via_task(
     state: &Arc<ServerState>,
-    project_id: ProjectId,
+    task_id: TaskId,
     target: &gradient_ci::ReactionTarget,
     kind: gradient_ci::ReactionKind,
 ) {
-    let reporter = match gradient_ci::actions::reporter_for_project(&state.ci(), project_id).await {
+    let reporter = match gradient_ci::actions::reporter_for_task(&state.ci(), task_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return,
         Err(e) => {
-            warn!(error = %e, %project_id, "/gradient reaction: resolving reporter");
+            warn!(error = %e, %task_id, "/gradient reaction: resolving reporter");
             return;
         }
     };
     if let Err(e) = reporter.add_reaction(target, kind).await {
-        warn!(error = %e, %project_id, ?kind, "/gradient reaction: post failed");
+        warn!(error = %e, %task_id, ?kind, "/gradient reaction: post failed");
     }
 }
 
-pub(super) async fn first_project_with_reporter(
+pub(super) async fn first_task_with_reporter(
     state: &Arc<ServerState>,
-    project_ids: &[ProjectId],
-) -> Option<ProjectId> {
-    for project_id in project_ids {
-        if let Ok(Some(_)) =
-            gradient_ci::actions::reporter_for_project(&state.ci(), *project_id).await
-        {
-            return Some(*project_id);
+    task_ids: &[TaskId],
+) -> Option<TaskId> {
+    for task_id in task_ids {
+        if let Ok(Some(_)) = gradient_ci::actions::reporter_for_task(&state.ci(), *task_id).await {
+            return Some(*task_id);
         }
     }
     None
 }
 
-/// Fetch a [`gradient_ci::PullRequestSnapshot`] using the first project whose
+/// Fetch a [`gradient_ci::PullRequestSnapshot`] using the first task whose
 /// reporter resolves. `None` on no reporter, an error, or a missing PR.
 async fn fetch_pr_snapshot(
     state: &Arc<ServerState>,
-    project_ids: &[ProjectId],
+    task_ids: &[TaskId],
     owner: &str,
     repo: &str,
     pr_number: u64,
 ) -> Option<gradient_ci::PullRequestSnapshot> {
-    for project_id in project_ids {
-        let reporter =
-            match gradient_ci::actions::reporter_for_project(&state.ci(), *project_id).await {
-                Ok(Some(r)) => r,
-                _ => continue,
-            };
+    for task_id in task_ids {
+        let reporter = match gradient_ci::actions::reporter_for_task(&state.ci(), *task_id).await {
+            Ok(Some(r)) => r,
+            _ => continue,
+        };
         match reporter.get_pull_request(owner, repo, pr_number).await {
             Ok(Some(snap)) => return Some(snap),
             Ok(None) => return None,
             Err(e) => {
-                warn!(error = %e, %project_id, "/gradient run: PR fetch failed, trying next project");
+                warn!(error = %e, %task_id, "/gradient run: PR fetch failed, trying next task");
             }
         }
     }
@@ -482,7 +478,7 @@ async fn fetch_pr_snapshot(
 }
 
 /// Reply to the PR explaining a `/gradient run <wildcard>` parse failure, via
-/// the first project with a usable reporter. Best-effort.
+/// the first task with a usable reporter. Best-effort.
 async fn post_wildcard_error_comment(
     state: &Arc<ServerState>,
     integration_ids: &[IntegrationId],
@@ -498,21 +494,20 @@ async fn post_wildcard_error_comment(
     );
 
     for integration_id in integration_ids {
-        let project_ids = match active_project_ids_for_integration(state, *integration_id).await {
+        let task_ids = match active_task_ids_for_integration(state, *integration_id).await {
             Ok(rows) => rows,
             Err(e) => {
-                warn!(error = %e, %integration_id, "/gradient run wildcard: failed to load projects for reply comment");
+                warn!(error = %e, %integration_id, "/gradient run wildcard: failed to load tasks for reply comment");
                 continue;
             }
         };
-        for project_id in project_ids {
-            let reporter = match gradient_ci::actions::reporter_for_project(&state.ci(), project_id)
-                .await
+        for task_id in task_ids {
+            let reporter = match gradient_ci::actions::reporter_for_task(&state.ci(), task_id).await
             {
                 Ok(Some(r)) => r,
                 Ok(None) => continue,
                 Err(e) => {
-                    warn!(error = %e, %project_id, "/gradient run wildcard: resolving reporter for reply comment");
+                    warn!(error = %e, %task_id, "/gradient run wildcard: resolving reporter for reply comment");
                     continue;
                 }
             };
@@ -522,7 +517,7 @@ async fn post_wildcard_error_comment(
             {
                 Ok(()) => return,
                 Err(e) => {
-                    warn!(error = %e, %project_id, "/gradient run wildcard: reply comment post failed, trying next project");
+                    warn!(error = %e, %task_id, "/gradient run wildcard: reply comment post failed, trying next task");
                 }
             }
         }
@@ -602,13 +597,13 @@ pub(super) fn github_installation_id_from_comment_body(body: &[u8]) -> Option<i6
         .map(|i| i.id)
 }
 
-pub(super) async fn active_project_ids_for_integration(
+pub(super) async fn active_task_ids_for_integration(
     state: &Arc<ServerState>,
     integration_id: IntegrationId,
-) -> Result<Vec<ProjectId>, sea_orm::DbErr> {
+) -> Result<Vec<TaskId>, sea_orm::DbErr> {
     let stmt = Statement::from_sql_and_values(
         DbBackend::Postgres,
-        "SELECT DISTINCT project FROM project_trigger \
+        "SELECT DISTINCT task FROM task_trigger \
          WHERE active = true \
            AND trigger_type = $1 \
            AND (config->>'integration_id')::uuid = $2"
@@ -620,13 +615,13 @@ pub(super) async fn active_project_ids_for_integration(
     );
 
     #[derive(sea_orm::FromQueryResult)]
-    struct ProjectRow {
-        project: ProjectId,
+    struct TaskRow {
+        task: TaskId,
     }
-    ProjectRow::find_by_statement(stmt)
+    TaskRow::find_by_statement(stmt)
         .all(&state.web_db)
         .await
-        .map(|rows| rows.into_iter().map(|r| r.project).collect())
+        .map(|rows| rows.into_iter().map(|r| r.task).collect())
 }
 
 #[cfg(test)]

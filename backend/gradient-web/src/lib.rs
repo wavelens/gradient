@@ -293,42 +293,42 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
                 .patch(orgs::patch_integration)
                 .delete(orgs::delete_integration),
         )
-        .route("/projects/{organization}", put(projects::put))
+        .route("/tasks/{organization}", put(tasks::put))
         .route(
-            "/projects/{organization}/available",
-            get(projects::get_project_name_available),
+            "/tasks/{organization}/available",
+            get(tasks::get_task_name_available),
         )
         .route(
-            "/projects/{organization}/{project}",
-            patch(projects::patch_project).delete(projects::delete_project),
+            "/tasks/{organization}/{task}",
+            patch(tasks::patch_task).delete(tasks::delete_task),
         )
         .route(
-            "/projects/{organization}/{project}/transfer",
-            post(projects::post_project_transfer),
+            "/tasks/{organization}/{task}/transfer",
+            post(tasks::post_task_transfer),
         )
         .route(
-            "/projects/{organization}/{project}/check-repository",
-            post(projects::post_project_check_repository),
+            "/tasks/{organization}/{task}/check-repository",
+            post(tasks::post_task_check_repository),
         )
         .route(
-            "/projects/{organization}/{project}/evaluate",
-            post(projects::post_project_evaluate),
+            "/tasks/{organization}/{task}/evaluate",
+            post(tasks::post_task_evaluate),
         )
         .route(
-            "/projects/{organization}/{project}/active",
-            post(projects::post_project_active).delete(projects::delete_project_active),
+            "/tasks/{organization}/{task}/active",
+            post(tasks::post_task_active).delete(tasks::delete_task_active),
         )
         .nest(
-            "/projects/{organization}/{project}/flake-inputs",
-            projects::flake_inputs::router(),
+            "/tasks/{organization}/{task}/flake-inputs",
+            tasks::flake_inputs::router(),
         )
         .nest(
-            "/projects/{organization}/{project}/triggers",
-            projects::triggers::router(),
+            "/tasks/{organization}/{task}/triggers",
+            tasks::triggers::router(),
         )
         .nest(
-            "/projects/{organization}/{project}/actions",
-            projects::actions::router(),
+            "/tasks/{organization}/{task}/actions",
+            tasks::actions::router(),
         )
         .route("/evals/{evaluation}", post(evals::post_evaluation))
         .route(
@@ -461,38 +461,35 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             "/orgs/{organization}/users",
             get(orgs::get_organization_users),
         )
-        .route("/projects/{organization}", get(projects::get))
+        .route("/tasks/{organization}", get(tasks::get))
+        .route("/tasks/{organization}/{task}", get(tasks::get_task))
         .route(
-            "/projects/{organization}/{project}",
-            get(projects::get_project),
+            "/tasks/{organization}/{task}/evaluations",
+            get(tasks::get_task_evaluations),
         )
         .route(
-            "/projects/{organization}/{project}/evaluations",
-            get(projects::get_project_evaluations),
+            "/tasks/{organization}/{task}/details",
+            get(tasks::get_task_details),
         )
         .route(
-            "/projects/{organization}/{project}/details",
-            get(projects::get_project_details),
+            "/tasks/{organization}/{task}/entry-points",
+            get(tasks::get_task_entry_points),
         )
         .route(
-            "/projects/{organization}/{project}/entry-points",
-            get(projects::get_project_entry_points),
+            "/tasks/{organization}/{task}/metrics",
+            get(tasks::get_task_metrics),
         )
         .route(
-            "/projects/{organization}/{project}/metrics",
-            get(projects::get_project_metrics),
+            "/tasks/{organization}/{task}/entry-point-metrics",
+            get(tasks::get_entry_point_metrics),
         )
         .route(
-            "/projects/{organization}/{project}/entry-point-metrics",
-            get(projects::get_entry_point_metrics),
+            "/tasks/{organization}/{task}/entry-point-downloads",
+            get(tasks::get_entry_point_download),
         )
         .route(
-            "/projects/{organization}/{project}/entry-point-downloads",
-            get(projects::get_entry_point_download),
-        )
-        .route(
-            "/projects/{organization}/{project}/badge",
-            get(badges::get_project_badge),
+            "/tasks/{organization}/{task}/badge",
+            get(badges::get_task_badge),
         )
         .route("/evals/{evaluation}", get(evals::get_evaluation))
         .route(
@@ -570,12 +567,12 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/metrics/catalog", get(metrics_query::get_metrics_catalog))
         .route("/metrics/query", get(metrics_query::get_metrics_query))
         .route(
-            "/metrics/projects/{organization}/{project}/evaluations",
-            get(projects::get_project_metrics),
+            "/metrics/tasks/{organization}/{task}/evaluations",
+            get(tasks::get_task_metrics),
         )
         .route(
-            "/metrics/projects/{organization}/{project}/entry-point",
-            get(projects::get_entry_point_metrics),
+            "/metrics/tasks/{organization}/{task}/entry-point",
+            get(tasks::get_entry_point_metrics),
         )
         .route("/board/jobs/dispatched", get(board::get_dispatched_jobs))
         .route("/board/jobs/pending", get(board::get_pending_jobs))
@@ -606,10 +603,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/board/workers/load", get(board::get_board_worker_load))
         .route("/board/live", get(board::board_live_ws))
         .route("/board/cache/live", get(live::cache_live_ws))
-        .route(
-            "/projects/{organization}/{project}/live",
-            get(live::project_live_ws),
-        )
+        .route("/tasks/{organization}/{task}/live", get(live::task_live_ws))
         .route("/evals/{evaluation}/live", get(live::evaluation_live_ws))
         .route("/builds/{build}/live", get(live::build_live_ws))
         .route_layer(middleware::from_fn_with_state(
@@ -825,14 +819,14 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
                 || r.builds_requeued > 0
                 || r.builds_aborted > 0
                 || r.evals_aborted > 0
-                || r.projects_forced > 0 =>
+                || r.tasks_forced > 0 =>
         {
             tracing::warn!(
                 attempts_aborted = r.attempts_aborted,
                 builds_requeued = r.builds_requeued,
                 builds_aborted = r.builds_aborted,
                 evals_aborted = r.evals_aborted,
-                projects_forced = r.projects_forced,
+                tasks_forced = r.tasks_forced,
                 "recovered interrupted work from previous process"
             )
         }

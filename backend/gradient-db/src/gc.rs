@@ -18,24 +18,20 @@ use uuid::Uuid;
 use super::DbContext;
 use gradient_types::*;
 
-/// Deletes evaluations for `project_id`, retaining the most recent `keep`
+/// Deletes evaluations for `task_id`, retaining the most recent `keep`
 /// terminal evaluations (see [`evaluations_to_gc`]).
 ///
 /// Handles DB deletion, build log removal, NAR cache files, and GC root symlinks.
-/// Skipped entirely while the project has any active evaluation, so an in-flight
+/// Skipped entirely while the task has any active evaluation, so an in-flight
 /// run never loses NARs it is about to reuse.
-pub async fn gc_project_evaluations(
-    ctx: &DbContext,
-    project_id: ProjectId,
-    keep: usize,
-) -> Result<()> {
+pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) -> Result<()> {
     if keep == 0 {
         return Ok(());
     }
 
     // Newest first; deletion selection counts only terminal evaluations.
     let all_evals = EEvaluation::find()
-        .filter(CEvaluation::Project.eq(project_id))
+        .filter(CEvaluation::Task.eq(task_id))
         .order_by_desc(CEvaluation::CreatedAt)
         .all(&ctx.worker_db)
         .await
@@ -61,9 +57,9 @@ pub async fn gc_project_evaluations(
         to_delete.iter().map(|e| e.id).collect();
 
     info!(
-        project_id = %project_id,
+        task_id = %task_id,
         deleting = to_delete.len(),
-        "Running per-project evaluation GC"
+        "Running per-task evaluation GC"
     );
 
     // Break the linked list so deletions never violate previous/next FKs:
@@ -122,17 +118,17 @@ pub async fn gc_project_evaluations(
         }
     }
 
-    info!(project_id = %project_id, deleted = to_delete.len(), "Per-project evaluation GC done");
+    info!(task_id = %task_id, deleted = to_delete.len(), "Per-task evaluation GC done");
     Ok(())
 }
 
 /// Selects, by index into a newest-first evaluation list, which evaluations the
-/// per-project GC should delete for a given `keep` count.
+/// per-task GC should delete for a given `keep` count.
 ///
 /// Returns nothing while any evaluation is genuinely active (Queued/Fetching/
 /// Evaluating*/Building/Waiting): an in-flight run may reuse NARs from older
 /// evaluations before it records its own build rows, so GC waits until the
-/// project is quiescent. An "active" evaluation untouched for more than
+/// task is quiescent. An "active" evaluation untouched for more than
 /// `wedged_hours` is presumed wedged and stops blocking - otherwise one stuck
 /// run silently turns a scheduler bug into unbounded storage growth
 /// (`wedged_hours = 0` restores the unconditional block). Wedged evaluations
@@ -544,7 +540,7 @@ mod tests {
     #[test]
     fn wedged_active_evaluation_stops_blocking_but_is_never_deleted() {
         // An eval "active" for longer than the wedged threshold no longer
-        // freezes the project's GC; terminal evals beyond keep are reclaimed,
+        // freezes the task's GC; terminal evals beyond keep are reclaimed,
         // the wedged eval itself is skipped.
         let evals = at(&[Building, Completed, Failed, Completed], 48);
         assert_eq!(

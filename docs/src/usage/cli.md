@@ -85,13 +85,13 @@ gradient organization create
 gradient organization delete <name>
 ```
 
-### Projects
+### Tasks
 
 ```sh
-gradient project list
-gradient project create
-gradient project delete <name>
-gradient project eval <name>          # Trigger a new evaluation
+gradient task list
+gradient task create
+gradient task delete <name>
+gradient task eval <name>          # Trigger a new evaluation
 ```
 
 ### Caches
@@ -141,11 +141,11 @@ server and queues a Nix evaluation against them. No Nix tooling runs on the
 client - only the files git tracks are uploaded, addressed by BLAKE3 content
 hash so unchanged blobs aren't re-sent across runs. The server materialises
 `/nix/store/<hash>-source`, signs it with the org's cache key, and dispatches
-an evaluation under a per-org reserved `build-request` project.
+an evaluation under a per-org reserved `build-request` task.
 
 ```sh
 # Inside a git working tree
-gradient build                          # eval the project's wildcard target
+gradient build                          # eval the task's wildcard target
 gradient build .#foo                    # nix-style installable -> packages.<system>.foo
 gradient build checks.x86_64-linux.foo  # eval a specific attribute path
 gradient build --system x86_64-linux    # system used to expand a bare `.#foo` target
@@ -170,7 +170,7 @@ server-side, `REF` must be a remote flake ref - `github:`, `gitlab:`,
 `sourcehut:`, `git+ssh://`, `git+https://`, `git+http://`, `git://`, `https://`,
 `http://`, `flake:`, or `path:/nix/store/...` - local filesystem paths
 (`./foo`, `/abs/path`, `~/foo`, a bare name) are rejected client-side. This is
-a per-run override distinct from a project's persistent [flake input
+a per-run override distinct from a task's persistent [flake input
 overrides](../configuration.md#flake-input-overrides), which apply to every
 run until removed.
 
@@ -226,12 +226,12 @@ as JSON envelopes to stdout instead.
 the server replays every build's stored log, then follows the active ones, so it
 works both live and on a finished evaluation. It also surfaces evaluation-level
 messages (warnings/errors) that the build-log stream alone omits - so a purely
-substituted build still shows output. `gradient project log` does the same for
-the selected project's latest evaluation.
+substituted build still shows output. `gradient task log` does the same for
+the selected task's latest evaluation.
 
 ```sh
 gradient logs 0190f3c2-...    # stream the whole evaluation's log
-gradient project log          # latest evaluation of the selected project
+gradient task log          # latest evaluation of the selected task
 ```
 
 Nix's own ANSI colours render on a TTY (control bytes are decoded, and stripped
@@ -268,7 +268,7 @@ output. The flag is silently ignored in `--json` mode.
 ### Downloading artefacts
 
 ```sh
-# Interactive picker over the latest evaluation of the selected project
+# Interactive picker over the latest evaluation of the selected task
 gradient download
 
 # Skip the evaluation picker
@@ -336,15 +336,15 @@ gradient completion bash   >> ~/.bashrc
 gradient completion zsh    >> ~/.zshrc
 gradient completion fish   >> ~/.config/fish/completions/gradient.fish
 
-# Generate project files
+# Generate task files
 gradient generate <type>
 ```
 
 Completions are dynamic: besides subcommands and flags, TAB also completes
-existing resource names (organizations, projects, workers, and caches) by
+existing resource names (organizations, tasks, workers, and caches) by
 querying the server. The resource lookups require a configured server and a
 valid login; when offline or logged out they yield nothing instead of erroring.
-Project and worker name completion uses the currently selected organization
+Task and worker name completion uses the currently selected organization
 (`gradient organization select <name>`).
 
 ## Global Options

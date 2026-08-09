@@ -244,19 +244,19 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 
 `DELETE /orgs/{org}/workers/{worker_id}` removes the registration. The worker stays connected until it disconnects, then cannot reconnect.
 
-### Projects
+### Tasks
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/projects/{org}` | List projects |
-| `PUT` | `/projects/{org}` | Create project |
-| `GET/PATCH/DELETE` | `/projects/{org}/{project}` | Get / update / delete |
-| `GET` | `/projects/{org}/{project}/details` | Aggregated project data |
-| `GET` | `/projects/{org}/{project}/evaluations` | List recent evaluations (optional `?limit=`) |
-| `GET` | `/projects/{org}/{project}/entry-points` | Root builds |
-| `POST` | `/projects/{org}/{project}/check-repository` | Test repo access |
-| `POST` | `/projects/{org}/{project}/evaluate` | Trigger evaluation |
-| `POST/DELETE` | `/projects/{org}/{project}/active` | Enable / disable |
+| `GET` | `/tasks/{org}` | List tasks |
+| `PUT` | `/tasks/{org}` | Create task |
+| `GET/PATCH/DELETE` | `/tasks/{org}/{task}` | Get / update / delete |
+| `GET` | `/tasks/{org}/{task}/details` | Aggregated task data |
+| `GET` | `/tasks/{org}/{task}/evaluations` | List recent evaluations (optional `?limit=`) |
+| `GET` | `/tasks/{org}/{task}/entry-points` | Root builds |
+| `POST` | `/tasks/{org}/{task}/check-repository` | Test repo access |
+| `POST` | `/tasks/{org}/{task}/evaluate` | Trigger evaluation |
+| `POST/DELETE` | `/tasks/{org}/{task}/active` | Enable / disable |
 
 ### Evaluations
 
@@ -312,14 +312,14 @@ channel only forwards events for its resource (authorized at connect).
 | Path | Events |
 |---|---|
 | `/board/live` | `queue_depth`, `job_dispatched`, `worker_connected`, `worker_disconnected` (scope-masked) |
-| `/projects/{org}/{project}/live` | `evaluation_status_changed`, `build_status_changed`, `evaluation_progress` for the project |
+| `/tasks/{org}/{task}/live` | `evaluation_status_changed`, `build_status_changed`, `evaluation_progress` for the task |
 | `/evals/{evaluation}/live` | `evaluation_status_changed`, `build_status_changed`, `evaluation_progress` for the evaluation |
 | `/builds/{build}/live` | `build_status_changed` for the build's evaluation (its dependency graph) |
 | `/board/cache/live` | `cache_changed` (content-free ping; refetch `/board/cache`) |
 
 Frames are JSON with a `type` field, e.g.
 `{"type":"build_status_changed","evaluation_id":"…","build_id":"…","status":2}`.
-`evaluation_progress` (`{"type":"evaluation_progress","project":"…","evaluation_id":"…"}`)
+`evaluation_progress` (`{"type":"evaluation_progress","task":"…","evaluation_id":"…"}`)
 is a content-free ping emitted as builds and entry-points are persisted during
 the evaluation phase - before any build changes status - so the build and
 dependency totals grow live instead of only appearing once evaluation finishes.
@@ -384,7 +384,7 @@ TOKEN=$(curl -s -X POST https://gradient.example.com/api/v1/auth/basic/login \
   -H 'Content-Type: application/json' \
   -d '{"loginname":"alice","password":"secret"}' | jq -r .message)
 
-curl -X POST "https://gradient.example.com/api/v1/projects/my-org/my-project/evaluate" \
+curl -X POST "https://gradient.example.com/api/v1/tasks/my-org/my-task/evaluate" \
   -H "Authorization: Bearer $TOKEN"
 ```
 

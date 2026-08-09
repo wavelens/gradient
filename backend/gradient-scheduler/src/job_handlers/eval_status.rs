@@ -149,7 +149,7 @@ impl Scheduler {
                 return;
             }
         };
-        let Some(project_id) = eval.project else {
+        let Some(task_id) = eval.task else {
             return;
         };
         let sidecar = match gradient_entity::evaluation_input_update::Entity::find()
@@ -163,17 +163,17 @@ impl Scheduler {
                 return;
             }
         };
-        let project = match EProject::find_by_id(project_id).one(db).await {
+        let task = match ETask::find_by_id(task_id).one(db).await {
             Ok(Some(p)) => p,
             _ => {
-                warn!(%project_id, "input_update expansion: project missing");
+                warn!(%task_id, "input_update expansion: task missing");
                 return;
             }
         };
 
         match gradient_ci::trigger::fan_out_expansion(
             db,
-            &project,
+            &task,
             sidecar.base_commit,
             matched,
             eval.trigger,

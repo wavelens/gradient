@@ -55,7 +55,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.sentryDsn` | `null` | Override the Sentry DSN used when `reportErrors` is true. `null` ships reports to the upstream Wavelens instance at `reports.wavelens.io`; set your own DSN to keep reports in-house. (`GRADIENT_SENTRY_DSN`) |
 | `discoverable` | `true` | Accept incoming `/proto` WebSocket connections from workers |
 | `settings.maxProtoConnections` | `256` | Max simultaneous worker WebSocket connections; further upgrades return `503 Service Unavailable` with `Retry-After: 10` until a slot frees |
-| `settings.keepEvaluations` | `30` | Global maximum of evaluations kept per project. Caps the per-project setting, and a new project starts at the lower of `30` and this. `0` disables the cap. (`GRADIENT_KEEP_EVALUATIONS`) |
+| `settings.keepEvaluations` | `30` | Global maximum of evaluations kept per task. Caps the per-task setting, and a new task starts at the lower of `30` and this. `0` disables the cap. (`GRADIENT_KEEP_EVALUATIONS`) |
 | `settings.logChunkBytes` | `262144` (256 KiB) | Target uncompressed size for each zstd build-log chunk written on finalize. Chunks split on line boundaries, so an over-long line may exceed this. (`GRADIENT_LOG_CHUNK_BYTES`) |
 | `settings.maxStorageGb` | `0` | Instance-wide cap on total cached NAR storage, in GB. When all writable caches for an org have less than 10 MiB headroom, new evaluations park in `Waiting`. `0` = unlimited; per-cache `max_storage_gb` limits still apply. (`GRADIENT_MAX_STORAGE_GB`) |
 | `settings.evalCacheMaxTotalBytes` | `10737418240` (10 GiB) | Total byte cap for fleet-shared eval-cache blobs. The eviction sweep drops oldest-`updated_at` rows until the surviving total is at or under this. (`GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES`) |
@@ -233,7 +233,7 @@ services.gradient.email = {
 
 ## GitHub App
 
-A GitHub App provides automatic webhook delivery and CI status reporting without per-project tokens. One App covers all organizations on the instance.
+A GitHub App provides automatic webhook delivery and CI status reporting without per-task tokens. One App covers all organizations on the instance.
 
 ### Setup
 
@@ -258,7 +258,7 @@ services.gradient.githubApp = {
 
 4. Install the App on each GitHub organization. Gradient auto-creates the `github-<account>` integration pair from the install webhook. Alternatively, org admins can create integrations manually via the UI by entering the installation id (one per GitHub account; multiple per org are supported).
 
-5. Once installed, push events automatically trigger evaluations (no polling) and CI statuses are reported using the installation token instead of a per-project PAT.
+5. Once installed, push events automatically trigger evaluations (no polling) and CI statuses are reported using the installation token instead of a per-task PAT.
 
 ## Forge Webhooks (Gitea / Forgejo / GitLab / GitHub without App)
 
@@ -276,7 +276,7 @@ Forge path by type:
 | GitLab | `/hooks/gitlab/{org}` | `X-Gitlab-Token` |
 | GitHub (no App) | `/hooks/github/{org}` | `X-Hub-Signature-256` |
 
-Gradient matches the incoming push payload's clone URL against active projects and queues an evaluation immediately.
+Gradient matches the incoming push payload's clone URL against active tasks and queues an evaluation immediately.
 
 ## Workers
 
@@ -413,7 +413,7 @@ BLAKE3-prefixed (`blake3:{nix32}`) hashes are still accepted on the read path so
 
 ## Declarative State
 
-Users, organizations, projects, integrations, caches, API keys, custom roles, and workers can be declared in `services.gradient.state` and reconciled on every startup. See [Declarative State](usage/state.md) for the full options reference.
+Users, organizations, tasks, integrations, caches, API keys, custom roles, and workers can be declared in `services.gradient.state` and reconciled on every startup. See [Declarative State](usage/state.md) for the full options reference.
 
 ### API keys
 
@@ -442,17 +442,17 @@ Managed roles cannot be modified or deleted via the API.
 
 ### Flake input overrides
 
-Each project may declare per-input flake overrides applied during evaluation fetch. Each entry must set exactly one of:
+Each task may declare per-input flake overrides applied during evaluation fetch. Each entry must set exactly one of:
 
 - `url` - a flake-ref string to replace the input's URL.
-- `keep_url = true` - force an update of the input keeping the URL declared in the project's `flake.nix`.
+- `keep_url = true` - force an update of the input keeping the URL declared in the task's `flake.nix`.
 
-Empty `flake_input_overrides = {}` (the default) means no overrides - `flake.lock` is used as-is. Setting the attrset to `{}` from a non-empty state removes all override rows for that project.
+Empty `flake_input_overrides = {}` (the default) means no overrides - `flake.lock` is used as-is. Setting the attrset to `{}` from a non-empty state removes all override rows for that task.
 
-This is a persistent, project-wide mechanism. For a one-off override on a single build request, use `gradient build`'s [`--override-input`](usage/cli.md#build-requests) instead.
+This is a persistent, task-wide mechanism. For a one-off override on a single build request, use `gradient build`'s [`--override-input`](usage/cli.md#build-requests) instead.
 
 ```nix
-services.gradient.state.projects.my-project = {
+services.gradient.state.tasks.my-task = {
   # ...
   flake_input_overrides = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

@@ -15,32 +15,32 @@
       </div>
       @if (org.role) {
         <div class="header-actions">
-          <button pButton label="Create Project" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+          <button pButton label="Create Task" icon="pi pi-plus" (click)="openCreateDialog()"></button>
           <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/organization', orgName, 'settings']"></button>
         </div>
       }
     </div>
 
-    <!-- Projects -->
-    @if (projects().length > 0) {
+    <!-- Tasks -->
+    @if (tasks().length > 0) {
       <div class="section">
-        <h2>Projects</h2>
-        <div class="project-grid">
-          @for (project of projects(); track project.id) {
-            <a [routerLink]="['/organization', orgName, 'project', project.name]" class="project-card">
-              <div class="project-icon">
+        <h2>Tasks</h2>
+        <div class="task-grid">
+          @for (task of tasks(); track task.id) {
+            <a [routerLink]="['/organization', orgName, 'task', task.name]" class="task-card">
+              <div class="task-icon">
                 <span class="material-symbols-outlined">folder</span>
               </div>
-              <div class="project-content">
-                <h3>{{ project.display_name || project.name }}</h3>
-                <p class="text-secondary">{{ project.description || 'No description' }}</p>
-                <div class="project-meta">
-                  @if (project.last_evaluation_status) {
-                    <app-eval-status-badge [status]="project.last_evaluation_status" />
+              <div class="task-content">
+                <h3>{{ task.display_name || task.name }}</h3>
+                <p class="text-secondary">{{ task.description || 'No description' }}</p>
+                <div class="task-meta">
+                  @if (task.last_evaluation_status) {
+                    <app-eval-status-badge [status]="task.last_evaluation_status" />
                   }
                 </div>
               </div>
-              <div class="project-arrow">
+              <div class="task-arrow">
                 <span class="material-symbols-outlined">arrow_forward</span>
               </div>
             </a>
@@ -50,21 +50,21 @@
     }
 
     <!-- Empty State -->
-    @if (projects().length === 0) {
+    @if (tasks().length === 0) {
       <app-empty-state
         icon="folder"
-        title="No projects yet"
-        [message]="org.role ? 'Create your first project to start evaluating Nix builds' : 'No projects have been created yet'"
-        [actionLabel]="org.role ? 'Create Project' : ''"
+        title="No tasks yet"
+        [message]="org.role ? 'Create your first task to start evaluating Nix builds' : 'No tasks have been created yet'"
+        [actionLabel]="org.role ? 'Create Task' : ''"
         (actionClick)="org.role && openCreateDialog()"
       />
     }
   }
 </div>
 
-<!-- Create Project Dialog -->
+<!-- Create Task Dialog -->
 <p-dialog
-  header="Create Project"
+  header="Create Task"
   [(visible)]="showCreateDialog"
   [modal]="true"
   [style]="{ width: '550px' }"
@@ -83,11 +83,11 @@
       <input
         pInputText
         id="proj-display"
-        [(ngModel)]="newProject.display_name"
-        placeholder="My Project"
+        [(ngModel)]="newTask.display_name"
+        placeholder="My Task"
         class="w-full"
-        (ngModelChange)="onProjectDisplayNameChange($event)"
-        (keyup.enter)="createProject()"
+        (ngModelChange)="onTaskDisplayNameChange($event)"
+        (keyup.enter)="createTask()"
       />
     </div>
 
@@ -97,12 +97,12 @@
         <input
           pInputText
           id="proj-name"
-          [(ngModel)]="newProject.name"
-          placeholder="project-name"
+          [(ngModel)]="newTask.name"
+          placeholder="task-name"
           class="w-full"
-          (ngModelChange)="onProjectNameChange($event)"
-          (input)="onProjectNameUserInput()"
-          (keyup.enter)="createProject()"
+          (ngModelChange)="onTaskNameChange($event)"
+          (input)="onTaskNameUserInput()"
+          (keyup.enter)="createTask()"
         />
         @if (nameCheckState() === 'checking') {
           <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
@@ -115,7 +115,7 @@
       @if (nameCheckState() === 'taken') {
         <small class="text-danger">This name is already taken.</small>
       } @else if (nameCheckState() === 'reserved') {
-        <small class="text-danger">this project name is reserved</small>
+        <small class="text-danger">this task name is reserved</small>
       } @else if (nameCheckState() === 'invalid') {
         <small class="text-danger">Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.</small>
       } @else {
@@ -128,8 +128,8 @@
       <textarea
         pInputTextarea
         id="proj-desc"
-        [(ngModel)]="newProject.description"
-        placeholder="Describe your project..."
+        [(ngModel)]="newTask.description"
+        placeholder="Describe your task..."
         rows="2"
         class="w-full"
       ></textarea>
@@ -140,10 +140,10 @@
       <input
         pInputText
         id="proj-repo"
-        [(ngModel)]="newProject.repository"
+        [(ngModel)]="newTask.repository"
         placeholder="https://github.com/user/repo"
         class="w-full"
-        (keyup.enter)="createProject()"
+        (keyup.enter)="createTask()"
       />
       <small class="text-secondary">Git repository URL to evaluate</small>
     </div>
@@ -156,11 +156,11 @@
       <input
         pInputText
         id="proj-wildcard"
-        [(ngModel)]="newProject.wildcard"
+        [(ngModel)]="newTask.wildcard"
         placeholder="**"
         class="w-full"
         [class.input-invalid]="wildcardInvalid"
-        (keyup.enter)="createProject()"
+        (keyup.enter)="createTask()"
       />
       @if (wildcardInvalid) {
         <small class="text-danger">Each pattern must be non-empty, not start with a period, and contain no spaces.</small>
@@ -181,8 +181,8 @@
     <button
       pButton
       label="Create"
-      (click)="createProject()"
-      [disabled]="!newProject.name || !newProject.display_name || !newProject.repository || wildcardInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved' || nameCheckState() === 'checking' || creating()"
+      (click)="createTask()"
+      [disabled]="!newTask.name || !newTask.display_name || !newTask.repository || wildcardInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved' || nameCheckState() === 'checking' || creating()"
       [loading]="creating()"
     ></button>
   </ng-template>

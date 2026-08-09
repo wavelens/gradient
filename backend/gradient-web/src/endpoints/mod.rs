@@ -19,8 +19,8 @@ pub mod live;
 pub mod metrics;
 pub mod metrics_query;
 pub mod orgs;
-pub mod projects;
 pub mod stats;
+pub mod tasks;
 pub mod user;
 pub mod workers;
 

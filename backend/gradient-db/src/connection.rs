@@ -226,13 +226,13 @@ async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
             continue;
         }
 
-        // Direct-build evaluations have no project; skip force_evaluation for those.
-        if let Some(project_id) = evaluation.project
-            && let Some(project) = EProject::find_by_id(project_id).one(db).await?
+        // Direct-build evaluations have no task; skip force_evaluation for those.
+        if let Some(task_id) = evaluation.task
+            && let Some(task) = ETask::find_by_id(task_id).one(db).await?
         {
-            let mut aproject: AProject = project.into();
-            aproject.force_evaluation = Set(true);
-            aproject.update(db).await?;
+            let mut atask: ATask = task.into();
+            atask.force_evaluation = Set(true);
+            atask.update(db).await?;
         }
 
         let mut aevaluation: AEvaluation = evaluation.into();
@@ -411,36 +411,36 @@ pub async fn get_any_organization_by_name(
         .context("Failed to query organization")
 }
 
-pub async fn get_project_by_name(
+pub async fn get_task_by_name(
     ctx: &DbContext,
     user_id: UserId,
     organization_name: String,
-    project_name: String,
-) -> Result<Option<(MOrganization, MProject)>> {
+    task_name: String,
+) -> Result<Option<(MOrganization, MTask)>> {
     match get_organization_by_name(ctx, user_id, organization_name).await? {
-        Some(o) => Ok(EProject::find()
-            .filter(CProject::Organization.eq(o.id))
-            .filter(CProject::Name.eq(project_name))
+        Some(o) => Ok(ETask::find()
+            .filter(CTask::Organization.eq(o.id))
+            .filter(CTask::Name.eq(task_name))
             .one(&ctx.web_db)
             .await
-            .context("Failed to query project")?
+            .context("Failed to query task")?
             .map(|p| (o, p))),
         None => Ok(None),
     }
 }
 
-pub async fn get_any_project_by_name(
+pub async fn get_any_task_by_name(
     ctx: &DbContext,
     organization_name: String,
-    project_name: String,
-) -> Result<Option<(MOrganization, MProject)>> {
+    task_name: String,
+) -> Result<Option<(MOrganization, MTask)>> {
     match get_any_organization_by_name(ctx, organization_name).await? {
-        Some(o) => Ok(EProject::find()
-            .filter(CProject::Organization.eq(o.id))
-            .filter(CProject::Name.eq(project_name))
+        Some(o) => Ok(ETask::find()
+            .filter(CTask::Organization.eq(o.id))
+            .filter(CTask::Name.eq(task_name))
             .one(&ctx.web_db)
             .await
-            .context("Failed to query project")?
+            .context("Failed to query task")?
             .map(|p| (o, p))),
         None => Ok(None),
     }

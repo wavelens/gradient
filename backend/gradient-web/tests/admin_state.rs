@@ -49,7 +49,7 @@ fn with_user(
 fn with_empty_export(db: MockDatabase) -> MockDatabase {
     db.append_query_results([Vec::<gradient_entity::user::Model>::new()])
         .append_query_results([Vec::<gradient_entity::organization::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::project::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([Vec::<gradient_entity::cache::Model>::new()])
         .append_query_results([Vec::<gradient_entity::role::Model>::new()])
         .append_query_results([Vec::<gradient_entity::cache_role::Model>::new()])
@@ -62,9 +62,9 @@ fn with_empty_export(db: MockDatabase) -> MockDatabase {
         .append_query_results([Vec::<gradient_entity::cache_user::Model>::new()])
         .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
         .append_query_results([Vec::<gradient_entity::cache_upstream::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::project_trigger::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::project_action::Model>::new()])
-        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::task_action::Model>::new()])
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
         .append_query_results([Vec::<gradient_entity::github_installation::Model>::new()])
 }
 
@@ -133,7 +133,7 @@ fn export_state_json_returns_empty_shape() {
         for key in [
             "users",
             "organizations",
-            "projects",
+            "tasks",
             "caches",
             "roles",
             "api_keys",

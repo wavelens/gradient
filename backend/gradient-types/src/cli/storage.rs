@@ -6,7 +6,7 @@
 
 use clap::Args;
 
-/// Evaluations a freshly created project keeps, before the instance-wide
+/// Evaluations a freshly created task keeps, before the instance-wide
 /// maximum is applied. Also the default for that maximum.
 pub const DEFAULT_KEEP_EVALUATIONS: i32 = 30;
 
@@ -26,7 +26,7 @@ pub struct StorageArgs {
     pub validate_state: bool,
     #[arg(long, env = "GRADIENT_DELETE_STATE", default_value = "true")]
     pub delete_state: bool,
-    /// Instance-wide maximum for a project's `keep_evaluations`. New projects
+    /// Instance-wide maximum for a task's `keep_evaluations`. New tasks
     /// start at the lower of [`DEFAULT_KEEP_EVALUATIONS`] and this. `0` disables
     /// the cap.
     #[arg(
@@ -57,7 +57,7 @@ pub struct StorageArgs {
     #[arg(long, env = "GRADIENT_NAR_UPLOAD_GRACE_HOURS", default_value_t = 24)]
     pub nar_upload_grace_hours: i64,
     /// Hours after which an "active" evaluation that has not been touched is
-    /// presumed wedged and stops blocking the per-project evaluation GC (the
+    /// presumed wedged and stops blocking the per-task evaluation GC (the
     /// wedged evaluation itself is never deleted). 0 = a wedged evaluation
     /// blocks GC forever.
     #[arg(long, env = "GRADIENT_GC_WEDGED_EVAL_HOURS", default_value_t = 24)]
@@ -155,7 +155,7 @@ impl Default for StorageArgs {
 }
 
 impl StorageArgs {
-    /// The ceiling on a project's `keep_evaluations`, or `None` when the cap is
+    /// The ceiling on a task's `keep_evaluations`, or `None` when the cap is
     /// disabled. Saturates rather than wrapping: a configured value past
     /// `i32::MAX` would otherwise become a negative ceiling that rejects
     /// everything.
@@ -166,7 +166,7 @@ impl StorageArgs {
         }
     }
 
-    /// `keep_evaluations` for a freshly created project. Creating a project
+    /// `keep_evaluations` for a freshly created task. Creating a task
     /// above the ceiling would leave it unsaveable: the frontend sends the whole
     /// form back and the value it was handed fails validation (#561).
     pub fn default_keep_evaluations(&self) -> i32 {
@@ -188,10 +188,10 @@ mod tests {
         }
     }
 
-    /// The reported bug: with a maximum below the default, a new project was
+    /// The reported bug: with a maximum below the default, a new task was
     /// still handed the default and every subsequent save was rejected.
     #[test]
-    fn a_new_project_never_starts_above_the_maximum() {
+    fn a_new_task_never_starts_above_the_maximum() {
         assert_eq!(args(3).default_keep_evaluations(), 3);
         assert_eq!(args(1).default_keep_evaluations(), 1);
     }

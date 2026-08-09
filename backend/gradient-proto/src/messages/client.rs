@@ -93,12 +93,12 @@ pub enum ClientMessage {
         update: JobUpdateKind,
     },
 
-    /// All tasks in a job completed successfully.
+    /// All steps in a job completed successfully.
     /// Results were already sent via [`ClientMessage::JobUpdate`].
     /// Per-build resource metrics travel inline on each `JobUpdate::BuildOutput`.
     JobCompleted { job_id: String },
 
-    /// A task in the job failed; remaining tasks are skipped.
+    /// A step in the job failed; remaining steps are skipped.
     JobFailed {
         job_id: String,
         error: String,

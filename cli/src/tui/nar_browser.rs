@@ -17,15 +17,25 @@ pub struct NarBrowser {
 
 impl NarBrowser {
     pub fn new(all: Vec<NarSummary>) -> Self {
-        let mut b = Self { all, filtered_idx: Vec::new(), selected: 0, filter: String::new() };
+        let mut b = Self {
+            all,
+            filtered_idx: Vec::new(),
+            selected: 0,
+            filter: String::new(),
+        };
         b.recompute();
         b
     }
 
     fn recompute(&mut self) {
         let f = self.filter.to_lowercase();
-        self.filtered_idx = self.all.iter().enumerate()
-            .filter(|(_, n)| f.is_empty() || n.package.to_lowercase().contains(&f) || n.hash.contains(&f))
+        self.filtered_idx = self
+            .all
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| {
+                f.is_empty() || n.package.to_lowercase().contains(&f) || n.hash.contains(&f)
+            })
             .map(|(i, _)| i)
             .collect();
         self.selected = 0;
@@ -35,14 +45,24 @@ impl NarBrowser {
         self.filtered_idx.iter().map(|&i| &self.all[i]).collect()
     }
 
-    pub fn push_filter(&mut self, c: char) { self.filter.push(c); self.recompute(); }
-    pub fn pop_filter(&mut self) { self.filter.pop(); self.recompute(); }
-
-    pub fn move_down(&mut self) {
-        if self.selected + 1 < self.filtered_idx.len() { self.selected += 1; }
+    pub fn push_filter(&mut self, c: char) {
+        self.filter.push(c);
+        self.recompute();
+    }
+    pub fn pop_filter(&mut self) {
+        self.filter.pop();
+        self.recompute();
     }
 
-    pub fn move_up(&mut self) { self.selected = self.selected.saturating_sub(1); }
+    pub fn move_down(&mut self) {
+        if self.selected + 1 < self.filtered_idx.len() {
+            self.selected += 1;
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
 
     #[allow(dead_code)]
     pub fn selected_item(&self) -> Option<&NarSummary> {
@@ -53,12 +73,26 @@ impl NarBrowser {
 impl View for NarBrowser {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
-        let items: Vec<ListItem> = self.visible().iter()
-            .map(|n| ListItem::new(format!("{}  {}", &n.hash[..n.hash.len().min(12)], n.package)))
+        let items: Vec<ListItem> = self
+            .visible()
+            .iter()
+            .map(|n| {
+                ListItem::new(format!(
+                    "{}  {}",
+                    &n.hash[..n.hash.len().min(12)],
+                    n.package
+                ))
+            })
             .collect();
         let mut state = ListState::default();
-        if !self.filtered_idx.is_empty() { state.select(Some(self.selected)); }
-        let title = format!("NARs ({})  filter: {}", self.filtered_idx.len(), self.filter);
+        if !self.filtered_idx.is_empty() {
+            state.select(Some(self.selected));
+        }
+        let title = format!(
+            "NARs ({})  filter: {}",
+            self.filtered_idx.len(),
+            self.filter
+        );
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL).title(title))
             .highlight_symbol("> ");
@@ -96,7 +130,11 @@ mod tests {
 
     #[test]
     fn filter_narrows_and_resets_selection() {
-        let mut b = NarBrowser::new(vec![item("a", "hello"), item("b", "zlib"), item("c", "hella")]);
+        let mut b = NarBrowser::new(vec![
+            item("a", "hello"),
+            item("b", "zlib"),
+            item("c", "hella"),
+        ]);
         b.selected = 2;
         b.push_filter('h');
         b.push_filter('e');
@@ -107,14 +145,17 @@ mod tests {
     #[test]
     fn move_down_clamps_to_last() {
         let mut b = NarBrowser::new(vec![item("a", "x"), item("b", "y")]);
-        b.move_down(); b.move_down(); b.move_down();
+        b.move_down();
+        b.move_down();
+        b.move_down();
         assert_eq!(b.selected, 1);
     }
 
     #[test]
     fn filter_by_hash_prefix() {
         let mut b = NarBrowser::new(vec![item("abc111", "x"), item("def222", "y")]);
-        b.push_filter('a'); b.push_filter('b');
+        b.push_filter('a');
+        b.push_filter('b');
         assert_eq!(b.visible().len(), 1);
     }
 }

@@ -218,7 +218,7 @@ async fn narinfo_served_from_db_inner() {
 
 /// Regression: when the `cached_path_signature` row's `signature` column is
 /// `NULL` (the state the sign sweep leaves rows in for `sign_cache=false`
-/// projects), the narinfo handler must return 404 - never serve an unsigned
+/// tasks), the narinfo handler must return 404 - never serve an unsigned
 /// narinfo. The whole `sign_cache=false` privacy guarantee depends on this.
 #[test]
 fn narinfo_returns_404_when_signature_null() {

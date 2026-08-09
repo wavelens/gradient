@@ -8,7 +8,7 @@ mod fixtures;
 
 use super::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, park_if_storage_full};
 use fixtures::{
-    input, make_commit, make_eval, make_project_with_concurrency, make_project_with_last_eval,
+    input, make_commit, make_eval, make_task_with_concurrency, make_task_with_last_eval,
     with_eval_worker, with_storage_not_full, with_writable_cache,
 };
 use gradient_entity::evaluation::EvaluationStatus;
@@ -23,7 +23,7 @@ use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 async fn storage_gate_ignores_non_queued_eval() {
     let already_waiting = make_eval(
         EvaluationId::now_v7(),
-        ProjectId::nil(),
+        TaskId::nil(),
         CommitId::now_v7(),
         EvaluationStatus::Waiting,
     );
@@ -39,14 +39,14 @@ async fn storage_gate_ignores_non_queued_eval() {
 async fn skips_when_same_commit_as_last_eval() {
     let prev_eval_id = EvaluationId::now_v7();
     let prev_commit_id = CommitId::now_v7();
-    let project = make_project_with_last_eval(Some(prev_eval_id));
+    let task = make_task_with_last_eval(Some(prev_eval_id));
     let same_hash = vec![1u8; 20];
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // Same-commit dedup: fetch prev eval
         .append_query_results([vec![make_eval(
             prev_eval_id,
-            project.id,
+            task.id,
             prev_commit_id,
             EvaluationStatus::Completed,
         )]])
@@ -54,10 +54,10 @@ async fn skips_when_same_commit_as_last_eval() {
         .append_query_results([vec![make_commit(prev_commit_id, same_hash.clone())]])
         .into_connection();
 
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
     let res = apply_trigger(
         &db,
-        &project,
+        &task,
         input(trig, TriggerType::Polling, same_hash, false),
     )
     .await
@@ -68,11 +68,11 @@ async fn skips_when_same_commit_as_last_eval() {
 #[tokio::test]
 async fn time_trigger_bypasses_same_commit_check() {
     let prev_eval_id = EvaluationId::now_v7();
-    let project = make_project_with_last_eval(Some(prev_eval_id));
+    let task = make_task_with_last_eval(Some(prev_eval_id));
     let same_hash = vec![1u8; 20];
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // No same-commit dedup queries (time bypasses)
@@ -83,7 +83,7 @@ async fn time_trigger_bypasses_same_commit_check() {
         // trigger_evaluation: resolve previous (returns the prev eval row)
         .append_query_results([vec![make_eval(
             prev_eval_id,
-            project.id,
+            task.id,
             CommitId::nil(),
             EvaluationStatus::Completed,
         )]])
@@ -93,7 +93,7 @@ async fn time_trigger_bypasses_same_commit_check() {
         .append_query_results([vec![{
             let mut m = make_eval(
                 new_eval_id,
-                project.id,
+                task.id,
                 new_commit_id,
                 EvaluationStatus::Queued,
             );
@@ -101,33 +101,29 @@ async fn time_trigger_bypasses_same_commit_check() {
             m
         }]])
         // snapshot flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
-        // project update read-back
-        .append_query_results([vec![project.clone()]])
-        // project update exec
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        // task update read-back
+        .append_query_results([vec![task.clone()]])
+        // task update exec
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
         }]);
     let db = with_eval_worker(with_storage_not_full(with_writable_cache(db))).into_connection();
 
-    let res = apply_trigger(
-        &db,
-        &project,
-        input(trig, TriggerType::Time, same_hash, false),
-    )
-    .await
-    .unwrap();
+    let res = apply_trigger(&db, &task, input(trig, TriggerType::Time, same_hash, false))
+        .await
+        .unwrap();
     assert!(matches!(res, ApplyOutcome::Created { .. }));
 }
 
 #[tokio::test]
 async fn skip_concurrency_with_running_eval() {
-    let project = make_project_with_last_eval(None);
+    let task = make_task_with_last_eval(None);
     let running_eval_id = EvaluationId::now_v7();
     let running_eval = make_eval(
         running_eval_id,
-        project.id,
+        task.id,
         CommitId::nil(),
         EvaluationStatus::Building,
     );
@@ -141,10 +137,10 @@ async fn skip_concurrency_with_running_eval() {
         // Concurrency policy reuses the in-flight eval - Skip => SkippedConcurrency.
         .into_connection();
 
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
     let res = apply_trigger(
         &db,
-        &project,
+        &task,
         input(trig, TriggerType::Polling, vec![9u8; 20], false),
     )
     .await
@@ -158,13 +154,13 @@ async fn polling_with_in_flight_same_commit_skips_without_aborting() {
     // being built must NOT abort the running evaluation. Even if
     // last_evaluation is dangling or missing, dedup against the in-flight
     // eval's commit catches it before the concurrency policy fires.
-    let project = make_project_with_concurrency(None, ConcurrencyPolicy::SoftAbort);
+    let task = make_task_with_concurrency(None, ConcurrencyPolicy::SoftAbort);
     let running_eval_id = EvaluationId::now_v7();
     let running_commit_id = CommitId::now_v7();
     let same_hash = vec![3u8; 20];
     let running_eval = make_eval(
         running_eval_id,
-        project.id,
+        task.id,
         running_commit_id,
         EvaluationStatus::Building,
     );
@@ -177,10 +173,10 @@ async fn polling_with_in_flight_same_commit_skips_without_aborting() {
         // dedup short-circuits with SkippedSameCommit; no abort, no insert
         .into_connection();
 
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
     let res = apply_trigger(
         &db,
-        &project,
+        &task,
         input(trig, TriggerType::Polling, same_hash, false),
     )
     .await
@@ -193,10 +189,10 @@ async fn polling_with_in_flight_same_commit_skips_without_aborting() {
 
 #[tokio::test]
 async fn all_concurrency_creates_evaluation_alongside_running() {
-    let project = make_project_with_concurrency(None, ConcurrencyPolicy::All);
+    let task = make_task_with_concurrency(None, ConcurrencyPolicy::All);
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
     let new_hash = vec![9u8; 20];
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -211,7 +207,7 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
         .append_query_results([vec![{
             let mut m = make_eval(
                 new_eval_id,
-                project.id,
+                task.id,
                 new_commit_id,
                 EvaluationStatus::Queued,
             );
@@ -220,10 +216,10 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
             m
         }]])
         // snapshot flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
-        // project update read-back
-        .append_query_results([vec![project.clone()]])
-        // project update exec
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        // task update read-back
+        .append_query_results([vec![task.clone()]])
+        // task update exec
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -232,7 +228,7 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
 
     let res = apply_trigger(
         &db,
-        &project,
+        &task,
         input(trig, TriggerType::Polling, new_hash, false),
     )
     .await
@@ -254,9 +250,9 @@ async fn all_concurrency_creates_evaluation_alongside_running() {
 
 #[tokio::test]
 async fn unique_constraint_violation_returns_skipped_concurrency() {
-    let project = make_project_with_last_eval(None);
+    let task = make_task_with_last_eval(None);
     let new_commit_id = CommitId::now_v7();
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // Concurrency check: no in-flight (races past the guard)
@@ -267,13 +263,13 @@ async fn unique_constraint_violation_returns_skipped_concurrency() {
         .append_query_results([vec![make_commit(new_commit_id, vec![1u8; 20])]])
         // evaluation insert fails with unique constraint violation
         .append_query_errors([sea_orm::DbErr::Custom(
-            "uq_evaluation_one_active_per_project".into(),
+            "uq_evaluation_one_active_per_task".into(),
         )])
         .into_connection();
 
     let res = apply_trigger(
         &db,
-        &project,
+        &task,
         input(trig, TriggerType::Polling, vec![1u8; 20], false),
     )
     .await
@@ -287,11 +283,11 @@ async fn unique_constraint_violation_returns_skipped_concurrency() {
 #[tokio::test]
 async fn manual_bypasses_same_commit_check() {
     let prev_eval_id = EvaluationId::now_v7();
-    let project = make_project_with_last_eval(Some(prev_eval_id));
+    let task = make_task_with_last_eval(Some(prev_eval_id));
     let same_hash = vec![1u8; 20];
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         // manual=true skips same-commit dedup entirely
@@ -302,7 +298,7 @@ async fn manual_bypasses_same_commit_check() {
         // trigger_evaluation: resolve previous (prev row exists)
         .append_query_results([vec![make_eval(
             prev_eval_id,
-            project.id,
+            task.id,
             CommitId::nil(),
             EvaluationStatus::Completed,
         )]])
@@ -311,15 +307,15 @@ async fn manual_bypasses_same_commit_check() {
         // evaluation insert
         .append_query_results([vec![make_eval(
             new_eval_id,
-            project.id,
+            task.id,
             new_commit_id,
             EvaluationStatus::Queued,
         )]])
         // snapshot flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
-        // project update read-back
-        .append_query_results([vec![project.clone()]])
-        // project update exec
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        // task update read-back
+        .append_query_results([vec![task.clone()]])
+        // task update exec
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -328,7 +324,7 @@ async fn manual_bypasses_same_commit_check() {
 
     let res = apply_trigger(
         &db,
-        &project,
+        &task,
         input(trig, TriggerType::Polling, same_hash, true),
     )
     .await
@@ -338,11 +334,11 @@ async fn manual_bypasses_same_commit_check() {
 
 #[tokio::test]
 async fn hard_abort_populates_aborted_fields() {
-    let project = make_project_with_concurrency(None, ConcurrencyPolicy::HardAbort);
+    let task = make_task_with_concurrency(None, ConcurrencyPolicy::HardAbort);
     let running_eval_id = EvaluationId::now_v7();
     let running_eval = make_eval(
         running_eval_id,
-        project.id,
+        task.id,
         CommitId::nil(),
         EvaluationStatus::Building,
     );
@@ -362,7 +358,7 @@ async fn hard_abort_populates_aborted_fields() {
     };
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
     let new_hash = vec![7u8; 20];
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -400,7 +396,7 @@ async fn hard_abort_populates_aborted_fields() {
         .append_query_results([vec![{
             let mut m = make_eval(
                 new_eval_id,
-                project.id,
+                task.id,
                 new_commit_id,
                 EvaluationStatus::Queued,
             );
@@ -408,10 +404,10 @@ async fn hard_abort_populates_aborted_fields() {
             m
         }]])
         // snapshot flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
-        // trigger_evaluation: project update read-back
-        .append_query_results([vec![project.clone()]])
-        // trigger_evaluation: project exec
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        // trigger_evaluation: task update read-back
+        .append_query_results([vec![task.clone()]])
+        // trigger_evaluation: task exec
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -420,7 +416,7 @@ async fn hard_abort_populates_aborted_fields() {
 
     let res = apply_trigger(
         &db,
-        &project,
+        &task,
         input(trig, TriggerType::Polling, new_hash, false),
     )
     .await
@@ -446,16 +442,16 @@ async fn hard_abort_populates_aborted_fields() {
 #[tokio::test]
 async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
     use gradient_types::waiting_reason::WaitingReason;
-    let project = make_project_with_last_eval(None);
+    let task = make_task_with_last_eval(None);
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
     let new_hash = vec![1u8; 20];
 
     let parked_eval = {
         let mut m = make_eval(
             new_eval_id,
-            project.id,
+            task.id,
             new_commit_id,
             EvaluationStatus::Waiting,
         );
@@ -471,7 +467,7 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
         .append_query_results([vec![{
             let mut m = make_eval(
                 new_eval_id,
-                project.id,
+                task.id,
                 new_commit_id,
                 EvaluationStatus::Queued,
             );
@@ -479,8 +475,8 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
             m
         }]])
         // snapshot flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
-        .append_query_results([vec![project.clone()]])
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        .append_query_results([vec![task.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -509,7 +505,7 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
         source_comment: None,
         instance_max_storage_gb: 0,
     };
-    let res = apply_trigger(&db, &project, applied).await.unwrap();
+    let res = apply_trigger(&db, &task, applied).await.unwrap();
 
     let ApplyOutcome::Created { evaluation, .. } = res else {
         panic!("expected Created, got {res:?}");
@@ -532,23 +528,23 @@ async fn gate_approval_parks_pr_evaluation_in_waiting_approval() {
     }
 }
 
-/// When the project's organisation has no writable cache subscription, a
+/// When the task's organisation has no writable cache subscription, a
 /// freshly-created evaluation is parked in `Waiting` with the `NoCache`
 /// reason - no jobs are spawned and the scheduler's reconciler must leave
 /// the row alone until the cache-create endpoint re-queues it.
 #[tokio::test]
 async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
     use gradient_types::waiting_reason::WaitingReason;
-    let project = make_project_with_last_eval(None);
+    let task = make_task_with_last_eval(None);
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
     let new_hash = vec![1u8; 20];
 
     let parked_eval = {
         let mut m = make_eval(
             new_eval_id,
-            project.id,
+            task.id,
             new_commit_id,
             EvaluationStatus::Waiting,
         );
@@ -568,7 +564,7 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
         .append_query_results([vec![{
             let mut m = make_eval(
                 new_eval_id,
-                project.id,
+                task.id,
                 new_commit_id,
                 EvaluationStatus::Queued,
             );
@@ -576,9 +572,9 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
             m
         }]])
         // snapshot flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
-        // trigger_evaluation: project update read-back + exec
-        .append_query_results([vec![project.clone()]])
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        // trigger_evaluation: task update read-back + exec
+        .append_query_results([vec![task.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -595,7 +591,7 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
 
     let res = apply_trigger(
         &db,
-        &project,
+        &task,
         input(trig, TriggerType::Polling, new_hash, false),
     )
     .await
@@ -613,7 +609,7 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
     assert!(matches!(reason, WaitingReason::NoCache));
 }
 
-/// When the project's organisation has a writable cache but no active
+/// When the task's organisation has a writable cache but no active
 /// worker registration with `enable_eval`, `apply_trigger` parks the
 /// freshly-created evaluation in `Waiting + Workers { connected_workers: 0 }`.
 /// Without this gate the eval would sit `Queued` forever - the
@@ -622,16 +618,16 @@ async fn no_writable_cache_parks_evaluation_in_waiting_no_cache() {
 #[tokio::test]
 async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
     use gradient_types::waiting_reason::WaitingReason;
-    let project = make_project_with_last_eval(None);
+    let task = make_task_with_last_eval(None);
     let new_eval_id = EvaluationId::now_v7();
     let new_commit_id = CommitId::now_v7();
-    let trig = ProjectTriggerId::now_v7();
+    let trig = TaskTriggerId::now_v7();
     let new_hash = vec![1u8; 20];
 
     let parked_eval = {
         let mut m = make_eval(
             new_eval_id,
-            project.id,
+            task.id,
             new_commit_id,
             EvaluationStatus::Waiting,
         );
@@ -651,7 +647,7 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
         .append_query_results([vec![{
             let mut m = make_eval(
                 new_eval_id,
-                project.id,
+                task.id,
                 new_commit_id,
                 EvaluationStatus::Queued,
             );
@@ -659,9 +655,9 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
             m
         }]])
         // snapshot flake input overrides (none)
-        .append_query_results([Vec::<gradient_entity::project_flake_input_override::Model>::new()])
-        // trigger_evaluation: project update read-back + exec
-        .append_query_results([vec![project.clone()]])
+        .append_query_results([Vec::<gradient_entity::task_flake_input_override::Model>::new()])
+        // trigger_evaluation: task update read-back + exec
+        .append_query_results([vec![task.clone()]])
         .append_exec_results([MockExecResult {
             last_insert_id: 0,
             rows_affected: 1,
@@ -684,7 +680,7 @@ async fn no_eval_capable_worker_parks_evaluation_in_waiting_workers() {
 
     let res = apply_trigger(
         &db,
-        &project,
+        &task,
         input(trig, TriggerType::Polling, new_hash, false),
     )
     .await

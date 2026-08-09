@@ -21,9 +21,9 @@
 
       <div class="sidebar-breadcrumb">
         <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
-        @if (ev.project_name) {
+        @if (ev.task_name) {
           <span class="breadcrumb-sep">/</span>
-          <a [routerLink]="['/organization', orgName, 'project', ev.project_name]" class="breadcrumb-link">{{ ev.project_display_name || ev.project_name }}</a>
+          <a [routerLink]="['/organization', orgName, 'task', ev.task_name]" class="breadcrumb-link">{{ ev.task_display_name || ev.task_name }}</a>
         }
         <span class="breadcrumb-sep">/</span>
         <span class="breadcrumb-cur">Evaluation</span>

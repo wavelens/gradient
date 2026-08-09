@@ -7,12 +7,12 @@
 import { Injectable, inject } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { ActivatedRouteSnapshot, RouterStateSnapshot, TitleStrategy } from '@angular/router';
-import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
+import { TaskAccessData } from '@core/resolvers/task-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
 import { OrganizationAccessData } from '@core/resolvers/organization-access.resolver';
 
 const BRAND = 'Gradient';
-const ENTITY_ONLY_ROUTE_TITLES = new Set(['Organization', 'Project', 'Cache']);
+const ENTITY_ONLY_ROUTE_TITLES = new Set(['Organization', 'Task', 'Cache']);
 
 @Injectable({ providedIn: 'root' })
 export class GradientTitleStrategy extends TitleStrategy {
@@ -37,12 +37,12 @@ export function composeTitle(entity: string | undefined, routeTitle: string | un
 export function findEntityName(snapshot: ActivatedRouteSnapshot): string | undefined {
   const visit = (s: ActivatedRouteSnapshot): string | undefined => {
     const data = s.data as {
-      projectAccess?: ProjectAccessData;
+      taskAccess?: TaskAccessData;
       cacheAccess?: CacheAccessData;
       organizationAccess?: OrganizationAccessData;
     };
     const name =
-      data.projectAccess?.project.display_name ??
+      data.taskAccess?.task.display_name ??
       data.cacheAccess?.cache.display_name ??
       data.organizationAccess?.organization?.display_name;
     if (name) return name;

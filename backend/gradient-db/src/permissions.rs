@@ -23,7 +23,7 @@ use gradient_types::ids::RoleId;
 ///
 /// Permissions are intentionally granular so that custom roles can mix and
 /// match (e.g. a "Releaser" role could hold [`Permission::TriggerEvaluation`]
-/// without [`Permission::EditProject`]).
+/// without [`Permission::EditTask`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum Permission {
     // ── Org-level ────────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ pub enum Permission {
     ManageRoles,
     /// CRUD on org integrations (forge credentials).
     ManageIntegrations,
-    /// CRUD on project actions.
+    /// CRUD on task actions.
     ManageActions,
     /// Register/configure org-owned workers.
     ManageWorkers,
@@ -49,14 +49,14 @@ pub enum Permission {
     /// Manage the org's SSH key (used for git fetches).
     ManageSshKey,
 
-    // ── Project-level (within an org) ────────────────────────────────────────
-    /// Create a new project in the org.
-    CreateProject,
-    /// Modify or delete an existing project (settings, integration, transfer).
-    EditProject,
+    // ── Task-level (within an org) ────────────────────────────────────────
+    /// Create a new task in the org.
+    CreateTask,
+    /// Modify or delete an existing task (settings, integration, transfer).
+    EditTask,
     /// Trigger an evaluation / build run.
     TriggerEvaluation,
-    /// CRUD on project triggers.
+    /// CRUD on task triggers.
     ManageTriggers,
 }
 
@@ -77,8 +77,8 @@ impl Permission {
         Permission::ManageWorkers,
         Permission::ManageSubscriptions,
         Permission::ManageSshKey,
-        Permission::CreateProject,
-        Permission::EditProject,
+        Permission::CreateTask,
+        Permission::EditTask,
         Permission::TriggerEvaluation,
         Permission::ManageTriggers,
     ];
@@ -99,8 +99,8 @@ impl Permission {
             Permission::ManageWorkers => 7,
             Permission::ManageSubscriptions => 8,
             Permission::ManageSshKey => 9,
-            Permission::CreateProject => 10,
-            Permission::EditProject => 11,
+            Permission::CreateTask => 10,
+            Permission::EditTask => 11,
             Permission::TriggerEvaluation => 12,
             Permission::ManageTriggers => 13,
         };
@@ -120,8 +120,8 @@ impl Permission {
             Permission::ManageWorkers => "manageWorkers",
             Permission::ManageSubscriptions => "manageSubscriptions",
             Permission::ManageSshKey => "manageSshKey",
-            Permission::CreateProject => "createProject",
-            Permission::EditProject => "editProject",
+            Permission::CreateTask => "createTask",
+            Permission::EditTask => "editTask",
             Permission::TriggerEvaluation => "triggerEvaluation",
             Permission::ManageTriggers => "manageTriggers",
         }
@@ -169,7 +169,7 @@ pub fn admin_mask() -> PermissionMask {
     mask_from(Permission::ALL)
 }
 
-/// Canonical bitmask for the built-in **Write** role: project, action, and
+/// Canonical bitmask for the built-in **Write** role: task, action, and
 /// integration management - but no member/role administration and no destruction
 /// of the organization or its settings.
 pub fn write_mask() -> PermissionMask {
@@ -181,8 +181,8 @@ pub fn write_mask() -> PermissionMask {
         ManageWorkers,
         ManageSubscriptions,
         ManageSshKey,
-        CreateProject,
-        EditProject,
+        CreateTask,
+        EditTask,
         TriggerEvaluation,
         ManageTriggers,
     ])
@@ -190,7 +190,7 @@ pub fn write_mask() -> PermissionMask {
 
 /// Canonical bitmask for the built-in **View** role.
 ///
-/// Read-only on sensitive surfaces (members, projects, actions, the org
+/// Read-only on sensitive surfaces (members, tasks, actions, the org
 /// itself), but currently retains mutation rights on a handful of non-secret
 /// sub-resources (workers, ssh key, cache subscriptions, integrations) to
 /// preserve historical behavior. Tightening these is an explicit follow-up.
@@ -368,14 +368,14 @@ mod tests {
         assert!(!mask_grants(mask, Permission::ManageRoles));
         assert!(!mask_grants(mask, Permission::DeleteOrg));
         assert!(!mask_grants(mask, Permission::ManageOrgSettings));
-        assert!(mask_grants(mask, Permission::EditProject));
+        assert!(mask_grants(mask, Permission::EditTask));
         assert!(mask_grants(mask, Permission::ManageActions));
     }
 
     #[test]
-    fn view_mask_cannot_edit_projects_or_actions() {
+    fn view_mask_cannot_edit_tasks_or_actions() {
         let mask = view_mask();
-        assert!(!mask_grants(mask, Permission::EditProject));
+        assert!(!mask_grants(mask, Permission::EditTask));
         assert!(!mask_grants(mask, Permission::ManageActions));
         assert!(!mask_grants(mask, Permission::ManageMembers));
         assert!(!mask_grants(mask, Permission::ManageRoles));
@@ -399,7 +399,7 @@ mod tests {
     #[test]
     fn view_org_is_not_mutating() {
         assert!(!is_mutating(Permission::ViewOrg));
-        assert!(is_mutating(Permission::EditProject));
+        assert!(is_mutating(Permission::EditTask));
         assert!(is_mutating(Permission::ManageMembers));
         assert!(is_mutating(Permission::ManageRoles));
     }

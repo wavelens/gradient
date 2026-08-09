@@ -612,7 +612,7 @@ pub(crate) mod gitea {
 pub(crate) mod gitlab {
     use super::*;
 
-    fn project_id(owner: &str, repo: &str) -> String {
+    fn task_id(owner: &str, repo: &str) -> String {
         format!("{owner}/{repo}").replace('/', "%2F")
     }
 
@@ -632,11 +632,11 @@ pub(crate) mod gitlab {
         title: &str,
         body: &str,
     ) -> Result<super::PrRef> {
-        let id = project_id(owner, repo);
+        let id = task_id(owner, repo);
         let open: Vec<Mr> = send_json(
             auth(
                 client.get(format!(
-                    "{base_url}/api/v4/projects/{id}/merge_requests?state=opened&source_branch={head}"
+                    "{base_url}/api/v4/tasks/{id}/merge_requests?state=opened&source_branch={head}"
                 )),
                 token,
             ),
@@ -648,7 +648,7 @@ pub(crate) mod gitlab {
             send_ok(
                 auth(
                     client.put(format!(
-                        "{base_url}/api/v4/projects/{id}/merge_requests/{}",
+                        "{base_url}/api/v4/tasks/{id}/merge_requests/{}",
                         mr.iid
                     )),
                     token,
@@ -669,7 +669,7 @@ pub(crate) mod gitlab {
 
         let created: Mr = send_json(
             auth(
-                client.post(format!("{base_url}/api/v4/projects/{id}/merge_requests")),
+                client.post(format!("{base_url}/api/v4/tasks/{id}/merge_requests")),
                 token,
             )
             .json(&CreateMr {
@@ -695,13 +695,10 @@ pub(crate) mod gitlab {
         owner: &str,
         repo: &str,
     ) -> Result<String> {
-        let id = project_id(owner, repo);
-        let info: ProjectInfo = send_json(
-            auth(
-                client.get(format!("{base_url}/api/v4/projects/{id}")),
-                token,
-            ),
-            "gitlab get project",
+        let id = task_id(owner, repo);
+        let info: TaskInfo = send_json(
+            auth(client.get(format!("{base_url}/api/v4/tasks/{id}")), token),
+            "gitlab get task",
         )
         .await?;
 
@@ -738,7 +735,7 @@ pub(crate) mod gitlab {
     }
 
     #[derive(Deserialize)]
-    struct ProjectInfo {
+    struct TaskInfo {
         default_branch: String,
     }
     #[derive(Deserialize)]

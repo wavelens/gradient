@@ -77,7 +77,7 @@ describe('LiveService', () => {
   });
 
   it('closes the socket on unsubscribe', () => {
-    sub = service.connect('/projects/o/p/live').subscribe();
+    sub = service.connect('/tasks/o/p/live').subscribe();
     const ws = FakeWebSocket.instances[0];
     expect(ws.closed).toBe(false);
     sub.unsubscribe();

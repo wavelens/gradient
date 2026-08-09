@@ -15,7 +15,7 @@ use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 /// Auto-recover an evaluation wedged in `graph_stuck` because an anchor's own
 /// `.drv` NAR is missing from our cache and has no producer: only evaluation
 /// emits a `.drv`, and the daemon-free server cannot reproduce one. Aborts the
-/// stuck run (freeing the single-active-per-project slot) and queues a fresh
+/// stuck run (freeing the single-active-per-task slot) and queues a fresh
 /// full evaluation of the **same commit** - re-instantiating the flake
 /// re-materialises the `.drv` in the worker store, which re-uploads it.
 ///
@@ -24,10 +24,10 @@ use sea_orm::{ActiveModelTrait, ConnectionTrait, IntoActiveModel};
 /// transient miss, and re-triggering again would loop.
 pub async fn trigger_drv_recovery<C: ConnectionTrait>(
     db: &C,
-    project: &MProject,
+    task: &MTask,
     stuck: &MEvaluation,
 ) -> Result<MEvaluation, TriggerError> {
-    // Abort before insert: the single-active-per-project unique index rejects a
+    // Abort before insert: the single-active-per-task unique index rejects a
     // second active row, so the stuck eval must leave the active set first.
     abort_evaluation(db, stuck.id, AbortKind::Soft).await?;
 
@@ -35,7 +35,7 @@ pub async fn trigger_drv_recovery<C: ConnectionTrait>(
     let new_eval_id = EvaluationId::now_v7();
     let aevaluation = MEvaluation {
         id: new_eval_id,
-        project: Some(project.id),
+        task: Some(task.id),
         repository: stuck.repository.clone(),
         commit: stuck.commit,
         wildcard: stuck.wildcard.clone(),
@@ -51,11 +51,11 @@ pub async fn trigger_drv_recovery<C: ConnectionTrait>(
 
     let new_eval = aevaluation.insert(db).await?;
 
-    snapshot_flake_input_overrides(db, project.id, new_eval.id).await?;
+    snapshot_flake_input_overrides(db, task.id, new_eval.id).await?;
 
-    let mut aproject: AProject = project.clone().into();
-    aproject.last_evaluation = Set(Some(new_eval_id));
-    aproject.update(db).await?;
+    let mut atask: ATask = task.clone().into();
+    atask.last_evaluation = Set(Some(new_eval_id));
+    atask.update(db).await?;
 
     Ok(new_eval)
 }

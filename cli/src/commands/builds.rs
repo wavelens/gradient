@@ -57,7 +57,8 @@ pub async fn handle(cmd: Commands, out: Output) {
             search,
             case,
         } => {
-            crate::commands::builds_log::handle_log(&id, interactive, lines, search, case, out).await
+            crate::commands::builds_log::handle_log(&id, interactive, lines, search, case, out)
+                .await
         }
     }
 }

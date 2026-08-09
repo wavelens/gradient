@@ -249,9 +249,9 @@ it to the next reconcile tick: every pass that deletes `cached_path` rows
 transaction** (`clear_gate_flags_for_hashes`), so there is no window in which the
 gate trusts an artifact GC just removed. Path invalidation goes further and
 demotes the producer itself (`demote_cached_output`), so an invalidated output
-rebuilds instead of staying trusted-but-gone. And because the per-project
+rebuilds instead of staying trusted-but-gone. And because the per-task
 evaluation GC refuses to run while any evaluation is active, a wedged `Building`
-evaluation used to freeze a project's GC forever - an "active" evaluation
+evaluation used to freeze a task's GC forever - an "active" evaluation
 untouched for `gc_wedged_eval_hours` (default 24h) now stops blocking, while
 never being deleted itself.
 
@@ -291,7 +291,7 @@ re-pushing it (CacheQuery reported it cached) and dependent builds failed
 upload-vs-GC race; a NAR that is still unreferenced after the window is a genuine
 orphan and reclaimed.
 
-Evaluation GC (`gc_project_evaluations`) deletes old evaluations and relies on FK
+Evaluation GC (`gc_task_evaluations`) deletes old evaluations and relies on FK
 cascade to clear their per-eval rows: `evaluation -> build_job -> build_attempt`.
 `build_log_chunk` previously carried a bare `build_attempt` UUID with no FK, so its
 chunk-index rows leaked forever once the eval (and its attempts) were collected; it
@@ -313,7 +313,7 @@ is built. The resolved upstream NAR URL plus narinfo metadata is persisted once
 onto `derivation_output` (`external_url`, `nar_hash`, `file_size`,
 `references_list`, `deriver`), so the narinfo lookup runs only once. Substitutable
 anchors dispatch through the existing `external_cached` path. The dispatch carries
-the derivation's output `(name, store_path)` pairs in the `BuildTask` so the worker
+the derivation's output `(name, store_path)` pairs in the `BuildSpec` so the worker
 fetches the outputs directly and never touches the `.drv`: a substitution needs
 only the output NAR plus its runtime closure, never the `.drv`'s build-time
 `input_sources` (binary caches do not serve those, so importing the `.drv` would
@@ -582,7 +582,7 @@ once at startup to reconcile the durable state the dead process left behind:
   reached the build phase, so their edges are already flushed).
 - Pre-build in-flight evaluations (`Fetching`/`EvaluatingFlake`/
   `EvaluatingDerivation`) are aborted - their dependency edges were never
-  flushed - and their projects get `ForceEvaluation` so a fresh evaluation
+  flushed - and their tasks get `ForceEvaluation` so a fresh evaluation
   re-walks them and writes a complete graph.
 - The anchors those aborted evaluations drove are aborted too
   (`Created`/`Queued`/`Building` -> `Aborted`), mirroring the explicit-abort

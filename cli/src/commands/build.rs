@@ -131,7 +131,7 @@ pub async fn handle_build(
     } else {
         out.ok(&dispatch);
         out.human(format!("Evaluation: {}", dispatch.evaluation));
-        out.human(format!("Project:    {}", dispatch.project));
+        out.human(format!("Task:    {}", dispatch.task));
         out.human(format!("Commit:     {}", dispatch.commit));
     }
 
