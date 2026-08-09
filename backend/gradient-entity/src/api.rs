@@ -8,7 +8,7 @@ use chrono::NaiveDateTime;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{ApiId, CacheId, OrganizationId, UserId};
+use crate::ids::{ApiId, CacheId, ProjectId, UserId};
 
 #[derive(Clone, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "api")]
@@ -26,10 +26,10 @@ pub struct Model {
     /// Bitmask over `gradient_core::permissions::Permission` capabilities;
     /// caps the key's effective authority on every authenticated request.
     pub permission: i64,
-    /// Optional org pin. `None` = key works in any org the owning user is a
+    /// Optional project pin. `None` = key works in any project the owning user is a
     /// member of (legacy behavior). `Some(id)` = key is rejected for any
-    /// other org.
-    pub organization: Option<OrganizationId>,
+    /// other project.
+    pub project: Option<ProjectId>,
     pub cache: Option<CacheId>,
     /// Source CIDRs allowed to present this key. `None`/empty = any source.
     #[sea_orm(column_type = "Array(std::sync::Arc::new(ColumnType::Text))", nullable)]
@@ -45,13 +45,13 @@ pub enum Relation {
     )]
     OwnedBy,
     #[sea_orm(
-        belongs_to = "super::organization::Entity",
-        from = "Column::Organization",
-        to = "super::organization::Column::Id",
+        belongs_to = "super::project::Entity",
+        from = "Column::Project",
+        to = "super::project::Column::Id",
         on_delete = "SetNull",
         on_update = "Cascade"
     )]
-    Organization,
+    Project,
     #[sea_orm(
         belongs_to = "super::cache::Entity",
         from = "Column::Cache",
@@ -75,7 +75,7 @@ impl std::fmt::Debug for Model {
             .field("expires_at", &self.expires_at)
             .field("revoked_at", &self.revoked_at)
             .field("permission", &self.permission)
-            .field("organization", &self.organization)
+            .field("project", &self.project)
             .field("cache", &self.cache)
             .field("allowed_ips", &self.allowed_ips)
             .finish()

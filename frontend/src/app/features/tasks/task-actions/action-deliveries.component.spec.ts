@@ -19,7 +19,7 @@ describe('ActionDeliveriesComponent', () => {
       providers: [provideHttpClient(), provideHttpClientTesting()],
     }).compileComponents();
     fixture = TestBed.createComponent(ActionDeliveriesComponent);
-    fixture.componentRef.setInput('org', 'test-org');
+    fixture.componentRef.setInput('project', 'test-project');
     fixture.componentRef.setInput('task', 'test-proj');
     fixture.componentRef.setInput('actionId', 'a-id');
     httpMock = TestBed.inject(HttpTestingController);

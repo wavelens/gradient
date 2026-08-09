@@ -11,7 +11,7 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { TaskSettingsComponent } from './task-settings.component';
 import { TasksService } from '@core/services/tasks.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { AccessState } from '@core/models/access.model';
 
 type AccessCase = { managed: boolean; canEdit: boolean; canTrigger?: boolean };
@@ -23,7 +23,7 @@ function asAccess(c: AccessCase): AccessState {
 function taskFor(c: AccessCase) {
   return {
     id: 'p',
-    organization: 'acme',
+    project: 'acme',
     name: 'demo',
     display_name: 'Demo',
     description: '',
@@ -42,7 +42,7 @@ function taskFor(c: AccessCase) {
 
 function activatedRouteStub(c: AccessCase): ActivatedRoute {
   return {
-    snapshot: { paramMap: convertToParamMap({ org: 'acme', task: 'demo' }) },
+    snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }) },
     data: of({}),
     parent: { data: of({ taskAccess: { task: taskFor(c), access: asAccess(c) } }) },
   } as unknown as ActivatedRoute;
@@ -68,8 +68,8 @@ function setup(c: AccessCase): ComponentFixture<TaskSettingsComponent> {
         useValue: { getTaskInfo: () => of(taskFor(c)) },
       },
       {
-        provide: OrganizationsService,
-        useValue: { getOrganization: () => of({ id: 'o', display_name: 'Acme' }) },
+        provide: ProjectsService,
+        useValue: { getProject: () => of({ id: 'o', display_name: 'Acme' }) },
       },
     ],
   });

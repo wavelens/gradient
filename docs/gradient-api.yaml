@@ -26,12 +26,12 @@ info:
     `nix-support/hydra-build-products`. Access is granted when any of the following
     conditions is met:
 
-    - The owning organisation is **public** - no credentials required.
+    - The owning project is **public** - no credentials required.
     - A short-lived (1 h) **download token** is supplied via `?token=<download_token>`.
       Obtain one from `GET /builds/{build}/download-token` while authenticated.
       Tokens are scoped to a single build and are safe to embed in URLs.
     - A valid session (`jwt_token` cookie or `Authorization: Bearer` header) belonging
-      to a member of the owning organisation.
+      to a member of the owning project.
 
     ## Rate limiting
 
@@ -108,8 +108,8 @@ tags:
     description: Authentication - login, register, OAuth/OIDC
   - name: user
     description: Current user profile, API keys, and settings
-  - name: orgs
-    description: Organization management, members, SSH keys, cache subscriptions
+  - name: projects
+    description: Project management, members, SSH keys, cache subscriptions
   - name: tasks
     description: Task management and evaluation triggers
   - name: triggers
@@ -123,8 +123,8 @@ tags:
   - name: build-requests
     description: >-
       Ad-hoc build requests from `gradient build` - CLI-uploaded source
-      evaluated under a per-org build-request task. Flake inputs served
-      over `git+ssh://` are fetched using the organization's SSH key, and
+      evaluated under a per-project build-request task. Flake inputs served
+      over `git+ssh://` are fetched using the project's SSH key, and
       `input_overrides` can override remote flake inputs for the run.
   - name: workers
     description: Worker registration and live status (proto workers connected via WebSocket)
@@ -137,7 +137,7 @@ tags:
   - name: forge-webhooks
     description: Incoming forge webhooks (external forges → Gradient push triggers)
   - name: integrations
-    description: Per-organization named forge integrations (inbound HMAC secrets + outbound API credentials)
+    description: Per-project named forge integrations (inbound HMAC secrets + outbound API credentials)
   - name: admin
     description: Server-wide administrative endpoints. All routes require the caller to have the `superuser` flag.
   - name: scim
@@ -225,7 +225,7 @@ paths:
                   registration_enabled: false
                   email_verification_enabled: false
                   quic: false
-                  create_org: everyone
+                  create_project: everyone
                   create_cache: everyone
 
   /proto:
@@ -755,7 +755,7 @@ paths:
         it cannot be retrieved again. Use it as `Authorization: Bearer GRAD<key>`.
         Pass `expires_in_days` to make the key auto-expire; omit for no expiry.
         A cache-pinned key may only grant cache permissions the caller already
-        holds; members of an organization subscribed to the cache are treated as
+        holds; members of a project subscribed to the cache are treated as
         read-only, so they can mint read-only cache keys.
       operationId: createUserKey
       requestBody:
@@ -852,7 +852,7 @@ paths:
       tags: [user]
       summary: Update an API key's configurable options
       description: |-
-        Edit the key's name, permission set, or organization pin in place.
+        Edit the key's name, permission set, or project pin in place.
         Permissions replace the existing set wholesale. State-managed keys
         cannot be edited. Cannot be called from an API-key-authenticated
         request - sessions only.
@@ -1108,17 +1108,17 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  # ── Organizations ─────────────────────────────────────────────────────────────
+  # ── Projects ─────────────────────────────────────────────────────────────
 
-  /orgs:
+  /projects:
     get:
-      tags: [orgs]
-      summary: List organizations
-      description: Returns all organizations the current user is a member of.
-      operationId: listOrgs
+      tags: [projects]
+      summary: List projects
+      description: Returns all projects the current user is a member of.
+      operationId: listProjects
       responses:
         '200':
-          description: Organization list
+          description: Project list
           content:
             application/json:
               schema:
@@ -1129,26 +1129,26 @@ paths:
                       message:
                         type: array
                         items:
-                          $ref: '#/components/schemas/Organization'
+                          $ref: '#/components/schemas/Project'
         '401':
           $ref: '#/components/responses/Unauthorized'
     put:
-      tags: [orgs]
-      summary: Create organization
-      description: Creates a new organization owned by the current user.
-      operationId: createOrg
+      tags: [projects]
+      summary: Create project
+      description: Creates a new project owned by the current user.
+      operationId: createProject
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/MakeOrganizationRequest'
+              $ref: '#/components/schemas/MakeProjectRequest'
             example:
-              name: my-org
-              display_name: My Organization
+              name: my-project
+              display_name: My Project
       responses:
         '200':
-          description: Organization UUID
+          description: Project UUID
           content:
             application/json:
               schema:
@@ -1163,19 +1163,19 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
-  /orgs/available:
+  /projects/available:
     get:
-      tags: [orgs]
-      summary: Check organization name availability
-      description: Returns `true` if no organization with the given name exists, `false` if it is already taken.
-      operationId: checkOrgNameAvailable
+      tags: [projects]
+      summary: Check project name availability
+      description: Returns `true` if no project with the given name exists, `false` if it is already taken.
+      operationId: checkProjectNameAvailable
       parameters:
         - name: name
           in: query
           required: true
           schema:
             type: string
-          description: Organization name to check
+          description: Project name to check
       responses:
         '200':
           description: Availability result
@@ -1194,16 +1194,16 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /orgs/{organization}:
+  /projects/{project}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
     get:
-      tags: [orgs]
-      summary: Get organization
-      operationId: getOrg
+      tags: [projects]
+      summary: Get project
+      operationId: getProject
       responses:
         '200':
-          description: Organization details
+          description: Project details
           content:
             application/json:
               schema:
@@ -1212,25 +1212,25 @@ paths:
                   - type: object
                     properties:
                       message:
-                        $ref: '#/components/schemas/Organization'
+                        $ref: '#/components/schemas/Project'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
-      tags: [orgs]
-      summary: Update organization
+      tags: [projects]
+      summary: Update project
       description: |
-        Updates one or more organization fields. Managed organizations cannot
+        Updates one or more project fields. Managed projects cannot
         be edited via the API. Requires the caller to hold the **admin** role
-        in the organization.
-      operationId: patchOrg
+        in the project.
+      operationId: patchProject
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchOrganizationRequest'
+              $ref: '#/components/schemas/PatchProjectRequest'
       responses:
         '200':
           description: Updated
@@ -1249,12 +1249,12 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
     delete:
-      tags: [orgs]
-      summary: Delete organization
+      tags: [projects]
+      summary: Delete project
       description: |
-        Permanently deletes the organization and all its resources. Requires
-        the caller to hold the **admin** role in the organization.
-      operationId: deleteOrg
+        Permanently deletes the project and all its resources. Requires
+        the caller to hold the **admin** role in the project.
+      operationId: deleteProject
       responses:
         '200':
           description: Deleted
@@ -1269,13 +1269,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /orgs/{organization}/users:
+  /projects/{project}/users:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
     get:
-      tags: [orgs]
-      summary: List organization members
-      operationId: listOrgUsers
+      tags: [projects]
+      summary: List project members
+      operationId: listProjectUsers
       responses:
         '200':
           description: Member list
@@ -1295,12 +1295,12 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     post:
-      tags: [orgs]
+      tags: [projects]
       summary: Add member
       description: |
-        Adds a user to the organization by username. Requires the caller to
-        hold the **admin** role in the organization.
-      operationId: addOrgUser
+        Adds a user to the project by username. Requires the caller to
+        hold the **admin** role in the project.
+      operationId: addProjectUser
       requestBody:
         required: true
         content:
@@ -1325,12 +1325,12 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
     patch:
-      tags: [orgs]
+      tags: [projects]
       summary: Update member role
       description: |
-        Updates the role or permissions of an existing organization member.
-        Requires the caller to hold the **admin** role in the organization.
-      operationId: patchOrgUser
+        Updates the role or permissions of an existing project member.
+        Requires the caller to hold the **admin** role in the project.
+      operationId: patchProjectUser
       requestBody:
         required: true
         content:
@@ -1351,12 +1351,12 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
-      tags: [orgs]
+      tags: [projects]
       summary: Remove member
       description: |
-        Removes a user from the organization. Requires the caller to hold the
-        **admin** role in the organization.
-      operationId: removeOrgUser
+        Removes a user from the project. Requires the caller to hold the
+        **admin** role in the project.
+      operationId: removeProjectUser
       requestBody:
         required: true
         content:
@@ -1377,20 +1377,20 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /orgs/{organization}/roles:
+  /projects/{project}/roles:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
     get:
-      tags: [orgs]
-      summary: List roles available in the organization
+      tags: [projects]
+      summary: List roles available in the project
       description: |
         Returns the three immutable built-in roles (Admin/Write/View) plus any
-        custom roles owned by this organization, along with the catalogue of
+        custom roles owned by this project, along with the catalogue of
         permissions that custom roles may carry.
 
-        Visible to any member of the organization so the add-member UI can
+        Visible to any member of the project so the add-member UI can
         populate its role dropdown.
-      operationId: listOrgRoles
+      operationId: listProjectRoles
       responses:
         '200':
           description: Role catalogue
@@ -1408,16 +1408,16 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     post:
-      tags: [orgs]
+      tags: [projects]
       summary: Create a custom role
       description: |
-        Creates a new role scoped to this organization. The caller must hold
+        Creates a new role scoped to this project. The caller must hold
         the **manageRoles** permission. The role's permission set is freely
-        chosen from the capabilities returned by `GET /orgs/{org}/roles` →
+        chosen from the capabilities returned by `GET /projects/{project}/roles` →
         `available_permissions`. Built-in role names (Admin, Write, View) and
-        any name already used by another role in the same org are rejected
+        any name already used by another role in the same project are rejected
         with `409`.
-      operationId: createOrgRole
+      operationId: createProjectRole
       requestBody:
         required: true
         content:
@@ -1447,9 +1447,9 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
-  /orgs/{organization}/roles/{role_id}:
+  /projects/{project}/roles/{role_id}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - name: role_id
         in: path
         required: true
@@ -1458,9 +1458,9 @@ paths:
           format: uuid
         description: Role identifier (UUIDv7).
     get:
-      tags: [orgs]
+      tags: [projects]
       summary: Fetch a role
-      operationId: getOrgRole
+      operationId: getProjectRole
       responses:
         '200':
           description: Role
@@ -1478,13 +1478,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
-      tags: [orgs]
+      tags: [projects]
       summary: Update a custom role
       description: |
         Renames a custom role and/or replaces its permission set. The three
         built-in roles (Admin, Write, View) are immutable; attempts to modify
         them return `403`.
-      operationId: patchOrgRole
+      operationId: patchProjectRole
       requestBody:
         required: true
         content:
@@ -1514,13 +1514,13 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
     delete:
-      tags: [orgs]
+      tags: [projects]
       summary: Delete a custom role
       description: |
         Deletes a custom role. The built-in roles cannot be deleted (`403`).
         A role currently assigned to one or more members cannot be deleted
         until those members are reassigned (`400`).
-      operationId: deleteOrgRole
+      operationId: deleteProjectRole
       responses:
         '200':
           description: Role deleted
@@ -1537,16 +1537,16 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /orgs/{organization}/ssh:
+  /projects/{project}/ssh:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
     get:
-      tags: [orgs]
+      tags: [projects]
       summary: Get SSH public key
       description: |-
-        Returns the SSH public key for the organization. This key must be added to
+        Returns the SSH public key for the project. This key must be added to
         each remote build server's `authorized_keys` to allow Gradient to connect.
-      operationId: getOrgSsh
+      operationId: getProjectSsh
       responses:
         '200':
           description: SSH public key
@@ -1562,10 +1562,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
     post:
-      tags: [orgs]
+      tags: [projects]
       summary: Regenerate SSH key pair
-      description: Generates a new Ed25519 key pair for the organization. The previous key will stop working on remote servers immediately.
-      operationId: postOrgSsh
+      description: Generates a new Ed25519 key pair for the project. The previous key will stop working on remote servers immediately.
+      operationId: postProjectSsh
       responses:
         '200':
           description: New SSH public key
@@ -1578,14 +1578,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /orgs/{organization}/subscribe:
+  /projects/{project}/subscribe:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
     get:
-      tags: [orgs]
+      tags: [projects]
       summary: List cache subscriptions
-      description: Returns the binary caches this organization currently uses as substituters.
-      operationId: listOrgSubscriptions
+      description: Returns the binary caches this project currently uses as substituters.
+      operationId: listProjectSubscriptions
       responses:
         '200':
           description: Subscribed caches
@@ -1603,17 +1603,17 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /orgs/{organization}/subscribe/{cache}:
+  /projects/{project}/subscribe/{cache}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/CacheSlug'
     post:
-      tags: [orgs]
+      tags: [projects]
       summary: Subscribe to cache
       description: |
-        Adds a binary cache to the organization's list of substituters.
-        Requires `manageSubscriptions` on the organization AND `manageCacheSubscriptions` on the cache.
-      operationId: subscribeOrgToCache
+        Adds a binary cache to the project's list of substituters.
+        Requires `manageSubscriptions` on the project AND `manageCacheSubscriptions` on the cache.
+      operationId: subscribeProjectToCache
       responses:
         '200':
           description: Subscribed
@@ -1628,12 +1628,12 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
     delete:
-      tags: [orgs]
+      tags: [projects]
       summary: Unsubscribe from cache
       description: |
-        Removes a binary cache from the organization's substituters.
-        Requires `manageSubscriptions` on the organization AND `manageCacheSubscriptions` on the cache.
-      operationId: unsubscribeOrgFromCache
+        Removes a binary cache from the project's substituters.
+        Requires `manageSubscriptions` on the project AND `manageCacheSubscriptions` on the cache.
+      operationId: unsubscribeProjectFromCache
       responses:
         '200':
           description: Unsubscribed
@@ -1648,13 +1648,13 @@ paths:
 
   # ── Tasks ─────────────────────────────────────────────────────────────────
 
-  /tasks/{organization}:
+  /tasks/{project}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
     get:
       tags: [tasks]
       summary: List tasks
-      description: Returns all tasks in the given organization with full details.
+      description: Returns all tasks in the given project with full details.
       operationId: listTasks
       responses:
         '200':
@@ -1677,7 +1677,7 @@ paths:
     put:
       tags: [tasks]
       summary: Create task
-      description: Creates a new task in the organization. `wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.
+      description: Creates a new task in the project. `wildcard` is a Nix attribute selector such as `packages.x86_64-linux` or `checks`.
       operationId: createTask
       requestBody:
         required: true
@@ -1710,9 +1710,9 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
-  /tasks/{organization}/{task}:
+  /tasks/{project}/{task}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [tasks]
@@ -1778,9 +1778,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/evaluations:
+  /tasks/{project}/{task}/evaluations:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [tasks]
@@ -1817,9 +1817,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/details:
+  /tasks/{project}/{task}/details:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [tasks]
@@ -1843,9 +1843,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/entry-points:
+  /tasks/{project}/{task}/entry-points:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [tasks]
@@ -1881,16 +1881,16 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/check-repository:
+  /tasks/{project}/{task}/check-repository:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     post:
       tags: [tasks]
       summary: Check repository accessibility
       description: >-
         Tests whether Gradient can clone the task's repository using the
-        organization's SSH key. Requires Admin or Write role; rejects
+        project's SSH key. Requires Admin or Write role; rejects
         state-managed tasks.
 
         Returns `400` with `code: "repository_unreachable"` and the underlying
@@ -1918,9 +1918,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/evaluate:
+  /tasks/{project}/{task}/evaluate:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     post:
       tags: [tasks]
@@ -1959,9 +1959,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/active:
+  /tasks/{project}/{task}/active:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     post:
       tags: [tasks]
@@ -2004,9 +2004,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/actions:
+  /tasks/{project}/{task}/actions:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [actions]
@@ -2061,9 +2061,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/actions/{id}:
+  /tasks/{project}/{task}/actions/{id}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
@@ -2140,9 +2140,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/actions/{id}/test:
+  /tasks/{project}/{task}/actions/{id}/test:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
@@ -2174,9 +2174,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/actions/{id}/regenerate-token:
+  /tasks/{project}/{task}/actions/{id}/regenerate-token:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
@@ -2212,9 +2212,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/actions/{id}/deliveries:
+  /tasks/{project}/{task}/actions/{id}/deliveries:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
@@ -2261,9 +2261,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/actions/{id}/deliveries/{delivery_id}:
+  /tasks/{project}/{task}/actions/{id}/deliveries/{delivery_id}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
@@ -2302,9 +2302,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/metrics:
+  /tasks/{project}/{task}/metrics:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [tasks]
@@ -2328,9 +2328,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/entry-point-metrics:
+  /tasks/{project}/{task}/entry-point-metrics:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [tasks]
@@ -2371,9 +2371,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/entry-point-downloads:
+  /tasks/{project}/{task}/entry-point-downloads:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [tasks]
@@ -2387,8 +2387,8 @@ paths:
         newest evaluation.
 
         Authentication:
-        - **Public organisations** - no credentials required.
-        - **Private organisations** - supply `?token=GRADxxxx` (API key) or a JWT, **or**
+        - **Public projects** - no credentials required.
+        - **Private projects** - supply `?token=GRADxxxx` (API key) or a JWT, **or**
           authenticate via `Authorization: Bearer` header / `jwt_token` session cookie.
 
         The `eval` value may contain double-quoted Nix attribute segments
@@ -2417,7 +2417,7 @@ paths:
           required: false
           description: |-
             API key (`GRADxxxx`) or JWT for authenticating static/permalink URLs.
-            Not required when the organisation is public or when a session cookie /
+            Not required when the project is public or when a session cookie /
             `Authorization` header is already present.
           schema:
             type: string
@@ -2435,9 +2435,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/badge:
+  /tasks/{project}/{task}/badge:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [tasks]
@@ -2458,8 +2458,8 @@ paths:
         | Aborted | yellow | `aborted` |
 
         **Authentication:**
-        - **Public organisations** - no credentials required. Embed the URL directly.
-        - **Private organisations** - supply `?token=GRADxxxx` (API key) or a JWT so the
+        - **Public projects** - no credentials required. Embed the URL directly.
+        - **Private projects** - supply `?token=GRADxxxx` (API key) or a JWT so the
           image can be fetched by external services without a session cookie.
 
         Responses include `Cache-Control: no-cache` so badge aggregator CDNs always
@@ -2498,7 +2498,7 @@ paths:
           in: query
           required: false
           description: |-
-            API key (`GRADxxxx`) or JWT for private organisations.
+            API key (`GRADxxxx`) or JWT for private projects.
             Embed in the image URL so external tools can fetch the badge without
             interactive authentication.
           schema:
@@ -2519,9 +2519,9 @@ paths:
 
   # ── Triggers ─────────────────────────────────────────────────────────────────
 
-  /tasks/{organization}/{task}/triggers:
+  /tasks/{project}/{task}/triggers:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [triggers]
@@ -2583,9 +2583,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/triggers/{id}:
+  /tasks/{project}/{task}/triggers/{id}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
@@ -2667,9 +2667,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/triggers/{id}/test:
+  /tasks/{project}/{task}/triggers/{id}/test:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
@@ -2707,9 +2707,9 @@ paths:
 
   # ── Flake Input Overrides ─────────────────────────────────────────────────────
 
-  /tasks/{organization}/{task}/flake-inputs:
+  /tasks/{project}/{task}/flake-inputs:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [flake-inputs]
@@ -2764,9 +2764,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/{task}/flake-inputs/{id}:
+  /tasks/{project}/{task}/flake-inputs/{id}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - $ref: '#/components/parameters/TaskSlug'
       - name: id
         in: path
@@ -2916,7 +2916,7 @@ paths:
         downloads, and dependency-graph endpoints. The build *state* (status,
         timing, log) comes from the global `derivation_build` anchor shared by
         every evaluation that needs the same derivation, so a derivation is
-        built once and the outcome is reused across evaluations and organizations.
+        built once and the outcome is reused across evaluations and projects.
       operationId: listEvaluationBuilds
       parameters:
         - name: limit
@@ -3262,7 +3262,7 @@ paths:
       description: |-
         Step 3. After all `missing` blobs have been uploaded, the client posts
         here to materialise `/nix/store/<hash>-source` from the staged files,
-        sign it with the org's cache key, lazily create the per-org reserved
+        sign it with the project's cache key, lazily create the per-project reserved
         `build-request` task on first use, and queue a new evaluation
         targeting the supplied `target` attribute path (or the task's
         wildcard when omitted).
@@ -3306,18 +3306,18 @@ paths:
         One-shot alternative to the manifest/blob flow for clients built with
         the `nix` feature. The client NAR-packs the git-tracked source itself
         and uploads it here; the server computes the `/nix/store/<hash>-source`
-        path, signs it, lazily creates the per-org `build-request` task, and
+        path, signs it, lazily creates the per-project `build-request` task, and
         queues an evaluation. The whole NAR is one request, bounded by
         `max_source_upload_size`; large sources should use the chunked
         `POST /build-requests/source/{upload}/chunk` + `finalize` flow instead.
       operationId: postBuildRequestSource
       parameters:
-        - name: organization
+        - name: project
           in: query
           required: true
           schema:
             type: string
-          description: Organization name.
+          description: Project name.
       requestBody:
         required: true
         content:
@@ -3425,7 +3425,7 @@ paths:
       summary: Finalise a chunked source upload and queue an evaluation
       description: |-
         Reassembles the staged source NAR for `upload`, computes its
-        `/nix/store/<hash>-source` path, signs it, lazily creates the per-org
+        `/nix/store/<hash>-source` path, signs it, lazily creates the per-project
         `build-request` task, queues an evaluation, and drops the partial.
       operationId: postBuildRequestSourceFinalize
       parameters:
@@ -3435,12 +3435,12 @@ paths:
           schema:
             type: string
           description: The upload id whose chunks were staged.
-        - name: organization
+        - name: project
           in: query
           required: true
           schema:
             type: string
-          description: Organization name.
+          description: Project name.
       requestBody:
         required: false
         content:
@@ -3499,7 +3499,7 @@ paths:
       description: |-
         Returns full build details including status, derivation path, architecture, assigned server, and output store paths.
 
-        **Access:** Accessible to members of any organization whose evaluation references this derivation (the build-once anchor is shared across organizations via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
+        **Access:** Accessible to members of any project whose evaluation references this derivation (the build-once anchor is shared across projects via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
       operationId: getBuild
       responses:
         '200':
@@ -3531,7 +3531,7 @@ paths:
         own, so the log of the most recent prior build of the same derivation is
         returned instead. The chunk/lines endpoints fall back the same way.
 
-        **Access:** Accessible to members of any organization whose evaluation references this derivation (the build-once anchor is shared across organizations via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
+        **Access:** Accessible to members of any project whose evaluation references this derivation (the build-once anchor is shared across projects via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
       operationId: getBuildLog
       responses:
         '200':
@@ -3723,7 +3723,7 @@ paths:
         capped at 500 nodes. Each edge `source → target` means `source` must be built
         before `target`.
 
-        **Access:** Accessible to members of any organization whose evaluation references this derivation (the build-once anchor is shared across organizations via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
+        **Access:** Accessible to members of any project whose evaluation references this derivation (the build-once anchor is shared across projects via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
       operationId: getBuildGraph
       responses:
         '200':
@@ -3841,9 +3841,9 @@ paths:
         `nix-support/hydra-build-products` file. Each entry has a file type,
         filename, Nix store path, and file size in bytes.
 
-        Accessible without authentication when the owning organisation is public.
+        Accessible without authentication when the owning project is public.
 
-        **Access:** Accessible to members of any organization whose evaluation references this derivation (the build-once anchor is shared across organizations via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
+        **Access:** Accessible to members of any project whose evaluation references this derivation (the build-once anchor is shared across projects via cache reachability). See `docs/src/scheduler.md#shared-build-anchors`.
       operationId: getBuildDownloads
       responses:
         '200':
@@ -3876,7 +3876,7 @@ paths:
         `GET /builds/{build}/download/{filename}` to share a link without exposing
         long-lived credentials.
 
-        Requires the caller to be a member of the organisation that owns the build.
+        Requires the caller to be a member of the project that owns the build.
       operationId: getBuildDownloadToken
       responses:
         '200':
@@ -3912,11 +3912,11 @@ paths:
         `Content-Disposition` header for the suggested filename in either case.
 
         Access is granted when **any** of the following is satisfied:
-        1. The owning organisation is public - no credentials required.
+        1. The owning project is public - no credentials required.
         2. `?token=<download_token>` - a short-lived per-build token from
            `GET /builds/{build}/download-token` (1 h validity, safe to embed in URLs).
         3. `jwt_token` cookie or `Authorization: Bearer` header and the caller is a
-           member of the owning organisation.
+           member of the owning project.
       operationId: downloadBuildArtefact
       parameters:
         - name: token
@@ -3945,13 +3945,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /tasks/{organization}/available:
+  /tasks/{project}/available:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
     get:
       tags: [tasks]
       summary: Check task name availability
-      description: Returns `true` if no task with the given name exists in the organization, `false` if it is already taken.
+      description: Returns `true` if no task with the given name exists in the project, `false` if it is already taken.
       operationId: checkTaskNameAvailable
       parameters:
         - name: name
@@ -3982,27 +3982,27 @@ paths:
 
   # ── Workers ──────────────────────────────────────────────────────────────────
 
-  /orgs/{organization}/workers:
+  /projects/{project}/workers:
     parameters:
-      - name: organization
+      - name: project
         in: path
         required: true
         schema:
           type: string
-        description: Organization name
+        description: Project name
 
     get:
       tags: [workers]
-      summary: List registered workers for an organization
+      summary: List registered workers for a project
       description: |
-        Returns all workers registered under this organization (peer), merged with
+        Returns all workers registered under this project (peer), merged with
         live status from the scheduler for currently connected workers, plus the
-        server-level base workers (`is_base: true`) the org can opt into.
+        server-level base workers (`is_base: true`) the project can opt into.
         Live fields (`architectures`, `system_features`, etc.) are only populated
         for build-capable workers that have sent `WorkerCapabilities`. A base
-        worker is omitted when the org already has a normal registration with the
+        worker is omitted when the project already has a normal registration with the
         same `worker_id` - that registration shadows it.
-      operationId: listOrgWorkers
+      operationId: listProjectWorkers
       security:
         - bearerAuth: []
       responses:
@@ -4018,7 +4018,7 @@ paths:
                       message:
                         type: array
                         items:
-                          $ref: '#/components/schemas/OrgWorkerEntry'
+                          $ref: '#/components/schemas/ProjectWorkerEntry'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4026,12 +4026,12 @@ paths:
 
     post:
       tags: [workers]
-      summary: Register a worker under an organization
+      summary: Register a worker under a project
       description: |
-        Registers a worker ID under this organization as a peer. Returns a one-time
+        Registers a worker ID under this project as a peer. Returns a one-time
         plaintext token that the worker operator must add to their worker config.
         The token is shown only once - it cannot be retrieved later.
-      operationId: registerOrgWorker
+      operationId: registerProjectWorker
       security:
         - bearerAuth: []
       requestBody:
@@ -4090,14 +4090,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /orgs/{organization}/workers/{worker_id}:
+  /projects/{project}/workers/{worker_id}:
     parameters:
-      - name: organization
+      - name: project
         in: path
         required: true
         schema:
           type: string
-        description: Organization name
+        description: Project name
       - name: worker_id
         in: path
         required: true
@@ -4112,7 +4112,7 @@ paths:
         Sets the `active` flag on a worker registration. Deactivating a worker
         triggers an immediate re-auth request, causing the worker to be disconnected
         if it is currently connected. Active jobs may be aborted.
-      operationId: patchOrgWorker
+      operationId: patchProjectWorker
       security:
         - bearerAuth: []
       requestBody:
@@ -4157,14 +4157,14 @@ paths:
 
     delete:
       tags: [workers]
-      summary: Unregister a worker from an organization
+      summary: Unregister a worker from a project
       description: |
         Removes the worker registration. The worker may still be connected until
         it disconnects naturally - it will not be able to reconnect after that.
-        The org's own registration is removed first, so a normal worker is deleted
+        The project's own registration is removed first, so a normal worker is deleted
         even when a base worker shares its `worker_id`; `409` is only returned when
         the id resolves solely to a base worker (managed via server state).
-      operationId: deleteOrgWorker
+      operationId: deleteProjectWorker
       security:
         - bearerAuth: []
       responses:
@@ -4186,24 +4186,24 @@ paths:
         '409':
           description: The id resolves only to a base worker, which is managed via server state.
 
-  /orgs/{organization}/workers/{worker_id}/test:
+  /projects/{project}/workers/{worker_id}/test:
     post:
       tags: [workers]
       summary: Test worker connectivity and authorization
       description: |
         Checks whether the worker is currently connected and whether it has
-        successfully authorized for the given organization. Useful for
+        successfully authorized for the given project. Useful for
         verifying base-worker setup without waiting for a real job.
-      operationId: testOrgWorker
+      operationId: testProjectWorker
       security:
         - bearerAuth: []
       parameters:
-        - name: organization
+        - name: project
           in: path
           required: true
           schema:
             type: string
-          description: Organization name
+          description: Project name
         - name: worker_id
           in: path
           required: true
@@ -4266,9 +4266,9 @@ paths:
       tags: [admin]
       summary: Export the live state configuration
       description: |
-        Reconstructs the current users, organizations, tasks, caches,
+        Reconstructs the current users, projects, tasks, caches,
         custom roles, API keys, workers (including server-level base workers
-        with their pre-enabled organizations) and integrations into a
+        with their pre-enabled projects) and integrations into a
         declarative `services.gradient.state` shape, so operators can codify
         the running system back into their nix configuration.
 
@@ -4307,9 +4307,9 @@ paths:
                 # Generated by `GET /admin/state`. Secret `*_file` fields are null and
                 # must be filled in with the credential paths on your host.
                 {
-                  organizations = {
-                    myorg = {
-                      name = "myorg";
+                  projects = {
+                    myproject = {
+                      name = "myproject";
                       id = "018f6f3a-0000-7000-8000-000000000001";
                       private_key_file = null;
                       created_by = "operator";
@@ -4663,7 +4663,7 @@ paths:
     get:
       tags: [caches]
       summary: List caches
-      description: Returns a paginated list of binary caches the current user owns or can access through an organization subscription.
+      description: Returns a paginated list of binary caches the current user owns or can access through a project subscription.
       operationId: listCaches
       parameters:
         - name: page
@@ -4769,7 +4769,7 @@ paths:
       summary: Get cache
       description: >-
         Returns cache details. Public caches are visible to anyone. A private
-        cache is visible to its cache members and to members of any organization
+        cache is visible to its cache members and to members of any project
         subscribed to it (matching the visibility of `GET /caches`); other
         callers receive `404`.
       operationId: getCache
@@ -4974,7 +4974,7 @@ paths:
       summary: Get cache statistics
       description: >-
         Returns bandwidth and hit statistics for the cache. Visible to anyone
-        for public caches, and to cache members or members of any organization
+        for public caches, and to cache members or members of any project
         subscribed to a private cache (matching `GET /caches/{cache}`); other
         callers receive `404`.
       operationId: getCacheStats
@@ -5375,7 +5375,7 @@ paths:
         Gradient caches and external binary caches), including each upstream's
         `public_key` so clients can trust pull-through paths. Follows the same
         visibility as `GET /caches/{cache}`: public caches are readable by
-        anyone, private caches only by members and subscribed organizations.
+        anyone, private caches only by members and subscribed projects.
       operationId: listCacheUpstreams
       responses:
         '200':
@@ -5770,10 +5770,10 @@ paths:
       summary: Get commit
       description: |
         Returns commit metadata (message, hash, author). Visibility follows the
-        commit's reachability: the caller must be a member of an organization
+        commit's reachability: the caller must be a member of a project
         that owns an evaluation (or direct build) referencing the commit, or
-        that organization must be public. Anonymous callers may read commits
-        reachable through public organizations only. All other cases return
+        that project must be public. Anonymous callers may read commits
+        reachable through public projects only. All other cases return
         `404` so existence isn't leaked.
       operationId: getCommit
       security:
@@ -5794,16 +5794,16 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  # ── Organization integrations ────────────────────────────────────────────────
+  # ── Project integrations ────────────────────────────────────────────────
 
-  /orgs/{organization}/integrations:
+  /projects/{project}/integrations:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
     get:
       tags: [integrations]
       summary: List integrations
-      description: List all inbound and outbound integrations in this organization.
-      operationId: listOrgIntegrations
+      description: List all inbound and outbound integrations in this project.
+      operationId: listProjectIntegrations
       responses:
         '200':
           description: List of integrations
@@ -5830,7 +5830,7 @@ paths:
       description: |-
         Creates a named inbound or outbound integration. `secret` and
         `access_token` are stored encrypted and never returned in responses.
-        Name is unique within `(organization, kind)`.
+        Name is unique within `(project, kind)`.
 
         One **inbound** integration can serve Gitea/Forgejo/GitLab
         simultaneously - the caller picks the forge path segment in the webhook
@@ -5841,9 +5841,9 @@ paths:
         `installation_id`. The server App must be configured (else `400`);
         the installation id is validated against the App (invalid id returns
         `400`). An inbound and outbound integration pair is created
-        automatically, named `github-<account>`. Multiple installations per org
+        automatically, named `github-<account>`. Multiple installations per project
         are supported (one per GitHub account).
-      operationId: createOrgIntegration
+      operationId: createProjectIntegration
       requestBody:
         required: true
         content:
@@ -5873,15 +5873,15 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /orgs/{organization}/integrations/summary:
+  /projects/{project}/integrations/summary:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
     get:
       tags: [integrations]
       summary: List integration summaries (credential-free)
       description: |-
         List integrations as credential-free summaries. Available to **any
-        org member**, in contrast to the full listing which requires
+        project member**, in contrast to the full listing which requires
         `ManageIntegrations`.
 
         The response excludes `secret`, `endpoint_url`, `access_token`, and
@@ -5890,7 +5890,7 @@ paths:
         an integration's name and forge type - e.g. populating the trigger
         create/edit dropdown for users who hold `EditTask` but not
         `ManageIntegrations`.
-      operationId: listOrgIntegrationSummaries
+      operationId: listProjectIntegrationSummaries
       responses:
         '200':
           description: List of integration summaries
@@ -5910,9 +5910,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /orgs/{organization}/integrations/{id}:
+  /projects/{project}/integrations/{id}:
     parameters:
-      - $ref: '#/components/parameters/OrganizationSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
       - name: id
         in: path
         required: true
@@ -5923,7 +5923,7 @@ paths:
     get:
       tags: [integrations]
       summary: Get integration
-      operationId: getOrgIntegration
+      operationId: getProjectIntegration
       responses:
         '200':
           description: Integration
@@ -5949,7 +5949,7 @@ paths:
 
         `forge_type=github` rows are managed by the App and installation; PATCH
         rejects them with `400`. Delete the row to remove the integration.
-      operationId: patchOrgIntegration
+      operationId: patchProjectIntegration
       requestBody:
         required: true
         content:
@@ -5984,7 +5984,7 @@ paths:
         referencing it are cleared via `ON DELETE SET NULL`.
         `forge_type=github` rows can be deleted; deleting removes the
         installation binding for that account.
-      operationId: deleteOrgIntegration
+      operationId: deleteProjectIntegration
       responses:
         '200':
           description: Deleted
@@ -6019,7 +6019,7 @@ paths:
         - `issue_comment` - `/gradient run` / `/gradient approve` maintainer commands.
         - `pull_request_review` - a maintainer's approving review clears a fork-PR approval gate.
         - `installation` / `installation_repositories` - stores or clears the GitHub App
-          `installation_id` on the matching Gradient organization.
+          `installation_id` on the matching Gradient project.
         - `ping` - always returns 200.
 
         This endpoint is unauthenticated (verified via HMAC signature).
@@ -6067,7 +6067,7 @@ paths:
         '503':
           description: GitHub App not configured (GitHub endpoint only)
 
-  /hooks/{forge}/{org}/{integration_name}:
+  /hooks/{forge}/{project}/{integration_name}:
     parameters:
       - name: forge
         in: path
@@ -6080,18 +6080,18 @@ paths:
           filter the integration lookup - a single inbound integration can
           serve all three forges. GitHub deliveries go through
           `POST /hooks/github` (the App webhook) instead.
-      - name: org
+      - name: project
         in: path
         required: true
         schema:
           type: string
-        description: Gradient organization name
+        description: Gradient project name
       - name: integration_name
         in: path
         required: true
         schema:
           type: string
-        description: Name of the inbound integration within the organization
+        description: Name of the inbound integration within the project
     post:
       tags: [forge-webhooks]
       summary: Receive forge push webhook
@@ -6191,42 +6191,42 @@ paths:
       summary: Query a metric time-series
       description: |-
         Returns time-bucketed points for a metric from `metric_rollup`, masked to
-        the caller's scope (superuser = all orgs, member = own + public orgs,
-        anonymous = public orgs). Unknown metrics or out-of-scope orgs return 404.
+        the caller's scope (superuser = all projects, member = own + public projects,
+        anonymous = public projects). Unknown metrics or out-of-scope projects return 404.
       operationId: getMetricsQuery
       parameters:
         - { name: metric, in: query, required: true, schema: { type: string } }
         - { name: granularity, in: query, schema: { type: string, enum: [minute, hour, day, week] } }
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
-        - { name: org, in: query, schema: { type: string, format: uuid } }
+        - { name: project, in: query, schema: { type: string, format: uuid } }
       responses:
         '200':
           description: Time-series points
         '404':
-          description: Unknown metric or org out of scope
+          description: Unknown metric or project out of scope
 
-  /metrics/tasks/{organization}/{task}/evaluations:
+  /metrics/tasks/{project}/{task}/evaluations:
     get:
       tags: [board]
       summary: Per-evaluation task metrics
       description: Per-evaluation series (build time, eval time, output/closure sizes, dependencies) for the task's recent completed evaluations.
       operationId: getTaskEvaluationMetrics
       parameters:
-        - { name: organization, in: path, required: true, schema: { type: string } }
+        - { name: project, in: path, required: true, schema: { type: string } }
         - { name: task, in: path, required: true, schema: { type: string } }
       responses:
         '200':
           description: Per-evaluation metric points
 
-  /metrics/tasks/{organization}/{task}/entry-point:
+  /metrics/tasks/{project}/{task}/entry-point:
     get:
       tags: [board]
       summary: Per-evaluation entry-point metrics
       description: Per-evaluation build metrics for a single entry point identified by its `eval` attribute path.
       operationId: getEntryPointEvaluationMetrics
       parameters:
-        - { name: organization, in: path, required: true, schema: { type: string } }
+        - { name: project, in: path, required: true, schema: { type: string } }
         - { name: task, in: path, required: true, schema: { type: string } }
         - { name: eval, in: query, required: true, schema: { type: string } }
       responses:
@@ -6262,7 +6262,7 @@ paths:
         Bounded ring of the most recent dispatch decisions, each with every
         scored candidate including the rejected/negative ones the dispatcher
         passed over. For tuning scoring rules. Superuser-only, as candidates
-        span all organizations.
+        span all projects.
       operationId: getBoardDispatchDecisions
       responses:
         '200':
@@ -6315,7 +6315,7 @@ paths:
     get:
       tags: [board]
       summary: Most expensive builds by resource
-      description: Top derivations by a captured per-build resource (peak RAM, CPU time, total disk bytes, or host network peak) from `derivation_metric`. Org-scoped.
+      description: Top derivations by a captured per-build resource (peak RAM, CPU time, total disk bytes, or host network peak) from `derivation_metric`. Project-scoped.
       operationId: getBoardExpensiveByResource
       parameters:
         - { name: metric, in: query, required: true, schema: { type: string, enum: [ram, cpu, disk, network] } }
@@ -6330,7 +6330,7 @@ paths:
     get:
       tags: [board]
       summary: Most expensive evaluations by resource
-      description: Top evaluations by a captured per-eval resource (peak RSS/heap, thunks, fn calls, allocated bytes, or total eval time) from `evaluation_metric`. Org-scoped through the evaluation's task.
+      description: Top evaluations by a captured per-eval resource (peak RSS/heap, thunks, fn calls, allocated bytes, or total eval time) from `evaluation_metric`. Project-scoped through the evaluation's task.
       operationId: getBoardExpensiveEvalsByResource
       parameters:
         - { name: metric, in: query, required: true, schema: { type: string, enum: [rss, heap, thunks, fncalls, alloc, time] } }
@@ -6373,7 +6373,7 @@ paths:
     get:
       tags: [board]
       summary: Aggregate scoring summary
-      description: Score histogram and mean per-rule contribution over recently dispatched jobs, masked to the caller's orgs.
+      description: Score histogram and mean per-rule contribution over recently dispatched jobs, masked to the caller's projects.
       operationId: getBoardScoringSummary
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
@@ -6411,7 +6411,7 @@ paths:
     get:
       tags: [board]
       summary: Connected workers
-      description: Connected workers with capability and live load; foreign-org worker identity and metrics are masked for non-superusers.
+      description: Connected workers with capability and live load; foreign-project worker identity and metrics are masked for non-superusers.
       operationId: getBoardWorkers
       responses:
         '200':
@@ -6426,7 +6426,7 @@ paths:
         architecture, and system feature, the in-flight job count against the
         summed slot capacity of the workers that can serve it. Answers whether
         the fleet is eval-, build-, or architecture-bound rather than showing one
-        blended busy %. Scoped to the caller's orgs (superusers see the whole
+        blended busy %. Scoped to the caller's projects (superusers see the whole
         fleet). Each bucket carries `{ key, in_flight, capacity, workers }`;
         busy % = in_flight / capacity.
       operationId: getBoardWorkerLoad
@@ -6453,9 +6453,9 @@ paths:
       description: >-
         Per-upstream-URL trailing latency, narinfo hit-rate, and request counts
         with hourly series. Metrics are keyed by URL, so the same URL registered
-        under several caches/orgs contributes to one series; `display_name` is
-        the URL host. Org-scoped: superusers see all URLs; members see the URLs
-        used by their orgs plus public orgs. Each series' `url` is the caller's
+        under several caches/projects contributes to one series; `display_name` is
+        the URL host. Project-scoped: superusers see all URLs; members see the URLs
+        used by their projects plus public projects. Each series' `url` is the caller's
         own upstream, so it is returned unmasked.
       operationId: getBoardUpstreams
       parameters:
@@ -6470,7 +6470,7 @@ paths:
       summary: Job Board live events (WebSocket)
       description: |-
         Upgrades to a WebSocket streaming JSON board events (`queue_depth`,
-        `job_dispatched`, `worker_connected`, `worker_disconnected`). Per-org
+        `job_dispatched`, `worker_connected`, `worker_disconnected`). Per-project
         events are masked to the caller's scope.
       operationId: boardLive
       responses:
@@ -6490,7 +6490,7 @@ paths:
         '101':
           description: Switching Protocols - WebSocket upgrade successful
 
-  /tasks/{organization}/{task}/live:
+  /tasks/{project}/{task}/live:
     get:
       tags: [tasks]
       summary: Task live updates (WebSocket)
@@ -6503,7 +6503,7 @@ paths:
         build/dependency totals grow live. Requires read access.
       operationId: taskLive
       parameters:
-        - { name: organization, in: path, required: true, schema: { type: string } }
+        - { name: project, in: path, required: true, schema: { type: string } }
         - { name: task, in: path, required: true, schema: { type: string } }
       responses:
         '101':
@@ -6545,7 +6545,7 @@ paths:
     get:
       tags: [board]
       summary: Network & API statistics
-      description: NAR egress series, per-worker latest network/disk speeds (org-scoped), and per-route HTTP latency/throughput (superuser-only).
+      description: NAR egress series, per-worker latest network/disk speeds (project-scoped), and per-route HTTP latency/throughput (superuser-only).
       operationId: getBoardNetwork
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
@@ -6557,7 +6557,7 @@ paths:
     get:
       tags: [board]
       summary: Worker fleet time-series
-      description: Hourly connected / draining / by-capability worker counts derived from worker samples, scoped to the caller's orgs.
+      description: Hourly connected / draining / by-capability worker counts derived from worker samples, scoped to the caller's projects.
       operationId: getBoardFleet
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
@@ -6569,7 +6569,7 @@ paths:
     get:
       tags: [board]
       summary: Build-duration heatmap
-      description: 2D build-duration distribution (duration band × hour) computed on demand from builds, scoped to the caller's orgs.
+      description: 2D build-duration distribution (duration band × hour) computed on demand from builds, scoped to the caller's projects.
       operationId: getBoardDurationsHeatmap
       parameters:
         - { name: window_hours, in: query, required: false, schema: { type: integer, default: 24 } }
@@ -6577,17 +6577,17 @@ paths:
         '200':
           description: Duration heatmap
 
-  /board/expensive/top-orgs:
+  /board/expensive/top-projects:
     get:
       tags: [board]
-      summary: Top organizations by build time (superuser)
-      description: Organizations ranked by cumulative completed-build time in a window. Superuser only.
-      operationId: getBoardTopOrgs
+      summary: Top projects by build time (superuser)
+      description: Projects ranked by cumulative completed-build time in a window. Superuser only.
+      operationId: getBoardTopProjects
       parameters:
         - { name: window_days, in: query, required: false, schema: { type: integer, default: 30 } }
       responses:
         '200':
-          description: Top organizations
+          description: Top projects
         '403':
           description: Superuser required
 
@@ -6603,20 +6603,20 @@ paths:
         '403':
           description: Superuser required
 
-  /orgs/{organization}/workers/{worker_id}/metrics:
+  /projects/{project}/workers/{worker_id}/metrics:
     get:
       tags: [board]
       summary: Per-worker metrics
-      description: Live-metric sample time-series (CPU, RAM, disk, network, load), connect/disconnect history, and total dispatched-job count for one worker. Org members only.
-      operationId: getOrgWorkerMetrics
+      description: Live-metric sample time-series (CPU, RAM, disk, network, load), connect/disconnect history, and total dispatched-job count for one worker. Project members only.
+      operationId: getProjectWorkerMetrics
       parameters:
-        - { name: organization, in: path, required: true, schema: { type: string } }
+        - { name: project, in: path, required: true, schema: { type: string } }
         - { name: worker_id, in: path, required: true, schema: { type: string } }
       responses:
         '200':
           description: Worker statistics
         '404':
-          description: Organization or worker not found
+          description: Project or worker not found
 
   # ── SCIM 2.0 ─────────────────────────────────────────────────────────────────
   # Instance-level provisioning (RFC 7643/7644), mounted at /scim/v2 only when
@@ -6816,7 +6816,7 @@ paths:
       summary: List SCIM groups
       description: |-
         Lists SCIM groups. A SCIM group is an IdP group name that resolves to
-        `(organization, role)` grants via `scim_group` on a state role; groups are
+        `(project, role)` grants via `scim_group` on a state role; groups are
         not created through SCIM. Supports the `displayName eq "..."` filter.
       operationId: scimListGroups
       security:
@@ -6860,8 +6860,8 @@ paths:
       tags: [scim]
       summary: Patch SCIM group membership
       description: |-
-        Adds or removes members. Membership maps to `organization_user` grants for
-        the `(organization, role)` the group resolves to. Unknown group names return 404.
+        Adds or removes members. Membership maps to `project_user` grants for
+        the `(project, role)` the group resolves to. Unknown group names return 404.
       operationId: scimPatchGroup
       security:
         - scimBearer: []
@@ -6908,15 +6908,15 @@ components:
         `/scim/v2` request. Independent of user authentication.
 
   parameters:
-    OrganizationSlug:
-      name: organization
+    ProjectSlug:
+      name: project
       in: path
       required: true
       schema:
         type: string
         pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
-        example: my-org
-      description: Organization name (slug)
+        example: my-project
+      description: Project name (slug)
 
     TaskSlug:
       name: task
@@ -6994,7 +6994,7 @@ components:
             $ref: '#/components/schemas/StringResponse'
           example:
             error: true
-            message: "Organization not found"
+            message: "Project not found"
 
     Conflict:
       description: Resource already exists
@@ -7251,7 +7251,7 @@ components:
         peer_id:
           type: string
           format: uuid
-          description: The organization's UUID - used as the peer_id in worker config
+          description: The project's UUID - used as the peer_id in worker config
         token:
           type: string
           nullable: true
@@ -7285,7 +7285,7 @@ components:
           type: boolean
           description: Whether the worker is draining (no new jobs will be dispatched)
 
-    OrgWorkerEntry:
+    ProjectWorkerEntry:
       type: object
       required: [worker_id, display_name, registered_at, active, enable_fetch, enable_eval, enable_build, is_base]
       properties:
@@ -7298,7 +7298,7 @@ components:
         registered_at:
           type: string
           format: date-time
-          description: When this worker was registered under the organization
+          description: When this worker was registered under the project
         active:
           type: boolean
           description: Whether the worker is allowed to authenticate and receive jobs
@@ -7322,16 +7322,16 @@ components:
           description: Server-side gate for the worker's `build` capability for this registration.
         is_base:
           type: boolean
-          description: Whether this entry is a server-level base worker (visible to every org, managed via state).
+          description: Whether this entry is a server-level base worker (visible to every project, managed via state).
         live:
           allOf:
             - $ref: '#/components/schemas/WorkerLiveInfo'
           nullable: true
           description: |
             Present when the worker is currently connected to this server **and**
-            successfully authenticated for this organization. A worker that is
-            globally connected (authorized for some other org) but did not
-            present a valid token for this org will have `live = null`.
+            successfully authenticated for this project. A worker that is
+            globally connected (authorized for some other project) but did not
+            present a valid token for this project will have `live = null`.
 
     WorkerInfo:
       type: object
@@ -7364,7 +7364,7 @@ components:
 
     WorkerTestResponse:
       type: object
-      required: [ok, connected, authorized_for_org, message]
+      required: [ok, connected, authorized_for_project, message]
       properties:
         ok:
           type: boolean
@@ -7372,9 +7372,9 @@ components:
         connected:
           type: boolean
           description: Whether the worker is currently connected to the server
-        authorized_for_org:
+        authorized_for_project:
           type: boolean
-          description: Whether the worker successfully authorized for the requesting organization
+          description: Whether the worker successfully authorized for the requesting project
         message:
           type: string
           description: Human-readable summary of the test result
@@ -7408,7 +7408,7 @@ components:
 
     ServerConfig:
       type: object
-      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_org, create_cache]
+      required: [oidc_enabled, registration_enabled, email_verification_enabled, quic, smtp_enabled, create_project, create_cache]
       properties:
         oidc_enabled:
           type: boolean
@@ -7428,10 +7428,10 @@ components:
         smtp_enabled:
           type: boolean
           description: Whether the server has SMTP configured (required for send_mail actions)
-        create_org:
+        create_project:
           type: string
           enum: [none, superusers, everyone]
-          description: Who may create organizations via the API (`none` = only the declarative state).
+          description: Who may create projects via the API (`none` = only the declarative state).
         create_cache:
           type: string
           enum: [none, superusers, everyone]
@@ -7566,20 +7566,20 @@ components:
             Capability identifiers (matching `Permission::as_wire_name`) the
             new key should grant. The full catalogue is at
             `GET /user/keys/permissions`.
-          example: [triggerEvaluation, viewOrg]
-        organization:
+          example: [triggerEvaluation, viewProject]
+        project:
           type: string
           nullable: true
           description: |-
-            Optional organization name to pin the key to. When set, the key is
-            rejected for any other organization. Mutually exclusive with `cache`.
+            Optional project name to pin the key to. When set, the key is
+            rejected for any other project. Mutually exclusive with `cache`.
         cache:
           type: string
           nullable: true
           description: |-
             Optional cache name to pin the key to. When set, the key carries
             cache-scoped permissions and is rejected for any other cache.
-            Mutually exclusive with `organization`.
+            Mutually exclusive with `project`.
         allowed_ips:
           type: array
           items: { type: string }
@@ -7602,11 +7602,11 @@ components:
           type: array
           items: { type: string }
           description: Capability identifiers granted by this key
-        organization:
+        project:
           type: string
           nullable: true
           description: |-
-            Organization name this key is pinned to, or `null` if the key is
+            Project name this key is pinned to, or `null` if the key is
             unscoped.
         created_at: { type: string, format: date-time }
         last_used_at:
@@ -7639,12 +7639,12 @@ components:
           minItems: 1
           description: |-
             When present, replaces the key's permission set wholesale.
-        organization:
+        project:
           type: string
           nullable: true
           description: |-
             Tri-state: omit to leave the pin unchanged; `null` to unpin;
-            string to pin to a specific organization.
+            string to pin to a specific project.
         allowed_ips:
           type: array
           items: { type: string }
@@ -7679,8 +7679,8 @@ components:
             One of: `login.success`, `login.failure`, `logout`, `register`,
             `user.delete`, `api_key.create`, `api_key.update`,
             `api_key.revoke`, `api_key.delete`, `session.revoke`, `auth.deny`,
-            `organization.delete`, `organization.member.add`,
-            `organization.member.remove`, `organization.member.role_change`,
+            `project.delete`, `project.member.add`,
+            `project.member.remove`, `project.member.role_change`,
             `task.delete`, `cache.delete`.
         ip: { type: string, nullable: true }
         user_agent: { type: string, nullable: true }
@@ -7742,7 +7742,7 @@ components:
         integration_id:
           type: string
           format: uuid
-          description: Outbound forge integration in the same org
+          description: Outbound forge integration in the same project
         generator:
           type: string
           enum: [flake_lock]
@@ -7841,20 +7841,20 @@ components:
             request_body: { type: string }
             response_body: { type: string, nullable: true }
 
-    # ── Organizations ─────────────────────────────────────────────────────────
+    # ── Projects ─────────────────────────────────────────────────────────
 
-    MakeOrganizationRequest:
+    MakeProjectRequest:
       type: object
       required: [name, display_name]
       properties:
         name:
           type: string
           pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$'
-          description: Unique slug for the organization
-          example: my-org
+          description: Unique slug for the project
+          example: my-project
         display_name:
           type: string
-          example: My Organization
+          example: My Project
         description:
           type: string
         public:
@@ -7867,7 +7867,7 @@ components:
             continues to receive CLI build artefacts; this is a UI-only
             opt-out.
 
-    PatchOrganizationRequest:
+    PatchProjectRequest:
       type: object
       properties:
         name:
@@ -7909,12 +7909,12 @@ components:
         name:
           type: string
           example: releaser
-        organization:
+        project:
           type: string
           format: uuid
           nullable: true
           description: |
-            `null` for built-in roles; the owning organization id for custom
+            `null` for built-in roles; the owning project id for custom
             roles.
         builtin:
           type: boolean
@@ -7982,13 +7982,13 @@ components:
       type: string
       description: |
         A capability identifier (camelCase). The full set is enumerated by
-        `GET /orgs/{organization}/roles` → `available_permissions`. New
+        `GET /projects/{project}/roles` → `available_permissions`. New
         capabilities may be appended in future releases; existing identifiers
         are stable.
       enum:
-        - viewOrg
-        - manageOrgSettings
-        - deleteOrg
+        - viewProject
+        - manageProjectSettings
+        - deleteProject
         - manageMembers
         - manageRoles
         - manageIntegrations
@@ -8000,7 +8000,7 @@ components:
         - editTask
         - triggerEvaluation
 
-    Organization:
+    Project:
       type: object
       required: [id, name, display_name, created_by, created_at, github_app_available]
       properties:
@@ -8091,7 +8091,7 @@ components:
 
     Task:
       type: object
-      required: [id, name, display_name, organization, repository, wildcard, active, created_by, created_at, managed, can_edit, can_trigger]
+      required: [id, name, display_name, project, repository, wildcard, active, created_by, created_at, managed, can_edit, can_trigger]
       properties:
         id:
           type: string
@@ -8100,7 +8100,7 @@ components:
           type: string
         display_name:
           type: string
-        organization:
+        project:
           type: string
           format: uuid
         repository:
@@ -8519,11 +8519,11 @@ components:
           overrides the task's wildcard for this run only. With no
           parked gate, `/gradient run` from a maintainer creates a fresh
           evaluation for the PR head.
-        - `no_cache`: the task's organisation has no writable cache
+        - `no_cache`: the task's project has no writable cache
           subscription, so build outputs would have nowhere to land. The
           evaluation auto-unparks the moment a writable cache is
           subscribed.
-        - `cache_storage_full`: every writable cache for the organisation is
+        - `cache_storage_full`: every writable cache for the project is
           within the headroom threshold of its (or the instance-wide)
           max-storage limit, so build outputs would have nowhere to land.
         - `graph_stuck`: the connected pool can build every pending anchor, but
@@ -8796,11 +8796,11 @@ components:
 
     ManifestRequest:
       type: object
-      required: [organization, files]
+      required: [project, files]
       properties:
-        organization:
+        project:
           type: string
-          description: Organization name (slug).
+          description: Project name (slug).
         files:
           type: array
           items:
@@ -8902,7 +8902,7 @@ components:
           type: string
           format: uuid
           description: |-
-            ID of the per-org reserved `build-request` task. Lazily created
+            ID of the per-project reserved `build-request` task. Lazily created
             on first dispatch and reused thereafter.
         commit:
           type: string
@@ -8914,9 +8914,9 @@ components:
           type: string
           nullable: true
           description: |-
-            Name of the org cache the build output is signed into, for the
+            Name of the project cache the build output is signed into, for the
             client to substitute from (`<server>/cache/<cache>`). `null` when
-            the organization has no cache.
+            the project has no cache.
 
     # ── Builds ────────────────────────────────────────────────────────────────
 
@@ -9190,12 +9190,12 @@ components:
 
     ExpensiveEval:
       type: object
-      required: [evaluation, organization, name, value, unit, worker]
+      required: [evaluation, project, name, value, unit, worker]
       properties:
         evaluation:
           type: string
           format: uuid
-        organization:
+        project:
           type: string
           format: uuid
         name:
@@ -9653,12 +9653,12 @@ components:
 
     Integration:
       type: object
-      required: [id, organization, name, display_name, kind, forge_type, has_secret, has_access_token, created_by, created_at]
+      required: [id, project, name, display_name, kind, forge_type, has_secret, has_access_token, created_by, created_at]
       properties:
         id:
           type: string
           format: uuid
-        organization:
+        project:
           type: string
           format: uuid
         name:
@@ -9721,7 +9721,7 @@ components:
       type: object
       description: >-
         Credential-free integration handle returned by
-        `GET /orgs/{org}/integrations/summary`. Available to any org member;
+        `GET /projects/{project}/integrations/summary`. Available to any project member;
         excludes `endpoint_url`, `has_secret`, and `has_access_token` so
         non-admins cannot fingerprint credential state.
       required: [id, name, display_name, kind, forge_type]
@@ -9918,7 +9918,7 @@ components:
       description: >-
         Slim integration handle inlined into reporter trigger responses so
         the trigger UI can render an integration's name without a separate
-        admin-gated call to `/orgs/{org}/integrations`.
+        admin-gated call to `/projects/{project}/integrations`.
       required: [id, name, display_name, forge_type]
       properties:
         id:
@@ -10058,28 +10058,28 @@ components:
             $ref: '#/components/schemas/SkippedTask'
     QueuedEvaluation:
       type: object
-      required: [task_id, task_name, organization, evaluation_id]
+      required: [task_id, task_name, project, evaluation_id]
       properties:
         task_id:
           type: string
           format: uuid
         task_name:
           type: string
-        organization:
+        project:
           type: string
         evaluation_id:
           type: string
           format: uuid
     SkippedTask:
       type: object
-      required: [task_id, task_name, organization, reason]
+      required: [task_id, task_name, project, reason]
       properties:
         task_id:
           type: string
           format: uuid
         task_name:
           type: string
-        organization:
+        project:
           type: string
         reason:
           type: string
@@ -10380,7 +10380,7 @@ components:
         architecture: { type: string }
         missing_count: { type: integer, nullable: true }
         missing_nar_size: { type: integer, nullable: true }
-        org_work_share: { type: number, nullable: true }
+        project_work_share: { type: number, nullable: true }
         rescore_count: { type: integer }
         queued_at: { type: string }
         ready_at: { type: string }
@@ -10442,8 +10442,8 @@ components:
       properties:
         id: { type: string, format: uuid }
         kind: { type: integer }
-        organization: { type: string, format: uuid }
-        organization_name: { type: string }
+        project: { type: string, format: uuid }
+        project_name: { type: string }
         worker_id: { type: string }
         score: { type: number }
         queued_at: { type: string, format: date-time }
@@ -10489,7 +10489,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         kind: { type: integer }
-        organization: { type: string, format: uuid }
+        project: { type: string, format: uuid }
         worker_id: { type: string }
         score: { type: number }
         dispatched_at: { type: string, format: date-time }
@@ -10502,7 +10502,7 @@ components:
       description: Summary of a single queued but not-yet-dispatched job.
       properties:
         kind: { type: integer }
-        organization: { type: string, format: uuid }
+        project: { type: string, format: uuid }
         evaluation_id: { type: string, format: uuid }
         build_id: { type: string, format: uuid, nullable: true }
         queued_at: { type: string, format: date-time }
@@ -10519,7 +10519,7 @@ components:
           description: Ephemeral id navigable via GET /board/jobs/{id} to this candidate's score-breakdown detail, served from the in-memory decision ring.
         job_id: { type: string }
         kind: { type: integer }
-        organization: { type: string, format: uuid }
+        project: { type: string, format: uuid }
         build_id: { type: string, format: uuid, nullable: true }
         evaluation_id: { type: string, format: uuid }
         pname: { type: string, nullable: true }
@@ -10602,7 +10602,7 @@ components:
       type: object
       description: |-
         SCIM core Group (RFC 7643 §4.2). `id`/`displayName` are the IdP group name;
-        `members` are users holding the resolved `(organization, role)` grant.
+        `members` are users holding the resolved `(project, role)` grant.
       properties:
         schemas:
           type: array

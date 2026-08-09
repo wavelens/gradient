@@ -32,7 +32,7 @@ pub struct ManifestFile {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BuildManifestRequest {
-    pub organization: String,
+    pub project: String,
     pub files: Vec<ManifestFile>,
 }
 
@@ -104,7 +104,7 @@ impl BuildRequestsApi<'_> {
 
     pub async fn upload_source_nar(
         &self,
-        organization: &str,
+        project: &str,
         target: Option<&str>,
         system: Option<&str>,
         nar_bytes: Vec<u8>,
@@ -126,7 +126,7 @@ impl BuildRequestsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("build-requests/source?organization={organization}"),
+            &format!("build-requests/source?project={project}"),
             true,
         )?
         .multipart(form);
@@ -156,7 +156,7 @@ impl BuildRequestsApi<'_> {
     pub async fn finalize_source(
         &self,
         upload: &str,
-        organization: &str,
+        project: &str,
         target: Option<&str>,
         system: Option<&str>,
         overrides: &[(String, String)],
@@ -177,7 +177,7 @@ impl BuildRequestsApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("build-requests/source/{upload}/finalize?organization={organization}"),
+            &format!("build-requests/source/{upload}/finalize?project={project}"),
             true,
         )?
         .json(&body);

@@ -19,9 +19,9 @@
 //!   worker provides that capability.
 //! - `Approval` - pull-request evaluation from a contributor who is not a
 //!   forge writer on the repo, gated until a maintainer approves.
-//! - `NoCache` - the task's organisation has no active cache configured,
+//! - `NoCache` - the task's project has no active cache configured,
 //!   so the build outputs would have nowhere to land.
-//! - `CacheStorageFull` - every writable cache for the organisation is within
+//! - `CacheStorageFull` - every writable cache for the project is within
 //!   the headroom threshold of its (or the instance-wide) max-storage limit.
 //! - `Draining` - the instance is draining (superuser action): all in-flight
 //!   evaluations are parked so the server can be stopped safely. Cleared on the
@@ -64,7 +64,7 @@ pub enum WaitingReason {
         pr_author: String,
     },
     NoCache,
-    /// Every writable cache for the org is within `STORAGE_HEADROOM_BYTES` of
+    /// Every writable cache for the project is within `STORAGE_HEADROOM_BYTES` of
     /// its configured `max_storage_gb` (or the instance-wide limit), so build
     /// outputs would have nowhere to land.
     CacheStorageFull,

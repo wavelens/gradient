@@ -45,7 +45,7 @@ pub(super) fn render_subject(template: Option<&str>, event: &str, payload: &Json
     };
     raw.replace("{event}", event)
         .replace("{task}", &get("task"))
-        .replace("{org}", &get("org"))
+        .replace("{project}", &get("project"))
         .replace("{id}", &get("id"))
         .replace("{status}", &get("status"))
 }
@@ -55,7 +55,7 @@ pub(super) fn render_default_body(event: &str, payload: &JsonValue) -> String {
     format!(
         "Event: {}\nTask: {}/{}\nEntity: {}\nStatus: {}\nTime: {}\nLink: {}\n",
         event,
-        get("org"),
+        get("project"),
         get("task"),
         get("id"),
         get("status"),

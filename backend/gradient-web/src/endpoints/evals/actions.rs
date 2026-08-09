@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::is_org_member;
+use crate::access::is_project_member;
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -29,8 +29,8 @@ pub async fn post_evaluation(
     let ctx =
         EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
 
-    // Mutations require explicit org membership even when the org is public.
-    if !is_org_member(&state, user.id, ctx.organization_id, api_key_ref).await? {
+    // Mutations require explicit project membership even when the project is public.
+    if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
         return Err(WebError::not_found("Evaluation"));
     }
 

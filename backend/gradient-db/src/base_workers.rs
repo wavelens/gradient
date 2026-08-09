@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Base-worker lookups: identity by worker_id, per-org enablement, and the
-//! enabled-org set used to scope a connecting base worker.
+//! Base-worker lookups: identity by worker_id, per-project enablement, and the
+//! enabled-project set used to scope a connecting base worker.
 
-use gradient_types::ids::{BaseWorkerId, OrganizationId};
+use gradient_types::ids::{BaseWorkerId, ProjectId};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 /// Returns the enabled `base_worker` row for this worker_id, if any.
@@ -37,32 +37,32 @@ pub async fn worker_id_is_base<C: ConnectionTrait>(
         .is_some())
 }
 
-/// Org UUIDs that have opted into the given base worker.
-pub async fn orgs_enabling_base_worker<C: ConnectionTrait>(
+/// Project UUIDs that have opted into the given base worker.
+pub async fn projects_enabling_base_worker<C: ConnectionTrait>(
     db: &C,
     base_worker: BaseWorkerId,
-) -> Result<Vec<OrganizationId>, sea_orm::DbErr> {
-    use gradient_entity::organization_base_worker::{Column as C2, Entity as E};
+) -> Result<Vec<ProjectId>, sea_orm::DbErr> {
+    use gradient_entity::project_base_worker::{Column as C2, Entity as E};
 
     Ok(E::find()
         .filter(C2::BaseWorker.eq(base_worker))
         .all(db)
         .await?
         .into_iter()
-        .map(|r| r.organization)
+        .map(|r| r.project)
         .collect())
 }
 
-/// True when the org has an enabled base worker with the `eval` gate on.
-pub async fn org_has_eval_capable_base_worker<C: ConnectionTrait>(
+/// True when the project has an enabled base worker with the `eval` gate on.
+pub async fn project_has_eval_capable_base_worker<C: ConnectionTrait>(
     db: &C,
-    organization: OrganizationId,
+    project: ProjectId,
 ) -> Result<bool, sea_orm::DbErr> {
     use gradient_entity::base_worker::{Column as BWC, Entity as BW};
-    use gradient_entity::organization_base_worker::{Column as OBWC, Entity as OBW};
+    use gradient_entity::project_base_worker::{Column as OBWC, Entity as OBW};
 
     let enabled_ids: Vec<BaseWorkerId> = OBW::find()
-        .filter(OBWC::Organization.eq(organization))
+        .filter(OBWC::Project.eq(project))
         .all(db)
         .await?
         .into_iter()
@@ -88,11 +88,11 @@ mod tests {
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     #[tokio::test]
-    async fn orgs_enabling_returns_empty_when_none() {
+    async fn projects_enabling_returns_empty_when_none() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<gradient_entity::organization_base_worker::Model>::new()])
+            .append_query_results([Vec::<gradient_entity::project_base_worker::Model>::new()])
             .into_connection();
-        let out = orgs_enabling_base_worker(&db, BaseWorkerId::nil())
+        let out = projects_enabling_base_worker(&db, BaseWorkerId::nil())
             .await
             .unwrap();
         assert!(out.is_empty());

@@ -30,12 +30,12 @@ pub(super) async fn run_gates<C: ConnectionTrait>(
     db: &C,
     eval: MEvaluation,
     approval: Option<&ApprovalInfo>,
-    organization: OrganizationId,
+    project: ProjectId,
     instance_max_storage_gb: i32,
 ) -> Result<MEvaluation, sea_orm::DbErr> {
     let eval = park_if_pending_approval(db, eval, approval).await?;
-    let eval = park_if_no_cache(db, eval, organization).await?;
-    let eval = park_if_storage_full(db, eval, organization, instance_max_storage_gb).await?;
-    let eval = park_if_no_workers(db, eval, organization).await?;
+    let eval = park_if_no_cache(db, eval, project).await?;
+    let eval = park_if_storage_full(db, eval, project, instance_max_storage_gb).await?;
+    let eval = park_if_no_workers(db, eval, project).await?;
     Ok(eval)
 }

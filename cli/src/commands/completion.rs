@@ -13,27 +13,27 @@ use std::time::Duration;
 
 const COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
 
-pub fn complete_orgs(current: &OsStr) -> Vec<CompletionCandidate> {
+pub fn complete_projects(current: &OsStr) -> Vec<CompletionCandidate> {
     run(current, |client, prefix| async move {
-        org_names(&client, &prefix).await
+        project_names(&client, &prefix).await
     })
 }
 
 pub fn complete_tasks(current: &OsStr) -> Vec<CompletionCandidate> {
     run(current, |client, prefix| async move {
-        let Some(org) = selected_org() else {
+        let Some(project) = selected_project() else {
             return Vec::new();
         };
-        task_names(&client, &org, &prefix).await
+        task_names(&client, &project, &prefix).await
     })
 }
 
 pub fn complete_workers(current: &OsStr) -> Vec<CompletionCandidate> {
     run(current, |client, prefix| async move {
-        let Some(org) = selected_org() else {
+        let Some(project) = selected_project() else {
             return Vec::new();
         };
-        worker_ids(&client, &org, &prefix).await
+        worker_ids(&client, &project, &prefix).await
     })
 }
 
@@ -45,38 +45,38 @@ pub fn complete_caches(current: &OsStr) -> Vec<CompletionCandidate> {
 
 pub fn complete_subscribed_caches(current: &OsStr) -> Vec<CompletionCandidate> {
     run(current, |client, prefix| async move {
-        let Some(org) = selected_org() else {
+        let Some(project) = selected_project() else {
             return Vec::new();
         };
-        subscribed_cache_names(&client, &org, &prefix).await
+        subscribed_cache_names(&client, &project, &prefix).await
     })
 }
 
-pub fn complete_org_users(current: &OsStr) -> Vec<CompletionCandidate> {
+pub fn complete_project_users(current: &OsStr) -> Vec<CompletionCandidate> {
     run(current, |client, prefix| async move {
-        let Some(org) = selected_org() else {
+        let Some(project) = selected_project() else {
             return Vec::new();
         };
-        org_user_names(&client, &org, &prefix).await
+        project_user_names(&client, &project, &prefix).await
     })
 }
 
-async fn org_names(client: &Client, prefix: &str) -> Vec<String> {
-    match client.orgs().list().await {
+async fn project_names(client: &Client, prefix: &str) -> Vec<String> {
+    match client.projects().list().await {
         Ok(res) => matching(res.items.into_iter().map(|i| i.name), prefix),
         Err(_) => Vec::new(),
     }
 }
 
-async fn task_names(client: &Client, org: &str, prefix: &str) -> Vec<String> {
-    match client.tasks().list(org).await {
+async fn task_names(client: &Client, project: &str, prefix: &str) -> Vec<String> {
+    match client.tasks().list(project).await {
         Ok(res) => matching(res.items.into_iter().map(|i| i.name), prefix),
         Err(_) => Vec::new(),
     }
 }
 
-async fn worker_ids(client: &Client, org: &str, prefix: &str) -> Vec<String> {
-    match client.workers().list(org).await {
+async fn worker_ids(client: &Client, project: &str, prefix: &str) -> Vec<String> {
+    match client.workers().list(project).await {
         Ok(workers) => matching(workers.into_iter().map(|w| w.worker_id), prefix),
         Err(_) => Vec::new(),
     }
@@ -89,15 +89,15 @@ async fn cache_names(client: &Client, prefix: &str) -> Vec<String> {
     }
 }
 
-async fn subscribed_cache_names(client: &Client, org: &str, prefix: &str) -> Vec<String> {
-    match client.orgs().subscriptions(org).await {
+async fn subscribed_cache_names(client: &Client, project: &str, prefix: &str) -> Vec<String> {
+    match client.projects().subscriptions(project).await {
         Ok(caches) => matching(caches.into_iter().map(|c| c.name), prefix),
         Err(_) => Vec::new(),
     }
 }
 
-async fn org_user_names(client: &Client, org: &str, prefix: &str) -> Vec<String> {
-    match client.orgs().users(org).await {
+async fn project_user_names(client: &Client, project: &str, prefix: &str) -> Vec<String> {
+    match client.projects().users(project).await {
         Ok(users) => matching(users.into_iter().map(|u| u.name), prefix),
         Err(_) => Vec::new(),
     }
@@ -107,9 +107,9 @@ fn matching(values: impl Iterator<Item = String>, prefix: &str) -> Vec<String> {
     values.filter(|v| v.starts_with(prefix)).collect()
 }
 
-fn selected_org() -> Option<String> {
+fn selected_project() -> Option<String> {
     load_config_quiet()
-        .get(&ConfigKey::SelectedOrganization)
+        .get(&ConfigKey::SelectedProject)
         .and_then(|v| v.clone())
         .filter(|s| !s.is_empty())
 }
@@ -212,11 +212,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn org_names_reads_paginated_items() {
+    async fn project_names_reads_paginated_items() {
         let server = MockServer::start().await;
         mount_json(
             &server,
-            "/api/v1/orgs",
+            "/api/v1/projects",
             serde_json::json!({
                 "error": false,
                 "message": {
@@ -231,12 +231,12 @@ mod tests {
         .await;
         let client = client(&server.uri());
 
-        assert_eq!(org_names(&client, "ac").await, vec!["acme", "acorn"]);
-        assert_eq!(org_names(&client, "aco").await, vec!["acorn"]);
+        assert_eq!(project_names(&client, "ac").await, vec!["acme", "acorn"]);
+        assert_eq!(project_names(&client, "aco").await, vec!["acorn"]);
     }
 
     #[tokio::test]
-    async fn task_names_uses_selected_org() {
+    async fn task_names_uses_selected_project() {
         let server = MockServer::start().await;
         mount_json(
             &server,
@@ -260,7 +260,7 @@ mod tests {
         let server = MockServer::start().await;
         mount_json(
             &server,
-            "/api/v1/orgs/acme/workers",
+            "/api/v1/projects/acme/workers",
             serde_json::json!({
                 "error": false,
                 "message": [

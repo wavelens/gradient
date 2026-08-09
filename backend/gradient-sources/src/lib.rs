@@ -77,12 +77,12 @@ pub enum SourceError {
     SigningKeyOperation,
     #[error("Cryptographic operation failed")]
     CryptographicOperation,
-    #[error("Failed to decode organization '{org}' private key: {reason}")]
-    OrganizationKeyDecoding { org: String, reason: String },
+    #[error("Failed to decode project '{project}' private key: {reason}")]
+    ProjectKeyDecoding { project: String, reason: String },
     #[error("Failed to convert decrypted private key to UTF-8")]
     KeyUtf8Conversion,
-    #[error("Failed to decrypt private key for organization '{org}'")]
-    KeyDecryption { org: String },
+    #[error("Failed to decrypt private key for project '{project}'")]
+    KeyDecryption { project: String },
     #[error("Failed to decode cache '{cache}' signing key: {reason}")]
     CacheKeyDecoding { cache: String, reason: String },
     #[error("Failed to decrypt private key")]
@@ -115,10 +115,8 @@ pub enum SourceError {
     UrlParsing,
     #[error("Unable to extract hash from Git URL")]
     GitHashExtraction,
-    #[error("Organization not found with ID: {id}")]
-    OrganizationNotFound {
-        id: gradient_types::ids::OrganizationId,
-    },
+    #[error("Project not found with ID: {id}")]
+    ProjectNotFound { id: gradient_types::ids::ProjectId },
 }
 
 /// Result of a successful prefetch. Owns the temporary clone directory so the
@@ -146,6 +144,6 @@ pub trait FlakePrefetcher: Send + Sync + std::fmt::Debug + 'static {
         crypt_secret_file: String,
         serve_url: String,
         repository: String,
-        organization: MOrganization,
+        project: MProject,
     ) -> Result<Option<PrefetchedFlake>>;
 }

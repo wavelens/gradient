@@ -8,9 +8,9 @@
   <div class="page-header">
     <div>
       <div class="breadcrumb">
-        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
         <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/organization', orgName, 'task', taskName]" class="breadcrumb-link">{{ taskDisplayName() || taskName }}</a>
+        <a [routerLink]="['/project', projectName, 'task', taskName]" class="breadcrumb-link">{{ taskDisplayName() || taskName }}</a>
         <span class="breadcrumb-separator">/</span>
         <span class="breadcrumb-current">Entry Point Metrics</span>
       </div>
@@ -19,7 +19,7 @@
     </div>
     @if (latestBuildId()) {
       <button pButton label="View Closure" icon="pi pi-sitemap" severity="secondary"
-         [routerLink]="['/organization', orgName, 'closure', 'build', latestBuildId()]"></button>
+         [routerLink]="['/project', projectName, 'closure', 'build', latestBuildId()]"></button>
     }
   </div>
 

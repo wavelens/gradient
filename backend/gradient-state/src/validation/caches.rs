@@ -17,11 +17,11 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
             );
         }
 
-        for org_name in &cache.organizations {
-            if !lookup.org_exists(org_name) {
+        for project_name in &cache.projects {
+            if !lookup.project_exists(project_name) {
                 errors.push(
-                    format!("caches.{}.organizations", cache.name),
-                    format!("Organization '{}' does not exist", org_name),
+                    format!("caches.{}.projects", cache.name),
+                    format!("Project '{}' does not exist", project_name),
                 );
             }
         }

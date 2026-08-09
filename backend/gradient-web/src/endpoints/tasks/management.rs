@@ -6,7 +6,7 @@
 
 use super::TaskResponse;
 use super::auto_attach;
-use crate::access::{Caller, OrgAccess, TaskAccess, has_permission, load_org, load_task};
+use crate::access::{Caller, ProjectAccess, TaskAccess, has_permission, load_project, load_task};
 use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{ErrorCode, WebError, WebResult};
@@ -16,7 +16,7 @@ use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 
 use gradient_core::ServerState;
-use gradient_db::get_any_organization_by_name;
+use gradient_db::get_any_project_by_name;
 use gradient_nix::RepositoryUrl;
 use gradient_sources::check_task_updates;
 use gradient_types::consts::*;
@@ -59,24 +59,24 @@ pub struct PatchTaskRequest {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TransferOwnershipRequest {
-    pub organization: String,
+    pub project: String,
 }
 
 pub async fn get_task_name_available(
     state: State<Arc<ServerState>>,
-    Path(organization): Path<String>,
+    Path(project): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> WebResult<Json<BaseResponse<bool>>> {
     let name = params.get("name").cloned().unwrap_or_default();
     if check_task_name(&name).is_err() {
         return Ok(ok_json(false));
     }
-    let org = get_any_organization_by_name(&state.db(), organization)
+    let project = get_any_project_by_name(&state.db(), project)
         .await?
-        .or_not_found("Organization")?;
+        .or_not_found("Project")?;
     let exists = ETask::find()
         .filter(CTask::Name.eq(name.as_str()))
-        .filter(CTask::Organization.eq(org.id))
+        .filter(CTask::Project.eq(project.id))
         .one(&state.web_db)
         .await?
         .is_some();
@@ -87,18 +87,16 @@ pub async fn get(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(organization): Path<String>,
+    Path(project): Path<String>,
     Query(params): Query<PaginationParams>,
 ) -> WebResult<Json<BaseResponse<Paginated<Vec<TaskResponse>>>>> {
     let api_key_ref = api_key.as_ref();
-    let organization = load_org(
+    let project = load_project(
         &state.0,
         Caller::from_option(&maybe_user),
         api_key_ref,
-        organization,
-        OrgAccess::Readable {
-            label: "Organization",
-        },
+        project,
+        ProjectAccess::Readable { label: "Project" },
     )
     .await?;
 
@@ -107,7 +105,7 @@ pub async fn get(
             has_permission(
                 &state,
                 user.id,
-                organization.id,
+                project.id,
                 Permission::EditTask,
                 api_key_ref,
             )
@@ -115,7 +113,7 @@ pub async fn get(
             has_permission(
                 &state,
                 user.id,
-                organization.id,
+                project.id,
                 Permission::TriggerEvaluation,
                 api_key_ref,
             )
@@ -126,7 +124,7 @@ pub async fn get(
 
     let listing = paginate(
         ETask::find()
-            .filter(CTask::Organization.eq(organization.id))
+            .filter(CTask::Project.eq(project.id))
             .order_by_asc(CTask::CreatedAt),
         &state.web_db,
         &params,
@@ -158,7 +156,7 @@ pub async fn get(
             .and_then(|id| eval_status_map.get(&id).cloned());
         TaskResponse {
             id: p.id,
-            organization: p.organization,
+            project: p.project,
             name: p.name,
             active: p.active,
             display_name: p.display_name,
@@ -186,7 +184,7 @@ pub async fn put(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path(organization): Path<String>,
+    Path(project): Path<String>,
     Json(body): Json<MakeTaskRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     if check_task_name(body.name.clone().as_str()).is_err() {
@@ -204,12 +202,12 @@ pub async fn put(
         .parse::<RepositoryUrl>()
         .map_err(|e| WebError::bad_request(e.to_string()))?;
 
-    let organization = load_org(
+    let project = load_project(
         &state.0,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
-        OrgAccess::Require {
+        project,
+        ProjectAccess::Require {
             permission: Permission::CreateTask,
             reject_managed: true,
         },
@@ -219,7 +217,7 @@ pub async fn put(
     let existing_task = ETask::find()
         .filter(
             Condition::all()
-                .add(CTask::Organization.eq(organization.id))
+                .add(CTask::Project.eq(project.id))
                 .add(CTask::Name.eq(body.name.clone())),
         )
         .one(&state.web_db)
@@ -238,7 +236,7 @@ pub async fn put(
 
     let task = MTask {
         id: TaskId::now_v7(),
-        organization: organization.id,
+        project: project.id,
         name: body.name.clone(),
         active: true,
         display_name: body.display_name.trim().to_string(),
@@ -277,7 +275,7 @@ pub async fn put(
     .await?;
 
     let integrations = EIntegration::find()
-        .filter(CIntegration::Organization.eq(organization.id))
+        .filter(CIntegration::Project.eq(project.id))
         .all(&state.web_db)
         .await
         .unwrap_or_default();
@@ -300,14 +298,14 @@ pub async fn get_task(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<TaskResponse>>> {
     let api_key_ref = api_key.as_ref();
-    let (organization, task) = load_task(
+    let (project, task) = load_task(
         &state.0,
         Caller::from_option(&maybe_user),
         api_key_ref,
-        organization,
+        project,
         task,
         TaskAccess::Readable,
     )
@@ -318,7 +316,7 @@ pub async fn get_task(
             has_permission(
                 &state,
                 user.id,
-                organization.id,
+                project.id,
                 Permission::EditTask,
                 api_key_ref,
             )
@@ -326,7 +324,7 @@ pub async fn get_task(
             has_permission(
                 &state,
                 user.id,
-                organization.id,
+                project.id,
                 Permission::TriggerEvaluation,
                 api_key_ref,
             )
@@ -346,7 +344,7 @@ pub async fn get_task(
 
     Ok(ok_json(TaskResponse {
         id: task.id,
-        organization: task.organization,
+        project: task.project,
         name: task.name,
         active: task.active,
         display_name: task.display_name,
@@ -371,14 +369,14 @@ pub async fn patch_task(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     Json(body): Json<PatchTaskRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (organization, task) = load_task(
+    let (project, task) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::EditTask,
@@ -390,7 +388,7 @@ pub async fn patch_task(
     let mut patcher = TaskPatcher::new(&state, &mut atask);
 
     if let Some(name) = body.name {
-        patcher.apply_name(&organization, name).await?;
+        patcher.apply_name(&project, name).await?;
     }
     if let Some(display_name) = body.display_name {
         patcher.apply_display_name(display_name)?;
@@ -432,14 +430,14 @@ impl<'a> TaskPatcher<'a> {
         Self { state, atask }
     }
 
-    async fn apply_name(&mut self, organization: &MOrganization, name: String) -> WebResult<()> {
+    async fn apply_name(&mut self, project: &MProject, name: String) -> WebResult<()> {
         if check_task_name(name.as_str()).is_err() {
             return Err(WebError::invalid_name("Task Name"));
         }
         let existing = ETask::find()
             .filter(
                 Condition::all()
-                    .add(CTask::Organization.eq(organization.id))
+                    .add(CTask::Project.eq(project.id))
                     .add(CTask::Name.eq(name.clone())),
             )
             .one(&self.state.web_db)
@@ -514,13 +512,13 @@ pub async fn delete_task(
     info: RequestInfo,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (organization_row, task) = load_task(
+    let (project_row, task) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::EditTask,
@@ -539,7 +537,7 @@ pub async fn delete_task(
         events::TASK_DELETE,
         &info,
         Some(serde_json::json!({
-            "organization_id": organization_row.id.to_string(),
+            "project_id": project_row.id.to_string(),
             "task_id": task_id.to_string(),
             "task_name": task_name,
         })),
@@ -558,13 +556,13 @@ pub async fn post_task_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, task) = load_task(
+    let (_project, task) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::EditTask,
@@ -588,13 +586,13 @@ pub async fn delete_task_active(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, task) = load_task(
+    let (_project, task) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::EditTask,
@@ -618,13 +616,13 @@ pub async fn post_task_check_repository(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<String>>> {
-    let (_organization, task) = load_task(
+    let (_project, task) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::EditTask,
@@ -655,26 +653,26 @@ pub async fn post_task_transfer(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     Json(body): Json<TransferOwnershipRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     let api_key_ref = api_key.as_ref();
-    let (organization, task) = load_task(
+    let (project, task) = load_task(
         &state,
         Caller::User(&user),
         api_key_ref,
-        organization,
+        project,
         task,
         TaskAccess::Member,
     )
     .await?;
 
-    // Only an org member with EditTask permission, or the current owner,
+    // Only a project member with EditTask permission, or the current owner,
     // may transfer ownership.
     let is_admin = has_permission(
         &state,
         user.id,
-        organization.id,
+        project.id,
         Permission::EditTask,
         api_key_ref,
     )
@@ -682,7 +680,7 @@ pub async fn post_task_transfer(
     let is_owner = task.created_by == user.id;
     if !is_admin && !is_owner {
         return Err(WebError::forbidden(
-            "Only the task owner or an organization admin can transfer ownership.".to_string(),
+            "Only the task owner or a project admin can transfer ownership.".to_string(),
         ));
     }
 
@@ -692,26 +690,26 @@ pub async fn post_task_transfer(
         ));
     }
 
-    let new_organization = load_org(
+    let new_project = load_project(
         &state.0,
         Caller::User(&user),
         api_key_ref,
-        body.organization.clone(),
-        OrgAccess::Require {
+        body.project.clone(),
+        ProjectAccess::Require {
             permission: Permission::CreateTask,
             reject_managed: true,
         },
     )
     .await?;
 
-    if new_organization.id == organization.id {
+    if new_project.id == project.id {
         return Err(WebError::bad_request(
-            "Task is already in this organization.".to_string(),
+            "Task is already in this project.".to_string(),
         ));
     }
 
     let mut atask: ATask = task.into();
-    atask.organization = Set(new_organization.id);
+    atask.project = Set(new_project.id);
     atask.update(&state.web_db).await?;
 
     let res = BaseResponse {

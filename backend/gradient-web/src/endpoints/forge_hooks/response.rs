@@ -29,7 +29,7 @@ pub struct WebhookResponse {
 pub struct QueuedEvaluation {
     pub task_id: TaskId,
     pub task_name: String,
-    pub organization: String,
+    pub project: String,
     pub evaluation_id: EvaluationId,
 }
 
@@ -37,7 +37,7 @@ pub struct QueuedEvaluation {
 pub struct SkippedTask {
     pub task_id: TaskId,
     pub task_name: String,
-    pub organization: String,
+    pub project: String,
     /// One of `already_in_progress`, `no_previous_evaluation`, `db_error`.
     pub reason: String,
 }

@@ -10,7 +10,7 @@ export type InboundForge = 'gitea' | 'forgejo' | 'gitlab';
 
 export interface Integration {
   id: string;
-  organization: string;
+  project: string;
   name: string;
   display_name: string;
   kind: IntegrationKind;
@@ -25,7 +25,7 @@ export interface Integration {
   account_login?: string | null;
 }
 
-/** Credential-free integration handle returned by the org-member summary
+/** Credential-free integration handle returned by the project-member summary
  *  endpoint and inlined into reporter trigger responses. */
 export interface IntegrationSummary {
   id: string;

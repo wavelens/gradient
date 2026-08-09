@@ -12,7 +12,7 @@ import { DialogModule } from 'primeng/dialog';
 import { ButtonModule } from 'primeng/button';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -53,7 +53,7 @@ export class TaskActionsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private actionsService = inject(ActionsService);
   private integrationsService = inject(IntegrationsService);
-  private orgsService = inject(OrganizationsService);
+  private projectsService = inject(ProjectsService);
   private accessSvc = inject(AccessService);
 
   access = injectTaskAccess();
@@ -81,8 +81,8 @@ export class TaskActionsComponent implements OnInit {
   testSuccessId = signal<string | null>(null);
   testFailureId = signal<string | null>(null);
 
-  orgName = '';
-  orgDisplayName = signal('');
+  projectName = '';
+  projectDisplayName = signal('');
   taskName = '';
 
   actions = signal<Action[]>([]);
@@ -100,10 +100,10 @@ export class TaskActionsComponent implements OnInit {
   confirmDeleteId = signal<string | null>(null);
 
   ngOnInit(): void {
-    this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
-    this.orgsService.getOrganization(this.orgName).subscribe({
-      next: (org) => this.orgDisplayName.set(org.display_name),
+    this.projectsService.getProject(this.projectName).subscribe({
+      next: (project) => this.projectDisplayName.set(project.display_name),
       error: () => {},
     });
     this.loadActions();
@@ -112,7 +112,7 @@ export class TaskActionsComponent implements OnInit {
 
   loadActions(): void {
     this.loading.set(true);
-    this.actionsService.list(this.orgName, this.taskName).subscribe({
+    this.actionsService.list(this.projectName, this.taskName).subscribe({
       next: (list) => {
         this.actions.set(list);
         this.loading.set(false);
@@ -122,7 +122,7 @@ export class TaskActionsComponent implements OnInit {
   }
 
   private loadIntegrations(): void {
-    this.integrationsService.listOrgIntegrations(this.orgName).subscribe({
+    this.integrationsService.listProjectIntegrations(this.projectName).subscribe({
       next: (list: Integration[]) =>
         this.outboundIntegrations.set(
           list
@@ -148,7 +148,7 @@ export class TaskActionsComponent implements OnInit {
   onCreateSaved(request: CreateActionRequest | UpdateActionRequest): void {
     this.saving.set(true);
     this.error.set(null);
-    this.actionsService.create(this.orgName, this.taskName, request as CreateActionRequest).subscribe({
+    this.actionsService.create(this.projectName, this.taskName, request as CreateActionRequest).subscribe({
       next: (res) => {
         this.saving.set(false);
         this.showCreateDialog.set(false);
@@ -167,7 +167,7 @@ export class TaskActionsComponent implements OnInit {
     if (!target) return;
     this.saving.set(true);
     this.error.set(null);
-    this.actionsService.update(this.orgName, this.taskName, target.id, request as UpdateActionRequest).subscribe({
+    this.actionsService.update(this.projectName, this.taskName, target.id, request as UpdateActionRequest).subscribe({
       next: () => {
         this.saving.set(false);
         this.showEditDialog.set(false);
@@ -189,7 +189,7 @@ export class TaskActionsComponent implements OnInit {
     const id = this.confirmDeleteId();
     if (!id) return;
     this.deletingId.set(id);
-    this.actionsService.delete(this.orgName, this.taskName, id).subscribe({
+    this.actionsService.delete(this.projectName, this.taskName, id).subscribe({
       next: () => {
         this.deletingId.set(null);
         this.confirmDeleteId.set(null);
@@ -210,7 +210,7 @@ export class TaskActionsComponent implements OnInit {
     this.testingId.set(id);
     this.testSuccessId.set(null);
     this.testFailureId.set(null);
-    this.actionsService.test(this.orgName, this.taskName, id).subscribe({
+    this.actionsService.test(this.projectName, this.taskName, id).subscribe({
       next: () => {
         this.testingId.set(null);
         this.testSuccessId.set(id);

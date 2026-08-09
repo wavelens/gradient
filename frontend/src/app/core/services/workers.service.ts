@@ -36,23 +36,23 @@ export interface WorkerMetricsResponse {
 export class WorkersService {
   private api = inject(ApiService);
 
-  getWorkers(org: string): Observable<Worker[]> {
-    return this.api.get<Worker[]>(`orgs/${org}/workers`);
+  getWorkers(project: string): Observable<Worker[]> {
+    return this.api.get<Worker[]>(`projects/${project}/workers`);
   }
 
-  getWorkerMetrics(org: string, workerId: string): Observable<WorkerMetricsResponse> {
-    return this.api.get<WorkerMetricsResponse>(`orgs/${org}/workers/${workerId}/metrics`);
+  getWorkerMetrics(project: string, workerId: string): Observable<WorkerMetricsResponse> {
+    return this.api.get<WorkerMetricsResponse>(`projects/${project}/workers/${workerId}/metrics`);
   }
 
   registerWorker(
-    org: string,
+    project: string,
     workerId: string,
     displayName: string,
     url?: string,
     token?: string,
     caps?: { enable_fetch: boolean; enable_eval: boolean; enable_build: boolean },
   ): Observable<WorkerRegistration> {
-    return this.api.post<WorkerRegistration>(`orgs/${org}/workers`, {
+    return this.api.post<WorkerRegistration>(`projects/${project}/workers`, {
       worker_id: workerId,
       display_name: displayName,
       url: url || undefined,
@@ -63,34 +63,34 @@ export class WorkersService {
     });
   }
 
-  setWorkerActive(org: string, workerId: string, active: boolean): Observable<string> {
-    return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, { active });
+  setWorkerActive(project: string, workerId: string, active: boolean): Observable<string> {
+    return this.api.patch<string>(`projects/${project}/workers/${workerId}`, { active });
   }
 
-  renameWorker(org: string, workerId: string, displayName: string): Observable<string> {
-    return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, { display_name: displayName });
+  renameWorker(project: string, workerId: string, displayName: string): Observable<string> {
+    return this.api.patch<string>(`projects/${project}/workers/${workerId}`, { display_name: displayName });
   }
 
   setWorkerCapability(
-    org: string,
+    project: string,
     workerId: string,
     cap: 'fetch' | 'eval' | 'build',
     enabled: boolean,
   ): Observable<string> {
     const body: Record<string, boolean> = {};
     body[`enable_${cap}`] = enabled;
-    return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, body);
+    return this.api.patch<string>(`projects/${project}/workers/${workerId}`, body);
   }
 
-  patchWorker(org: string, workerId: string, body: Record<string, unknown>): Observable<string> {
-    return this.api.patch<string>(`orgs/${org}/workers/${workerId}`, body);
+  patchWorker(project: string, workerId: string, body: Record<string, unknown>): Observable<string> {
+    return this.api.patch<string>(`projects/${project}/workers/${workerId}`, body);
   }
 
-  deleteWorker(org: string, workerId: string): Observable<string> {
-    return this.api.delete<string>(`orgs/${org}/workers/${workerId}`);
+  deleteWorker(project: string, workerId: string): Observable<string> {
+    return this.api.delete<string>(`projects/${project}/workers/${workerId}`);
   }
 
-  testWorker(org: string, workerId: string): Observable<WorkerTestResponse> {
-    return this.api.post<WorkerTestResponse>(`orgs/${org}/workers/${workerId}/test`, {});
+  testWorker(project: string, workerId: string): Observable<WorkerTestResponse> {
+    return this.api.post<WorkerTestResponse>(`projects/${project}/workers/${workerId}/test`, {});
   }
 }

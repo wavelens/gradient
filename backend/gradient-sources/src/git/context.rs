@@ -11,7 +11,7 @@ use gradient_types::*;
 use sea_orm::EntityTrait;
 
 /// Bundles the server state, task reference, and (if the repository URL is
-/// SSH) the decrypted key pair for the task's owning organisation.
+/// SSH) the decrypted key pair for the task's owning project.
 ///
 /// Created once per task-check cycle via [`TaskGitContext::new`]. Both
 /// [`check_task_updates`](super::check_task_updates) and
@@ -31,18 +31,16 @@ impl<'a> TaskGitContext<'a> {
     pub(super) async fn new(ctx: &'a DbContext, task: &'a MTask) -> Result<Self, SourceError> {
         let url = &task.repository;
         let ssh_creds = if check_repository_url_is_ssh(url) {
-            let organization = EOrganization::find_by_id(task.organization)
+            let project = EProject::find_by_id(task.project)
                 .one(&ctx.worker_db)
                 .await
                 .map_err(|e| SourceError::Database {
                     reason: e.to_string(),
                 })?
-                .ok_or(SourceError::OrganizationNotFound {
-                    id: task.organization,
-                })?;
+                .ok_or(SourceError::ProjectNotFound { id: task.project })?;
             Some(crate::ssh_key::decrypt_ssh_private_key(
                 &ctx.config.secrets.crypt_secret_file,
-                organization,
+                project,
                 &ctx.config.server.serve_url,
             )?)
         } else {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::is_org_member;
+use crate::access::is_project_member;
 use crate::authorization::MaybeApiKey;
 use crate::error::WebError;
 use async_stream::stream;
@@ -69,8 +69,8 @@ pub async fn post_evaluation_builds(
     let ctx =
         EvalAccessContext::load(&state, evaluation_id, &Some(user.clone()), api_key_ref).await?;
 
-    // Streaming log access requires org membership (not just public read access).
-    if !is_org_member(&state, user.id, ctx.organization_id, api_key_ref).await? {
+    // Streaming log access requires project membership (not just public read access).
+    if !is_project_member(&state, user.id, ctx.project_id, api_key_ref).await? {
         return Err(WebError::not_found("Evaluation"));
     }
 

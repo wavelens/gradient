@@ -10,18 +10,18 @@
 //! `Extension(MaybeApiKey(Some(ctx)))` into the request; session-JWT requests
 //! get `MaybeApiKey(None)`. The access layer reads this extension to
 //! intersect the key's permission mask with the user's role-derived mask, and
-//! to short-circuit on a pinned-org mismatch.
+//! to short-circuit on a pinned-project mismatch.
 
 use crate::permissions::PermissionMask;
 use gradient_types::ids::CacheId;
-use gradient_types::{ApiId, OrganizationId, UserId};
+use gradient_types::{ApiId, ProjectId, UserId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiKeyContext {
     pub api_id: ApiId,
     pub mask: PermissionMask,
-    /// `None` = unscoped; `Some(id)` pins the key to a single org.
-    pub organization: Option<OrganizationId>,
+    /// `None` = unscoped; `Some(id)` pins the key to a single project.
+    pub project: Option<ProjectId>,
     /// `None` = unscoped; `Some(id)` pins the key to a single cache.
     pub cache_pin: Option<CacheId>,
     /// Cache-permission mask. `None` means unrestricted (i64::MAX).
@@ -85,8 +85,8 @@ mod tests {
     fn from_key_preserves_fields() {
         let ctx = ApiKeyContext {
             api_id: ApiId::new(uuid!("a0000000-0000-0000-0000-000000000010")),
-            mask: mask_from(&[Permission::ViewOrg, Permission::TriggerEvaluation]),
-            organization: Some(OrganizationId::new(uuid!(
+            mask: mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation]),
+            project: Some(ProjectId::new(uuid!(
                 "a0000000-0000-0000-0000-000000000020"
             ))),
             cache_pin: None,
@@ -122,8 +122,8 @@ mod tests {
             user_id,
             context: ApiKeyContext {
                 api_id,
-                mask: mask_from(&[Permission::ViewOrg, Permission::TriggerEvaluation]),
-                organization: None,
+                mask: mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation]),
+                project: None,
                 cache_pin: None,
                 cache_permission_mask: None,
                 allowed_ips: Vec::new(),
@@ -133,9 +133,9 @@ mod tests {
         assert_eq!(ctx.api_id, api_id);
         assert_eq!(
             ctx.mask,
-            mask_from(&[Permission::ViewOrg, Permission::TriggerEvaluation])
+            mask_from(&[Permission::ViewProject, Permission::TriggerEvaluation])
         );
-        assert!(ctx.organization.is_none());
+        assert!(ctx.project.is_none());
         assert_eq!(outcome.user_id(), user_id);
     }
 }

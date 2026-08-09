@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! `GET /api/v1/config` exposes the `create_org` / `create_cache` permission
+//! `GET /api/v1/config` exposes the `create_project` / `create_cache` permission
 //! knobs so the frontend can hide the create buttons (issue #470).
 
 use gradient_test_support::web::{make_test_server, make_test_server_configured};
@@ -29,7 +29,7 @@ fn config_defaults_to_everyone() {
         let res = server.get("/api/v1/config").await;
         res.assert_status_ok();
         let body: Value = res.json();
-        assert_eq!(body["message"]["create_org"], "everyone");
+        assert_eq!(body["message"]["create_project"], "everyone");
         assert_eq!(body["message"]["create_cache"], "everyone");
     });
 }
@@ -39,14 +39,14 @@ fn config_reflects_configured_permissions() {
     run(async {
         let db = MockDatabase::new(DatabaseBackend::Postgres);
         let server = make_test_server_configured(db.into_connection(), |cli| {
-            cli.server.create_org = CreatePermission::None;
+            cli.server.create_project = CreatePermission::None;
             cli.server.create_cache = CreatePermission::Superusers;
         });
 
         let res = server.get("/api/v1/config").await;
         res.assert_status_ok();
         let body: Value = res.json();
-        assert_eq!(body["message"]["create_org"], "none");
+        assert_eq!(body["message"]["create_project"], "none");
         assert_eq!(body["message"]["create_cache"], "superusers");
     });
 }

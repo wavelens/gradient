@@ -16,7 +16,7 @@ use uuid::Uuid;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BoardEvent {
     JobDispatched {
-        organization: Uuid,
+        project: Uuid,
         worker_id: String,
         kind: i16,
         score: f64,
@@ -24,7 +24,7 @@ pub enum BoardEvent {
         evaluation_id: Uuid,
     },
     WorkerConnected {
-        organization: Uuid,
+        project: Uuid,
         worker_id: String,
     },
     WorkerDisconnected {

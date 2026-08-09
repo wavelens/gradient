@@ -55,7 +55,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   ty = signal(0);
   transform = computed(() => `translate(${this.tx()},${this.ty()}) scale(${this.scale()})`);
 
-  orgName = '';
+  projectName = '';
   kind = '';
   id = '';
   closureType = 'runtime';
@@ -68,7 +68,7 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
-    this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.kind = this.route.snapshot.paramMap.get('kind') || 'build';
     this.id = this.route.snapshot.paramMap.get('id') || '';
     this.closureType = this.route.snapshot.queryParamMap.get('type') === 'build' ? 'build' : 'runtime';
@@ -284,12 +284,12 @@ export class ClosureGraphComponent implements OnInit, OnDestroy {
   }
 
   goBack(): void {
-    // Return to wherever the user came from; fall back to the org overview when
+    // Return to wherever the user came from; fall back to the project overview when
     // the closure page was opened directly (no in-app history to pop).
     if (history.length > 1) {
       this.location.back();
     } else {
-      this.router.navigate(['/organization', this.orgName]);
+      this.router.navigate(['/project', this.projectName]);
     }
   }
 }

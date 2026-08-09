@@ -32,7 +32,7 @@ in {
       task = lib.mkOption {
         type = lib.types.str;
         description = "Task identifier for the deployments";
-        example = "my-org/my-task";
+        example = "my-project/my-task";
       };
 
       # TODO:

@@ -113,13 +113,13 @@ pub async fn list(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<Vec<FlakeInputOverrideOut>>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Member,
     )
@@ -138,14 +138,14 @@ pub async fn create(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     Json(body): Json<CreateBody>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::EditTask,
@@ -189,13 +189,13 @@ pub async fn read(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, FlakeInputOverrideId)>,
+    Path((project, task, id)): Path<(String, String, FlakeInputOverrideId)>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Member,
     )
@@ -215,14 +215,14 @@ pub async fn update(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, FlakeInputOverrideId)>,
+    Path((project, task, id)): Path<(String, String, FlakeInputOverrideId)>,
     Json(body): Json<UpdateBody>,
 ) -> WebResult<Json<BaseResponse<FlakeInputOverrideOut>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::EditTask,
@@ -277,13 +277,13 @@ pub async fn delete_one(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task, id)): Path<(String, String, FlakeInputOverrideId)>,
+    Path((project, task, id)): Path<(String, String, FlakeInputOverrideId)>,
 ) -> WebResult<Json<BaseResponse<DeletedResponse>>> {
-    let (_org, proj) = load_task(
+    let (_project, proj) = load_task(
         &state,
         Caller::User(&user),
         api_key.as_ref(),
-        organization,
+        project,
         task,
         TaskAccess::Require {
             permission: Permission::EditTask,

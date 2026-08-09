@@ -27,14 +27,14 @@ pub(crate) struct BuildParams {
 
 pub async fn handle_build(
     mut params: BuildParams,
-    organization: Option<String>,
+    project: Option<String>,
     background: bool,
     quiet: bool,
     no_link: bool,
     out: Output,
 ) {
-    // Surface a missing server / session before the org check so an unconfigured
-    // first run points at `gradient login` rather than org selection (#498).
+    // Surface a missing server / session before the project check so an unconfigured
+    // first run points at `gradient login` rather than project selection (#498).
     let client = client_from_config(out);
     if let Err(ConnectorError::Unauthorized) = client.user().get().await {
         out.err(
@@ -44,12 +44,12 @@ pub async fn handle_build(
         );
     }
 
-    let organization = organization
-        .or_else(|| set_get_value(ConfigKey::SelectedOrganization, None, true))
+    let project = project
+        .or_else(|| set_get_value(ConfigKey::SelectedProject, None, true))
         .unwrap_or_else(|| {
             if !quiet {
                 out.progress(
-                    "Organization must be set for build command. Use 'gradient organization select <name>' \
+                    "Project must be set for build command. Use 'gradient project select <name>' \
                      (it is selected automatically on `gradient login`).",
                 );
             }
@@ -118,7 +118,7 @@ pub async fn handle_build(
         exit(1);
     }
 
-    let dispatch = upload_and_dispatch(&client, &organization, &entries, &params, quiet, out).await;
+    let dispatch = upload_and_dispatch(&client, &project, &entries, &params, quiet, out).await;
 
     if background {
         out.ok(&dispatch);
@@ -189,7 +189,7 @@ pub async fn handle_build(
 
 async fn upload_and_dispatch(
     client: &connector::Client,
-    organization: &str,
+    project: &str,
     entries: &[TrackedFile],
     params: &BuildParams,
     quiet: bool,
@@ -197,26 +197,19 @@ async fn upload_and_dispatch(
 ) -> DispatchResponse {
     #[cfg(feature = "nix")]
     {
-        crate::commands::build_nix::dispatch_via_nar(
-            client,
-            organization,
-            entries,
-            params,
-            quiet,
-            out,
-        )
-        .await
+        crate::commands::build_nix::dispatch_via_nar(client, project, entries, params, quiet, out)
+            .await
     }
     #[cfg(not(feature = "nix"))]
     {
-        dispatch_via_manifest(client, organization, entries, params, quiet, out).await
+        dispatch_via_manifest(client, project, entries, params, quiet, out).await
     }
 }
 
 #[cfg(not(feature = "nix"))]
 async fn dispatch_via_manifest(
     client: &connector::Client,
-    organization: &str,
+    project: &str,
     entries: &[TrackedFile],
     params: &BuildParams,
     quiet: bool,
@@ -247,7 +240,7 @@ async fn dispatch_via_manifest(
         .collect();
 
     let manifest_req = BuildManifestRequest {
-        organization: organization.to_owned(),
+        project: project.to_owned(),
         files: hashed
             .iter()
             .map(|(path, hash, size)| ManifestFile {

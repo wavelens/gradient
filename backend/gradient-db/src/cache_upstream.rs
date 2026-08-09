@@ -8,12 +8,12 @@ use anyhow::Result;
 use gradient_entity::cache_upstream::{
     CacheUpstreamKind, Column as CCacheUpstream, Entity as ECacheUpstream,
 };
-use gradient_entity::organization_cache::{
-    CacheSubscriptionMode, Column as COrganizationCache, Entity as EOrganizationCache,
+use gradient_entity::project_cache::{
+    CacheSubscriptionMode, Column as CProjectCache, Entity as EProjectCache,
 };
 use sea_orm::{ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, Statement};
 
-use gradient_types::ids::{CacheId, CacheUpstreamId, OrganizationId};
+use gradient_types::ids::{CacheId, CacheUpstreamId, ProjectId};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpstreamEndpoint {
@@ -57,20 +57,20 @@ impl UpstreamAccum {
     }
 }
 
-pub async fn upstream_urls_for_org<C: ConnectionTrait>(
+pub async fn upstream_urls_for_project<C: ConnectionTrait>(
     db: &C,
-    org_id: OrganizationId,
+    project_id: ProjectId,
 ) -> Result<Vec<String>> {
-    let org_cache_rows = EOrganizationCache::find()
+    let project_cache_rows = EProjectCache::find()
         .filter(
             sea_orm::Condition::all()
-                .add(COrganizationCache::Organization.eq(org_id))
-                .add(COrganizationCache::Mode.ne(CacheSubscriptionMode::WriteOnly)),
+                .add(CProjectCache::Project.eq(project_id))
+                .add(CProjectCache::Mode.ne(CacheSubscriptionMode::WriteOnly)),
         )
         .all(db)
         .await?;
 
-    let cache_ids: Vec<CacheId> = org_cache_rows.iter().map(|r| r.cache).collect();
+    let cache_ids: Vec<CacheId> = project_cache_rows.iter().map(|r| r.cache).collect();
     if cache_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -97,20 +97,20 @@ pub struct GradientProtoUpstream {
     pub api_key_enc: Option<String>,
 }
 
-pub async fn gradient_proto_upstreams_for_org<C: ConnectionTrait>(
+pub async fn gradient_proto_upstreams_for_project<C: ConnectionTrait>(
     db: &C,
-    org_id: OrganizationId,
+    project_id: ProjectId,
 ) -> Result<Vec<GradientProtoUpstream>> {
-    let org_cache_rows = EOrganizationCache::find()
+    let project_cache_rows = EProjectCache::find()
         .filter(
             sea_orm::Condition::all()
-                .add(COrganizationCache::Organization.eq(org_id))
-                .add(COrganizationCache::Mode.ne(CacheSubscriptionMode::WriteOnly)),
+                .add(CProjectCache::Project.eq(project_id))
+                .add(CProjectCache::Mode.ne(CacheSubscriptionMode::WriteOnly)),
         )
         .all(db)
         .await?;
 
-    let cache_ids: Vec<CacheId> = org_cache_rows.iter().map(|r| r.cache).collect();
+    let cache_ids: Vec<CacheId> = project_cache_rows.iter().map(|r| r.cache).collect();
     if cache_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -138,9 +138,9 @@ pub async fn gradient_proto_upstreams_for_org<C: ConnectionTrait>(
         .collect())
 }
 
-pub async fn upstream_endpoints_for_org<C: ConnectionTrait>(
+pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
     db: &C,
-    org_id: OrganizationId,
+    project_id: ProjectId,
     window_minutes: i64,
 ) -> Result<Vec<UpstreamEndpoint>> {
     let sql = format!(
@@ -149,10 +149,10 @@ pub async fn upstream_endpoints_for_org<C: ConnectionTrait>(
                 SUM(um.narinfo_hits)::float8 \
                   / NULLIF(SUM(um.narinfo_hits + um.narinfo_misses), 0) AS hit_rate \
          FROM cache_upstream cu \
-         JOIN organization_cache oc ON oc.cache = cu.cache \
+         JOIN project_cache oc ON oc.cache = cu.cache \
          LEFT JOIN upstream_metric um ON um.upstream_url = cu.url \
               AND um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '{window_minutes} minutes' \
-         WHERE oc.organization = $1 AND oc.mode <> 2 AND cu.kind = 2 \
+         WHERE oc.project = $1 AND oc.mode <> 2 AND cu.kind = 2 \
                AND cu.mode <> 2 AND cu.url IS NOT NULL \
          GROUP BY cu.id, cu.url",
         window_minutes = window_minutes
@@ -162,7 +162,7 @@ pub async fn upstream_endpoints_for_org<C: ConnectionTrait>(
         .query_all(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             sql,
-            [org_id.into_inner().into()],
+            [project_id.into_inner().into()],
         ))
         .await?;
 
@@ -218,16 +218,16 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Distinct upstream URLs reachable by any of `org_ids` (their subscribed
+/// Distinct upstream URLs reachable by any of `project_ids` (their subscribed
 /// caches' HTTP upstreams). Scopes the by-URL board metrics to the caller.
-pub async fn upstream_urls_for_orgs<C: ConnectionTrait>(
+pub async fn upstream_urls_for_projects<C: ConnectionTrait>(
     db: &C,
-    org_list: &str,
+    project_list: &str,
 ) -> Result<std::collections::HashSet<String>> {
     let sql = format!(
         "SELECT DISTINCT cu.url AS url FROM cache_upstream cu \
-         JOIN organization_cache oc ON oc.cache = cu.cache \
-         WHERE oc.organization IN ({org_list}) AND cu.url IS NOT NULL"
+         JOIN project_cache oc ON oc.cache = cu.cache \
+         WHERE oc.project IN ({project_list}) AND cu.url IS NOT NULL"
     );
 
     Ok(db
@@ -242,18 +242,18 @@ pub async fn upstream_urls_for_orgs<C: ConnectionTrait>(
 mod tests {
     use super::*;
     use gradient_entity::cache_upstream::{self, CacheUpstreamKind};
-    use gradient_entity::organization_cache::{self, CacheSubscriptionMode};
+    use gradient_entity::project_cache::{self, CacheSubscriptionMode};
     use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::Uuid;
 
-    fn org_cache_row(
-        org: OrganizationId,
+    fn project_cache_row(
+        project: ProjectId,
         cache: CacheId,
         mode: CacheSubscriptionMode,
-    ) -> organization_cache::Model {
-        organization_cache::Model {
-            id: gradient_types::ids::OrganizationCacheId::now_v7(),
-            organization: org,
+    ) -> project_cache::Model {
+        project_cache::Model {
+            id: gradient_types::ids::ProjectCacheId::now_v7(),
+            project: project,
             cache,
             mode,
         }
@@ -277,14 +277,14 @@ mod tests {
 
     #[tokio::test]
     async fn returns_urls_from_subscribed_caches() {
-        let org = OrganizationId::new(Uuid::now_v7());
+        let project = ProjectId::new(Uuid::now_v7());
         let cache_a = CacheId::new(Uuid::now_v7());
         let cache_b = CacheId::new(Uuid::now_v7());
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![
-                org_cache_row(org, cache_a, CacheSubscriptionMode::ReadOnly),
-                org_cache_row(org, cache_b, CacheSubscriptionMode::ReadWrite),
+                project_cache_row(project, cache_a, CacheSubscriptionMode::ReadOnly),
+                project_cache_row(project, cache_b, CacheSubscriptionMode::ReadWrite),
             ]])
             .append_query_results([vec![
                 upstream_row(
@@ -300,7 +300,7 @@ mod tests {
             ]])
             .into_connection();
 
-        let urls = upstream_urls_for_org(&db, org)
+        let urls = upstream_urls_for_project(&db, project)
             .await
             .expect("helper succeeds");
         assert_eq!(
@@ -313,14 +313,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_when_no_org_caches() {
-        let org = OrganizationId::new(Uuid::now_v7());
+    async fn empty_when_no_project_caches() {
+        let project = ProjectId::new(Uuid::now_v7());
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<organization_cache::Model>::new()])
+            .append_query_results([Vec::<project_cache::Model>::new()])
             .into_connection();
 
-        let urls = upstream_urls_for_org(&db, org)
+        let urls = upstream_urls_for_project(&db, project)
             .await
             .expect("helper succeeds");
         assert!(urls.is_empty());
@@ -328,11 +328,11 @@ mod tests {
 
     #[tokio::test]
     async fn http_urls_excludes_gradient_proto() {
-        let org = OrganizationId::new(Uuid::now_v7());
+        let project = ProjectId::new(Uuid::now_v7());
         let cache_a = CacheId::new(Uuid::now_v7());
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![org_cache_row(
-                org,
+            .append_query_results([vec![project_cache_row(
+                project,
                 cache_a,
                 CacheSubscriptionMode::ReadOnly,
             )]])
@@ -342,7 +342,7 @@ mod tests {
                 Some("https://http.example/"),
             )]])
             .into_connection();
-        let urls = upstream_urls_for_org(&db, org).await.expect("ok");
+        let urls = upstream_urls_for_project(&db, project).await.expect("ok");
         assert_eq!(urls, vec!["https://http.example/".to_string()]);
     }
 

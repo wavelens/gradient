@@ -1,7 +1,7 @@
 # Scheduler
 
 The Gradient scheduler coordinates build dispatch across connected workers.
-This page covers how builds are shared across evaluations and organisations.
+This page covers how builds are shared across evaluations and projects.
 For a general overview of the scheduler architecture see
 [Architecture](development/architecture.md).
 
@@ -17,7 +17,7 @@ outlives the evaluation that drove it - its true owner is the build-once anchor,
 and a `Completed` anchor reused by a later evaluation keeps a retrievable log
 until the derivation itself is GC'd.
 
-When two evaluations - in the same or different organisations - need the same
+When two evaluations - in the same or different projects - need the same
 derivation, they share the one anchor: whichever is dispatched first builds
 it, and the others observe the result the moment the anchor reaches a
 terminal-success status. There is no leader/follower row and no `via` link;
@@ -304,9 +304,9 @@ in the separate retention loop instead.
 
 A derivation is just another build that can be substituted when its output is
 available on a cache, exactly like any other - fixed-output derivations are not
-special-cased. At eval time `resolve_anchors` runs an org-scoped lookup
+special-cased. At eval time `resolve_anchors` runs a project-scoped lookup
 (`compute_upstream_substitutable`): for every derivation not already in the
-gradient cache it probes each output's `.narinfo` across the org's configured
+gradient cache it probes each output's `.narinfo` across the project's configured
 upstream caches. A derivation is marked substitutable only when *every* one of
 its outputs is cached somewhere (the gradient cache or an upstream); otherwise it
 is built. The resolved upstream NAR URL plus narinfo metadata is persisted once
@@ -483,8 +483,8 @@ is visible without opening the log.
 #### Access and GC
 
 Read-only build endpoints (`GET /builds/{id}`, `/log`, `/downloads`,
-`/graph`) accept requests from members of any organisation whose evaluation
-references the derivation (a `build_job` exists for it in one of that org's
+`/graph`) accept requests from members of any project whose evaluation
+references the derivation (a `build_job` exists for it in one of that project's
 evaluations). The same reachability refcounts the anchor for garbage
 collection: a derivation with no surviving `build_job` is collected once past
 its grace period.

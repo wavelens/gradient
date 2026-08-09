@@ -9,7 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{OrganizationId, WorkerSampleId};
+use crate::ids::{ProjectId, WorkerSampleId};
 
 /// Worker lifecycle state at sample time; today a typed draining flag.
 #[repr(i16)]
@@ -53,7 +53,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub id: WorkerSampleId,
     pub worker_id: String,
-    pub organization: OrganizationId,
+    pub project: ProjectId,
     pub at: NaiveDateTime,
     pub cpu_usage_pct: Option<f32>,
     pub ram_free_mb: Option<i64>,

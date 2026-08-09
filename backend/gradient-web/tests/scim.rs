@@ -11,14 +11,14 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};
-use gradient_entity::{organization_user, user};
+use gradient_entity::{project_user, user};
 use gradient_notify::EmailSender;
 use gradient_state::ScimGroupRoles;
 use gradient_storage::NarStore;
 use gradient_test_support::cli::test_cli;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::log_storage::NoopLogStorage;
-use gradient_types::{OrganizationId, RoleId, RuntimeConfig, UserId};
+use gradient_types::{ProjectId, RoleId, RuntimeConfig, UserId};
 use gradient_web::create_router;
 use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult};
 use serde_json::{Value, json};
@@ -81,7 +81,7 @@ fn build_server(
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: gradient_types::SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(scim_group_roles),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -295,18 +295,18 @@ fn scim_delete_user_hard_deletes() {
     });
 }
 
-fn group_with_grant(name: &str) -> (ScimGroupRoles, OrganizationId, RoleId) {
-    let org = OrganizationId::now_v7();
+fn group_with_grant(name: &str) -> (ScimGroupRoles, ProjectId, RoleId) {
+    let project = ProjectId::now_v7();
     let role = RoleId::now_v7();
     let mut groups = ScimGroupRoles::new();
-    groups.insert(name.to_string(), vec![(org, role)]);
-    (groups, org, role)
+    groups.insert(name.to_string(), vec![(project, role)]);
+    (groups, project, role)
 }
 
-fn membership(org: OrganizationId, user: UserId, role: RoleId) -> organization_user::Model {
-    organization_user::Model {
+fn membership(project: ProjectId, user: UserId, role: RoleId) -> project_user::Model {
+    project_user::Model {
         id: Uuid::now_v7().into(),
-        organization: org,
+        project: project,
         user,
         role,
     }
@@ -331,10 +331,10 @@ fn scim_unknown_group_returns_404() {
 fn scim_get_group_lists_members() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        let (groups, org, role) = group_with_grant("acme-eng");
+        let (groups, project, role) = group_with_grant("acme-eng");
         let member = UserId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![membership(org, member, role)]]) // members lookup
+            .append_query_results([vec![membership(project, member, role)]]) // members lookup
             .into_connection();
         let s = scim_server_with_groups(db, groups);
         let res = s
@@ -353,12 +353,12 @@ fn scim_get_group_lists_members() {
 fn scim_patch_group_add_member_inserts_membership() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        let (groups, org, role) = group_with_grant("acme-eng");
+        let (groups, project, role) = group_with_grant("acme-eng");
         let member = UserId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<organization_user::Model>::new()]) // existing? none
-            .append_query_results([vec![membership(org, member, role)]]) // INSERT ... RETURNING
-            .append_query_results([vec![membership(org, member, role)]]) // members lookup
+            .append_query_results([Vec::<project_user::Model>::new()]) // existing? none
+            .append_query_results([vec![membership(project, member, role)]]) // INSERT ... RETURNING
+            .append_query_results([vec![membership(project, member, role)]]) // members lookup
             .into_connection();
         let s = scim_server_with_groups(db, groups);
         let res = s
@@ -380,14 +380,14 @@ fn scim_patch_group_add_member_inserts_membership() {
 fn scim_patch_group_remove_member_deletes_membership() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        let (groups, _org, _role) = group_with_grant("acme-eng");
+        let (groups, _project, _role) = group_with_grant("acme-eng");
         let member = UserId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
             }]) // DELETE
-            .append_query_results([Vec::<organization_user::Model>::new()]) // members lookup: empty
+            .append_query_results([Vec::<project_user::Model>::new()]) // members lookup: empty
             .into_connection();
         let s = scim_server_with_groups(db, groups);
         let res = s

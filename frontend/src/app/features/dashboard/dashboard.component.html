@@ -15,13 +15,13 @@
   } @else {
     <!-- Stats Overview -->
     <div class="dashboard-stats">
-      <a routerLink="/organizations" class="card">
+      <a routerLink="/projects" class="card">
         <div class="card-icon">
           <span class="material-symbols-outlined">corporate_fare</span>
         </div>
         <div class="card-content">
-          <h3>{{ organizations().length }}</h3>
-          <p class="text-secondary">Organizations</p>
+          <h3>{{ projects().length }}</h3>
+          <p class="text-secondary">Projects</p>
         </div>
         <div class="card-arrow">
           <span class="material-symbols-outlined">arrow_forward</span>
@@ -41,25 +41,25 @@
       </a>
     </div>
 
-    <!-- Recent Organizations -->
+    <!-- Recent Projects -->
     <div class="dashboard-section">
       <div class="section-header">
-        <h2>Organizations</h2>
-        <a routerLink="/organizations" class="view-all">View all →</a>
+        <h2>Projects</h2>
+        <a routerLink="/projects" class="view-all">View all →</a>
       </div>
 
-      @if (organizations().length > 0) {
+      @if (projects().length > 0) {
         <div class="card-list">
-          @for (org of recentOrganizations; track org.id) {
-            <a [routerLink]="['/organization', org.name]" class="card">
+          @for (project of recentProjects; track project.id) {
+            <a [routerLink]="['/project', project.name]" class="card">
               <div class="card-icon">
                 <span class="material-symbols-outlined">corporate_fare</span>
               </div>
               <div class="card-content">
-                <h3>{{ org.display_name || org.name }}</h3>
-                <p class="text-secondary">{{ org.description || 'No description' }}</p>
-                @if (org.role) {
-                  <span class="badge">{{ org.role }}</span>
+                <h3>{{ project.display_name || project.name }}</h3>
+                <p class="text-secondary">{{ project.description || 'No description' }}</p>
+                @if (project.role) {
+                  <span class="badge">{{ project.role }}</span>
                 }
               </div>
               <div class="card-arrow">
@@ -71,9 +71,9 @@
       } @else {
         <app-empty-state
           icon="corporate_fare"
-          title="No organizations yet"
-          message="Create your first organization to get started with Gradient"
-          actionLabel="Create Organization"
+          title="No projects yet"
+          message="Create your first project to get started with Gradient"
+          actionLabel="Create Project"
           (actionClick)="$any(null)"
         />
       }

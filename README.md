@@ -11,7 +11,7 @@
   •
   <a href="https://matrix.to/#/#gradient-ci:matrix.org">💬 Matrix Chat</a>
   •
-  <sup><a href="https://public.gradient.ci/organization/gradient/task/main">
+  <sup><a href="https://public.gradient.ci/project/gradient/task/main">
     <img src="https://public.gradient.ci/api/v1/tasks/gradient/main/badge" alt="Gradient Badge" align="middle">
   </a></sup>
 </p>
@@ -27,7 +27,7 @@
 <p align="center"><a href="./docs/gallery.md">📸 Screenshot Gallery</a></p>
 
 - **Modern UI**: clean and intuitive user interface
-- **Organizations**: multiple organizations, which work independently from each other (e.g. different workers, user access)
+- **Projects**: multiple projects, which work independently from each other (e.g. different workers, user access)
 - **API**: provides a RESTful API with API-Key management for authentication
 - **Streaming Logs**: real-time log streaming for builds
 - **Rich Task Configuration**: flake updates, check all branches, pull requests, and tags
@@ -173,7 +173,7 @@ To use pull deployment, you need to enable the `gradient-deploy` module in your 
     enable = true;
     server = "https://gradient.example.com";
     apiKeyFile = "/var/lib/gradient-deploy/api-key";
-    task = "organization/task";
+    task = "project/task";
   };
 }
 ```

@@ -69,8 +69,8 @@ in {
                 };
               };
 
-              organizations.stateorg = {
-                display_name = "State Org";
+              projects.stateproject = {
+                display_name = "State Project";
                 description = "Provisioned by state";
                 private_key_file = toString stateSshKey;
                 public = true;
@@ -82,12 +82,12 @@ in {
               };
 
               roles.releaser = {
-                organization = "stateorg";
-                permissions = [ "viewOrg" "triggerEvaluation" ];
+                project = "stateproject";
+                permissions = [ "viewProject" "triggerEvaluation" ];
               };
 
               tasks.statetask = {
-                organization = "stateorg";
+                project = "stateproject";
                 display_name = "State Task";
                 repository = "git@github.com:Wavelens/Gradient.git";
                 wildcard = "packages.x86_64-linux.*";
@@ -105,7 +105,7 @@ in {
               caches.statecache = {
                 display_name = "State Cache";
                 signing_key_file = toString stateSigningKey;
-                organizations = [ "stateorg" ];
+                projects = [ "stateproject" ];
                 public = true;
                 priority = 20;
                 local_priority = 5;
@@ -124,13 +124,13 @@ in {
               api_keys.state-ci-key = {
                 key_file = toString stateApiKeyHash;
                 owned_by = "statemember";
-                permissions = [ "viewOrg" ];
-                organization = "stateorg";
+                permissions = [ "viewProject" ];
+                project = "stateproject";
               };
 
               workers.stateworker = {
                 worker_id = "a0000000-0000-0000-0000-0000000000aa";
-                organizations = [ "stateorg" ];
+                projects = [ "stateproject" ];
                 token_file = toString stateWorkerToken;
                 display_name = "State Worker";
                 created_by = "stateadmin";
@@ -140,7 +140,7 @@ in {
               workers.statebaseworker = {
                 worker_id = "a0000000-0000-0000-0000-0000000000bb";
                 base_worker = true;
-                organizations = [ "stateorg" ];
+                projects = [ "stateproject" ];
                 token_file = toString stateWorkerToken;
                 display_name = "State Base Worker";
                 created_by = "stateadmin";
@@ -149,7 +149,7 @@ in {
               workers.statebaseworker2 = {
                 worker_id = "a0000000-0000-0000-0000-0000000000cc";
                 base_worker = true;
-                organizations = [ ];
+                projects = [ ];
                 token_file = toString stateWorkerToken;
                 display_name = "State Base Worker 2";
                 created_by = "stateadmin";
@@ -157,14 +157,14 @@ in {
 
               integrations = {
                 state-inbound = {
-                  organization = "stateorg";
+                  project = "stateproject";
                   kind = "inbound";
                   forge_type = "gitea";
                   secret_file = toString stateIntSecret;
                   created_by = "stateadmin";
                 };
                 state-outbound = {
-                  organization = "stateorg";
+                  project = "stateproject";
                   kind = "outbound";
                   forge_type = "gitea";
                   endpoint_url = "https://gitea.example.com";

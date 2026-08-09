@@ -14,7 +14,7 @@
 //!
 //! #[tokio::test]
 //! async fn example() {
-//!     let state = test_state(db_with(vec![[org()]]));
+//!     let state = test_state(db_with(vec![[project()]]));
 //!     // ...
 //! }
 //! ```

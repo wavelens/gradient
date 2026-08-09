@@ -27,7 +27,7 @@ pub struct WorkerConfig {
     /// Peer-to-token mappings for challenge-response authentication.
     /// Format: one `peer_id:token` pair per line (newline-separated).
     /// Use `*:token` to respond with `token` for any peer UUID the server challenges.
-    /// Each named peer is an org, cache, or proxy UUID.
+    /// Each named peer is a project, cache, or proxy UUID.
     /// Mutually exclusive with `--peers-file`.
     #[arg(long, env = "GRADIENT_WORKER_PEERS")]
     pub peers: Option<String>,

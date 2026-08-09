@@ -61,7 +61,7 @@ pub trait JobReporter: Send {
     -> Result<Vec<CachedPath>>;
 
     /// Query the server for which of the given `.drv` paths are already in its
-    /// derivation table for the owning org.
+    /// derivation table for the owning project.
     ///
     /// Returns the subset of `drv_paths` that the server already knows about.
     /// The BFS closure walker uses this to skip re-traversing subtrees of

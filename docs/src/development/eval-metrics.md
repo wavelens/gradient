@@ -42,7 +42,7 @@ thresholds.
 ## Board endpoints
 
 - `GET /board/evals/expensive-by-resource?metric={time,rss,heap,thunks,fncalls,alloc}&window_days=N`
-  - the top evaluations by a resource, org-scoped. `metric` is matched against a
+  - the top evaluations by a resource, project-scoped. `metric` is matched against a
   closed allow-list, so it cannot inject SQL.
 - `GET /evals/{evaluation}/flake-graph` - the walked flake-output graph for one
   evaluation.

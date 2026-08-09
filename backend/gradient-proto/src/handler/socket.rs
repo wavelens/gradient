@@ -13,7 +13,7 @@
 //! delivery. NAR transfer moved to [`super::nar_transfer`].
 
 use gradient_core::ServerState;
-use gradient_types::ids::OrganizationId;
+use gradient_types::ids::ProjectId;
 use gradient_types::*;
 use sea_orm::EntityTrait;
 use tracing::{debug, warn};
@@ -56,7 +56,7 @@ pub(super) async fn send_credentials_for_job(
     scheduler: &gradient_scheduler::Scheduler,
     worker_id: &str,
     job: &gradient_types::proto::Job,
-    org_id: OrganizationId,
+    project_id: ProjectId,
 ) {
     use gradient_types::proto::{FlakeStep, Job};
 
@@ -66,28 +66,21 @@ pub(super) async fn send_credentials_for_job(
     match job {
         Job::Flake(flake_job) => {
             if worker_can_fetch && flake_job.steps.contains(&FlakeStep::FetchFlake) {
-                send_ssh_key_credential(writer, state, org_id).await;
+                send_ssh_key_credential(writer, state, project_id).await;
             }
         }
         Job::Build(_) => {}
     }
 }
 
-async fn send_ssh_key_credential(
-    writer: &ProtoWriter,
-    state: &ServerState,
-    org_id: OrganizationId,
-) {
+async fn send_ssh_key_credential(writer: &ProtoWriter, state: &ServerState, project_id: ProjectId) {
     use gradient_types::proto::CredentialKind;
 
-    match EOrganization::find_by_id(org_id)
-        .one(&state.worker_db)
-        .await
-    {
-        Ok(Some(org)) => {
+    match EProject::find_by_id(project_id).one(&state.worker_db).await {
+        Ok(Some(project)) => {
             match gradient_sources::ssh_key::decrypt_ssh_private_key(
                 &state.config.secrets.crypt_secret_file,
-                org,
+                project,
                 &state.config.server.serve_url,
             ) {
                 Ok((private_key, _public_key)) => {
@@ -99,14 +92,14 @@ async fn send_ssh_key_credential(
                         },
                     )
                     .await;
-                    debug!(%org_id, "SSH key credential sent");
+                    debug!(%project_id, "SSH key credential sent");
                 }
                 Err(e) => {
-                    debug!(%org_id, error = %e, "no SSH key for org (may be HTTPS repo)");
+                    debug!(%project_id, error = %e, "no SSH key for project (may be HTTPS repo)");
                 }
             }
         }
-        Ok(None) => warn!(%org_id, "org not found for SSH key lookup"),
-        Err(e) => warn!(%org_id, error = %e, "failed to fetch org for SSH key"),
+        Ok(None) => warn!(%project_id, "project not found for SSH key lookup"),
+        Err(e) => warn!(%project_id, error = %e, "failed to fetch project for SSH key"),
     }
 }

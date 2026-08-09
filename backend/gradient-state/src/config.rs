@@ -8,7 +8,7 @@
 //! `State*` types it deserializes from the state JSON file. Validation lives in
 //! [`super::validation`]; provisioning in [`super::provisioning`].
 
-use gradient_entity::organization_cache::CacheSubscriptionMode;
+use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::triggers::{ConcurrencyPolicy, TriggerType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -31,14 +31,14 @@ pub struct StateUser {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateOrganization {
+pub struct StateProject {
     pub name: String,
     pub display_name: String,
-    /// Explicit organization UUID. When set, a freshly created org is given
+    /// Explicit project UUID. When set, a freshly created project is given
     /// this id instead of a server-generated one, so a declarative deployment
     /// can pin the value a worker references in its `peerFile`
-    /// (`<org_id>:<token>`). Applied on create only; the primary key is
-    /// immutable, so a value that conflicts with an existing org is rejected.
+    /// (`<project_id>:<token>`). Applied on create only; the primary key is
+    /// immutable, so a value that conflicts with an existing project is rejected.
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -48,18 +48,18 @@ pub struct StateOrganization {
     #[serde(default)]
     pub hide_build_requests: bool,
     pub created_by: String,
-    /// Declarative org membership. Empty preserves the legacy behavior of
+    /// Declarative project membership. Empty preserves the legacy behavior of
     /// auto-adding `created_by` as Admin. Non-empty makes the list
     /// authoritative: unmatched memberships are revoked, the implicit
     /// creator-Admin assignment is skipped, and members referencing users
     /// that do not yet exist are recorded as pending and applied at
     /// registration / OIDC first-login.
     #[serde(default)]
-    pub members: Vec<StateOrgMemberEntry>,
+    pub members: Vec<StateProjectMemberEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StateOrgMemberEntry {
+pub struct StateProjectMemberEntry {
     pub user: String,
     pub role: String,
 }
@@ -67,7 +67,7 @@ pub struct StateOrgMemberEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateTask {
     pub name: String,
-    pub organization: String,
+    pub project: String,
     pub display_name: String,
     #[serde(default)]
     pub description: Option<String>,
@@ -138,7 +138,7 @@ fn default_soft_abort() -> ConcurrencyPolicy {
 pub struct StateTrigger {
     #[serde(rename = "type")]
     pub trigger_type: TriggerType,
-    /// Name of an inbound integration in the same org. Required for
+    /// Name of an inbound integration in the same project. Required for
     /// `reporter_push` and `reporter_pull_request` triggers.
     #[serde(default)]
     pub integration: Option<String>,
@@ -163,7 +163,7 @@ pub struct StateIntegration {
     /// Defaults to `name` when unset.
     #[serde(default)]
     pub display_name: Option<String>,
-    pub organization: String,
+    pub project: String,
     /// `"inbound"` or `"outbound"`.
     pub kind: String,
     /// `"gitea"`, `"forgejo"`, `"gitlab"`, or `"github"`.
@@ -201,7 +201,7 @@ pub struct StateCache {
     pub max_storage_gb: i32,
     pub signing_key_file: String,
     #[serde(default)]
-    pub organizations: Vec<String>,
+    pub projects: Vec<String>,
     #[serde(default)]
     pub upstreams: Vec<StateUpstream>,
     pub public: bool,
@@ -252,17 +252,17 @@ pub struct StateApiKey {
     /// Capability identifiers (matching `Permission::as_wire_name`) the key
     /// should grant. Required - there is no safe default.
     pub permissions: Vec<String>,
-    /// Optional organization name to pin the key to. `None` = unscoped.
+    /// Optional project name to pin the key to. `None` = unscoped.
     #[serde(default)]
-    pub organization: Option<String>,
+    pub project: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateRole {
     pub name: String,
-    /// Organization the role belongs to. State-managed roles are always
-    /// org-scoped - there is no way to define a global state-managed role.
-    pub organization: String,
+    /// Project the role belongs to. State-managed roles are always
+    /// project-scoped - there is no way to define a global state-managed role.
+    pub project: String,
     /// Capability identifiers (matching `Permission::as_wire_name`) the role
     /// grants. Required - there is no safe default.
     pub permissions: Vec<String>,
@@ -283,11 +283,11 @@ pub struct StateWorker {
     pub worker_id: String,
     #[serde(default)]
     pub url: Option<String>,
-    /// Organizations the worker is registered under. One
-    /// `worker_registration` row is provisioned per (worker_id, org)
+    /// Projects the worker is registered under. One
+    /// `worker_registration` row is provisioned per (worker_id, project)
     /// pair so the same physical worker can serve builds for multiple
-    /// orgs without duplicating the declarative entry.
-    pub organizations: Vec<String>,
+    /// projects without duplicating the declarative entry.
+    pub projects: Vec<String>,
     pub token_file: String,
     /// Human-readable display name shown in the workers list.
     pub display_name: String,
@@ -301,12 +301,12 @@ pub struct StateWorker {
     /// Per-registration server-side gate for `build`. Defaults to true.
     #[serde(default = "default_true")]
     pub enable_build: bool,
-    /// When true this entry is a base worker (server-level, not per-org).
-    /// `organizations` then lists orgs to pre-enable.
+    /// When true this entry is a base worker (server-level, not per-project).
+    /// `projects` then lists projects to pre-enable.
     #[serde(default)]
     pub base_worker: bool,
     /// Optional fixed auth identity (UUID) for a base worker; replaces the
-    /// per-org challenge. Ignored for non-base workers.
+    /// per-project challenge. Ignored for non-base workers.
     #[serde(default)]
     pub authorize_against: Option<String>,
     /// Global enable for a base worker. Ignored for non-base workers.
@@ -319,7 +319,7 @@ pub struct StateConfiguration {
     #[serde(default)]
     pub users: HashMap<String, StateUser>,
     #[serde(default)]
-    pub organizations: HashMap<String, StateOrganization>,
+    pub projects: HashMap<String, StateProject>,
     #[serde(default)]
     pub tasks: HashMap<String, StateTask>,
     #[serde(default)]
@@ -368,7 +368,7 @@ mod config_tests {
             "integrations": {
                 "acme-gh-in": {
                     "name": "acme-gh-in",
-                    "organization": "acme",
+                    "project": "acme",
                     "kind": "inbound",
                     "forge_type": "github",
                     "installation_id": 42,

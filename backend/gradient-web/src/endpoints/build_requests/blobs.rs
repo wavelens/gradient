@@ -57,7 +57,7 @@ pub async fn post_blobs(
     if !has_permission(
         &state,
         user.id,
-        session.organization,
+        session.project,
         Permission::TriggerEvaluation,
         api_key_ref,
     )
@@ -70,7 +70,7 @@ pub async fn post_blobs(
         .map_err(|e| WebError::internal(format!("Corrupt session.missing JSON: {}", e)))?;
     let mut missing_set: HashSet<String> = missing_vec.into_iter().collect();
 
-    let org_uuid = session.organization.into_inner();
+    let project_uuid = session.project.into_inner();
     let mut uploaded: usize = 0;
 
     while let Some(field) = multipart
@@ -108,14 +108,14 @@ pub async fn post_blobs(
 
         state
             .nar_storage
-            .put_blob(org_uuid, &hash_array, bytes_vec)
+            .put_blob(project_uuid, &hash_array, bytes_vec)
             .await
             .map_err(|e| WebError::internal(format!("Failed to persist blob: {}", e)))?;
 
         let now_ts = now();
         let insert_result = MBuildRequestBlob {
             id: BuildRequestBlobId::now_v7(),
-            organization: session.organization,
+            project: session.project,
             hash: hash_bytes.clone(),
             size,
             created_at: now_ts,

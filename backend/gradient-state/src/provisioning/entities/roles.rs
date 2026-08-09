@@ -20,12 +20,12 @@ impl<'a> StateApplicator<'a> {
     pub(crate) async fn apply_roles(
         &self,
         state_roles: &HashMap<String, StateRole>,
-    ) -> Result<HashMap<(String, String), (OrganizationId, RoleId)>, DynError> {
-        let org_lookup = self.org_lookup().await?;
-        let mut role_ids: HashMap<(String, String), (OrganizationId, RoleId)> = HashMap::new();
+    ) -> Result<HashMap<(String, String), (ProjectId, RoleId)>, DynError> {
+        let project_lookup = self.project_lookup().await?;
+        let mut role_ids: HashMap<(String, String), (ProjectId, RoleId)> = HashMap::new();
 
         for state_role in state_roles.values() {
-            let org_id = lookup_id(&org_lookup, &state_role.organization, "Organization")?;
+            let project_id = lookup_id(&project_lookup, &state_role.project, "Project")?;
 
             let mut perms = Vec::with_capacity(state_role.permissions.len());
             for wire in &state_role.permissions {
@@ -50,7 +50,7 @@ impl<'a> StateApplicator<'a> {
 
             let existing = role::Entity::find()
                 .filter(role::Column::Name.eq(&state_role.name))
-                .filter(role::Column::Organization.eq(org_id))
+                .filter(role::Column::Project.eq(project_id))
                 .one(self.db)
                 .await?;
 
@@ -67,7 +67,7 @@ impl<'a> StateApplicator<'a> {
                 let active = role::Model {
                     id,
                     name: state_role.name.clone(),
-                    organization: Some(org_id),
+                    project: Some(project_id),
                     permission: mask,
                     managed: true,
                 }
@@ -79,8 +79,8 @@ impl<'a> StateApplicator<'a> {
             };
 
             role_ids.insert(
-                (state_role.organization.clone(), state_role.name.clone()),
-                (org_id, role_id),
+                (state_role.project.clone(), state_role.name.clone()),
+                (project_id, role_id),
             );
         }
 

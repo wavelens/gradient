@@ -62,7 +62,7 @@ fn cache_upstream_row(cache_id: CacheId) -> cache_upstream::Model {
         id: CacheUpstreamId::now_v7(),
         cache: cache_id,
         display_name: "cache.nixos.org".to_string(),
-        mode: gradient_entity::organization_cache::CacheSubscriptionMode::ReadOnly,
+        mode: gradient_entity::project_cache::CacheSubscriptionMode::ReadOnly,
         kind: cache_upstream::CacheUpstreamKind::Http,
         url: Some("https://cache.nixos.org".to_string()),
         public_key: Some(

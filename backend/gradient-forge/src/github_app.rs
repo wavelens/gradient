@@ -8,7 +8,7 @@
 //!
 //! GitHub Apps authenticate as the app itself using a short-lived RS256 JWT,
 //! then exchange it for a per-installation access token scoped to a specific
-//! GitHub org/account. The access token can then be used as a Bearer token for
+//! GitHub organization/account. The access token can then be used as a Bearer token for
 //! the GitHub REST API (e.g. to post commit statuses).
 
 use anyhow::{Context, Result, anyhow, bail};

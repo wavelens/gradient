@@ -53,10 +53,10 @@ pub mod flake_output_node;
 pub mod github_installation;
 pub mod integration;
 pub mod open_pr_state;
-pub mod organization;
-pub mod organization_base_worker;
-pub mod organization_cache;
-pub mod organization_user;
+pub mod project;
+pub mod project_base_worker;
+pub mod project_cache;
+pub mod project_user;
 pub mod role;
 pub mod server;
 pub mod session;
@@ -106,9 +106,9 @@ mod model_default_tests {
     }
 
     #[test]
-    fn organization_cache_default_uses_read_write_mode() {
-        let m = organization_cache::Model::default();
-        assert_eq!(m.mode, organization_cache::CacheSubscriptionMode::ReadWrite);
+    fn project_cache_default_uses_read_write_mode() {
+        let m = project_cache::Model::default();
+        assert_eq!(m.mode, project_cache::CacheSubscriptionMode::ReadWrite);
     }
 
     #[test]

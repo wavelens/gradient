@@ -19,7 +19,7 @@
 /// Set `active.$field = Set(value)` when `$body.$field` is `Some`.
 ///
 /// ```ignore
-/// patch_field!(aorg, body, description);
+/// patch_field!(aproject, body, description);
 /// ```
 #[macro_export]
 macro_rules! patch_field {
@@ -34,7 +34,7 @@ macro_rules! patch_field {
 /// before assigning. Useful for `.trim().to_string()` shaping.
 ///
 /// ```ignore
-/// patch_field_with!(aorg, body, description, |s: String| s.trim().to_string());
+/// patch_field_with!(aproject, body, description, |s: String| s.trim().to_string());
 /// ```
 #[macro_export]
 macro_rules! patch_field_with {

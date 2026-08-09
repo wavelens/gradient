@@ -12,14 +12,14 @@ import { of } from 'rxjs';
 import { TaskActionsComponent } from './task-actions.component';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { ConfigService } from '@core/services/config.service';
 import { AccessState } from '@core/models/access.model';
 import { Action } from '@core/models';
 
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
-    snapshot: { paramMap: convertToParamMap({ org: 'acme', task: 'demo' }) },
+    snapshot: { paramMap: convertToParamMap({ project: 'acme', task: 'demo' }) },
     data: of({}),
     parent: { data: of({ taskAccess: { task: {}, access } }) },
   } as unknown as ActivatedRoute;
@@ -66,8 +66,8 @@ function setup(
           test: () => of(undefined),
         },
       },
-      { provide: IntegrationsService, useValue: { listOrgIntegrations: () => of([]) } },
-      { provide: OrganizationsService, useValue: { getOrganization: () => of({ display_name: 'Acme' }) } },
+      { provide: IntegrationsService, useValue: { listProjectIntegrations: () => of([]) } },
+      { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: ConfigService, useValue: { smtpEnabled: true } },
     ],
   });

@@ -8,7 +8,7 @@
 //!
 //! Regression coverage for issue #88 (IDOR): the handler must only return
 //! commit metadata when the caller can reach the commit through an
-//! evaluation in an organization they belong to (or the org is public).
+//! evaluation in a project they belong to (or the project is public).
 //! Both authenticated non-members and unauthenticated callers must receive
 //! `404` so existence isn't leaked.
 //!
@@ -21,9 +21,9 @@
 //!     4. SELECT commit
 //!     5. SELECT evaluations (filtered by commit)
 //!     6. SELECT tasks    (only if any eval has task_id)
-//!     7. SELECT organizations (filtered by collected ids)
-//!   Then membership probe (only when no org is public AND caller is authenticated):
-//!     8. SELECT organization_user
+//!     7. SELECT projects (filtered by collected ids)
+//!   Then membership probe (only when no project is public AND caller is authenticated):
+//!     8. SELECT project_user
 
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
@@ -35,7 +35,7 @@ use gradient_storage::NarStore;
 use gradient_test_support::cli::test_cli;
 use gradient_test_support::fakes::email::InMemoryEmailSender;
 use gradient_test_support::fixtures::{
-    commit_id, eval_at, org, org_id, task_id, test_date, user, user_id,
+    commit_id, eval_at, project, project_id, task_id, test_date, user, user_id,
 };
 use gradient_test_support::log_storage::NoopLogStorage;
 use gradient_types::{ConcurrencyPolicy, RuntimeConfig, SecretString, SessionId};
@@ -93,8 +93,8 @@ fn live_session(id: SessionId) -> gradient_entity::session::Model {
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
-fn other_org_id() -> OrganizationId {
-    OrganizationId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000a0").unwrap())
+fn other_project_id() -> ProjectId {
+    ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000a0").unwrap())
 }
 
 fn eval_id() -> EvaluationId {
@@ -104,7 +104,7 @@ fn eval_id() -> EvaluationId {
 fn task_row() -> gradient_entity::task::Model {
     gradient_entity::task::Model {
         id: task_id(),
-        organization: org_id(),
+        project: project_id(),
         name: "test-task".into(),
         active: true,
         display_name: "Test Task".into(),
@@ -130,19 +130,17 @@ fn commit_row() -> gradient_entity::commit::Model {
     }
 }
 
-fn public_org() -> gradient_entity::organization::Model {
-    gradient_entity::organization::Model {
+fn public_project() -> gradient_entity::project::Model {
+    gradient_entity::project::Model {
         public: true,
-        ..org()
+        ..project()
     }
 }
 
-fn membership_row() -> gradient_entity::organization_user::Model {
-    gradient_entity::organization_user::Model {
-        id: OrganizationUserId::new(
-            Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap(),
-        ),
-        organization: org_id(),
+fn membership_row() -> gradient_entity::project_user::Model {
+    gradient_entity::project_user::Model {
+        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
+        project: project_id(),
         user: user_id(),
         role: gradient_types::consts::BASE_ROLE_VIEW_ID,
     }
@@ -170,7 +168,7 @@ fn make_server(db: sea_orm::DatabaseConnection) -> TestServer {
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new(JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -198,15 +196,15 @@ fn run<F: std::future::Future>(fut: F) -> F::Output {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-/// Anonymous caller: commit reachable through a public-org task → 200.
+/// Anonymous caller: commit reachable through a public-project task → 200.
 #[test]
-fn anon_can_read_commit_in_public_org() {
+fn anon_can_read_commit_in_public_project() {
     run(async {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![commit_row()]])
             .append_query_results([vec![eval_at(eval_id(), 0)]])
             .append_query_results([vec![task_row()]])
-            .append_query_results([vec![public_org()]]);
+            .append_query_results([vec![public_project()]]);
         let server = make_server(db.into_connection());
 
         let res = server.get(&commit_url()).await;
@@ -217,15 +215,15 @@ fn anon_can_read_commit_in_public_org() {
     });
 }
 
-/// Anonymous caller: commit reachable only through a private org → 404.
+/// Anonymous caller: commit reachable only through a private project → 404.
 #[test]
-fn anon_cannot_read_commit_in_private_org() {
+fn anon_cannot_read_commit_in_private_project() {
     run(async {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![commit_row()]])
             .append_query_results([vec![eval_at(eval_id(), 0)]])
             .append_query_results([vec![task_row()]])
-            .append_query_results([vec![org()]]); // private
+            .append_query_results([vec![project()]]); // private
         let server = make_server(db.into_connection());
 
         let res = server.get(&commit_url()).await;
@@ -235,10 +233,10 @@ fn anon_cannot_read_commit_in_private_org() {
     });
 }
 
-/// Authenticated org member: commit reachable through a private org they
+/// Authenticated project member: commit reachable through a private project they
 /// belong to → 200.
 #[test]
-fn member_can_read_commit_in_private_org() {
+fn member_can_read_commit_in_private_project() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
@@ -247,7 +245,7 @@ fn member_can_read_commit_in_private_org() {
             .append_query_results([vec![commit_row()]])
             .append_query_results([vec![eval_at(eval_id(), 0)]])
             .append_query_results([vec![task_row()]])
-            .append_query_results([vec![org()]])
+            .append_query_results([vec![project()]])
             .append_query_results([vec![membership_row()]]);
         let server = make_server(db.into_connection());
 
@@ -262,7 +260,7 @@ fn member_can_read_commit_in_private_org() {
     });
 }
 
-/// Authenticated user with no membership in any org that owns the commit's
+/// Authenticated user with no membership in any project that owns the commit's
 /// evaluation → 404 (must not leak existence).
 #[test]
 fn non_member_cannot_read_commit() {
@@ -270,23 +268,23 @@ fn non_member_cannot_read_commit() {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // Commit reachable through a task in `other_org_id` - caller has no
+        // Commit reachable through a task in `other_project_id` - caller has no
         // membership there.
         let foreign_task = gradient_entity::task::Model {
-            organization: other_org_id(),
+            project: other_project_id(),
             ..task_row()
         };
-        let foreign_org = gradient_entity::organization::Model {
-            id: other_org_id(),
-            ..org()
+        let foreign_project = gradient_entity::project::Model {
+            id: other_project_id(),
+            ..project()
         };
 
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![commit_row()]])
             .append_query_results([vec![eval_at(eval_id(), 0)]])
             .append_query_results([vec![foreign_task]])
-            .append_query_results([vec![foreign_org]])
-            .append_query_results([Vec::<gradient_entity::organization_user::Model>::new()]);
+            .append_query_results([vec![foreign_project]])
+            .append_query_results([Vec::<gradient_entity::project_user::Model>::new()]);
         let server = make_server(db.into_connection());
 
         let res = server
@@ -300,7 +298,7 @@ fn non_member_cannot_read_commit() {
 }
 
 /// Evaluation referencing the commit has no task (legacy direct-build
-/// row before issue #234) → 404, since task is required to resolve org.
+/// row before issue #234) → 404, since task is required to resolve project.
 #[test]
 fn commit_referenced_only_via_orphan_eval_returns_404() {
     run(async {

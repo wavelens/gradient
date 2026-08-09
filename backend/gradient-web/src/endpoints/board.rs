@@ -5,7 +5,7 @@
  */
 
 //! Job Board read endpoints: live dispatched jobs, per-job scoring detail,
-//! connected workers, and the most expensive builds. Out-of-scope orgs are
+//! connected workers, and the most expensive builds. Out-of-scope projects are
 //! masked: their jobs collapse to an aggregate count and foreign workers lose
 //! their identity and live metrics.
 
@@ -35,7 +35,7 @@ use uuid::Uuid;
 pub struct DispatchedJobSummary {
     pub id: Uuid,
     pub kind: i16,
-    pub organization: Uuid,
+    pub project: Uuid,
     pub worker_id: String,
     pub score: f64,
     pub dispatched_at: String,
@@ -47,14 +47,14 @@ pub struct DispatchedJobSummary {
 #[derive(Serialize)]
 pub struct DispatchedJobsResponse {
     pub jobs: Vec<DispatchedJobSummary>,
-    /// In-flight jobs owned by orgs the caller can't see, shown only as a count.
+    /// In-flight jobs owned by projects the caller can't see, shown only as a count.
     pub other_running: u64,
 }
 
 #[derive(Serialize)]
 pub struct PendingJobSummary {
     pub kind: i16,
-    pub organization: Uuid,
+    pub project: Uuid,
     pub evaluation_id: Uuid,
     pub build_id: Option<Uuid>,
     pub queued_at: String,
@@ -65,7 +65,7 @@ pub struct PendingJobSummary {
 #[derive(Serialize)]
 pub struct PendingJobsResponse {
     pub jobs: Vec<PendingJobSummary>,
-    /// Pending jobs owned by orgs the caller can't see, shown only as a count.
+    /// Pending jobs owned by projects the caller can't see, shown only as a count.
     pub other_pending: u64,
 }
 
@@ -80,10 +80,10 @@ pub async fn get_pending_jobs(
     let mut jobs = Vec::new();
     let mut other_pending = 0u64;
     for j in snapshot {
-        if scope.allows(&Uuid::from(j.organization)) {
+        if scope.allows(&Uuid::from(j.project)) {
             jobs.push(PendingJobSummary {
                 kind: i16::from(j.kind),
-                organization: j.organization.into(),
+                project: j.project.into(),
                 evaluation_id: j.evaluation_id.into(),
                 build_id: j.derivation_build.map(Into::into),
                 queued_at: j.queued_at.and_utc().to_rfc3339(),
@@ -116,7 +116,7 @@ pub async fn get_dispatched_jobs(
     let mut jobs = Vec::new();
     let mut other_running = 0u64;
     for j in open {
-        if scope.allows(&Uuid::from(j.organization)) {
+        if scope.allows(&Uuid::from(j.project)) {
             let attempt = build_attempt::Entity::find()
                 .filter(build_attempt::Column::DispatchedJob.eq(j.id))
                 .one(&state.web_db)
@@ -151,7 +151,7 @@ pub async fn get_dispatched_jobs(
             jobs.push(DispatchedJobSummary {
                 id: j.id.into(),
                 kind: i16::from(j.kind),
-                organization: j.organization.into(),
+                project: j.project.into(),
                 worker_id: j.worker_id,
                 score: j.score,
                 dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
@@ -177,7 +177,7 @@ pub struct DecisionCandidateView {
     pub id: Uuid,
     pub job_id: String,
     pub kind: i16,
-    pub organization: Uuid,
+    pub project: Uuid,
     pub build_id: Option<Uuid>,
     pub evaluation_id: Uuid,
     pub pname: Option<String>,
@@ -196,7 +196,7 @@ pub struct DispatchDecisionView {
 
 /// Recent dispatch decisions with every scored candidate, including rejected and
 /// negative ones the dispatcher passed over. Superuser-only: candidates span all
-/// orgs, and the view exists to tune cross-org scoring rules (#419).
+/// projects, and the view exists to tune cross-project scoring rules (#419).
 pub async fn get_dispatch_decisions(
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
@@ -219,7 +219,7 @@ pub async fn get_dispatch_decisions(
                     id: c.id.into(),
                     job_id: c.job_id,
                     kind: c.kind,
-                    organization: c.organization.into(),
+                    project: c.project.into(),
                     build_id: c.derivation_build.map(Into::into),
                     evaluation_id: c.evaluation_id.into(),
                     pname: c.pname,
@@ -247,8 +247,8 @@ pub struct AttemptSummary {
 pub struct DispatchedJobDetail {
     pub id: Uuid,
     pub kind: i16,
-    pub organization: Uuid,
-    pub organization_name: String,
+    pub project: Uuid,
+    pub project_name: String,
     pub worker_id: String,
     pub score: f64,
     pub queued_at: String,
@@ -279,11 +279,11 @@ pub async fn get_dispatched_job(
     // In-memory candidates (rejected and winning alike) carry an ephemeral id;
     // look there first, then fall back to the persisted `dispatched_job` row.
     if let Some(c) = scheduler.candidate_detail(DispatchedJobId::from(id)).await {
-        if !scope.allows(&Uuid::from(c.organization)) {
+        if !scope.allows(&Uuid::from(c.project)) {
             return Err(WebError::not_found("Job"));
         }
 
-        let organization_name = gradient_entity::organization::Entity::find_by_id(c.organization)
+        let project_name = gradient_entity::project::Entity::find_by_id(c.project)
             .one(&state.web_db)
             .await?
             .map(|o| o.name)
@@ -292,8 +292,8 @@ pub async fn get_dispatched_job(
         return Ok(ok_json(DispatchedJobDetail {
             id: c.id.into(),
             kind: c.kind,
-            organization: c.organization.into(),
-            organization_name,
+            project: c.project.into(),
+            project_name,
             worker_id: c.worker_id,
             score: c.score,
             queued_at: c.queued_at.and_utc().to_rfc3339(),
@@ -317,11 +317,11 @@ pub async fn get_dispatched_job(
         .await?
         .ok_or_else(|| WebError::not_found("Job"))?;
 
-    if !scope.allows(&Uuid::from(j.organization)) {
+    if !scope.allows(&Uuid::from(j.project)) {
         return Err(WebError::not_found("Job"));
     }
 
-    let organization_name = gradient_entity::organization::Entity::find_by_id(j.organization)
+    let project_name = gradient_entity::project::Entity::find_by_id(j.project)
         .one(&state.web_db)
         .await?
         .map(|o| o.name)
@@ -380,8 +380,8 @@ pub async fn get_dispatched_job(
     Ok(ok_json(DispatchedJobDetail {
         id: j.id.into(),
         kind: i16::from(j.kind),
-        organization: j.organization.into(),
-        organization_name,
+        project: j.project.into(),
+        project_name,
         worker_id: j.worker_id,
         score: j.score,
         queued_at: j.queued_at.and_utc().to_rfc3339(),
@@ -402,9 +402,9 @@ pub async fn get_dispatched_job(
 
 #[derive(Serialize)]
 pub struct BoardWorker {
-    /// `None` when the worker belongs to an org the caller can't see.
+    /// `None` when the worker belongs to a project the caller can't see.
     pub id: Option<String>,
-    pub organization: Option<Uuid>,
+    pub project: Option<Uuid>,
     pub draining: bool,
     pub assigned_jobs: i64,
     pub max_concurrent_builds: i64,
@@ -429,13 +429,13 @@ pub async fn get_board_workers(
         .into_iter()
         .map(|w| {
             let accessible = w
-                .organization
+                .project
                 .map(|o| scope.allows(&Uuid::from(o)))
                 .unwrap_or_else(|| scope.is_all());
 
             BoardWorker {
                 id: accessible.then(|| w.id.clone()),
-                organization: accessible.then(|| w.organization.map(Into::into)).flatten(),
+                project: accessible.then(|| w.project.map(Into::into)).flatten(),
                 draining: w.draining,
                 assigned_jobs: w.assigned_job_count as i64,
                 max_concurrent_builds: w.max_concurrent_builds as i64,
@@ -588,14 +588,14 @@ pub async fn get_board_worker_load(
     let visible_workers: Vec<&gradient_scheduler::WorkerInfo> = workers
         .iter()
         .filter(|w| {
-            w.organization
+            w.project
                 .map(|o| scope.allows(&Uuid::from(o)))
                 .unwrap_or_else(|| scope.is_all())
         })
         .collect();
     let visible_jobs: Vec<&gradient_scheduler::BoardActiveJob> = jobs
         .iter()
-        .filter(|j| scope.allows(&Uuid::from(j.organization)))
+        .filter(|j| scope.allows(&Uuid::from(j.project)))
         .collect();
 
     Ok(ok_json(aggregate_worker_load(
@@ -612,7 +612,7 @@ pub struct ExpensiveParams {
 #[derive(Serialize)]
 pub struct ExpensiveBuild {
     pub build_id: Uuid,
-    pub organization: Uuid,
+    pub project: Uuid,
     pub name: String,
     pub build_time_ms: i64,
     pub worker: Option<String>,
@@ -632,12 +632,12 @@ pub async fn get_expensive_jobs(
         ),
     ];
 
-    if let Some(list) = scope.org_in_list() {
+    if let Some(list) = scope.project_in_list() {
         if list.is_empty() {
             return Ok(ok_json(vec![]));
         }
 
-        clauses.push(format!("pr.organization IN ({list})"));
+        clauses.push(format!("pr.project IN ({list})"));
     }
 
     let window = params.window_days.unwrap_or(30).max(1);
@@ -646,7 +646,7 @@ pub async fn get_expensive_jobs(
     ));
 
     let sql = format!(
-        "SELECT bj.id, pr.organization, d.name, \
+        "SELECT bj.id, pr.project, d.name, \
          EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000 AS build_time_ms, \
          dj.worker_id AS worker \
          FROM build_job bj \
@@ -673,7 +673,7 @@ pub async fn get_expensive_jobs(
         .into_iter()
         .map(|r| ExpensiveBuild {
             build_id: r.try_get("", "id").unwrap_or_default(),
-            organization: r.try_get("", "organization").unwrap_or_default(),
+            project: r.try_get("", "project").unwrap_or_default(),
             name: r.try_get("", "name").unwrap_or_default(),
             build_time_ms: r.try_get("", "build_time_ms").unwrap_or(0),
             worker: r.try_get("", "worker").ok(),
@@ -736,7 +736,7 @@ pub async fn get_scoring_rules() -> WebResult<Json<BaseResponse<Vec<RuleDescript
 
 /// Aggregate scoring view over recently dispatched jobs: a score histogram plus
 /// the mean per-rule contribution, so operators can see how the policy scored
-/// real dispatches without opening every job. Scope-masked to the caller's orgs.
+/// real dispatches without opening every job. Scope-masked to the caller's projects.
 pub async fn get_scoring_summary(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -750,12 +750,12 @@ pub async fn get_scoring_summary(
         "dispatched_at >= (now() AT TIME ZONE 'UTC') - interval '{window} hours'"
     )];
 
-    if let Some(list) = scope.org_in_list() {
+    if let Some(list) = scope.project_in_list() {
         if list.is_empty() {
             return Ok(ok_json(ScoringSummary::default()));
         }
 
-        clauses.push(format!("organization IN ({list})"));
+        clauses.push(format!("project IN ({list})"));
     }
 
     let sql = format!(
@@ -847,23 +847,23 @@ pub async fn get_scoring_summary(
 }
 
 #[derive(Serialize)]
-pub struct TopOrgBuildTime {
-    pub organization: Uuid,
+pub struct TopProjectBuildTime {
+    pub project: Uuid,
     pub total_build_ms: i64,
     pub build_count: i64,
 }
 
-/// Top organizations by cumulative build time in a window (superuser-only),
+/// Top projects by cumulative build time in a window (superuser-only),
 /// for the Expensive Jobs page.
-pub async fn get_top_orgs_by_buildtime(
+pub async fn get_top_projects_by_buildtime(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Query(params): Query<ExpensiveParams>,
-) -> WebResult<Json<BaseResponse<Vec<TopOrgBuildTime>>>> {
+) -> WebResult<Json<BaseResponse<Vec<TopProjectBuildTime>>>> {
     require_superuser(&user)?;
     let window = params.window_days.unwrap_or(30).max(1);
     let sql = format!(
-        "SELECT pr.organization, \
+        "SELECT pr.project, \
          sum(EXTRACT(EPOCH FROM (ba.build_finished_at - ba.build_started_at))::bigint * 1000)::bigint AS total, \
          count(*)::bigint AS cnt \
          FROM build_job bj \
@@ -878,7 +878,7 @@ pub async fn get_top_orgs_by_buildtime(
          WHERE b.status = {completed} \
            AND ba.build_started_at IS NOT NULL AND ba.build_finished_at IS NOT NULL \
            AND ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days' \
-         GROUP BY pr.organization ORDER BY total DESC LIMIT 15",
+         GROUP BY pr.project ORDER BY total DESC LIMIT 15",
         completed = gradient_db::status_sql::build(gradient_entity::build::BuildStatus::Completed),
     );
 
@@ -889,8 +889,8 @@ pub async fn get_top_orgs_by_buildtime(
 
     let out = rows
         .into_iter()
-        .map(|r| TopOrgBuildTime {
-            organization: r.try_get("", "organization").unwrap_or_default(),
+        .map(|r| TopProjectBuildTime {
+            project: r.try_get("", "project").unwrap_or_default(),
             total_build_ms: r.try_get("", "total").unwrap_or(0),
             build_count: r.try_get("", "cnt").unwrap_or(0),
         })
@@ -908,7 +908,7 @@ pub struct ResourceParams {
 #[derive(Serialize)]
 pub struct ExpensiveResource {
     pub derivation: Uuid,
-    pub organization: Uuid,
+    pub project: Uuid,
     pub name: String,
     pub value: f64,
     pub unit: &'static str,
@@ -916,7 +916,7 @@ pub struct ExpensiveResource {
 }
 
 /// Top derivations by a captured per-build resource (peak RAM, CPU time, total
-/// disk bytes, or host network peak), read from `derivation_metric`. Org-scoped.
+/// disk bytes, or host network peak), read from `derivation_metric`. Project-scoped.
 pub async fn get_expensive_by_resource(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -948,9 +948,9 @@ pub async fn get_expensive_by_resource(
     };
 
     let mut clauses = vec![not_null.to_string()];
-    let org_filter = match scope.org_in_list() {
+    let project_filter = match scope.project_in_list() {
         Some(list) if list.is_empty() => return Ok(ok_json(vec![])),
-        Some(list) => format!(" AND pr.organization IN ({list})"),
+        Some(list) => format!(" AND pr.project IN ({list})"),
         None => String::new(),
     };
 
@@ -959,18 +959,18 @@ pub async fn get_expensive_by_resource(
         "dm.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window} days'"
     ));
 
-    // Derivations are global, so attribute each metric row to one producing org
+    // Derivations are global, so attribute each metric row to one producing project
     // (an in-scope one when scoped) via the build -> evaluation -> task chain.
     let sql = format!(
-        "SELECT dm.derivation, pro.organization, d.name, {value_expr} AS value, dm.worker_id \
+        "SELECT dm.derivation, pro.project, d.name, {value_expr} AS value, dm.worker_id \
          FROM derivation_metric dm \
          JOIN derivation d ON d.id = dm.derivation \
          JOIN LATERAL ( \
-           SELECT pr.organization \
+           SELECT pr.project \
            FROM build_job bj \
            JOIN evaluation ev ON ev.id = bj.evaluation \
            JOIN task pr ON pr.id = ev.task \
-           WHERE bj.derivation = dm.derivation{org_filter} \
+           WHERE bj.derivation = dm.derivation{project_filter} \
            LIMIT 1 \
          ) pro ON true \
          WHERE {} ORDER BY value DESC LIMIT 20",
@@ -986,7 +986,7 @@ pub async fn get_expensive_by_resource(
         .into_iter()
         .map(|r| ExpensiveResource {
             derivation: r.try_get("", "derivation").unwrap_or_default(),
-            organization: r.try_get("", "organization").unwrap_or_default(),
+            project: r.try_get("", "project").unwrap_or_default(),
             name: r.try_get("", "name").unwrap_or_default(),
             value: r.try_get("", "value").unwrap_or(0.0),
             unit,
@@ -1005,7 +1005,7 @@ pub async fn board_live_ws(
 ) -> Response {
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user)
         .await
-        .unwrap_or(MetricsScope::Orgs(vec![]));
+        .unwrap_or(MetricsScope::Projects(vec![]));
 
     // Subscribe before snapshotting so no event is missed between the two.
     let rx = state.board_events.subscribe();
@@ -1047,15 +1047,15 @@ async fn board_live_loop(
     }
 }
 
-/// Forward only events the caller may see: queue depth to everyone, per-org
-/// events to members of that org (or superusers), worker disconnects to
+/// Forward only events the caller may see: queue depth to everyone, per-project
+/// events to members of that project (or superusers), worker disconnects to
 /// superusers. Out-of-scope detail is dropped (the REST view supplies the
 /// "other running" aggregate count).
 fn mask_event(ev: &BoardEvent, scope: &MetricsScope) -> Option<String> {
     let visible = match ev {
         BoardEvent::QueueDepth { .. } => true,
-        BoardEvent::JobDispatched { organization, .. } => scope.allows(organization),
-        BoardEvent::WorkerConnected { organization, .. } => scope.allows(organization),
+        BoardEvent::JobDispatched { project, .. } => scope.allows(project),
+        BoardEvent::WorkerConnected { project, .. } => scope.allows(project),
         BoardEvent::WorkerDisconnected { .. } => scope.is_all(),
         // Resource-scoped events are served by the per-resource /live channels.
         BoardEvent::EvaluationStatusChanged { .. }
@@ -1076,7 +1076,7 @@ pub struct EvalResourceParams {
 #[derive(Serialize)]
 pub struct ExpensiveEval {
     pub evaluation: Uuid,
-    pub organization: Uuid,
+    pub project: Uuid,
     pub name: String,
     pub value: f64,
     pub unit: &'static str,
@@ -1099,7 +1099,7 @@ fn eval_metric_expr(metric: &str) -> Option<(&'static str, &'static str)> {
 
 /// Top evaluations by a captured per-eval resource (peak RSS/heap, thunks, fn
 /// calls, allocated bytes, or total eval time) from `evaluation_metric`,
-/// org-scoped through the evaluation's task.
+/// project-scoped through the evaluation's task.
 pub async fn get_expensive_evals_by_resource(
     State(state): State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
@@ -1110,12 +1110,12 @@ pub async fn get_expensive_evals_by_resource(
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
     let mut clauses = vec![];
-    if let Some(list) = scope.org_in_list() {
+    if let Some(list) = scope.project_in_list() {
         if list.is_empty() {
             return Ok(ok_json(vec![]));
         }
 
-        clauses.push(format!("p.organization IN ({list})"));
+        clauses.push(format!("p.project IN ({list})"));
     }
 
     let window = params.window_days.unwrap_or(30).max(1);
@@ -1124,7 +1124,7 @@ pub async fn get_expensive_evals_by_resource(
     ));
 
     let sql = format!(
-        "SELECT em.evaluation, p.organization, ev.wildcard AS name, {value_expr} AS value, em.worker_id \
+        "SELECT em.evaluation, p.project, ev.wildcard AS name, {value_expr} AS value, em.worker_id \
          FROM evaluation_metric em \
          JOIN evaluation ev ON ev.id = em.evaluation \
          JOIN task p ON p.id = ev.task \
@@ -1141,7 +1141,7 @@ pub async fn get_expensive_evals_by_resource(
         .into_iter()
         .map(|r| ExpensiveEval {
             evaluation: r.try_get("", "evaluation").unwrap_or_default(),
-            organization: r.try_get("", "organization").unwrap_or_default(),
+            project: r.try_get("", "project").unwrap_or_default(),
             name: r.try_get("", "name").unwrap_or_default(),
             value: r.try_get("", "value").unwrap_or(0.0),
             unit,
@@ -1200,7 +1200,7 @@ mod tests {
     use super::*;
     use gradient_entity::dispatched_job::DispatchedJobKind;
     use gradient_scheduler::{BoardActiveJob, WorkerInfo};
-    use gradient_types::ids::OrganizationId;
+    use gradient_types::ids::ProjectId;
     use gradient_types::proto::GradientCapabilities;
 
     fn worker(
@@ -1225,7 +1225,7 @@ mod tests {
             assigned_job_count: 0,
             draining: false,
             authorized_peers: None,
-            organization: None,
+            project: None,
             cpu_usage_pct: None,
             ram_free_mb: None,
             ram_total_mb: 0,
@@ -1237,7 +1237,7 @@ mod tests {
     fn build_job(arch: &str, features: &[&str]) -> BoardActiveJob {
         BoardActiveJob {
             worker_id: "w".into(),
-            organization: OrganizationId::now_v7(),
+            project: ProjectId::now_v7(),
             kind: DispatchedJobKind::Build,
             architecture: Some(arch.into()),
             required_features: features.iter().map(|s| s.to_string()).collect(),
@@ -1249,7 +1249,7 @@ mod tests {
     fn flake_job(eval_step: bool, fetch_step: bool) -> BoardActiveJob {
         BoardActiveJob {
             worker_id: "w".into(),
-            organization: OrganizationId::now_v7(),
+            project: ProjectId::now_v7(),
             kind: DispatchedJobKind::Eval,
             architecture: None,
             required_features: vec![],

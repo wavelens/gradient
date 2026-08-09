@@ -22,7 +22,7 @@ Minimal setup: Gradient server + co-located worker on a single NixOS host.
 
 ## 2. Generate Secrets
 
-Pick a UUID for the worker - you will use it in the config and when registering the worker to your org:
+Pick a UUID for the worker - you will use it in the config and when registering the worker to your project:
 
 ```sh
 uuidgen
@@ -39,7 +39,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 openssl rand -base64 48 > /run/secrets/gradient-worker-token
 
 # Peers file: one entry per line in the format <peer_id>:<token>.
-# * as peer_id means the worker responds with this token for any org's challenge.
+# * as peer_id means the worker responds with this token for any project's challenge.
 echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worker-peers
 ```
 
@@ -71,7 +71,7 @@ echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worke
 }
 ```
 
-After `nixos-rebuild switch`, navigate to `https://gradient.example.com/account/register` to create the first user, then create an organization. Register the worker under **Organization Settings → Workers** using the UUID from step 2 and the token from `/run/secrets/gradient-worker-token`.
+After `nixos-rebuild switch`, navigate to `https://gradient.example.com/account/register` to create the first user, then create a project. Register the worker under **Project Settings → Workers** using the UUID from step 2 and the token from `/run/secrets/gradient-worker-token`.
 
 ## Next Steps
 

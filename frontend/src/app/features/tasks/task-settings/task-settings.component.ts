@@ -13,7 +13,7 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { TasksService } from '@core/services/tasks.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { AutoCompleteModule } from 'primeng/autocomplete';
 import { SelectModule } from 'primeng/select';
 import { CheckboxModule } from 'primeng/checkbox';
@@ -47,7 +47,7 @@ export class TaskSettingsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private tasksService = inject(TasksService);
-  private orgsService = inject(OrganizationsService);
+  private projectsService = inject(ProjectsService);
 
   access = injectTaskAccess();
 
@@ -62,13 +62,13 @@ export class TaskSettingsComponent implements OnInit {
   showTransferDialog = signal(false);
   errorMessage = signal<string | null>(null);
   saveSuccess = signal(false);
-  transferOrgName = '';
+  transferProjectName = '';
   transferError = signal<string | null>(null);
   transferSuccess = signal(false);
-  transferOrgSuggestions = signal<string[]>([]);
+  transferProjectSuggestions = signal<string[]>([]);
 
-  orgName = '';
-  orgDisplayName = signal('');
+  projectName = '';
+  projectDisplayName = signal('');
   taskName = '';
 
   formData: {
@@ -97,10 +97,10 @@ export class TaskSettingsComponent implements OnInit {
   ];
 
   ngOnInit(): void {
-    this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
-    this.orgsService.getOrganization(this.orgName).subscribe({
-      next: (org) => this.orgDisplayName.set(org.display_name),
+    this.projectsService.getProject(this.projectName).subscribe({
+      next: (project) => this.projectDisplayName.set(project.display_name),
       error: () => {},
     });
     this.loadTask();
@@ -108,10 +108,10 @@ export class TaskSettingsComponent implements OnInit {
 
   loadTask(): void {
     this.loading.set(true);
-    this.tasksService.getTaskInfo(this.orgName, this.taskName).subscribe({
+    this.tasksService.getTaskInfo(this.projectName, this.taskName).subscribe({
       next: (task) => {
         if (task.name === 'build-request') {
-          this.router.navigate(['/organization', this.orgName, 'task', task.name]);
+          this.router.navigate(['/project', this.projectName, 'task', task.name]);
           return;
         }
         this.task.set(task);
@@ -137,7 +137,7 @@ export class TaskSettingsComponent implements OnInit {
     this.saving.set(true);
     this.errorMessage.set(null);
     this.saveSuccess.set(false);
-    this.tasksService.updateTask(this.orgName, this.taskName, this.formData).subscribe({
+    this.tasksService.updateTask(this.projectName, this.taskName, this.formData).subscribe({
       next: () => {
         this.saving.set(false);
         this.saveSuccess.set(true);
@@ -156,8 +156,8 @@ export class TaskSettingsComponent implements OnInit {
 
     this.toggling.set(true);
     const action = proj.active
-      ? this.tasksService.deactivateTask(this.orgName, this.taskName)
-      : this.tasksService.activateTask(this.orgName, this.taskName);
+      ? this.tasksService.deactivateTask(this.projectName, this.taskName)
+      : this.tasksService.activateTask(this.projectName, this.taskName);
 
     action.subscribe({
       next: () => {
@@ -171,39 +171,39 @@ export class TaskSettingsComponent implements OnInit {
     });
   }
 
-  onTransferOrgSearch(event: { query: string }): void {
+  onTransferProjectSearch(event: { query: string }): void {
     const q = event.query.trim().toLowerCase();
-    this.orgsService.getOrganizations().subscribe({
+    this.projectsService.getProjects().subscribe({
       next: (res) => {
         const names = res.items
           .map((o) => o.name)
-          .filter((n) => n !== this.orgName && (!q || n.toLowerCase().includes(q)));
-        this.transferOrgSuggestions.set(names);
+          .filter((n) => n !== this.projectName && (!q || n.toLowerCase().includes(q)));
+        this.transferProjectSuggestions.set(names);
       },
-      error: () => this.transferOrgSuggestions.set([]),
+      error: () => this.transferProjectSuggestions.set([]),
     });
   }
 
   onTransferDialogHide(): void {
-    this.transferOrgName = '';
+    this.transferProjectName = '';
     this.transferError.set(null);
     this.transferSuccess.set(false);
   }
 
   transferOwnership(): void {
-    if (!this.transferOrgName.trim()) return;
+    if (!this.transferProjectName.trim()) return;
     this.transferring.set(true);
     this.transferError.set(null);
     this.transferSuccess.set(false);
-    this.tasksService.transferOwnership(this.orgName, this.taskName, this.transferOrgName.trim()).subscribe({
+    this.tasksService.transferOwnership(this.projectName, this.taskName, this.transferProjectName.trim()).subscribe({
       next: () => {
         this.transferring.set(false);
         this.transferSuccess.set(true);
-        const targetOrg = this.transferOrgName.trim();
-        this.transferOrgName = '';
+        const targetProject = this.transferProjectName.trim();
+        this.transferProjectName = '';
         setTimeout(() => {
           this.showTransferDialog.set(false);
-          this.router.navigate(['/organization', targetOrg]);
+          this.router.navigate(['/project', targetProject]);
         }, 1500);
       },
       error: (error) => {
@@ -215,9 +215,9 @@ export class TaskSettingsComponent implements OnInit {
 
   deleteTask(): void {
     this.deleting.set(true);
-    this.tasksService.deleteTask(this.orgName, this.taskName).subscribe({
+    this.tasksService.deleteTask(this.projectName, this.taskName).subscribe({
       next: () => {
-        this.router.navigate(['/organization', this.orgName]);
+        this.router.navigate(['/project', this.projectName]);
       },
       error: (error) => {
         console.error('Failed to delete task:', error);

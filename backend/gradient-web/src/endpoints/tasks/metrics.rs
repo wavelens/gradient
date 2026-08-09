@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{Caller, OrgAccess, load_org};
+use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::endpoints::builds::closure::{derivation_closure_reachable, sum_output_sizes};
 use crate::error::WebResult;
@@ -42,19 +42,19 @@ pub async fn get_task_metrics(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
 ) -> WebResult<Json<BaseResponse<TaskMetricsResponse>>> {
-    let organization = load_org(
+    let project = load_project(
         &state.0,
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
-        organization,
-        OrgAccess::Readable { label: "Task" },
+        project,
+        ProjectAccess::Readable { label: "Task" },
     )
     .await?;
 
     let task = ETask::find()
-        .filter(CTask::Organization.eq(organization.id))
+        .filter(CTask::Project.eq(project.id))
         .filter(CTask::Name.eq(task))
         .one(&state.web_db)
         .await?
@@ -160,20 +160,20 @@ pub async fn get_entry_point_metrics(
     state: State<Arc<ServerState>>,
     Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
     Extension(api_key): Extension<MaybeApiKey>,
-    Path((organization, task)): Path<(String, String)>,
+    Path((project, task)): Path<(String, String)>,
     Query(params): Query<EntryPointMetricsQuery>,
 ) -> WebResult<Json<BaseResponse<EntryPointMetricsResponse>>> {
-    let organization = load_org(
+    let project = load_project(
         &state.0,
         Caller::from_option(&maybe_user),
         api_key.as_ref(),
-        organization,
-        OrgAccess::Readable { label: "Task" },
+        project,
+        ProjectAccess::Readable { label: "Task" },
     )
     .await?;
 
     let task = ETask::find()
-        .filter(CTask::Organization.eq(organization.id))
+        .filter(CTask::Project.eq(project.id))
         .filter(CTask::Name.eq(task))
         .one(&state.web_db)
         .await?

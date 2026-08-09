@@ -105,12 +105,12 @@ computes (aggregations, transformations, IDs it creates).
 async fn get_task_metrics_empty_returns_empty_points() {
     // DB: task found, then no completed evaluations
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        .append_query_results([vec![common::task(common::org().id)]])
+        .append_query_results([vec![common::task(common::project().id)]])
         .append_query_results([Vec::<evaluation::Model>::new()])
         .into_connection();
 
     let resp = common::server(db).await
-        .get("/api/v1/tasks/test-org/test-task/metrics")
+        .get("/api/v1/tasks/test-project/test-task/metrics")
         .add_header("Authorization", common::bearer_token())
         .await;
 
@@ -199,8 +199,8 @@ pub fn db_with<T: sea_orm::IntoMockRow>(rows: Vec<T>) -> DatabaseConnection {
 }
 
 // Fixture builders - deterministic values, easy to read in assertions
-pub fn org() -> organization::Model { ... }
-pub fn task(org_id: Uuid) -> task::Model { ... }
+pub fn project() -> project::Model { ... }
+pub fn task(project_id: Uuid) -> task::Model { ... }
 pub fn user() -> user::Model { ... }
 pub fn evaluation(task_id: Uuid) -> evaluation::Model { ... }
 pub fn build(eval_id: Uuid) -> build::Model { ... }
@@ -216,17 +216,17 @@ pub async fn server(db: DatabaseConnection) -> TestServer {
     TestServer::new(app).unwrap()
 }
 
-// web/tests/orgs.rs
+// web/tests/projects.rs
 #[tokio::test]
-async fn get_org_unauthenticated_returns_401() {
-    let s = common::server(common::db_with(vec![common::org()])).await;
-    s.get("/api/v1/orgs/test-org").await.assert_status_unauthorized();
+async fn get_project_unauthenticated_returns_401() {
+    let s = common::server(common::db_with(vec![common::project()])).await;
+    s.get("/api/v1/projects/test-project").await.assert_status_unauthorized();
 }
 
 #[tokio::test]
-async fn get_org_unknown_returns_404() {
-    let s = common::server(common::db_empty::<organization::Model>()).await;
-    s.get("/api/v1/orgs/nonexistent")
+async fn get_project_unknown_returns_404() {
+    let s = common::server(common::db_empty::<project::Model>()).await;
+    s.get("/api/v1/projects/nonexistent")
         .add_header("Authorization", common::bearer_token())
         .await
         .assert_status_not_found();
@@ -250,7 +250,7 @@ web/
     common/
       mod.rs        ← test_cli(), test_state(), server(), bearer_token(), fixtures
     auth.rs         ← register / login / logout flows
-    orgs.rs         ← CRUD, member management, auth enforcement
+    projects.rs         ← CRUD, member management, auth enforcement
     tasks.rs     ← CRUD, metrics, keep_evaluations GC
     builds.rs       ← status queries, log endpoints
     evals.rs        ← evaluation actions, build listing

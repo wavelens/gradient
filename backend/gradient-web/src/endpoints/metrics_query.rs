@@ -8,8 +8,8 @@
 //!
 //! `GET /metrics/catalog` lists the available metrics; `GET /metrics/query`
 //! returns time-series points masked to the caller's scope: superusers see all
-//! orgs, members see their orgs plus public orgs, anonymous callers see public
-//! orgs only.
+//! projects, members see their projects plus public projects, anonymous callers see public
+//! projects only.
 
 use crate::authorization::MaybeUser;
 use crate::error::{WebError, WebResult};
@@ -40,61 +40,61 @@ const CATALOG: &[MetricMeta] = &[
         key: "builds.created",
         kind: "counter",
         unit: "builds",
-        dimensions: &["org"],
+        dimensions: &["project"],
     },
     MetricMeta {
         key: "builds.dispatched",
         kind: "counter",
         unit: "builds",
-        dimensions: &["org"],
+        dimensions: &["project"],
     },
     MetricMeta {
         key: "builds.completed",
         kind: "counter",
         unit: "builds",
-        dimensions: &["org"],
+        dimensions: &["project"],
     },
     MetricMeta {
         key: "builds.substituted",
         kind: "counter",
         unit: "builds",
-        dimensions: &["org"],
+        dimensions: &["project"],
     },
     MetricMeta {
         key: "builds.failed",
         kind: "counter",
         unit: "builds",
-        dimensions: &["org"],
+        dimensions: &["project"],
     },
     MetricMeta {
         key: "evals.completed",
         kind: "counter",
         unit: "evals",
-        dimensions: &["org"],
+        dimensions: &["project"],
     },
     MetricMeta {
         key: "evals.failed",
         kind: "counter",
         unit: "evals",
-        dimensions: &["org"],
+        dimensions: &["project"],
     },
     MetricMeta {
         key: "builds.duration_ms",
         kind: "histogram",
         unit: "ms",
-        dimensions: &["org"],
+        dimensions: &["project"],
     },
     MetricMeta {
         key: "dispatch.wait_ms",
         kind: "histogram",
         unit: "ms",
-        dimensions: &["org"],
+        dimensions: &["project"],
     },
     MetricMeta {
         key: "deps.wait_ms",
         kind: "histogram",
         unit: "ms",
-        dimensions: &["org"],
+        dimensions: &["project"],
     },
 ];
 
@@ -108,7 +108,7 @@ pub struct MetricQueryParams {
     pub granularity: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
-    pub org: Option<Uuid>,
+    pub project: Option<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -133,24 +133,24 @@ pub async fn get_metrics_query(
     let gran = RollupGranularity::from_query_param(params.granularity.as_deref());
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
-    // org filter: an explicit org must be inside the caller's scope.
-    let org_filter: Option<Vec<String>> = match (&scope, params.org) {
+    // project filter: an explicit project must be inside the caller's scope.
+    let project_filter: Option<Vec<String>> = match (&scope, params.project) {
         (MetricsScope::All, Some(o)) => Some(vec![o.to_string()]),
         (MetricsScope::All, None) => None,
-        (MetricsScope::Orgs(orgs), Some(o)) => {
+        (MetricsScope::Projects(projects), Some(o)) => {
             let o = o.to_string();
-            if !orgs.contains(&o) {
+            if !projects.contains(&o) {
                 return Err(WebError::not_found("Metric"));
             }
 
             Some(vec![o])
         }
-        (MetricsScope::Orgs(orgs), None) => {
-            if orgs.is_empty() {
+        (MetricsScope::Projects(projects), None) => {
+            if projects.is_empty() {
                 return Ok(ok_json(vec![]));
             }
 
-            Some(orgs.clone())
+            Some(projects.clone())
         }
     };
 
@@ -164,15 +164,15 @@ pub async fn get_metrics_query(
         Value::from(params.metric.clone()),
         Value::from(i16::from(gran)),
     ];
-    if let Some(orgs) = &org_filter {
+    if let Some(projects) = &project_filter {
         // DB-sourced UUID strings, safe to inline as a quoted IN list.
-        let list = orgs
+        let list = projects
             .iter()
             .map(|o| format!("'{o}'"))
             .collect::<Vec<_>>()
             .join(",");
 
-        sql.push_str(&format!(" AND (scope->>'org') IN ({list})"));
+        sql.push_str(&format!(" AND (scope->>'project') IN ({list})"));
     }
 
     if let Some(from) = parse_ts(params.from.as_deref()) {

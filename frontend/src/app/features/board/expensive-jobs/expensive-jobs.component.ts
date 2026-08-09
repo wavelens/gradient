@@ -10,7 +10,7 @@ import {
   BoardService,
   ExpensiveBuild,
   ExpensiveResource,
-  TopOrgBuildTime,
+  TopProjectBuildTime,
 } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 
@@ -64,14 +64,14 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
       </table>
     }
 
-    @if (topOrgs().length) {
-      <h2>Top organizations by build time (superuser)</h2>
+    @if (topProjects().length) {
+      <h2>Top projects by build time (superuser)</h2>
       <app-metric-chart
         type="bar"
         [horizontal]="true"
         [height]="320"
-        [series]="topOrgSeries()"
-        [categories]="topOrgCategories()"
+        [series]="topProjectSeries()"
+        [categories]="topProjectCategories()"
         [colors]="['#fd7e14']"
       ></app-metric-chart>
     }
@@ -99,7 +99,7 @@ export class BoardExpensiveJobsComponent implements OnInit {
   private board = inject(BoardService);
   builds = signal<ExpensiveBuild[]>([]);
   resources = signal<ExpensiveResource[]>([]);
-  topOrgs = signal<TopOrgBuildTime[]>([]);
+  topProjects = signal<TopProjectBuildTime[]>([]);
   tab = signal<Tab>('time');
   private windowDays = 30;
 
@@ -112,9 +112,9 @@ export class BoardExpensiveJobsComponent implements OnInit {
   ];
 
   valueHeader = computed(() => this.tabs.find((t) => t.key === this.tab())?.label ?? '');
-  topOrgCategories = computed(() => this.topOrgs().map((o) => o.organization.slice(0, 8)));
-  topOrgSeries = computed(() => [
-    { name: 'build hours', data: this.topOrgs().map((o) => +(o.total_build_ms / 3_600_000).toFixed(2)) },
+  topProjectCategories = computed(() => this.topProjects().map((o) => o.project.slice(0, 8)));
+  topProjectSeries = computed(() => [
+    { name: 'build hours', data: this.topProjects().map((o) => +(o.total_build_ms / 3_600_000).toFixed(2)) },
   ]);
 
   ngOnInit(): void {
@@ -129,9 +129,9 @@ export class BoardExpensiveJobsComponent implements OnInit {
         .getExpensiveByResource(this.tab() as 'ram' | 'cpu' | 'disk' | 'network', this.windowDays)
         .subscribe((r) => this.resources.set(r));
     }
-    this.board.getTopOrgs(this.windowDays).subscribe({
-      next: (o) => this.topOrgs.set(o),
-      error: () => this.topOrgs.set([]),
+    this.board.getTopProjects(this.windowDays).subscribe({
+      next: (o) => this.topProjects.set(o),
+      error: () => this.topProjects.set([]),
     });
   }
 

@@ -68,12 +68,12 @@ fn is_claimable(password: &Option<String>, oidc_subject: &Option<String>) -> boo
     password.is_none() && oidc_subject.is_none()
 }
 
-/// Distinct `(org, role)` grants for the groups a user presents on login.
+/// Distinct `(project, role)` grants for the groups a user presents on login.
 fn grants_for_groups(
     map: &gradient_state::OidcGroupRoles,
     groups: &[String],
-) -> Vec<(OrganizationId, RoleId)> {
-    let mut out: Vec<(OrganizationId, RoleId)> = Vec::new();
+) -> Vec<(ProjectId, RoleId)> {
+    let mut out: Vec<(ProjectId, RoleId)> = Vec::new();
     for group in groups {
         for &grant in map.get(group).into_iter().flatten() {
             if !out.contains(&grant) {
@@ -92,34 +92,34 @@ async fn apply_oidc_group_grants<C: sea_orm::ConnectionTrait>(
     groups: &[String],
     user_id: UserId,
 ) -> Result<()> {
-    for (org_id, role_id) in grants_for_groups(map, groups) {
-        let existing = EOrganizationUser::find()
-            .filter(COrganizationUser::Organization.eq(org_id))
-            .filter(COrganizationUser::User.eq(user_id))
+    for (project_id, role_id) in grants_for_groups(map, groups) {
+        let existing = EProjectUser::find()
+            .filter(CProjectUser::Project.eq(project_id))
+            .filter(CProjectUser::User.eq(user_id))
             .one(tx)
             .await
-            .context("query org membership for OIDC group grant")?;
+            .context("query project membership for OIDC group grant")?;
         match existing {
             Some(row) if row.role == role_id => {}
             Some(row) => {
-                let mut active: AOrganizationUser = row.into();
+                let mut active: AProjectUser = row.into();
                 active.role = Set(role_id);
                 active
                     .update(tx)
                     .await
-                    .context("update org role from OIDC group")?;
+                    .context("update project role from OIDC group")?;
             }
             None => {
-                MOrganizationUser {
-                    id: OrganizationUserId::now_v7(),
-                    organization: org_id,
+                MProjectUser {
+                    id: ProjectUserId::now_v7(),
+                    project: project_id,
                     user: user_id,
                     role: role_id,
                 }
                 .into_active_model()
                 .insert(tx)
                 .await
-                .context("insert org membership from OIDC group")?;
+                .context("insert project membership from OIDC group")?;
             }
         }
     }
@@ -454,9 +454,9 @@ async fn create_or_update_user(
             .await
             .context("Failed to claim OIDC account")?;
 
-        if let Err(e) = gradient_state::apply_pending_org_memberships(
+        if let Err(e) = gradient_state::apply_pending_project_memberships(
             &tx,
-            &state.pending_org_memberships,
+            &state.pending_project_memberships,
             &user.username,
             user_id,
         )
@@ -465,7 +465,7 @@ async fn create_or_update_user(
             tracing::warn!(
                 error = %e,
                 username = %user.username,
-                "Failed to apply pending state-managed org memberships for claimed OIDC user"
+                "Failed to apply pending state-managed project memberships for claimed OIDC user"
             );
         }
 
@@ -500,9 +500,9 @@ async fn create_or_update_user(
     .await
     .context("Failed to create user")?;
 
-    if let Err(e) = gradient_state::apply_pending_org_memberships(
+    if let Err(e) = gradient_state::apply_pending_project_memberships(
         &tx,
-        &state.pending_org_memberships,
+        &state.pending_project_memberships,
         &user.username,
         user.id,
     )
@@ -511,7 +511,7 @@ async fn create_or_update_user(
         tracing::warn!(
             error = %e,
             username = %user.username,
-            "Failed to apply pending state-managed org memberships for new OIDC user"
+            "Failed to apply pending state-managed project memberships for new OIDC user"
         );
     }
 
@@ -627,17 +627,17 @@ mod tests {
     #[test]
     fn collects_distinct_grants_for_presented_groups() {
         use std::collections::HashMap;
-        let org = OrganizationId::now_v7();
+        let project = ProjectId::now_v7();
         let role = RoleId::now_v7();
         let mut map: gradient_state::OidcGroupRoles = HashMap::new();
-        map.insert("platform-team".into(), vec![(org, role)]);
-        map.insert("ops".into(), vec![(org, role)]);
+        map.insert("platform-team".into(), vec![(project, role)]);
+        map.insert("ops".into(), vec![(project, role)]);
 
         let grants = super::grants_for_groups(
             &map,
             &["platform-team".into(), "ops".into(), "irrelevant".into()],
         );
-        assert_eq!(grants, vec![(org, role)]);
+        assert_eq!(grants, vec![(project, role)]);
 
         assert!(super::grants_for_groups(&map, &["nobody".into()]).is_empty());
     }

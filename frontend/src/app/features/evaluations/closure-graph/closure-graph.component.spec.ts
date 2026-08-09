@@ -28,7 +28,7 @@ function setup(kind: string, type?: string) {
   const svc = service();
   const route = {
     snapshot: {
-      paramMap: convertToParamMap({ org: 'acme', kind, id: 'x1' }),
+      paramMap: convertToParamMap({ project: 'acme', kind, id: 'x1' }),
       queryParamMap: convertToParamMap(type ? { type } : {}),
     },
   } as unknown as ActivatedRoute;

@@ -118,7 +118,7 @@ Gradient will start automatically and be available at `https://gradient.example.
 ## First Steps After Installation
 
 1. Navigate to `https://gradient.example.com/account/register` to create the first user account.
-2. Log in and create an organization.
+2. Log in and create a project.
 3. Create a Nix cache (optional - required for binary cache serving).
 4. Create your first task pointing to a Git repository.
 5. Trigger an evaluation - a connected `gradient-worker` will fetch, evaluate, and build.

@@ -266,11 +266,11 @@ pub async fn get_build_download(
         if claims.derivation != ctx.build_job.derivation {
             return Err(WebError::not_found("Build"));
         }
-    } else if !ctx.organization.public {
+    } else if !ctx.project.public {
         match maybe_user {
             Some(user) => {
-                use crate::access::is_org_member;
-                if !is_org_member(&state, user.id, ctx.organization.id, api_key.as_ref()).await? {
+                use crate::access::is_project_member;
+                if !is_project_member(&state, user.id, ctx.project.id, api_key.as_ref()).await? {
                     return Err(WebError::not_found("Build"));
                 }
             }

@@ -22,7 +22,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
-use gradient_types::ids::OrganizationId;
+use gradient_types::ids::ProjectId;
 use tokio::sync::{Notify, mpsc};
 
 use gradient_types::proto::GradientCapabilities;
@@ -122,7 +122,7 @@ impl TypedWorker<Active> {
     /// Construct a new active worker.
     pub fn new(
         capabilities: GradientCapabilities,
-        authorized_peers: HashSet<OrganizationId>,
+        authorized_peers: HashSet<ProjectId>,
         reauth_notify: Arc<Notify>,
         abort_tx: mpsc::UnboundedSender<(String, String)>,
     ) -> Self {

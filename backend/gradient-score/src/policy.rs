@@ -38,9 +38,9 @@ pub trait ScoringPolicy: Send + Sync + std::fmt::Debug {
     fn uses_history(&self) -> bool {
         false
     }
-    /// Whether any enabled rule consumes `JobContext::org_work_share`, so the
+    /// Whether any enabled rule consumes `JobContext::project_work_share`, so the
     /// scheduler skips computing the share otherwise.
-    fn uses_org_work_share(&self) -> bool {
+    fn uses_project_work_share(&self) -> bool {
         false
     }
 }
@@ -50,17 +50,17 @@ pub struct RulePolicy {
     name: &'static str,
     rules: Vec<Box<dyn ScoreRule>>,
     uses_history: bool,
-    uses_org_work_share: bool,
+    uses_project_work_share: bool,
 }
 
 impl RulePolicy {
     pub fn new(name: &'static str, rules: Vec<Box<dyn ScoreRule>>, uses_history: bool) -> Self {
-        let uses_org_work_share = rules.iter().any(|r| r.uses_org_work_share());
+        let uses_project_work_share = rules.iter().any(|r| r.uses_project_work_share());
         Self {
             name,
             rules,
             uses_history,
-            uses_org_work_share,
+            uses_project_work_share,
         }
     }
 }
@@ -110,8 +110,8 @@ impl ScoringPolicy for RulePolicy {
         self.uses_history
     }
 
-    fn uses_org_work_share(&self) -> bool {
-        self.uses_org_work_share
+    fn uses_project_work_share(&self) -> bool {
+        self.uses_project_work_share
     }
 }
 
@@ -145,7 +145,7 @@ fn resource_aware_table() -> Vec<RuleSpec> {
     rules.push(spec(true, Box::new(ResourceSaturationRule::default())));
     rules.push(spec(true, Box::new(PreferLocalBuildRule::default())));
     // Disabled: its idle gate counts zero-occupancy rather than spare capacity,
-    // over-penalizing busy-but-fair orgs. Re-enabling is a scheduling-policy
+    // over-penalizing busy-but-fair projects. Re-enabling is a scheduling-policy
     // decision (#476), made here by flipping the flag.
     rules.push(spec(false, Box::new(FairShareRule::default())));
     rules.push(spec(true, Box::new(NetworkAffinityRule::default())));
@@ -207,13 +207,13 @@ pub fn policy_by_name(name: &str) -> std::sync::Arc<dyn ScoringPolicy> {
 mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, ScoredJob};
-    use gradient_types::ids::OrganizationId;
+    use gradient_types::ids::ProjectId;
     use gradient_types::now;
 
     fn scored_job(arch: &str) -> ScoredJob<'_> {
         ScoredJob::new_build(
             "job",
-            OrganizationId::now_v7(),
+            ProjectId::now_v7(),
             arch,
             false,
             false,
@@ -281,7 +281,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now(),
             ready_at: now(),
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now: now(),
         };
@@ -294,7 +294,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now() - chrono::Duration::seconds(3600),
             ready_at: now() - chrono::Duration::seconds(3600),
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now: now(),
         };
@@ -316,7 +316,7 @@ mod tests {
         let feats: Vec<String> = vec![];
         let j = ScoredJob::new_build(
             "j",
-            OrganizationId::now_v7(),
+            ProjectId::now_v7(),
             "x86_64-linux",
             false,
             true,
@@ -331,7 +331,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now(),
             ready_at: now(),
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now: now(),
         };
@@ -375,7 +375,7 @@ mod tests {
             dependency_count: 0,
             queued_at: n,
             ready_at: n,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now: now(),
         };
@@ -388,7 +388,7 @@ mod tests {
             dependency_count: 0,
             queued_at: n,
             ready_at: n,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now: now(),
         };
@@ -413,7 +413,7 @@ mod tests {
             dependency_count: 2,
             queued_at: now(),
             ready_at: now(),
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now: now(),
         };
@@ -476,7 +476,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now(),
             ready_at: now(),
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now: now(),
         };
@@ -486,12 +486,12 @@ mod tests {
         assert_eq!(breakdown.rules["RescoreWaitRule"], 0.0);
     }
 
-    /// Only FairShareRule consumes org_work_share, and it ships disabled, so
+    /// Only FairShareRule consumes project_work_share, and it ships disabled, so
     /// the live policies must not ask the scheduler to compute the share.
     #[test]
-    fn org_work_share_is_unconsumed_while_fair_share_is_disabled() {
-        assert!(!policy_by_name("simple").uses_org_work_share());
-        assert!(!policy_by_name("resource-aware").uses_org_work_share());
-        assert!(FairShareRule::default().uses_org_work_share());
+    fn project_work_share_is_unconsumed_while_fair_share_is_disabled() {
+        assert!(!policy_by_name("simple").uses_project_work_share());
+        assert!(!policy_by_name("resource-aware").uses_project_work_share());
+        assert!(FairShareRule::default().uses_project_work_share());
     }
 }

@@ -111,7 +111,7 @@ pub async fn dispatch_evaluation_created(ctx: &CiContext, eval: &gradient_types:
             }),
         ) => (
             "evaluation.queued",
-            Some("Waiting for an eval-capable worker to be registered on the organisation."),
+            Some("Waiting for an eval-capable worker to be registered on the project."),
         ),
         _ => return,
     };

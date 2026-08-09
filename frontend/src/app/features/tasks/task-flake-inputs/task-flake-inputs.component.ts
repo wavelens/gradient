@@ -15,7 +15,7 @@ import { CheckboxModule } from 'primeng/checkbox';
 import { ToastModule } from 'primeng/toast';
 import { MessageService } from 'primeng/api';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -56,7 +56,7 @@ const DEFAULT_FORM: FlakeInputFormState = {
 export class TaskFlakeInputsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private overridesService = inject(FlakeInputOverridesService);
-  private orgsService = inject(OrganizationsService);
+  private projectsService = inject(ProjectsService);
   private messageService = inject(MessageService);
   private accessSvc = inject(AccessService);
 
@@ -72,8 +72,8 @@ export class TaskFlakeInputsComponent implements OnInit {
   saving = signal(false);
   deletingId = signal<string | null>(null);
 
-  orgName = '';
-  orgDisplayName = signal('');
+  projectName = '';
+  projectDisplayName = signal('');
   taskName = '';
 
   overrides = signal<FlakeInputOverride[]>([]);
@@ -85,10 +85,10 @@ export class TaskFlakeInputsComponent implements OnInit {
   form: FlakeInputFormState = { ...DEFAULT_FORM };
 
   ngOnInit(): void {
-    this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
-    this.orgsService.getOrganization(this.orgName).subscribe({
-      next: (org) => this.orgDisplayName.set(org.display_name),
+    this.projectsService.getProject(this.projectName).subscribe({
+      next: (project) => this.projectDisplayName.set(project.display_name),
       error: () => {},
     });
     this.loadOverrides();
@@ -96,7 +96,7 @@ export class TaskFlakeInputsComponent implements OnInit {
 
   loadOverrides(): void {
     this.loading.set(true);
-    this.overridesService.list(this.orgName, this.taskName).subscribe({
+    this.overridesService.list(this.projectName, this.taskName).subscribe({
       next: (list) => {
         this.overrides.set(list);
         this.loading.set(false);
@@ -136,7 +136,7 @@ export class TaskFlakeInputsComponent implements OnInit {
       input_name: this.form.input_name,
       url: this.form.keepUrl ? null : this.form.url,
     };
-    this.overridesService.create(this.orgName, this.taskName, body).subscribe({
+    this.overridesService.create(this.projectName, this.taskName, body).subscribe({
       next: () => {
         this.saving.set(false);
         this.showCreateDialog.set(false);
@@ -163,7 +163,7 @@ export class TaskFlakeInputsComponent implements OnInit {
       input_name: this.form.input_name,
       url: this.form.keepUrl ? null : this.form.url,
     };
-    this.overridesService.update(this.orgName, this.taskName, id, body).subscribe({
+    this.overridesService.update(this.projectName, this.taskName, id, body).subscribe({
       next: () => {
         this.saving.set(false);
         this.showEditDialog.set(false);
@@ -185,7 +185,7 @@ export class TaskFlakeInputsComponent implements OnInit {
   deleteOverride(id: string): void {
     if (!confirm('Delete this flake input override? This cannot be undone.')) return;
     this.deletingId.set(id);
-    this.overridesService.delete(this.orgName, this.taskName, id).subscribe({
+    this.overridesService.delete(this.projectName, this.taskName, id).subscribe({
       next: () => {
         this.deletingId.set(null);
         this.loadOverrides();

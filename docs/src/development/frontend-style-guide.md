@@ -92,7 +92,7 @@ Located at `frontend/src/app/styles/_grids.scss` and globally registered in
 
 ## Migrating existing forms
 
-The current login, register, profile, organization-settings,
+The current login, register, profile, project-settings,
 task-settings, cache-settings, integrations, api-keys, and admin/github-app
 components each rebuild the same `.form-group` + label + error markup by hand.
 Migrating them onto the primitives is intentionally out of scope for the

@@ -118,7 +118,7 @@ async fn build_signer<C: ConnectionTrait>(
 
 /// True iff the path is produced by at least one task and every producing
 /// task has `sign_cache=false` - mirrors the sweep's skip gate. The reserved
-/// per-org `build-request` task is always signable. Paths with no producing
+/// per-project `build-request` task is always signable. Paths with no producing
 /// task (`.drv` files, direct uploads) return false -> signed normally.
 async fn producing_tasks_all_private<C: ConnectionTrait>(db: &C, hash: &str) -> bool {
     #[derive(FromQueryResult)]

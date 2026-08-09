@@ -9,7 +9,7 @@ import { ConcurrencyPolicy, TriggerType } from './trigger.model';
 
 export interface Task {
   id: string;
-  organization: string;
+  project: string;
   name: string;
   active: boolean;
   display_name: string;

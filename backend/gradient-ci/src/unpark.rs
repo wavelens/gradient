@@ -7,20 +7,20 @@
 //! Side-effect helpers that flip parked evaluations back to `Queued` once
 //! the external condition they were waiting on clears.
 //!
-//! `NoCache` parks: triggered when the task's organisation had no writable
-//! cache subscription. Caller (`orgs/settings.rs::subscribe_cache`) invokes
-//! [`unpark_no_cache_for_org`] right after inserting the subscription row;
+//! `NoCache` parks: triggered when the task's project had no writable
+//! cache subscription. Caller (`projects/settings.rs::subscribe_cache`) invokes
+//! [`unpark_no_cache_for_project`] right after inserting the subscription row;
 //! the caller is also responsible for re-emitting the `Pending` CI status
 //! for each unparked evaluation.
 //!
 //! `Workers { connected_workers: 0 }` parks: triggered when the task's
-//! organisation had no active `eval`-capable worker registration. Caller
-//! (`orgs/workers.rs::{post,patch}_org_worker`) invokes
-//! [`unpark_no_workers_for_org`] when a registration is created or its
+//! project had no active `eval`-capable worker registration. Caller
+//! (`projects/workers.rs::{post,patch}_project_worker`) invokes
+//! [`unpark_no_workers_for_project`] when a registration is created or its
 //! `active`/`enable_eval` flags transition to `true`.
 
-use gradient_db::org_has_eval_capable_worker_registration;
-use gradient_types::ids::OrganizationId;
+use gradient_db::project_has_eval_capable_worker_registration;
+use gradient_types::ids::ProjectId;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
 
@@ -29,36 +29,36 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 
 /// Flip every evaluation parked with `WaitingReason::NoCache` for tasks in
-/// `organization` back to `Queued`. Returns the updated rows so the caller
+/// `project` back to `Queued`. Returns the updated rows so the caller
 /// can re-emit pending CI checks.
-pub async fn unpark_no_cache_for_org<C: ConnectionTrait>(
+pub async fn unpark_no_cache_for_project<C: ConnectionTrait>(
     db: &C,
-    organization: OrganizationId,
+    project: ProjectId,
 ) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
-    unpark_for_org(db, organization, |r| matches!(r, WaitingReason::NoCache)).await
+    unpark_for_project(db, project, |r| matches!(r, WaitingReason::NoCache)).await
 }
 
 /// Flip evaluations parked with `WaitingReason::CacheStorageFull` for tasks
-/// in `organization` back to `Queued`, but only when the org actually has
+/// in `project` back to `Queued`, but only when the project actually has
 /// storage headroom again. The guard prevents a churn of re-queue → re-park
-/// when nothing actionable changed (mirrors `unpark_no_workers_for_org`).
-pub async fn unpark_storage_full_for_org<C: ConnectionTrait>(
+/// when nothing actionable changed (mirrors `unpark_no_workers_for_project`).
+pub async fn unpark_storage_full_for_project<C: ConnectionTrait>(
     db: &C,
-    organization: OrganizationId,
+    project: ProjectId,
     instance_max_storage_gb: i32,
 ) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
-    if gradient_db::org_caches_all_full(db, organization, instance_max_storage_gb).await? {
+    if gradient_db::project_caches_all_full(db, project, instance_max_storage_gb).await? {
         return Ok(Vec::new());
     }
-    unpark_for_org(db, organization, |r| {
+    unpark_for_project(db, project, |r| {
         matches!(r, WaitingReason::CacheStorageFull)
     })
     .await
 }
 
-/// Scan every org with a `CacheStorageFull`-parked evaluation and unpark those
+/// Scan every project with a `CacheStorageFull`-parked evaluation and unpark those
 /// that now have headroom. Used by the background cleanup pass after NARs are
-/// freed, where there is no single triggering org.
+/// freed, where there is no single triggering project.
 pub async fn unpark_storage_full_all<C: ConnectionTrait>(
     db: &C,
     instance_max_storage_gb: i32,
@@ -68,7 +68,7 @@ pub async fn unpark_storage_full_all<C: ConnectionTrait>(
         .all(db)
         .await?;
 
-    let mut orgs: Vec<OrganizationId> = Vec::new();
+    let mut projects: Vec<ProjectId> = Vec::new();
     for eval in &parked {
         let is_storage = eval
             .waiting_reason
@@ -82,38 +82,39 @@ pub async fn unpark_storage_full_all<C: ConnectionTrait>(
             continue;
         };
         if let Some(task) = ETask::find_by_id(task_id).one(db).await?
-            && !orgs.contains(&task.organization)
+            && !projects.contains(&task.project)
         {
-            orgs.push(task.organization);
+            projects.push(task.project);
         }
     }
 
     let mut unparked = Vec::new();
-    for org in orgs {
-        unparked.extend(unpark_storage_full_for_org(db, org, instance_max_storage_gb).await?);
+    for project in projects {
+        unparked
+            .extend(unpark_storage_full_for_project(db, project, instance_max_storage_gb).await?);
     }
     Ok(unparked)
 }
 
 /// Flip every evaluation parked with `WaitingReason::Workers { connected_workers: 0 }`
-/// for tasks in `organization` back to `Queued`. The zero-workers shape
-/// is what `park_if_no_workers` writes when the org has no active
+/// for tasks in `project` back to `Queued`. The zero-workers shape
+/// is what `park_if_no_workers` writes when the project has no active
 /// `eval`-capable worker registration at all; other `Workers { .. }` parks
 /// (capability mismatch, transient runtime stall) are owned by the
 /// build-dispatch reconciler and are left alone.
 ///
-/// No-op when the organisation still has no active `eval`-capable worker
+/// No-op when the project still has no active `eval`-capable worker
 /// registration - callers in the worker endpoints invoke this unconditionally
 /// after any registration touch, and this guard prevents a churn of
 /// re-queue → reconciler re-park when nothing actionable changed.
-pub async fn unpark_no_workers_for_org<C: ConnectionTrait>(
+pub async fn unpark_no_workers_for_project<C: ConnectionTrait>(
     db: &C,
-    organization: OrganizationId,
+    project: ProjectId,
 ) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
-    if !org_has_eval_capable_worker_registration(db, organization).await? {
+    if !project_has_eval_capable_worker_registration(db, project).await? {
         return Ok(Vec::new());
     }
-    unpark_for_org(db, organization, |r| {
+    unpark_for_project(db, project, |r| {
         matches!(
             r,
             WaitingReason::Workers {
@@ -125,13 +126,13 @@ pub async fn unpark_no_workers_for_org<C: ConnectionTrait>(
     .await
 }
 
-async fn unpark_for_org<C: ConnectionTrait, F: Fn(&WaitingReason) -> bool>(
+async fn unpark_for_project<C: ConnectionTrait, F: Fn(&WaitingReason) -> bool>(
     db: &C,
-    organization: OrganizationId,
+    project: ProjectId,
     matches_reason: F,
 ) -> Result<Vec<MEvaluation>, sea_orm::DbErr> {
     let task_ids: Vec<TaskId> = ETask::find()
-        .filter(CTask::Organization.eq(organization))
+        .filter(CTask::Project.eq(project))
         .all(db)
         .await?
         .into_iter()
@@ -365,10 +366,10 @@ mod tests {
         );
     }
 
-    fn make_task(org: OrganizationId) -> gradient_entity::task::Model {
+    fn make_task(project: ProjectId) -> gradient_entity::task::Model {
         gradient_entity::task::Model {
             id: TaskId::now_v7(),
-            organization: org,
+            project: project,
             name: "p".into(),
             active: true,
             wildcard: "*".into(),
@@ -383,7 +384,7 @@ mod tests {
     fn eval_capable_registration() -> gradient_entity::worker_registration::Model {
         gradient_entity::worker_registration::Model {
             id: gradient_types::ids::WorkerRegistrationId::now_v7(),
-            peer_id: OrganizationId::nil(),
+            peer_id: ProjectId::nil(),
             worker_id: "00000000-0000-4000-8000-000000000001".into(),
             active: true,
             enable_fetch: true,
@@ -396,8 +397,8 @@ mod tests {
 
     #[tokio::test]
     async fn unpark_no_workers_requeues_zero_workers_park_and_skips_other_workers_parks() {
-        let org = OrganizationId::now_v7();
-        let task = make_task(org);
+        let project = ProjectId::now_v7();
+        let task = make_task(project);
 
         let stranded = {
             let mut e = waiting_eval(WaitingReason::workers(Vec::new(), 0, Vec::new()));
@@ -422,9 +423,9 @@ mod tests {
         requeued.waiting_reason = None;
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Gate: org has an eval-capable registration → continue
+            // Gate: project has an eval-capable registration → continue
             .append_query_results([vec![eval_capable_registration()]])
-            // Fetch org's tasks
+            // Fetch project's tasks
             .append_query_results([vec![task.clone()]])
             // Fetch Waiting evals across those tasks
             .append_query_results([vec![stranded.clone(), capability_mismatch.clone()]])
@@ -436,7 +437,7 @@ mod tests {
             }])
             .into_connection();
 
-        let out = unpark_no_workers_for_org(&db, org).await.unwrap();
+        let out = unpark_no_workers_for_project(&db, project).await.unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, stranded.id);
         assert_eq!(out[0].status, EvaluationStatus::Queued);
@@ -447,11 +448,11 @@ mod tests {
     async fn unpark_no_workers_is_noop_when_no_eval_capable_registration() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // Gate: no eval-capable registration, and no base worker enabled for
-            // this org either, so the gate returns false and unpark is a noop.
+            // this project either, so the gate returns false and unpark is a noop.
             .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
-            .append_query_results([Vec::<gradient_entity::organization_base_worker::Model>::new()])
+            .append_query_results([Vec::<gradient_entity::project_base_worker::Model>::new()])
             .into_connection();
-        let out = unpark_no_workers_for_org(&db, OrganizationId::now_v7())
+        let out = unpark_no_workers_for_project(&db, ProjectId::now_v7())
             .await
             .unwrap();
         assert!(out.is_empty());
@@ -459,8 +460,8 @@ mod tests {
 
     #[tokio::test]
     async fn unpark_storage_full_requeues_when_headroom_returns() {
-        let org = OrganizationId::now_v7();
-        let task = make_task(org);
+        let project = ProjectId::now_v7();
+        let task = make_task(project);
 
         let stranded = {
             let mut e = waiting_eval(WaitingReason::CacheStorageFull);
@@ -472,11 +473,11 @@ mod tests {
         requeued.waiting_reason = None;
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // Guard `org_caches_all_full`: no writable caches → not full.
-            .append_query_results([Vec::<gradient_entity::organization_cache::Model>::new()])
-            // unpark_for_org: org's tasks
+            // Guard `project_caches_all_full`: no writable caches → not full.
+            .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
+            // unpark_for_project: project's tasks
             .append_query_results([vec![task.clone()]])
-            // unpark_for_org: Waiting evals across those tasks
+            // unpark_for_project: Waiting evals across those tasks
             .append_query_results([vec![stranded.clone()]])
             // Update the matching row → requeued
             .append_query_results([vec![requeued.clone()]])
@@ -486,7 +487,9 @@ mod tests {
             }])
             .into_connection();
 
-        let out = unpark_storage_full_for_org(&db, org, 0).await.unwrap();
+        let out = unpark_storage_full_for_project(&db, project, 0)
+            .await
+            .unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].id, stranded.id);
         assert_eq!(out[0].status, EvaluationStatus::Queued);

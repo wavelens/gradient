@@ -120,7 +120,7 @@ async fn pass_blobs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Resul
         }
         let mut hash = [0u8; 32];
         hash.copy_from_slice(&row.hash);
-        let key = (row.organization.into_inner(), hash);
+        let key = (row.project.into_inner(), hash);
         row_keys.insert(key);
         if !on_disk_set.contains(&key) {
             match state.nar_storage.get_blob(key.0, &key.1).await {
@@ -192,7 +192,7 @@ async fn pass_logs(state: Arc<ServerState>, report: &mut DeepGcReport) -> Result
 mod tests {
     use super::*;
     use crate::cacher::test_support::test_server_state_with_log;
-    use gradient_entity::ids::{BuildRequestBlobId, OrganizationId};
+    use gradient_entity::ids::{BuildRequestBlobId, ProjectId};
     use gradient_storage::{FileLogStorage, LogStorage, NarStore};
     use gradient_test_support::log_storage::NoopLogStorage;
     use sea_orm::{DatabaseBackend, MockDatabase};
@@ -210,9 +210,9 @@ mod tests {
     async fn pass_blobs_removes_orphan_blob() {
         let tmp = tempfile::tempdir().unwrap();
         let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
-        let org = OrganizationId::now_v7();
+        let project = ProjectId::now_v7();
         let hash = [0x11u8; 32];
-        nar.put_blob(org.into_inner(), &hash, b"x".to_vec())
+        nar.put_blob(project.into_inner(), &hash, b"x".to_vec())
             .await
             .unwrap();
 
@@ -230,7 +230,7 @@ mod tests {
         assert!(
             state
                 .nar_storage
-                .get_blob(org.into_inner(), &hash)
+                .get_blob(project.into_inner(), &hash)
                 .await
                 .unwrap()
                 .is_none()
@@ -241,12 +241,12 @@ mod tests {
     async fn pass_blobs_purges_zombie_row() {
         let tmp = tempfile::tempdir().unwrap();
         let nar = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
-        let org = OrganizationId::now_v7();
+        let project = ProjectId::now_v7();
         let hash = [0x22u8; 32];
 
         let zombie = gradient_entity::build_request_blob::Model {
             id: BuildRequestBlobId::now_v7(),
-            organization: org,
+            project: project,
             hash: hash.to_vec(),
             size: 1,
             created_at: now(),

@@ -51,13 +51,13 @@ pub struct PatchWorkerRequest {
 pub struct WorkersApi<'a>(pub(crate) &'a Client);
 
 impl WorkersApi<'_> {
-    pub async fn list(&self, org: &str) -> Result<Vec<Worker>, ConnectorError> {
+    pub async fn list(&self, project: &str) -> Result<Vec<Worker>, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::GET,
-            &format!("orgs/{org}/workers"),
+            &format!("projects/{project}/workers"),
             true,
         )?;
         http::decode(req.send().await?).await
@@ -65,7 +65,7 @@ impl WorkersApi<'_> {
 
     pub async fn create(
         &self,
-        org: &str,
+        project: &str,
         body: MakeWorkerRequest,
     ) -> Result<RegisterWorkerResponse, ConnectorError> {
         let req = http::request(
@@ -73,7 +73,7 @@ impl WorkersApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::POST,
-            &format!("orgs/{org}/workers"),
+            &format!("projects/{project}/workers"),
             true,
         )?
         .json(&body);
@@ -82,7 +82,7 @@ impl WorkersApi<'_> {
 
     pub async fn update(
         &self,
-        org: &str,
+        project: &str,
         worker_id: &str,
         body: PatchWorkerRequest,
     ) -> Result<String, ConnectorError> {
@@ -91,20 +91,20 @@ impl WorkersApi<'_> {
             self.0.base_url(),
             self.0.token(),
             Method::PATCH,
-            &format!("orgs/{org}/workers/{worker_id}"),
+            &format!("projects/{project}/workers/{worker_id}"),
             true,
         )?
         .json(&body);
         http::decode(req.send().await?).await
     }
 
-    pub async fn delete(&self, org: &str, worker_id: &str) -> Result<String, ConnectorError> {
+    pub async fn delete(&self, project: &str, worker_id: &str) -> Result<String, ConnectorError> {
         let req = http::request(
             self.0.http(),
             self.0.base_url(),
             self.0.token(),
             Method::DELETE,
-            &format!("orgs/{org}/workers/{worker_id}"),
+            &format!("projects/{project}/workers/{worker_id}"),
             true,
         )?;
         http::decode(req.send().await?).await

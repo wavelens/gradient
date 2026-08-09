@@ -8,11 +8,11 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { forkJoin } from 'rxjs';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
-import { Organization, Cache } from '@core/models';
+import { Project, Cache } from '@core/models';
 
 @Component({
   selector: 'app-dashboard',
@@ -27,11 +27,11 @@ import { Organization, Cache } from '@core/models';
   styleUrl: './dashboard.component.scss',
 })
 export class DashboardComponent implements OnInit {
-  private organizationsService = inject(OrganizationsService);
+  private projectsService = inject(ProjectsService);
   private cachesService = inject(CachesService);
 
   loading = signal(true);
-  organizations = signal<Organization[]>([]);
+  projects = signal<Project[]>([]);
   caches = signal<Cache[]>([]);
 
   ngOnInit(): void {
@@ -42,11 +42,11 @@ export class DashboardComponent implements OnInit {
     this.loading.set(true);
 
     forkJoin({
-      organizations: this.organizationsService.getOrganizations(),
+      projects: this.projectsService.getProjects(),
       caches: this.cachesService.getCaches(),
     }).subscribe({
-      next: ({ organizations, caches }) => {
-        this.organizations.set(organizations.items);
+      next: ({ projects, caches }) => {
+        this.projects.set(projects.items);
         this.caches.set(caches.items);
         this.loading.set(false);
       },
@@ -57,8 +57,8 @@ export class DashboardComponent implements OnInit {
     });
   }
 
-  get recentOrganizations() {
-    return this.organizations().slice(0, 5);
+  get recentProjects() {
+    return this.projects().slice(0, 5);
   }
 
   get recentCaches() {

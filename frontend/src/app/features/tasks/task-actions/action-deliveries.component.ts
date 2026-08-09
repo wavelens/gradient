@@ -19,7 +19,7 @@ import { ActionDelivery, ActionDeliveryDetail } from '../../../core/models/actio
 export class ActionDeliveriesComponent implements OnInit {
   private actions = inject(ActionsService);
 
-  org = input.required<string>();
+  project = input.required<string>();
   task = input.required<string>();
   actionId = input.required<string>();
   closed = output<void>();
@@ -39,7 +39,7 @@ export class ActionDeliveriesComponent implements OnInit {
   loadPage() {
     this.loading.set(true);
     this.loadError.set(null);
-    this.actions.listDeliveries(this.org(), this.task(), this.actionId(), this.limit, this.offset()).subscribe({
+    this.actions.listDeliveries(this.project(), this.task(), this.actionId(), this.limit, this.offset()).subscribe({
       next: (rows) => {
         this.deliveries.set(rows);
         this.hasMore.set(rows.length === this.limit);
@@ -61,7 +61,7 @@ export class ActionDeliveriesComponent implements OnInit {
     }
     map.set(id, 'loading');
     this.expanded.set(map);
-    this.actions.getDelivery(this.org(), this.task(), this.actionId(), id).subscribe({
+    this.actions.getDelivery(this.project(), this.task(), this.actionId(), id).subscribe({
       next: (detail) => {
         const m = new Map(this.expanded());
         m.set(id, detail);

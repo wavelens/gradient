@@ -27,11 +27,11 @@ fn test_scheduler() -> Arc<Scheduler> {
     Arc::new(Scheduler::new(state))
 }
 
-fn eval_job(peer: OrganizationId) -> PendingEvalJob {
+fn eval_job(peer: ProjectId) -> PendingEvalJob {
     PendingEvalJob {
         evaluation_id: EvaluationId::now_v7(),
         task_id: None,
-        org_id: peer,
+        project_id: peer,
         commit_id: CommitId::now_v7(),
         repository: "https://example.com/repo".into(),
         job: FlakeJob {
@@ -67,7 +67,7 @@ fn eval_worker_caps() -> GradientCapabilities {
 #[tokio::test]
 async fn test_enqueue_and_get_candidates() {
     let scheduler = test_scheduler();
-    let peer = OrganizationId::now_v7();
+    let peer = ProjectId::now_v7();
 
     scheduler
         .register_worker("w1", eval_worker_caps(), HashSet::new())
@@ -93,7 +93,7 @@ async fn test_enqueue_and_get_candidates() {
 #[tokio::test]
 async fn job_notify_bump_is_not_lost_when_not_awaiting() {
     let scheduler = test_scheduler();
-    let peer = OrganizationId::now_v7();
+    let peer = ProjectId::now_v7();
 
     let mut rx = scheduler.job_notify();
     assert!(
@@ -168,8 +168,8 @@ async fn capability_update_kicks_dispatch_instead_of_reconciling_inline() {
 #[tokio::test]
 async fn test_candidates_filtered_by_authorized_peers() {
     let scheduler = test_scheduler();
-    let peer_a = OrganizationId::now_v7();
-    let peer_b = OrganizationId::now_v7();
+    let peer_a = ProjectId::now_v7();
+    let peer_b = ProjectId::now_v7();
 
     scheduler
         .register_worker("w1", eval_worker_caps(), HashSet::from([peer_a]))
@@ -190,7 +190,7 @@ async fn test_candidates_filtered_by_authorized_peers() {
 #[tokio::test]
 async fn test_score_assignment_flow() {
     let scheduler = test_scheduler();
-    let peer = OrganizationId::now_v7();
+    let peer = ProjectId::now_v7();
 
     scheduler
         .register_worker("w1", eval_worker_caps(), HashSet::new())
@@ -221,7 +221,7 @@ async fn test_score_assignment_flow() {
 #[tokio::test]
 async fn test_job_rejected_requeues() {
     let scheduler = test_scheduler();
-    let peer = OrganizationId::now_v7();
+    let peer = ProjectId::now_v7();
 
     scheduler
         .register_worker("w1", eval_worker_caps(), HashSet::new())
@@ -243,7 +243,7 @@ async fn test_job_rejected_requeues() {
 #[tokio::test]
 async fn test_worker_disconnect_requeues_jobs() {
     let scheduler = test_scheduler();
-    let peer = OrganizationId::now_v7();
+    let peer = ProjectId::now_v7();
 
     scheduler
         .register_worker("w1", eval_worker_caps(), HashSet::new())
@@ -278,8 +278,8 @@ async fn test_worker_disconnect_requeues_jobs() {
 #[tokio::test]
 async fn test_update_authorized_peers_expands_access() {
     let scheduler = test_scheduler();
-    let peer_a = OrganizationId::now_v7();
-    let peer_b = OrganizationId::now_v7();
+    let peer_a = ProjectId::now_v7();
+    let peer_b = ProjectId::now_v7();
 
     // Worker starts authorized for peer_a only.
     scheduler
@@ -306,7 +306,7 @@ async fn test_update_authorized_peers_expands_access() {
 #[tokio::test]
 async fn test_draining_worker_still_has_assigned_jobs() {
     let scheduler = test_scheduler();
-    let peer = OrganizationId::now_v7();
+    let peer = ProjectId::now_v7();
 
     scheduler
         .register_worker("w1", eval_worker_caps(), HashSet::new())
@@ -374,7 +374,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
     let eval_id = EvaluationId::now_v7();
-    let peer = OrganizationId::now_v7();
+    let peer = ProjectId::now_v7();
     let build_id = DerivationBuildId::now_v7();
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -392,7 +392,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
             PendingBuildJob {
                 derivation_build: build_id,
                 evaluation_id: eval_id,
-                org_id: peer,
+                project_id: peer,
                 job: BuildJob {
                     builds: vec![BuildSpec {
                         build_id: build_id.to_string(),
@@ -455,7 +455,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     let eval_id = EvaluationId::now_v7();
-    let peer = OrganizationId::now_v7();
+    let peer = ProjectId::now_v7();
     let source_path = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-source";
 
     let archived_eval = gradient_entity::evaluation::Model {
@@ -471,7 +471,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // register_worker resolves the worker's owning org from worker_registration;
+        // register_worker resolves the worker's owning project from worker_registration;
         // an empty result means "no registration row" and skips the connection record.
         .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
         .append_query_results([vec![archived_eval]])
@@ -529,7 +529,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
     use gradient_types::proto::{BuildJob, BuildSpec};
 
     let scheduler = test_scheduler();
-    let peer = OrganizationId::now_v7();
+    let peer = ProjectId::now_v7();
     let eval_id = EvaluationId::now_v7();
     let build_id_a = DerivationBuildId::now_v7();
     let build_id_b = DerivationBuildId::now_v7();
@@ -540,7 +540,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
             PendingEvalJob {
                 evaluation_id: eval_id,
                 task_id: None,
-                org_id: peer,
+                project_id: peer,
                 commit_id: CommitId::now_v7(),
                 repository: "https://example.com/repo".into(),
                 job: gradient_types::proto::FlakeJob {
@@ -573,7 +573,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                 PendingBuildJob {
                     derivation_build: build_id,
                     evaluation_id: eval_id,
-                    org_id: peer,
+                    project_id: peer,
                     job: BuildJob {
                         builds: vec![BuildSpec {
                             build_id: build_id.to_string(),

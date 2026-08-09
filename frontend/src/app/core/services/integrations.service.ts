@@ -18,30 +18,30 @@ import {
 export class IntegrationsService {
   private api = inject(ApiService);
 
-  listOrgIntegrations(org: string): Observable<Integration[]> {
-    return this.api.get<Integration[]>(`orgs/${org}/integrations`);
+  listProjectIntegrations(project: string): Observable<Integration[]> {
+    return this.api.get<Integration[]>(`projects/${project}/integrations`);
   }
 
-  /** Credential-free integration list available to any org member.
+  /** Credential-free integration list available to any project member.
    *  Use this for UIs that only need name/forge_type - e.g. populating the
    *  trigger create/edit dropdown - instead of the admin-gated full list. */
-  listOrgIntegrationSummaries(org: string): Observable<IntegrationSummary[]> {
-    return this.api.get<IntegrationSummary[]>(`orgs/${org}/integrations/summary`);
+  listProjectIntegrationSummaries(project: string): Observable<IntegrationSummary[]> {
+    return this.api.get<IntegrationSummary[]>(`projects/${project}/integrations/summary`);
   }
 
-  createOrgIntegration(org: string, body: CreateIntegrationRequest): Observable<Integration> {
-    return this.api.put<Integration>(`orgs/${org}/integrations`, body);
+  createProjectIntegration(project: string, body: CreateIntegrationRequest): Observable<Integration> {
+    return this.api.put<Integration>(`projects/${project}/integrations`, body);
   }
 
-  getOrgIntegration(org: string, id: string): Observable<Integration> {
-    return this.api.get<Integration>(`orgs/${org}/integrations/${id}`);
+  getProjectIntegration(project: string, id: string): Observable<Integration> {
+    return this.api.get<Integration>(`projects/${project}/integrations/${id}`);
   }
 
-  patchOrgIntegration(org: string, id: string, body: PatchIntegrationRequest): Observable<Integration> {
-    return this.api.patch<Integration>(`orgs/${org}/integrations/${id}`, body);
+  patchProjectIntegration(project: string, id: string, body: PatchIntegrationRequest): Observable<Integration> {
+    return this.api.patch<Integration>(`projects/${project}/integrations/${id}`, body);
   }
 
-  deleteOrgIntegration(org: string, id: string): Observable<boolean> {
-    return this.api.delete<boolean>(`orgs/${org}/integrations/${id}`);
+  deleteProjectIntegration(project: string, id: string): Observable<boolean> {
+    return this.api.delete<boolean>(`projects/${project}/integrations/${id}`);
   }
 }

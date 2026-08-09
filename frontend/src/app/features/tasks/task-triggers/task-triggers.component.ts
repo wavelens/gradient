@@ -15,7 +15,7 @@ import { SelectModule } from 'primeng/select';
 import { CheckboxModule } from 'primeng/checkbox';
 import { TriggersService } from '@core/services/triggers.service';
 import { IntegrationsService } from '@core/services/integrations.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -85,7 +85,7 @@ export class TaskTriggersComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private triggersService = inject(TriggersService);
   private integrationsService = inject(IntegrationsService);
-  private orgsService = inject(OrganizationsService);
+  private projectsService = inject(ProjectsService);
   private accessSvc = inject(AccessService);
 
   access = injectTaskAccess();
@@ -112,8 +112,8 @@ export class TaskTriggersComponent implements OnInit {
   firingId = signal<string | null>(null);
   fireSuccessId = signal<string | null>(null);
 
-  orgName = '';
-  orgDisplayName = signal('');
+  projectName = '';
+  projectDisplayName = signal('');
   taskName = '';
 
   triggers = signal<TaskTrigger[]>([]);
@@ -142,10 +142,10 @@ export class TaskTriggersComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
-    this.orgsService.getOrganization(this.orgName).subscribe({
-      next: (org) => this.orgDisplayName.set(org.display_name),
+    this.projectsService.getProject(this.projectName).subscribe({
+      next: (project) => this.projectDisplayName.set(project.display_name),
       error: () => {},
     });
     this.loadTriggers();
@@ -154,7 +154,7 @@ export class TaskTriggersComponent implements OnInit {
 
   loadTriggers(): void {
     this.loading.set(true);
-    this.triggersService.list(this.orgName, this.taskName).subscribe({
+    this.triggersService.list(this.projectName, this.taskName).subscribe({
       next: (list) => {
         this.triggers.set(list);
         this.loading.set(false);
@@ -164,7 +164,7 @@ export class TaskTriggersComponent implements OnInit {
   }
 
   private loadIntegrations(): void {
-    this.integrationsService.listOrgIntegrationSummaries(this.orgName).subscribe({
+    this.integrationsService.listProjectIntegrationSummaries(this.projectName).subscribe({
       next: (list) => this.inboundIntegrations.set(list.filter((i) => i.kind === 'inbound')),
       error: () => {},
     });
@@ -243,7 +243,7 @@ export class TaskTriggersComponent implements OnInit {
       config: this.buildConfig() as any,
       active: this.form.active,
     };
-    this.triggersService.create(this.orgName, this.taskName, body).subscribe({
+    this.triggersService.create(this.projectName, this.taskName, body).subscribe({
       next: () => {
         this.saving.set(false);
         this.showCreateDialog.set(false);
@@ -265,7 +265,7 @@ export class TaskTriggersComponent implements OnInit {
       config: this.buildConfig() as any,
       active: this.form.active,
     };
-    this.triggersService.update(this.orgName, this.taskName, target.id, body).subscribe({
+    this.triggersService.update(this.projectName, this.taskName, target.id, body).subscribe({
       next: () => {
         this.saving.set(false);
         this.showEditDialog.set(false);
@@ -282,7 +282,7 @@ export class TaskTriggersComponent implements OnInit {
   deleteTrigger(id: string): void {
     if (!confirm('Delete this trigger? This cannot be undone.')) return;
     this.deletingId.set(id);
-    this.triggersService.delete(this.orgName, this.taskName, id).subscribe({
+    this.triggersService.delete(this.projectName, this.taskName, id).subscribe({
       next: () => {
         this.deletingId.set(null);
         this.loadTriggers();
@@ -294,7 +294,7 @@ export class TaskTriggersComponent implements OnInit {
   fireNow(id: string): void {
     this.firingId.set(id);
     this.fireSuccessId.set(null);
-    this.triggersService.fireNow(this.orgName, this.taskName, id).subscribe({
+    this.triggersService.fireNow(this.projectName, this.taskName, id).subscribe({
       next: () => {
         this.firingId.set(null);
         this.fireSuccessId.set(id);

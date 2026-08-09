@@ -13,8 +13,8 @@ use axum::response::{IntoResponse, Response};
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use gradient_core::ServerState;
-use gradient_entity::organization_user;
-use gradient_types::{OrganizationId, RoleId, UserId};
+use gradient_entity::project_user;
+use gradient_types::{ProjectId, RoleId, UserId};
 
 use super::dto::*;
 use super::error::{SCIM_CONTENT_TYPE, ScimError, ScimResult};
@@ -29,10 +29,7 @@ fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
         .into_response()
 }
 
-fn grants<'a>(
-    state: &'a Arc<ServerState>,
-    group: &str,
-) -> Option<&'a Vec<(OrganizationId, RoleId)>> {
+fn grants<'a>(state: &'a Arc<ServerState>, group: &str) -> Option<&'a Vec<(ProjectId, RoleId)>> {
     state.scim_group_roles.get(group)
 }
 
@@ -41,10 +38,10 @@ async fn group_resource(state: &Arc<ServerState>, group: &str) -> ScimResult<Gro
     let db = state.web_db.inner();
     let mut members: Vec<GroupMember> = Vec::new();
     // A member holds every grant; the first grant is representative.
-    if let Some((org, role)) = grants.first() {
-        let rows = organization_user::Entity::find()
-            .filter(organization_user::Column::Organization.eq(*org))
-            .filter(organization_user::Column::Role.eq(*role))
+    if let Some((project, role)) = grants.first() {
+        let rows = project_user::Entity::find()
+            .filter(project_user::Column::Project.eq(*project))
+            .filter(project_user::Column::Role.eq(*role))
             .all(db)
             .await?;
         for r in rows {
@@ -176,26 +173,26 @@ fn member_ids_for_remove(op: &PatchOperation, parsed: &[String]) -> Vec<String> 
 
 async fn add_member(
     state: &Arc<ServerState>,
-    grants: &[(OrganizationId, RoleId)],
+    grants: &[(ProjectId, RoleId)],
     uid: &str,
 ) -> ScimResult<()> {
     let user_id = parse_uid(uid)?;
     let db = state.web_db.inner();
-    for (org, role) in grants {
-        let exists = organization_user::Entity::find()
-            .filter(organization_user::Column::Organization.eq(*org))
-            .filter(organization_user::Column::User.eq(user_id))
+    for (project, role) in grants {
+        let exists = project_user::Entity::find()
+            .filter(project_user::Column::Project.eq(*project))
+            .filter(project_user::Column::User.eq(user_id))
             .one(db)
             .await?;
         match exists {
             Some(m) => {
-                let mut am: organization_user::ActiveModel = m.into();
+                let mut am: project_user::ActiveModel = m.into();
                 am.role = Set(*role);
                 am.update(db).await?;
             }
             None => {
-                organization_user::ActiveModel {
-                    organization: Set(*org),
+                project_user::ActiveModel {
+                    project: Set(*project),
                     user: Set(user_id),
                     role: Set(*role),
                     ..Default::default()
@@ -211,15 +208,15 @@ async fn add_member(
 
 async fn remove_member(
     state: &Arc<ServerState>,
-    grants: &[(OrganizationId, RoleId)],
+    grants: &[(ProjectId, RoleId)],
     uid: &str,
 ) -> ScimResult<()> {
     let user_id = parse_uid(uid)?;
     let db = state.web_db.inner();
-    for (org, _role) in grants {
-        organization_user::Entity::delete_many()
-            .filter(organization_user::Column::Organization.eq(*org))
-            .filter(organization_user::Column::User.eq(user_id))
+    for (project, _role) in grants {
+        project_user::Entity::delete_many()
+            .filter(project_user::Column::Project.eq(*project))
+            .filter(project_user::Column::User.eq(user_id))
             .exec(db)
             .await?;
     }

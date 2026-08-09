@@ -7,7 +7,7 @@
 { pkgs, lib, ... }: let
   # Same fixture secrets the integration tests use; admin password is "admin_password".
   adminPwHash = pkgs.writeText "admin-pw-hash" "$argon2id$v=19$m=4096,t=3,p=1$c29tZXNhbHQxMjM0NQ$hIKBEy9SOWlnAlcwUv2PLPBdsMkKhVlCyjTxaWIK+v4";
-  orgSshKey = pkgs.writeText "org-ssh-key" ''
+  projectSshKey = pkgs.writeText "project-ssh-key" ''
     -----BEGIN OPENSSH PRIVATE KEY-----
     b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
     QyNTUxOQAAACDle/PUDDuuI9h8+ViFyHMQjqARSRhLJcYKnay7MrflOgAAAJALQNCyC0DQ
@@ -125,16 +125,16 @@ in {
             superuser = true;
           };
 
-          organizations.testorg = {
-            display_name = "MyOrganization";
-            description = "My Test Organization";
-            private_key_file = toString orgSshKey;
+          projects.testproject = {
+            display_name = "MyProject";
+            description = "My Test Project";
+            private_key_file = toString projectSshKey;
             public = true;
             created_by = "admin";
           };
 
           tasks.testtask = {
-            organization = "testorg";
+            project = "testproject";
             display_name = "MyTask";
             description = "Just a test";
             repository = "git://server/test";
@@ -152,14 +152,14 @@ in {
           caches.testcache = {
             display_name = "MyCache";
             signing_key_file = toString cacheSigningKey;
-            organizations = [ "testorg" ];
+            projects = [ "testproject" ];
             public = true;
             created_by = "admin";
           };
 
           workers.devworker = {
             worker_id = "a0000000-0000-0000-0000-000000000001";
-            organizations = [ "testorg" ];
+            projects = [ "testproject" ];
             token_file = toString workerToken;
             display_name = "Dev Worker";
             created_by = "admin";

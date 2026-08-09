@@ -28,7 +28,7 @@ export interface Worker {
   display_name: string;
   managed: boolean;
   active: boolean;
-  /** True when this is a state-managed base worker shared across orgs; `active` then means enabled for this org. */
+  /** True when this is a state-managed base worker shared across projects; `active` then means enabled for this project. */
   is_base: boolean;
   registered_at?: string;
   /** WebSocket URL where the worker accepts incoming server connections. */
@@ -54,6 +54,6 @@ export interface WorkerRegistration {
 export interface WorkerTestResponse {
   ok: boolean;
   connected: boolean;
-  authorized_for_org: boolean;
+  authorized_for_project: boolean;
   message: string;
 }

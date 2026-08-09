@@ -1,7 +1,7 @@
 # Forge Integration
 
 Gradient connects to a Git forge through named **integrations** owned by each
-organization. An integration is either **inbound** (the forge pushes events to
+project. An integration is either **inbound** (the forge pushes events to
 Gradient) or **outbound** (Gradient reports build status back). Each task
 links to at most one inbound and one outbound integration.
 
@@ -12,11 +12,11 @@ GitHub App).
 
 In the Gradient UI:
 
-1. Open your organization → **Integrations**.
+1. Open your project → **Integrations**.
 2. Click **New integration**.
 3. Fill in:
     - **Name** - short slug (`production`, `gitea-status`, ...); must be unique
-      within the organization and kind.
+      within the project and kind.
     - **Kind** - *Inbound* (Gradient receives webhooks) or *Outbound*
       (Gradient calls the forge API).
     - **Forge type** - Gitea / Forgejo / GitLab / GitHub. For GitHub, also
@@ -41,10 +41,10 @@ GitHub integrations are created by entering a GitHub App **Installation ID**
 in the New Integration form (select `forge_type: github`). The server validates
 the id against the configured App and creates an inbound and outbound pair
 automatically, named `github-<account>` (e.g. `github-acme-corp`). Multiple
-installations per org are supported - one per GitHub account.
+installations per project are supported - one per GitHub account.
 
 The install webhook also auto-creates these pairs when the App is installed on
-a GitHub account whose repos match an existing org task.
+a GitHub account whose repos match an existing project task.
 
 GitHub rows can be **deleted** to remove the binding, but cannot be edited
 (PATCH returns `400`). Reference them from task triggers (inbound) and
@@ -54,13 +54,13 @@ task `outbound_integration` (outbound) like any other integration.
 
 To report build status back to a forge, create a `forge_status_report` action on the task (see [Actions](./actions.md)).
 
-When a task is created and its repository URL unambiguously matches one of the organization's integrations, Gradient auto-attaches the wiring: a push trigger for the matching inbound integration and a `forge_status_report` action for the matching outbound integration (at most one of each). Ambiguous matches are left for manual setup.
+When a task is created and its repository URL unambiguously matches one of the project's integrations, Gradient auto-attaches the wiring: a push trigger for the matching inbound integration and a `forge_status_report` action for the matching outbound integration (at most one of each). Ambiguous matches are left for manual setup.
 
 ## 3. Configure the forge webhook
 
 ### Gitea / Forgejo
 
-Repository or organization webhook → `POST` → `application/json`, URL from
+Repository or project webhook → `POST` → `application/json`, URL from
 Gradient, secret = the integration's secret. Under **Trigger On** choose
 *Custom Events* (or *Send everything*) and enable **Push**, **Pull Request**,
 **Issue Comment**, **Pull Request Comment**, **Pull Request Review**, and
@@ -87,16 +87,16 @@ Gradient server. There are three roles to consider:
 1. **Server operator** - once per Gradient instance, register the App and put
    its credentials into the server's config. See the
    [GitHub App setup](../development/github-app-setup.md) operator doc.
-2. **Organization admin** - once the server has the App configured, install the
-   App on the organization's GitHub account.
+2. **Project admin** - once the server has the App configured, install the
+   App on the project's GitHub account.
 3. **GitHub repository owner** - installing the App fires the `installation`
    webhook, which carries the list of granted repositories. Gradient writes a
-   `github_installation` row for every org owning a task whose repository URL
+   `github_installation` row for every project owning a task whose repository URL
    resolves to one of those repositories, and seeds the `github-<account>`
    inbound + outbound integration pair. Matching is purely on the repository URL:
-   the organization name and the Gradient task name need not match GitHub, and
+   the project name and the Gradient task name need not match GitHub, and
    the flake shorthand (`github:owner/repo`) is recognized alongside the https
-   and SSH clone URLs. Multiple installations per org are supported (one per
+   and SSH clone URLs. Multiple installations per project are supported (one per
    GitHub account). Subsequent push / pull-request deliveries route to the
    corresponding integration pair, and tasks can link to the outbound row to
    enable status reporting.
@@ -118,7 +118,7 @@ From the Integrations page:
 All inbound webhook URLs have the form:
 
 ```text
-{serveUrl}/api/v1/hooks/{forge}/{organization}/{integration_name}
+{serveUrl}/api/v1/hooks/{forge}/{project}/{integration_name}
 ```
 
 where `{forge}` is `gitea`, `forgejo`, or `gitlab`. GitHub deliveries go
@@ -130,7 +130,7 @@ segment.
 
 ### Webhook response body
 
-Both `POST /api/v1/hooks/{forge}/{org}/{integration_name}` and `POST /api/v1/hooks/github`
+Both `POST /api/v1/hooks/{forge}/{project}/{integration_name}` and `POST /api/v1/hooks/github`
 return the standard envelope with a `WebhookResponse` payload describing what happened:
 
 ```json
@@ -144,7 +144,7 @@ return the standard envelope with a `WebhookResponse` payload describing what ha
       {
         "task_id": "...",
         "task_name": "widgets",
-        "organization": "acme",
+        "project": "acme",
         "evaluation_id": "..."
       }
     ],
@@ -152,7 +152,7 @@ return the standard envelope with a `WebhookResponse` payload describing what ha
       {
         "task_id": "...",
         "task_name": "widgets-staging",
-        "organization": "acme",
+        "project": "acme",
         "reason": "already_in_progress"
       }
     ]
@@ -176,7 +176,7 @@ deliveries whose source IP does not match are rejected with
 `403 forbidden_source_ip` after signature verification succeeds. An empty or
 omitted list allows any source.
 
-For the per-forge route (`POST /hooks/{forge}/{org}/{integration_name}`) the
+For the per-forge route (`POST /hooks/{forge}/{project}/{integration_name}`) the
 check applies to the resolved client IP. For the GitHub App route
 (`POST /hooks/github`), the check is applied per-installation: integrations
 whose allowlist rejects the source IP are simply skipped, while integrations
@@ -197,7 +197,7 @@ honored only when the peer is in `GRADIENT_NETWORK_TRUSTED_PROXIES`.
 |-----------------------------------|-------------------------------------------------------------------------------------------------|
 | `401 Unauthorized` in delivery log | Secret mismatch - re-copy the secret from Gradient or rotate and reconfigure the forge.         |
 | `403 forbidden_source_ip`          | The forge's egress IP isn't in the integration's `allowed_ips` list. Add it or clear the list.   |
-| `404 Not Found`                   | Wrong organization or integration name in the URL, or `{forge}=github` (use the App webhook).   |
+| `404 Not Found`                   | Wrong project or integration name in the URL, or `{forge}=github` (use the App webhook).   |
 | `200 OK` but no evaluation runs   | No task links to this inbound integration, or the repository URL doesn't match any task.  |
 | PR CI or `/gradient` comments never fire | The forge webhook is push-only. Enable PR/merge-request, comment/note, and review events (see [Configure the forge webhook](#3-configure-the-forge-webhook)). |
 | `503 Service Unavailable`         | The integration row has no secret set yet - paste or generate one on the Integrations page.     |

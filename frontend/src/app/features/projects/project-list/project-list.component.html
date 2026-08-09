@@ -1,0 +1,188 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1>Projects</h1>
+      <p class="text-secondary">Manage your projects</p>
+    </div>
+    @if (canCreateProject) {
+      <button pButton label="Create Project" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+    }
+  </div>
+
+  @if (loading()) {
+    <app-loading-spinner message="Loading projects..." />
+  } @else {
+    @if (projects().length > 0) {
+      <div class="project-grid">
+        @for (project of projects(); track project.id) {
+          <a [routerLink]="['/project', project.name]" class="project-card">
+            <div class="project-icon">
+              <span class="material-symbols-outlined">corporate_fare</span>
+            </div>
+            <div class="project-content">
+              <h3>{{ project.display_name || project.name }}</h3>
+              <p class="text-secondary">{{ project.description || 'No description' }}</p>
+              <div class="project-badges">
+                @if (project.role) {
+                  <span class="role-badge" [class.owner]="project.role === 'Admin'">
+                    {{ project.role }}
+                  </span>
+                }
+                @if (project.public) {
+                  <span class="role-badge public-badge">Public</span>
+                }
+                @if (project.running_evaluations && project.running_evaluations > 0) {
+                  <span class="activity-badge">
+                    <span class="material-symbols-outlined spinning">sync</span>
+                    {{ project.running_evaluations }} running
+                  </span>
+                }
+              </div>
+            </div>
+            <div class="project-arrow">
+              <span class="material-symbols-outlined">arrow_forward</span>
+            </div>
+          </a>
+        }
+      </div>
+    } @else {
+      <app-empty-state
+        icon="corporate_fare"
+        title="No projects yet"
+        [message]="authService.isAuthenticated() ? 'Create your first project to get started with Gradient' : 'No projects have been created yet'"
+        [actionLabel]="authService.isAuthenticated() ? 'Create Project' : ''"
+        (actionClick)="authService.isAuthenticated() && openCreateDialog()"
+      />
+    }
+  }
+
+  @if (publicLoading() && !loading()) {
+    <app-loading-spinner message="Loading public projects..." />
+  } @else if (filteredPublicProjects.length > 0) {
+    <div class="section-header discover-header">
+      <h2>Discover Public Projects</h2>
+    </div>
+    <div class="project-grid">
+      @for (project of filteredPublicProjects; track project.id) {
+        <a [routerLink]="['/project', project.name]" class="project-card">
+          <div class="project-icon">
+            <span class="material-symbols-outlined">public</span>
+          </div>
+          <div class="project-content">
+            <h3>{{ project.display_name || project.name }}</h3>
+            <p class="text-secondary">{{ project.description || 'No description' }}</p>
+            <span class="role-badge public-badge">Public</span>
+          </div>
+          <div class="project-arrow">
+            <span class="material-symbols-outlined">arrow_forward</span>
+          </div>
+        </a>
+      }
+    </div>
+  }
+</div>
+
+<!-- Create Project Dialog -->
+<p-dialog
+  header="Create Project"
+  [(visible)]="showCreateDialog"
+  [modal]="true"
+  [style]="{ width: '500px' }"
+  [draggable]="false"
+  [resizable]="false"
+>
+  @if (createError()) {
+    <div class="dialog-error">
+      <span class="material-symbols-outlined">error</span>
+      {{ createError() }}
+    </div>
+  }
+  <div class="dialog-content">
+    <div class="form-group">
+      <label for="display_name">Display Name *</label>
+      <input
+        pInputText
+        id="display_name"
+        [(ngModel)]="newProject.display_name"
+        placeholder="My Project"
+        class="w-full"
+        (ngModelChange)="onProjectDisplayNameChange($event)"
+        (keyup.enter)="createProject()"
+      />
+    </div>
+
+    <div class="form-group">
+      <label for="name">Name *</label>
+      <div class="name-input-wrapper">
+        <input
+          pInputText
+          id="name"
+          [(ngModel)]="newProject.name"
+          placeholder="project-name"
+          class="w-full"
+          (ngModelChange)="onProjectNameChange($event)"
+          (input)="onProjectNameUserInput()"
+          (keyup.enter)="createProject()"
+        />
+        @if (nameCheckState() === 'checking') {
+          <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
+        } @else if (nameCheckState() === 'available') {
+          <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
+        } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
+          <span class="name-check-icon taken"><span class="material-symbols-outlined">close</span></span>
+        }
+      </div>
+      @if (nameCheckState() === 'taken') {
+        <small class="text-danger">This name is already taken.</small>
+      } @else if (nameCheckState() === 'invalid') {
+        <small class="text-danger">Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.</small>
+      } @else {
+        <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
+      }
+    </div>
+
+    <div class="form-group">
+      <label for="description">Description</label>
+      <textarea
+        pInputTextarea
+        id="description"
+        [(ngModel)]="newProject.description"
+        placeholder="Describe your project..."
+        rows="3"
+        class="w-full"
+      ></textarea>
+    </div>
+
+    <div class="form-group">
+      <label for="visibility">Visibility</label>
+      <select id="visibility" [(ngModel)]="newProject.public" class="role-select w-full">
+        <option [ngValue]="false">Private</option>
+        <option [ngValue]="true">Public</option>
+      </select>
+      <small class="text-secondary">Public projects are visible to all users</small>
+    </div>
+  </div>
+
+  <ng-template pTemplate="footer">
+    <button
+      pButton
+      label="Cancel"
+      severity="secondary"
+      (click)="showCreateDialog.set(false)"
+      [disabled]="creating()"
+    ></button>
+    <button
+      pButton
+      label="Create"
+      (click)="createProject()"
+      [disabled]="!newProject.name || !newProject.display_name || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
+      [loading]="creating()"
+    ></button>
+  </ng-template>
+</p-dialog>

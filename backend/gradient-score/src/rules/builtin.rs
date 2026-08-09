@@ -334,12 +334,12 @@ impl ScoreRule for RescoreWaitRule {
 mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, ScoredJob};
-    use gradient_types::ids::OrganizationId;
+    use gradient_types::ids::ProjectId;
 
     fn build_job(arch: &'static str) -> ScoredJob<'static> {
         ScoredJob::new_build(
             "test",
-            OrganizationId::now_v7(),
+            ProjectId::now_v7(),
             arch,
             false,
             false,
@@ -350,12 +350,7 @@ mod tests {
     }
 
     fn eval_job(fetch_flake: bool) -> ScoredJob<'static> {
-        ScoredJob::new_eval(
-            "test",
-            OrganizationId::now_v7(),
-            fetch_flake,
-            Default::default(),
-        )
+        ScoredJob::new_eval("test", ProjectId::now_v7(), fetch_flake, Default::default())
     }
 
     fn worker<'a>(archs: &'a [String], fetch: bool) -> WorkerContext<'a> {
@@ -389,7 +384,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -400,7 +395,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -432,7 +427,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -443,7 +438,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -475,7 +470,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -486,7 +481,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -497,7 +492,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -527,7 +522,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -538,7 +533,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -580,7 +575,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -614,7 +609,7 @@ mod tests {
             dependency_count: 1,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -625,7 +620,7 @@ mod tests {
             dependency_count: 15,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -657,7 +652,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -668,7 +663,7 @@ mod tests {
             dependency_count: 5,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -699,7 +694,7 @@ mod tests {
             dependency_count: 100_000,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -722,7 +717,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -733,7 +728,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now - chrono::Duration::seconds(60),
             ready_at: now - chrono::Duration::seconds(60),
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -744,7 +739,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now - chrono::Duration::seconds(10_000),
             ready_at: now - chrono::Duration::seconds(10_000),
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -786,7 +781,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -797,7 +792,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 4,
             now,
         };
@@ -808,7 +803,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -819,7 +814,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -877,7 +872,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -888,7 +883,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };
@@ -899,7 +894,7 @@ mod tests {
             dependency_count: 0,
             queued_at: now,
             ready_at: now,
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now,
         };

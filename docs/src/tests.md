@@ -186,7 +186,7 @@ Gitea/GitLab prefer `username` over `login`, and the PR number comes from
 `visible_cache_condition_includes_owned_and_subscribed` and
 `visible_cache_condition_owner_only_without_memberships` cover the single
 visibility filter `GET /caches` now shares with the access layer (owned caches
-plus org-subscribed ones). The paginated envelope is decoded end to end by the
+plus project-subscribed ones). The paginated envelope is decoded end to end by the
 CLI connector tests `caches_api::list_caches_decodes_paginated` and
 `completion::cache_names_returns_names_and_respects_prefix`.
 
@@ -426,8 +426,8 @@ cannot silently ignore a dimension.
 - `unmeasured_build_is_vetoed_not_penalized` - the rescore hold is an explicit
   veto recorded in `ScoreBreakdown.vetoes`, not a -1000 penalty a large
   unrelated bonus could out-vote.
-- `org_work_share_is_unconsumed_while_fair_share_is_disabled` - the live
-  policies do not ask the scheduler to compute the O(active builds) org share
+- `project_work_share_is_unconsumed_while_fair_share_is_disabled` - the live
+  policies do not ask the scheduler to compute the O(active builds) project share
   while `FairShareRule` ships disabled in the declarative rule table.
 
 `backend/gradient-score/src/rules/builtin.rs`:
@@ -523,34 +523,34 @@ it - a `Completed` anchor reused by a later evaluation keeps a retrievable log.
 `gradient-cache/src/cacher/deep_gc.rs`: `pass_logs_removes_orphan_log` remains the
 backstop, deleting any `log_storage` object whose `build_attempt` row is gone.
 
-## GitHub App installation org-binding
+## GitHub App installation project-binding
 
 `backend/gradient-web/src/endpoints/forge_hooks/installation.rs`:
 `github_full_name_parses_every_url_form`, `github_full_name_rejects_non_github_hosts`,
 and `installation_payload_collects_full_names_from_both_arrays` (in the sibling
 `payloads.rs`) cover the binding
-of an `installation` / `installation_repositories` webhook to every org owning a
+of an `installation` / `installation_repositories` webhook to every project owning a
 task whose repository URL resolves to one of the payload's repositories. The
 match is purely on the parsed `owner/repo`, so the flake shorthand
 (`github:owner/repo`) binds the same as the https / SSH clone URLs; previously the
-matcher keyed off a literal `github.com` substring and an org-name equals login
-fallback, so a `github:`-form task (and any org not named after the account)
-left the org without a `github_installation` row.
+matcher keyed off a literal `github.com` substring and a project-name equals login
+fallback, so a `github:`-form task (and any project not named after the account)
+left the project without a `github_installation` row.
 
 `github_installation.created_at` must be `TIMESTAMP` to match the entity's
 `NaiveDateTime`; the create migration originally typed it `TIMESTAMPTZ`, so every
-read (e.g. `PUT /orgs/{org}/integrations`) failed to decode the column (#449).
+read (e.g. `PUT /projects/{project}/integrations`) failed to decode the column (#449).
 `m20260620_000004` converts the column in place on already-migrated installs
 (conditional on the current type, so it is a no-op once `TIMESTAMP`). Verified by
 E2E CI against real PostgreSQL; sea-orm `MockDatabase` cannot reproduce the
 column-type decode error.
 
 `event_repo_matches_task_is_host_agnostic_on_owner_repo`,
-`event_repo_rejects_a_sibling_repo_in_the_same_org`,
+`event_repo_rejects_a_sibling_repo_in_the_same_project`,
 `event_repo_empty_urls_match_every_task`, and
 `event_repo_unparsable_task_never_matches` cover the fan-out repo gate: an
-org-wide inbound integration (a GitHub App installation spans every repo in the
-org) must fire only triggers whose task tracks the repository the webhook
+project-wide inbound integration (a GitHub App installation spans every repo in the
+project) must fire only triggers whose task tracks the repository the webhook
 event came from. Matching is host-agnostic on `owner/repo`. Without it a push/PR
 to one repo fanned out to sibling tasks, whose eval carried the wrong repo's
 commit and made the reporter post a check-run for a SHA absent from the task's
@@ -588,7 +588,7 @@ instead of silently returning, making the "nothing happened" case diagnosable.
 Frontend (`pnpm --dir frontend exec ng test --include='**/eval-status-badge.component.spec.ts' --watch=false`):
 - shared `EvalStatusBadgeComponent` collapses `Evaluating*` to `Evaluating`,
   applies the success class for `Completed`, spins a running icon, and pulses a
-  queued icon. Reused by the organization detail list and the task detail
+  queued icon. Reused by the project detail list and the task detail
   title (one source of truth for the eval status tag).
 
 Frontend (`**/task-detail.component.spec.ts`):
@@ -601,7 +601,7 @@ Frontend (`**/task-detail.component.spec.ts`):
 
 Frontend (`**/task-actions.component.spec.ts`):
 - `includes a Settings link in the breadcrumb` - Actions breadcrumb is now
-  `[Org] / [Task] / Settings / Actions`.
+  `[Project] / [Task] / Settings / Actions`.
 
 ## Forge action "Test" button connectivity probe
 
@@ -635,7 +635,7 @@ brittle per-query `MockDatabase` unit test; the closure-filter itself is a plain
 `backend/gradient-web/src/endpoints/tasks/auto_attach.rs`: `host_parsing_covers_url_shapes`,
 `self_hosted_pairs_inbound_and_outbound`, `public_github_matches_by_forge_type`,
 `ambiguous_inbound_is_skipped`, and `unrelated_forge_does_not_match` cover the
-repository-URL → org-integration matcher that auto-attaches a push trigger and a
+repository-URL → project-integration matcher that auto-attaches a push trigger and a
 status-report action on task creation.
 
 `backend/gradient-forge/src/webhook.rs`: `github_push_extracts_commit_subject_and_author`,
@@ -679,21 +679,21 @@ a banner when draining, and the button click calls `AdminService.setDraining(tru
 
 ## Base workers (#115)
 
-`backend/gradient-db/src/` - `base_worker_db_helpers` tests cover inserting and querying `base_worker` rows, the `eval_gate` fallback (base workers bypass the per-org eval gate when `authorize_against` is set), and the `enabled` global flag filtering.
+`backend/gradient-db/src/` - `base_worker_db_helpers` tests cover inserting and querying `base_worker` rows, the `eval_gate` fallback (base workers bypass the per-project eval gate when `authorize_against` is set), and the `enabled` global flag filtering.
 
-`backend/gradient-proto/` - `base_worker_auth` tests cover the auth-challenge path for a base worker: wildcard `*` handshake succeeds, per-org scope is rejected when `authorize_against` forces a fixed identity, and a base worker with no connected orgs is rejected with an appropriate error.
+`backend/gradient-proto/` - `base_worker_auth` tests cover the auth-challenge path for a base worker: wildcard `*` handshake succeeds, per-project scope is rejected when `authorize_against` forces a fixed identity, and a base worker with no connected projects is rejected with an appropriate error.
 
-`backend/gradient-state/` - `state_validation` tests that a non-base worker with an empty `organizations` list fails validation, and that `base_worker = true` with an empty list is accepted. `state_provisioning` asserts that pre-enabled orgs listed under a base worker get `worker_registration` rows at provision time.
+`backend/gradient-state/` - `state_validation` tests that a non-base worker with an empty `projects` list fails validation, and that `base_worker = true` with an empty list is accepted. `state_provisioning` asserts that pre-enabled projects listed under a base worker get `worker_registration` rows at provision time.
 
-`backend/web/` - `list_workers_includes_is_base` asserts the union query marks base-worker rows `is_base: true`; `patch_enable_disable_base_worker` verifies that org members can toggle a base worker on/off but PATCH with `display_name` or `enable_fetch` is rejected (405); `fire_test_endpoint` tests the `POST /orgs/{org}/workers/{id}/test` response shape for connected/disconnected and authorized/unauthorized states.
+`backend/web/` - `list_workers_includes_is_base` asserts the union query marks base-worker rows `is_base: true`; `patch_enable_disable_base_worker` verifies that project members can toggle a base worker on/off but PATCH with `display_name` or `enable_fetch` is rejected (405); `fire_test_endpoint` tests the `POST /projects/{project}/workers/{id}/test` response shape for connected/disconnected and authorized/unauthorized states.
 
-`frontend/src/app/organizations/workers/` - `workers.component.spec.ts` covers rendering of `is_base` badge, the enable/disable toggle emitting the correct PATCH body, and that the edit/delete actions are absent for base-worker rows.
+`frontend/src/app/projects/workers/` - `workers.component.spec.ts` covers rendering of `is_base` badge, the enable/disable toggle emitting the correct PATCH body, and that the edit/delete actions are absent for base-worker rows.
 
-`nix/tests/gradient/api` - E2E NixOS VM test provisions a base worker via state, calls `GET /orgs/{org}/workers` and asserts `is_base: true` in the response, then calls `POST /orgs/{org}/workers/{id}/test` and checks `ok: true`.
+`nix/tests/gradient/api` - E2E NixOS VM test provisions a base worker via state, calls `GET /projects/{project}/workers` and asserts `is_base: true` in the response, then calls `POST /projects/{project}/workers/{id}/test` and checks `ok: true`.
 
 ## State export includes base workers (#405)
 
-`backend/gradient-state/src/export.rs` - `export_base_worker_emits_flag_orgs_and_authorize_against` asserts the exporter reconstructs a base worker as a `StateWorker` with `base_worker = true`, the `enabled` and `enable_*` gates, the stringified `authorize_against` UUID, and only the orgs linked via `organization_base_worker` (other base workers' links excluded); `token_file` stays blank because it cannot be recovered from the stored hash.
+`backend/gradient-state/src/export.rs` - `export_base_worker_emits_flag_projects_and_authorize_against` asserts the exporter reconstructs a base worker as a `StateWorker` with `base_worker = true`, the `enabled` and `enable_*` gates, the stringified `authorize_against` UUID, and only the projects linked via `project_base_worker` (other base workers' links excluded); `token_file` stays blank because it cannot be recovered from the stored hash.
 
 ## Scoring rule descriptions (#403)
 
@@ -710,10 +710,10 @@ a banner when draining, and the button click calls `AdminService.setDraining(tru
 
 ## Wildcard attr tolerance + fair-share idle gate (#419)
 
-A wildcard (`*`/`#`) legitimately spans attrs that aren't buildable derivations, so an attr a wildcard simply doesn't match is skipped, and a pinpointed target that matches nothing surfaces a `matched no derivations` error. A wildcard-matched attr that *throws* when forced, however, is now always surfaced as an eval error (see Thrown-attribute eval errors below) rather than skipped silently. The `FairShareRule` penalty now applies only when every worker is busy, so a lone busy org is never penalized below the dispatcher's zero floor into leaving the cluster idle.
+A wildcard (`*`/`#`) legitimately spans attrs that aren't buildable derivations, so an attr a wildcard simply doesn't match is skipped, and a pinpointed target that matches nothing surfaces a `matched no derivations` error. A wildcard-matched attr that *throws* when forced, however, is now always surfaced as an eval error (see Thrown-attribute eval errors below) rather than skipped silently. The `FairShareRule` penalty now applies only when every worker is busy, so a lone busy project is never penalized below the dispatcher's zero floor into leaving the cluster idle.
 
 - `backend/gradient-worker/src/executor/eval.rs`: `explicit_attr_set_keeps_only_wildcard_free_includes` asserts only wildcard-free, non-exclusion patterns count as explicit (quoted dots collapse to the discovered path form).
-- `backend/gradient-score/src/rules/fair_share.rs`: `idle_capacity_lifts_penalty` asserts a busy org is rationed when `idle_workers == 0` but not penalized when a worker is idle.
+- `backend/gradient-score/src/rules/fair_share.rs`: `idle_capacity_lifts_penalty` asserts a busy project is rationed when `idle_workers == 0` but not penalized when a worker is idle.
 
 The scheduler also keeps a bounded ring of recent dispatch decisions - every scored candidate, including the rejected/negative ones the dispatcher passed over - exposed at `GET /board/jobs/decisions` (superuser-only) and surfaced by a Live Jobs "incl. rejected" dropdown so operators can see all scores while tuning rules.
 
@@ -739,11 +739,11 @@ Aborting an evaluation parks it as `Waiting` with `WaitingReason::Aborting` befo
 
 ## Worker shadows base worker of same id (#407)
 
-`backend/gradient-web/src/endpoints/orgs/workers.rs` - `registration_shadows_base_worker_of_same_id` asserts `unshadowed_base_workers` drops a base worker whose `worker_id` matches one of the org's normal registrations, so `GET /orgs/{org}/workers` lists the conflicting worker only once (as the org registration). `delete_org_worker` deletes the registration first, so the normal worker is removed even when a base worker shares its id, and the `409` base-worker guard fires only when no registration exists.
+`backend/gradient-web/src/endpoints/projects/workers.rs` - `registration_shadows_base_worker_of_same_id` asserts `unshadowed_base_workers` drops a base worker whose `worker_id` matches one of the project's normal registrations, so `GET /projects/{project}/workers` lists the conflicting worker only once (as the project registration). `delete_project_worker` deletes the registration first, so the normal worker is removed even when a base worker shares its id, and the `409` base-worker guard fires only when no registration exists.
 
 ## Global derivation build identity (build-once anchors)
 
-A derivation is built exactly once across all evaluations and organisations.
+A derivation is built exactly once across all evaluations and projects.
 State lives on a `derivation_build` anchor (1:1 with the content-addressed
 `derivation`, `UNIQUE(derivation)`); each evaluation links to it through a
 per-eval `build_job`, and `Created → Queued` promotion is driven by the global
@@ -828,8 +828,8 @@ claimed on first login, while password-bearing or already-bound accounts are
 not.
 
 OIDC group → role mapping (issue #322) is covered by
-`core` `state::tests::resolves_group_to_org_role_grants` (declared `oidc_group`
-lists resolve to `(organization, role)` grants) and
+`core` `state::tests::resolves_group_to_project_role_grants` (declared `oidc_group`
+lists resolve to `(project, role)` grants) and
 `oidc.rs::tests::collects_distinct_grants_for_presented_groups` (a user's group
 claims collect the distinct grants applied additively on login).
 ## Unified resource access - `crate::access` and `crate::permissions`
@@ -846,30 +846,30 @@ two modules:
   decides authorization from a role row's `permission` column, so custom
   roles configured at runtime require no code change at the call sites.
   The web crate re-exports this module as `web::permissions`.
-- `backend/web/src/access.rs` - exposes `load_org`, `load_task`,
-  `load_cache`, `load_webhook_in_org`, `load_integration_in_org`, plus the
-  predicates `is_org_member` / `has_permission` and the new
+- `backend/web/src/access.rs` - exposes `load_project`, `load_task`,
+  `load_cache`, `load_webhook_in_project`, `load_integration_in_project`, plus the
+  predicates `is_project_member` / `has_permission` and the new
   `load_membership_with_permissions` helper that loads the membership row
   alongside the role's permission bitmask in one logical step. Each loader
-  takes an access policy enum (`OrgAccess`, `TaskAccess`, `CacheAccess`)
+  takes an access policy enum (`ProjectAccess`, `TaskAccess`, `CacheAccess`)
   so handlers declare *what level of access they need* rather than stitching
   together ad-hoc lookup + permission + state-managed checks.
 
 Unit tests in `access.rs` cover the role matrix and the managed-resource
 guard:
 
-- `org_admin_passes` - admin role + permission grants the resource.
-- `org_admin_view_role_forbidden` - view role + admin-required permission →
+- `project_admin_passes` - admin role + permission grants the resource.
+- `project_admin_view_role_forbidden` - view role + admin-required permission →
   `WebError::Forbidden`.
-- `org_admin_managed_forbidden` - state-managed org rejected for mutating
+- `project_admin_managed_forbidden` - state-managed project rejected for mutating
   permissions.
-- `org_admin_non_member_not_found` - non-member → `WebError::NotFound`
+- `project_admin_non_member_not_found` - non-member → `WebError::NotFound`
   (no leak between "missing" and "not a member").
-- `org_writable_write_role_passes` / `org_writable_view_role_forbidden` -
+- `project_writable_write_role_passes` / `project_writable_view_role_forbidden` -
   write-tier permission honors Admin+Write but rejects View.
-- `org_member_view_role_passes` - `OrgAccess::Member` accepts any role.
-- `org_readable_public_visible_to_anon` /
-  `org_readable_private_invisible_to_anon` - visibility rule for anonymous
+- `project_member_view_role_passes` - `ProjectAccess::Member` accepts any role.
+- `project_readable_public_visible_to_anon` /
+  `project_readable_private_invisible_to_anon` - visibility rule for anonymous
   callers.
 - `task_editable_admin_passes` / `task_editable_view_forbidden` /
   `task_editable_managed_forbidden` / `task_missing_returns_task_label` -
@@ -889,13 +889,13 @@ Unit tests in `permissions.rs` (in `core`) lock the bitmask invariants:
 - `admin_mask_grants_everything` - Admin's canonical mask covers
   `Permission::ALL`.
 - `write_mask_excludes_admin_only_perms` - Write retains task/webhook
-  management but cannot manage members, roles, or org settings.
+  management but cannot manage members, roles, or project settings.
 - `view_mask_cannot_edit_tasks_or_webhooks` - View is read-only on
   sensitive surfaces.
 - `empty_mask_grants_nothing` - defensive: a role with `permission = 0`
   authorizes nothing.
 - `mask_round_trips_through_vec` - `mask_to_vec` and `mask_from` are inverses.
-- `view_org_is_not_mutating` / `is_builtin_role_recognises_seed_uuids`.
+- `view_project_is_not_mutating` / `is_builtin_role_recognises_seed_uuids`.
 
 Run with: `cargo test -p web --lib access::tests`
 and `cargo test -p core --lib permissions::tests`.
@@ -904,14 +904,14 @@ and `cargo test -p core --lib permissions::tests`.
 
 Issue #103 / #81 wired a DB-backed permission system: every role row carries
 an `i64` bitmask in `role.permission`, capability authorization is a single
-`mask & Permission::bit() != 0`, and a new `/orgs/{org}/roles` endpoint
-family exposes CRUD for org-scoped custom roles.
+`mask & Permission::bit() != 0`, and a new `/projects/{project}/roles` endpoint
+family exposes CRUD for project-scoped custom roles.
 
 Integration tests in `backend/web/tests/roles_crud.rs` exercise the full API
 through `axum_test::TestServer` + `MockDatabase`:
 
-- `list_roles_returns_builtins_plus_custom` - `GET /orgs/{org}/roles` is
-  visible to any member and returns the three built-ins, all org-scoped
+- `list_roles_returns_builtins_plus_custom` - `GET /projects/{project}/roles` is
+  visible to any member and returns the three built-ins, all project-scoped
   custom roles, and an `available_permissions` catalogue derived from
   `Permission::ALL`.
 - `create_role_persists_permission_bitmask` - `POST` resolves the wire-form
@@ -923,7 +923,7 @@ through `axum_test::TestServer` + `MockDatabase`:
   `manageRoles` permission may create roles; a View-tier member is rejected
   with `403`.
 - `create_role_rejects_duplicate_name` - name uniqueness is scoped to
-  `(org_id, name)` ∪ built-ins; duplicates return `409`.
+  `(project_id, name)` ∪ built-ins; duplicates return `409`.
 - `patch_builtin_role_is_forbidden` / `delete_builtin_role_is_forbidden` -
   the three system roles are immutable.
 - `patch_custom_role_updates_mask` - the bitmask is overwritten wholesale
@@ -939,25 +939,25 @@ through `axum_test::TestServer` + `MockDatabase`:
 
 Run with: `cargo test -p web --test roles_crud`.
 
-## Proto handshake - organization peer filtering
+## Proto handshake - project peer filtering
 
-Helper `filter_org_peers_without_cache` runs during the `/proto` handshake's
+Helper `filter_project_peers_without_cache` runs during the `/proto` handshake's
 `perform_auth` step. After token validation, each authorized peer that is an
-organization is checked against the `organization_cache` table. Organizations
+project is checked against the `project_cache` table. Projects
 without a subscribed cache are moved into `failed_peers` with reason
-`"organization has no cache subscribed"`. If the worker authenticated but the
+`"project has no cache subscribed"`. If the worker authenticated but the
 authorized peer set ends up empty solely because of missing caches, the
-connection is rejected with the dedicated `495 organization has no cache
+connection is rejected with the dedicated `495 project has no cache
 subscribed` instead of a misleading `401`; a `401 no valid peer tokens provided`
 is reserved for genuine token failures.
 
 Backend tests (in `backend/proto/src/handler/auth.rs`):
 
-- `tests::filter_org_peers_passes_through_org_with_cache`
-- `tests::filter_org_peers_demotes_org_without_cache`
-- `tests::filter_org_peers_passes_through_non_org_uuids`
-- `tests::filter_org_peers_mixed`
-- `tests::validate_then_filter_demotes_org_without_cache`
+- `tests::filter_project_peers_passes_through_project_with_cache`
+- `tests::filter_project_peers_demotes_project_without_cache`
+- `tests::filter_project_peers_passes_through_non_project_uuids`
+- `tests::filter_project_peers_mixed`
+- `tests::validate_then_filter_demotes_project_without_cache`
 
 Auth-decision tests (in `backend/proto/src/handler/session.rs`):
 
@@ -974,7 +974,7 @@ This is a concurrency property of the connection loops, not a pure-function beha
 
 ## CacheQuery replies correlate by a per-query id, not the job id
 
-The worker registered exactly one `CacheQuery` waiter per `job_id` (`CacheWaiters = HashMap<job_id, oneshot::Sender>`) and the server echoed `job_id` in `CacheStatus`/`CacheError`. That silently assumes a job never has two queries outstanding - but a build reuses its `job_id` across transient retries and the substitute/prefetch pipeline can have several in flight, so a second query's `insert` dropped the first's waiter (the first then saw `RecvError`, or after its own 75s client timeout a late reply reached the wrong query), and a reply for a superseded query was delivered to whichever waiter currently held the `job_id`. Observed on C3D2 (hyp3): many concurrent `CacheQuery Pull/Push (substitute)` for already-cached crate `.drv`s timed out after 75s with the DB idle and upstreams quiet - the replies weren't slow, they were mis-correlated. Fix: the worker mints a `uuid` `query_id` per query, registers the waiter under it, and the server echoes it in `CacheStatus`/`CacheError`; `job_id` is dropped from both replies (the worker holds it locally in `CacheWaiter` for job-end cleanup) and kept only on the `CacheQuery` request, where the server still needs it to resolve the job's org (`org_for_job`). `PROTO_VERSION` 6 -> 7. `backend/gradient-worker/src/proto/job.rs`: `cache_replies_correlate_by_query_id_not_job_id` registers two waiters under one `job_id` with distinct `query_id`s and asserts a reply reaches only its own query, an unknown/stale reply is dropped (not misrouted), and `forget_cache_waiters_for_job` frees a still-pending query so an aborted job can't leak its slot. End-to-end delivery is E2E-CI-covered.
+The worker registered exactly one `CacheQuery` waiter per `job_id` (`CacheWaiters = HashMap<job_id, oneshot::Sender>`) and the server echoed `job_id` in `CacheStatus`/`CacheError`. That silently assumes a job never has two queries outstanding - but a build reuses its `job_id` across transient retries and the substitute/prefetch pipeline can have several in flight, so a second query's `insert` dropped the first's waiter (the first then saw `RecvError`, or after its own 75s client timeout a late reply reached the wrong query), and a reply for a superseded query was delivered to whichever waiter currently held the `job_id`. Observed on C3D2 (hyp3): many concurrent `CacheQuery Pull/Push (substitute)` for already-cached crate `.drv`s timed out after 75s with the DB idle and upstreams quiet - the replies weren't slow, they were mis-correlated. Fix: the worker mints a `uuid` `query_id` per query, registers the waiter under it, and the server echoes it in `CacheStatus`/`CacheError`; `job_id` is dropped from both replies (the worker holds it locally in `CacheWaiter` for job-end cleanup) and kept only on the `CacheQuery` request, where the server still needs it to resolve the job's project (`project_for_job`). `PROTO_VERSION` 6 -> 7. `backend/gradient-worker/src/proto/job.rs`: `cache_replies_correlate_by_query_id_not_job_id` registers two waiters under one `job_id` with distinct `query_id`s and asserts a reply reaches only its own query, an unknown/stale reply is dropped (not misrouted), and `forget_cache_waiters_for_job` frees a still-pending query so an aborted job can't leak its slot. End-to-end delivery is E2E-CI-covered.
 
 ## CacheQuery DB error is indeterminate, not "absent"
 
@@ -1059,11 +1059,11 @@ The reactive `cascade_dependency_failed` fails an anchor's dependents only on a 
 
 ## Frontend - workers page no-cache banner
 
-When the active organization has no subscribed cache, the workers page shows
+When the active project has no subscribed cache, the workers page shows
 a banner instructing the admin to subscribe to a cache before workers can run.
 
 - `WorkersComponent - no-cache banner` - banner show/hide specs at
-  `frontend/src/app/features/organizations/workers/workers.component.spec.ts`
+  `frontend/src/app/features/projects/workers/workers.component.spec.ts`
 
 ## Frontend - HTTP upstream Gradient-cache probe (#363)
 
@@ -1141,7 +1141,7 @@ Run with: `cargo test -p web --test cli_device_authorization`
 ## Inbound forge webhook response-body (BaseResponse envelope)
 
 Integration tests in `backend/web/tests/forge_hooks.rs` verify that both
-webhook endpoints (`POST /api/v1/hooks/{forge}/{org}/{name}` and
+webhook endpoints (`POST /api/v1/hooks/{forge}/{project}/{name}` and
 `POST /api/v1/hooks/github`) return a correctly-shaped
 `BaseResponse<WebhookResponse>` envelope under all common scenarios.
 
@@ -1152,12 +1152,12 @@ Tests covered:
 | # | Test name | Scenario |
 |---|-----------|----------|
 | 1 | `forge_webhook_no_matching_task` | Gitea push, valid signature, no active task tracks the repo → 200, `tasks_scanned=0`, empty `queued`/`skipped`. |
-| 2 | `forge_webhook_matching_task_queues` | Gitea push, valid signature, one matching task → 200, one item in `queued` with correct `task_name` and `organization`. |
+| 2 | `forge_webhook_matching_task_queues` | Gitea push, valid signature, one matching task → 200, one item in `queued` with correct `task_name` and `project`. |
 | 3 | `forge_webhook_invalid_signature` | Gitea push, wrong HMAC → 401, `error=true`, `message="invalid webhook signature"`. |
-| 4 | `forge_webhook_integration_not_found` | Org found but integration row absent → 404, `message="integration not found"`. |
+| 4 | `forge_webhook_integration_not_found` | Project found but integration row absent → 404, `message="integration not found"`. |
 | 5 | `github_app_webhook_push_queues` | GitHub App push, valid `X-Hub-Signature-256`, one matching task → 200, one item in `queued`. |
 | 6 | `github_app_webhook_ping` | GitHub App ping event → 200, `event="ping"`, all arrays empty. |
-| 7 | `github_app_webhook_installation` | GitHub App installation event, org not found in DB (warns, does not error) → 200, `event="installation"`, empty queued. |
+| 7 | `github_app_webhook_installation` | GitHub App installation event, project not found in DB (warns, does not error) → 200, `event="installation"`, empty queued. |
 | 8 | `github_app_webhook_not_configured` | GitHub App config absent (`github_app_webhook_secret_file=None`) → 503, `message="github app integration not configured"`. |
 
 **Deferred (Task 8):**
@@ -1270,7 +1270,7 @@ Backend:
 - `cache::cacher::sign_sweep::tests::skip_set_empty_when_no_private_producers` -
   no skips when all producers are public.
 - `web::tests::tasks_sign_cache::get_task_includes_sign_cache` - GET
-  `/api/v1/tasks/{org}/{name}` returns `sign_cache` in the response body.
+  `/api/v1/tasks/{project}/{name}` returns `sign_cache` in the response body.
 - `web::tests::tasks_sign_cache::patch_task_writes_sign_cache_false` -
   PATCH with `{ "sign_cache": false }` is accepted and round-trips.
 - `web::tests::tasks_sign_cache::create_task_accepts_sign_cache_false` -
@@ -1284,20 +1284,20 @@ Backend:
 ## Detached NAR commit resolves the sign target before the job is evicted
 
 Regression from detaching the `NarUploaded` commit off the session read loop
-(`781dfd2f`): the commit task called `scheduler.org_for_job(job_id)` to pick
+(`781dfd2f`): the commit task called `scheduler.project_for_job(job_id)` to pick
 the caches to sign for, but the read loop had already moved on to the next
 frame - `JobComplete`, which evicts the job from the tracker. So the resolve
 raced to `None`, `SignTargets` collapsed to `None`, and no
 `cached_path_signature` placeholder was written. `derivation_output.is_cached`
 was still set, so the narinfo handler found the path but 404'd forever on the
 missing signature - the `nix/tests/gradient/cache` VM test failed at Phase 7.
-Fix: `on_nar_uploaded` resolves the org on the read loop (a cheap in-memory
+Fix: `on_nar_uploaded` resolves the project on the read loop (a cheap in-memory
 tracker read that doesn't reintroduce the head-of-line stall the detach cured)
 and threads it into the commit, so `mark_nar_stored` / `record_nar_push_metric`
 never re-resolve from the evicted tracker.
 
 Backend (`cargo test -p proto --lib ingest::tests`):
-- `org_target_enqueues_signature_placeholder` - `SignTargets::OrgCaches`
+- `project_target_enqueues_signature_placeholder` - `SignTargets::ProjectCaches`
   inserts a `cached_path_signature` placeholder for every subscribed cache.
 - `none_target_enqueues_no_signature` - `SignTargets::None` (the pre-fix race
   state) records the path but touches no `cached_path_signature` row.
@@ -1646,7 +1646,7 @@ Backend (`cargo test -p gradient-scheduler --lib upstream_substitutable_tests`):
 - `no_outputs_is_not_substitutable` - a derivation with no recorded outputs is
   never substitutable.
 
-The full probe (`compute_upstream_substitutable`: org-scoped `.narinfo` lookup,
+The full probe (`compute_upstream_substitutable`: project-scoped `.narinfo` lookup,
 persisting `derivation_output.external_url` + metadata, and `query()` serving the
 persisted URL without re-running narinfo) is covered end-to-end in CI - there is
 no real-Postgres/HTTP unit harness for it.
@@ -1981,8 +1981,8 @@ Backend (`cargo test -p core --lib state::tests`):
 - `user_accepts_missing_password_file` - `StateUser` accepts a JSON
   document with `"password_file": null`, so the NixOS module may emit
   OIDC-only users without a password credential file.
-- `org_task_cache_descriptions_optional` - `description` on
-  organizations, tasks, and caches is optional; a full config without
+- `project_task_cache_descriptions_optional` - `description` on
+  projects, tasks, and caches is optional; a full config without
   them validates cleanly.
 - `state_task_accepts_wildcard_field` - `StateTask` deserialises
   the canonical `wildcard` field.
@@ -2020,45 +2020,45 @@ Backend (`cargo test -p core --lib state::tests`):
   `force_evaluation`; serde's default unknown-field handling drops it
   silently so existing deployments parse cleanly after the field's
   removal from the schema.
-- `state_org_accepts_explicit_id` / `state_org_id_defaults_none` -
-  `StateOrganization.id` deserialises from a UUID string and defaults to
-  `None`, so a declarative deployment can pin the org UUID a worker's
-  `peersFile` references (`<org_id>:<token>`) (issue #333).
-- `state_org_validator_rejects_malformed_id` - a non-UUID `id` yields a
-  validation error pinpointing `organizations.<org>.id`.
-- `state_org_validator_rejects_duplicate_ids` - two organizations
+- `state_project_accepts_explicit_id` / `state_project_id_defaults_none` -
+  `StateProject.id` deserialises from a UUID string and defaults to
+  `None`, so a declarative deployment can pin the project UUID a worker's
+  `peersFile` references (`<project_id>:<token>`) (issue #333).
+- `state_project_validator_rejects_malformed_id` - a non-UUID `id` yields a
+  validation error pinpointing `projects.<project>.id`.
+- `state_project_validator_rejects_duplicate_ids` - two projects
   declaring the same `id` is an error.
-- `state_org_members_serde_round_trip` - `StateOrganization.members`
+- `state_project_members_serde_round_trip` - `StateProject.members`
   round-trips through JSON as `[{ user, role }]` entries, covering both
   built-in (`Write`) and custom (`releaser`) role names.
-- `state_org_members_default_empty` - omitting `members` deserialises
+- `state_project_members_default_empty` - omitting `members` deserialises
   to an empty `Vec`, preserving the legacy creator-as-Admin behavior on
   state files that predate the field (issue #94).
-- `state_org_members_validator_accepts_builtin_role` - a member with
+- `state_project_members_validator_accepts_builtin_role` - a member with
   `role = "Write"` validates when the referenced user exists.
-- `state_org_members_validator_accepts_custom_org_role` - a member can
-  reference a state-managed custom org role declared under
-  `state.roles` scoped to the same organization.
-- `state_org_members_validator_rejects_unknown_role` - a role name
-  that is neither a built-in nor a declared org role yields a
+- `state_project_members_validator_accepts_custom_project_role` - a member can
+  reference a state-managed custom project role declared under
+  `state.roles` scoped to the same project.
+- `state_project_members_validator_rejects_unknown_role` - a role name
+  that is neither a built-in nor a declared project role yields a
   validation error pinpointing
-  `organizations.<org>.members.<user>.role`.
-- `state_org_members_validator_ignores_unknown_user` - a member
+  `projects.<project>.members.<user>.role`.
+- `state_project_members_validator_ignores_unknown_user` - a member
   referencing a user that does not exist passes validation; the
   membership is deferred and applied on registration / OIDC first-login
   (issue #94 contract).
-- `state_org_members_validator_rejects_duplicate_user` - two
-  member entries with the same `user` in one org's `members` is an
+- `state_project_members_validator_rejects_duplicate_user` - two
+  member entries with the same `user` in one project's `members` is an
   error.
 - `pending_membership_tests::apply_pending_returns_zero_for_unknown_user`
   (`backend/gradient-state/src/provisioning.rs`) -
-  `apply_pending_org_memberships` is a no-op when the username has no
+  `apply_pending_project_memberships` is a no-op when the username has no
   pending entries; callable from any user-creation path without a
   matching state declaration.
 - `keep_set_tests::keep_sets_track_inner_name_not_attrset_key`
   (`backend/gradient-state/src/provisioning.rs`) - `gradient-state.nix`
   exposes `name = mkOption { default = <attrset key>; }` on users,
-  organizations, tasks, caches, and API keys, so a user may pin
+  projects, tasks, caches, and API keys, so a user may pin
   `tasks.foo = { name = "main"; … }`. Every `apply_*` writes the
   override value to the DB row; `unmark_removed_entities` therefore must
   also key its keep-sets on the value's `name`/`username` field, not on
@@ -2091,7 +2091,7 @@ Backend (`cargo test -p core --lib state::provisioning::trigger_helper_tests`):
 Backend (`cargo test -p core --lib state::tests`):
 - `state_reporter_trigger_accepts_declared_inbound_integration` - a
   `reporter_push` trigger naming a declared inbound integration in the same
-  org passes validation.
+  project passes validation.
 - `state_reporter_trigger_rejects_unknown_integration` - a reporter trigger
   naming an integration that is not declared yields a
   `tasks.<task>.triggers` validation error, surfacing the mistake at
@@ -2154,30 +2154,30 @@ Backend (`cargo test -p gradient-scheduler --lib build::tests`):
 - `dependency_blocked_build_is_not_buildable` - a build waiting on an unsatisfied dependency is not buildable regardless of dispatch mode.
 - `substitutable_within_budget_is_buildable_anywhere` - a substitutable build under the miss threshold is buildable on any worker with the derivation's architecture.
 
-## Org members can view subscribed caches (#327)
+## Project members can view subscribed caches (#327)
 
 NixOS VM (`nix/tests/gradient/state`):
-- `org member can view subscribed caches they do not own` - a state-provisioned
-  cache appears in `GET /caches` for any member of a subscribed organization,
+- `project member can view subscribed caches they do not own` - a state-provisioned
+  cache appears in `GET /caches` for any member of a subscribed project,
   so viewing it by name (`GET /caches/{cache}`, `gradient cache show`) must
   succeed too. `bob` (a plain `corp` member who created none of the caches and
   holds no cache membership) lists and shows both the active `main` and inactive
   `dev` caches. Regression: detail lookups previously required a direct
-  `cache_user` row, so org members got a 404 via the API, CLI and WebUI.
+  `cache_user` row, so project members got a 404 via the API, CLI and WebUI.
 - `non-members cannot see private caches` - `charlie`, who belongs to no
-  subscribing org, neither lists nor can show the private caches, pinning the
+  subscribing project, neither lists nor can show the private caches, pinning the
   broadened read access so it does not leak caches to unrelated users.
 
-## Org members get read-only cache access (#334)
+## Project members get read-only cache access (#334)
 
 Backend (`cargo test -p web --lib access::tests`):
 - `effective_cache_mask_returns_role_for_member` - a direct cache member's API
   key is capped by their cache role mask.
-- `effective_cache_mask_returns_view_for_org_subscriber` - a member of a
-  subscribed organization with no `cache_user` row is treated as read-only
+- `effective_cache_mask_returns_view_for_project_subscriber` - a member of a
+  subscribed project with no `cache_user` row is treated as read-only
   (`cache_view_mask`), so they can mint a read-only cache key and view stats.
 - `effective_cache_mask_none_for_outsider` - a user with neither a cache role
-  nor a subscribing org gets no mask, so cache-pinned key creation 404s.
+  nor a subscribing project gets no mask, so cache-pinned key creation 404s.
 
 These pin the fix for the remaining "cache not found" responses: creating a
 read-only cache API key (`POST /user/keys`) and reading cache traffic/storage
@@ -2203,7 +2203,7 @@ Backend (`cargo test -p core --lib state::provisioning::api_key_hash_tests`):
 Backend (`cargo test -p core --lib state::provisioning::helper_tests`):
 - `lookup_id_returns_id_when_present` / `lookup_id_errors_with_kind_and_name` -
   pin the shared `lookup_id` helper used by every `apply_*` provisioning step
-  so missing user/org references produce a uniform `"<Kind> '<name>' not
+  so missing user/project references produce a uniform `"<Kind> '<name>' not
   found"` error.
 - `read_credential_default_dir_when_env_unset` /
   `credentials_dir_returns_nonempty` - pin the shared credential-file
@@ -2278,10 +2278,10 @@ Tests (`backend/web/tests/evals_artefacts.rs`):
   lookup).
 - `missing_eval_returns_404` - non-existent evaluation id surfaces as
   `404 Not Found`.
-- `public_org_allows_anonymous` - anonymous request against an evaluation
-  owned by a `public=true` organization succeeds without a Bearer token.
-- `private_org_rejects_anonymous` - anonymous request against a
-  `public=false` organization returns `404` (the same shape eval-access uses
+- `public_project_allows_anonymous` - anonymous request against an evaluation
+  owned by a `public=true` project succeeds without a Bearer token.
+- `private_project_rejects_anonymous` - anonymous request against a
+  `public=false` project returns `404` (the same shape eval-access uses
   to avoid distinguishing missing from forbidden).
 
 ## EvalMessage - worker-surfaced evaluation messages
@@ -2323,7 +2323,7 @@ Backend (`cargo test -p scheduler --tests scheduler_tests::job_notify_bump_is_no
 ## Push-mode signature placeholders - insert-select, FK-race-safe
 
 `ensure_push_signatures` (`backend/gradient-proto/src/handler/cache.rs`) creates
-one `cached_path_signature` placeholder per (cached_path, org cache) pair when a
+one `cached_path_signature` placeholder per (cached_path, project cache) pair when a
 worker connects in Push mode - a cartesian product over the worker's whole store.
 It inserts via `INSERT ... SELECT FROM cached_path ... CROSS JOIN unnest(caches)`
 keyed on `cp.id = ANY($paths)`, so a path concurrently purged (demote/GC) between
@@ -2466,32 +2466,32 @@ Specs (vitest + jsdom):
   matching the server `/config` response. Direct regression for #218.
   (`shared/components/header/header.component.spec.ts`)
 
-## CI check names - org/task context
+## CI check names - project/task context
 
-CI check names reported to GitHub/Gitea now include the organization
+CI check names reported to GitHub/Gitea now include the project
 and task so multiple Gradient instances/tasks sharing a forge
 repository remain distinguishable. Helpers live in
 `backend/gradient-ci/src/reporting.rs` and are reused by the
 `ForgeStatusReport` action dispatcher (`backend/gradient-ci/src/actions.rs`):
 
-- Evaluation roll-up: `Gradient Evaluation {org}/{task}` (e.g.
+- Evaluation roll-up: `Gradient Evaluation {project}/{task}` (e.g.
   `Gradient Evaluation wavelens/my-task`).
-- Per-entry-point build: `Gradient Build {org}/{task}: {entry_point}`.
-- When the organization lookup returns `None`, the scope degrades to
+- Per-entry-point build: `Gradient Build {project}/{task}: {entry_point}`.
+- When the project lookup returns `None`, the scope degrades to
   just `{task}`.
 
 Tests (`cargo test -p core --tests ci::reporting`):
 
-- `check_scope_with_org` - `Some("wavelens"), "my-task"` →
+- `check_scope_with_project` - `Some("wavelens"), "my-task"` →
   `"wavelens/my-task"`.
-- `check_scope_without_org_falls_back_to_task` - `None, "my-task"`
+- `check_scope_without_project_falls_back_to_task` - `None, "my-task"`
   → `"my-task"`.
 - `evaluation_context_format` - produces the new
   `"Gradient Evaluation …"` string.
 - `build_context_format` - produces
   `"Gradient Build wavelens/my-task: my-package"`.
-- `build_context_falls_back_when_org_missing` - degrades correctly when
-  the organization is unknown.
+- `build_context_falls_back_when_project_missing` - degrades correctly when
+  the project is unknown.
 
 ## Per-IP HTTP rate limiting
 
@@ -2649,7 +2649,7 @@ Unit tests (`cargo test -p core --tests forge::reporter`):
 ## SSH private key decryption - no plaintext fallback
 
 `decrypt_ssh_private_key` in `backend/gradient-sources/src/ssh_key.rs`
-decrypts the per-organization SSH key from `organization.private_key`.
+decrypts the per-project SSH key from `project.private_key`.
 Decryption failure must NOT silently fall back to interpreting the
 stored value as a plaintext PEM, otherwise anyone with write access to
 that column could bypass encryption entirely.
@@ -2657,7 +2657,7 @@ that column could bypass encryption entirely.
 Tests (`backend/gradient-sources/src/ssh_key.rs`):
 
 - `decrypt_ssh_key_corrupt_base64_fails` - non-base64 column rejected
-  with `OrganizationKeyDecoding`.
+  with `ProjectKeyDecoding`.
 - `decrypt_ssh_key_plaintext_pem_rejected` - a base64-encoded plaintext
   OpenSSH PEM placed directly in the column is rejected with
   `KeyDecryption`, not accepted.
@@ -2736,8 +2736,8 @@ migration). Tests:
 - `backend/web/tests/evals_artefacts.rs` - artefact tree response: empty
   evaluation returns empty `entry_points`, full tree exposes
   `entry_point → outputs → products` with alphabetic ordering and the
-  `build_id` field on each entry point, public-org evaluations allow
-  anonymous access, private-org evaluations 404 for anonymous callers.
+  `build_id` field on each entry point, public-project evaluations allow
+  anonymous access, private-project evaluations 404 for anonymous callers.
 - `backend/web/tests/old_direct_build_gone.rs` - see the regression
   block above.
 - `backend/gradient-storage/src/source_nar.rs` - in-file unit tests for
@@ -2798,7 +2798,7 @@ on the stored format: PHC strings (starting with `$`) are verified via
 `password_auth::verify_password`; legacy hex SHA-256 rows from
 pre-existing registrations are accepted via a constant-time
 `subtle::ConstantTimeEq` compare so old workers keep working until they
-are re-registered. New tokens written by `POST /orgs/{org}/workers` and
+are re-registered. New tokens written by `POST /projects/{project}/workers` and
 by state-file provisioning use `password_auth::generate_hash`.
 
 Backend tests (`cargo test -p proto --lib handler::auth`):
@@ -3075,7 +3075,7 @@ Unit tests in `backend/gradient-db/src/dependency_graph.rs`:
 
 ## Build deduplication via `via` field (`#175`)
 
-When two evaluations (in the same organisation) discover the same
+When two evaluations (in the same project) discover the same
 derivation, the second build is inserted as a *follower* of the first by
 storing the leader's id in the new `build.via` column. Followers are
 filtered out of `dispatch_ready_builds` SQL (`AND b.via IS NULL`), so two
@@ -3112,7 +3112,7 @@ Tests:
 ## Typed entity IDs (`entity::ids`)
 
 `backend/entity/src/ids.rs` defines one newtype per entity (`UserId`,
-`OrganizationId`, `TaskId`, …) so the compiler rejects argument
+`ProjectId`, `TaskId`, …) so the compiler rejects argument
 swaps. Unit tests (`cargo test -p entity --tests`) cover:
 
 - Round-trip with `Uuid` (no information loss).
@@ -3134,7 +3134,7 @@ confirm the derive resolves for representative models:
 - `evaluation::Model::default()` - `status == EvaluationStatus::Queued`.
 - `audit_log::Model::default()` - JSON metadata is `None`, timestamp is
   the 1970 epoch from `NaiveDateTime::default()`.
-- `organization_cache::Model::default()` - `mode == ReadWrite`.
+- `project_cache::Model::default()` - `mode == ReadWrite`.
 
 A nil ID is a placeholder, not a persistable value: callers override `id`
 (typically with `Id::now_v7()`) and use `..Default::default()` for the
@@ -3142,7 +3142,7 @@ remaining fields.
 
 A `trybuild` compile-fail test
 (`cargo test -p entity --test compile_fail`) locks the swap-prevention
-property: a function expecting `OrganizationId` MUST reject a `UserId`
+property: a function expecting `ProjectId` MUST reject a `UserId`
 argument at compile time. Regenerate the captured rustc diagnostic
 after a deliberate API change with:
 
@@ -3343,7 +3343,7 @@ Run with `cargo test -p core --tests state_machine::eval`.
 - `scheduler::Scheduler::cancel_evaluation_jobs` - drops eval and per-build entries from the tracker.
 - `web::endpoints::tasks::triggers` - list/create/read/update/delete; `all` concurrency accepted (200); invalid config rejected (400).
 - `web::endpoints::tasks::triggers` - **integration enrichment**: list/get responses for `reporter_push`/`reporter_pull_request` include an inlined `integration` object (`id`, `name`, `display_name`, `forge_type`); polling triggers return `integration: null` and skip the integration SELECT (`list_polling_trigger_has_null_integration_and_skips_lookup`); orphaned references (integration row deleted) degrade to `integration: null` (`list_reporter_trigger_with_missing_integration_returns_null`).
-- `web::endpoints::orgs::integrations` - **summaries endpoint** (`GET /orgs/{org}/integrations/summary`): any org member can list summaries (no `ManageIntegrations` required); response excludes `secret`, `endpoint_url`, `access_token`, `has_secret`, `has_access_token` so non-admins cannot probe credential state; non-members get 404 (consistent with org loader's hide-existence policy).
+- `web::endpoints::projects::integrations` - **summaries endpoint** (`GET /projects/{project}/integrations/summary`): any project member can list summaries (no `ManageIntegrations` required); response excludes `secret`, `endpoint_url`, `access_token`, `has_secret`, `has_access_token` so non-admins cannot probe credential state; non-members get 404 (consistent with project loader's hide-existence policy).
 - `web::endpoints::tasks::evaluations` - response includes nullable `trigger` summary, populated for evaluations created by a trigger.
 - `web::endpoints::forge_hooks::events` - PR (github/gitea/gitlab) and release (github/gitea/gitlab) parsers; GitLab action mapping; tag-ref support on push parsers.
 - `web::endpoints::forge_hooks` integration - push fans out to matching trigger row; branch glob filter skip; PR action filter; release fires only `releases_only` triggers; GitHub App push by installation_id.
@@ -3690,30 +3690,30 @@ Tests (`cargo test -p score policy`):
   at `max_wait_secs * bonus_per_second` so ancient jobs cannot dominate
   every other rule.
 
-## Scheduler policy - per-org fair share (#111)
+## Scheduler policy - per-project fair share (#111)
 
 A tenant flooding the queue with hundreds of builds previously starved a
-quiet tenant: `WaitTimeRule` plateaus at +360, so once the busy org's jobs
-maxed out their wait bonus there was nothing left to favour the quiet org.
-`FairShareRule` penalizes a candidate proportional to its owning org's
-share of currently-active builds (`org_share`, computed in-memory by the
+quiet tenant: `WaitTimeRule` plateaus at +360, so once the busy project's jobs
+maxed out their wait bonus there was nothing left to favour the quiet project.
+`FairShareRule` penalizes a candidate proportional to its owning project's
+share of currently-active builds (`project_share`, computed in-memory by the
 scheduler in `take_best_of_kind` from the active-job map and threaded into
 `JobContext`). The default weight (500) exceeds the wait plateau (360) so
 fairness overrides the wait gradient. The rule is part of the
-`resource-aware` policy; `org_share` is `None` (no penalty) when no builds
+`resource-aware` policy; `project_share` is `None` (no penalty) when no builds
 are active.
 
 Tests (`cargo test -p score fair_share`, `cargo test -p scheduler fair_share`):
 
-- `busier_org_scores_more_negative` - (`score::rules::fair_share`) a job
-  with `org_share = Some(0.99)` scores more negative than `Some(0.01)`.
+- `busier_project_scores_more_negative` - (`score::rules::fair_share`) a job
+  with `project_share = Some(0.99)` scores more negative than `Some(0.01)`.
 - `zero_share_and_none_score_zero` - (`score::rules::fair_share`)
   `Some(0.0)` and `None` both contribute exactly 0.
 - `fair_share_overrides_wait_gradient` - (`score::rules::fair_share`) a
-  quiet org (share 0) outscores a busy org (share 1) even when the busy
+  quiet project (share 0) outscores a busy project (share 1) even when the busy
   job has saturated `WaitTimeRule`, proving the weight beats the plateau.
-- `fair_share_quiet_org_wins_over_busy_org` - (`scheduler::jobs`) end to
-  end: org A already has five active builds, org B none; with the
+- `fair_share_quiet_project_wins_over_busy_project` - (`scheduler::jobs`) end to
+  end: project A already has five active builds, project B none; with the
   `resource-aware` policy the next build is assigned to B's pending job.
 
 ## Build artefacts - `external_cached` outputs include `hydra-build-products`
@@ -3764,25 +3764,25 @@ caller - the handler held a `// TODO: Check if user has access to the
 commit` and never enforced it, allowing cross-tenant disclosure of
 commit message, hash, and author for any commit UUID an attacker could
 guess or harvest. The route now lives behind `authorize_optional` and
-the handler walks `commit → evaluation → task → organization` to
+the handler walks `commit → evaluation → task → project` to
 require either public visibility or membership; every other case
-(non-member, anonymous on private org, missing commit, no referencing
+(non-member, anonymous on private project, missing commit, no referencing
 evaluation) maps to `404` so existence isn't leaked.
 
 Tests (`cargo test -p web --test commits_authorization`):
 
-- `anon_can_read_commit_in_public_org` - an unauthenticated caller may
-  fetch a commit reachable through a task in a public organization.
-- `anon_cannot_read_commit_in_private_org` - the same commit, but the
-  organization is private, returns `404` for an unauthenticated caller.
-- `member_can_read_commit_in_private_org` - an authenticated member of
-  the owning organization sees the commit (200).
+- `anon_can_read_commit_in_public_project` - an unauthenticated caller may
+  fetch a commit reachable through a task in a public project.
+- `anon_cannot_read_commit_in_private_project` - the same commit, but the
+  project is private, returns `404` for an unauthenticated caller.
+- `member_can_read_commit_in_private_project` - an authenticated member of
+  the owning project sees the commit (200).
 - `non_member_cannot_read_commit` - an authenticated user who is not a
-  member of any organization that owns a referencing evaluation gets
+  member of any project that owns a referencing evaluation gets
   `404`. Direct regression for #88.
 - `commit_referenced_only_via_orphan_eval_returns_404` - when every
   referencing evaluation has no `task` (legacy direct-build rows
-  before issue #234), no org can be resolved and the response is `404`.
+  before issue #234), no project can be resolved and the response is `404`.
 - `nonexistent_commit_returns_404` and
   `commit_without_evaluation_returns_404` - both shapes of "no path"
   return `404` without leaking which case applied.
@@ -3828,19 +3828,19 @@ cover the wiring of the limiter into the proto router:
 Several create/update handlers historically performed two or more
 inserts back-to-back without a transaction, so a unique-constraint
 collision or other failure on the second statement would leave the
-first row committed (orphaned org without admin membership, cache
+first row committed (orphaned project without admin membership, cache
 without its default upstream, direct-build row without its uploaded
 artefacts on disk, etc.). The handlers now wrap each multi-step write
 in a `sea_orm` transaction and map PostgreSQL `unique_violation`
 (SQLSTATE `23505`) onto a typed `WebError::already_exists` via a shared
 helper.
 
-Integration tests in `backend/web/tests/orgs_create.rs` and
+Integration tests in `backend/web/tests/projects_create.rs` and
 `backend/web/tests/caches_create.rs` cover the two `put` handlers that
 gained transactional scope:
 
-- `orgs::put` now wraps the `organization` insert and the admin
-  `organization_user` membership insert in a single transaction.
+- `projects::put` now wraps the `project` insert and the admin
+  `project_user` membership insert in a single transaction.
 - `caches::put` now wraps the `cache` insert and the default
   `cache_upstream` insert in a single transaction.
 
@@ -3925,7 +3925,7 @@ External behaviour is unchanged (HTTP 500, code `internal`, body
 - `IntoResponse` no longer logs for the new variant - the rich-context
   warn line is emitted exactly once at the construction callsite,
   carrying the structured ids (`task_id`, `evaluation_id`,
-  `derivation_id`, `organization_id`) that triage actually needs.
+  `derivation_id`, `project_id`) that triage actually needs.
 - The callsite log itself is now `tracing::warn!`, not `error!`, so
   these benign races no longer pollute the error stream.
 
@@ -4083,10 +4083,10 @@ and the failure mode is loud.
 `backend/web/tests/auth_hardening.rs` (full HTTP via `axum_test`):
 
 - `api_key_with_only_view_cannot_trigger_evaluation` - a key whose mask is
-  `[viewOrg]` returns 403 from the task evaluate endpoint, even when the
+  `[viewProject]` returns 403 from the task evaluate endpoint, even when the
   owning user is admin.
-- `api_key_pinned_to_other_org_is_invisible` - a key pinned to a different
-  org returns 404 (not 403, not 401) on `GET /api/v1/orgs/{name}` so org
+- `api_key_pinned_to_other_project_is_invisible` - a key pinned to a different
+  project returns 404 (not 403, not 401) on `GET /api/v1/projects/{name}` so project
   existence isn't leaked.
 - `api_key_cannot_create_api_keys` - `POST /api/v1/user/keys` from an
   API-key-authenticated request returns 403 (the self-management guard).
@@ -4105,7 +4105,7 @@ Three API-provided flags drive the user-visible rule that:
   (Start Evaluation, Restart Failed Builds, Abort) independently of
   `can_edit`. `can_trigger` reflects `Permission::TriggerEvaluation` while
   `can_edit` reflects `Permission::EditTask`. Backends without the field
-  (caches, orgs) cause `accessFromEntity` to fall back to `can_edit`, so the
+  (caches, projects) cause `accessFromEntity` to fall back to `can_edit`, so the
   existing single-permission model still works.
 
 The primitives:
@@ -4138,18 +4138,18 @@ The primitives:
   path and the `managed=true / can_edit=false` propagation. The router is
   configured with `paramsInheritanceStrategy: 'always'`
   (`frontend/src/app/app.config.ts`) so child routes nested under
-  `task-layout` / `cache-layout` inherit the `:org` / `:task` /
+  `task-layout` / `cache-layout` inherit the `:project` / `:task` /
   `:cache` params from the parent - without it, child components reading
   `route.snapshot.paramMap` get empty strings and the settings pages render
   blank.
-- `frontend/src/app/core/services/org-access.service.ts` - derives
-  `AccessState` from `Organization.role` and `Organization.managed` for
-  org-scoped pages without a parent entity resolver. Tests cover Admin /
+- `frontend/src/app/core/services/project-access.service.ts` - derives
+  `AccessState` from `Project.role` and `Project.managed` for
+  project-scoped pages without a parent entity resolver. Tests cover Admin /
   Write / View / undefined / custom-role-name cases.
 
 Each retrofitted feature component (`task-settings`, `task-triggers`,
 `task-detail`, `cache-settings`, `cache-upstreams`,
-`organization-settings`, `workers`, `cache-subscriptions`, `members-roles`,
+`project-settings`, `workers`, `cache-subscriptions`, `members-roles`,
 `api-keys`, `profile`, `integrations`) carries gating tests covering at
 least the two key scenarios:
 
@@ -4176,8 +4176,8 @@ spec asserts three scenarios:
 The two reported bugs that motivated this work are covered directly:
 
 - `WorkersComponent` - Register Worker absent under view-only access;
-  present-disabled under state-managed org; per-row buttons honor each
-  worker's own `managed` flag independent of the org's access.
+  present-disabled under state-managed project; per-row buttons honor each
+  worker's own `managed` flag independent of the project's access.
 - `CacheUpstreamsComponent` - Add Upstream / Edit / Delete absent under
   view-only access (page itself remains navigable); present-disabled
   under state-managed cache.
@@ -4193,7 +4193,7 @@ Run command: `pnpm -C frontend test --watch=false --include='**/access*'`
 
 ## Entry-point metrics - surface in-progress evaluations (`web/tests/entry_point_metrics.rs`)
 
-Integration tests for `GET /tasks/{org}/{task}/entry-point-metrics`
+Integration tests for `GET /tasks/{project}/{task}/entry-point-metrics`
 guarding against the regression where the metrics page renders the empty
 state ("No completed evaluations found for this entry point.") even though
 the entry-point's build is in a terminal state. The endpoint must filter
@@ -4217,7 +4217,7 @@ Three cases:
 
 ## Entry-point download - pin to newest commit (`web/tests/entry_point_download.rs`)
 
-Integration tests for `GET /tasks/{org}/{task}/entry-point-downloads`
+Integration tests for `GET /tasks/{project}/{task}/entry-point-downloads`
 guarding against #185: the endpoint previously selected the most recently
 *completed* evaluation by ordering on `evaluation.created_at`, so a
 retriggered run of an older commit shadowed the latest one. The handler now
@@ -4242,19 +4242,19 @@ Three cases:
 
 - `core/src/db/cache_reach.rs` unit tests cover direct overlap, transitive
   internal chains, external-upstream skip, write-only reader exclusion, and
-  cycle tolerance for `writer_orgs_reachable_from`.
-- `core/src/db/status.rs::find_active_leaders_tests` covers the cross-org
-  match case, the most-advanced/oldest tie-break, the same-org-preferred
-  short-circuit, and the cross-org `external_cached` skip.
-- `core/src/db/status.rs::reelect_leader_tests` covers same-org promotion
-  with cross-org orphaning, and the no-same-org-everyone-orphaned case.
-- `scheduler/src/build.rs::cross_org_mirror_tests` covers the pure
-  `build_cross_org_artefact_rows` helper: FK rewrite on mirrored products
+  cycle tolerance for `writer_projects_reachable_from`.
+- `core/src/db/status.rs::find_active_leaders_tests` covers the cross-project
+  match case, the most-advanced/oldest tie-break, the same-project-preferred
+  short-circuit, and the cross-project `external_cached` skip.
+- `core/src/db/status.rs::reelect_leader_tests` covers same-project promotion
+  with cross-project orphaning, and the no-same-project-everyone-orphaned case.
+- `scheduler/src/build.rs::cross_project_mirror_tests` covers the pure
+  `build_cross_project_artefact_rows` helper: FK rewrite on mirrored products
   and orphan-product dropping.
-- `web/tests/cross_org_follower_log_visible.rs` covers cross-org log access
-  via `BuildAccessContext::load`'s follower-org fallback.
-- `web/tests/evaluation_builds_via_cross_org.rs` covers the
-  `GET /evals/{eval}/builds` leader-row swap across organisations.
+- `web/tests/cross_project_follower_log_visible.rs` covers cross-project log access
+  via `BuildAccessContext::load`'s follower-project fallback.
+- `web/tests/evaluation_builds_via_cross_project.rs` covers the
+  `GET /evals/{eval}/builds` leader-row swap across projects.
 
 ## Cache local-priority (issue #222)
 
@@ -4330,7 +4330,7 @@ Tests for when a derivation's outputs are pulled from an upstream cache, Gradien
 ### Upstream URL helper (`core/src/db/cache_upstream.rs`)
 
 - `returns_urls_from_subscribed_caches` - shared upstream-URL helper.
-- `empty_when_no_org_caches` - empty result when org has no caches.
+- `empty_when_no_project_caches` - empty result when project has no caches.
 
 ## Derivation path parsing (`core/src/sources/nar_path.rs`)
 
@@ -4358,7 +4358,7 @@ derivations, so the largest single query is bounded by the request `limit`
 rather than the evaluation size. The existing mock-DB integration tests
 `evaluation_builds_via.rs::{follower_build_is_replaced_with_leader_row,
 plain_build_returns_own_row_without_extra_query}` and
-`evaluation_builds_via_cross_org.rs` pin the new query sequence; the
+`evaluation_builds_via_cross_project.rs` pin the new query sequence; the
 behavioural regression for the overflow is verified at code-review time
 (every `is_in(...)` site on this hot path is now chunked).
 
@@ -4393,21 +4393,21 @@ crashed prior worker.
 
 `frontend/src/app/core/title/gradient-title-strategy.ts` walks the
 `RouterStateSnapshot` for resolved `taskAccess` / `cacheAccess` /
-`organizationAccess` data and composes a title of the form
+`projectAccess` data and composes a title of the form
 `<entity display_name> · <route title> · Gradient`, falling back to
 `<entity> · Gradient` for the root detail pages whose static route title
-is implied by the entity itself (`Task`, `Cache`, `Organization`). The
+is implied by the entity itself (`Task`, `Cache`, `Project`). The
 spec at `gradient-title-strategy.spec.ts` covers the four combinations
 (both, entity-only, route-only, neither) and the entity-not-found
 fallback that keeps the title strategy a noop when an
-`organizationAccess` resolver returns `null`.
+`projectAccess` resolver returns `null`.
 
-A companion `organizationAccessResolver`
-(`frontend/src/app/core/resolvers/organization-access.resolver.ts`)
-fetches the organization for every `/organization/:org/*` route that
+A companion `projectAccessResolver`
+(`frontend/src/app/core/resolvers/project-access.resolver.ts`)
+fetches the project for every `/project/:project/*` route that
 doesn't already have a parent resolver. The spec covers the happy path,
 the no-param case, and the network-error fallback (resolver must not
-fail navigation just because the org fetch errored).
+fail navigation just because the project fetch errored).
 
 ## Evaluation duration parity between task page and log page (issue #229)
 
@@ -4433,13 +4433,13 @@ its duration after the evaluation finished because it used
 ## Connector + CLI JSON
 
 The `cli/connector` crate has wiremock-backed unit tests covering each sub-API
-(`cli/connector/tests/{auth,user,orgs,tasks,evals,builds,build_requests,caches,commits,workers,webhooks,integrations,admin,server}_api.rs`).
+(`cli/connector/tests/{auth,user,projects,tasks,evals,builds,build_requests,caches,commits,workers,webhooks,integrations,admin,server}_api.rs`).
 Each file covers: happy path, server `{error: true}` envelope (→ `ConnectorError::Api`),
 401 (→ `Unauthorized`), and transport failure.
 
 `caches_api.rs::list_caches_decodes_bare_array` is a regression for #290: the
 `GET /caches` endpoint returns `message` as a bare array (not the paginated
-`{items,total,page,per_page}` envelope used by orgs/tasks), so
+`{items,total,page,per_page}` envelope used by projects/tasks), so
 `caches().list()` returns `ListResponse` (`Vec<ListItem>`). The test replays the
 exact response from the bug report to prevent the connector from drifting back to
 the paginated type, which made the CLI mis-report a 200 as `api error (200)`.
@@ -4462,8 +4462,8 @@ CLI integration tests in `cli/tests/`:
 Dynamic completer unit tests live in `cli/src/commands/completion.rs` (`#[cfg(test)]`,
 wiremock-backed). They drive each completer core against a mock server and assert it
 returns the resource names and honours the partial prefix
-(`cache_names`, `org_names` reading paginated `items`, `task_names`/`worker_ids`
-scoped to the selected org), and that a non-2xx response yields no candidates so the
+(`cache_names`, `project_names` reading paginated `items`, `task_names`/`worker_ids`
+scoped to the selected project), and that a non-2xx response yields no candidates so the
 shell never errors.
 
 Run a single connector test file with `cargo test -p connector --test <name>`; CI runs the full suite.
@@ -4481,23 +4481,23 @@ immediately. Coverage:
   `workers` / `approval` / `no_cache` variants plus the legacy-row
   decoder.
 - `core/src/ci/apply.rs::no_writable_cache_parks_evaluation_in_waiting_no_cache`
-  - `apply_trigger` parks newly-created evals as `NoCache` when the org
+  - `apply_trigger` parks newly-created evals as `NoCache` when the project
   has no writable cache subscription.
 - `core/src/ci/apply.rs::no_eval_capable_worker_parks_evaluation_in_waiting_workers`
   (issue #268) - `apply_trigger` parks newly-created evals as
-  `Workers { connected_workers: 0 }` when the org has no active worker
+  `Workers { connected_workers: 0 }` when the project has no active worker
   registration with `enable_eval` set. Without this gate the eval
   would sit `Queued` forever - the build-dispatch reconciler only
   acts on builds, which don't exist yet, and the connected-worker
   count alone doesn't distinguish "no eval-capable worker" from
   "build-only worker connected".
-- `core/src/db/org_workers.rs::org_has_eval_capable_worker_registration` -
-  returns true iff the org has at least one `worker_registration` row
+- `core/src/db/project_workers.rs::project_has_eval_capable_worker_registration` -
+  returns true iff the project has at least one `worker_registration` row
   with `active = true AND enable_eval = true`. Consumed by both the
   park-on-create gate and the unpark short-circuit.
 - `core/src/ci/unpark.rs::unpark_no_workers_*` - re-queues evals
   parked with `Workers { connected_workers: 0 }` once an
-  eval-capable registration appears in the org; no-op when the org
+  eval-capable registration appears in the project; no-op when the project
   still has no eval-capable registration.
 - `scheduler/src/build.rs::pre_build_target_queued_no_eval_capable_workers_stalls`
   (issue #268) - regression test confirming the reconciler stalls a
@@ -4630,7 +4630,7 @@ the server fans out one per-input update eval each.
 ## SSH flake inputs and per-run overrides (#514/#515/#521)
 
 `gradient build` now archives cached build-request sources through a real
-`FetchFlake` step so `git+ssh://` flake inputs resolve with the org SSH key
+`FetchFlake` step so `git+ssh://` flake inputs resolve with the project SSH key
 before eval (#515), the `flake.lock` updater's revision resolver clones
 `ssh://` git inputs with the same key and unconditional host-key acceptance
 instead of failing with "invalid or unknown remote ssh hostkey" (#521), and
@@ -4700,7 +4700,7 @@ Run with: `cargo test -p core --test actions_dispatch`
 - `matches_event_returns_false_for_unlisted` - action does not fire for events not in its list.
 - `matches_event_empty_events_never_fires` - empty `events` list → no dispatch.
 - `forge_status_ignores_events_list` - `forge_status_report` always maps `build.started/completed/failed` regardless of `events`.
-- `payload_helpers_include_all_fields` - outgoing JSON payload for `send_web_request` contains `event`, `task`, `organization`, `id`, `status`.
+- `payload_helpers_include_all_fields` - outgoing JSON payload for `send_web_request` contains `event`, `task`, `project`, `id`, `status`.
 
 ### Backend - inline unit tests (`backend/gradient-ci/src/actions.rs`)
 
@@ -4708,7 +4708,7 @@ Run with: `cargo test -p core --lib ci::actions::tests`
 
 - `matches_event` - `Action::matches_event` returns correct booleans for listed/unlisted events and the empty-events edge case.
 - `forge_status_for_event` - maps `build.started → pending`, `build.completed → success`, `build.failed → failure`; non-build events return `None`.
-- `render_subject` - applies `{event}`, `{task}`, `{org}`, `{id}`, `{status}` placeholders to a subject template string.
+- `render_subject` - applies `{event}`, `{task}`, `{project}`, `{id}`, `{status}` placeholders to a subject template string.
 - `render_default_body` - default body contains event, task slug, entity id, status, and a URL.
 
 ### Frontend
@@ -4736,7 +4736,7 @@ Run with: `pnpm --dir frontend exec ng test --watch=false`
 
 ## Evaluation start - surface repository errors (issue #280)
 
-`POST /tasks/{org}/{p}/evaluate` and `POST /tasks/{org}/{p}/check-repository`
+`POST /tasks/{project}/{p}/evaluate` and `POST /tasks/{project}/{p}/check-repository`
 used to swallow git fetch failures (DNS, connection refused, auth) inside
 `core::sources::git::check_for_updates` and bubble up a generic 500 with no
 actionable detail. The fix propagates the `SourceError` to the web layer, which
@@ -4815,7 +4815,7 @@ Run with: `cargo test -p gradient-forge --lib webhook`
 Run with: `cargo test -p gradient-web --test forge_hooks`
 
 - `forge_webhook_test_ping_zero_sha_is_ok_noop` - posting the all-zero Gitea
-  push to `/hooks/gitea/{org}/{name}` (valid signature) returns `200` with an
+  push to `/hooks/gitea/{project}/{name}` (valid signature) returns `200` with an
   empty `push` response and touches no trigger/task rows.
 
 ## Source-IP allowlist (#282)
@@ -4950,7 +4950,7 @@ Run with: `cargo test -p gradient-ci --lib` and
 
 State-managed GitHub installations live in the `integrations` map as
 `forge_type=github` entries carrying an `installation_id` (no secret/token), not
-a separate top-level resource or an org-state list. Apply upserts the
+a separate top-level resource or a project-state list. Apply upserts the
 `github_installation` row and links it from the integration; export round-trips
 the `installation_id`/`account_login`; validation requires a positive
 `installation_id` for github entries.
@@ -5074,31 +5074,31 @@ are covered too. Phases:
 
 - **Auth / user / keys** - check-username, register, login, logout; profile,
   settings, sessions, audit-log, search; API-key create/list/revoke/delete.
-- **Organizations** - CRUD, available/public, ssh rotation, roles CRUD, and
-  membership (a second user is added via `POST /orgs/{org}/users`, re-roled with
+- **Projects** - CRUD, available/public, ssh rotation, roles CRUD, and
+  membership (a second user is added via `POST /projects/{project}/users`, re-roled with
   `PATCH`, and removed with `DELETE`, asserting the member list each time).
 - **Tasks** - CRUD, details, triggers, active toggle, plus a transfer flow
-  that moves a throwaway task to a second org and verifies it disappears from
+  that moves a throwaway task to a second project and verifies it disappears from
   the source and appears under the destination.
 - **Workers** - register/list/patch/delete (direct + CLI), with v4 worker UUIDs.
 - **Caches** - CRUD, key/stats, active/public toggles, plus sub-resources:
   member add/re-role/remove, custom-role create/get/patch/delete, an HTTP
-  upstream create/patch/delete, and org subscription remove/restore.
+  upstream create/patch/delete, and project subscription remove/restore.
 - **Cache NARs** - synthetic upload (CLI + direct multipart), list/show/stats/
   available, and delete (CLI plus a direct `DELETE` asserting `204`).
 - **Build-dependent endpoints** - exercised on empty state for correct
   not-found behaviour, since no builds are present.
-- **Edge cases** - duplicate creates (org, task, cache, org/cache role, API
-  key, org/cache member, subscription) return an enveloped `409`; a reserved
+- **Edge cases** - duplicate creates (project, task, cache, project/cache role, API
+  key, project/cache member, subscription) return an enveloped `409`; a reserved
   task name (`build-request`) and an empty API-key permission mask return
   enveloped `400`s.
 - **Permissions (multi-actor)** - the second user acts with their own token: a
-  non-member cannot read the private org; the built-in `View` role grants read
+  non-member cannot read the private project; the built-in `View` role grants read
   but is rejected (enveloped `403`) on settings edit, task create, member
-  add, and org delete; promotion to `Admin` unlocks the settings edit.
+  add, and project delete; promotion to `Admin` unlocks the settings edit.
 - **State export (`GET /admin/state`)** - rejected (`403`) for a non-superuser;
   after elevating `operator` to superuser in the DB, the JSON format returns the
-  seeded org/task/cache with secret `*_file` fields redacted to `null`, and
+  seeded project/task/cache with secret `*_file` fields redacted to `null`, and
   the default Nix format renders the same resources as a pasteable expression.
 
 The auth surface is rate-limited (burst 5, one token per 6s), so the script
@@ -5319,7 +5319,7 @@ feeds each build's prediction to the lazy `history` provider. On build completio
 worker's `BuildMetrics` and adopts the worker-measured `build_time_ms`.
 `summarize` also averages the rows' `build_time_ms` into
 `HistoryPrediction.build_time_ms` (same null-filter/mean as `avg_cpu_time_ms`),
-which `take_best_of_kind` uses to work-weight each org's active-build share.
+which `take_best_of_kind` uses to work-weight each project's active-build share.
 
 ### Negative-total dispatch gate (`scheduler::jobs`)
 
@@ -5399,7 +5399,7 @@ runtime endpoint).
 ## Cache storage limits (#216)
 
 Per-instance (`GRADIENT_MAX_STORAGE_GB`) and per-cache (`max_storage_gb`, GB,
-0 = unlimited) storage caps. When every writable cache for an org has less than
+0 = unlimited) storage caps. When every writable cache for a project has less than
 10 MiB headroom, new evaluations park in `Waiting` with `CacheStorageFull`.
 
 - **`core::types::waiting_reason::tests::cache_storage_full_round_trip`** - the
@@ -5414,7 +5414,7 @@ Per-instance (`GRADIENT_MAX_STORAGE_GB`) and per-cache (`max_storage_gb`, GB,
   cache queries. The `no_eval_capable_worker_parks_*` flow also exercises the
   gate's not-full pass-through.
 - **`core::ci::unpark::tests::unpark_storage_full_requeues_when_headroom_returns`**
-  - a `CacheStorageFull`-parked eval is re-queued once the org regains headroom.
+  - a `CacheStorageFull`-parked eval is re-queued once the project regains headroom.
 - **`core::types::cli::storage::tests`** - `default_max_storage_gb_is_unlimited`
   / `clap_default_max_storage_gb_is_zero` pin the `0` default.
 - **`web::endpoints::caches::management::tests`** -
@@ -5467,7 +5467,7 @@ both from the latest `build_attempt` via the same `LATERAL` join.
 `core::db::cache_storage::tests::file_size_sum_casts_to_bigint` asserts the
 generated SQL wraps `SUM(file_size)` in `CAST(... AS bigint)`. Postgres widens
 `SUM(int8)` to `NUMERIC`, which failed to decode into `Option<i64>` and surfaced
-as an Internal Server Error when manually triggering an evaluation for an org
+as an Internal Server Error when manually triggering an evaluation for a project
 with a writable cache.
 
 ## Multi-line evaluation warnings preserved (#351)
@@ -5482,12 +5482,12 @@ warnings still split and the `SQLite database … is busy` line is still dropped
 ## Declarative state apply - gradient-api NixOS test (#347)
 
 `nix/tests/gradient/api` declares a full `services.gradient.state` (users with a
-superuser, organization with members, a state-managed role, a task with
+superuser, project with members, a state-managed role, a task with
 non-default fields and polling+time triggers, a cache with members/role/upstream,
 an API key, a worker registration, and inbound+outbound integrations) and
 Phase 8d of `test.py` asserts each resource was provisioned by the startup state
 actor. It also checks the API key's bearer token authorizes while its
-`viewOrg`-only mask rejects a settings mutation, and (for #349) that
+`viewProject`-only mask rejects a settings mutation, and (for #349) that
 `LimitMEMLOCK` is raised and no `mlock failed` warning appears in the journal.
 
 ## Chunked `IN` queries under the Postgres param cap (#345)
@@ -5533,8 +5533,8 @@ Frontend (`pnpm --dir frontend exec ng test --include='<glob>' --watch=false`):
   renders the pending-jobs list.
 
 Backend (`cargo test -p scheduler --tests jobs`):
-- `pending_snapshot_reports_kind_and_org` - `JobTracker::pending_snapshot` reports
-  each pending job's kind, org, and build-id, backing `GET /board/jobs/pending`.
+- `pending_snapshot_reports_kind_and_project` - `JobTracker::pending_snapshot` reports
+  each pending job's kind, project, and build-id, backing `GET /board/jobs/pending`.
 
 ## Scheduler - windowed instance context (#359)
 
@@ -5571,7 +5571,7 @@ Backend (`cargo test -p score`):
   `rescore_count` 0, drops to 0 at 4, is 0 once `missing_nar_size` is known, and
   is always 0 for eval jobs.
 - `fair_share_breaks_tie_at_equal_wait` (`score::rules::fair_share`) - at equal
-  wait the quieter org's job outscores the busier org's, fair-share + wait
+  wait the quieter project's job outscores the busier project's, fair-share + wait
   combined.
 - `aggregate_len1_is_identity_and_multi_reduces` (`score::context`) -
   `BuildContext::aggregate` is identity for one item; multi-item folds
@@ -5592,8 +5592,8 @@ instance-context windowed table with scalar counts.
 
 The dispatched-job detail now hides the server-only `core`/`cache` capability
 flags and the redundant standalone `fetch` row, shows the job-context
-architecture only for build jobs, links the worker id to its org-scoped metrics
-page (`organization_name` is now part of `DispatchedJobDetail`), makes the
+architecture only for build jobs, links the worker id to its project-scoped metrics
+page (`project_name` is now part of `DispatchedJobDetail`), makes the
 derivation rows the build entry-point, and falls back to a limited view (or a
 "Job not found" message) when a queued job has no dispatch record yet. The live
 board persists its tab/filter selection in `sessionStorage` and reconciles the
@@ -5603,7 +5603,7 @@ dispatch event.
 Frontend (`board/job-detail/job-detail.component.spec.ts`) - capability list
 excludes `core`/`cache` and has no separate `Fetch` row; architecture renders
 for build jobs and is hidden for eval jobs; the worker id links to
-`/organization/{org}/workers/{id}/metrics`; an undispatched job renders the
+`/project/{project}/workers/{id}/metrics`; an undispatched job renders the
 pending view without a scoring breakdown, and an unknown id renders "Job not
 found".
 
@@ -5658,7 +5658,7 @@ evaluation pages stayed frozen until the eval phase finished.
 - `backend/gradient-web/src/endpoints/live.rs::tests::eval_channel_matches_only_its_evaluation`
   and `task_channel_forwards_progress_and_learns_its_eval` assert the new
   `evaluation_progress` frame is forwarded on the `/evals/{id}/live` and
-  `/tasks/{org}/{task}/live` channels (and learnt into the task
+  `/tasks/{project}/{task}/live` channels (and learnt into the task
   channel's known-eval set), while a progress ping for another evaluation /
   task is dropped.
 - `backend/gradient-scheduler/src/eval.rs::handle_eval_result` emits
@@ -5859,7 +5859,7 @@ harness).
   `DELETE /Users/{id}` soft-disables by default (issues an `UPDATE`, not a
   `DELETE`) and hard-deletes when `scim_hard_delete` is set.
 - **Groups** - `PATCH /Groups/{id}` add/remove members maps to
-  `organization_user` grants for the resolved `(organization, role)`; an unknown
+  `project_user` grants for the resolved `(project, role)`; an unknown
   group name returns `404`.
 - **Discovery** - `GET ServiceProviderConfig`/`ResourceTypes`/`Schemas` return the
   advertised capabilities.
@@ -5869,7 +5869,7 @@ harness).
 `gradient-types` `config.rs` unit tests cover `scim_config()` (disabled → `None`,
 enabled-without-token → `None`, fully-configured → `Some`) and `RuntimeConfig`
 propagation; `gradient-state` covers `resolve_scim_group_roles` mapping a
-`scim_group` name to its `(org, role)` grant; `scim/filter.rs` covers the
+`scim_group` name to its `(project, role)` grant; `scim/filter.rs` covers the
 `attr eq "value"` parser.
 
 ## Open PR flake.lock updater
@@ -6098,11 +6098,11 @@ session on slow object storage).
   the DB reset and the worker-side orphan-task cancellation are covered by CI E2E
   rather than the MockDatabase unit harness.
 
-## Per-org multi-installation GitHub integration (#436)
+## Per-project multi-installation GitHub integration (#436)
 
 GitHub is now a first-class creatable forge integration. The App remains
-server-wide; installations are per-org and multiple (one per GitHub account),
-created via `PUT /orgs/{org}/integrations` with `forge_type=github` and
+server-wide; installations are per-project and multiple (one per GitHub account),
+created via `PUT /projects/{project}/integrations` with `forge_type=github` and
 `installation_id`, or auto-created by the install webhook.
 
 `backend/gradient-ci/src/integration_lookup.rs` - `name_tests`:
@@ -6110,27 +6110,27 @@ created via `PUT /orgs/{org}/integrations` with `forge_type=github` and
 - `falls_back_to_installation_id` - `github_integration_name(None, 42)` yields `"github-42"` when no login is available.
 
 `backend/gradient-ci/src/integration_lookup.rs` - `ensure_tests`:
-- `creates_both_rows_when_none_exist` - `ensure_github_app_integrations` on an org with no existing rows inserts the inbound and outbound pair linked to the specific `github_installation`.
-- `skips_kinds_that_already_exist` - repeated calls are idempotent per installation; rows that already exist for that org/installation/kind are not duplicated.
+- `creates_both_rows_when_none_exist` - `ensure_github_app_integrations` on a project with no existing rows inserts the inbound and outbound pair linked to the specific `github_installation`.
+- `skips_kinds_that_already_exist` - repeated calls are idempotent per installation; rows that already exist for that project/installation/kind are not duplicated.
 
 `backend/gradient-forge/src/github_app.rs` - `parses_installation_account_login`:
 - `InstallationResponse` deserialises `{"id":42,"account":{"login":"acme-corp"}}` and returns `account.login = "acme-corp"`. Guards the `get_installation` API call that validates an installation id on `PUT`.
 
-`backend/gradient-web/tests/orgs_integrations.rs`:
-- `github_create_without_app_config_is_rejected` - `PUT /orgs/{org}/integrations` with `forge_type=github` returns `400` when the server has no GitHub App configured (`GRADIENT_GITHUB_APP_ID` absent). Guards the "App must be configured" prerequisite before any installation lookup.
+`backend/gradient-web/tests/projects_integrations.rs`:
+- `github_create_without_app_config_is_rejected` - `PUT /projects/{project}/integrations` with `forge_type=github` returns `400` when the server has no GitHub App configured (`GRADIENT_GITHUB_APP_ID` absent). Guards the "App must be configured" prerequisite before any installation lookup.
 - PATCH on a `forge_type=github` row returns `400`; github rows are installation-managed and not editable via PATCH (delete to remove). The `PatchIntegrationRequest.forge_type` enum excludes `github` at the schema level.
-- github rows CAN be deleted via `DELETE /orgs/{org}/integrations/{id}`; removing the row also removes the `github_installation` binding.
+- github rows CAN be deleted via `DELETE /projects/{project}/integrations/{id}`; removing the row also removes the `github_installation` binding.
 
 `backend/gradient-web/tests/forge_hooks.rs` - reworked GitHub App dispatch tests routing by `github_installation` FK:
 - `github_app_webhook_push_fires_trigger` (Test 10) - a push event dispatched via a `github_installation` row fires the matching task trigger and returns one queued evaluation.
-- `github_app_webhook_installation` (Test 12) - an `installation` event for an org not found in the DB warns and returns `200` with `event="installation"` and empty queued arrays (no crash).
-- `github_app_webhook_multi_org_routes_to_matching_org` (Test 15) - a push event routes only to the org whose task URL matches the push payload; the sibling org with a different repo URL is not queued.
+- `github_app_webhook_installation` (Test 12) - an `installation` event for a project not found in the DB warns and returns `200` with `event="installation"` and empty queued arrays (no crash).
+- `github_app_webhook_multi_project_routes_to_matching_project` (Test 15) - a push event routes only to the project whose task URL matches the push payload; the sibling project with a different repo URL is not queued.
 - `github_app_webhook_no_matching_repo_returns_zero` (Test 16) - a push against a repo URL not tracked by any task returns `tasks_scanned=0`.
 
 `backend/gradient-state/src/config.rs` - `deserializes_github_integration_with_installation_id`:
 - A `forge_type=github` entry in the `integrations` map deserialises with `installation_id` + optional `account_login`, covering the state provisioning path that links the `github_installation`.
 
-`frontend/src/app/features/organizations/integrations/integrations.component.spec.ts` - `IntegrationsComponent - create github integration`:
+`frontend/src/app/features/projects/integrations/integrations.component.spec.ts` - `IntegrationsComponent - create github integration`:
 - `createIntegration sends forge_type=github with installation_id` - form submit with `forge_type=github` and a numeric `installation_id` string calls `PUT` with the parsed integer.
 - `createIntegration rejects a non-integer installation_id` - a non-numeric installation id string fails client-side validation without sending a request.
 
@@ -6263,7 +6263,7 @@ rather than the host freezing. Covered in the same file:
 - Frontend: `cache.component.spec.ts` renders an upstream row from `getUpstreams`.
 - SQL coverage (window stats query, per-batch upsert, rollup inserts) is by
   mirrored-query review plus CI E2E; no real-Postgres unit harness exists.
-- Org-scoping of `/board/cache/upstreams` mirrors `get_board_network` (MetricsScope) and is covered by CI E2E (no local real-Postgres harness).
+- Project-scoping of `/board/cache/upstreams` mirrors `get_board_network` (MetricsScope) and is covered by CI E2E (no local real-Postgres harness).
 
 ## Standalone evaluator crate + `gradient eval` (#472)
 
@@ -6295,16 +6295,16 @@ the same "no custom events" rule as `forge_status_report`.
 - `state_action_validate_rejects_events_on_open_pr` - an `open_pr` action with a
   non-empty `events` list is rejected on the `.events` field.
 
-## Organization/cache creation permission gate (#470)
+## Project/cache creation permission gate (#470)
 
-`create_org` / `create_cache` (`CreatePermission`: `none` | `superusers` |
-`everyone`, default `everyone`) gate `PUT /orgs` and `PUT /caches`. The server
+`create_project` / `create_cache` (`CreatePermission`: `none` | `superusers` |
+`everyone`, default `everyone`) gate `PUT /projects` and `PUT /caches`. The server
 enforces the gate; the frontend additionally hides the create buttons and
 `GET /config` exposes both values.
 
 - `backend/gradient-web/tests/create_permissions.rs` -
-  `create_{org,cache}_superusers_rejects_regular_user` (403 `superuser_required`),
-  `create_{org,cache}_none_rejects_superuser` (403 `creation_disabled`), and the
+  `create_{project,cache}_superusers_rejects_regular_user` (403 `superuser_required`),
+  `create_{project,cache}_none_rejects_superuser` (403 `creation_disabled`), and the
   allow-path cases that reach the name-taken pre-check (409) once the gate is
   satisfied.
 - `backend/gradient-web/tests/config_endpoint.rs` -
@@ -6413,7 +6413,7 @@ the 151 pre-globalization migrations were squashed into one guarded baseline.
 Two always-on scans saturated Postgres on a large graph (observed live at 100% CPU: the `cache_derivation` INSERT SELECT at 1-3 minutes per pass and the `cached_path` closure fixpoint at 11-40s per pass, re-launched every 5s so the DB never idled, starving the pool for everything else):
 
 - The dispatch tick now alternates scopes: `ReconcileScope::Tick` every 5s runs only the anchor-side fixpoints (`drv_closure_cached` / `closure_complete` - they gate dispatch, so mid-eval progression rides their cadence) plus promotion; the `Global` backstop (unbacked-output demote, dependency-failed sweep) runs every `GLOBAL_RECONCILE_TICKS` = 6th tick (30s); and the `cached_path` closure re-derivation - whose CLEAR pass re-verifies every complete row's whole reference list, 20-40s on a large cache and not fixable by indexes - runs only in the new `ReconcileScope::Deep` (`DEEP_RECONCILE_TICKS` = hourly) and in `Unstick`. That demotion is sound because the flag became fully event-driven: ingest forward-maintains it, and `clear_gate_flags_for_hashes` (all GC/delete paths, in the deletion transaction) now also clears `cached_path.closure_complete` on every transitive referrer of a deleted hash via a set-based `WITH RECURSIVE` walk pruned at already-false rows - previously GC only cleared anchor flags and the every-pass fixpoint was load-bearing for eviction.
-- `record_newly_completed_derivations` (sign sweep) re-scanned every derivation every subscribed org ever built, per sweep, with correlated per-candidate probes. It is now seeded: the sweep collects the hashes it just signed, resolves them to derivations, and walks dependents layer-by-layer to a fixpoint (`d.id = ANY($frontier)` + `RETURNING derivation`). The unseeded backfill survives for fresh cache subscriptions and rows a crashed sweep missed, hourly (`FULL_BACKFILL_SECS`, armed on first call so a restart never pays it immediately) and rewritten set-based: the already-recorded set is materialised once (`WITH have AS MATERIALIZED`) and hash anti-joined instead of probed per candidate per dependency.
+- `record_newly_completed_derivations` (sign sweep) re-scanned every derivation every subscribed project ever built, per sweep, with correlated per-candidate probes. It is now seeded: the sweep collects the hashes it just signed, resolves them to derivations, and walks dependents layer-by-layer to a fixpoint (`d.id = ANY($frontier)` + `RETURNING derivation`). The unseeded backfill survives for fresh cache subscriptions and rows a crashed sweep missed, hourly (`FULL_BACKFILL_SECS`, armed on first call so a restart never pays it immediately) and rewritten set-based: the already-recorded set is materialised once (`WITH have AS MATERIALIZED`) and hash anti-joined instead of probed per candidate per dependency.
 - `m20260704_000000_flag_partial_indexes`: partial indexes for the periodic scanners - `cached_path_signature (signature IS NULL)` (the sweep's pending scan was a full scan of the largest table), both sides of `cached_path.closure_complete`, and both sides of the `derivation_build` flag fixpoints (`closure_complete`, `drv_closure_cached AND edges_complete`), so each CLEAR/SET pass finds its candidate rows by index instead of walking the heap.
 
 All load-shape changes with unchanged semantics; covered by E2E CI (no MockDatabase harness for recursive SQL or timing).
@@ -6508,19 +6508,19 @@ nothing instead of silently completing.
 
 ## CLI onboarding (#498)
 
-`cli/src/commands/organization.rs` `tests` - the pure `decide_org_onboarding`
-that drives post-login org selection:
-- `no_orgs_yields_none`, `single_org_auto_selects`, `multiple_orgs_prompt_choice`
+`cli/src/commands/project.rs` `tests` - the pure `decide_project_onboarding`
+that drives post-login project selection:
+- `no_projects_yields_none`, `single_project_auto_selects`, `multiple_projects_prompt_choice`
   cover the zero / one / many membership cases.
-- `valid_current_selection_is_kept` leaves an already-selected org untouched;
-  `stale_current_selection_falls_through` re-selects when the stored org is no
+- `valid_current_selection_is_kept` leaves an already-selected project untouched;
+  `stale_current_selection_falls_through` re-selects when the stored project is no
   longer a membership.
 
 `cli/tests/onboarding.rs` (`assert_cmd` + `wiremock`):
-- `organization_select_without_login_is_rejected` - selecting an org with no
+- `project_select_without_login_is_rejected` - selecting a project with no
   stored token exits `Unauthorized` and points at `gradient login <url>`.
-- `organization_select_rejects_non_member` / `organization_select_accepts_member`
-  - selection is validated against the caller's `/orgs` memberships.
+- `project_select_rejects_non_member` / `project_select_accepts_member`
+  - selection is validated against the caller's `/projects` memberships.
 
 ## Private-cache auth + result linking on `gradient build`
 
@@ -6535,7 +6535,7 @@ that drives post-login org selection:
 - `remove_entry_drops_matching_machine_block` keeps a re-install idempotent.
 
 `link_result` (`cli/src/commands/build_nix.rs`, `nix` feature) now realises the
-primary output with a single `nix-store --realise` that wires the org cache in
+primary output with a single `nix-store --realise` that wires the project cache in
 as an `extra-substituters` (its signing key via `extra-trusted-public-keys`, and
 a 0600 temp `netrc` from the logged-in session when the cache is private),
 alongside the user's own substituters. An output already local or reachable only
@@ -6774,7 +6774,7 @@ content before any object write.
 ## Per-input flake prefetch fallback (#550)
 
 `nix flake archive` fetches every input in `flake.lock`, so one unfetchable
-input (e.g. a private `git+ssh` input the org has no key for) failed the whole
+input (e.g. a private `git+ssh` input the project has no key for) failed the whole
 fetch even when the eval targets never referenced it. On archive failure the
 worker now prefetches the source and each locked input independently
 (`prefetch_flake_best_effort`), collecting successes and emitting per-input

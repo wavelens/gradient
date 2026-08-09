@@ -60,12 +60,12 @@ impl ScoreRule for PreferLocalBuildRule {
 mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, ScoredJob};
-    use gradient_types::ids::OrganizationId;
+    use gradient_types::ids::ProjectId;
 
     fn job(prefer_local_build: bool) -> ScoredJob<'static> {
         ScoredJob::new_build(
             "test",
-            OrganizationId::now_v7(),
+            ProjectId::now_v7(),
             "x86_64-linux",
             prefer_local_build,
             false,
@@ -83,7 +83,7 @@ mod tests {
             dependency_count: 0,
             queued_at: gradient_types::now(),
             ready_at: gradient_types::now(),
-            org_work_share: None,
+            project_work_share: None,
             rescore_count: 0,
             now: gradient_types::now(),
         }

@@ -5,29 +5,29 @@
  */
 
 use gradient_core::ServerState;
-use gradient_types::ids::OrganizationId;
+use gradient_types::ids::ProjectId;
 use std::collections::HashSet;
 use tracing::warn;
 use uuid::Uuid;
 
 use crate::messages::{FailedPeer, GradientCapabilities};
 
-/// Demotes any authorized peer that is an organization with zero
-/// `organization_cache` rows. Cache and proxy peer UUIDs (anything not present
-/// in the `organization` table) are passed through unchanged.
-pub(super) async fn filter_org_peers_without_cache(
+/// Demotes any authorized peer that is a project with zero
+/// `project_cache` rows. Cache and proxy peer UUIDs (anything not present
+/// in the `project` table) are passed through unchanged.
+pub(super) async fn filter_project_peers_without_cache(
     state: &ServerState,
     authorized: Vec<String>,
 ) -> (Vec<String>, Vec<FailedPeer>) {
-    use gradient_entity::organization::{Column as OCol, Entity as EOrg};
-    use gradient_entity::organization_cache::{Column as OCCol, Entity as EOrgCache};
+    use gradient_entity::project::{Column as OCol, Entity as EProject};
+    use gradient_entity::project_cache::{Column as OCCol, Entity as EProjectCache};
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
     let mut authorized_out: Vec<String> = Vec::new();
-    let mut uuid_peers: Vec<(String, OrganizationId)> = Vec::new();
+    let mut uuid_peers: Vec<(String, ProjectId)> = Vec::new();
     for s in authorized {
         match Uuid::parse_str(&s) {
-            Ok(u) => uuid_peers.push((s, OrganizationId::new(u))),
+            Ok(u) => uuid_peers.push((s, ProjectId::new(u))),
             Err(_) => authorized_out.push(s),
         }
     }
@@ -36,16 +36,16 @@ pub(super) async fn filter_org_peers_without_cache(
         return (authorized_out, Vec::new());
     }
 
-    let uuid_set: Vec<OrganizationId> = uuid_peers.iter().map(|(_, u)| *u).collect();
+    let uuid_set: Vec<ProjectId> = uuid_peers.iter().map(|(_, u)| *u).collect();
 
-    let org_ids: HashSet<OrganizationId> = match EOrg::find()
+    let project_ids: HashSet<ProjectId> = match EProject::find()
         .filter(OCol::Id.is_in(uuid_set.clone()))
         .all(&state.worker_db)
         .await
     {
         Ok(rows) => rows.into_iter().map(|r| r.id).collect(),
         Err(e) => {
-            warn!(error = %e, "failed to look up organizations for peer filter");
+            warn!(error = %e, "failed to look up projects for peer filter");
             for (s, _) in uuid_peers {
                 authorized_out.push(s);
             }
@@ -53,17 +53,17 @@ pub(super) async fn filter_org_peers_without_cache(
         }
     };
 
-    let orgs_with_cache: HashSet<OrganizationId> = if org_ids.is_empty() {
+    let projects_with_cache: HashSet<ProjectId> = if project_ids.is_empty() {
         HashSet::new()
     } else {
-        match EOrgCache::find()
-            .filter(OCCol::Organization.is_in(org_ids.iter().copied().collect::<Vec<_>>()))
+        match EProjectCache::find()
+            .filter(OCCol::Project.is_in(project_ids.iter().copied().collect::<Vec<_>>()))
             .all(&state.worker_db)
             .await
         {
-            Ok(rows) => rows.into_iter().map(|r| r.organization).collect(),
+            Ok(rows) => rows.into_iter().map(|r| r.project).collect(),
             Err(e) => {
-                warn!(error = %e, "failed to look up organization_cache rows");
+                warn!(error = %e, "failed to look up project_cache rows");
                 for (s, _) in uuid_peers {
                     authorized_out.push(s);
                 }
@@ -74,10 +74,10 @@ pub(super) async fn filter_org_peers_without_cache(
 
     let mut demoted: Vec<FailedPeer> = Vec::new();
     for (s, u) in uuid_peers {
-        if org_ids.contains(&u) && !orgs_with_cache.contains(&u) {
+        if project_ids.contains(&u) && !projects_with_cache.contains(&u) {
             demoted.push(FailedPeer {
                 peer_id: s,
-                reason: "organization has no cache subscribed".into(),
+                reason: "project has no cache subscribed".into(),
             });
         } else {
             authorized_out.push(s);
@@ -117,10 +117,10 @@ pub(super) struct BaseWorkerChallenge {
     /// `(peer_id, token_hash)` pairs to send in the AuthChallenge.
     pub challenge: Vec<(String, String)>,
     /// When set, a successful auth of this single identity expands to
-    /// `enabled_orgs`; otherwise `challenge` already lists the enabled orgs.
+    /// `enabled_projects`; otherwise `challenge` already lists the enabled projects.
     pub authorize_against: Option<String>,
-    /// Org UUID strings that opted into this base worker.
-    pub enabled_orgs: Vec<String>,
+    /// Project UUID strings that opted into this base worker.
+    pub enabled_projects: Vec<String>,
 }
 
 /// Returns base-worker challenge data when `worker_id` is an enabled base
@@ -135,8 +135,8 @@ pub(super) async fn lookup_base_worker_challenge(
             .ok()
             .flatten()?;
 
-    let enabled_orgs: Vec<String> =
-        gradient_db::base_workers::orgs_enabling_base_worker(&state.worker_db, bw.id)
+    let enabled_projects: Vec<String> =
+        gradient_db::base_workers::projects_enabling_base_worker(&state.worker_db, bw.id)
             .await
             .unwrap_or_default()
             .into_iter()
@@ -145,7 +145,7 @@ pub(super) async fn lookup_base_worker_challenge(
 
     let challenge = match &bw.authorize_against {
         Some(uuid) => vec![(uuid.to_string(), bw.token_hash.clone())],
-        None => enabled_orgs
+        None => enabled_projects
             .iter()
             .map(|o| (o.clone(), bw.token_hash.clone()))
             .collect(),
@@ -154,12 +154,12 @@ pub(super) async fn lookup_base_worker_challenge(
     Some(BaseWorkerChallenge {
         challenge,
         authorize_against: bw.authorize_against.map(|u| u.to_string()),
-        enabled_orgs,
+        enabled_projects,
     })
 }
 
 /// Applies a base worker's authorize_against expansion: in single-identity mode,
-/// a successful auth of the identity expands to the enabled-org set; otherwise the
+/// a successful auth of the identity expands to the enabled-project set; otherwise the
 /// token-authorized set is returned unchanged.
 pub(super) fn expand_base_authorized(
     base: &Option<BaseWorkerChallenge>,
@@ -169,7 +169,7 @@ pub(super) fn expand_base_authorized(
         && let Some(identity) = &b.authorize_against
     {
         return if token_authorized.iter().any(|p| p == identity) {
-            b.enabled_orgs.clone()
+            b.enabled_projects.clone()
         } else {
             Vec::new()
         };
@@ -579,47 +579,47 @@ mod tests {
                 .map(|o| ((*o).into(), "hash".into()))
                 .collect(),
             authorize_against: authorize_against.map(|s| s.into()),
-            enabled_orgs: enabled.iter().map(|o| (*o).into()).collect(),
+            enabled_projects: enabled.iter().map(|o| (*o).into()).collect(),
         }
     }
 
     #[test]
-    fn expand_base_authorized_identity_present_expands_to_enabled_orgs() {
-        let base = Some(base_challenge(Some("id-1"), &["org-1", "org-2"]));
+    fn expand_base_authorized_identity_present_expands_to_enabled_projects() {
+        let base = Some(base_challenge(Some("id-1"), &["project-1", "project-2"]));
         let out = expand_base_authorized(&base, vec!["id-1".into()]);
-        assert_eq!(out, vec!["org-1".to_string(), "org-2".to_string()]);
+        assert_eq!(out, vec!["project-1".to_string(), "project-2".to_string()]);
     }
 
     #[test]
     fn expand_base_authorized_identity_absent_returns_empty() {
-        let base = Some(base_challenge(Some("id-1"), &["org-1", "org-2"]));
+        let base = Some(base_challenge(Some("id-1"), &["project-1", "project-2"]));
         let out = expand_base_authorized(&base, vec!["other".into()]);
         assert!(out.is_empty());
     }
 
     #[test]
-    fn expand_base_authorized_per_org_mode_passes_through_unchanged() {
-        let base = Some(base_challenge(None, &["org-1", "org-2"]));
-        let token_authorized = vec!["org-1".to_string()];
+    fn expand_base_authorized_per_project_mode_passes_through_unchanged() {
+        let base = Some(base_challenge(None, &["project-1", "project-2"]));
+        let token_authorized = vec!["project-1".to_string()];
         let out = expand_base_authorized(&base, token_authorized.clone());
         assert_eq!(out, token_authorized);
     }
 
     #[test]
     fn expand_base_authorized_none_passes_through_unchanged() {
-        let token_authorized = vec!["org-1".to_string(), "org-2".to_string()];
+        let token_authorized = vec!["project-1".to_string(), "project-2".to_string()];
         let out = expand_base_authorized(&None, token_authorized.clone());
         assert_eq!(out, token_authorized);
     }
 
-    // ── filter_org_peers_without_cache ───────────────────────────────────────
+    // ── filter_project_peers_without_cache ───────────────────────────────────────
 
-    use gradient_entity::organization::Model as OrgModel;
-    use gradient_entity::organization_cache::{CacheSubscriptionMode, Model as OrgCacheModel};
+    use gradient_entity::project::Model as ProjectModel;
+    use gradient_entity::project_cache::{CacheSubscriptionMode, Model as ProjectCacheModel};
     use sea_orm::{DatabaseBackend, MockDatabase};
 
-    fn org_row(id: OrganizationId) -> OrgModel {
-        OrgModel {
+    fn project_row(id: ProjectId) -> ProjectModel {
+        ProjectModel {
             id,
             name: format!("o-{}", id),
             display_name: "test".into(),
@@ -634,10 +634,13 @@ mod tests {
         }
     }
 
-    fn org_cache_row(org: OrganizationId, cache: gradient_types::ids::CacheId) -> OrgCacheModel {
-        OrgCacheModel {
-            id: gradient_types::ids::OrganizationCacheId::now_v7(),
-            organization: org,
+    fn project_cache_row(
+        project: ProjectId,
+        cache: gradient_types::ids::CacheId,
+    ) -> ProjectCacheModel {
+        ProjectCacheModel {
+            id: gradient_types::ids::ProjectCacheId::now_v7(),
+            project: project,
             cache,
             mode: CacheSubscriptionMode::ReadWrite,
         }
@@ -648,91 +651,94 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn filter_org_peers_passes_through_org_with_cache() {
-        let org = OrganizationId::now_v7();
+    async fn filter_project_peers_passes_through_project_with_cache() {
+        let project = ProjectId::now_v7();
         let cache = gradient_types::ids::CacheId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![org_row(org)]])
-            .append_query_results([vec![org_cache_row(org, cache)]])
+            .append_query_results([vec![project_row(project)]])
+            .append_query_results([vec![project_cache_row(project, cache)]])
             .into_connection();
         let state = state_with_db(db);
         let (authorized, demoted) =
-            filter_org_peers_without_cache(&state, vec![org.to_string()]).await;
-        assert_eq!(authorized, vec![org.to_string()]);
+            filter_project_peers_without_cache(&state, vec![project.to_string()]).await;
+        assert_eq!(authorized, vec![project.to_string()]);
         assert!(demoted.is_empty());
     }
 
     #[tokio::test]
-    async fn filter_org_peers_demotes_org_without_cache() {
-        let org = OrganizationId::now_v7();
+    async fn filter_project_peers_demotes_project_without_cache() {
+        let project = ProjectId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![org_row(org)]])
-            .append_query_results([Vec::<OrgCacheModel>::new()])
+            .append_query_results([vec![project_row(project)]])
+            .append_query_results([Vec::<ProjectCacheModel>::new()])
             .into_connection();
         let state = state_with_db(db);
         let (authorized, demoted) =
-            filter_org_peers_without_cache(&state, vec![org.to_string()]).await;
+            filter_project_peers_without_cache(&state, vec![project.to_string()]).await;
         assert!(authorized.is_empty());
         assert_eq!(demoted.len(), 1);
-        assert_eq!(demoted[0].peer_id, org.to_string());
+        assert_eq!(demoted[0].peer_id, project.to_string());
         assert!(
             demoted[0]
                 .reason
-                .contains("organization has no cache subscribed")
+                .contains("project has no cache subscribed")
         );
     }
 
     #[tokio::test]
-    async fn filter_org_peers_passes_through_non_org_uuids() {
-        let cache_peer = OrganizationId::now_v7();
+    async fn filter_project_peers_passes_through_non_project_uuids() {
+        let cache_peer = ProjectId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<OrgModel>::new()])
+            .append_query_results([Vec::<ProjectModel>::new()])
             .into_connection();
         let state = state_with_db(db);
         let (authorized, demoted) =
-            filter_org_peers_without_cache(&state, vec![cache_peer.to_string()]).await;
+            filter_project_peers_without_cache(&state, vec![cache_peer.to_string()]).await;
         assert_eq!(authorized, vec![cache_peer.to_string()]);
         assert!(demoted.is_empty());
     }
 
     #[tokio::test]
-    async fn filter_org_peers_mixed() {
-        let org_with = OrganizationId::now_v7();
-        let org_without = OrganizationId::now_v7();
+    async fn filter_project_peers_mixed() {
+        let project_with = ProjectId::now_v7();
+        let project_without = ProjectId::now_v7();
         let cache = gradient_types::ids::CacheId::now_v7();
-        let cache_peer = OrganizationId::now_v7();
+        let cache_peer = ProjectId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![org_row(org_with), org_row(org_without)]])
-            .append_query_results([vec![org_cache_row(org_with, cache)]])
+            .append_query_results([vec![
+                project_row(project_with),
+                project_row(project_without),
+            ]])
+            .append_query_results([vec![project_cache_row(project_with, cache)]])
             .into_connection();
         let state = state_with_db(db);
-        let (authorized, demoted) = filter_org_peers_without_cache(
+        let (authorized, demoted) = filter_project_peers_without_cache(
             &state,
             vec![
-                org_with.to_string(),
-                org_without.to_string(),
+                project_with.to_string(),
+                project_without.to_string(),
                 cache_peer.to_string(),
             ],
         )
         .await;
-        assert!(authorized.contains(&org_with.to_string()));
+        assert!(authorized.contains(&project_with.to_string()));
         assert!(authorized.contains(&cache_peer.to_string()));
         assert_eq!(demoted.len(), 1);
-        assert_eq!(demoted[0].peer_id, org_without.to_string());
+        assert_eq!(demoted[0].peer_id, project_without.to_string());
     }
 
     #[tokio::test]
-    async fn validate_then_filter_demotes_org_without_cache() {
+    async fn validate_then_filter_demotes_project_without_cache() {
         let token = "token-x";
-        let org_with = OrganizationId::now_v7();
-        let org_without = OrganizationId::now_v7();
+        let project_with = ProjectId::now_v7();
+        let project_without = ProjectId::now_v7();
         let registered = vec![
-            (org_with.to_string(), sha256_hex(token)),
-            (org_without.to_string(), sha256_hex(token)),
+            (project_with.to_string(), sha256_hex(token)),
+            (project_without.to_string(), sha256_hex(token)),
         ];
         let auth = vec![
-            (org_with.to_string(), token.to_string()),
-            (org_without.to_string(), token.to_string()),
+            (project_with.to_string(), token.to_string()),
+            (project_without.to_string(), token.to_string()),
         ];
         let (authorized, failed) = validate_tokens(&registered, &auth);
         assert_eq!(authorized.len(), 2);
@@ -740,22 +746,21 @@ mod tests {
 
         let cache = gradient_types::ids::CacheId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![org_row(org_with), org_row(org_without)]])
-            .append_query_results([vec![org_cache_row(org_with, cache)]])
+            .append_query_results([vec![
+                project_row(project_with),
+                project_row(project_without),
+            ]])
+            .append_query_results([vec![project_cache_row(project_with, cache)]])
             .into_connection();
         let state = state_with_db(db);
 
-        let (authorized, demoted) = filter_org_peers_without_cache(&state, authorized).await;
+        let (authorized, demoted) = filter_project_peers_without_cache(&state, authorized).await;
         let mut failed = failed;
         failed.extend(demoted);
 
-        assert_eq!(authorized, vec![org_with.to_string()]);
+        assert_eq!(authorized, vec![project_with.to_string()]);
         assert_eq!(failed.len(), 1);
-        assert_eq!(failed[0].peer_id, org_without.to_string());
-        assert!(
-            failed[0]
-                .reason
-                .contains("organization has no cache subscribed")
-        );
+        assert_eq!(failed[0].peer_id, project_without.to_string());
+        assert!(failed[0].reason.contains("project has no cache subscribed"));
     }
 }

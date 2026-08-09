@@ -188,7 +188,7 @@ async fn decode_api_key(
     let context = ApiKeyContext {
         api_id: api_key.id,
         mask: api_key.permission,
-        organization: api_key.organization,
+        project: api_key.project,
         cache_pin: api_key.cache,
         cache_permission_mask: if api_key.cache.is_some() {
             Some(api_key.permission)

@@ -459,7 +459,7 @@
       <nav class="breadcrumb">
         <a class="breadcrumb-link" href="#">Home</a>
         <span class="text-secondary"> / </span>
-        <a class="breadcrumb-link" href="#">Organization</a>
+        <a class="breadcrumb-link" href="#">Project</a>
         <span class="text-secondary"> / </span>
         <span>Settings</span>
       </nav>
@@ -618,7 +618,7 @@
         button into <code>[slot=actions]</code> on <code>gr-page-layout</code>.
       </p>
       <div class="sg-page-frame">
-        <gr-page-layout title="Workers" subtitle="Build workers for this organization">
+        <gr-page-layout title="Workers" subtitle="Build workers for this project">
           <button slot="actions" pButton label="Register Worker" icon="pi pi-plus"></button>
           <p class="text-secondary">List of workers would go here.</p>
         </gr-page-layout>
@@ -627,7 +627,7 @@
       <h3>Settings Nav Row</h3>
       <p class="text-secondary">
         Title + description on the left, action button on the right. Used in
-        organization / task settings to send the user to a sub-page (Manage
+        project / task settings to send the user to a sub-page (Manage
         Workers, Manage Caches, etc.). Stack rows in one card with
         <code>p-divider</code> between them.
       </p>
@@ -635,7 +635,7 @@
         <div class="sg-nav-row">
           <div>
             <h4>Workers</h4>
-            <p class="text-secondary">Manage build workers for this organization</p>
+            <p class="text-secondary">Manage build workers for this project</p>
           </div>
           <button pButton label="Manage Workers" icon="pi pi-cog" severity="secondary"></button>
         </div>
@@ -643,7 +643,7 @@
         <div class="sg-nav-row">
           <div>
             <h4>Cache Subscriptions</h4>
-            <p class="text-secondary">Nix binary caches this organization pushes builds to</p>
+            <p class="text-secondary">Nix binary caches this project pushes builds to</p>
           </div>
           <button pButton label="Manage Caches" icon="pi pi-database" severity="secondary"></button>
         </div>

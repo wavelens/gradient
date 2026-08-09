@@ -10,7 +10,7 @@ fn ok<T: serde::Serialize>(m: T) -> serde_json::Value {
 async fn list_workers_returns_vec() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/orgs/my-org/workers"))
+        .and(path("/api/v1/projects/my-project/workers"))
         .respond_with(ResponseTemplate::new(200).set_body_json(ok(serde_json::json!([]))))
         .mount(&server)
         .await;
@@ -20,7 +20,7 @@ async fn list_workers_returns_vec() {
         .token("t")
         .build()
         .unwrap();
-    let workers = client.workers().list("my-org").await.unwrap();
+    let workers = client.workers().list("my-project").await.unwrap();
     assert!(workers.is_empty());
 }
 
@@ -28,7 +28,7 @@ async fn list_workers_returns_vec() {
 async fn create_worker_returns_response() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/api/v1/orgs/my-org/workers"))
+        .and(path("/api/v1/projects/my-project/workers"))
         .respond_with(
             ResponseTemplate::new(200).set_body_json(ok(serde_json::json!({
                 "peer_id": "worker-1", "token": "tok123"
@@ -45,7 +45,7 @@ async fn create_worker_returns_response() {
     let res = client
         .workers()
         .create(
-            "my-org",
+            "my-project",
             connector::workers::MakeWorkerRequest {
                 worker_id: "worker-1".into(),
                 display_name: "My Worker".into(),

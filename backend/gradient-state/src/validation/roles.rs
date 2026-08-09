@@ -9,12 +9,12 @@ use gradient_db::permissions::Permission;
 use std::collections::HashSet;
 
 pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
-    let mut role_keys_seen_per_org: HashSet<(String, String)> = HashSet::new();
+    let mut role_keys_seen_per_project: HashSet<(String, String)> = HashSet::new();
     for role in lookup.config.roles.values() {
-        if !lookup.org_exists(&role.organization) {
+        if !lookup.project_exists(&role.project) {
             errors.push(
-                format!("roles.{}.organization", role.name),
-                format!("Organization '{}' does not exist", role.organization),
+                format!("roles.{}.project", role.name),
+                format!("Project '{}' does not exist", role.project),
             );
         }
         if role.permissions.is_empty() {
@@ -40,13 +40,13 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 ),
             );
         }
-        let key = (role.organization.clone(), role.name.clone());
-        if !role_keys_seen_per_org.insert(key) {
+        let key = (role.project.clone(), role.name.clone());
+        if !role_keys_seen_per_project.insert(key) {
             errors.push(
                 format!("roles.{}.name", role.name),
                 format!(
-                    "Duplicate role '{}' in organization '{}'",
-                    role.name, role.organization
+                    "Duplicate role '{}' in project '{}'",
+                    role.name, role.project
                 ),
             );
         }

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Best-effort wiring of a freshly created task to the org's forge
+//! Best-effort wiring of a freshly created task to the project's forge
 //! integrations. When the repository URL unambiguously belongs to one inbound
 //! and/or one outbound integration, a push trigger and a status-report action
 //! are attached so the task works with the forge without extra setup.

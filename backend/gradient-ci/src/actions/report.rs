@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow};
 use gradient_forge::reporter::{CiReport, CiStatus};
 use gradient_types::input::vec_to_hex;
 use gradient_types::{
-    BuildJobId, CEntryPoint, EBuildJob, ECommit, EEntryPoint, EEvaluation, EOrganization, ETask,
+    BuildJobId, CEntryPoint, EBuildJob, ECommit, EEntryPoint, EEvaluation, EProject, ETask,
     EvaluationId,
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -171,7 +171,7 @@ pub(super) async fn build_ci_report_from_payload(
     // one check per derivation would spam the PR with per-dependency noise.
     let entry_point_eval = entry_points.first().map(|ep| ep.eval.clone());
 
-    let org_name = EOrganization::find_by_id(task.organization)
+    let project_name = EProject::find_by_id(task.project)
         .one(&ctx.db.worker_db)
         .await
         .ok()
@@ -204,10 +204,10 @@ pub(super) async fn build_ci_report_from_payload(
         }
     };
 
-    let details_url = org_name.as_ref().map(|org| {
+    let details_url = project_name.as_ref().map(|project| {
         format!(
-            "{}/organization/{}/log/{}",
-            ctx.db.config.server.frontend_url, org, evaluation.id
+            "{}/project/{}/log/{}",
+            ctx.db.config.server.frontend_url, project, evaluation.id
         )
     });
 

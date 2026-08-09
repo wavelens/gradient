@@ -185,7 +185,7 @@ pub enum ServerMessage {
     /// Response to [`super::client::ClientMessage::QueryKnownDerivations`].
     ///
     /// Contains the subset of the queried `.drv` paths that are already
-    /// recorded in the server's derivation table for the owning org.
+    /// recorded in the server's derivation table for the owning project.
     /// The worker skips subtree traversal for these paths during BFS.
     KnownDerivations { job_id: String, known: Vec<String> },
 

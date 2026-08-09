@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use gradient_core::ServerState;
-use gradient_types::ids::{CacheId, CachedPathId, OrganizationId};
+use gradient_types::ids::{CacheId, CachedPathId, ProjectId};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
 use tracing::{error, warn};
@@ -68,33 +68,36 @@ async fn load_cached_path_rows(
 }
 
 /// For Push mode: ensure a `cached_path_signature` row exists for each
-/// (cached_path, org cache) pair so that the signing job is triggered for
+/// (cached_path, project cache) pair so that the signing job is triggered for
 /// paths that were already cached before this worker connected.
 async fn ensure_push_signatures(
     state: &ServerState,
-    org_id: OrganizationId,
+    project_id: ProjectId,
     cached_path_rows: &[gradient_entity::cached_path::Model],
 ) {
     if cached_path_rows.is_empty() {
         return;
     }
 
-    let org_caches = EOrganizationCache::find()
-        .filter(COrganizationCache::Organization.eq(org_id))
+    let project_caches = EProjectCache::find()
+        .filter(CProjectCache::Project.eq(project_id))
         .all(&state.cache_db)
         .await
         .unwrap_or_default();
-    if org_caches.is_empty() {
+    if project_caches.is_empty() {
         return;
     }
 
-    let cache_ids: Vec<uuid::Uuid> = org_caches.iter().map(|oc| oc.cache.into_inner()).collect();
+    let cache_ids: Vec<uuid::Uuid> = project_caches
+        .iter()
+        .map(|oc| oc.cache.into_inner())
+        .collect();
     let path_ids: Vec<uuid::Uuid> = cached_path_rows
         .iter()
         .map(|cp| cp.id.into_inner())
         .collect();
 
-    // Insert via `SELECT FROM cached_path` (cross-joined with the org caches) so a
+    // Insert via `SELECT FROM cached_path` (cross-joined with the project caches) so a
     // path concurrently purged between the lookup and here is simply skipped,
     // instead of failing the whole batch on the cached_path FK. Array params keep
     // each statement to two binds regardless of row count; chunk the path list so
@@ -119,7 +122,7 @@ async fn ensure_push_signatures(
             .await;
         if let Err(e) = result {
             warn!(
-                %org_id,
+                %project_id,
                 error = %e,
                 "failed to insert cached_path_signature placeholders (Push mode)"
             );
@@ -375,27 +378,27 @@ async fn extend_with_persisted_upstream(
     served
 }
 
-/// Probe org-configured upstream caches for any `uncached_pairs` not found
+/// Probe project-configured upstream caches for any `uncached_pairs` not found
 /// locally, extending `result` with any hits. Outbound probes are bounded by
-/// the shared upstream-query semaphore. No-ops if the org has no upstream URLs.
+/// the shared upstream-query semaphore. No-ops if the project has no upstream URLs.
 async fn extend_with_upstream_results(
     state: &ServerState,
-    org_id: OrganizationId,
+    project_id: ProjectId,
     uncached_pairs: Vec<(String, String)>,
     result: &mut Vec<gradient_types::proto::CachedPath>,
 ) {
     const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
-    let endpoints = match gradient_db::upstream_endpoints_for_org(
+    let endpoints = match gradient_db::upstream_endpoints_for_project(
         &state.cache_db,
-        org_id,
+        project_id,
         UPSTREAM_WINDOW_MINUTES,
     )
     .await
     {
         Ok(eps) => eps,
         Err(e) => {
-            warn!(%org_id, error = %e, "CacheQuery upstream lookup failed");
+            warn!(%project_id, error = %e, "CacheQuery upstream lookup failed");
             return;
         }
     };
@@ -437,22 +440,26 @@ async fn extend_with_upstream_results(
     }
 }
 
-/// Pull availability for any still-uncached paths from the org's configured
+/// Pull availability for any still-uncached paths from the project's configured
 /// gradient_proto upstreams, extending `result` with hits.
 async fn extend_with_gradient_proto_results(
     state: &ServerState,
-    org_id: OrganizationId,
+    project_id: ProjectId,
     uncached_pairs: &[(String, String)],
     result: &mut Vec<gradient_types::proto::CachedPath>,
 ) {
-    let upstreams =
-        match gradient_db::gradient_proto_upstreams_for_org(&state.cache_db, org_id).await {
-            Ok(u) => u,
-            Err(e) => {
-                warn!(%org_id, error = %e, "gradient_proto upstream lookup failed");
-                return;
-            }
-        };
+    let upstreams = match gradient_db::gradient_proto_upstreams_for_project(
+        &state.cache_db,
+        project_id,
+    )
+    .await
+    {
+        Ok(u) => u,
+        Err(e) => {
+            warn!(%project_id, error = %e, "gradient_proto upstream lookup failed");
+            return;
+        }
+    };
     if upstreams.is_empty() {
         return;
     }
@@ -491,7 +498,7 @@ async fn extend_with_gradient_proto_results(
 ///   Uncached paths include a presigned S3 PUT URL when S3-backed.
 async fn query(
     state: &ServerState,
-    org_id: Option<OrganizationId>,
+    project_id: Option<ProjectId>,
     paths: &[String],
     mode: gradient_types::proto::QueryMode,
 ) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
@@ -530,7 +537,7 @@ async fn query(
     }
 
     if matches!(mode, QueryMode::Push)
-        && let Some(oid) = org_id
+        && let Some(oid) = project_id
     {
         ensure_push_signatures(state, oid, &cached_path_rows).await;
     }
@@ -571,7 +578,7 @@ async fn query(
         .collect();
 
     if !uncached_pairs.is_empty()
-        && let Some(oid) = org_id
+        && let Some(oid) = project_id
     {
         extend_with_upstream_results(state, oid, uncached_pairs.clone(), &mut result).await;
         extend_with_gradient_proto_results(state, oid, &uncached_pairs, &mut result).await;
@@ -759,11 +766,11 @@ pub(super) async fn path_in_cache(
 
 pub(super) async fn handle_cache_query(
     state: &ServerState,
-    org_id: Option<OrganizationId>,
+    project_id: Option<ProjectId>,
     paths: &[String],
     mode: gradient_types::proto::QueryMode,
 ) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
-    query(state, org_id, paths, mode).await
+    query(state, project_id, paths, mode).await
 }
 
 fn expand_references(raw: Option<&str>) -> Option<Vec<String>> {

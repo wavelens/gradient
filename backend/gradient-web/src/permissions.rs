@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Re-export of the org permission system, plus web-layer helpers shared
+//! Re-export of the project permission system, plus web-layer helpers shared
 //! between the role-management API and the API-key endpoints. The canonical
 //! capability set lives in [`gradient_db::permissions`].
 
@@ -20,7 +20,7 @@ pub struct PermissionEntry {
 }
 
 /// Catalogue of every capability a custom role or API key may grant. Used by
-/// both the role-management UI (`GET /orgs/{org}/roles`) and the API-key UI
+/// both the role-management UI (`GET /projects/{project}/roles`) and the API-key UI
 /// (`GET /user/keys/permissions`).
 pub fn available_permissions() -> Vec<PermissionEntry> {
     Permission::ALL

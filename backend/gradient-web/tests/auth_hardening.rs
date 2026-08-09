@@ -89,7 +89,7 @@ fn server_with(web_db_setup: impl FnOnce(MockDatabase) -> MockDatabase) -> TestS
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new(JWT_SECRET.to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -290,7 +290,7 @@ fn delete_user_with_wrong_password_is_forbidden() {
 #[test]
 fn api_key_with_only_view_cannot_trigger_evaluation() {
     use gradient_db::permissions::{Permission, mask_from};
-    use gradient_test_support::fixtures::{org, org_id};
+    use gradient_test_support::fixtures::{project, project_id};
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
@@ -303,12 +303,12 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
             key: hash_api_key(&raw),
             last_used_at: now,
             created_at: now,
-            permission: mask_from(&[Permission::ViewOrg]),
+            permission: mask_from(&[Permission::ViewProject]),
             ..Default::default()
         };
-        let admin_membership = gradient_entity::organization_user::Model {
-            id: gradient_entity::ids::OrganizationUserId::now_v7(),
-            organization: org_id(),
+        let admin_membership = gradient_entity::project_user::Model {
+            id: gradient_entity::ids::ProjectUserId::now_v7(),
+            project: project_id(),
             user: user_id(),
             role: gradient_types::consts::BASE_ROLE_ADMIN_ID,
         };
@@ -327,10 +327,10 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
                 }])
                 .append_query_results([vec![key.clone()]])
                 .append_query_results([vec![user()]])
-                .append_query_results([vec![org()]])
+                .append_query_results([vec![project()]])
                 .append_query_results([vec![gradient_entity::task::Model {
                     id: gradient_test_support::fixtures::task_id(),
-                    organization: org_id(),
+                    project: project_id(),
                     name: "test-task".into(),
                     display_name: "Test".into(),
                     repository: "git@example.com:test/test.git".into(),
@@ -355,7 +355,7 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
         });
 
         let res = s
-            .post("/api/v1/tasks/test-org/test-task/evaluate")
+            .post("/api/v1/tasks/test-project/test-task/evaluate")
             .add_header("authorization", format!("Bearer GRAD{}", raw))
             .await;
         res.assert_status(axum::http::StatusCode::FORBIDDEN);
@@ -363,15 +363,15 @@ fn api_key_with_only_view_cannot_trigger_evaluation() {
 }
 
 #[test]
-fn api_key_pinned_to_other_org_is_invisible() {
+fn api_key_pinned_to_other_project_is_invisible() {
     use gradient_db::permissions::{Permission, mask_from};
-    use gradient_test_support::fixtures::org;
+    use gradient_test_support::fixtures::project;
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         let raw = "y".repeat(64);
         let now = Utc::now().naive_utc();
-        let pinned_elsewhere = gradient_entity::ids::OrganizationId::new(uuid::uuid!(
+        let pinned_elsewhere = gradient_entity::ids::ProjectId::new(uuid::uuid!(
             "ffffffff-ffff-ffff-ffff-ffffffffffff"
         ));
         let key = api::Model {
@@ -382,7 +382,7 @@ fn api_key_pinned_to_other_org_is_invisible() {
             last_used_at: now,
             created_at: now,
             permission: mask_from(Permission::ALL),
-            organization: Some(pinned_elsewhere),
+            project: Some(pinned_elsewhere),
             ..Default::default()
         };
 
@@ -394,11 +394,11 @@ fn api_key_pinned_to_other_org_is_invisible() {
                 }])
                 .append_query_results([vec![key.clone()]])
                 .append_query_results([vec![user()]])
-                .append_query_results([vec![org()]])
+                .append_query_results([vec![project()]])
         });
 
         let res = s
-            .get("/api/v1/orgs/test-org")
+            .get("/api/v1/projects/test-project")
             .add_header("authorization", format!("Bearer GRAD{}", raw))
             .await;
         res.assert_status(axum::http::StatusCode::NOT_FOUND);
@@ -437,7 +437,7 @@ fn api_key_cannot_create_api_keys() {
             .add_header("authorization", format!("Bearer GRAD{}", raw))
             .json(&serde_json::json!({
                 "name": "child",
-                "permissions": ["viewOrg"],
+                "permissions": ["viewProject"],
             }))
             .await;
         res.assert_status(axum::http::StatusCode::FORBIDDEN);

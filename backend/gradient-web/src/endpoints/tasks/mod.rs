@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TaskResponse {
     pub id: TaskId,
-    pub organization: OrganizationId,
+    pub project: ProjectId,
     pub name: String,
     pub active: bool,
     pub display_name: String,

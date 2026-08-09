@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use gradient_db::org_has_writable_cache;
+use gradient_db::project_has_writable_cache;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::waiting_reason::WaitingReason;
 use gradient_types::*;
@@ -12,23 +12,23 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, ConnectionTrait};
 
 /// Move a freshly-created `Queued` evaluation into `Waiting` with
-/// `WaitingReason::NoCache` if the task's organisation lacks a writable
+/// `WaitingReason::NoCache` if the task's project lacks a writable
 /// cache subscription. Returns the evaluation unchanged when at least one
 /// ReadWrite/WriteOnly cache is present.
 ///
 /// Callers that go through [`apply_trigger`](super::super::apply_trigger) get
-/// this automatically; the manual `/tasks/{org}/{task}/evaluate` endpoint
+/// this automatically; the manual `/tasks/{project}/{task}/evaluate` endpoint
 /// applies it directly after calling
 /// [`trigger_evaluation`](crate::trigger_evaluation).
 pub async fn park_if_no_cache<C: ConnectionTrait>(
     db: &C,
     eval: MEvaluation,
-    organization: OrganizationId,
+    project: ProjectId,
 ) -> Result<MEvaluation, sea_orm::DbErr> {
     if eval.status != EvaluationStatus::Queued {
         return Ok(eval);
     }
-    if org_has_writable_cache(db, organization).await? {
+    if project_has_writable_cache(db, project).await? {
         return Ok(eval);
     }
     let mut ae: AEvaluation = eval.into();

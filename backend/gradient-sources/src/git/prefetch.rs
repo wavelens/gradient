@@ -31,21 +31,21 @@ impl FlakePrefetcher for Libgit2Prefetcher {
         crypt_secret_file: String,
         serve_url: String,
         repository: String,
-        organization: MOrganization,
+        project: MProject,
     ) -> Result<Option<PrefetchedFlake>> {
-        prefetch_flake_inner(crypt_secret_file, serve_url, repository, organization)
+        prefetch_flake_inner(crypt_secret_file, serve_url, repository, project)
             .await
             .map(|opt| opt.map(PrefetchedFlake::from_tempdir))
             .map_err(|e| anyhow::anyhow!("{}", e))
     }
 }
 
-#[instrument(skip(organization), fields(repository = %repository))]
+#[instrument(skip(project), fields(repository = %repository))]
 async fn prefetch_flake_inner(
     crypt_secret_file: String,
     serve_url: String,
     repository: String,
-    organization: MOrganization,
+    project: MProject,
 ) -> std::result::Result<Option<tempfile::TempDir>, SourceError> {
     if !check_repository_url_is_ssh(&repository) {
         debug!("HTTPS repository – skipping git clone, nix will fetch on demand");
@@ -55,7 +55,7 @@ async fn prefetch_flake_inner(
     debug!(repository, "SSH repository – cloning via libgit2");
 
     let (private_key, public_key) =
-        crate::ssh_key::decrypt_ssh_private_key(&crypt_secret_file, organization, &serve_url)?;
+        crate::ssh_key::decrypt_ssh_private_key(&crypt_secret_file, project, &serve_url)?;
 
     let (git_url, rev) = parse_nix_git_url(&repository)?;
 

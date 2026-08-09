@@ -18,7 +18,7 @@ pub mod forge_hooks;
 pub mod live;
 pub mod metrics;
 pub mod metrics_query;
-pub mod orgs;
+pub mod projects;
 pub mod stats;
 pub mod tasks;
 pub mod user;
@@ -69,7 +69,7 @@ pub struct ServerConfig {
     pub email_verification_enabled: bool,
     pub smtp_enabled: bool,
     pub quic: bool,
-    pub create_org: CreatePermission,
+    pub create_project: CreatePermission,
     pub create_cache: CreatePermission,
 }
 
@@ -92,7 +92,7 @@ pub async fn get_config(
                     .is_some_and(|e| e.require_verification),
             smtp_enabled: state.email.is_enabled(),
             quic: state.config.proto.quic,
-            create_org: state.config.server.create_org,
+            create_project: state.config.server.create_project,
             create_cache: state.config.server.create_cache,
         },
     };

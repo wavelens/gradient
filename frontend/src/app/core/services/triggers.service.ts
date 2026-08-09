@@ -13,31 +13,31 @@ import { CreateTriggerBody, TaskTrigger, UpdateTriggerBody } from '@core/models'
 export class TriggersService {
   private api = inject(ApiService);
 
-  private base(org: string, proj: string): string {
-    return `tasks/${org}/${proj}/triggers`;
+  private base(project: string, proj: string): string {
+    return `tasks/${project}/${proj}/triggers`;
   }
 
-  list(org: string, proj: string): Observable<TaskTrigger[]> {
-    return this.api.get<TaskTrigger[]>(this.base(org, proj));
+  list(project: string, proj: string): Observable<TaskTrigger[]> {
+    return this.api.get<TaskTrigger[]>(this.base(project, proj));
   }
 
-  create(org: string, proj: string, body: CreateTriggerBody): Observable<TaskTrigger> {
-    return this.api.post<TaskTrigger>(this.base(org, proj), body);
+  create(project: string, proj: string, body: CreateTriggerBody): Observable<TaskTrigger> {
+    return this.api.post<TaskTrigger>(this.base(project, proj), body);
   }
 
-  get(org: string, proj: string, id: string): Observable<TaskTrigger> {
-    return this.api.get<TaskTrigger>(`${this.base(org, proj)}/${id}`);
+  get(project: string, proj: string, id: string): Observable<TaskTrigger> {
+    return this.api.get<TaskTrigger>(`${this.base(project, proj)}/${id}`);
   }
 
-  update(org: string, proj: string, id: string, body: UpdateTriggerBody): Observable<TaskTrigger> {
-    return this.api.patch<TaskTrigger>(`${this.base(org, proj)}/${id}`, body);
+  update(project: string, proj: string, id: string, body: UpdateTriggerBody): Observable<TaskTrigger> {
+    return this.api.patch<TaskTrigger>(`${this.base(project, proj)}/${id}`, body);
   }
 
-  delete(org: string, proj: string, id: string): Observable<boolean> {
-    return this.api.delete<boolean>(`${this.base(org, proj)}/${id}`);
+  delete(project: string, proj: string, id: string): Observable<boolean> {
+    return this.api.delete<boolean>(`${this.base(project, proj)}/${id}`);
   }
 
-  fireNow(org: string, proj: string, id: string): Observable<boolean> {
-    return this.api.post<boolean>(`${this.base(org, proj)}/${id}/test`);
+  fireNow(project: string, proj: string, id: string): Observable<boolean> {
+    return this.api.post<boolean>(`${this.base(project, proj)}/${id}/test`);
   }
 }

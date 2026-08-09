@@ -27,15 +27,15 @@ impl<'a> StateApplicator<'a> {
         state_tasks: &HashMap<String, StateTask>,
     ) -> Result<(), DynError> {
         let user_map = self.user_lookup().await?;
-        let org_map = self.org_lookup().await?;
+        let project_map = self.project_lookup().await?;
 
         for state_task in state_tasks.values() {
             let created_by_id = lookup_id(&user_map, &state_task.created_by, "User")?;
-            let org_id = lookup_id(&org_map, &state_task.organization, "Organization")?;
+            let project_id = lookup_id(&project_map, &state_task.project, "Project")?;
 
             let existing_task = task::Entity::find()
                 .filter(task::Column::Name.eq(&state_task.name))
-                .filter(task::Column::Organization.eq(org_id))
+                .filter(task::Column::Project.eq(project_id))
                 .one(self.db)
                 .await?;
 
@@ -44,7 +44,7 @@ impl<'a> StateApplicator<'a> {
             let task_row = if let Some(existing) = existing_task {
                 let task_id = existing.id;
                 let mut proj: task::ActiveModel = existing.into();
-                proj.organization = Set(org_id);
+                proj.project = Set(project_id);
                 proj.active = Set(state_task.active);
                 proj.display_name = Set(state_task.display_name.clone());
                 proj.description = Set(state_task.description.clone().unwrap_or_default());
@@ -64,7 +64,7 @@ impl<'a> StateApplicator<'a> {
             } else {
                 let proj = task::Model {
                     id: TaskId::now_v7(),
-                    organization: org_id,
+                    project: project_id,
                     name: state_task.name.clone(),
                     active: state_task.active,
                     display_name: state_task.display_name.clone(),
@@ -89,9 +89,9 @@ impl<'a> StateApplicator<'a> {
 
             if let Some(triggers) = &state_task.triggers {
                 let inbound_integrations_by_name =
-                    inbound_integrations_by_name(self.db, org_id).await?;
+                    inbound_integrations_by_name(self.db, project_id).await?;
                 let outbound_integrations_by_name =
-                    outbound_integrations_by_name(self.db, org_id).await?;
+                    outbound_integrations_by_name(self.db, project_id).await?;
 
                 apply_task_triggers(
                     self.db,
@@ -121,7 +121,7 @@ impl<'a> StateApplicator<'a> {
             self.apply_task_actions(
                 task_row.id,
                 created_by_id,
-                org_id,
+                project_id,
                 &state_task.name,
                 &state_task.actions,
             )
@@ -143,11 +143,11 @@ impl<'a> StateApplicator<'a> {
         &self,
         task_id: TaskId,
         created_by: UserId,
-        org_id: OrganizationId,
+        project_id: ProjectId,
         task_name: &str,
         desired: &[StateAction],
     ) -> Result<(), DynError> {
-        let outbound = outbound_integrations_by_name(self.db, org_id).await?;
+        let outbound = outbound_integrations_by_name(self.db, project_id).await?;
         let crypt_key = load_secret_bytes(self.crypt_secret_file)
             .map_err(|e| format!("Failed to load crypt secret: {}", e))?;
 
@@ -552,7 +552,7 @@ pub(crate) fn build_action_config(
                 .ok_or_else(|| format!("action '{}': integration must be a string", a.name))?;
             let integration_id = *outbound.get(int_name).ok_or_else(|| {
                 format!(
-                    "action '{}': outbound integration '{}' not found in task's organization",
+                    "action '{}': outbound integration '{}' not found in task's project",
                     a.name, int_name
                 )
             })?;
@@ -564,7 +564,7 @@ pub(crate) fn build_action_config(
                 .ok_or_else(|| format!("action '{}': integration must be a string", a.name))?;
             let integration_id = *outbound.get(int_name).ok_or_else(|| {
                 format!(
-                    "action '{}': outbound integration '{}' not found in task's organization",
+                    "action '{}': outbound integration '{}' not found in task's project",
                     a.name, int_name
                 )
             })?;

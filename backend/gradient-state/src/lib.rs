@@ -16,33 +16,34 @@ mod validation;
 pub use config::*;
 pub use export::export_state;
 pub use provisioning::{
-    PendingOrgMembership, PendingOrgMemberships, StateApplyResult, apply_pending_org_memberships,
+    PendingProjectMembership, PendingProjectMemberships, StateApplyResult,
+    apply_pending_project_memberships,
 };
 pub use validation::{ValidationError, ValidationResult};
 
-use gradient_types::{OrganizationId, RoleId};
+use gradient_types::{ProjectId, RoleId};
 use sea_orm::DatabaseConnection;
 use std::collections::HashMap;
 
 /// Resolved at startup from [`StateRole::oidc_group`]: OIDC group name → the
-/// `(organization, role)` grants a user presenting that group receives on login.
-pub type OidcGroupRoles = HashMap<String, Vec<(OrganizationId, RoleId)>>;
+/// `(project, role)` grants a user presenting that group receives on login.
+pub type OidcGroupRoles = HashMap<String, Vec<(ProjectId, RoleId)>>;
 
 /// Build the OIDC group → grants map from declared roles. `role_ids` maps
-/// `(organization_name, role_name)` to the provisioned `(OrganizationId, RoleId)`.
+/// `(project_name, role_name)` to the provisioned `(ProjectId, RoleId)`.
 pub fn resolve_oidc_group_roles(
     config: &StateConfiguration,
-    role_ids: &HashMap<(String, String), (OrganizationId, RoleId)>,
+    role_ids: &HashMap<(String, String), (ProjectId, RoleId)>,
 ) -> OidcGroupRoles {
     let mut map: OidcGroupRoles = HashMap::new();
     for role in config.roles.values() {
         if role.oidc_group.is_empty() {
             continue;
         }
-        let key = (role.organization.clone(), role.name.clone());
+        let key = (role.project.clone(), role.name.clone());
         let Some(&grant) = role_ids.get(&key) else {
             tracing::warn!(
-                organization = %role.organization,
+                project = %role.project,
                 role = %role.name,
                 "oidc_group references a role that was not provisioned; skipping",
             );
@@ -56,24 +57,24 @@ pub fn resolve_oidc_group_roles(
 }
 
 /// Resolved at startup from [`StateRole::scim_group`]: SCIM group name → the
-/// `(organization, role)` grants a member of that SCIM group receives.
-pub type ScimGroupRoles = HashMap<String, Vec<(OrganizationId, RoleId)>>;
+/// `(project, role)` grants a member of that SCIM group receives.
+pub type ScimGroupRoles = HashMap<String, Vec<(ProjectId, RoleId)>>;
 
 /// Build the SCIM group → grants map from declared roles. Mirrors
 /// [`resolve_oidc_group_roles`].
 pub fn resolve_scim_group_roles(
     config: &StateConfiguration,
-    role_ids: &HashMap<(String, String), (OrganizationId, RoleId)>,
+    role_ids: &HashMap<(String, String), (ProjectId, RoleId)>,
 ) -> ScimGroupRoles {
     let mut map: ScimGroupRoles = HashMap::new();
     for role in config.roles.values() {
         if role.scim_group.is_empty() {
             continue;
         }
-        let key = (role.organization.clone(), role.name.clone());
+        let key = (role.project.clone(), role.name.clone());
         let Some(&grant) = role_ids.get(&key) else {
             tracing::warn!(
-                organization = %role.organization,
+                project = %role.project,
                 role = %role.name,
                 "scim_group references a role that was not provisioned; skipping",
             );
@@ -110,7 +111,7 @@ pub async fn load_and_apply_state(
     let Some(path) = state_file_path else {
         tracing::info!("No state file configured, skipping state management");
         return Ok(StateApplyResult {
-            pending: PendingOrgMemberships::new(),
+            pending: PendingProjectMemberships::new(),
             oidc_group_roles: OidcGroupRoles::new(),
             scim_group_roles: ScimGroupRoles::new(),
         });

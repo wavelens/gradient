@@ -430,7 +430,7 @@ pub fn require_superuser(user: &gradient_types::MUser) -> Result<(), WebError> {
     }
 }
 
-/// Enforces a [`CreatePermission`] gate on organization/cache creation.
+/// Enforces a [`CreatePermission`] gate on project/cache creation.
 pub fn require_create_permission(
     permission: gradient_types::CreatePermission,
     user: &gradient_types::MUser,

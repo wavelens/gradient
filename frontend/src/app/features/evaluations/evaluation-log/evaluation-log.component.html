@@ -20,10 +20,10 @@
     <aside class="builds-sidebar" (focusin)="setSidebarFocus(true)" (focusout)="setSidebarFocus(false)">
 
       <div class="sidebar-breadcrumb">
-        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
         @if (ev.task_name) {
           <span class="breadcrumb-sep">/</span>
-          <a [routerLink]="['/organization', orgName, 'task', ev.task_name]" class="breadcrumb-link">{{ ev.task_display_name || ev.task_name }}</a>
+          <a [routerLink]="['/project', projectName, 'task', ev.task_name]" class="breadcrumb-link">{{ ev.task_display_name || ev.task_name }}</a>
         }
         <span class="breadcrumb-sep">/</span>
         <span class="breadcrumb-cur">Evaluation</span>
@@ -118,7 +118,7 @@
                   @if ((item.build.status === 'Completed' || item.build.status === 'Substituted') && item.build.has_artefacts) {
                     <a
                       class="build-dl-link"
-                      [routerLink]="['/organization', orgName, 'artefacts', item.build.id]"
+                      [routerLink]="['/project', projectName, 'artefacts', item.build.id]"
                       [queryParams]="{ evalId: evaluationId }"
                       (click)="$event.stopPropagation()"
                       title="View build artefacts"
@@ -128,7 +128,7 @@
                   }
                   <a
                     class="graph-link"
-                    [routerLink]="['/organization', orgName, 'graph', item.build.id]"
+                    [routerLink]="['/project', projectName, 'graph', item.build.id]"
                     [queryParams]="{ evalId: evaluationId }"
                     (click)="$event.stopPropagation()"
                     title="View dependency graph"

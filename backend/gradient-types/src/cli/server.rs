@@ -8,7 +8,7 @@ use crate::input::port_in_range;
 use clap::{Args, ValueEnum};
 use serde::{Deserialize, Serialize};
 
-/// Who may create organizations / caches through the API.
+/// Who may create projects / caches through the API.
 #[derive(ValueEnum, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 #[value(rename_all = "lowercase")]
@@ -54,9 +54,9 @@ pub struct ServerArgs {
     /// Author/committer email for `OpenPr` commits; see `pr_commit_name`.
     #[arg(long, env = "GRADIENT_PR_COMMIT_EMAIL")]
     pub pr_commit_email: Option<String>,
-    /// Who may create organizations through the API.
-    #[arg(long, value_enum, env = "GRADIENT_CREATE_ORG", default_value_t = CreatePermission::Everyone)]
-    pub create_org: CreatePermission,
+    /// Who may create projects through the API.
+    #[arg(long, value_enum, env = "GRADIENT_CREATE_PROJECT", default_value_t = CreatePermission::Everyone)]
+    pub create_project: CreatePermission,
     /// Who may create caches through the API.
     #[arg(long, value_enum, env = "GRADIENT_CREATE_CACHE", default_value_t = CreatePermission::Everyone)]
     pub create_cache: CreatePermission,
@@ -72,7 +72,7 @@ impl Default for ServerArgs {
             use_tls: true,
             pr_commit_name: None,
             pr_commit_email: None,
-            create_org: CreatePermission::default(),
+            create_project: CreatePermission::default(),
             create_cache: CreatePermission::default(),
         }
     }

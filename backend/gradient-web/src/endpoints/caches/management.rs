@@ -16,7 +16,7 @@ use axum::extract::{Path, Query, State};
 use chrono::NaiveDateTime;
 use gradient_core::ServerState;
 use gradient_entity::cache_upstream::CacheUpstreamKind;
-use gradient_entity::organization_cache::CacheSubscriptionMode;
+use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_sources::{format_cache_public_key, generate_signing_key};
 use gradient_types::input::{check_index_name, validate_display_name};
 use gradient_types::*;
@@ -359,22 +359,22 @@ pub async fn patch_cache(
         .map_err(|e| WebError::from_db_err(e, "Cache Name"))?;
 
     if raised_limit {
-        let org_ids: Vec<OrganizationId> = EOrganizationCache::find()
-            .filter(COrganizationCache::Cache.eq(cache_id))
+        let project_ids: Vec<ProjectId> = EProjectCache::find()
+            .filter(CProjectCache::Cache.eq(cache_id))
             .all(&state.web_db)
             .await?
             .into_iter()
-            .map(|oc| oc.organization)
+            .map(|oc| oc.project)
             .collect();
-        for org in org_ids {
-            if let Err(e) = gradient_ci::unpark_storage_full_for_org(
+        for project in project_ids {
+            if let Err(e) = gradient_ci::unpark_storage_full_for_project(
                 &state.web_db,
-                org,
+                project,
                 state.config.storage.max_storage_gb,
             )
             .await
             {
-                tracing::warn!(error = %e, org_id = %org, "failed to unpark storage-full evals");
+                tracing::warn!(error = %e, project_id = %project, "failed to unpark storage-full evals");
             }
         }
     }
@@ -403,13 +403,13 @@ pub async fn delete_cache(
     let cache_id = cache.id;
     let cache_name = cache.name.clone();
 
-    let subscribing_orgs: Vec<OrganizationId> = EOrganizationCache::find()
-        .filter(COrganizationCache::Cache.eq(cache.id))
+    let subscribing_projects: Vec<ProjectId> = EProjectCache::find()
+        .filter(CProjectCache::Cache.eq(cache.id))
         .all(&state.web_db)
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|oc| oc.organization)
+        .map(|oc| oc.project)
         .collect();
 
     let acache: ACache = cache.into();
@@ -423,7 +423,7 @@ pub async fn delete_cache(
         Some(serde_json::json!({
             "cache_id": cache_id.to_string(),
             "cache_name": cache_name,
-            "subscribing_orgs": subscribing_orgs.iter().map(|o| o.to_string()).collect::<Vec<_>>(),
+            "subscribing_projects": subscribing_projects.iter().map(|o| o.to_string()).collect::<Vec<_>>(),
         })),
     )
     .await;

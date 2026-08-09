@@ -15,7 +15,7 @@ use chrono::{Duration, Utc};
 use gradient_db::permissions::PermissionMask;
 use gradient_entity::ids::*;
 use gradient_entity::role;
-use gradient_test_support::fixtures::{org_id, user, user_id};
+use gradient_test_support::fixtures::{project_id, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;
 use gradient_types::consts::BASE_ROLE_WRITE_ID;
@@ -32,12 +32,10 @@ fn write_role_row() -> role::Model {
     }
 }
 
-fn membership() -> gradient_entity::organization_user::Model {
-    gradient_entity::organization_user::Model {
-        id: OrganizationUserId::new(
-            Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap(),
-        ),
-        organization: org_id(),
+fn membership() -> gradient_entity::project_user::Model {
+    gradient_entity::project_user::Model {
+        id: ProjectUserId::new(Uuid::parse_str("00000000-0000-0000-0000-0000000000bb").unwrap()),
+        project: project_id(),
         user: user_id(),
         role: BASE_ROLE_WRITE_ID,
     }
@@ -64,7 +62,7 @@ fn live_upload_session(
     };
     gradient_entity::upload_session::Model {
         id,
-        organization: org_id(),
+        project: project_id(),
         manifest: json!([]),
         missing: serde_json::to_value(missing).unwrap(),
         created_at: now,
@@ -173,7 +171,7 @@ fn happy_path_uploads_blob_and_shrinks_missing() {
 
         let inserted_blob = gradient_entity::build_request_blob::Model {
             id: BuildRequestBlobId::now_v7(),
-            organization: org_id(),
+            project: project_id(),
             hash: hex::decode(&payload_hex).unwrap(),
             size: payload.len() as i64,
             created_at: Utc::now().naive_utc(),

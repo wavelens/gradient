@@ -11,15 +11,15 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { of } from 'rxjs';
 import { ApiKeysComponent } from './api-keys.component';
 import { UserService } from '@core/services/user.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { ApiKey } from '@core/models/user.model';
 
 const unmanagedKey: ApiKey = {
   id: 'k1',
   name: 'CI key',
   managed: false,
-  permissions: ['viewOrg'],
-  organization: null,
+  permissions: ['viewProject'],
+  project: null,
   cache: null,
   created_at: '2026-01-01T00:00:00',
   last_used_at: null,
@@ -32,8 +32,8 @@ const managedKey: ApiKey = {
   id: 'k2',
   name: 'Nix key',
   managed: true,
-  permissions: ['viewOrg'],
-  organization: null,
+  permissions: ['viewProject'],
+  project: null,
   cache: null,
   created_at: '2026-01-01T00:00:00',
   last_used_at: null,
@@ -57,8 +57,8 @@ function setup(keys: ApiKey[]): ComponentFixture<ApiKeysComponent> {
         },
       },
       {
-        provide: OrganizationsService,
-        useValue: { getOrganizations: () => of({ items: [], total: 0, page: 1, per_page: 100 }) },
+        provide: ProjectsService,
+        useValue: { getProjects: () => of({ items: [], total: 0, page: 1, per_page: 100 }) },
       },
     ],
   });

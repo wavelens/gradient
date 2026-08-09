@@ -28,7 +28,7 @@ unset, and unknown names log a warning and fall back to `resource-aware`.
 - Three scoring inputs:
   - `JobContext` - per-candidate: kind, architecture, missing-path count,
     missing NAR size, dependency count, `queued_at`/`ready_at`, `rescore_count`
-    and the owning org's work share.
+    and the owning project's work share.
   - `WorkerContext` - the worker's architectures, system features, fetch
     capability and optional live metrics (free RAM, CPU-core score, disk/network
     speed).
@@ -79,7 +79,7 @@ by the instance average wait, and saturates at the rule cap for anti-starvation.
 
 ### `FairShareRule`
 
-Penalty proportional to the owning org's share of in-flight **work** -
+Penalty proportional to the owning project's share of in-flight **work** -
 weighted by build duration (prefer-local builds count at half), not by job
 count - so a few long builds and many short ones are balanced fairly.
 
@@ -104,7 +104,7 @@ Adds the following on top of the `simple` rule set:
 | `ResourceFitRule` | soft + disqualifier | Penalty scaling with predicted-RAM overshoot of free RAM (amplified by past/instance OOM rate); bonus for CPU-heavy jobs on higher-CPU-score workers. Now also applies to **evaluation** jobs (previously builds-only), using a per-task p95 of historical eval peak-RSS so heavy evals route to big-RAM workers. No-op without history samples or worker metrics. |
 | `ResourceSaturationRule` | disqualifier | `-1000` when the worker's live CPU usage is `>= 90%` or free RAM is `<= 10%` of total, plus another `-1000` when the build's historical peak RAM x1.1 exceeds the worker's free RAM (likely OOM); the two stack (up to `-2000`). Keeps real builds off overloaded or too-small workers. Exempts `builtin`-architecture (substitute-only) builds and evals; no-op without worker metrics, and the RAM-fit check needs history samples. |
 | `PreferLocalBuildRule` | soft | Bonus for `preferLocalBuild` derivations on a worker that already holds (most of) the closure, decaying with missing paths. |
-| `FairShareRule` | disqualifier (disabled) | Penalty proportional to the org's share of in-flight work (duration-weighted; prefer-local at half), so a quiet org is served promptly when a busy org floods the queue. Currently disabled - see the idle-gate note above. |
+| `FairShareRule` | disqualifier (disabled) | Penalty proportional to the project's share of in-flight work (duration-weighted; prefer-local at half), so a quiet project is served promptly when a busy project floods the queue. Currently disabled - see the idle-gate note above. |
 | `NetworkAffinityRule` | soft | Bonus for fixed-output derivations on faster-network workers, scaling to a reference speed then capping. No-op for non-FOD jobs or without a network metric. |
 | `DiskAffinityRule` | soft | Bonus for disk-heavy jobs on faster-disk workers, scaling to a reference speed then capping. No-op below the disk-heavy threshold or without a disk metric. |
 

@@ -6,7 +6,7 @@
 
 use gradient_entity::StorePath;
 use gradient_storage::nar::NarStore;
-use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, OrganizationId};
+use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, ProjectId};
 use gradient_types::*;
 use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
 use sea_orm::sea_query::OnConflict;
@@ -32,9 +32,9 @@ pub struct IngestInput<'a> {
 }
 
 pub enum SignTargets {
-    OrgCaches(OrganizationId),
+    ProjectCaches(ProjectId),
     Cache(CacheId),
-    /// Record the path but enqueue no signatures (no resolvable org).
+    /// Record the path but enqueue no signatures (no resolvable project).
     None,
 }
 
@@ -282,8 +282,8 @@ async fn upsert_and_sign<C: ConnectionTrait>(
     let cache_ids: Vec<CacheId> = match targets {
         SignTargets::None => vec![],
         SignTargets::Cache(id) => vec![id],
-        SignTargets::OrgCaches(org) => EOrganizationCache::find()
-            .filter(COrganizationCache::Organization.eq(org))
+        SignTargets::ProjectCaches(project) => EProjectCache::find()
+            .filter(CProjectCache::Project.eq(project))
             .all(db)
             .await?
             .into_iter()
@@ -573,13 +573,13 @@ mod tests {
 
     const SP: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";
 
-    fn org() -> OrganizationId {
-        OrganizationId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000003").unwrap())
+    fn project() -> ProjectId {
+        ProjectId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000003").unwrap())
     }
 
-    fn org_cache_row() -> gradient_entity::organization_cache::Model {
-        gradient_entity::organization_cache::Model {
-            organization: org(),
+    fn project_cache_row() -> gradient_entity::project_cache::Model {
+        gradient_entity::project_cache::Model {
+            project: project(),
             cache: cache_id(),
             ..Default::default()
         }
@@ -591,31 +591,31 @@ mod tests {
             .any(|t| format!("{t:?}").contains("cached_path_signature"))
     }
 
-    /// A resolved org enqueues a `cached_path_signature` placeholder for every
+    /// A resolved project enqueues a `cached_path_signature` placeholder for every
     /// subscribed cache. Regression guard: the detached NAR commit must resolve
-    /// the org on the read loop *before* the job is evicted from the tracker -
+    /// the project on the read loop *before* the job is evicted from the tracker -
     /// otherwise `SignTargets` collapses to `None`, no placeholder is written,
     /// the sign sweep has nothing to sign, and the narinfo 404s forever.
     #[tokio::test]
-    async fn org_target_enqueues_signature_placeholder() {
+    async fn project_target_enqueues_signature_placeholder() {
         let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
             .append_query_results([vec![returned_cached_path(hash)]])
-            .append_query_results([vec![org_cache_row()]])
+            .append_query_results([vec![project_cache_row()]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 1,
             }])
             .into_connection();
 
-        ingest_metadata_only(&db, input(SP), SignTargets::OrgCaches(org()))
+        ingest_metadata_only(&db, input(SP), SignTargets::ProjectCaches(project()))
             .await
             .expect("ingest");
 
         assert!(
             log_has_signature_insert(db),
-            "OrgCaches target must insert a cached_path_signature placeholder"
+            "ProjectCaches target must insert a cached_path_signature placeholder"
         );
     }
 
@@ -641,7 +641,7 @@ mod tests {
         assert!(logged, "the content address must be written to cached_path");
     }
 
-    /// No resolvable org (the exact state the pre-fix race produced) records the
+    /// No resolvable project (the exact state the pre-fix race produced) records the
     /// path but enqueues no signature - so the endpoint can distinguish "not yet
     /// signed" from "will never be signed".
     #[tokio::test]

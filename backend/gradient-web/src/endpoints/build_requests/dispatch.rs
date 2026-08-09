@@ -7,7 +7,7 @@
 //! `POST /build-requests/{session}/dispatch` - finalises a build-request
 //! upload session by materialising the staged blobs into a
 //! `/nix/store/<hash>-source` path, persisting `cached_path` metadata,
-//! lazily creating a per-org `build-request` task, and queueing an
+//! lazily creating a per-project `build-request` task, and queueing an
 //! evaluation for the scheduler to pick up.
 
 use super::types::ManifestEntry;
@@ -29,8 +29,8 @@ use gradient_types::ids::{
 };
 use gradient_types::{
     ACachedPathSignature, AEvaluationFlakeInputOverride, AUploadSession, BaseResponse, CCachedPath,
-    CCachedPathSignature, COrganizationCache, CTask, ECache, ECachedPath, ECachedPathSignature,
-    EEvaluationFlakeInputOverride, EOrganizationCache, ETask, EUploadSession, MCachedPath,
+    CCachedPathSignature, CProjectCache, CTask, ECache, ECachedPath, ECachedPathSignature,
+    EEvaluationFlakeInputOverride, EProjectCache, ETask, EUploadSession, MCachedPath,
     MCachedPathSignature, MCommit, MEvaluation, MEvaluationFlakeInputOverride, MTask, MUser,
     NULL_TIME, now,
 };
@@ -124,7 +124,7 @@ pub async fn post_dispatch(
     if !has_permission(
         &state,
         user.id,
-        session.organization,
+        session.project,
         Permission::TriggerEvaluation,
         api_key.as_ref(),
     )
@@ -156,7 +156,7 @@ pub async fn post_dispatch(
         .map_err(|e| WebError::internal(format!("Failed to create staging dir: {}", e)))?;
     materialise_staging(
         &state,
-        &session.organization.into_inner(),
+        &session.project.into_inner(),
         &manifest,
         staging.path(),
     )
@@ -174,7 +174,7 @@ pub async fn post_dispatch(
 
     let response = finalize_build_request(
         &state,
-        session.organization,
+        session.project,
         &user,
         &nar,
         body.target,
@@ -194,7 +194,7 @@ pub async fn post_dispatch(
 /// Shared by the blob-manifest dispatch and the `nix`-feature source-NAR upload.
 pub(super) async fn finalize_build_request(
     state: &ServerState,
-    organization: gradient_types::ids::OrganizationId,
+    project: gradient_types::ids::ProjectId,
     user: &MUser,
     nar: &SourceNar,
     target: Option<String>,
@@ -216,10 +216,10 @@ pub(super) async fn finalize_build_request(
     let tx = state.web_db.inner().begin().await?;
 
     let cached_path = ensure_cached_path(&tx, nar).await?;
-    queue_signature_placeholders(&tx, &cached_path, &organization).await?;
+    queue_signature_placeholders(&tx, &cached_path, &project).await?;
     let task = ensure_build_request_task(
         &tx,
-        organization,
+        project,
         user.id,
         state.config.storage.default_keep_evaluations(),
     )
@@ -275,7 +275,7 @@ pub(super) async fn finalize_build_request(
             .await?;
     }
 
-    let cache = resolve_org_cache_name(&tx, organization).await?;
+    let cache = resolve_project_cache_name(&tx, project).await?;
 
     tx.commit().await?;
 
@@ -287,12 +287,12 @@ pub(super) async fn finalize_build_request(
     })
 }
 
-async fn resolve_org_cache_name<C: ConnectionTrait>(
+async fn resolve_project_cache_name<C: ConnectionTrait>(
     tx: &C,
-    org: gradient_types::ids::OrganizationId,
+    project: gradient_types::ids::ProjectId,
 ) -> WebResult<Option<String>> {
-    let Some(link) = EOrganizationCache::find()
-        .filter(COrganizationCache::Organization.eq(org))
+    let Some(link) = EProjectCache::find()
+        .filter(CProjectCache::Project.eq(project))
         .one(tx)
         .await?
     else {
@@ -308,7 +308,7 @@ async fn resolve_org_cache_name<C: ConnectionTrait>(
 
 async fn materialise_staging(
     state: &ServerState,
-    org_uuid: &uuid::Uuid,
+    project_uuid: &uuid::Uuid,
     manifest: &[ManifestEntry],
     root: &std::path::Path,
 ) -> WebResult<()> {
@@ -320,7 +320,7 @@ async fn materialise_staging(
 
         let data = state
             .nar_storage
-            .get_blob(*org_uuid, &hash_array)
+            .get_blob(*project_uuid, &hash_array)
             .await
             .map_err(|e| WebError::internal(format!("Failed to fetch blob: {}", e)))?
             .ok_or_else(|| {
@@ -381,18 +381,18 @@ async fn ensure_cached_path<C: ConnectionTrait>(
 async fn queue_signature_placeholders<C: ConnectionTrait>(
     tx: &C,
     cached_path: &gradient_entity::cached_path::Model,
-    org: &gradient_types::ids::OrganizationId,
+    project: &gradient_types::ids::ProjectId,
 ) -> WebResult<()> {
-    let org_caches = EOrganizationCache::find()
-        .filter(COrganizationCache::Organization.eq(*org))
+    let project_caches = EProjectCache::find()
+        .filter(CProjectCache::Project.eq(*project))
         .all(tx)
         .await?;
-    if org_caches.is_empty() {
+    if project_caches.is_empty() {
         return Ok(());
     }
 
     let now_ts = now();
-    let rows: Vec<ACachedPathSignature> = org_caches
+    let rows: Vec<ACachedPathSignature> = project_caches
         .into_iter()
         .map(|oc| {
             MCachedPathSignature {
@@ -423,14 +423,14 @@ async fn queue_signature_placeholders<C: ConnectionTrait>(
 
 async fn ensure_build_request_task<C: ConnectionTrait>(
     tx: &C,
-    org_id: gradient_types::ids::OrganizationId,
+    project_id: gradient_types::ids::ProjectId,
     user_id: gradient_types::ids::UserId,
     keep_evaluations: i32,
 ) -> WebResult<gradient_entity::task::Model> {
     if let Some(existing) = ETask::find()
         .filter(
             Condition::all()
-                .add(CTask::Organization.eq(org_id))
+                .add(CTask::Project.eq(project_id))
                 .add(CTask::Name.eq(BUILD_REQUEST_TASK_NAME)),
         )
         .one(tx)
@@ -441,7 +441,7 @@ async fn ensure_build_request_task<C: ConnectionTrait>(
 
     let task = MTask {
         id: TaskId::now_v7(),
-        organization: org_id,
+        project: project_id,
         name: BUILD_REQUEST_TASK_NAME.to_string(),
         active: true,
         display_name: "Build Requests".to_string(),
@@ -464,7 +464,7 @@ async fn ensure_build_request_task<C: ConnectionTrait>(
         Err(err) if is_unique_violation(&err) => ETask::find()
             .filter(
                 Condition::all()
-                    .add(CTask::Organization.eq(org_id))
+                    .add(CTask::Project.eq(project_id))
                     .add(CTask::Name.eq(BUILD_REQUEST_TASK_NAME)),
             )
             .one(tx)

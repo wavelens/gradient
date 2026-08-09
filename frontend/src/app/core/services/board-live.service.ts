@@ -10,7 +10,7 @@ import { environment } from '@environments/environment';
 
 export interface BoardLiveEvent {
   type: 'job_dispatched' | 'worker_connected' | 'worker_disconnected' | 'queue_depth';
-  organization?: string;
+  project?: string;
   worker_id?: string;
   kind?: number;
   score?: number;

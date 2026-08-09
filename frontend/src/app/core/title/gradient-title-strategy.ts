@@ -9,10 +9,10 @@ import { Title } from '@angular/platform-browser';
 import { ActivatedRouteSnapshot, RouterStateSnapshot, TitleStrategy } from '@angular/router';
 import { TaskAccessData } from '@core/resolvers/task-access.resolver';
 import { CacheAccessData } from '@core/resolvers/cache-access.resolver';
-import { OrganizationAccessData } from '@core/resolvers/organization-access.resolver';
+import { ProjectAccessData } from '@core/resolvers/project-access.resolver';
 
 const BRAND = 'Gradient';
-const ENTITY_ONLY_ROUTE_TITLES = new Set(['Organization', 'Task', 'Cache']);
+const ENTITY_ONLY_ROUTE_TITLES = new Set(['Project', 'Task', 'Cache']);
 
 @Injectable({ providedIn: 'root' })
 export class GradientTitleStrategy extends TitleStrategy {
@@ -39,12 +39,12 @@ export function findEntityName(snapshot: ActivatedRouteSnapshot): string | undef
     const data = s.data as {
       taskAccess?: TaskAccessData;
       cacheAccess?: CacheAccessData;
-      organizationAccess?: OrganizationAccessData;
+      projectAccess?: ProjectAccessData;
     };
     const name =
       data.taskAccess?.task.display_name ??
       data.cacheAccess?.cache.display_name ??
-      data.organizationAccess?.organization?.display_name;
+      data.projectAccess?.project?.display_name;
     if (name) return name;
     for (const child of s.children) {
       const found = visit(child);

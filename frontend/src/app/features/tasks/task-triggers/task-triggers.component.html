@@ -8,9 +8,9 @@
   <div class="page-header">
     <div>
       <div class="breadcrumb">
-        <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
         <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/organization', orgName, 'task', taskName]" class="breadcrumb-link">{{ taskName }}</a>
+        <a [routerLink]="['/project', projectName, 'task', taskName]" class="breadcrumb-link">{{ taskName }}</a>
         <span class="breadcrumb-separator">/</span>
         <span class="breadcrumb-current">Triggers</span>
       </div>

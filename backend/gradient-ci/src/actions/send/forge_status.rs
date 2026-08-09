@@ -153,7 +153,7 @@ pub(crate) async fn build_reporter_for_integration(
 }
 
 /// GitHub-App installation reporter, used when the App is configured and the
-/// integration's org has an installation. Returns `None` to fall back to the
+/// integration's project has an installation. Returns `None` to fall back to the
 /// provider's token reporter.
 async fn build_github_app_reporter(
     ctx: &CiContext,

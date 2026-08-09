@@ -89,32 +89,32 @@
     };
   });
 
-  organizationType = types.submodule ({ config, name, ... }: {
+  projectType = types.submodule ({ config, name, ... }: {
     options = {
       name = mkOption {
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Unique name for the organization";
+        description = "Unique name for the project";
       };
 
       display_name = mkOption {
         type = types.str;
         default = config.name;
         defaultText = "config.name";
-        description = "Display name for the organization";
+        description = "Display name for the project";
       };
 
       id = mkOption {
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Explicit organization UUID. When set, a freshly created
-          organization is given this id instead of a server-generated one,
+          Explicit project UUID. When set, a freshly created
+          project is given this id instead of a server-generated one,
           so a worker's `peersFile` can reference it (`<id>:<token>`) in a
           fully declarative deployment without first looking up the
           auto-generated id. Applied on create only; the id is immutable, so
-          a value conflicting with an existing organization is rejected.
+          a value conflicting with an existing project is rejected.
 
           Generate one with `uuidgen`.
         '';
@@ -123,7 +123,7 @@
       description = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Description of the organization";
+        description = "Description of the project";
       };
 
       private_key_file = mkOption {
@@ -134,7 +134,7 @@
       public = mkOption {
         type = types.bool;
         default = false;
-        description = "Whether the organization is public (visible to all users)";
+        description = "Whether the project is public (visible to all users)";
       };
 
       hide_build_requests = mkOption {
@@ -142,7 +142,7 @@
         default = false;
         description = ''
           When `true`, the auto-managed `build-request` task for this
-          organization is hidden from task listings in the web UI. The
+          project is hidden from task listings in the web UI. The
           task still exists and continues to receive evaluations from the
           `gradient build` CLI; this is a UI-only opt-out.
         '';
@@ -150,14 +150,14 @@
 
       created_by = mkOption {
         type = types.str;
-        description = "Username of the user who created this organization";
+        description = "Username of the user who created this project";
       };
 
       members = mkOption {
-        type = types.listOf orgMemberType;
+        type = types.listOf projectMemberType;
         default = [];
         description = ''
-          Users with role assignments on this organization. When empty
+          Users with role assignments on this project. When empty
           (the default), legacy behavior applies: `created_by` is added
           as Admin and no other membership reconciliation happens.
 
@@ -214,9 +214,9 @@
         description = "Unique name for the task";
       };
 
-      organization = mkOption {
+      project = mkOption {
         type = types.str;
-        description = "Name of the organization this task belongs to";
+        description = "Name of the project this task belongs to";
       };
 
       display_name = mkOption {
@@ -411,7 +411,7 @@
         type = types.str;
         default = name;
         defaultText = "<attrset key>";
-        description = "Unique name for the integration within (organization, kind)";
+        description = "Unique name for the integration within (project, kind)";
       };
 
       display_name = mkOption {
@@ -420,9 +420,9 @@
         description = "Human-readable display name for the integration. Defaults to `name` when null.";
       };
 
-      organization = mkOption {
+      project = mkOption {
         type = types.str;
-        description = "Name of the organization this integration belongs to";
+        description = "Name of the project this integration belongs to";
       };
 
       kind = mkOption {
@@ -443,7 +443,7 @@
           `github` requires `installation_id` (no secret/token/endpoint); it
           provisions the linked GitHub App installation in place of those
           credentials. GitHub rows are also auto-created when the App is
-          installed on the org, so a declared one is reconciled additively.
+          installed on the project, so a declared one is reconciled additively.
         '';
       };
 
@@ -510,11 +510,11 @@
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Name of an inbound integration in the same organization that backs
+          Name of an inbound integration in the same project that backs
           this trigger. Required for `reporter_push` and `reporter_pull_request`;
           ignored for `polling` and `time`. Must name an integration in
           `services.gradient.state.integrations` or a GitHub App row auto-seeded
-          when the App is installed on the org.
+          when the App is installed on the project.
         '';
       };
 
@@ -588,12 +588,12 @@
 
           - `send_mail`: `{ recipients = [ "ops@example.com" ]; subject_template = null; }`
           - `send_web_request`: `{ url = "https://hooks.example.com/gradient"; token_file = "/etc/gradient/secrets/<name>-token"; }`
-          - `forge_status_report`: `{ integration = "gitea-prod"; }` (name of an outbound integration in the same organization)
+          - `forge_status_report`: `{ integration = "gitea-prod"; }` (name of an outbound integration in the same project)
           - `open_pr`: opens a pull request on the forge with the result of a
             generator (currently `flake_lock`, which updates `flake.lock`).
             Fields:
             - `integration` (string): name of an outbound integration in the
-              same organization, same convention as `forge_status_report`.
+              same project, same convention as `forge_status_report`.
             - `generator` (string, default `"flake_lock"`): which change
               generator produces the PR contents.
             - `granularity` (string, default `"per_run"`): one of `"per_run"`
@@ -637,7 +637,7 @@
     };
   };
 
-  orgMemberType = types.submodule {
+  projectMemberType = types.submodule {
     options = {
       user = mkOption {
         type = types.str;
@@ -652,8 +652,8 @@
         type = types.str;
         description = ''
           Role name. Either a built-in (`Admin`/`Write`/`View`) or a
-          custom org role declared under
-          `services.gradient.state.roles` for the same organization.
+          custom project role declared under
+          `services.gradient.state.roles` for the same project.
         '';
       };
     };
@@ -721,7 +721,7 @@
         default = 0;
         description = ''
           Max storage for this cache in GB. When all writable caches for an
-          org have less than 10 MiB headroom, new evaluations park in Waiting.
+          project have less than 10 MiB headroom, new evaluations park in Waiting.
           0 = unlimited.
         '';
       };
@@ -731,10 +731,10 @@
         description = "Path to file containing the Nix cache signing key";
       };
 
-      organizations = mkOption {
+      projects = mkOption {
         type = types.listOf types.str;
         default = [ ];
-        description = "List of organization names that can use this cache";
+        description = "List of project names that can use this cache";
       };
 
       upstreams = mkOption {
@@ -779,7 +779,7 @@
       public = mkOption {
         type = types.bool;
         default = false;
-        description = "Whether the cache is public (available to all organizations)";
+        description = "Whether the cache is public (available to all projects)";
       };
 
       created_by = mkOption {
@@ -811,17 +811,17 @@
         example = "wss://worker.example.com/proto";
       };
 
-      organizations = mkOption {
+      projects = mkOption {
         type = types.listOf types.str;
         default = [ ];
         description = ''
-          Organizations this worker is registered under. The provisioner
+          Projects this worker is registered under. The provisioner
           creates one `worker_registration` row per
-          (worker_id, organization) pair so the same physical worker can
-          serve builds for multiple organizations from a single state
-          entry. For a base worker, lists organizations to pre-enable;
+          (worker_id, project) pair so the same physical worker can
+          serve builds for multiple projects from a single state
+          entry. For a base worker, lists projects to pre-enable;
           may be empty. Non-base workers must list at least one
-          organization (enforced by the server at state-apply time).
+          project (enforced by the server at state-apply time).
         '';
         example = [ "acme-corp" "globex" ];
       };
@@ -857,20 +857,20 @@
       base_worker = mkOption {
         type = types.bool;
         default = false;
-        description = "When true this entry is a base worker (server-level, available to every organization) rather than a per-organization registration. `organizations` then lists organizations to pre-enable.";
+        description = "When true this entry is a base worker (server-level, available to every project) rather than a per-project registration. `projects` then lists projects to pre-enable.";
       };
 
       authorize_against = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Optional fixed UUID identity a base worker authenticates as, instead of the per-organization challenge. Ignored for non-base workers.";
+        description = "Optional fixed UUID identity a base worker authenticates as, instead of the per-project challenge. Ignored for non-base workers.";
         example = "123e4567-e89b-12d3-a456-426614174000";
       };
 
       enabled = mkOption {
         type = types.bool;
         default = true;
-        description = "Global enable for a base worker. When false the base worker is unavailable to every organization. Ignored for non-base workers.";
+        description = "Global enable for a base worker. When false the base worker is unavailable to every project. Ignored for non-base workers.";
       };
     };
   });
@@ -909,18 +909,18 @@
           non-empty. The full catalogue is defined in
           `gradient_core::permissions::Permission` and exposed at runtime via
           `GET /user/keys/permissions`. Common identifiers include
-          `viewOrg`, `triggerEvaluation`, `editTask`, `manageMembers`.
+          `viewProject`, `triggerEvaluation`, `editTask`, `manageMembers`.
         '';
-        example = [ "viewOrg" "triggerEvaluation" ];
+        example = [ "viewProject" "triggerEvaluation" ];
       };
 
-      organization = mkOption {
+      project = mkOption {
         type = types.nullOr types.str;
         default = null;
         description = ''
-          Optional organization name to pin the key to. When set, the key is
-          rejected for every other organization (the request looks identical
-          to "not a member"). When null, the key works in any org the owning
+          Optional project name to pin the key to. When set, the key is
+          rejected for every other project (the request looks identical
+          to "not a member"). When null, the key works in any project the owning
           user is a member of.
         '';
       };
@@ -936,16 +936,16 @@
         description = ''
           Name of the role. Must not collide with the built-in role names
           (`Admin`, `Write`, `View`) and must be unique within its
-          organization. State-managed roles cannot be modified via the
+          project. State-managed roles cannot be modified via the
           role-management API.
         '';
       };
 
-      organization = mkOption {
+      project = mkOption {
         type = types.str;
         description = ''
-          Organization the role belongs to. State-managed roles are always
-          org-scoped - there is no way to define a global state-managed
+          Project the role belongs to. State-managed roles are always
+          project-scoped - there is no way to define a global state-managed
           role.
         '';
       };
@@ -956,7 +956,7 @@
           Capability identifiers (camelCase) the role grants. Must be
           non-empty. See `apiKeyType.permissions` for the catalogue.
         '';
-        example = [ "viewOrg" "triggerEvaluation" ];
+        example = [ "viewProject" "triggerEvaluation" ];
       };
 
       oidc_group = mkOption {
@@ -965,7 +965,7 @@
         description = ''
           OIDC group claims that grant this role on login. A user whose
           `groups` claim contains any listed group is granted this role in
-          the role's organization. Grants are additive - they never remove a
+          the role's project. Grants are additive - they never remove a
           membership. Requires the `groups` scope on the OIDC client.
         '';
         example = [ "platform-team" "ops" ];
@@ -976,7 +976,7 @@
         default = [];
         description = ''
           SCIM group names that grant this role. A user the IdP adds to a
-          listed SCIM group is granted this role in the role's organization.
+          listed SCIM group is granted this role in the role's project.
           Grants are additive; removal from the group removes the membership.
         '';
         example = [ "acme-eng" ];
@@ -992,10 +992,10 @@
         description = "Attribute set of users to create, keyed by username";
       };
 
-      organizations = mkOption {
-        type = types.attrsOf organizationType;
+      projects = mkOption {
+        type = types.attrsOf projectType;
         default = { };
-        description = "Attribute set of organizations to create, keyed by name";
+        description = "Attribute set of projects to create, keyed by name";
       };
 
       tasks = mkOption {
@@ -1008,7 +1008,7 @@
         type = types.attrsOf integrationType;
         default = { };
         description = ''
-          Attribute set of per-organization forge integrations, keyed by name.
+          Attribute set of per-project forge integrations, keyed by name.
           Each entry inserts a row into `integration`. For inbound integrations,
           `secret_file` is read as a systemd credential and stored encrypted.
           For outbound integrations, `access_token_file` is similarly encrypted.
@@ -1017,14 +1017,14 @@
         example = literalExpression ''
           {
             acme-prod-inbound = {
-              organization = "acme-corp";
+              project = "acme-corp";
               kind = "inbound";
               forge_type = "gitea";
               secret_file = "/etc/gradient/secrets/acme-inbound-hmac";
               created_by = "alice";
             };
             acme-status-reports = {
-              organization = "acme-corp";
+              project = "acme-corp";
               kind = "outbound";
               forge_type = "gitea";
               endpoint_url = "https://gitea.example.com";
@@ -1032,7 +1032,7 @@
               created_by = "alice";
             };
             acme-github-out = {
-              organization = "acme-corp";
+              project = "acme-corp";
               kind = "outbound";
               forge_type = "github";
               installation_id = 12345678;
@@ -1054,7 +1054,7 @@
         default = { };
         description = ''
           Attribute set of state-managed custom roles, keyed by role name.
-          Each entry creates a custom role in the specified organization with
+          Each entry creates a custom role in the specified project with
           the given permission set. Managed roles cannot be modified or
           deleted through the API - only this state file can change them.
         '';
@@ -1080,7 +1080,7 @@
           {
             builder-1 = {
               display_name = "Primary Build Server";
-              organizations = [ "acme-corp" ];
+              projects = [ "acme-corp" ];
               token_file = "/etc/gradient/secrets/builder-1-token";
               created_by = "alice";
             };
@@ -1096,7 +1096,7 @@ in
     state = mkOption {
       type = stateType;
       default = { };
-      description = "Gradient state configuration for users, organizations, tasks, and caches";
+      description = "Gradient state configuration for users, projects, tasks, and caches";
       example = literalExpression ''
         {
           users = {
@@ -1108,17 +1108,17 @@ in
               superuser = true;
             };
           };
-          organizations = {
+          projects = {
             acme-corp = {
               display_name = "ACME Corporation";
-              description = "Main development organization";
+              description = "Main development project";
               private_key_file = "/etc/gradient/secrets/acme_ssh_key";
               created_by = "alice";
             };
           };
           tasks = {
             web-app = {
-              organization = "acme-corp";
+              project = "acme-corp";
               display_name = "Web Application";
               description = "Main web application";
               repository = "https://github.com/acme-corp/web-app.git";
@@ -1139,22 +1139,22 @@ in
               display_name = "Main Binary Cache";
               description = "Primary binary cache";
               signing_key_file = "/etc/gradient/secrets/main_cache_key";
-              organizations = [ "acme-corp" ];
+              projects = [ "acme-corp" ];
               created_by = "alice";
             };
           };
           roles = {
             releaser = {
-              organization = "acme-corp";
-              permissions = [ "viewOrg" "triggerEvaluation" ];
+              project = "acme-corp";
+              permissions = [ "viewProject" "triggerEvaluation" ];
             };
           };
           api_keys = {
             ci-runner = {
               key_file = "/etc/gradient/secrets/ci-runner";
               owned_by = "alice";
-              permissions = [ "viewOrg" "triggerEvaluation" ];
-              organization = "acme-corp";
+              permissions = [ "viewProject" "triggerEvaluation" ];
+              project = "acme-corp";
             };
           };
         }

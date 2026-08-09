@@ -26,8 +26,8 @@ fn cache_id() -> CacheId {
     CacheId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap())
 }
 
-fn org_id() -> OrganizationId {
-    OrganizationId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap())
+fn project_id() -> ProjectId {
+    ProjectId::new(Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap())
 }
 
 fn deriv_id() -> DerivationId {
@@ -60,7 +60,7 @@ fn test_date() -> chrono::NaiveDateTime {
 ///   0. ECache::find (by name)
 ///   1. EDerivationOutput::find (by hash)
 ///   2. EDerivation::find_by_id
-///   3. EOrganizationCache::find (subscription check)
+///   3. EProjectCache::find (subscription check)
 ///   4. ECachedPath::find (by hash)
 ///   5. ECachedPathSignature::find
 pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
@@ -73,7 +73,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
-        created_by: UserId::new(org_id().into_inner()),
+        created_by: UserId::new(project_id().into_inner()),
         created_at: test_date(),
         ..Default::default()
     };
@@ -145,7 +145,7 @@ pub async fn public_cache_with_narinfo() -> Arc<ServerState> {
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -167,7 +167,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
-        created_by: UserId::new(org_id().into_inner()),
+        created_by: UserId::new(project_id().into_inner()),
         created_at: test_date(),
         ..Default::default()
     };
@@ -197,7 +197,7 @@ pub async fn public_cache_state() -> Arc<ServerState> {
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -223,7 +223,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public: true,
-        created_by: UserId::new(org_id().into_inner()),
+        created_by: UserId::new(project_id().into_inner()),
         created_at: test_date(),
         ..Default::default()
     };
@@ -254,7 +254,7 @@ pub async fn public_cache_with_nar() -> Arc<ServerState> {
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -298,7 +298,7 @@ fn cache_row_with_visibility(public: bool) -> gradient_entity::cache::Model {
         public_key: "test-pub-key".into(),
         private_key: "test-priv-key".into(),
         public,
-        created_by: UserId::new(org_id().into_inner()),
+        created_by: UserId::new(project_id().into_inner()),
         created_at: test_date(),
         ..Default::default()
     }
@@ -371,7 +371,7 @@ fn make_state(
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -454,7 +454,7 @@ pub async fn private_cache_state() -> Arc<ServerState> {
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
@@ -522,7 +522,7 @@ pub async fn private_cache_with_nar() -> Arc<ServerState> {
         shutdown: gradient_util::shutdown::Shutdown::new(),
         jwt_secret: SecretString::new("test-jwt-secret".to_string()),
         started_at: chrono::Utc::now(),
-        pending_org_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
+        pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),
         oidc_group_roles: std::sync::Arc::new(std::collections::HashMap::new()),
         scim_group_roles: std::sync::Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,

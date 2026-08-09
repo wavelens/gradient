@@ -15,8 +15,8 @@ import { EvaluationsService } from '@core/services/evaluations.service';
 const DETAIL: DispatchedJobDetail = {
   id: 'job-1',
   kind: 1,
-  organization: 'o1',
-  organization_name: 'org-one',
+  project: 'o1',
+  project_name: 'project-one',
   worker_id: 'w1',
   score: 12.5,
   dispatched_at: '2026-06-08T00:01:00Z',
@@ -43,7 +43,7 @@ const DETAIL: DispatchedJobDetail = {
     architecture: 'x86_64-linux',
     missing_count: 5,
     missing_nar_size: 1024,
-    org_work_share: 0.25,
+    project_work_share: 0.25,
     rescore_count: 2,
     queued_at: '2026-06-08T00:00:00Z',
     ready_at: '2026-06-08T00:00:30Z',
@@ -94,7 +94,7 @@ const EVAL_DETAIL: DispatchedJobDetail = {
     architecture: '',
     missing_count: null,
     missing_nar_size: null,
-    org_work_share: null,
+    project_work_share: null,
     rescore_count: 0,
     queued_at: '2026-06-08T00:00:00Z',
     ready_at: '2026-06-08T00:00:30Z',
@@ -104,7 +104,7 @@ const EVAL_DETAIL: DispatchedJobDetail = {
 
 const PENDING: PendingJobSummary = {
   kind: 1,
-  organization: 'o1',
+  project: 'o1',
   evaluation_id: 'e1',
   build_id: 'b9',
   queued_at: '2026-06-08T00:00:00Z',
@@ -180,11 +180,11 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(drv.textContent).toContain('/nix/store/xxx-foo');
   });
 
-  it('links the worker id to the org-scoped worker metrics page', () => {
+  it('links the worker id to the project-scoped worker metrics page', () => {
     const el = setup().nativeElement as HTMLElement;
     const link = el.querySelector('.ids .worker-link') as HTMLAnchorElement;
     expect(link).toBeTruthy();
-    expect(link.getAttribute('href')).toBe('/organization/org-one/workers/w1/metrics');
+    expect(link.getAttribute('href')).toBe('/project/project-one/workers/w1/metrics');
   });
 
   it('shows the architecture for build jobs', () => {

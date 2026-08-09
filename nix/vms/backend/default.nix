@@ -32,7 +32,7 @@
 
     server.succeed("${lib.getExe pkgs.gradient-cli} config Server http://gradient.local")
     server.succeed("${lib.getExe pkgs.gradient-cli} config AuthToken ACCESS_TOKEN".replace("ACCESS_TOKEN", token))
-    server.succeed("${lib.getExe pkgs.gradient-cli} organization create --name testorg --display-name MyOrganization --description 'My Test Organization'")
+    server.succeed("${lib.getExe pkgs.gradient-cli} project create --name testproject --display-name MyProject --description 'My Test Project'")
   '';
 
   interactive = {

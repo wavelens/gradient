@@ -8,7 +8,7 @@
 ## Features
 
 - **Modern UI**: clean and intuitive user interface
-- **Organizations**: multiple organizations, which work independently from each other (e.g. different workers, user access)
+- **Projects**: multiple projects, which work independently from each other (e.g. different workers, user access)
 - **API**: provides a RESTful API with API-Key management for authentication
 - **Streaming Logs**: real-time log streaming for builds
 - **Rich Task Configuration**: flake updates, check all branches, pull requests, and tags

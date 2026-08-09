@@ -5,21 +5,21 @@
  */
 
 //! Deterministic fixture builders. Stable UUIDs make assertions readable:
-//! you can write `assert_eq!(body["name"], "test-org")` instead of chasing
+//! you can write `assert_eq!(body["name"], "test-project")` instead of chasing
 //! a random `Uuid`.
 
 use gradient_entity::ids::{
-    CacheId, CacheUpstreamId, CacheUserId, CommitId, EvaluationId, OrganizationCacheId,
-    OrganizationId, TaskId, UserId,
+    CacheId, CacheUpstreamId, CacheUserId, CommitId, EvaluationId, ProjectCacheId, ProjectId,
+    TaskId, UserId,
 };
-use gradient_entity::organization_cache::CacheSubscriptionMode;
+use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::*;
 use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, DbErr, IntoActiveModel};
 use uuid::Uuid;
 
-pub fn org_id() -> OrganizationId {
-    OrganizationId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
+pub fn project_id() -> ProjectId {
+    ProjectId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap())
 }
 pub fn user_id() -> UserId {
     UserId::new(Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap())
@@ -38,11 +38,11 @@ pub fn test_date() -> chrono::NaiveDateTime {
         .unwrap()
 }
 
-pub fn org() -> organization::Model {
-    organization::Model {
-        id: org_id(),
-        name: "test-org".into(),
-        display_name: "Test Organization".into(),
+pub fn project() -> project::Model {
+    project::Model {
+        id: project_id(),
+        name: "test-project".into(),
+        display_name: "Test Project".into(),
         public_key: "ssh-ed25519 AAAA test".into(),
         private_key: "encrypted".into(),
         created_by: user_id(),
@@ -73,8 +73,8 @@ pub fn superuser_user() -> user::Model {
     }
 }
 
-pub fn org_with_id(id: OrganizationId, slug: &str) -> organization::Model {
-    organization::Model {
+pub fn project_with_id(id: ProjectId, slug: &str) -> project::Model {
+    project::Model {
         id,
         name: slug.into(),
         display_name: slug.into(),
@@ -101,15 +101,15 @@ pub fn cache_with_id(id: CacheId, slug: &str, owner: UserId) -> cache::Model {
     }
 }
 
-pub fn org_cache_link(
-    id: OrganizationCacheId,
-    org: OrganizationId,
+pub fn project_cache_link(
+    id: ProjectCacheId,
+    project: ProjectId,
     cache: CacheId,
     mode: CacheSubscriptionMode,
-) -> organization_cache::Model {
-    organization_cache::Model {
+) -> project_cache::Model {
+    project_cache::Model {
         id,
-        organization: org,
+        project: project,
         cache,
         mode,
     }

@@ -12,7 +12,7 @@ import { vi } from 'vitest';
 import { of, throwError } from 'rxjs';
 import { TaskDetailComponent } from './task-detail.component';
 import { TasksService } from '@core/services/tasks.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { AccessState } from '@core/models/access.model';
 import { BuildStatusCounts, EntryPointSummary, EvaluationSummary } from '@core/models/task.model';
@@ -42,7 +42,7 @@ function evalSummary(id: string, status: EvaluationSummary['status'] = 'Building
 function activatedRouteStub(access: AccessState): ActivatedRoute {
   return {
     snapshot: {
-      paramMap: convertToParamMap({ org: 'acme', task: 'demo' }),
+      paramMap: convertToParamMap({ project: 'acme', task: 'demo' }),
       queryParamMap: convertToParamMap({}),
     },
     data: of({}),
@@ -84,7 +84,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 function makeTasksService(access: AccessState, overrides: Partial<{
   startEvaluation: () => ReturnType<TasksService['startEvaluation']>;
   restartFailedBuilds: () => ReturnType<TasksService['restartFailedBuilds']>;
-  abortEvaluation: (org: string, proj: string, id: string) => ReturnType<TasksService['abortEvaluation']>;
+  abortEvaluation: (project: string, proj: string, id: string) => ReturnType<TasksService['abortEvaluation']>;
   getEntryPoints: () => ReturnType<TasksService['getEntryPoints']>;
   extraEvals: EvaluationSummary[];
   primaryStatus: EvaluationSummary['status'];
@@ -112,7 +112,7 @@ function setup(
       provideHttpClientTesting(),
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
       { provide: TasksService, useValue: tasksService },
-      { provide: OrganizationsService, useValue: { getOrganization: () => of({ display_name: 'Acme' }) } },
+      { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
       { provide: AuthService, useValue: { isAuthenticated: () => true } },
     ],
   });
@@ -220,7 +220,7 @@ describe('TaskDetailComponent - evaluation selection', () => {
     const spy = vi.spyOn(tasksService, 'getEntryPoints').mockReturnValue(of([]));
     const component = fixture.componentInstance;
     component.select(component.evaluations()[1]);
-    expect(spy).toHaveBeenCalledWith(component.orgName, component.taskName, component.evaluations()[1].id);
+    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, component.evaluations()[1].id);
   });
 
   it('labels a pull-request trigger as "PR #<n>" (#391)', () => {
@@ -291,6 +291,6 @@ describe('TaskDetailComponent - abort modal', () => {
     const component = fixture.componentInstance;
     component.abortTarget.set('e1');
     component.confirmAbort();
-    expect(spy).toHaveBeenCalledWith(component.orgName, component.taskName, 'e1');
+    expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, 'e1');
   });
 });

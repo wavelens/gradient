@@ -21,7 +21,7 @@ import {
 } from 'ng-apexcharts';
 import { ButtonModule } from 'primeng/button';
 import { TasksService, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/services/tasks.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 
 const CHART_COLORS = {
@@ -61,32 +61,32 @@ type ChartOptions = {
 export class EntryPointMetricsComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private tasksService = inject(TasksService);
-  private orgsService = inject(OrganizationsService);
+  private projectsService = inject(ProjectsService);
 
   loading = signal(true);
   points = signal<EntryPointMetricPoint[]>([]);
   evalAttr = signal('');
   keepEvaluations = signal(30);
-  orgName = '';
-  orgDisplayName = signal('');
+  projectName = '';
+  projectDisplayName = signal('');
   taskName = '';
   taskDisplayName = signal('');
 
   ngOnInit(): void {
-    this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.taskName = this.route.snapshot.paramMap.get('task') || '';
     const evalParam = this.route.snapshot.queryParamMap.get('eval') || '';
     this.evalAttr.set(evalParam);
-    this.orgsService.getOrganization(this.orgName).subscribe({
-      next: (org) => this.orgDisplayName.set(org.display_name),
+    this.projectsService.getProject(this.projectName).subscribe({
+      next: (project) => this.projectDisplayName.set(project.display_name),
       error: () => {},
     });
-    this.tasksService.getTaskInfo(this.orgName, this.taskName).subscribe({
+    this.tasksService.getTaskInfo(this.projectName, this.taskName).subscribe({
       next: (proj) => this.taskDisplayName.set(proj.display_name),
       error: () => {},
     });
 
-    this.tasksService.getEntryPointMetrics(this.orgName, this.taskName, evalParam).subscribe({
+    this.tasksService.getEntryPointMetrics(this.projectName, this.taskName, evalParam).subscribe({
       next: (data: EntryPointMetricsResponse) => {
         this.points.set(data.points);
         this.keepEvaluations.set(data.keep_evaluations);

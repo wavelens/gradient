@@ -288,46 +288,45 @@ async fn pick_latest_evaluation(
     task: Option<&str>,
     out: Output,
 ) -> String {
-    let (organization, task) = resolve_task(task, out);
-    let evaluations = match client.tasks().evaluations(&organization, &task).await {
+    let (project, task) = resolve_task(task, out);
+    let evaluations = match client.tasks().evaluations(&project, &task).await {
         Ok(evals) => evals,
         Err(e) => out.err(to_exit_kind(&e), e),
     };
     let latest = evaluations.into_iter().next().unwrap_or_else(|| {
         out.err(
             ExitKind::Api,
-            format!("No evaluations found for {}/{}.", organization, task),
+            format!("No evaluations found for {}/{}.", project, task),
         );
     });
     out.human(format!(
         "Using latest evaluation {} for task {}/{}.",
-        latest.id, organization, task
+        latest.id, project, task
     ));
     latest.id
 }
 
 fn resolve_task(arg: Option<&str>, out: Output) -> (String, String) {
     if let Some(spec) = arg {
-        if let Some((org, proj)) = spec.split_once('/') {
-            return (org.to_string(), proj.to_string());
+        if let Some((project, proj)) = spec.split_once('/') {
+            return (project.to_string(), proj.to_string());
         }
-        let organization = set_get_value(ConfigKey::SelectedOrganization, None, true)
-            .unwrap_or_else(|| {
-                out.err(
-                    ExitKind::Usage,
-                    format!(
-                        "--task '{}' has no org prefix and no organization is selected.",
-                        spec
-                    ),
-                );
-            });
-        return (organization, spec.to_string());
+        let project = set_get_value(ConfigKey::SelectedProject, None, true).unwrap_or_else(|| {
+            out.err(
+                ExitKind::Usage,
+                format!(
+                    "--task '{}' has no project prefix and no project is selected.",
+                    spec
+                ),
+            );
+        });
+        return (project, spec.to_string());
     }
 
     if let Some(selected) = set_get_value(ConfigKey::SelectedTask, None, true)
-        && let Some((org, proj)) = selected.split_once('/')
+        && let Some((project, proj)) = selected.split_once('/')
     {
-        return (org.to_string(), proj.to_string());
+        return (project.to_string(), proj.to_string());
     }
 
     out.err(

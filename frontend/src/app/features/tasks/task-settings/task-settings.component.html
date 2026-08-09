@@ -11,15 +11,15 @@
     <div class="page-header">
       <div>
         <div class="breadcrumb">
-          <a [routerLink]="['/organization', orgName]" class="breadcrumb-link">{{ orgDisplayName() || orgName }}</a>
+          <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
           <span class="breadcrumb-separator">/</span>
-          <a [routerLink]="['/organization', orgName, 'task', taskName]" class="breadcrumb-link">{{ proj.display_name }}</a>
+          <a [routerLink]="['/project', projectName, 'task', taskName]" class="breadcrumb-link">{{ proj.display_name }}</a>
           <span class="breadcrumb-separator">/</span>
           <span class="breadcrumb-current">Settings</span>
         </div>
         <h1>Task Settings</h1>
       </div>
-      <button pButton label="Organization Settings" icon="pi pi-building" severity="secondary" [routerLink]="['/organization', orgName, 'settings']"></button>
+      <button pButton label="Project Settings" icon="pi pi-building" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
     </div>
 
     @if (errorMessage()) {
@@ -125,7 +125,7 @@
           <p class="text-secondary">
             Triggers control how and when evaluations run for this task - polling intervals, forge push and pull-request events, and cron schedules.
           </p>
-          <a pButton label="Manage Triggers" icon="pi pi-clock" severity="secondary" [routerLink]="['/organization', orgName, 'task', taskName, 'triggers']"></a>
+          <a pButton label="Manage Triggers" icon="pi pi-clock" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'triggers']"></a>
         </div>
       </div>
     </div>
@@ -138,7 +138,7 @@
           <p class="text-secondary">
             Actions react to evaluation and build events - send mail, post webhooks, or report status back to your forge.
           </p>
-          <a pButton label="Manage Actions" icon="pi pi-bolt" severity="secondary" [routerLink]="['/organization', orgName, 'task', taskName, 'actions']"></a>
+          <a pButton label="Manage Actions" icon="pi pi-bolt" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'actions']"></a>
         </div>
       </div>
     </div>
@@ -152,7 +152,7 @@
             Override individual flake inputs with a new git URL, or force an update of an input keeping its original URL. Inputs without an override stay at whatever flake.lock has locked.
           </p>
           <a pButton label="Manage Flake Inputs" icon="pi pi-share-alt" severity="secondary"
-             [routerLink]="['/organization', orgName, 'task', taskName, 'flake-inputs']"></a>
+             [routerLink]="['/project', projectName, 'task', taskName, 'flake-inputs']"></a>
         </div>
       </div>
     </div>
@@ -188,7 +188,7 @@
             <div class="danger-row">
             <div>
               <h3>Transfer Ownership</h3>
-              <p class="text-secondary">Transfer this task to another organization.</p>
+              <p class="text-secondary">Transfer this task to another project.</p>
             </div>
             <button
               pButton
@@ -231,7 +231,7 @@
   (onHide)="onTransferDialogHide()"
 >
   <div class="dialog-content">
-    <p>Transfer <strong>{{ task()?.display_name }}</strong> to another organization. This action cannot be undone.</p>
+    <p>Transfer <strong>{{ task()?.display_name }}</strong> to another project. This action cannot be undone.</p>
     @if (transferError()) {
       <div class="dialog-error">
         <span class="material-symbols-outlined">error</span>
@@ -245,12 +245,12 @@
       </div>
     }
     <div class="form-group">
-      <label>Target Organization</label>
+      <label>Target Project</label>
       <p-autoComplete
-        [(ngModel)]="transferOrgName"
-        [suggestions]="transferOrgSuggestions()"
-        (completeMethod)="onTransferOrgSearch($event)"
-        placeholder="Organization name"
+        [(ngModel)]="transferProjectName"
+        [suggestions]="transferProjectSuggestions()"
+        (completeMethod)="onTransferProjectSearch($event)"
+        placeholder="Project name"
         styleClass="w-full"
         [forceSelection]="false"
         [disabled]="transferring()"
@@ -260,7 +260,7 @@
   </div>
   <ng-template pTemplate="footer">
     <button pButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
-    <button pButton label="Transfer" icon="pi pi-send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferOrgName.trim()"></button>
+    <button pButton label="Transfer" icon="pi pi-send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName.trim()"></button>
   </ng-template>
 </p-dialog>
 

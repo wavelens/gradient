@@ -258,13 +258,13 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
     if (this.scoreScope() === 'all') this.loadDecisions();
     this.sub = this.live.connect().subscribe({
       next: (ev) => {
-        if (ev.type === 'job_dispatched' && ev.organization) {
+        if (ev.type === 'job_dispatched' && ev.project) {
           this.jobs.update((list) =>
             [
               {
                 id: `live:${ev.evaluation_id}:${ev.worker_id}:${Date.now()}`,
                 kind: ev.kind ?? 0,
-                organization: ev.organization!,
+                project: ev.project!,
                 worker_id: ev.worker_id ?? '',
                 score: ev.score ?? 0,
                 dispatched_at: new Date().toISOString(),

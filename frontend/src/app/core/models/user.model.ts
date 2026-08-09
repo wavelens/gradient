@@ -28,7 +28,7 @@ export interface ApiKey {
   name: string;
   managed: boolean;
   permissions: string[];
-  organization: string | null;
+  project: string | null;
   cache: string | null;
   created_at: string;
   last_used_at: string | null;

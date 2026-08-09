@@ -29,8 +29,8 @@ pub use self::reporting::*;
 pub use self::trigger::*;
 pub use self::unpark::{
     find_approval_gated_eval, set_evaluation_source_comment, unpark_approval,
-    unpark_approval_with_wildcard, unpark_no_cache_for_org, unpark_no_workers_for_org,
-    unpark_storage_full_all, unpark_storage_full_for_org,
+    unpark_approval_with_wildcard, unpark_no_cache_for_project, unpark_no_workers_for_project,
+    unpark_storage_full_all, unpark_storage_full_for_project,
 };
 pub use gradient_forge::github_app::*;
 pub use gradient_forge::reporter::*;

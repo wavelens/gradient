@@ -12,7 +12,7 @@
 //! | Endpoint                                              | Forge          | Auth method             |
 //! |-------------------------------------------------------|----------------|-------------------------|
 //! | `POST /hooks/github`                                  | GitHub App     | `X-Hub-Signature-256`   |
-//! | `POST /hooks/{forge}/{org}/{integration_name}`        | Gitea/Forgejo/GitLab | per-integration secret |
+//! | `POST /hooks/{forge}/{project}/{integration_name}`        | Gitea/Forgejo/GitLab | per-integration secret |
 
 mod approval;
 mod commands;
@@ -352,7 +352,7 @@ async fn dispatch_github_app_release(
 
 // ── Generic forge webhook ──────────────────────────────────────────────────
 
-/// `POST /api/v1/hooks/{forge}/{org_name}/{integration_name}` - receives push,
+/// `POST /api/v1/hooks/{forge}/{project_name}/{integration_name}` - receives push,
 /// pull-request, and release events from a named inbound integration.
 ///
 /// The `forge` path segment is one of: `gitea`, `forgejo`, `gitlab`.
@@ -360,7 +360,7 @@ pub async fn forge_webhook(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     OptionalPeer(peer): OptionalPeer,
-    Path((forge, org_name, integration_name)): Path<(String, String, String)>,
+    Path((forge, project_name, integration_name)): Path<(String, String, String)>,
     headers: HeaderMap,
     body: Bytes,
 ) -> WebResult<Json<BaseResponse<WebhookResponse>>> {
@@ -376,18 +376,18 @@ pub async fn forge_webhook(
         return Err(WebError::bad_request("unsupported forge"));
     }
 
-    let org = EOrganization::find()
-        .filter(COrganization::Name.eq(org_name.as_str()))
+    let project = EProject::find()
+        .filter(CProject::Name.eq(project_name.as_str()))
         .one(&state.web_db)
         .await
         .map_err(|e| {
-            warn!(error = %e, org = %org_name, "DB error looking up organization for forge webhook");
+            warn!(error = %e, project = %project_name, "DB error looking up project for forge webhook");
             WebError::internal("internal error")
         })?
         .ok_or_else(|| WebError::not_found_msg("integration not found"))?;
 
     let integration = EIntegration::find()
-        .filter(CIntegration::Organization.eq(org.id))
+        .filter(CIntegration::Project.eq(project.id))
         .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
         .filter(CIntegration::Name.eq(integration_name.as_str()))
         .one(&state.web_db)
@@ -397,7 +397,7 @@ pub async fn forge_webhook(
             WebError::internal("internal error")
         })?
         .ok_or_else(|| {
-            warn!(org = %org_name, %forge, integration = %integration_name, "Integration not found");
+            warn!(project = %project_name, %forge, integration = %integration_name, "Integration not found");
             WebError::not_found_msg("integration not found")
         })?;
 
@@ -417,7 +417,7 @@ pub async fn forge_webhook(
 
     let signature = first_header(&headers, provider.signature_headers());
     if !provider.verify_signature(plaintext_secret.expose(), signature, &body) {
-        warn!(org = %org_name, forge = %forge, integration = %integration_name, "Forge webhook: invalid signature");
+        warn!(project = %project_name, forge = %forge, integration = %integration_name, "Forge webhook: invalid signature");
         return Err(WebError::unauthorized("invalid webhook signature"));
     }
 
@@ -429,7 +429,7 @@ pub async fn forge_webhook(
         let client_ip = resolve_client_ip(&headers, peer_ip, &state.config.network.trusted_proxies);
         if !ip_allowed(client_ip, &allowlist) {
             warn!(
-                org = %org_name,
+                project = %project_name,
                 forge = %forge,
                 integration = %integration_name,
                 %client_ip,

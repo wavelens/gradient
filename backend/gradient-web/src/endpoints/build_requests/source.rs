@@ -10,7 +10,7 @@
 //! CLI uses this to skip the per-file blob manifest.
 
 use super::dispatch::{DispatchResponse, InputOverrideBody, finalize_build_request};
-use crate::access::{Caller, OrgAccess, load_org};
+use crate::access::{Caller, ProjectAccess, load_project};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -30,7 +30,7 @@ use std::time::Duration;
 
 #[derive(Deserialize)]
 pub struct SourceQuery {
-    pub organization: String,
+    pub project: String,
 }
 
 pub async fn post_source(
@@ -40,12 +40,12 @@ pub async fn post_source(
     Query(query): Query<SourceQuery>,
     mut multipart: Multipart,
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
-    let org = load_org(
+    let project = load_project(
         &state.0,
         Caller::User(&user),
         api_key.as_ref(),
-        query.organization,
-        OrgAccess::Require {
+        query.project,
+        ProjectAccess::Require {
             permission: Permission::TriggerEvaluation,
             reject_managed: false,
         },
@@ -85,7 +85,7 @@ pub async fn post_source(
         .map_err(|e| WebError::internal(format!("Failed to read source NAR: {}", e)))?;
 
     let response =
-        finalize_build_request(&state, org.id, &user, &nar, target, system, Vec::new()).await?;
+        finalize_build_request(&state, project.id, &user, &nar, target, system, Vec::new()).await?;
 
     Ok(ok_json(response))
 }
@@ -160,7 +160,7 @@ pub async fn source_chunk(
     Ok(ok_json(json!({ "received": received })))
 }
 
-/// `POST /build-requests/source/{upload}/finalize?organization=X` - reassemble the
+/// `POST /build-requests/source/{upload}/finalize?project=X` - reassemble the
 /// staged NAR, compute its `/nix/store/<hash>-source` path, and finalise the
 /// build-request evaluation, then drop the partial.
 pub async fn source_finalize(
@@ -173,12 +173,12 @@ pub async fn source_finalize(
 ) -> WebResult<Json<BaseResponse<DispatchResponse>>> {
     require_safe_upload_id(&upload)?;
 
-    let org = load_org(
+    let project = load_project(
         &state.0,
         Caller::User(&user),
         api_key.as_ref(),
-        query.organization,
-        OrgAccess::Require {
+        query.project,
+        ProjectAccess::Require {
             permission: Permission::TriggerEvaluation,
             reject_managed: false,
         },
@@ -208,7 +208,7 @@ pub async fn source_finalize(
 
     let response = finalize_build_request(
         &state,
-        org.id,
+        project.id,
         &user,
         &nar,
         body.target,

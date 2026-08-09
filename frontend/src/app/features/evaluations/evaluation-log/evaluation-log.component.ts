@@ -33,7 +33,7 @@ import { Subscription } from 'rxjs';
 import { auditTime, switchMap } from 'rxjs/operators';
 import { EvaluationsService, BuildItem, BuildWithOutputs } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
-import { OrganizationsService } from '@core/services/organizations.service';
+import { ProjectsService } from '@core/services/projects.service';
 import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -58,7 +58,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private evalService = inject(EvaluationsService);
   private live = inject(LiveService);
-  private orgsService = inject(OrganizationsService);
+  private projectsService = inject(ProjectsService);
   protected authService = inject(AuthService);
   private sanitizer = inject(DomSanitizer);
   private cdr = inject(ChangeDetectorRef);
@@ -82,8 +82,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   activeBuildsCount = signal(0);
   private tick = signal(0);
 
-  orgName = '';
-  orgDisplayName = signal('');
+  projectName = '';
+  projectDisplayName = signal('');
   evaluationId = '';
   private initialBuildId: string | null = null;
   // #489: when set, the build list is scoped to this build's package closure.
@@ -158,7 +158,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     document.documentElement.style.overflow = 'hidden';
     document.body.style.overflow = 'hidden';
-    this.orgName = this.route.snapshot.paramMap.get('org') || '';
+    this.projectName = this.route.snapshot.paramMap.get('project') || '';
     this.evaluationId = this.route.snapshot.paramMap.get('evaluationId') || '';
     this.initialBuildId = this.route.snapshot.queryParamMap.get('build');
     this.scopeBuildId.set(this.initialBuildId);
@@ -168,8 +168,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       this.loading.set(false);
       return;
     }
-    this.orgsService.getOrganization(this.orgName).subscribe({
-      next: (org) => this.orgDisplayName.set(org.display_name),
+    this.projectsService.getProject(this.projectName).subscribe({
+      next: (project) => this.projectDisplayName.set(project.display_name),
       error: () => {},
     });
     this.loadEvaluation();
@@ -1291,9 +1291,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       case 'approval':
         return `Awaiting maintainer approval for pull request #${reason.pr_number} by ${reason.pr_author}.`;
       case 'no_cache':
-        return 'No cache is configured for this organization. Configure a cache before this evaluation can run.';
+        return 'No cache is configured for this project. Configure a cache before this evaluation can run.';
       case 'cache_storage_full':
-        return 'Every writable cache for this organization is full. Free space or raise the limit before this evaluation can run.';
+        return 'Every writable cache for this project is full. Free space or raise the limit before this evaluation can run.';
       case 'graph_stuck': {
         const buildWord = reason.pending_anchors === 1 ? 'build is' : 'builds are';
         return `Workers are available, but ${reason.pending_anchors} ${buildWord} blocked on dependencies. Recovering automatically.`;
@@ -1346,7 +1346,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     this.totalBuilds = 0;
     this.loadingMore = false;
     this.evaluationId = id;
-    this.router.navigate(['/organization', this.orgName, 'log', id]);
+    this.router.navigate(['/project', this.projectName, 'log', id]);
     this.loadEvaluation();
   }
 

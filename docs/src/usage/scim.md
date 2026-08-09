@@ -27,19 +27,19 @@ the token secret and rotate it like any other credential. When SCIM is disabled,
 ## Groups → roles
 
 A SCIM group is an IdP group name, not a Gradient object: groups are not created
-through SCIM. Each group resolves to `(organization, role)` grants via the
+through SCIM. Each group resolves to `(project, role)` grants via the
 `scim_group` list on a state-managed role:
 
 ```nix
 services.gradient.state.roles.acme-engineer = {
-  organization = "acme";
-  permissions  = [ "viewOrg" "triggerEvaluation" ];
+  project = "acme";
+  permissions  = [ "viewProject" "triggerEvaluation" ];
   scim_group   = [ "acme-eng" ];
 };
 ```
 
 Adding a user to the `acme-eng` SCIM group grants the `acme-engineer` role in the
-`acme` organization; removing them revokes it. Grants are additive across groups.
+`acme` project; removing them revokes it. Grants are additive across groups.
 A group name with no matching `scim_group` entry is unknown and returns `404`.
 See [Declarative State](state.md).
 

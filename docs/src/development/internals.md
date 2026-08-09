@@ -13,9 +13,9 @@ Key functions inside each crate.
 - `push` → calls `core::evaluation_trigger::trigger_evaluation` for each matching task.
 - `installation` / `installation_repositories` → upserts or clears `github_installation` rows and seeds the `github-<account>` integration pair.
 
-**Generic forges** (`POST /api/v1/hooks/{forge}/{org}/{integration_name}`):
+**Generic forges** (`POST /api/v1/hooks/{forge}/{project}/{integration_name}`):
 - `{forge}` ∈ `gitea`, `forgejo`, `gitlab`. GitHub deliveries route to the App webhook above.
-- Looks up the integration by `(organization, kind=inbound, name=integration_name)` - `forge_type` is **not** part of the filter, so one inbound row can serve all three generic forges.
+- Looks up the integration by `(project, kind=inbound, name=integration_name)` - `forge_type` is **not** part of the filter, so one inbound row can serve all three generic forges.
 - Decrypts `integration.secret` (same `crypt_secret_file` infrastructure as SSH keys).
 - Picks the HMAC scheme from the `{forge}` path segment (`X-Gitea-Signature`, `X-Gitlab-Token`, etc).
 - `push` → calls `trigger_evaluation` for each matching task.
@@ -114,7 +114,7 @@ Constructs a `NixPathInfo` response from `derivation_output` + `cached_path` + `
 
 When the hash doesn't match any `derivation_output`, narinfo falls back to the `cached_path` table. This covers `.drv` files and any other standalone store path the worker pushed.
 
-**Worker-side signing.** All packing, zstd compression, and Ed25519 signing happen on the worker. Before dispatching a `FlakeJob` or `BuildJob`, the server sends one `Credential { kind: SigningKey }` per cache owned by the job's org that has a `private_key` configured. The worker accumulates the keys and signs every path it uploads (fetched flake input, evaluated `.drv`, built output) once per key. Signatures arrive via `FetchedInput.signatures` or `JobUpdate::Signed`; the server stores each entry in `cached_path_signature` keyed by the cache named in the signature. A cache added after a path was uploaded has no signature for that path until it is re-uploaded - there is no server-side backfill.
+**Worker-side signing.** All packing, zstd compression, and Ed25519 signing happen on the worker. Before dispatching a `FlakeJob` or `BuildJob`, the server sends one `Credential { kind: SigningKey }` per cache owned by the job's project that has a `private_key` configured. The worker accumulates the keys and signs every path it uploads (fetched flake input, evaluated `.drv`, built output) once per key. Signatures arrive via `FetchedInput.signatures` or `JobUpdate::Signed`; the server stores each entry in `cached_path_signature` keyed by the cache named in the signature. A cache added after a path was uploaded has no signature for that path until it is re-uploaded - there is no server-side backfill.
 
 **Debug info** (`GET /cache/{cache}/debuginfo/{build_id}`)
 
@@ -174,14 +174,14 @@ Batching the BFS (one DB round-trip per level) keeps the query count proportiona
 
 Workers authenticate to the server using a challenge-response flow:
 
-1. A peer (org admin) calls `POST /api/v1/orgs/{org}/workers` with `{"worker_id": "<string>"}`.
-2. The server generates a 32-byte random token, stores `sha256(token)` in `worker_registration` with `peer_id = org.id`, and returns `{peer_id, token}`.
+1. A peer (project admin) calls `POST /api/v1/projects/{project}/workers` with `{"worker_id": "<string>"}`.
+2. The server generates a 32-byte random token, stores `sha256(token)` in `worker_registration` with `peer_id = project.id`, and returns `{peer_id, token}`.
 3. The worker operator configures `GRADIENT_WORKER_PEERS_FILE` with `peer_id:token` pairs.
-4. On connect, the server sends `AuthChallenge { peers }` listing all org IDs that registered this worker ID.
+4. On connect, the server sends `AuthChallenge { peers }` listing all project IDs that registered this worker ID.
 5. The worker responds with `AuthResponse { tokens: {peer_id: token} }`.
 6. The server validates each token by comparing `sha256(token)` against the stored hash. The worker is authorized for all peers that pass.
 
-A worker may be authorized for multiple orgs simultaneously - it sees job candidates from all its authorized peers.
+A worker may be authorized for multiple projects simultaneously - it sees job candidates from all its authorized peers.
 
 ---
 
