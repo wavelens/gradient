@@ -120,7 +120,7 @@ in {
           extraConfig = lib.mkOption {
             description = ''
               Additional lines of configuration passed to
-              `services.caddy.virtualHosts.<name>.extraConfig` 
+              `services.caddy.virtualHosts.<name>.extraConfig`
               after the reverse proxy setup.
             '';
             type = lib.types.lines;
@@ -1073,7 +1073,6 @@ in {
                 client_max_body_size ${toString proxyMaxBodyBytes};
                 proxy_buffering off;
                 proxy_request_buffering off;
-                proxy_max_temp_file_size 0;
                 proxy_connect_timeout 1h;
                 proxy_send_timeout 1h;
                 proxy_read_timeout 1h;
@@ -1100,7 +1099,6 @@ in {
                 client_max_body_size ${toString proxyMaxBodyBytes};
                 proxy_buffering off;
                 proxy_request_buffering off;
-                proxy_max_temp_file_size 0;
                 proxy_connect_timeout 1h;
                 proxy_send_timeout 1h;
                 proxy_read_timeout 1h;
