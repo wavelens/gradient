@@ -196,6 +196,18 @@ api("PUT", "projects/myorg", token=token, expect_error=True, body=json.dumps({
     "repository": "git@github.com:Wavelens/Gradient.git", "wildcard": "packages.*"}))  # reserved name
 assert api("GET", "projects/myorg/myproject", token=token)["id"] == proj_id
 assert any(p["id"] == proj_id for p in api("GET", "projects/myorg", token=token)["items"])
+
+# A new project must not start above GRADIENT_KEEP_EVALUATIONS (5 here). It used
+# to be created at the hardcoded 30, so the very first save - the frontend sends
+# the whole form back - was rejected by the server's own value (#561).
+fresh = api("GET", "projects/myorg/myproject", token=token)
+assert fresh["keep_evaluations"] == 5, fresh
+api("PATCH", "projects/myorg/myproject", token=token,
+    body=json.dumps({"keep_evaluations": fresh["keep_evaluations"]}))
+api("PATCH", "projects/myorg/myproject", token=token, expect_error=True,
+    body=json.dumps({"keep_evaluations": 6}))  # above the server maximum
+api("PATCH", "projects/myorg/myproject", token=token, expect_error=True,
+    body=json.dumps({"keep_evaluations": 0}))  # below the floor
 api("GET", "projects/myorg/available", token=token)
 api("GET", "projects/myorg/myproject/details", token=token)
 api("PATCH", "projects/myorg/myproject", token=token, body=json.dumps({"display_name": "MP2"}))

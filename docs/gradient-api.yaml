@@ -8078,7 +8078,10 @@ components:
         keep_evaluations:
           type: integer
           minimum: 1
-          description: Number of completed evaluations to retain for metrics and history
+          description: >-
+            Number of completed evaluations to retain for metrics and history.
+            Rejected with `400` when it exceeds `GRADIENT_KEEP_EVALUATIONS`, the
+            instance-wide maximum.
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
         sign_cache:
@@ -8111,7 +8114,10 @@ components:
           type: boolean
         keep_evaluations:
           type: integer
-          description: Number of completed evaluations retained for metrics and history
+          description: >-
+            Number of completed evaluations retained for metrics and history. A
+            new project starts at the lower of 30 and the instance-wide maximum
+            (`GRADIENT_KEEP_EVALUATIONS`).
         concurrency:
           $ref: '#/components/schemas/ConcurrencyPolicy'
         sign_cache:

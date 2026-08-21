@@ -55,7 +55,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `settings.sentryDsn` | `null` | Override the Sentry DSN used when `reportErrors` is true. `null` ships reports to the upstream Wavelens instance at `reports.wavelens.io`; set your own DSN to keep reports in-house. (`GRADIENT_SENTRY_DSN`) |
 | `discoverable` | `true` | Accept incoming `/proto` WebSocket connections from workers |
 | `settings.maxProtoConnections` | `256` | Max simultaneous worker WebSocket connections; further upgrades return `503 Service Unavailable` with `Retry-After: 10` until a slot frees |
-| `settings.keepEvaluations` | `30` | Global maximum of evaluations kept per project (caps the per-project setting) |
+| `settings.keepEvaluations` | `30` | Global maximum of evaluations kept per project. Caps the per-project setting, and a new project starts at the lower of `30` and this. `0` disables the cap. (`GRADIENT_KEEP_EVALUATIONS`) |
 | `settings.logChunkBytes` | `262144` (256 KiB) | Target uncompressed size for each zstd build-log chunk written on finalize. Chunks split on line boundaries, so an over-long line may exceed this. (`GRADIENT_LOG_CHUNK_BYTES`) |
 | `settings.maxStorageGb` | `0` | Instance-wide cap on total cached NAR storage, in GB. When all writable caches for an org have less than 10 MiB headroom, new evaluations park in `Waiting`. `0` = unlimited; per-cache `max_storage_gb` limits still apply. (`GRADIENT_MAX_STORAGE_GB`) |
 | `settings.evalCacheMaxTotalBytes` | `10737418240` (10 GiB) | Total byte cap for fleet-shared eval-cache blobs. The eviction sweep drops oldest-`updated_at` rows until the surviving total is at or under this. (`GRADIENT_EVAL_CACHE_MAX_TOTAL_BYTES`) |
