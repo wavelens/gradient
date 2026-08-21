@@ -1066,8 +1066,14 @@ in {
             "/api/" = {
               proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
+              # NAR and blob uploads are streamed straight to gradient: buffering
+              # them would spool the whole body to /tmp before we see a byte, and
+              # log endpoints stream their response the same way.
               extraConfig = ''
                 client_max_body_size ${toString proxyMaxBodyBytes};
+                proxy_buffering off;
+                proxy_request_buffering off;
+                proxy_max_temp_file_size 0;
                 proxy_connect_timeout 1h;
                 proxy_send_timeout 1h;
                 proxy_read_timeout 1h;
@@ -1087,8 +1093,14 @@ in {
             "/cache/" = {
               proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
+              # A substituter pulls NARs that run to hundreds of MB. With the
+              # default buffering nginx writes each one to proxy_temp_path first,
+              # which fills the disk and kills the transfer mid-stream.
               extraConfig = ''
                 client_max_body_size ${toString proxyMaxBodyBytes};
+                proxy_buffering off;
+                proxy_request_buffering off;
+                proxy_max_temp_file_size 0;
                 proxy_connect_timeout 1h;
                 proxy_send_timeout 1h;
                 proxy_read_timeout 1h;
