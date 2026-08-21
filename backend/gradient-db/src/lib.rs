@@ -15,6 +15,7 @@ pub mod closure;
 pub mod connection;
 pub mod consistency;
 pub mod context;
+pub mod debug_info;
 pub mod dep_closure;
 pub mod dependency_graph;
 pub mod derivation;
@@ -58,6 +59,9 @@ pub use self::closure::*;
 pub use self::connection::*;
 pub use self::consistency::{ConsistencyReport, graph_consistency_report};
 pub use self::context::DbContext;
+pub use self::debug_info::{
+    DebugInfoTarget, carries_debug_info, index_cached_path, lookup_for_cache, pending_debug_index,
+};
 pub use self::dep_closure::*;
 pub use self::dependency_graph::*;
 pub use self::derivation::*;

@@ -33,6 +33,7 @@ mod m20260705_000000_upstream_metric_by_url;
 mod m20260706_000000_build_attempt_build_job_set_null;
 mod m20260706_000001_disable_jit;
 mod m20260709_000000_input_update_discover_only;
+mod m20260821_000000_debug_info;
 
 pub struct Migrator;
 
@@ -67,6 +68,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260706_000000_build_attempt_build_job_set_null::Migration),
             Box::new(m20260706_000001_disable_jit::Migration),
             Box::new(m20260709_000000_input_update_discover_only::Migration),
+            Box::new(m20260821_000000_debug_info::Migration),
         ]
     }
 }

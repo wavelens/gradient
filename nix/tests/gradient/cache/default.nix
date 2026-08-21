@@ -261,6 +261,8 @@ in {
     testScript = { nodes, ... }:
       ''
       # ── Helpers ───────────────────────────────────────────────────────────
+      import json
+
       GIT     = "${lib.getExe pkgs.git}"
       CURL    = "${lib.getExe pkgs.curl}"
       JQ      = "${lib.getExe pkgs.jq}"
@@ -520,6 +522,56 @@ in {
       client.fail(f"ls {upload_path}")
       print(client.succeed(f"nix-store -vvv --realize {upload_path}"))
       print(client.succeed(f"ls {upload_path}"))
+
+      # ── Phase 10: debuginfo index + 404 on unknown keys (#563) ────────────
+      # A `separateDebugInfo` output carries `lib/debug/.build-id/<xx>/<yy>.debug`.
+      # Uploading one must make `debuginfo/<build-id>` resolve to that NAR member,
+      # in the same JSON shape nix writes under `index-debug-info=true`, and every
+      # key we do not serve must be a 404: nixseparatedebuginfod aborts the whole
+      # lookup on any other status.
+      banner("Phase 10: debuginfo index and 404 on unknown keys (#563)")
+      build_id = "7dbeaca53fbc9a489b633871093c37dae3857a37"
+      member = f"lib/debug/.build-id/{build_id[:2]}/{build_id[2:]}.debug"
+      server.succeed(f"mkdir -p /tmp/probe-debug/lib/debug/.build-id/{build_id[:2]}")
+      server.succeed(f"echo gradient-debuginfo-563 > /tmp/probe-debug/{member}")
+      debug_path = server.succeed("nix-store --add /tmp/probe-debug").strip()
+      debug_hash = debug_path.split("-")[0].replace("/nix/store/", "")
+      print(f"Uploading debug output: {debug_path}")
+      print(server.succeed(f"{CLI} cache upload main {debug_path}"))
+
+      client.wait_until_succeeds(
+          f"{CURL} -sf {CACHE}/{debug_hash}.narinfo -o /dev/null", timeout=60
+      )
+
+      # The build-id walk runs detached from the upload commit, so poll for it.
+      client.wait_until_succeeds(
+          f"{CURL} -sf {CACHE}/debuginfo/{build_id} -o /dev/null", timeout=60
+      )
+      redirect = client.succeed(f"{CURL} -sf {CACHE}/debuginfo/{build_id}")
+      print(redirect)
+      parsed = json.loads(redirect)
+      assert parsed["member"] == member, redirect
+      assert parsed["archive"].startswith("../nar/"), redirect
+      assert parsed["archive"].endswith(".nar.zst"), redirect
+
+      # `nix copy` writes the key with the `.debug` suffix still attached; both
+      # spellings must resolve to the same document.
+      assert client.succeed(f"{CURL} -sf {CACHE}/debuginfo/{build_id}.debug") == redirect
+
+      # The archive link is relative to the `debuginfo/` key, so it resolves
+      # against the cache root - and must actually be fetchable.
+      archive = parsed["archive"].replace("../", "", 1)
+      client.succeed(f"{CURL} -sf {CACHE}/{archive} -o /dev/null")
+
+      def status(url):
+          return client.succeed(f"{CURL} -s -o /dev/null -w '%{{http_code}}' {url}").strip()
+
+      assert status(f"{CACHE}/debuginfo/{'0' * 40}") == "404"
+      assert status(f"{CACHE}/debuginfo/{'0' * 40}.debug") == "404"
+      assert status(f"{CACHE}/debuginfo/not-a-build-id") == "404"
+      # The exact request from #563: a debuginfo probe against a cache root that
+      # has no such cache. Used to be a 400, which crashed the client.
+      assert status(f"http://server/cache/debuginfo/{build_id}.debug") == "404"
 
       banner("Cache test PASSED")
       '';

@@ -336,6 +336,34 @@ Private caches require HTTP Basic Auth (any username, JWT or API key as password
 | `GET` | `/cache/{cache}/gradient-cache-info` | Gradient cache metadata (add `?json` for JSON) |
 | `GET` | `/cache/{cache}/{hash}.narinfo` | Path info (add `?json` for JSON). `References`/`Deriver` are store-path basenames; the empty `References` line is omitted. Responds with `X-Cache: HIT` when served from our store, `MISS` when proxied from an upstream. |
 | `GET` | `/cache/{cache}/nar/{hash}.nar.zst` | NAR archive |
+| `GET` | `/cache/{cache}/debuginfo/{build_id}` | DWARF debug info for an ELF build id (also accepts `{build_id}.debug`) |
+
+Every key the cache does not serve answers `404`, never another `4xx`: a
+substituter or debuginfod client treats anything else as a hard error and gives
+up instead of moving on to the next substituter.
+
+#### Debug info
+
+`debuginfo/{build_id}` implements the same index nix writes when a binary cache
+is created with `index-debug-info=true`, so `nixseparatedebuginfod`, `dwarffs`
+and `gdb`'s debuginfod client resolve symbols straight from a Gradient cache:
+
+```json
+{ "archive": "../nar/<file-hash>.nar.zst",
+  "member": "lib/debug/.build-id/7d/beaca53fbc9a489b633871093c37dae3857a37.debug" }
+```
+
+`archive` is relative to the requested key, so it resolves against the cache
+root. The index is built by walking the NAR of every cached
+`separateDebugInfo` output - store paths whose name ends in `-debug`, the only
+ones nixpkgs puts a `lib/debug/.build-id` tree in. Uploads index themselves;
+`GRADIENT_DEBUG_INDEX_INTERVAL_SECS` paces the backfill that covers paths cached
+before the index existed.
+
+For a path the cache substituted rather than built, the lookup falls through to
+the cache's upstreams and rewrites their `archive` link through
+`nar/upstream/{id}/...`, so a pull-through cache serves debug info for what it
+mirrors. `X-Cache` reports `HIT` for our own index and `MISS` for an upstream's.
 
 **Inspection surface** (NAR content inspection and build logs):
 

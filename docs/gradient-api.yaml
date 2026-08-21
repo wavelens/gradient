@@ -6159,6 +6159,7 @@ paths:
       | `GET /cache/{cache}/gradient-cache-info` | Gradient-specific cache metadata. Add `?json` for JSON response (`GradientCacheInfo`). Responds with `Access-Control-Allow-Origin: *` for browser probes. |
       | `GET /cache/{cache}/{hash}.narinfo` | Path info for a store path. Add `?json` for JSON response (`NixPathInfo`). |
       | `GET /cache/{cache}/nar/{hash}.nar.zst` | Compressed NAR archive |
+      | `GET /cache/{cache}/debuginfo/{build_id}` | DWARF debug info for an ELF build id, in nix's `index-debug-info` format: `{"archive": "../nar/<file>.nar.zst", "member": "lib/debug/.build-id/<xx>/<yy>.debug"}`. Both `{build_id}` and `{build_id}.debug` resolve. Indexed from `separateDebugInfo` outputs (store paths ending in `-debug`); a miss falls through to the cache's upstreams with their `archive` link rewritten through `nar/upstream/{id}/...`, so `X-Cache` reports `HIT` (ours) or `MISS` (upstream). Unknown build ids - and any other key this cache does not serve - answer `404`, never a `4xx` that debuginfod clients treat as fatal. |
 
       ### Gradient Proto surface
 

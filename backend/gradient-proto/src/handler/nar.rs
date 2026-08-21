@@ -118,6 +118,8 @@ pub(super) async fn mark_nar_stored(
         .await?
         .cached_path;
 
+    crate::ingest::spawn_debug_index(state, cached_path_id, store_path);
+
     let marked = EDerivationOutput::update_many()
         .col_expr(CDerivationOutput::IsCached, Expr::value(true))
         .col_expr(CDerivationOutput::CachedPath, Expr::value(cached_path_id))

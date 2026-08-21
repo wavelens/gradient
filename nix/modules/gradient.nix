@@ -706,6 +706,12 @@ in {
           default = 3600;
         };
 
+        debugIndexIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between DWARF build-id index backfill passes. Uploads index their own NAR in place, so this tick only catches paths cached before the index existed and walks lost to a restart.";
+          type = lib.types.ints.positive;
+          default = 300;
+        };
+
         narVerifyDigest = lib.mkOption {
           description = "When set, the S3 presigned NAR commit path GETs the uploaded object and recomputes its hash before marking it cached, catching same-length corruption at the cost of a full object read. Off by default: the presigned path still HEAD-checks size, and the relayed/REST upload paths always content-verify since they already hold the bytes in memory.";
           type = lib.types.bool;
@@ -970,6 +976,7 @@ in {
         GRADIENT_NAR_TTL_HOURS = toString cfg.settings.cacheTtlHours;
         GRADIENT_CACHE_MAINTENANCE_INTERVAL_SECS = toString cfg.settings.cacheMaintenanceIntervalSecs;
         GRADIENT_SIGN_SWEEP_INTERVAL_SECS = toString cfg.settings.signSweepIntervalSecs;
+        GRADIENT_DEBUG_INDEX_INTERVAL_SECS = toString cfg.settings.debugIndexIntervalSecs;
         GRADIENT_NAR_VERIFY_DIGEST = lib.boolToString cfg.settings.narVerifyDigest;
         GRADIENT_NAR_UPLOAD_GRACE_HOURS = toString cfg.settings.narUploadGraceHours;
         GRADIENT_GC_WEDGED_EVAL_HOURS = toString cfg.settings.gcWedgedEvalHours;

@@ -99,6 +99,15 @@ pub struct StorageArgs {
         default_value_t = 3600
     )]
     pub sign_sweep_interval_secs: u64,
+    /// Interval in seconds between DWARF build-id index backfill passes. Uploads
+    /// index their own NAR in place, so this tick only catches paths cached
+    /// before the index existed and walks lost to a restart. Defaults to 300.
+    #[arg(
+        long,
+        env = "GRADIENT_DEBUG_INDEX_INTERVAL_SECS",
+        default_value_t = 300
+    )]
+    pub debug_index_interval_secs: u64,
     /// When set, the S3 presigned NAR commit path GETs the uploaded object and
     /// recomputes its hash before marking it cached, catching same-length
     /// corruption at the cost of a full object read. Off by default: the presigned
@@ -128,6 +137,7 @@ impl Default for StorageArgs {
             eval_cache_sweep_interval_secs: 3600,
             cache_maintenance_interval_secs: 3600,
             sign_sweep_interval_secs: 60,
+            debug_index_interval_secs: 300,
             nar_verify_digest: false,
         }
     }

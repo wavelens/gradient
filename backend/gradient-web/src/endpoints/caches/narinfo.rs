@@ -114,12 +114,15 @@ pub async fn path(
     Path((cache, path)): Path<(String, String)>,
     Query(flag): Query<JsonFlag>,
 ) -> WebResult<Response> {
-    let path_hash =
-        get_hash_from_url(path.clone()).map_err(|e| WebError::bad_request(e.to_string()))?;
-
+    // Anything that isn't a narinfo is simply not in this cache. Nix clients and
+    // debuginfod probe the cache root for keys we never serve, and a 4xx other
+    // than 404 reads as a hard error to them - nixseparatedebuginfod aborts the
+    // whole request rather than moving on to the next substituter (#563).
     if !path.ends_with(".narinfo") {
         return Err(WebError::not_found("Path"));
     }
+
+    let path_hash = get_hash_from_url(path.clone()).map_err(|_| WebError::not_found("Path"))?;
 
     let client_ip = cache_client_ip(&state, &headers, peer);
     let ctx = CacheContext::load(&state, &headers, client_ip, cache).await?;

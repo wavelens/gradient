@@ -116,6 +116,14 @@ When the hash doesn't match any `derivation_output`, narinfo falls back to the `
 
 **Worker-side signing.** All packing, zstd compression, and Ed25519 signing happen on the worker. Before dispatching a `FlakeJob` or `BuildJob`, the server sends one `Credential { kind: SigningKey }` per cache owned by the job's org that has a `private_key` configured. The worker accumulates the keys and signs every path it uploads (fetched flake input, evaluated `.drv`, built output) once per key. Signatures arrive via `FetchedInput.signatures` or `JobUpdate::Signed`; the server stores each entry in `cached_path_signature` keyed by the cache named in the signature. A cache added after a path was uploaded has no signature for that path until it is re-uploaded - there is no server-side backfill.
 
+**Debug info** (`GET /cache/{cache}/debuginfo/{build_id}`)
+
+Mirrors nix's `index-debug-info`: the response is the JSON document
+`{"archive": "../nar/<file_hash>.nar.zst", "member": "lib/debug/.build-id/<xx>/<yy>.debug"}`,
+with `archive` relative to the requested key so it resolves against the cache root. Both the hydra spelling (`<build-id>`) and the `nix copy` one (`<build-id>.debug`) are accepted, and the `cached_path_signature` join is the access gate, same as narinfo. The index in `debug_info` is filled by walking the stored NAR of `separateDebugInfo` outputs - store paths whose name ends in `-debug`, the only ones nixpkgs gives a `lib/debug/.build-id` tree. An upload walks its own NAR on a detached task; `cached_path.debug_info_indexed` marks a NAR scanned (even when it held nothing) so the `debug-index` backfill sweep reads each one at most once per `file_hash`. A miss falls through to the cache's upstreams and rewrites their `archive` link through `nar/upstream/{id}/...`, the same pull-through shape `/log` has; `X-Cache` distinguishes the two. Nix signs store paths, not the debug index, so there is nothing to verify on an upstream document - an `archive` that is absolute or escapes the upstream root is refused rather than proxied.
+
+Every key under `/cache/{cache}/` that we do not serve answers `404`, never another `4xx`: substituters and debuginfod clients treat any other status as a hard error and abandon the lookup instead of trying the next substituter.
+
 **Closure presence** (`cache_derivation`)
 
 The cacher maintains the invariant: a `cache_derivation(cache, derivation)` row exists iff every `derivation_output` of `derivation` has `is_cached = true` AND every transitive dependency of `derivation` has its own `cache_derivation` row for the same cache. After caching an output, `try_record_cache_derivation` checks both conditions and inserts the row when they hold; otherwise the next caching pass picks it up. Invalidation walks reverse `derivation_dependency` edges in `revoke_cache_derivation_closure` and deletes every dependent's `cache_derivation` row for the affected cache, since their closure assertion no longer holds.

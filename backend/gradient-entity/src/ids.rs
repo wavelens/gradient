@@ -97,6 +97,7 @@ id_newtype!(CacheUserId);
 id_newtype!(CachedPathId);
 id_newtype!(CachedPathSignatureId);
 id_newtype!(CommitId);
+id_newtype!(DebugInfoId);
 id_newtype!(DerivationId);
 id_newtype!(DerivationClosureId);
 id_newtype!(DerivationDependencyId);
