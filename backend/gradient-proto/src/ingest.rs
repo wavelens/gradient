@@ -221,9 +221,16 @@ async fn upsert_and_sign<C: ConnectionTrait>(
     {
         Some(row) => {
             let id = row.id;
+            let file_hash = normalize_nar_hash(input.file_hash);
+            // Different bytes under the same store path: the recorded build-id
+            // members no longer describe the NAR, so re-open it to the indexer.
+            let rescan_debug_info = row.file_hash.as_deref() != Some(file_hash.as_str());
             let mut active = row.into_active_model();
             active.file_size = Set(Some(input.file_size));
-            active.file_hash = Set(Some(normalize_nar_hash(input.file_hash)));
+            active.file_hash = Set(Some(file_hash));
+            if rescan_debug_info {
+                active.debug_info_indexed = Set(false);
+            }
             active.nar_size = Set(Some(input.nar_size));
             active.nar_hash = Set(Some(normalize_nar_hash(input.nar_hash)));
             if input.deriver.is_some() {
@@ -320,6 +327,35 @@ async fn upsert_and_sign<C: ConnectionTrait>(
         cached_path: cached_path_id,
         created,
     })
+}
+
+/// Walk a freshly stored `separateDebugInfo` NAR for its `lib/debug/.build-id`
+/// members so `debuginfo/{build_id}` answers as soon as the upload lands.
+/// Detached: the walk decompresses the whole NAR and must not hold up the commit
+/// path. Non-`-debug` paths are skipped outright, and the backfill sweep covers
+/// whatever a crash or a storage hiccup drops here.
+pub fn spawn_debug_index(
+    state: &gradient_core::ServerState,
+    cached_path: CachedPathId,
+    store_path: &str,
+) {
+    let Ok(sp) = StorePath::parse(store_path) else {
+        return;
+    };
+    if !gradient_db::carries_debug_info(sp.name()) {
+        return;
+    }
+
+    let db = state.worker_db.clone();
+    let nar_storage = state.nar_storage.clone();
+    let hash = sp.hash().to_owned();
+    state.shutdown.spawn(async move {
+        match gradient_db::index_cached_path(&db, &nar_storage, cached_path, &hash).await {
+            Ok(0) => {}
+            Ok(count) => debug!(%hash, count, "indexed debug-info build ids"),
+            Err(e) => warn!(%hash, error = %e, "failed to index debug info"),
+        }
+    });
 }
 
 #[cfg(test)]

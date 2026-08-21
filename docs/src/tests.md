@@ -6882,3 +6882,38 @@ backing NAR - the only state a fresh evaluation repairs.
   embeds the absent-NAR predicate.
 - `unproducible_drv_block_sql_shape` - the existing gate fragments are retained
   alongside it.
+
+## Debug files resolve, and unknown cache keys are 404 (#563)
+
+`/cache/{cache}/{path}` parsed the filename before anything else and answered
+`400` when it was not a `<hash>.narinfo`. `nixseparatedebuginfod` probes
+`debuginfo/<build-id>.debug` on every substituter and treats any status other
+than `200`/`404` as fatal, so a routine probe took the whole lookup down with a
+`500`. The parse now yields `404`, and the key it was probing for is served.
+
+`backend/gradient-storage/src/debug_info.rs`:
+`finds_separate_debug_info_members` walks a real NAR and recovers the build id
+from the `<xx>` directory plus the `<yyyy>.debug` file;
+`ignores_malformed_and_misplaced_entries` rejects short names, wrong extensions,
+a non-hex bucket and a `lib/debug/.build-id` tree nested under another
+directory; `a_nar_without_debug_info_yields_nothing` keeps ordinary outputs out
+of the index.
+
+`backend/gradient-db/src/debug_info.rs`:
+`only_separate_debug_info_outputs_are_scanned` pins the `-debug` suffix rule
+that keeps the walk off every other NAR in the cache.
+
+`backend/gradient-web/src/endpoints/caches/debuginfo.rs`:
+`both_nix_spellings_resolve_to_the_same_build_id` covers the hydra
+(`<build-id>`) and `nix copy` (`<build-id>.debug`) spellings;
+`anything_that_is_not_a_build_id_is_rejected` keeps the handler off keys that
+belong to other routes; `an_upstream_archive_is_routed_through_the_nar_proxy`
+and `an_archive_that_escapes_the_upstream_root_is_refused` cover the
+pull-through rewrite, including the absolute-path and `../..` cases that must
+never become a proxied fetch.
+
+`nix/tests/gradient/cache/default.nix` phase 10 is the end-to-end case: upload a
+store path carrying `lib/debug/.build-id/<xx>/<yy>.debug`, poll until the index
+lands, assert the JSON names the member and an `../nar/...` archive that is
+actually fetchable, and assert `404` for an unknown build id, a malformed one,
+and the exact `/cache/debuginfo/<build-id>.debug` request from the issue.

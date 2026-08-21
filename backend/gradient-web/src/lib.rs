@@ -713,6 +713,10 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             get(caches::gradient_cache_info),
         )
         .route("/cache/{cache}/nix-cache-info", get(caches::nix_cache_info))
+        .route(
+            "/cache/{cache}/debuginfo/{build_id}",
+            get(caches::debuginfo),
+        )
         .route("/cache/{cache}/{path}", get(caches::path))
         .route(
             "/cache/{cache}/nar/upstream/{upstream_id}/{*path}",

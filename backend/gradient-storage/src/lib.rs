@@ -5,6 +5,7 @@
  */
 
 pub mod context;
+pub mod debug_info;
 pub mod digest;
 mod layout;
 pub mod log;
@@ -16,6 +17,7 @@ pub mod sgr;
 pub mod source_nar;
 
 pub use self::context::StorageCtx;
+pub use self::debug_info::{BuildIdEntry, scan_build_ids};
 pub use self::digest::{VerifyError, file_hash_sri, verify_nar_bytes, verify_nar_reader};
 pub use self::log::*;
 pub use self::nar::*;

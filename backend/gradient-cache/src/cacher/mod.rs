@@ -12,6 +12,7 @@
 //! GC passes against the cache's DB and NAR store.
 
 mod cleanup;
+mod debug_index;
 mod deep_gc;
 mod eval_cache_sweep;
 mod invalidate;
@@ -19,6 +20,7 @@ mod sign_sweep;
 #[cfg(test)]
 pub(crate) mod test_support;
 
+pub use self::debug_index::index_pending_debug_info;
 pub use self::deep_gc::{DeepGcReport, run_deep_gc};
 pub use self::eval_cache_sweep::{eval_cache_sweep_loop, evict_eval_cache};
 
@@ -62,8 +64,8 @@ impl Sweep {
 /// GC/reconcile steps that used to live in the monolithic `cache_loop`
 /// (orphan-files, eval GC, derivation GC, NAR TTL, demote-unbacked,
 /// unpark-storage-full, build-request blobs, upload sessions, partial-store
-/// GC); "sign-sweep" is the signature backfill. Each runs on its own
-/// interval and its own spawned loop.
+/// GC); "sign-sweep" is the signature backfill and "debug-index" the build-id
+/// backfill. Each runs on its own interval and its own spawned loop.
 fn sweeps(state: &ServerState) -> Vec<Sweep> {
     vec![
         Sweep::new(
@@ -75,6 +77,11 @@ fn sweeps(state: &ServerState) -> Vec<Sweep> {
             "sign-sweep",
             state.config.storage.sign_sweep_interval_secs.max(1),
             |state| Box::pin(sign_missing_signatures(state)),
+        ),
+        Sweep::new(
+            "debug-index",
+            state.config.storage.debug_index_interval_secs.max(1),
+            |state| Box::pin(index_pending_debug_info(state)),
         ),
     ]
 }

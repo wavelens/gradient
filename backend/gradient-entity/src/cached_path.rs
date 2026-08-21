@@ -46,6 +46,9 @@ pub struct Model {
     pub ca: Option<String>,
     /// Full `.drv` path that produced this output, if known.
     pub deriver: Option<String>,
+    /// True once the NAR has been walked for `lib/debug/.build-id` members.
+    /// Set even when the walk found none, so the backfill never re-reads it.
+    pub debug_info_indexed: bool,
     pub created_at: NaiveDateTime,
 }
 
