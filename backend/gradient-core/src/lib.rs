@@ -85,8 +85,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
     let oidc_group_roles = Arc::new(state_result.oidc_group_roles);
     let scim_group_roles = Arc::new(state_result.scim_group_roles);
 
-    if cli.storage.keep_evaluations > 0 {
-        let max = cli.storage.keep_evaluations as i32;
+    if let Some(max) = cli.storage.keep_evaluations_max() {
         let over_limit = EProject::find()
             .filter(CProject::KeepEvaluations.gt(max))
             .all(&db)

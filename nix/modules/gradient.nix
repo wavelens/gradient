@@ -443,8 +443,8 @@ in {
         };
 
         keepEvaluations = lib.mkOption {
-          description = "Amount of evaluations to keep in the database and cache";
-          type = lib.types.ints.positive;
+          description = "Global maximum of evaluations kept per project. Caps the per-project setting, and a new project starts at the lower of 30 and this. 0 disables the cap.";
+          type = lib.types.ints.unsigned;
           default = 30;
         };
 

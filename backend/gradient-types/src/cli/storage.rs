@@ -6,6 +6,10 @@
 
 use clap::Args;
 
+/// Evaluations a freshly created project keeps, before the instance-wide
+/// maximum is applied. Also the default for that maximum.
+pub const DEFAULT_KEEP_EVALUATIONS: i32 = 30;
+
 #[derive(Args, Debug, Clone)]
 pub struct StorageArgs {
     #[arg(long, env = "GRADIENT_STORE_PATH")]
@@ -22,7 +26,14 @@ pub struct StorageArgs {
     pub validate_state: bool,
     #[arg(long, env = "GRADIENT_DELETE_STATE", default_value = "true")]
     pub delete_state: bool,
-    #[arg(long, env = "GRADIENT_KEEP_EVALUATIONS", default_value = "30")]
+    /// Instance-wide maximum for a project's `keep_evaluations`. New projects
+    /// start at the lower of [`DEFAULT_KEEP_EVALUATIONS`] and this. `0` disables
+    /// the cap.
+    #[arg(
+        long,
+        env = "GRADIENT_KEEP_EVALUATIONS",
+        default_value_t = DEFAULT_KEEP_EVALUATIONS as usize
+    )]
     pub keep_evaluations: usize,
     /// TTL in hours for cached NAR files that have not been fetched recently.
     /// When expired the NAR is removed from storage and its GC root is deleted.
@@ -125,7 +136,7 @@ impl Default for StorageArgs {
             state_file: None,
             validate_state: false,
             delete_state: true,
-            keep_evaluations: 30,
+            keep_evaluations: DEFAULT_KEEP_EVALUATIONS as usize,
             nar_ttl_hours: 336,
             keep_orphan_derivations_hours: 24,
             nar_upload_grace_hours: 24,
@@ -140,5 +151,76 @@ impl Default for StorageArgs {
             debug_index_interval_secs: 300,
             nar_verify_digest: false,
         }
+    }
+}
+
+impl StorageArgs {
+    /// The ceiling on a project's `keep_evaluations`, or `None` when the cap is
+    /// disabled. Saturates rather than wrapping: a configured value past
+    /// `i32::MAX` would otherwise become a negative ceiling that rejects
+    /// everything.
+    pub fn keep_evaluations_max(&self) -> Option<i32> {
+        match self.keep_evaluations {
+            0 => None,
+            max => Some(i32::try_from(max).unwrap_or(i32::MAX)),
+        }
+    }
+
+    /// `keep_evaluations` for a freshly created project. Creating a project
+    /// above the ceiling would leave it unsaveable: the frontend sends the whole
+    /// form back and the value it was handed fails validation (#561).
+    pub fn default_keep_evaluations(&self) -> i32 {
+        match self.keep_evaluations_max() {
+            Some(max) => DEFAULT_KEEP_EVALUATIONS.min(max),
+            None => DEFAULT_KEEP_EVALUATIONS,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(keep_evaluations: usize) -> StorageArgs {
+        StorageArgs {
+            keep_evaluations,
+            ..Default::default()
+        }
+    }
+
+    /// The reported bug: with a maximum below the default, a new project was
+    /// still handed the default and every subsequent save was rejected.
+    #[test]
+    fn a_new_project_never_starts_above_the_maximum() {
+        assert_eq!(args(3).default_keep_evaluations(), 3);
+        assert_eq!(args(1).default_keep_evaluations(), 1);
+    }
+
+    /// A maximum above the default raises the ceiling, not the starting point -
+    /// the setting is documented as a cap, not a target.
+    #[test]
+    fn a_higher_maximum_leaves_the_default_alone() {
+        assert_eq!(
+            args(100).default_keep_evaluations(),
+            DEFAULT_KEEP_EVALUATIONS
+        );
+        assert_eq!(args(100).keep_evaluations_max(), Some(100));
+    }
+
+    #[test]
+    fn zero_disables_the_cap() {
+        assert_eq!(args(0).keep_evaluations_max(), None);
+        assert_eq!(args(0).default_keep_evaluations(), DEFAULT_KEEP_EVALUATIONS);
+    }
+
+    /// A maximum past `i32::MAX` must saturate: `as i32` would wrap negative and
+    /// the cap check would then reject every value.
+    #[test]
+    fn an_out_of_range_maximum_saturates() {
+        assert_eq!(args(usize::MAX).keep_evaluations_max(), Some(i32::MAX));
+        assert_eq!(
+            args(usize::MAX).default_keep_evaluations(),
+            DEFAULT_KEEP_EVALUATIONS
+        );
     }
 }

@@ -6917,3 +6917,26 @@ store path carrying `lib/debug/.build-id/<xx>/<yy>.debug`, poll until the index
 lands, assert the JSON names the member and an `../nar/...` archive that is
 actually fetchable, and assert `404` for an unknown build id, a malformed one,
 and the exact `/cache/debuginfo/<build-id>.debug` request from the issue.
+
+## A new project never starts above the evaluation cap (#561)
+
+`PUT /projects/{org}` hard-coded `keep_evaluations: 30` and ignored
+`GRADIENT_KEEP_EVALUATIONS`. On an instance with a lower maximum every new
+project was created above it, so the first save - the settings form sends the
+whole form back - was rejected with `keep_evaluations cannot exceed the server
+maximum`, using the value the server itself had handed out. The startup sweep
+that caps existing projects only masked it until the next restart.
+
+`backend/gradient-types/src/cli/storage.rs`:
+`a_new_project_never_starts_above_the_maximum` is the reported case;
+`a_higher_maximum_leaves_the_default_alone` pins that the setting is a cap and
+not a target, so raising it does not raise what new projects get;
+`zero_disables_the_cap` covers the documented opt-out; and
+`an_out_of_range_maximum_saturates` guards the `usize as i32` that would
+otherwise wrap a huge configured maximum into a negative ceiling rejecting every
+value.
+
+`nix/tests/gradient/api` runs with `keepEvaluations = 5`, below the per-project
+default, and phase 4 asserts a freshly created project reports `5`, that echoing
+that value straight back in a `PATCH` succeeds, and that `6` (over the maximum)
+and `0` (under the floor) are still refused.

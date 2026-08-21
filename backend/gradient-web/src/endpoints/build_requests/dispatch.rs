@@ -217,7 +217,13 @@ pub(super) async fn finalize_build_request(
 
     let cached_path = ensure_cached_path(&tx, nar).await?;
     queue_signature_placeholders(&tx, &cached_path, &organization).await?;
-    let project = ensure_build_request_project(&tx, organization, user.id).await?;
+    let project = ensure_build_request_project(
+        &tx,
+        organization,
+        user.id,
+        state.config.storage.default_keep_evaluations(),
+    )
+    .await?;
 
     let target = target
         .map(|t| t.trim().to_string())
@@ -419,6 +425,7 @@ async fn ensure_build_request_project<C: ConnectionTrait>(
     tx: &C,
     org_id: gradient_types::ids::OrganizationId,
     user_id: gradient_types::ids::UserId,
+    keep_evaluations: i32,
 ) -> WebResult<gradient_entity::project::Model> {
     if let Some(existing) = EProject::find()
         .filter(
@@ -445,7 +452,7 @@ async fn ensure_build_request_project<C: ConnectionTrait>(
         created_by: user_id,
         created_at: now(),
         managed: true,
-        keep_evaluations: 30,
+        keep_evaluations,
         concurrency: ConcurrencyPolicy::SoftAbort,
         sign_cache: true,
         ..Default::default()

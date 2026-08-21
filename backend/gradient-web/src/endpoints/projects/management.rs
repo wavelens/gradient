@@ -248,7 +248,7 @@ pub async fn put(
         last_check_at: *NULL_TIME,
         created_by: user.id,
         created_at: gradient_types::now(),
-        keep_evaluations: 30,
+        keep_evaluations: state.config.storage.default_keep_evaluations(),
         concurrency: body.concurrency.unwrap_or(ConcurrencyPolicy::SoftAbort),
         sign_cache: body.sign_cache.unwrap_or(true),
         ..Default::default()
@@ -487,8 +487,9 @@ impl<'a> ProjectPatcher<'a> {
                 "keep_evaluations must be at least 1".to_string(),
             ));
         }
-        let global_max = self.state.config.storage.keep_evaluations as i32;
-        if global_max > 0 && keep > global_max {
+        if let Some(global_max) = self.state.config.storage.keep_evaluations_max()
+            && keep > global_max
+        {
             return Err(WebError::bad_request(format!(
                 "keep_evaluations cannot exceed the server maximum of {}",
                 global_max
