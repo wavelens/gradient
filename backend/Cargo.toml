@@ -114,6 +114,7 @@ async-ssh2-lite      = { version = "0.5", default-features = false, features = [
 axum                 = { version = "0.8", default-features = false }
 axum-streams         = { version = "0.25", default-features = false, features = ["json"] }
 axum_typed_multipart = { version = "0.16", default-features = false, features = ["tempfile_3"] }
+badgelib             = { version = "0.5.0", default-features = false }
 email_address        = { version = "0.2", default-features = false }
 governor             = { version = "0.10", default-features = false, features = ["std"] }
 http                 = { version = "1.4", default-features = false }
