@@ -803,7 +803,7 @@ sequenceDiagram
     W->>S: AssignJobResponse { accepted: true }
     W->>S: NarRequest { missing paths }
     Note right of W: cached from JobOffer scoring
-    S-->>W: NarPush (batched, zstd-compressed); S3-backed paths arrive as presigned GET URLs in the CacheQuery reply
+    S-->>W: NarPush (batched, zstd-compressed), S3-backed paths as presigned GET URLs
     Note over W: builds in order,<br/>parses .drv from local store
     W->>S: JobUpdate::BuildOutput { dep₀ }
     W->>S: JobUpdate::BuildOutput { dep₁ }
