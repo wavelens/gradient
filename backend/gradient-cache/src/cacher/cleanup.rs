@@ -716,7 +716,7 @@ mod tests {
         let hash = [0xABu8; 32];
         let stale = gradient_entity::build_request_blob::Model {
             id: BuildRequestBlobId::now_v7(),
-            project: project,
+            project,
             hash: hash.to_vec(),
             size: 1,
             created_at: now() - chrono::Duration::days(30),

@@ -109,7 +109,7 @@ pub fn project_cache_link(
 ) -> project_cache::Model {
     project_cache::Model {
         id,
-        project: project,
+        project,
         cache,
         mode,
     }
