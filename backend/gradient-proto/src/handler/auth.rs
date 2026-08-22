@@ -640,7 +640,7 @@ mod tests {
     ) -> ProjectCacheModel {
         ProjectCacheModel {
             id: gradient_types::ids::ProjectCacheId::now_v7(),
-            project: project,
+            project,
             cache,
             mode: CacheSubscriptionMode::ReadWrite,
         }

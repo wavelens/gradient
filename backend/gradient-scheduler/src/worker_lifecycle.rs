@@ -34,7 +34,7 @@ pub(crate) async fn record_worker_sample(
     let sample = gradient_entity::worker_sample::Model {
         id: gradient_entity::ids::WorkerSampleId::now_v7(),
         worker_id: info.id.clone(),
-        project: project,
+        project,
         at: gradient_types::now(),
         cpu_usage_pct: info.cpu_usage_pct,
         ram_free_mb: info.ram_free_mb.map(|v| v as i64),

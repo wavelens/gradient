@@ -369,7 +369,7 @@ mod tests {
     fn make_task(project: ProjectId) -> gradient_entity::task::Model {
         gradient_entity::task::Model {
             id: TaskId::now_v7(),
-            project: project,
+            project,
             name: "p".into(),
             active: true,
             wildcard: "*".into(),

@@ -253,7 +253,7 @@ mod tests {
     ) -> project_cache::Model {
         project_cache::Model {
             id: gradient_types::ids::ProjectCacheId::now_v7(),
-            project: project,
+            project,
             cache,
             mode,
         }

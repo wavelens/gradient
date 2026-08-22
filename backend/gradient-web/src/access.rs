@@ -1063,7 +1063,7 @@ mod tests {
         ApiKeyContext {
             api_id: gradient_entity::ids::ApiId::new(uuid!("a0000000-0000-0000-0000-000000000099")),
             mask,
-            project: project,
+            project,
             cache_pin: None,
             cache_permission_mask: None,
             allowed_ips: Vec::new(),

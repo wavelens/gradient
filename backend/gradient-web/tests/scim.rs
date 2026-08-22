@@ -306,7 +306,7 @@ fn group_with_grant(name: &str) -> (ScimGroupRoles, ProjectId, RoleId) {
 fn membership(project: ProjectId, user: UserId, role: RoleId) -> project_user::Model {
     project_user::Model {
         id: Uuid::now_v7().into(),
-        project: project,
+        project,
         user,
         role,
     }
