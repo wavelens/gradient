@@ -281,7 +281,7 @@ describe('TaskDetailComponent - abort modal', () => {
     const spy = vi.spyOn(tasksService, 'abortEvaluation');
     fixture.componentInstance.abortTarget.set('e1');
     fixture.detectChanges();
-    expect(document.querySelector('.p-dialog')).toBeTruthy();
+    expect(document.querySelector('.gr-dialog')).toBeTruthy();
     expect(spy).not.toHaveBeenCalled();
   });
 

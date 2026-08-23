@@ -8,10 +8,10 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
-import { ButtonModule } from 'primeng/button';
 import { TasksService, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { ButtonComponent } from '@shared/ui';
 
 const CHART_COLORS = {
   buildTime: '#17a2b8',
@@ -24,7 +24,7 @@ const CHART_COLORS = {
 @Component({
   selector: 'app-entry-point-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, ButtonModule, MetricChartComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, ButtonComponent, MetricChartComponent, LoadingSpinnerComponent],
   templateUrl: './entry-point-metrics.component.html',
   styleUrl: './entry-point-metrics.component.scss',
 })

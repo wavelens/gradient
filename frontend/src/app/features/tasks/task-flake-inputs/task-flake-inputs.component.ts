@@ -8,18 +8,13 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { CheckboxModule } from 'primeng/checkbox';
-import { ToastModule } from 'primeng/toast';
-import { MessageService } from 'primeng/api';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { FlakeInputOverride, CreateFlakeInputOverrideBody } from '@core/models';
+import { ButtonComponent, CheckboxComponent, DialogComponent, InputDirective, MessageService, ToastComponent } from '@shared/ui';
 
 interface FlakeInputFormState {
   input_name: string;
@@ -40,11 +35,11 @@ const DEFAULT_FORM: FlakeInputFormState = {
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    CheckboxModule,
-    ToastModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
+    CheckboxComponent,
+    ToastComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,

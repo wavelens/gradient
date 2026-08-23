@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<p-toast />
+<gr-toast />
 
 <div class="container">
   <div class="page-header">
@@ -21,9 +21,9 @@
     </div>
     <button
       *appWritable="access()"
-      pButton
+      grButton
       label="New Override"
-      icon="pi pi-plus"
+      icon="add"
       (click)="startCreate()"
       [appManagedDisable]="access()"
     ></button>
@@ -39,9 +39,9 @@
         <p class="text-secondary">No overrides configured. The task's flake.lock is used as-is.</p>
         <button
           *appWritable="access()"
-          pButton
+          grButton
           label="New Override"
-          icon="pi pi-plus"
+          icon="add"
           (click)="startCreate()"
           [appManagedDisable]="access()"
         ></button>
@@ -70,9 +70,9 @@
               <div class="override-actions">
                 <button
                   *appWritable="access()"
-                  pButton
+                  grButton
                   label="Edit"
-                  icon="pi pi-pencil"
+                  icon="edit"
                   severity="secondary"
                   size="small"
                   [disabled]="rowDisabled()"
@@ -80,9 +80,9 @@
                 ></button>
                 <button
                   *appWritable="access()"
-                  pButton
+                  grButton
                   label="Delete"
-                  icon="pi pi-trash"
+                  icon="delete"
                   severity="danger"
                   size="small"
                   [loading]="deletingId() === override.id"
@@ -99,38 +99,32 @@
 </div>
 
 <!-- Create Dialog -->
-<p-dialog
+<gr-dialog
   header="New Override"
   [(visible)]="showCreateDialog"
-  [modal]="true"
-  [style]="{ width: '520px' }"
-  [draggable]="false"
-  [resizable]="false"
-  (onHide)="cancelEdit()"
+  width="520px"
+  (hide)="cancelEdit()"
 >
   <ng-container *ngTemplateOutlet="overrideForm"></ng-container>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
-    <button pButton label="Create" icon="pi pi-check" (click)="saveCreate()" [loading]="saving()" [disabled]="saving()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
+    <button grButton label="Create" icon="check" (click)="saveCreate()" [loading]="saving()" [disabled]="saving()"></button>
+  </div>
+</gr-dialog>
 
 <!-- Edit Dialog -->
-<p-dialog
+<gr-dialog
   header="Edit Override"
   [(visible)]="showEditDialog"
-  [modal]="true"
-  [style]="{ width: '520px' }"
-  [draggable]="false"
-  [resizable]="false"
-  (onHide)="cancelEdit()"
+  width="520px"
+  (hide)="cancelEdit()"
 >
   <ng-container *ngTemplateOutlet="overrideForm"></ng-container>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
-    <button pButton label="Save" icon="pi pi-check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
+    <button grButton label="Save" icon="check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
+  </div>
+</gr-dialog>
 
 <!-- Shared form template -->
 <ng-template #overrideForm>
@@ -144,7 +138,7 @@
   <div class="form-group">
     <label for="fi-input-name">Input Name</label>
     <input
-      pInputText
+      grInput
       id="fi-input-name"
       [(ngModel)]="form.input_name"
       class="w-full"
@@ -154,7 +148,7 @@
   </div>
 
   <div class="form-group checkbox-group">
-    <p-checkbox
+    <gr-checkbox
       inputId="fi-keep-url"
       [(ngModel)]="form.keepUrl"
       [binary]="true"
@@ -166,7 +160,7 @@
     <div class="form-group">
       <label for="fi-url">URL</label>
       <input
-        pInputText
+        grInput
         id="fi-url"
         [(ngModel)]="form.url"
         class="w-full"

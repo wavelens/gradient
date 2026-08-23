@@ -8,10 +8,6 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { SelectModule } from 'primeng/select';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
@@ -27,6 +23,7 @@ import {
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { LabelHelpComponent } from '@shared/components/form';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { ButtonComponent, DialogComponent, InputDirective, SelectComponent } from '@shared/ui';
 
 interface Option<T> {
   label: string;
@@ -40,10 +37,10 @@ interface Option<T> {
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    SelectModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
+    SelectComponent,
     LoadingSpinnerComponent,
     LabelHelpComponent,
     WritableDirective,

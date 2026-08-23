@@ -6,13 +6,12 @@
 
 import { Component, input, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
+import { ButtonComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'gr-copy-field',
   standalone: true,
-  imports: [CommonModule, ButtonModule, InputTextModule],
+  imports: [CommonModule, ButtonComponent, InputDirective],
   templateUrl: './copy-field.component.html',
   styleUrl: './copy-field.component.scss',
 })

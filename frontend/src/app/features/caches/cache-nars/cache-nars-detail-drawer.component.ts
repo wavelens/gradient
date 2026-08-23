@@ -15,15 +15,14 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
 import { CachesService, NarDetail, NarSummary } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { ButtonComponent, DialogComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-cache-nars-detail-drawer',
   standalone: true,
-  imports: [CommonModule, DialogModule, ButtonModule, LoadingSpinnerComponent],
+  imports: [CommonModule, DialogComponent, ButtonComponent, LoadingSpinnerComponent],
   templateUrl: './cache-nars-detail-drawer.component.html',
   styleUrl: './cache-nars-detail-drawer.component.scss',
 })

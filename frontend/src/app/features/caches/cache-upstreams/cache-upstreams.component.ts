@@ -8,14 +8,12 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
 import { CachesService, UpstreamCache, CacheSubscriptionMode } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
+import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-cache-upstreams',
@@ -24,9 +22,9 @@ import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,

@@ -38,13 +38,13 @@ import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, Trigger
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { commitLabel, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
-import { ButtonModule } from 'primeng/button';
 import { environment } from '@environments/environment';
+import { ButtonComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonModule],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent],
   templateUrl: './evaluation-log.component.html',
   styleUrls: [
     './evaluation-log.component.scss',

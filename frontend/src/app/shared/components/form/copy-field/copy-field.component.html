@@ -1,6 +1,6 @@
 <div class="copy-field">
   <input
-    pInputText
+    grInput
     [id]="id() ?? null"
     [value]="value()"
     [class.copy-field__input--mono]="mono()"
@@ -8,9 +8,9 @@
     readonly
   />
   <button
-    pButton
+    grButton
     type="button"
-    [icon]="copied() ? 'pi pi-check' : 'pi pi-copy'"
+    [icon]="copied() ? 'check' : 'content_copy'"
     [severity]="copied() ? 'success' : 'secondary'"
     [attr.aria-label]="copied() ? 'Copied' : 'Copy to clipboard'"
     (click)="copy()"

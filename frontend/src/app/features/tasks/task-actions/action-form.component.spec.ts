@@ -118,7 +118,7 @@ describe('ActionFormComponent', () => {
     fixture.componentRef.setInput('open', true);
     fixture.componentRef.setInput('error', 'Integration not found');
     fixture.detectChanges();
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Integration not found');
+    expect(document.body.textContent).toContain('Integration not found');
   });
 
   it('emits a CreateActionRequest with the correct discriminated union on submit', () => {

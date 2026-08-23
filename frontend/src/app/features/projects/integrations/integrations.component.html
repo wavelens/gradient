@@ -19,9 +19,9 @@
     </div>
     <button
       *appWritable="access()"
-      pButton
+      grButton
       label="New Integration"
-      icon="pi pi-plus"
+      icon="add"
       (click)="openCreateDialog()"
       [appManagedDisable]="access()"
     ></button>
@@ -64,9 +64,9 @@
           <p class="text-secondary">Create an inbound integration to receive forge webhooks, or an outbound integration to report build statuses.</p>
           <button
             *appWritable="access()"
-            pButton
+            grButton
             label="New Integration"
-            icon="pi pi-plus"
+            icon="add"
             (click)="openCreateDialog()"
             [appManagedDisable]="access()"
           ></button>
@@ -96,9 +96,9 @@
                   @if (integration.forge_type !== 'github') {
                     <button
                       *appWritable="access()"
-                      pButton
+                      grButton
                       label="Edit"
-                      icon="pi pi-pencil"
+                      icon="edit"
                       severity="secondary"
                       size="small"
                       (click)="openEditDialog(integration)"
@@ -107,9 +107,9 @@
                   }
                   <button
                     *appWritable="access()"
-                    pButton
+                    grButton
                     label="Delete"
-                    icon="pi pi-trash"
+                    icon="delete"
                     severity="danger"
                     size="small"
                     [loading]="deletingId() === integration.id"
@@ -140,7 +140,7 @@
                     <div class="forge-selector">
                       @for (opt of inboundForgeOptions; track opt.value) {
                         <button
-                          pButton
+                          grButton
                           type="button"
                           [label]="opt.label"
                           size="small"
@@ -154,10 +154,10 @@
                   <div class="form-group">
                     <label>Webhook URL</label>
                     <div class="copy-row">
-                      <input pInputText [value]="inboundUrl(integration)" readonly class="w-full" />
+                      <input grInput [value]="inboundUrl(integration)" readonly class="w-full" />
                       <button
-                        pButton
-                        [icon]="copiedUrlId() === integration.id ? 'pi pi-check' : 'pi pi-copy'"
+                        grButton
+                        [icon]="copiedUrlId() === integration.id ? 'check' : 'content_copy'"
                         [severity]="copiedUrlId() === integration.id ? 'success' : 'secondary'"
                         (click)="copyInboundUrl(integration)"
                       ></button>
@@ -201,13 +201,10 @@
 </div>
 
 <!-- Create Dialog -->
-<p-dialog
+<gr-dialog
   header="New Integration"
   [(visible)]="showCreateDialog"
-  [modal]="true"
-  [style]="{ width: '520px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="520px"
 >
   @if (errorMessage()) {
     <div class="dialog-error">
@@ -220,7 +217,7 @@
       Name
       <gr-label-help href="https://wavelens.github.io/gradient/usage/integration/" title="Learn about forge integrations" />
     </label>
-    <input pInputText id="int-name" [(ngModel)]="formData.name" [class.input-invalid]="nameInvalid" class="w-full" placeholder="e.g. main-gitea" />
+    <input grInput id="int-name" [(ngModel)]="formData.name" [class.input-invalid]="nameInvalid" class="w-full" placeholder="e.g. main-gitea" />
     @if (nameInvalid) {
       <small class="text-danger">Lowercase letters, digits, and dashes only. Cannot start or end with a dash.</small>
     } @else {
@@ -229,7 +226,7 @@
   </div>
   <div class="form-group">
     <label for="int-display-name">Display Name</label>
-    <input pInputText id="int-display-name" [(ngModel)]="formData.display_name" class="w-full" placeholder="Defaults to the name" />
+    <input grInput id="int-display-name" [(ngModel)]="formData.display_name" class="w-full" placeholder="Defaults to the name" />
     <small class="text-secondary">Human-readable label shown in the integrations list.</small>
   </div>
   <div class="form-group">
@@ -237,31 +234,29 @@
       Kind
       <gr-label-help href="https://wavelens.github.io/gradient/usage/integration/" title="Inbound vs outbound integrations" />
     </label>
-    <p-select
+    <gr-select
       inputId="int-kind"
       [(ngModel)]="formData.kind"
       [options]="kindOptions"
       optionLabel="label"
       optionValue="value"
-      styleClass="w-full"
     />
   </div>
   <div class="form-group">
     <label for="int-forge">Forge</label>
-    <p-select
+    <gr-select
       inputId="int-forge"
       [(ngModel)]="formData.forge_type"
       [options]="formData.kind === 'outbound' ? outboundForgeOptions() : allForgeOptions()"
       optionLabel="label"
       optionValue="value"
-      styleClass="w-full"
     />
   </div>
 
   @if (formData.forge_type === 'github') {
     <div class="form-group">
       <label for="int-installation-id">App Installation ID</label>
-      <input pInputText id="int-installation-id" [(ngModel)]="formData.installation_id" class="w-full"
+      <input grInput id="int-installation-id" [(ngModel)]="formData.installation_id" class="w-full"
         placeholder="e.g. 12345678" />
       <small class="text-secondary">The numeric installation ID from your GitHub App installation.</small>
     </div>
@@ -273,44 +268,41 @@
     <div class="form-group">
       <label for="int-secret">Webhook Secret</label>
       <div class="copy-row">
-        <input pInputText id="int-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to omit verification" />
-        <button pButton type="button" icon="pi pi-refresh" severity="secondary" (click)="generateSecret()"></button>
+        <input grInput id="int-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to omit verification" />
+        <button grButton type="button" icon="refresh" severity="secondary" (click)="generateSecret()"></button>
       </div>
       <small class="text-secondary">Copy this into your forge's webhook secret field. Store it now - it will not be shown again.</small>
     </div>
     <div class="form-group">
       <label for="int-allowed-ips">Allowed source IPs / CIDRs</label>
-      <textarea id="int-allowed-ips" pInputText rows="3" class="w-full" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
+      <textarea id="int-allowed-ips" grInput rows="3" class="w-full" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
       <small class="text-secondary">One CIDR per line. Leave blank to accept webhooks from any source.</small>
     </div>
   } @else {
     <div class="form-group">
       <label for="int-endpoint">Endpoint URL</label>
-      <input pInputText id="int-endpoint" [(ngModel)]="formData.endpoint_url" class="w-full"
+      <input grInput id="int-endpoint" [(ngModel)]="formData.endpoint_url" class="w-full"
         placeholder="e.g. https://gitea.example.com" />
       <small class="text-secondary">Base URL of your forge instance.</small>
     </div>
     <div class="form-group">
       <label for="int-token">Access Token</label>
-      <input pInputText id="int-token" type="password" [(ngModel)]="formData.access_token" class="w-full"
+      <input grInput id="int-token" type="password" [(ngModel)]="formData.access_token" class="w-full"
         placeholder="API token with commit status write permission" />
     </div>
   }
 
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
-    <button pButton label="Create" icon="pi pi-check" (click)="createIntegration()" [loading]="saving()" [disabled]="saving() || !formData.name.trim() || nameInvalid"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
+    <button grButton label="Create" icon="check" (click)="createIntegration()" [loading]="saving()" [disabled]="saving() || !formData.name.trim() || nameInvalid"></button>
+  </div>
+</gr-dialog>
 
 <!-- Edit Dialog -->
-<p-dialog
+<gr-dialog
   header="Edit Integration"
   [(visible)]="showEditDialog"
-  [modal]="true"
-  [style]="{ width: '520px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="520px"
 >
   @if (editingIntegration(); as target) {
     @if (errorMessage()) {
@@ -321,57 +313,56 @@
     }
     <div class="form-group">
       <label for="edit-name">Name</label>
-      <input pInputText id="edit-name" [(ngModel)]="formData.name" class="w-full" />
+      <input grInput id="edit-name" [(ngModel)]="formData.name" class="w-full" />
     </div>
     <div class="form-group">
       <label for="edit-display-name">Display Name</label>
-      <input pInputText id="edit-display-name" [(ngModel)]="formData.display_name" class="w-full" />
+      <input grInput id="edit-display-name" [(ngModel)]="formData.display_name" class="w-full" />
     </div>
     <div class="form-group">
       <label for="edit-forge">Forge</label>
-      <p-select
+      <gr-select
         inputId="edit-forge"
         [(ngModel)]="formData.forge_type"
         [options]="target.kind === 'outbound' ? outboundForgeOptions() : allForgeOptions()"
         optionLabel="label"
         optionValue="value"
-        styleClass="w-full"
       />
     </div>
     @if (target.kind === 'inbound') {
       <div class="form-group">
         <label for="edit-secret">Webhook Secret</label>
         <div class="copy-row">
-          <input pInputText id="edit-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to keep existing" />
-          <button pButton type="button" icon="pi pi-refresh" severity="secondary" (click)="generateSecret()"></button>
+          <input grInput id="edit-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to keep existing" />
+          <button grButton type="button" icon="refresh" severity="secondary" (click)="generateSecret()"></button>
         </div>
         <small class="text-secondary">Currently {{ target.has_secret ? 'configured' : 'not set' }}. Entering a new value replaces it.</small>
         @if (target.has_secret) {
-          <button pButton type="button" label="Clear Secret" icon="pi pi-trash" severity="danger" size="small" class="mt-sm" (click)="clearSecret()" [disabled]="saving()"></button>
+          <button grButton type="button" label="Clear Secret" icon="delete" severity="danger" size="small" class="mt-sm" (click)="clearSecret()" [disabled]="saving()"></button>
         }
       </div>
       <div class="form-group">
         <label for="edit-allowed-ips">Allowed source IPs / CIDRs</label>
-        <textarea id="edit-allowed-ips" pInputText rows="3" class="w-full" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
+        <textarea id="edit-allowed-ips" grInput rows="3" class="w-full" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
         <small class="text-secondary">One CIDR per line. Leave blank to accept webhooks from any source.</small>
       </div>
     } @else {
       <div class="form-group">
         <label for="edit-endpoint">Endpoint URL</label>
-        <input pInputText id="edit-endpoint" [(ngModel)]="formData.endpoint_url" class="w-full" />
+        <input grInput id="edit-endpoint" [(ngModel)]="formData.endpoint_url" class="w-full" />
       </div>
       <div class="form-group">
         <label for="edit-token">Access Token</label>
-        <input pInputText id="edit-token" type="password" [(ngModel)]="formData.access_token" class="w-full" placeholder="Leave blank to keep existing" />
+        <input grInput id="edit-token" type="password" [(ngModel)]="formData.access_token" class="w-full" placeholder="Leave blank to keep existing" />
         <small class="text-secondary">Currently {{ target.has_access_token ? 'configured' : 'not set' }}.</small>
         @if (target.has_access_token) {
-          <button pButton type="button" label="Clear Token" icon="pi pi-trash" severity="danger" size="small" class="mt-sm" (click)="clearAccessToken()" [disabled]="saving()"></button>
+          <button grButton type="button" label="Clear Token" icon="delete" severity="danger" size="small" class="mt-sm" (click)="clearAccessToken()" [disabled]="saving()"></button>
         }
       </div>
     }
   }
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
-    <button pButton label="Save" icon="pi pi-check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
+    <button grButton label="Save" icon="check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
+  </div>
+</gr-dialog>

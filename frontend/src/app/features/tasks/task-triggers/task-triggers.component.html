@@ -19,9 +19,9 @@
     </div>
     <button
       *appWritable="access()"
-      pButton
+      grButton
       label="New Trigger"
-      icon="pi pi-plus"
+      icon="add"
       (click)="startCreate()"
       [appManagedDisable]="access()"
     ></button>
@@ -37,9 +37,9 @@
         <p class="text-secondary">Create a trigger to automatically start evaluations on a schedule, push event, or pull request.</p>
         <button
           *appWritable="access()"
-          pButton
+          grButton
           label="New Trigger"
-          icon="pi pi-plus"
+          icon="add"
           (click)="startCreate()"
           [appManagedDisable]="access()"
         ></button>
@@ -70,9 +70,9 @@
               <div class="trigger-actions">
                 <button
                   *appWritable="triggerAccess()"
-                  pButton
+                  grButton
                   label="Fire Now"
-                  icon="pi pi-play"
+                  icon="play_arrow"
                   severity="secondary"
                   size="small"
                   [loading]="firingId() === trigger.id"
@@ -81,9 +81,9 @@
                 ></button>
                 <button
                   *appWritable="access()"
-                  pButton
+                  grButton
                   label="Edit"
-                  icon="pi pi-pencil"
+                  icon="edit"
                   severity="secondary"
                   size="small"
                   [disabled]="rowDisabled()"
@@ -91,9 +91,9 @@
                 ></button>
                 <button
                   *appWritable="access()"
-                  pButton
+                  grButton
                   label="Delete"
-                  icon="pi pi-trash"
+                  icon="delete"
                   severity="danger"
                   size="small"
                   [loading]="deletingId() === trigger.id"
@@ -110,38 +110,32 @@
 </div>
 
 <!-- Create Dialog -->
-<p-dialog
+<gr-dialog
   header="New Trigger"
   [(visible)]="showCreateDialog"
-  [modal]="true"
-  [style]="{ width: '560px' }"
-  [draggable]="false"
-  [resizable]="false"
-  (onHide)="cancelEdit()"
+  width="560px"
+  (hide)="cancelEdit()"
 >
   <ng-container *ngTemplateOutlet="triggerForm; context: { isEdit: false }"></ng-container>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
-    <button pButton label="Create" icon="pi pi-check" (click)="saveCreate()" [loading]="saving()" [disabled]="saving()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showCreateDialog.set(false)" [disabled]="saving()"></button>
+    <button grButton label="Create" icon="check" (click)="saveCreate()" [loading]="saving()" [disabled]="saving()"></button>
+  </div>
+</gr-dialog>
 
 <!-- Edit Dialog -->
-<p-dialog
+<gr-dialog
   header="Edit Trigger"
   [(visible)]="showEditDialog"
-  [modal]="true"
-  [style]="{ width: '560px' }"
-  [draggable]="false"
-  [resizable]="false"
-  (onHide)="cancelEdit()"
+  width="560px"
+  (hide)="cancelEdit()"
 >
   <ng-container *ngTemplateOutlet="triggerForm; context: { isEdit: true }"></ng-container>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
-    <button pButton label="Save" icon="pi pi-check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="saving()"></button>
+    <button grButton label="Save" icon="check" (click)="saveEdit()" [loading]="saving()" [disabled]="saving()"></button>
+  </div>
+</gr-dialog>
 
 <!-- Shared form template -->
 <ng-template #triggerForm let-isEdit="isEdit">
@@ -154,13 +148,12 @@
 
   <div class="form-group">
     <label for="trig-type">Type</label>
-    <p-select
+    <gr-select
       inputId="trig-type"
       [(ngModel)]="form.type"
       [options]="typeOptions"
       optionLabel="label"
       optionValue="value"
-      styleClass="w-full"
       [disabled]="isEdit"
     />
     @if (isEdit) {
@@ -172,7 +165,7 @@
     <div class="form-group">
       <label for="trig-interval">Interval (seconds)</label>
       <input
-        pInputText
+        grInput
         id="trig-interval"
         type="number"
         min="10"
@@ -184,7 +177,7 @@
     <div class="form-group">
       <label for="trig-branch">Branch</label>
       <input
-        pInputText
+        grInput
         id="trig-branch"
         [(ngModel)]="form.branch"
         placeholder="HEAD (default branch)"
@@ -197,20 +190,19 @@
   @if (form.type === 'reporter_push' || form.type === 'reporter_pull_request') {
     <div class="form-group">
       <label for="trig-integration">Integration</label>
-      <p-select
+      <gr-select
         inputId="trig-integration"
         [(ngModel)]="form.integration_id"
         [options]="integrationOptions()"
         optionLabel="label"
         optionValue="value"
-        styleClass="w-full"
       />
       <small class="text-secondary">Inbound integration that delivers webhooks for this trigger.</small>
     </div>
     <div class="form-group">
       <label for="trig-branches">Branches</label>
       <input
-        pInputText
+        grInput
         id="trig-branches"
         [(ngModel)]="form.branches"
         class="w-full"
@@ -224,7 +216,7 @@
     <div class="form-group">
       <label for="trig-tags">Tags</label>
       <input
-        pInputText
+        grInput
         id="trig-tags"
         [(ngModel)]="form.tags"
         class="w-full"
@@ -233,7 +225,7 @@
       <small class="text-secondary">Comma-separated tag patterns. Leave blank to match any tag.</small>
     </div>
     <div class="form-group checkbox-group">
-      <p-checkbox
+      <gr-checkbox
         inputId="trig-releases-only"
         [(ngModel)]="form.releases_only"
         [binary]="true"
@@ -246,7 +238,7 @@
     <div class="form-group">
       <label for="trig-actions">Actions</label>
       <input
-        pInputText
+        grInput
         id="trig-actions"
         [(ngModel)]="form.actions"
         class="w-full"
@@ -256,7 +248,7 @@
     </div>
 
     <div class="form-group checkbox-group">
-      <p-checkbox
+      <gr-checkbox
         inputId="trig-require-approval"
         [(ngModel)]="form.require_approval"
         [binary]="true"
@@ -278,7 +270,7 @@
     <div class="form-group">
       <label for="trig-cron">Cron Expression</label>
       <input
-        pInputText
+        grInput
         id="trig-cron"
         [(ngModel)]="form.cron"
         class="w-full"
@@ -291,7 +283,7 @@
   }
 
   <div class="form-group checkbox-group">
-    <p-checkbox
+    <gr-checkbox
       inputId="trig-active"
       [(ngModel)]="form.active"
       [binary]="true"

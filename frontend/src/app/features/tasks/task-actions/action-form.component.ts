@@ -7,13 +7,6 @@
 import { Component, OnChanges, SimpleChanges, computed, inject, input, output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { SelectModule } from 'primeng/select';
-import { SelectButtonModule } from 'primeng/selectbutton';
-import { CheckboxModule } from 'primeng/checkbox';
-import { TextareaModule } from 'primeng/textarea';
 import { ConfigService } from '@core/services/config.service';
 import {
   Action,
@@ -27,6 +20,7 @@ import {
   UpdateActionRequest,
 } from '@core/models';
 import { ActionEventsComponent } from './action-events.component';
+import { ButtonComponent, CheckboxComponent, DialogComponent, InputDirective, SelectButtonComponent, SelectComponent } from '@shared/ui';
 
 type FormMode = 'create' | 'edit';
 
@@ -41,13 +35,13 @@ interface IntegrationOption {
   imports: [
     CommonModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    SelectModule,
-    SelectButtonModule,
-    CheckboxModule,
-    TextareaModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
+    SelectComponent,
+    SelectButtonComponent,
+    CheckboxComponent,
+    InputDirective,
     ActionEventsComponent,
   ],
   templateUrl: './action-form.component.html',

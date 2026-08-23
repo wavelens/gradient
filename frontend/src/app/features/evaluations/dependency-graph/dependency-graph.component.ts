@@ -23,7 +23,7 @@ import { auditTime } from 'rxjs/operators';
 import { EvaluationsService, BuildGraph } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { ButtonModule } from 'primeng/button';
+import { ButtonComponent } from '@shared/ui';
 
 const CARD_W = 200;
 const CARD_H = 78;
@@ -49,7 +49,7 @@ interface LayoutEdge {
 @Component({
   selector: 'app-dependency-graph',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonModule],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent],
   templateUrl: './dependency-graph.component.html',
   styleUrl: './dependency-graph.component.scss',
 })
