@@ -20,7 +20,7 @@ class HostComponent {
   access = signal<AccessState>({ managed: false, canEdit: true, canTrigger: true });
 }
 
-// Mirrors how PrimeNG inputs implement ControlValueAccessor - the directive
+// Mirrors how a gr-ui control implements ControlValueAccessor - the directive
 // must call `setDisabledState` on them, since setting the DOM `disabled`
 // property on a component host element does not flow into the component's
 // internal state.
@@ -28,10 +28,10 @@ class HostComponent {
   selector: 'fake-input',
   standalone: true,
   providers: [
-    { provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => FakePrimeNgInputDirective), multi: true },
+    { provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => FakeInputDirective), multi: true },
   ],
 })
-class FakePrimeNgInputDirective implements ControlValueAccessor {
+class FakeInputDirective implements ControlValueAccessor {
   isDisabled = false;
   writeValue(): void {}
   registerOnChange(): void {}
@@ -44,7 +44,7 @@ class FakePrimeNgInputDirective implements ControlValueAccessor {
 @Component({
   selector: 'cva-host',
   standalone: true,
-  imports: [FormsModule, ManagedDisableDirective, FakePrimeNgInputDirective],
+  imports: [FormsModule, ManagedDisableDirective, FakeInputDirective],
   template: `<fake-input [(ngModel)]="value" [appManagedDisable]="access()"></fake-input>`,
 })
 class CvaHostComponent {
@@ -112,12 +112,12 @@ describe('ManagedDisableDirective ([appManagedDisable])', () => {
   });
 });
 
-describe('ManagedDisableDirective with a ControlValueAccessor (PrimeNG-like)', () => {
+describe('ManagedDisableDirective with a ControlValueAccessor', () => {
   let fixture: ComponentFixture<CvaHostComponent>;
 
-  function cvaInstance(): FakePrimeNgInputDirective {
+  function cvaInstance(): FakeInputDirective {
     const debugEl = fixture.debugElement.children[0];
-    return debugEl.injector.get(FakePrimeNgInputDirective);
+    return debugEl.injector.get(FakeInputDirective);
   }
 
   beforeEach(() => {

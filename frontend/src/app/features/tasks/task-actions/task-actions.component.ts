@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -46,6 +46,7 @@ interface IntegrationOption {
     ActionDeliveriesComponent,
   ],
   templateUrl: './task-actions.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './task-actions.component.scss',
 })
 export class TaskActionsComponent implements OnInit {

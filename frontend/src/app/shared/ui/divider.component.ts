@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input } from '@angular/core';
+import { Component, input, ChangeDetectionStrategy } from '@angular/core';
 
 @Component({
   selector: 'gr-divider',
@@ -15,6 +15,7 @@ import { Component, input } from '@angular/core';
     '[attr.aria-orientation]': 'orientation()',
     '[class.gr-divider--vertical]': 'orientation() === "vertical"',
   },
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       :host {

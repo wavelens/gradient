@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -43,6 +43,7 @@ interface RoleFormState {
     ManagedDisableDirective,
   ],
   templateUrl: './members-roles.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './members-roles.component.scss',
 })
 export class MembersRolesComponent implements OnInit {

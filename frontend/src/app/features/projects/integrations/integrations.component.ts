@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -47,6 +47,7 @@ interface Option<T> {
     ManagedDisableDirective,
   ],
   templateUrl: './integrations.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './integrations.component.scss',
 })
 export class IntegrationsComponent implements OnInit {

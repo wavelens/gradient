@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -33,6 +33,7 @@ import { ButtonComponent, DialogComponent, InputDirective, MessageService, Toast
   ],
   providers: [MessageService],
   templateUrl: './workers.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./workers.component.scss', './workers.dialog.scss'],
 })
 export class WorkersComponent implements OnInit {

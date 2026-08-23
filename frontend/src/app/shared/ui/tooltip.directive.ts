@@ -11,7 +11,7 @@ import {
   OverlayRef,
 } from '@angular/cdk/overlay';
 import { ComponentPortal } from '@angular/cdk/portal';
-import { Component, Directive, ElementRef, OnDestroy, inject, input } from '@angular/core';
+import { Component, Directive, ElementRef, OnDestroy, inject, input, ChangeDetectionStrategy } from '@angular/core';
 
 export type TooltipPosition = 'top' | 'bottom' | 'left' | 'right';
 
@@ -26,6 +26,7 @@ const POSITIONS: Record<TooltipPosition, ConnectedPosition> = {
   selector: 'gr-tooltip-panel',
   standalone: true,
   template: '<div class="gr-tooltip">{{ text }}</div>',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .gr-tooltip {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { BoardService, MetricPoint } from '@core/services/board.service';
@@ -31,6 +31,7 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       [colors]="['#28a745']"
     ></app-metric-chart>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .kpis {

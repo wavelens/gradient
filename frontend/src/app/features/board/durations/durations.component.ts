@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService, MetricPoint, DurationsHeatmap } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
@@ -38,6 +38,7 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       [colors]="['#6f42c1', '#fd7e14']"
     ></app-metric-chart>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [`app-metric-chart { display: block; margin-bottom: 1rem; }`],
 })
 export class BoardDurationsComponent implements OnInit {

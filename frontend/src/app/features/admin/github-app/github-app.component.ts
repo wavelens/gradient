@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, HostListener, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -16,6 +16,7 @@ import { ButtonComponent, InputDirective } from '@shared/ui';
   standalone: true,
   imports: [CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective],
   templateUrl: './github-app.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './github-app.component.scss',
 })
 export class GithubAppComponent implements OnInit {

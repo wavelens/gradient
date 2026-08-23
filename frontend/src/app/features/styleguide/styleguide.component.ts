@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 
@@ -63,6 +63,7 @@ interface DemoCounty {
   ],
   providers: [ConfirmationService, MessageService],
   templateUrl: './styleguide.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: ['./styleguide.component.scss', './styleguide.demos.scss'],
 })
 export class StyleguideComponent {
@@ -132,13 +133,6 @@ export class StyleguideComponent {
     'info', 'visibility', 'visibility_off', 'edit', 'delete', 'add', 'close',
     'search', 'menu', 'arrow_back', 'arrow_forward', 'expand_more', 'refresh',
   ];
-  primeIcons = [
-    'pi-home', 'pi-cog', 'pi-user', 'pi-sign-out', 'pi-check', 'pi-times',
-    'pi-info-circle', 'pi-exclamation-triangle', 'pi-pencil', 'pi-trash',
-    'pi-plus', 'pi-minus', 'pi-search', 'pi-bars', 'pi-arrow-left',
-    'pi-arrow-right', 'pi-chevron-down', 'pi-refresh', 'pi-copy', 'pi-link',
-  ];
-
   // ── TOC ────────────────────────────────────────────────────────────────────
   toc = [
     { id: 'colors', label: 'Colors' },

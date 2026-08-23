@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ElementRef, OnDestroy, afterNextRender, booleanAttribute, effect, input, numberAttribute, viewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, afterNextRender, booleanAttribute, effect, input, numberAttribute, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import * as echarts from 'echarts/core';
 import { BarChart, HeatmapChart, LineChart, RadarChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, RadarComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
@@ -37,6 +37,7 @@ echarts.use([
       <div #host class="metric-chart__plot" [style.height.px]="height()"></div>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .metric-chart {

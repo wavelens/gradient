@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { EvaluationsService, BuildProduct, isHtmlArtefact } from '@core/services/evaluations.service';
 import { AuthService } from '@core/services/auth.service';
@@ -17,6 +17,7 @@ import { environment } from '@environments/environment';
   standalone: true,
   imports: [RouterModule, LoadingSpinnerComponent],
   templateUrl: './build-artefacts.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './build-artefacts.component.scss',
 })
 export class BuildArtefactsComponent implements OnInit {

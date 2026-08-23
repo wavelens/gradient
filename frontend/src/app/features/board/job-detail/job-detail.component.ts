@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, DestroyRef, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, DestroyRef, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
@@ -272,6 +272,7 @@ interface RuleRow {
       </div>
     </gr-dialog>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       :host { display: block; padding: 1.5rem; max-width: 1000px; margin: 0 auto; }

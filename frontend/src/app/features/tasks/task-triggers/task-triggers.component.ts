@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -75,6 +75,7 @@ const DEFAULT_FORM: TriggerFormState = {
     ManagedDisableDirective,
   ],
   templateUrl: './task-triggers.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './task-triggers.component.scss',
 })
 export class TaskTriggersComponent implements OnInit {

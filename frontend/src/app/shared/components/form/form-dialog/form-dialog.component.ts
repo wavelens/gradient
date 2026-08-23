@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, model, output } from '@angular/core';
+import { Component, input, model, output, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonComponent, DialogComponent } from '@shared/ui';
 
@@ -13,6 +13,7 @@ import { ButtonComponent, DialogComponent } from '@shared/ui';
   standalone: true,
   imports: [CommonModule, ButtonComponent, DialogComponent],
   templateUrl: './form-dialog.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './form-dialog.component.scss',
 })
 export class FormDialogComponent {

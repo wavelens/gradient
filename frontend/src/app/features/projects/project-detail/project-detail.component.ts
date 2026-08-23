@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -40,6 +40,7 @@ const RESERVED_TASK_NAMES = ['build-request'];
     EvalStatusBadgeComponent,
   ],
   templateUrl: './project-detail.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './project-detail.component.scss',
 })
 export class ProjectDetailComponent implements OnInit, OnDestroy {

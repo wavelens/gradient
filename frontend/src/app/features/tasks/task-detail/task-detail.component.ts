@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, OnDestroy, ElementRef, HostListener, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, ElementRef, HostListener, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
@@ -32,6 +32,7 @@ import { ButtonComponent, DialogComponent, MenuComponent, MenuItem, TooltipDirec
     SegmentedBarComponent, EvalStatusBadgeComponent,
   ],
   templateUrl: './task-detail.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
     './task-detail.component.scss',
     './task-detail.evaluations.scss',

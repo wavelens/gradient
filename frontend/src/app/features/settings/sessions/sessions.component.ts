@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { UserService } from '@core/services/user.service';
@@ -17,6 +17,7 @@ import { ButtonComponent } from '@shared/ui';
   standalone: true,
   imports: [CommonModule, RouterModule, ButtonComponent, LoadingSpinnerComponent],
   templateUrl: './sessions.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './sessions.component.scss',
 })
 export class SessionsComponent implements OnInit {

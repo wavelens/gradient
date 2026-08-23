@@ -4194,10 +4194,10 @@ The primitives:
   when `managed || !canEdit`. Tests cover all four flag combinations,
   tooltip text, and that the directive correctly clears its own state when
   access becomes writable. The directive also propagates the disabled state
-  through `NgControl.valueAccessor.setDisabledState`, so PrimeNG controls
+  through `NgControl.valueAccessor.setDisabledState`, so `gr-ui` controls
   (`p-select`, `p-checkbox`, `p-autoComplete`, …) - which only honor the
   ControlValueAccessor hook, not raw DOM `disabled` - actually become
-  read-only when the user has no write access. A `FakePrimeNgInputDirective`
+  read-only when the user has no write access. A `FakeInputDirective`
   in the spec stands in for any `ControlValueAccessor` host and asserts the
   propagation (issue #229).
 - `frontend/src/app/core/resolvers/task-access.resolver.ts` and
@@ -7194,3 +7194,54 @@ actually created (the SVG renderer is used rather than canvas so this is
 verifiable under jsdom), that `bare` drops the card chrome and heading for
 callers supplying their own panel, that changing the `series` input re-renders,
 and that destroying the component disposes the chart instead of leaking it.
+
+## The gr-ui component layer replaces PrimeNG
+
+PrimeNG v22 is closed source: compiled-only, with a no-reverse-engineering
+clause and an offline-verified licence key. That cannot ship inside an
+AGPL-3.0 distribution at any price, because there is no corresponding source
+for downstream to rebuild. v21 is the last MIT line and it pins the app to
+Angular 21, so the ten components actually in use were rebuilt in
+`frontend/src/app/shared/ui/` on `@angular/cdk`. The upstream source for those
+components runs to roughly 11,900 lines; sized to the API the call sites
+actually use it is closer to 1,500, because the overlay positioning, focus
+trap and keyboard handling are delegated to the CDK.
+
+Each component has its own spec under `frontend/src/app/shared/ui/`.
+
+`button.component.spec.ts` covers the attribute component that sits on a native
+`<button>`: that the severity class tracks the input, that the icon renders as a
+Material Symbol on the correct side of the label, that `loading` swaps the icon
+for a spinner and sets `aria-busy`, and that a caller passing content instead of
+`label` still renders. One case pins the deliberate design decision that the
+component never touches the native `disabled` property, so the existing
+`appManagedDisable` directive stays the only writer and the two cannot fight.
+
+`dialog.component.spec.ts` covers the modal on the CDK overlay: that it is
+absent from the DOM until visible, that the header, body and the
+`[grDialogFooter]` slot all render, that closing reports back through the
+two-way `visible` binding and emits `hide`. The re-open case is the important
+one: the panel lives in an `<ng-template>` projected into an overlay, and
+content projected into a template that is stamped more than once is exactly the
+pattern that silently renders empty on the second open. `popover.component.spec.ts`
+pins the same property for the popover.
+
+`select.component.spec.ts` covers the dropdown against a real `ngModel`: that it
+writes the option *value* rather than the option object, that a value pushed in
+from the model resolves back to its label, that a disabled option cannot be
+picked, and that Escape and the arrow keys work, since a `<div>`-based dropdown
+loses everything a native `<select>` gave us for free.
+`checkbox.component.spec.ts` and `select-button.component.spec.ts` cover the
+other two `ControlValueAccessor` implementations, including `setDisabledState`,
+which is the hook `appManagedDisable` reaches through.
+
+`autocomplete.component.spec.ts` covers the suggestion flow: the component asks
+the caller to complete on every keystroke, shows the panel only once there are
+suggestions, and writes a picked suggestion into both the model and the field.
+`menu.component.spec.ts` covers item commands, separators, disabled items and
+that router-link items render as anchors. `tooltip.directive.spec.ts` covers
+hover and focus, and pins that a doubled `mouseenter` does not stack a second
+overlay. `toast.component.spec.ts` covers the `MessageService` queue including
+`life` expiry and `life: 0` meaning sticky, and `confirm-dialog.component.spec.ts`
+covers accept, reject and the default button labels.
+

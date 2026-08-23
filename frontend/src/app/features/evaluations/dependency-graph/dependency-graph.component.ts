@@ -15,6 +15,7 @@ import {
   ElementRef,
   NgZone,
   ChangeDetectorRef,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -51,6 +52,7 @@ interface LayoutEdge {
   standalone: true,
   imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent],
   templateUrl: './dependency-graph.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './dependency-graph.component.scss',
 })
 export class DependencyGraphComponent implements OnInit, OnDestroy {

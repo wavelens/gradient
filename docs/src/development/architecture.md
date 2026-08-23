@@ -150,9 +150,9 @@ All timestamps are `NaiveDateTime` (UTC, stored without timezone). The `NULL_TIM
 
 ## Frontend
 
-Standalone Angular 21 SPA in `frontend/`. Communicates exclusively with the backend REST API. Built as static files, served by NGINX in production.
+Standalone Angular 22 SPA in `frontend/`. Communicates exclusively with the backend REST API. Built as static files, served by NGINX in production.
 
-Key patterns: standalone components, Angular signals (`signal()`, `computed()`), PrimeNG for UI, Apache ECharts for metric charts, SCSS variables from `_variables.scss`.
+Key patterns: standalone components, Angular signals (`signal()`, `computed()`), the in-repo `gr-ui` component layer on `@angular/cdk` for UI, Apache ECharts for metric charts, SCSS variables from `_variables.scss`.
 
 ## CLI
 

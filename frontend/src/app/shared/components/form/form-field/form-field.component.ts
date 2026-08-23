@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input } from '@angular/core';
+import { Component, input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AbstractControl } from '@angular/forms';
 import { FormErrorComponent } from '../form-error/form-error.component';
@@ -14,6 +14,7 @@ import { FormErrorComponent } from '../form-error/form-error.component';
   standalone: true,
   imports: [CommonModule, FormErrorComponent],
   templateUrl: './form-field.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './form-field.component.scss',
 })
 export class FormFieldComponent {

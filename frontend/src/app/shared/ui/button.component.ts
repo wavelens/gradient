@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, booleanAttribute, computed, input } from '@angular/core';
+import { Component, booleanAttribute, computed, input, ChangeDetectionStrategy } from '@angular/core';
 
 export type ButtonSeverity = 'primary' | 'secondary' | 'success' | 'info' | 'warn' | 'danger';
 
@@ -38,6 +38,7 @@ export type ButtonSeverity = 'primary' | 'secondary' | 'success' | 'info' | 'war
     '[class.gr-button--loading]': 'loading()',
     '[attr.aria-busy]': 'loading() ? "true" : null',
   },
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './button.component.scss',
 })
 export class ButtonComponent {
