@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
@@ -26,6 +26,7 @@ const CHART_COLORS = {
   standalone: true,
   imports: [CommonModule, RouterModule, ButtonComponent, MetricChartComponent, LoadingSpinnerComponent],
   templateUrl: './entry-point-metrics.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './entry-point-metrics.component.scss',
 })
 export class EntryPointMetricsComponent implements OnInit {

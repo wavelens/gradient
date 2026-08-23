@@ -122,16 +122,6 @@
           </div>
         }
       </div>
-
-      <h3>PrimeIcons</h3>
-      <div class="sg-icons">
-        @for (i of primeIcons; track i) {
-          <div class="sg-icon">
-            <i class="pi" [class]="i"></i>
-            <span class="sg-icon__name">{{ i }}</span>
-          </div>
-        }
-      </div>
     </section>
 
     <!-- ─── Buttons ─── -->
@@ -344,7 +334,7 @@
 
       <h3>Popup Menu</h3>
       <p class="text-secondary">
-        PrimeNG <code>p-menu</code> with <code>[popup]="true"</code> attached to a
+        <code>gr-menu</code> anchored to a
         trigger button. Use for row-level "more actions" menus.
       </p>
       <div class="sg-row">
@@ -362,7 +352,7 @@
 
       <h3>Popover</h3>
       <p class="text-secondary">
-        PrimeNG <code>p-popover</code> for richer overlay content (forms, hints, mini-cards).
+        <code>gr-popover</code> for richer overlay content (forms, hints, mini-cards).
       </p>
       <div class="sg-row">
         <button grButton label="Open popover" icon="info"
@@ -628,7 +618,7 @@
         Title + description on the left, action button on the right. Used in
         project / task settings to send the user to a sub-page (Manage
         Workers, Manage Caches, etc.). Stack rows in one card with
-        <code>p-divider</code> between them.
+        <code>gr-divider</code> between them.
       </p>
       <div class="sg-card">
         <div class="sg-nav-row">

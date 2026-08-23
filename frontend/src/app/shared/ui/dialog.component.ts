@@ -19,6 +19,7 @@ import {
   model,
   output,
   viewChild,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { TemplateRef } from '@angular/core';
 
@@ -52,6 +53,7 @@ import { TemplateRef } from '@angular/core';
       </div>
     </ng-template>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './dialog.component.scss',
 })
 export class DialogComponent implements OnDestroy {

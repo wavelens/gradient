@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   FormBuilder,
@@ -30,6 +30,7 @@ interface CliDeviceInfo {
   standalone: true,
   imports: [CommonModule, ReactiveFormsModule, ButtonComponent],
   templateUrl: './cli-authorize.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cli-authorize.component.scss',
 })
 export class CliAuthorizeComponent implements OnInit {

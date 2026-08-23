@@ -16,6 +16,7 @@ import {
   input,
   output,
   signal,
+  ChangeDetectionStrategy
 } from '@angular/core';
 
 @Component({
@@ -24,6 +25,7 @@ import {
   imports: [CdkConnectedOverlay, CdkOverlayOrigin],
   templateUrl: './autocomplete.component.html',
   styleUrl: './autocomplete.component.scss',
+  changeDetection: ChangeDetectionStrategy.Eager,
   providers: [
     { provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => AutoCompleteComponent), multi: true },
   ],

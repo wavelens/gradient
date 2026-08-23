@@ -7,6 +7,7 @@
 import {
   Component, OnInit, OnDestroy, inject, signal, computed,
   ViewChild, ElementRef, NgZone, ChangeDetectorRef,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { CommonModule, Location } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -30,6 +31,7 @@ type LaidLink = { source: LaidNode; target: LaidNode; width?: number; value: num
   standalone: true,
   imports: [CommonModule, ButtonComponent, LoadingSpinnerComponent],
   templateUrl: './closure-graph.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './closure-graph.component.scss',
 })
 export class ClosureGraphComponent implements OnInit, OnDestroy {

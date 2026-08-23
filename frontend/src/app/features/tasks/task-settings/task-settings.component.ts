@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -35,6 +35,7 @@ import { AutoCompleteComponent, ButtonComponent, CheckboxComponent, DialogCompon
     ManagedDisableDirective,
   ],
   templateUrl: './task-settings.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './task-settings.component.scss',
 })
 export class TaskSettingsComponent implements OnInit {

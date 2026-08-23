@@ -14,10 +14,11 @@ import {
   ViewContainerRef,
   inject,
   viewChild,
+  ChangeDetectionStrategy
 } from '@angular/core';
 
 /// Click-anchored overlay. Callers keep a template reference and call
-/// `toggle($event)`, the same shape the PrimeNG popover used.
+/// `toggle($event)` from the element the panel should hang off.
 @Component({
   selector: 'gr-popover',
   standalone: true,
@@ -26,6 +27,7 @@ import {
       <div class="gr-popover" role="dialog"><ng-content /></div>
     </ng-template>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './popover.component.scss',
 })
 export class PopoverComponent implements OnDestroy {

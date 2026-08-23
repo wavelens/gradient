@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, inject } from '@angular/core';
+import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
 import { MessageService } from './message.service';
 import { MessageSeverity } from './types';
 
@@ -34,6 +34,7 @@ const ICONS: Record<MessageSeverity, string> = {
       }
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './toast.component.scss',
 })
 export class ToastComponent {

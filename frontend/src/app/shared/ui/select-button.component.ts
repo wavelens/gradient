@@ -5,7 +5,7 @@
  */
 
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
-import { Component, booleanAttribute, forwardRef, input, signal } from '@angular/core';
+import { Component, booleanAttribute, forwardRef, input, signal, ChangeDetectionStrategy } from '@angular/core';
 
 @Component({
   selector: 'gr-select-button',
@@ -28,6 +28,7 @@ import { Component, booleanAttribute, forwardRef, input, signal } from '@angular
     </div>
   `,
   styleUrl: './select-button.component.scss',
+  changeDetection: ChangeDetectionStrategy.Eager,
   providers: [
     { provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => SelectButtonComponent), multi: true },
   ],

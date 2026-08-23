@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -38,6 +38,7 @@ type SortOrder = 'asc' | 'desc';
     CacheNarsDetailDrawerComponent,
   ],
   templateUrl: './cache-nars.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache-nars.component.scss',
 })
 export class CacheNarsComponent implements OnInit {

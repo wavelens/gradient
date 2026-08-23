@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService, BoardNetworkStats, HttpRouteStat } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
@@ -68,6 +68,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
       </tbody>
     </table>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       app-metric-chart { display: block; margin-bottom: 1rem; }

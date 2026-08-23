@@ -13,6 +13,7 @@ import {
   SimpleChanges,
   inject,
   signal,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CachesService, NarDetail, NarSummary } from '@core/services/caches.service';
@@ -24,6 +25,7 @@ import { ButtonComponent, DialogComponent } from '@shared/ui';
   standalone: true,
   imports: [CommonModule, DialogComponent, ButtonComponent, LoadingSpinnerComponent],
   templateUrl: './cache-nars-detail-drawer.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache-nars-detail-drawer.component.scss',
 })
 export class CacheNarsDetailDrawerComponent implements OnChanges {

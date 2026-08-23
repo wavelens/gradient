@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, input, output } from '@angular/core';
+import { Component, computed, input, output, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ACTION_EVENTS } from '../../../core/models/action.model';
 
@@ -13,6 +13,7 @@ import { ACTION_EVENTS } from '../../../core/models/action.model';
   standalone: true,
   imports: [CommonModule],
   templateUrl: './action-events.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './action-events.component.scss',
 })
 export class ActionEventsComponent {

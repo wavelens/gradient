@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -32,6 +32,7 @@ import { ButtonComponent, DialogComponent, DividerComponent, InputDirective } fr
     ManagedDisableDirective,
   ],
   templateUrl: './cache-settings.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache-settings.component.scss',
 })
 export class CacheSettingsComponent implements OnInit {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { forkJoin } from 'rxjs';
 import { BoardService, MetricPoint, BoardWorker } from '@core/services/board.service';
@@ -39,6 +39,7 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       [colors]="['#fd7e14']"
     ></app-metric-chart>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [`app-metric-chart { display: block; margin-bottom: 1rem; }`],
 })
 export class BoardThroughputComponent implements OnInit {

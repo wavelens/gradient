@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { EvaluationStatus } from '@core/models/task.model';
 import { isRunningEvaluationStatus } from '@shared/evaluation';
@@ -21,6 +21,7 @@ import { isRunningEvaluationStatus } from '@shared/evaluation';
       {{ label() }}
     </span>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './eval-status-badge.component.scss',
 })
 export class EvalStatusBadgeComponent {

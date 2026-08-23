@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { WorkersService, WorkerSamplePoint, WorkerConnectionEntry } from '@core/services/workers.service';
@@ -46,6 +46,7 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       </table>
     </div>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .wm { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }

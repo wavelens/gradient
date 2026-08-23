@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -30,6 +30,7 @@ import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
     ManagedDisableDirective,
   ],
   templateUrl: './cache-upstreams.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache-upstreams.component.scss',
 })
 export class CacheUpstreamsComponent implements OnInit {

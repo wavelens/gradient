@@ -24,13 +24,13 @@ left):
    inline code.
 3. **Spacing & Radius** - visual chips for every `$spacing-*` and
    `$border-radius-*` token.
-4. **Icons** - Material Symbols and PrimeIcons sample grids.
-5. **Buttons** - PrimeNG `pButton` severities, variants (icon, text, outlined,
+4. **Icons** - Material Symbols sample grid.
+5. **Buttons** - `grButton` severities, variants (icon, text, outlined,
    rounded), and states (default, disabled, loading).
 6. **Form Primitives** - live demo of `<gr-form-field>`,
    `<gr-password-input>`, `<gr-message-banner>`, and the `FormFieldsBuilder`
    service.
-7. **Popups & Overlays** - `<gr-form-dialog>`, PrimeNG confirm dialog,
+7. **Popups & Overlays** - `<gr-form-dialog>`, `<gr-confirm-dialog>`,
    toast notifications, and tooltips.
 8. **Feedback** - `<app-loading-spinner>`, `<app-empty-state>`,
    `<app-stat-card>`, status chips, and badges.
@@ -52,7 +52,7 @@ Located at `frontend/src/app/shared/components/form/`.
 | `<gr-form-error>` | Renders a validation message for a control once touched/dirty. Built-in messages for `required`, `email`, `minlength`, `maxlength`, `min`, `max`, `pattern`, `passwordStrength`, `passwordMatch`, `usernameTaken`. Overridable per-instance via `[messages]`. |
 | `<gr-password-input>` | Password input with a built-in show/hide toggle. Bind to a `FormControl` via `[control]`. |
 | `<gr-message-banner>` | Page-level message with `error / success / warning / info` types. Default icon per type, overridable. |
-| `<gr-form-dialog>` | PrimeNG `p-dialog` wrapper with standardized Cancel / Submit footer, loading state, and disabled state. |
+| `<gr-form-dialog>` | `<gr-dialog>` wrapper with standardized Cancel / Submit footer, loading state, and disabled state. |
 | `FormFieldsBuilder` | Typed convenience wrapper around `FormBuilder`: `text`, `email`, `password`, `confirm`, `number`, `checkbox`. Inject and call instead of repeating `[Validators.required, ...]` everywhere. Also exports `passwordStrengthValidator` and `passwordMatchValidator` as standalone helpers. |
 
 Import from the barrel:
