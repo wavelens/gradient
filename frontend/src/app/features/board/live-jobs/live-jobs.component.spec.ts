@@ -10,7 +10,7 @@ import { of, EMPTY } from 'rxjs';
 import { BoardLiveJobsComponent } from './live-jobs.component';
 import { BoardService } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
-import { DispatchedJobSummary, PendingJobSummary } from '@core/services/board.service';
+import { DispatchDecisionView, DispatchedJobSummary, PendingJobSummary } from '@core/services/board.service';
 
 const PENDING: PendingJobSummary = {
   kind: 1,
@@ -98,6 +98,21 @@ describe('BoardLiveJobsComponent - dispatched pname column', () => {
   });
 });
 
+// Shaped by DispatchDecisionView so the compiler catches drift: the server
+// sends a per-candidate `id` and `won`, not just a decision-level `winner`.
+const DECISIONS: DispatchDecisionView[] = [
+  {
+    at: '2026-06-08T00:00:00Z',
+    worker_id: 'w1',
+    kind: 1,
+    winner: 'j1',
+    candidates: [
+      { id: 'c1', job_id: 'j1', kind: 1, project: 'o1', build_id: 'b1', evaluation_id: 'e1', pname: 'win', score: 12, won: true },
+      { id: 'c2', job_id: 'j2', kind: 1, project: 'o2', build_id: 'b2', evaluation_id: 'e2', pname: 'loser', score: -8, won: false },
+    ],
+  },
+];
+
 describe('BoardLiveJobsComponent - decision scores (#419)', () => {
   beforeEach(() => sessionStorage.clear());
 
@@ -111,19 +126,7 @@ describe('BoardLiveJobsComponent - decision scores (#419)', () => {
           useValue: {
             getDispatchedJobs: () => of({ jobs: [], other_running: 0 }),
             getPendingJobs: () => of({ jobs: [], other_pending: 0 }),
-            getDispatchDecisions: () =>
-              of([
-                {
-                  at: '2026-06-08T00:00:00Z',
-                  worker_id: 'w1',
-                  kind: 1,
-                  winner: 'j1',
-                  candidates: [
-                    { job_id: 'j1', kind: 1, project: 'o1', build_id: 'b1', evaluation_id: 'e1', pname: 'win', score: 12 },
-                    { job_id: 'j2', kind: 1, project: 'o2', build_id: 'b2', evaluation_id: 'e2', pname: 'loser', score: -8 },
-                  ],
-                },
-              ]),
+            getDispatchDecisions: () => of(DECISIONS),
           },
         },
         { provide: BoardLiveService, useValue: { connect: () => EMPTY } },
