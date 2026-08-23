@@ -21,9 +21,9 @@
     </div>
     <button
       *appWritable="access()"
-      pButton
+      grButton
       label="New Action"
-      icon="pi pi-plus"
+      icon="add"
       (click)="startCreate()"
       [appManagedDisable]="access()"
     ></button>
@@ -46,9 +46,9 @@
         <p class="text-secondary">Create an action to send mail, post webhooks, or report build status back to your forge.</p>
         <button
           *appWritable="access()"
-          pButton
+          grButton
           label="New Action"
-          icon="pi pi-plus"
+          icon="add"
           (click)="startCreate()"
           [appManagedDisable]="access()"
         ></button>
@@ -93,9 +93,9 @@
               <div class="action-actions">
                 <button
                   *appWritable="triggerAccess()"
-                  pButton
+                  grButton
                   label="Test"
-                  icon="pi pi-play"
+                  icon="play_arrow"
                   severity="secondary"
                   size="small"
                   [loading]="testingId() === action.id"
@@ -103,18 +103,18 @@
                   (click)="testAction(action.id)"
                 ></button>
                 <button
-                  pButton
+                  grButton
                   label="Deliveries"
-                  icon="pi pi-list"
+                  icon="list"
                   severity="secondary"
                   size="small"
                   (click)="openDeliveries(action.id)"
                 ></button>
                 <button
                   *appWritable="access()"
-                  pButton
+                  grButton
                   label="Edit"
-                  icon="pi pi-pencil"
+                  icon="edit"
                   severity="secondary"
                   size="small"
                   [disabled]="rowDisabled()"
@@ -122,9 +122,9 @@
                 ></button>
                 <button
                   *appWritable="access()"
-                  pButton
+                  grButton
                   label="Delete"
-                  icon="pi pi-trash"
+                  icon="delete"
                   severity="danger"
                   size="small"
                   [loading]="deletingId() === action.id"
@@ -168,34 +168,28 @@
   />
 }
 
-<p-dialog
+<gr-dialog
   header="Delete Action"
   [visible]="confirmDeleteId() !== null"
   (visibleChange)="$event || cancelDelete()"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="400px"
 >
   <p>Delete this action? This cannot be undone.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="cancelDelete()"></button>
-    <button pButton label="Delete" severity="danger" (click)="confirmDelete()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="cancelDelete()"></button>
+    <button grButton label="Delete" severity="danger" (click)="confirmDelete()"></button>
+  </div>
+</gr-dialog>
 
-<p-dialog
+<gr-dialog
   header="Save this token now"
   [visible]="revealedToken() !== null"
   (visibleChange)="$event || dismissToken()"
-  [modal]="true"
-  [style]="{ width: '520px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="520px"
 >
   <p>The action's token is shown below. It will not be displayed again - copy it now and store it somewhere safe.</p>
   <pre class="token-reveal">{{ revealedToken() }}</pre>
-  <ng-template pTemplate="footer">
-    <button pButton label="I've copied it" icon="pi pi-check" (click)="dismissToken()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="I've copied it" icon="check" (click)="dismissToken()"></button>
+  </div>
+</gr-dialog>

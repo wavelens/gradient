@@ -15,7 +15,7 @@
       <h1>API Keys</h1>
       <p class="text-secondary">Manage API keys for programmatic access</p>
     </div>
-    <button pButton label="New API Key" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+    <button grButton label="New API Key" icon="add" (click)="openCreateDialog()"></button>
   </div>
 
   @if (loading()) {
@@ -26,7 +26,7 @@
         <span class="material-symbols-outlined">key</span>
         <h3>No API keys</h3>
         <p class="text-secondary">Create an API key to access Gradient programmatically.</p>
-        <button pButton label="Create API Key" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+        <button grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
       </div>
     } @else {
       <div class="keys-list">
@@ -47,7 +47,7 @@
                 <div class="key-meta text-secondary">
                   <span
                     class="badge badge-info"
-                    [pTooltip]="permissionTooltip(key)"
+                    [grTooltip]="permissionTooltip(key)"
                     tooltipPosition="top"
                   >
                     {{ key.permissions.length }} permission{{ key.permissions.length === 1 ? '' : 's' }}
@@ -67,17 +67,17 @@
             <div class="key-actions">
               @if (!key.revoked_at) {
                 <button
-                  pButton
+                  grButton
                   label="Edit"
-                  icon="pi pi-pencil"
+                  icon="edit"
                   severity="secondary"
                   (click)="openEditDialog(key)"
                   [appManagedDisable]="rowAccess(key)"
                 ></button>
                 <button
-                  pButton
+                  grButton
                   label="Revoke"
-                  icon="pi pi-ban"
+                  icon="block"
                   severity="warn"
                   (click)="revokeKey(key)"
                   [loading]="revokingId() === key.id"
@@ -86,9 +86,9 @@
                 ></button>
               }
               <button
-                pButton
+                grButton
                 label="Delete"
-                icon="pi pi-trash"
+                icon="delete"
                 severity="danger"
                 (click)="deleteKey(key)"
                 [loading]="deletingId() === key.id"
@@ -104,12 +104,9 @@
 </div>
 
 <!-- Create / Edit Dialog -->
-<p-dialog
+<gr-dialog
   [(visible)]="showDialog"
-  [modal]="true"
-  [style]="{ width: '520px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="520px"
   [header]="editingKey() ? 'Edit API Key' : 'Create API Key'"
 >
   @if (errorMessage()) {
@@ -122,7 +119,7 @@
   <div class="form-group">
     <label for="key-name">Name</label>
     <input
-      pInputText
+      grInput
       id="key-name"
       [(ngModel)]="formName"
       placeholder="e.g. CI/CD Pipeline"
@@ -134,7 +131,7 @@
     <div class="form-group">
       <label for="key-expires">Expires in (days)</label>
       <input
-        pInputText
+        grInput
         id="key-expires"
         type="number"
         min="1"
@@ -145,11 +142,11 @@
     </div>
   }
 
-  <p-divider />
+  <gr-divider />
 
   <div class="form-group">
     <label>Scope</label>
-    <p-selectbutton
+    <gr-select-button
       [options]="scopeOptions"
       [(ngModel)]="formScope"
       optionLabel="label"
@@ -161,15 +158,13 @@
   @if (formScope === 'project') {
     <div class="form-group">
       <label for="key-project">Project</label>
-      <p-select
+      <gr-select
         inputId="key-project"
         [options]="projectOptions()"
         optionLabel="label"
         optionValue="value"
         [(ngModel)]="formProject"
         placeholder="Any project"
-        appendTo="body"
-        styleClass="w-full"
       />
     </div>
   }
@@ -177,15 +172,13 @@
   @if (formScope === 'cache') {
     <div class="form-group">
       <label for="key-cache">Cache</label>
-      <p-select
+      <gr-select
         inputId="key-cache"
         [options]="cacheOptions()"
         optionLabel="label"
         optionValue="value"
         [(ngModel)]="formCache"
         placeholder="Select a cache"
-        appendTo="body"
-        styleClass="w-full"
       />
     </div>
   }
@@ -197,7 +190,7 @@
     </label>
     <textarea
       id="key-allowed-ips"
-      pInputText
+      grInput
       rows="3"
       class="w-full"
       [(ngModel)]="formAllowedIps"
@@ -205,14 +198,14 @@
     ></textarea>
   </div>
 
-  <p-divider />
+  <gr-divider />
 
   <div class="form-group">
     <label>Permissions</label>
     <div class="permission-grid">
       @for (p of activePermissions(); track p.id) {
         <div class="permission-row">
-          <p-checkbox
+          <gr-checkbox
             [(ngModel)]="formPermissions[p.id]"
             [binary]="true"
             [inputId]="'perm-' + p.id"
@@ -223,40 +216,37 @@
     </div>
   </div>
 
-  <ng-template pTemplate="footer">
+  <div grDialogFooter>
     <button
-      pButton
+      grButton
       label="Cancel"
       severity="secondary"
       (click)="showDialog.set(false)"
       [disabled]="creating() || saving()"
     ></button>
     <button
-      pButton
+      grButton
       [label]="editingKey() ? 'Save' : 'Create'"
-      [icon]="editingKey() ? 'pi pi-check' : 'pi pi-plus'"
+      [icon]="editingKey() ? 'check' : 'add'"
       (click)="saveKey()"
       [loading]="creating() || saving()"
       [disabled]="creating() || saving() || !formName.trim()"
     ></button>
-  </ng-template>
-</p-dialog>
+  </div>
+</gr-dialog>
 
 <!-- Show Created Key Dialog -->
-<p-dialog
+<gr-dialog
   header="API Key Created"
   [(visible)]="showKeyDialog"
-  [modal]="true"
-  [style]="{ width: '500px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="500px"
 >
   <p>Your new API key has been created. Copy it now - it will not be shown again.</p>
   <div class="key-display">
     <code class="key-value">{{ createdKeyValue() }}</code>
-    <button pButton icon="pi pi-copy" severity="secondary" (click)="copyKey()" title="Copy to clipboard"></button>
+    <button grButton icon="content_copy" severity="secondary" (click)="copyKey()" title="Copy to clipboard"></button>
   </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Done" (click)="showKeyDialog.set(false)"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Done" (click)="showKeyDialog.set(false)"></button>
+  </div>
+</gr-dialog>

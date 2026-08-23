@@ -6,13 +6,12 @@
 
 import { Component, input, model, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ButtonModule } from 'primeng/button';
-import { DialogModule } from 'primeng/dialog';
+import { ButtonComponent, DialogComponent } from '@shared/ui';
 
 @Component({
   selector: 'gr-form-dialog',
   standalone: true,
-  imports: [CommonModule, ButtonModule, DialogModule],
+  imports: [CommonModule, ButtonComponent, DialogComponent],
   templateUrl: './form-dialog.component.html',
   styleUrl: './form-dialog.component.scss',
 })

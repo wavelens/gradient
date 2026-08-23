@@ -8,19 +8,13 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { TextareaModule } from 'primeng/textarea';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { AutoCompleteModule } from 'primeng/autocomplete';
-import { SelectModule } from 'primeng/select';
-import { CheckboxModule } from 'primeng/checkbox';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConcurrencyPolicy, Task } from '@core/models';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
+import { AutoCompleteComponent, ButtonComponent, CheckboxComponent, DialogComponent, InputDirective, SelectComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-task-settings',
@@ -29,13 +23,13 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    TextareaModule,
-    AutoCompleteModule,
-    SelectModule,
-    CheckboxModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
+    InputDirective,
+    AutoCompleteComponent,
+    SelectComponent,
+    CheckboxComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,

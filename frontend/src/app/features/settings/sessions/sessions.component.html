@@ -42,9 +42,9 @@
               </div>
               <div class="session-actions">
                 <button
-                  pButton
+                  grButton
                   label="Revoke"
-                  icon="pi pi-sign-out"
+                  icon="logout"
                   severity="danger"
                   [disabled]="s.current || revokingId() === s.id"
                   [loading]="revokingId() === s.id"

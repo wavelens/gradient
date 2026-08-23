@@ -19,9 +19,9 @@
     </div>
     <button
       *appWritable="access()"
-      pButton
+      grButton
       label="Subscribe to Cache"
-      icon="pi pi-plus"
+      icon="add"
       [appManagedDisable]="access()"
       (click)="openSubscribeDialog()"
     ></button>
@@ -37,9 +37,9 @@
         <p class="text-secondary">Subscribe to a Nix binary cache to have builds pushed there automatically.</p>
         <button
           *appWritable="access()"
-          pButton
+          grButton
           label="Subscribe to Cache"
-          icon="pi pi-plus"
+          icon="add"
           [appManagedDisable]="access()"
           (click)="openSubscribeDialog()"
         ></button>
@@ -55,9 +55,9 @@
             <div class="cache-actions">
               <button
                 *appWritable="access()"
-                pButton
+                grButton
                 label="Unsubscribe"
-                icon="pi pi-times"
+                icon="close"
                 severity="danger"
                 [loading]="unsubscribingId() === cache.id"
                 [disabled]="unsubscribingId() !== null"
@@ -73,13 +73,10 @@
 </div>
 
 <!-- Subscribe Dialog -->
-<p-dialog
+<gr-dialog
   header="Subscribe to Cache"
   [(visible)]="showSubscribeDialog"
-  [modal]="true"
-  [style]="{ width: '440px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="440px"
 >
   @if (errorMessage()) {
     <div class="dialog-error">
@@ -89,28 +86,26 @@
   }
   <div class="form-group">
     <label for="cache-name">Cache Name</label>
-    <p-autoComplete
-      id="cache-name"
+    <gr-autocomplete
+      inputId="cache-name"
       [(ngModel)]="newCacheName"
       [suggestions]="cacheSuggestions()"
       (completeMethod)="onCacheSearch($event)"
       placeholder="e.g. my-cache"
-      styleClass="w-full"
       [forceSelection]="false"
-      appendTo="body"
-      (keyup.enter)="subscribeCache()"
+      (enter)="subscribeCache()"
     />
     <small class="text-secondary">The name of the binary cache you own.</small>
   </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showSubscribeDialog.set(false)" [disabled]="subscribing()"></button>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showSubscribeDialog.set(false)" [disabled]="subscribing()"></button>
     <button
-      pButton
+      grButton
       label="Subscribe"
-      icon="pi pi-check"
+      icon="check"
       (click)="subscribeCache()"
       [loading]="subscribing()"
       [disabled]="subscribing() || !newCacheName.trim()"
     ></button>
-  </ng-template>
-</p-dialog>
+  </div>
+</gr-dialog>

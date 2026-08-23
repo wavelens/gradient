@@ -8,17 +8,13 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { AutoCompleteModule } from 'primeng/autocomplete';
-import { TooltipModule } from 'primeng/tooltip';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
+import { AutoCompleteComponent, ButtonComponent, DialogComponent, TooltipDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-cache-subscriptions',
@@ -27,11 +23,9 @@ import { AccessState } from '@core/models';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    AutoCompleteModule,
-    TooltipModule,
+    DialogComponent,
+    ButtonComponent,
+    AutoCompleteComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,

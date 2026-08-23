@@ -140,28 +140,28 @@
 
       <h3>Severities</h3>
       <div class="sg-row">
-        <button pButton label="Primary"></button>
-        <button pButton label="Secondary" severity="secondary"></button>
-        <button pButton label="Success" severity="success"></button>
-        <button pButton label="Danger" severity="danger"></button>
-        <button pButton label="Warn" severity="warn"></button>
-        <button pButton label="Info" severity="info"></button>
+        <button grButton label="Primary"></button>
+        <button grButton label="Secondary" severity="secondary"></button>
+        <button grButton label="Success" severity="success"></button>
+        <button grButton label="Danger" severity="danger"></button>
+        <button grButton label="Warn" severity="warn"></button>
+        <button grButton label="Info" severity="info"></button>
       </div>
 
       <h3>Variants</h3>
       <div class="sg-row">
-        <button pButton label="With icon" icon="pi pi-plus"></button>
-        <button pButton icon="pi pi-trash" severity="danger" aria-label="Delete"></button>
-        <button pButton label="Text" [text]="true"></button>
-        <button pButton label="Outlined" [outlined]="true"></button>
-        <button pButton label="Rounded" [rounded]="true"></button>
+        <button grButton label="With icon" icon="add"></button>
+        <button grButton icon="delete" severity="danger" aria-label="Delete"></button>
+        <button grButton label="Text" [text]="true"></button>
+        <button grButton label="Outlined" [outlined]="true"></button>
+        <button grButton label="Rounded" [rounded]="true"></button>
       </div>
 
       <h3>States</h3>
       <div class="sg-row">
-        <button pButton label="Default"></button>
-        <button pButton label="Disabled" [disabled]="true"></button>
-        <button pButton label="Loading" [loading]="true"></button>
+        <button grButton label="Default"></button>
+        <button grButton label="Disabled" [disabled]="true"></button>
+        <button grButton label="Loading" [loading]="true"></button>
       </div>
     </section>
 
@@ -183,7 +183,7 @@
             [control]="demoForm.controls['name']"
             hint="At least 3 characters."
           >
-            <input pInputText id="sg-name" formControlName="name" class="w-full" />
+            <input grInput id="sg-name" formControlName="name" class="w-full" />
           </gr-form-field>
 
           <gr-form-field
@@ -192,7 +192,7 @@
             [required]="true"
             [control]="demoForm.controls['email']"
           >
-            <input pInputText id="sg-email" type="email" formControlName="email" class="w-full" />
+            <input grInput id="sg-email" type="email" formControlName="email" class="w-full" />
           </gr-form-field>
 
           <gr-form-field
@@ -227,13 +227,12 @@
             for="sg-role"
             [control]="demoForm.controls['role']"
           >
-            <p-select
+            <gr-select
               inputId="sg-role"
               [options]="roles"
               optionLabel="label"
               optionValue="value"
               formControlName="role"
-              styleClass="w-full"
             />
           </gr-form-field>
 
@@ -243,19 +242,19 @@
             [control]="demoForm.controls['bio']"
             hint="Max 200 characters."
           >
-            <textarea pTextarea id="sg-bio" formControlName="bio" rows="3" class="w-full"></textarea>
+            <textarea grInput id="sg-bio" formControlName="bio" rows="3" class="w-full"></textarea>
           </gr-form-field>
 
           <gr-form-field [control]="demoForm.controls['accept']">
             <label class="sg-check">
-              <p-checkbox formControlName="accept" [binary]="true" />
+              <gr-checkbox formControlName="accept" [binary]="true" />
               <span>Accept terms</span>
             </label>
           </gr-form-field>
 
           <div class="gr-form-actions">
-            <button pButton type="submit" label="Submit"></button>
-            <button pButton type="button" label="Reset" severity="secondary" (click)="demoForm.reset()"></button>
+            <button grButton type="submit" label="Submit"></button>
+            <button grButton type="button" label="Reset" severity="secondary" (click)="demoForm.reset()"></button>
           </div>
         </form>
 
@@ -304,7 +303,7 @@
               title="Learn about evaluation wildcards"
             />
           </label>
-          <input pInputText id="sg-lh-wild" class="w-full" value="packages.x86_64-linux.*" />
+          <input grInput id="sg-lh-wild" class="w-full" value="packages.x86_64-linux.*" />
         </div>
       </div>
     </section>
@@ -314,13 +313,13 @@
       <h2>Popups &amp; Overlays</h2>
 
       <div class="sg-row">
-        <button pButton label="Open form dialog" icon="pi pi-pencil" (click)="openDialog()"></button>
-        <button pButton label="Confirm delete" severity="danger" icon="pi pi-trash" (click)="confirmDelete()"></button>
-        <button pButton label="Toast: success" severity="success" (click)="toast('success', 'Saved', 'Looking good.')"></button>
-        <button pButton label="Toast: error" severity="danger" (click)="toast('error', 'Failed', 'Could not save.')"></button>
-        <button pButton label="Toast: info" severity="info" (click)="toast('info', 'FYI', 'Just an info note.')"></button>
-        <button pButton label="Toast: warn" severity="warn" (click)="toast('warn', 'Heads up', 'Be careful.')"></button>
-        <button pButton label="Hover for tooltip" pTooltip="Tooltip content" tooltipPosition="top"></button>
+        <button grButton label="Open form dialog" icon="edit" (click)="openDialog()"></button>
+        <button grButton label="Confirm delete" severity="danger" icon="delete" (click)="confirmDelete()"></button>
+        <button grButton label="Toast: success" severity="success" (click)="toast('success', 'Saved', 'Looking good.')"></button>
+        <button grButton label="Toast: error" severity="danger" (click)="toast('error', 'Failed', 'Could not save.')"></button>
+        <button grButton label="Toast: info" severity="info" (click)="toast('info', 'FYI', 'Just an info note.')"></button>
+        <button grButton label="Toast: warn" severity="warn" (click)="toast('warn', 'Heads up', 'Be careful.')"></button>
+        <button grButton label="Hover for tooltip" grTooltip="Tooltip content" tooltipPosition="top"></button>
       </div>
 
       <gr-form-dialog
@@ -338,7 +337,7 @@
             [required]="true"
             [control]="dialogForm.controls['label']"
           >
-            <input pInputText id="sg-dlg-label" formControlName="label" class="w-full" />
+            <input grInput id="sg-dlg-label" formControlName="label" class="w-full" />
           </gr-form-field>
         </form>
       </gr-form-dialog>
@@ -350,37 +349,37 @@
       </p>
       <div class="sg-row">
         <button
-          pButton
-          icon="pi pi-ellipsis-v"
+          grButton
+          icon="more_vert"
           severity="secondary"
           aria-label="Open actions menu"
           (click)="rowMenu.toggle($event)"
         ></button>
-        <button pButton label="Actions" icon="pi pi-chevron-down" iconPos="right"
+        <button grButton label="Actions" icon="expand_more" iconPos="right"
           severity="secondary" (click)="rowMenu.toggle($event)"></button>
       </div>
-      <p-menu #rowMenu [model]="rowMenuItems" [popup]="true" appendTo="body" />
+      <gr-menu #rowMenu [model]="rowMenuItems" />
 
       <h3>Popover</h3>
       <p class="text-secondary">
         PrimeNG <code>p-popover</code> for richer overlay content (forms, hints, mini-cards).
       </p>
       <div class="sg-row">
-        <button pButton label="Open popover" icon="pi pi-info-circle"
+        <button grButton label="Open popover" icon="info"
           severity="secondary" (click)="popover.toggle($event)"></button>
       </div>
-      <p-popover #popover>
+      <gr-popover #popover>
         <div class="sg-popover-body">
           <strong>Quick info</strong>
           <p class="text-secondary">
             Popovers can hold any content - text, mini-forms, or action lists.
           </p>
-          <button pButton label="Got it" size="small" (click)="popover.hide()"></button>
+          <button grButton label="Got it" size="small" (click)="popover.hide()"></button>
         </div>
-      </p-popover>
+      </gr-popover>
 
-      <p-confirmDialog />
-      <p-toast />
+      <gr-confirm-dialog />
+      <gr-toast />
     </section>
 
     <!-- ─── Feedback ─── -->
@@ -450,7 +449,7 @@
           <div class="gr-grid-rows sg-row-item">
             <span><strong>{{ r.name }}</strong></span>
             <span class="text-secondary">{{ r.status }}</span>
-            <button pButton icon="pi pi-cog" severity="secondary" aria-label="Settings"></button>
+            <button grButton icon="settings" severity="secondary" aria-label="Settings"></button>
           </div>
         }
       </div>
@@ -503,7 +502,7 @@
               >
                 {{ w.status }}
               </span>
-              <button pButton label="Edit" icon="pi pi-pencil" severity="secondary" size="small"></button>
+              <button grButton label="Edit" icon="edit" severity="secondary" size="small"></button>
             </div>
           </div>
         }
@@ -547,10 +546,10 @@
       <h3>.gr-grid-form</h3>
       <div class="sg-card">
         <div class="gr-grid-form">
-          <gr-form-field label="First"><input pInputText class="w-full" /></gr-form-field>
-          <gr-form-field label="Last"><input pInputText class="w-full" /></gr-form-field>
+          <gr-form-field label="First"><input grInput class="w-full" /></gr-form-field>
+          <gr-form-field label="Last"><input grInput class="w-full" /></gr-form-field>
           <gr-form-field label="Email" class="gr-grid-form__full">
-            <input pInputText class="w-full" />
+            <input grInput class="w-full" />
           </gr-form-field>
         </div>
       </div>
@@ -566,7 +565,7 @@
       <div class="sg-card">
         <div class="gr-grid-rows sg-row-item">
           <span>Label</span><span>Value</span>
-          <button pButton label="Action" severity="secondary"></button>
+          <button grButton label="Action" severity="secondary"></button>
         </div>
       </div>
     </section>
@@ -593,13 +592,13 @@
 
           <gr-settings-section title="Personal Information" description="Public profile details.">
             <gr-form-field label="Username" for="lay-uname">
-              <input pInputText id="lay-uname" class="w-full" value="john" />
+              <input grInput id="lay-uname" class="w-full" value="john" />
             </gr-form-field>
             <gr-form-field label="Email" for="lay-email">
-              <input pInputText id="lay-email" class="w-full" value="john@example.com" />
+              <input grInput id="lay-email" class="w-full" value="john@example.com" />
             </gr-form-field>
             <div class="gr-form-actions">
-              <button pButton label="Save Changes" icon="pi pi-check"></button>
+              <button grButton label="Save Changes" icon="check"></button>
             </div>
           </gr-settings-section>
 
@@ -619,7 +618,7 @@
       </p>
       <div class="sg-page-frame">
         <gr-page-layout title="Workers" subtitle="Build workers for this project">
-          <button slot="actions" pButton label="Register Worker" icon="pi pi-plus"></button>
+          <button slot="actions" grButton label="Register Worker" icon="add"></button>
           <p class="text-secondary">List of workers would go here.</p>
         </gr-page-layout>
       </div>
@@ -637,23 +636,23 @@
             <h4>Workers</h4>
             <p class="text-secondary">Manage build workers for this project</p>
           </div>
-          <button pButton label="Manage Workers" icon="pi pi-cog" severity="secondary"></button>
+          <button grButton label="Manage Workers" icon="settings" severity="secondary"></button>
         </div>
-        <p-divider />
+        <gr-divider />
         <div class="sg-nav-row">
           <div>
             <h4>Cache Subscriptions</h4>
             <p class="text-secondary">Nix binary caches this project pushes builds to</p>
           </div>
-          <button pButton label="Manage Caches" icon="pi pi-database" severity="secondary"></button>
+          <button grButton label="Manage Caches" icon="database" severity="secondary"></button>
         </div>
-        <p-divider />
+        <gr-divider />
         <div class="sg-nav-row">
           <div>
             <h4>Integrations</h4>
             <p class="text-secondary">Forge integrations for inbound webhooks and CI status</p>
           </div>
-          <button pButton label="Manage Integrations" icon="pi pi-link" severity="secondary"></button>
+          <button grButton label="Manage Integrations" icon="link" severity="secondary"></button>
         </div>
       </div>
     </section>

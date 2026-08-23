@@ -7,14 +7,13 @@
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import { ButtonModule } from 'primeng/button';
-import { CardModule } from 'primeng/card';
 import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint, UpstreamCache } from '@core/services/caches.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { LabelHelpComponent } from '@shared/components/form';
 import { Cache } from '@core/models';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 import { MetricSeries } from '@shared/components/metric-chart/metric-chart.options';
+import { ButtonComponent } from '@shared/ui';
 
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';
 
@@ -31,8 +30,7 @@ const CHART_COLORS = {
   imports: [
     CommonModule,
     RouterModule,
-    ButtonModule,
-    CardModule,
+    ButtonComponent,
     LoadingSpinnerComponent,
     LabelHelpComponent,
     MetricChartComponent,

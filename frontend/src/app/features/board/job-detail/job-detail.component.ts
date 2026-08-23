@@ -8,9 +8,6 @@ import { Component, OnInit, DestroyRef, inject, signal, computed } from '@angula
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { PopoverModule, Popover } from 'primeng/popover';
 import {
   BoardService,
   DispatchedJobDetail,
@@ -21,6 +18,7 @@ import {
   Windowed,
 } from '@core/services/board.service';
 import { EvaluationsService, BuildWithOutputs } from '@core/services/evaluations.service';
+import { ButtonComponent, DialogComponent, PopoverComponent } from '@shared/ui';
 
 interface RuleRow {
   name: string;
@@ -33,7 +31,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule, DialogModule, ButtonModule, PopoverModule],
+  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, PopoverComponent],
   template: `
     <a routerLink="/board/live" class="back">← Live Jobs</a>
 
@@ -87,11 +85,11 @@ interface RuleRow {
         </tbody>
       </table>
 
-      <p-popover #rulePop>
+      <gr-popover #rulePop>
         @if (activeRule(); as a) {
           <div class="rule-help"><strong>{{ a.rule }}</strong><p>{{ a.description }}</p></div>
         }
-      </p-popover>
+      </gr-popover>
 
       @if (j.candidates) {
         <h2>Runner-up candidates</h2>
@@ -240,14 +238,11 @@ interface RuleRow {
       <p class="muted">Loading job…</p>
     }
 
-    <p-dialog
+    <gr-dialog
       header="Build info"
       [visible]="buildDialog()"
       (visibleChange)="buildDialog.set($event)"
-      [modal]="true"
-      [style]="{ width: '640px' }"
-      [draggable]="false"
-      [resizable]="false"
+      width="640px"
     >
       @if (buildLoading()) {
         <p class="muted">Loading build…</p>
@@ -272,10 +267,10 @@ interface RuleRow {
           }
         </div>
       }
-      <ng-template pTemplate="footer">
-        <button pButton label="Close" severity="secondary" (click)="buildDialog.set(false)"></button>
-      </ng-template>
-    </p-dialog>
+      <div grDialogFooter>
+        <button grButton label="Close" severity="secondary" (click)="buildDialog.set(false)"></button>
+      </div>
+    </gr-dialog>
   `,
   styles: [
     `
@@ -374,7 +369,7 @@ export class BoardJobDetailComponent implements OnInit {
       .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
   });
 
-  showHelp(event: Event, row: RuleRow, popover: Popover): void {
+  showHelp(event: Event, row: RuleRow, popover: PopoverComponent): void {
     this.activeRule.set({ rule: row.name, description: row.description });
     popover.toggle(event);
   }

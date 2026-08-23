@@ -27,6 +27,7 @@ function evalSummary(id: string, status: EvaluationSummary['status'] = 'Building
     commit: 'abc1234def5678',
     commit_message: null,
     status,
+    wildcard: 'packages.x86_64-linux.*',
     trigger: null,
     triggered_by: null,
     pr_number: null,
@@ -281,7 +282,7 @@ describe('TaskDetailComponent - abort modal', () => {
     const spy = vi.spyOn(tasksService, 'abortEvaluation');
     fixture.componentInstance.abortTarget.set('e1');
     fixture.detectChanges();
-    expect(document.querySelector('.p-dialog')).toBeTruthy();
+    expect(document.querySelector('.gr-dialog')).toBeTruthy();
     expect(spy).not.toHaveBeenCalled();
   });
 

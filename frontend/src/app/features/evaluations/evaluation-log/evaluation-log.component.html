@@ -186,17 +186,17 @@
             <code class="commit-hash" [title]="ev.commit || ''">{{ commitLabel(ev.commit) }}</code>
           </div>
           <div class="info-metric nav-btns">
-            <button pButton icon="pi pi-arrow-left" severity="secondary" size="small"
+            <button grButton icon="arrow_back" severity="secondary" size="small"
               [disabled]="!ev.previous"
               (click)="ev.previous && navigateToEvaluation(ev.previous)"></button>
-            <button pButton icon="pi pi-arrow-right" severity="secondary" size="small"
+            <button grButton icon="arrow_forward" severity="secondary" size="small"
               [disabled]="!ev.next"
               (click)="ev.next && navigateToEvaluation(ev.next)"></button>
           </div>
         </div>
         <div class="info-bar-right">
           @if (isRunning() && authService.isAuthenticated()) {
-            <button pButton label="Abort" icon="pi pi-times" severity="danger" size="small"
+            <button grButton label="Abort" icon="close" severity="danger" size="small"
               (click)="abortEvaluation()" [loading]="aborting()" [disabled]="aborting()"></button>
           }
         </div>
@@ -319,7 +319,7 @@
                 />
                 <span class="log-search-count">
                   @if (searchLoading()) {
-                    <i class="pi pi-spin pi-spinner"></i>
+                    <span class="material-symbols-outlined gr-spin">progress_activity</span>
                   } @else {
                     {{ searchHits().length === 0 ? 0 : currentHit() + 1 }} / {{ searchTotal() }}
                   }

@@ -8,14 +8,13 @@ import { Component, HostListener, OnInit, computed, inject, signal } from '@angu
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
 import { AdminService, GithubAppCredentials } from '@core/services/admin.service';
+import { ButtonComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-admin-github-app',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ButtonModule, InputTextModule],
+  imports: [CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective],
   templateUrl: './github-app.component.html',
   styleUrl: './github-app.component.scss',
 })

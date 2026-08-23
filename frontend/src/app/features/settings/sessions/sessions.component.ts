@@ -7,15 +7,15 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
-import { ButtonModule } from 'primeng/button';
 import { UserService } from '@core/services/user.service';
 import { Session } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { ButtonComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-sessions',
   standalone: true,
-  imports: [CommonModule, RouterModule, ButtonModule, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, ButtonComponent, LoadingSpinnerComponent],
   templateUrl: './sessions.component.html',
   styleUrl: './sessions.component.scss',
 })

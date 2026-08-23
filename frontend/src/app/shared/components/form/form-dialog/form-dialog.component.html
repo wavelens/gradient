@@ -1,17 +1,14 @@
-<p-dialog
+<gr-dialog
   [header]="title()"
   [(visible)]="visible"
-  [modal]="true"
-  [style]="{ width: width() }"
-  [draggable]="false"
-  [resizable]="false"
+  [width]="width()"
 >
   <div class="form-dialog__content">
     <ng-content></ng-content>
   </div>
-  <ng-template pTemplate="footer">
+  <div grDialogFooter>
     <button
-      pButton
+      grButton
       [label]="cancelLabel()"
       severity="secondary"
       (click)="onCancel()"
@@ -19,7 +16,7 @@
     ></button>
     @if (submitIcon() || submitSeverity()) {
       <button
-        pButton
+        grButton
         [label]="submitLabel()"
         [icon]="submitIcon() ?? ''"
         [severity]="$any(submitSeverity())"
@@ -29,12 +26,12 @@
       ></button>
     } @else {
       <button
-        pButton
+        grButton
         [label]="submitLabel()"
         (click)="onSubmit()"
         [loading]="loading()"
         [disabled]="loading() || disabled()"
       ></button>
     }
-  </ng-template>
-</p-dialog>
+  </div>
+</gr-dialog>

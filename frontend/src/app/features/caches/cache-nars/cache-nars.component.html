@@ -47,15 +47,15 @@
   <div class="filter-row">
     <div class="filter-group">
       <label for="filter-hash">Hash</label>
-      <input pInputText id="filter-hash" [ngModel]="hash()" (ngModelChange)="hash.set($event)" placeholder="store hash prefix" class="w-full" (keydown.enter)="applyFilters()" />
+      <input grInput id="filter-hash" [ngModel]="hash()" (ngModelChange)="hash.set($event)" placeholder="store hash prefix" class="w-full" (keydown.enter)="applyFilters()" />
     </div>
     <div class="filter-group">
       <label for="filter-package">Package</label>
-      <input pInputText id="filter-package" [ngModel]="package()" (ngModelChange)="package.set($event)" placeholder="package name" class="w-full" (keydown.enter)="applyFilters()" />
+      <input grInput id="filter-package" [ngModel]="package()" (ngModelChange)="package.set($event)" placeholder="package name" class="w-full" (keydown.enter)="applyFilters()" />
     </div>
     <div class="filter-actions">
-      <button pButton type="button" label="Apply" icon="pi pi-filter" (click)="applyFilters()"></button>
-      <button pButton type="button" label="Reset" severity="secondary" (click)="reset()"></button>
+      <button grButton type="button" label="Apply" icon="filter_alt" (click)="applyFilters()"></button>
+      <button grButton type="button" label="Reset" severity="secondary" (click)="reset()"></button>
     </div>
   </div>
 
@@ -109,11 +109,11 @@
           <span class="col col-time text-secondary">{{ formatDate(row.created_at) }}</span>
           <span class="col col-time text-secondary">{{ formatDate(row.last_fetched_at, 'never') }}</span>
           <span class="col col-actions" (click)="$event.stopPropagation()">
-            <button pButton icon="pi pi-info-circle" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
+            <button grButton icon="info" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
             <button
               *appWritable="access()"
-              pButton
-              icon="pi pi-trash"
+              grButton
+              icon="delete"
               severity="danger"
               [text]="true"
               [loading]="deletingHash() === row.hash"
@@ -131,10 +131,10 @@
         Page {{ page() }} of {{ totalPages() }} &middot; {{ total() }} total
       </span>
       <div class="pagination-actions">
-        <button pButton icon="pi pi-angle-double-left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(1)"></button>
-        <button pButton icon="pi pi-angle-left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(page() - 1)"></button>
-        <button pButton icon="pi pi-angle-right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)"></button>
-        <button pButton icon="pi pi-angle-double-right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(totalPages())"></button>
+        <button grButton icon="keyboard_double_arrow_left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(1)"></button>
+        <button grButton icon="chevron_left" severity="secondary" [disabled]="page() <= 1" (click)="goToPage(page() - 1)"></button>
+        <button grButton icon="chevron_right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(page() + 1)"></button>
+        <button grButton icon="keyboard_double_arrow_right" severity="secondary" [disabled]="page() >= totalPages()" (click)="goToPage(totalPages())"></button>
       </div>
     </div>
   }
@@ -146,14 +146,11 @@
   (closed)="closeDrawer()"
 />
 
-<p-dialog
+<gr-dialog
   header="Delete NAR"
   [visible]="pendingDelete() !== null"
   (visibleChange)="$event || cancelDelete()"
-  [modal]="true"
-  [style]="{ width: '480px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="480px"
   [closable]="!deletingHash()"
 >
   @if (deleteError()) {
@@ -170,8 +167,8 @@
       If other caches still hold this NAR, only this cache's signature is removed. Otherwise the NAR blob is deleted permanently.
     </p>
   }
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="cancelDelete()" [disabled]="deletingHash() !== null"></button>
-    <button pButton label="Delete" severity="danger" icon="pi pi-trash" (click)="confirmDelete()" [loading]="deletingHash() !== null"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="cancelDelete()" [disabled]="deletingHash() !== null"></button>
+    <button grButton label="Delete" severity="danger" icon="delete" (click)="confirmDelete()" [loading]="deletingHash() !== null"></button>
+  </div>
+</gr-dialog>

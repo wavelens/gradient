@@ -8,17 +8,13 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { ToastModule } from 'primeng/toast';
-import { MessageService } from 'primeng/api';
 import { WorkersService } from '@core/services/workers.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { GradientCapabilities, Worker, WorkerRegistration, AccessState } from '@core/models';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
+import { ButtonComponent, DialogComponent, InputDirective, MessageService, ToastComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-workers',
@@ -27,10 +23,10 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    ToastModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
+    ToastComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,

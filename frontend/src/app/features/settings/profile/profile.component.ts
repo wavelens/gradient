@@ -8,15 +8,12 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { DividerModule } from 'primeng/divider';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
+import { ButtonComponent, DialogComponent, DividerComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-profile',
@@ -25,10 +22,10 @@ import { AccessState } from '@core/models';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    DividerModule,
-    ButtonModule,
-    InputTextModule,
+    DialogComponent,
+    DividerComponent,
+    ButtonComponent,
+    InputDirective,
     LoadingSpinnerComponent,
     ManagedDisableDirective,
   ],

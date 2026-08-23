@@ -42,7 +42,7 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
 function findIconButton(root: HTMLElement, icon: string): HTMLButtonElement | null {
   return (
     (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).find(
-      (el) => !!el.querySelector(`.${icon}`),
+      (el) => el.querySelector('.gr-button__icon')?.textContent?.trim() === icon,
     ) ?? null
   );
 }
@@ -119,15 +119,15 @@ describe('CacheUpstreamsComponent - access gating', () => {
   it('hides Add Upstream, Edit, Delete under read-only access', () => {
     const fixture = setup({ managed: false, canEdit: false, canTrigger: false });
     expect(findByText(fixture.nativeElement, 'add upstream')).toBeNull();
-    expect(findIconButton(fixture.nativeElement, 'pi-pencil')).toBeNull();
-    expect(findIconButton(fixture.nativeElement, 'pi-trash')).toBeNull();
+    expect(findIconButton(fixture.nativeElement, 'edit')).toBeNull();
+    expect(findIconButton(fixture.nativeElement, 'delete')).toBeNull();
   });
 
   it('shows but disables Add / Edit / Delete under state-managed access', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
     const addBtn = findByText(fixture.nativeElement, 'add upstream') as HTMLButtonElement | null;
-    const editBtn = findIconButton(fixture.nativeElement, 'pi-pencil');
-    const delBtn = findIconButton(fixture.nativeElement, 'pi-trash');
+    const editBtn = findIconButton(fixture.nativeElement, 'edit');
+    const delBtn = findIconButton(fixture.nativeElement, 'delete');
     expect(addBtn).not.toBeNull();
     expect(addBtn!.disabled).toBe(true);
     expect(editBtn).not.toBeNull();

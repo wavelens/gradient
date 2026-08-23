@@ -1,0 +1,31 @@
+<input
+  type="text"
+  class="gr-input gr-autocomplete__input"
+  role="combobox"
+  aria-autocomplete="list"
+  cdkOverlayOrigin
+  #trigger="cdkOverlayOrigin"
+  [id]="inputId()"
+  [value]="value()"
+  [placeholder]="placeholder()"
+  [disabled]="isDisabled()"
+  [attr.aria-expanded]="open()"
+  (input)="onInput($event)"
+  (keyup.enter)="onEnter()"
+  (blur)="onTouched()"
+/>
+
+<ng-template
+  cdkConnectedOverlay
+  [cdkConnectedOverlayOrigin]="trigger"
+  [cdkConnectedOverlayOpen]="open() && suggestions().length > 0"
+  [cdkConnectedOverlayWidth]="panelWidth() || 0"
+  (overlayOutsideClick)="close()"
+  (detach)="close()"
+>
+  <ul class="gr-autocomplete__panel" role="listbox">
+    @for (suggestion of suggestions(); track suggestion) {
+      <li role="option" class="gr-autocomplete__option" (click)="pick(suggestion)">{{ suggestion }}</li>
+    }
+  </ul>
+</ng-template>

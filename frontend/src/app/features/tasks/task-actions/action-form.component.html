@@ -4,14 +4,11 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<p-dialog
+<gr-dialog
   [header]="mode() === 'create' ? 'New Action' : 'Edit Action'"
   [visible]="visible()"
   (visibleChange)="onVisibleChange($event)"
-  [modal]="true"
-  [style]="{ width: '560px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="560px"
 >
   @if (error()) {
     <div class="dialog-error">
@@ -22,12 +19,12 @@
 
   <div class="form-group">
     <label for="action-name">Name</label>
-    <input pInputText id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" class="w-full" />
+    <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" class="w-full" />
   </div>
 
   <div class="form-group">
     <label>Type</label>
-    <p-selectbutton
+    <gr-select-button
       [options]="typeOptions()"
       [ngModel]="type()"
       (ngModelChange)="onTypeChange($event)"
@@ -45,7 +42,7 @@
     <div class="form-group">
       <label for="action-recipients">Recipients</label>
       <input
-        pInputText
+        grInput
         id="action-recipients"
         [ngModel]="recipientsRaw()"
         (ngModelChange)="recipientsRaw.set($event)"
@@ -57,7 +54,7 @@
     <div class="form-group">
       <label for="action-subject">Subject Template (optional)</label>
       <input
-        pInputText
+        grInput
         id="action-subject"
         [ngModel]="subjectTemplate()"
         (ngModelChange)="subjectTemplate.set($event)"
@@ -71,7 +68,7 @@
     <div class="form-group">
       <label for="action-url">URL</label>
       <input
-        pInputText
+        grInput
         id="action-url"
         [ngModel]="url()"
         (ngModelChange)="url.set($event)"
@@ -83,14 +80,14 @@
       <label for="action-token">Token</label>
       <div class="token-row">
         <input
-          pInputText
+          grInput
           id="action-token"
           [ngModel]="tokenValue()"
           (ngModelChange)="tokenValue.set($event)"
           [placeholder]="mode() === 'edit' ? 'Leave blank to keep existing token' : ''"
           class="w-full"
         />
-        <button pButton type="button" label="Generate" severity="secondary" (click)="generateToken()"></button>
+        <button grButton type="button" label="Generate" severity="secondary" (click)="generateToken()"></button>
       </div>
       <small class="text-secondary">
         @if (mode() === 'edit') {
@@ -105,14 +102,13 @@
   @if (type() === 'forge_status_report') {
     <div class="form-group">
       <label for="action-integration">Outbound Integration</label>
-      <p-select
+      <gr-select
         inputId="action-integration"
         [ngModel]="integrationId()"
         (ngModelChange)="integrationId.set($event)"
         [options]="integrationOptions()"
         optionLabel="label"
         optionValue="value"
-        styleClass="w-full"
       />
     </div>
   }
@@ -120,56 +116,52 @@
   @if (type() === 'open_pr') {
     <div class="form-group">
       <label for="pr-integration">Outbound Integration</label>
-      <p-select
+      <gr-select
         inputId="pr-integration"
         [ngModel]="integrationId()"
         (ngModelChange)="integrationId.set($event)"
         [options]="integrationOptions()"
         optionLabel="label"
         optionValue="value"
-        styleClass="w-full"
       />
     </div>
     <div class="form-group">
       <label for="pr-generator">Generator</label>
-      <p-select
+      <gr-select
         inputId="pr-generator"
         [ngModel]="prGenerator()"
         (ngModelChange)="prGenerator.set($event)"
         [options]="generatorOptions"
         optionLabel="label"
         optionValue="value"
-        styleClass="w-full"
       />
     </div>
     <div class="form-group">
       <label for="pr-granularity">Granularity</label>
-      <p-select
+      <gr-select
         inputId="pr-granularity"
         [ngModel]="prGranularity()"
         (ngModelChange)="prGranularity.set($event)"
         [options]="granularityOptions"
         optionLabel="label"
         optionValue="value"
-        styleClass="w-full"
       />
     </div>
     <div class="form-group">
       <label for="pr-verify-gate">Verify Gate</label>
-      <p-select
+      <gr-select
         inputId="pr-verify-gate"
         [ngModel]="prVerifyGate()"
         (ngModelChange)="prVerifyGate.set($event)"
         [options]="verifyGateOptions"
         optionLabel="label"
         optionValue="value"
-        styleClass="w-full"
       />
     </div>
     <div class="form-group">
       <label for="pr-branch-pattern">Branch Pattern</label>
       <input
-        pInputText
+        grInput
         id="pr-branch-pattern"
         [ngModel]="prBranchPattern()"
         (ngModelChange)="prBranchPattern.set($event)"
@@ -181,7 +173,7 @@
     <div class="form-group">
       <label for="pr-title-template">Title Template (optional)</label>
       <input
-        pInputText
+        grInput
         id="pr-title-template"
         [ngModel]="prTitleTemplate()"
         (ngModelChange)="prTitleTemplate.set($event)"
@@ -191,7 +183,7 @@
     <div class="form-group">
       <label for="pr-body-template">Body Template (optional)</label>
       <textarea
-        pInputTextarea
+        grInput
         id="pr-body-template"
         [ngModel]="prBodyTemplate()"
         (ngModelChange)="prBodyTemplate.set($event)"
@@ -200,7 +192,7 @@
       ></textarea>
     </div>
     <div class="form-group checkbox-group">
-      <p-checkbox
+      <gr-checkbox
         inputId="pr-update-existing"
         [ngModel]="prUpdateExisting()"
         (ngModelChange)="prUpdateExisting.set($event)"
@@ -233,12 +225,12 @@
   }
 
   <div class="form-group checkbox-group">
-    <p-checkbox inputId="action-active" [ngModel]="active()" (ngModelChange)="active.set($event)" [binary]="true" />
+    <gr-checkbox inputId="action-active" [ngModel]="active()" (ngModelChange)="active.set($event)" [binary]="true" />
     <label for="action-active">Active</label>
   </div>
 
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="onCancel()"></button>
-    <button pButton [label]="mode() === 'create' ? 'Create' : 'Save'" icon="pi pi-check" (click)="onSubmit()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="onCancel()"></button>
+    <button grButton [label]="mode() === 'create' ? 'Create' : 'Save'" icon="check" (click)="onSubmit()"></button>
+  </div>
+</gr-dialog>

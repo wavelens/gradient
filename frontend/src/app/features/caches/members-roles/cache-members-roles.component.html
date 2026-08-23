@@ -26,9 +26,9 @@
       <h2>Members</h2>
       <button
         *appWritable="access()"
-        pButton
+        grButton
         label="Add Member"
-        icon="pi pi-plus"
+        icon="add"
         severity="secondary"
         (click)="openAddMemberDialog()"
         [disabled]="rolesLoading() || roles().length === 0"
@@ -61,8 +61,8 @@
                   </select>
                   <button
                     *appWritable="access()"
-                    pButton
-                    icon="pi pi-times"
+                    grButton
+                    icon="close"
                     severity="danger"
                     size="small"
                     [loading]="removingMember() === member.id"
@@ -87,9 +87,9 @@
       <h2>Roles</h2>
       <button
         *appWritable="access()"
-        pButton
+        grButton
         label="New Role"
-        icon="pi pi-plus"
+        icon="add"
         severity="secondary"
         (click)="openCreateRoleDialog()"
         [disabled]="rolesLoading() || availablePermissions().length === 0"
@@ -119,8 +119,8 @@
                   @if (!role.builtin) {
                     <button
                       *appWritable="access()"
-                      pButton
-                      icon="pi pi-pencil"
+                      grButton
+                      icon="edit"
                       severity="secondary"
                       size="small"
                       [disabled]="savingRole() || deletingRole() !== null"
@@ -129,8 +129,8 @@
                     ></button>
                     <button
                       *appWritable="access()"
-                      pButton
-                      icon="pi pi-trash"
+                      grButton
+                      icon="delete"
                       severity="danger"
                       size="small"
                       [loading]="deletingRole() === role.id"
@@ -152,13 +152,10 @@
 </div>
 
 <!-- Add Member Dialog -->
-<p-dialog
+<gr-dialog
   header="Add Member"
   [(visible)]="showAddMemberDialog"
-  [modal]="true"
-  [style]="{ width: '420px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="420px"
 >
   <div class="dialog-content">
     @if (memberError()) {
@@ -169,16 +166,14 @@
     }
     <div class="form-group">
       <label for="member-name">Username</label>
-      <p-autoComplete
-        id="member-name"
+      <gr-autocomplete
+        inputId="member-name"
         [(ngModel)]="newMember.user"
         [suggestions]="userSuggestions()"
         (completeMethod)="onUserSearch($event)"
         placeholder="Enter username"
-        styleClass="w-full"
         [forceSelection]="false"
-        appendTo="body"
-        (keyup.enter)="addMember()"
+        (enter)="addMember()"
       />
     </div>
     <div class="form-group">
@@ -190,32 +185,29 @@
       </select>
     </div>
   </div>
-  <ng-template pTemplate="footer">
+  <div grDialogFooter>
     <button
-      pButton
+      grButton
       label="Cancel"
       severity="secondary"
       (click)="showAddMemberDialog.set(false)"
       [disabled]="addingMember()"
     ></button>
     <button
-      pButton
+      grButton
       label="Add"
       (click)="addMember()"
       [disabled]="!newMember.user || !newMember.role || addingMember()"
       [loading]="addingMember()"
     ></button>
-  </ng-template>
-</p-dialog>
+  </div>
+</gr-dialog>
 
 <!-- Role Dialog (Create/Edit) -->
-<p-dialog
+<gr-dialog
   [header]="editingRole() ? 'Edit Role' : 'New Role'"
   [(visible)]="showRoleDialog"
-  [modal]="true"
-  [style]="{ width: '520px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="520px"
 >
   <div class="dialog-content">
     @if (roleError()) {
@@ -227,7 +219,7 @@
     <div class="form-group">
       <label for="role-name">Name</label>
       <input
-        pInputText
+        grInput
         id="role-name"
         [(ngModel)]="roleForm.name"
         class="w-full"
@@ -240,7 +232,7 @@
       <div class="permissions-grid">
         @for (perm of availablePermissions(); track perm.id) {
           <label class="permission-row">
-            <p-checkbox
+            <gr-checkbox
               [(ngModel)]="roleForm.permissions[perm.id]"
               [binary]="true"
             />
@@ -257,20 +249,20 @@
       </div>
     </div>
   </div>
-  <ng-template pTemplate="footer">
+  <div grDialogFooter>
     <button
-      pButton
+      grButton
       label="Cancel"
       severity="secondary"
       (click)="showRoleDialog.set(false)"
       [disabled]="savingRole()"
     ></button>
     <button
-      pButton
+      grButton
       [label]="editingRole() ? 'Save' : 'Create'"
       (click)="saveRole()"
       [disabled]="!roleForm.name.trim() || savingRole()"
       [loading]="savingRole()"
     ></button>
-  </ng-template>
-</p-dialog>
+  </div>
+</gr-dialog>

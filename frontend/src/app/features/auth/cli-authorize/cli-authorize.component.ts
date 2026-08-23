@@ -13,10 +13,10 @@ import {
   Validators,
 } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { ButtonModule } from 'primeng/button';
 import { ApiService } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 import { take } from 'rxjs';
+import { ButtonComponent } from '@shared/ui';
 
 interface CliDeviceInfo {
   user_code: string;
@@ -28,7 +28,7 @@ interface CliDeviceInfo {
 @Component({
   selector: 'app-cli-authorize',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ButtonModule],
+  imports: [CommonModule, ReactiveFormsModule, ButtonComponent],
   templateUrl: './cli-authorize.component.html',
   styleUrl: './cli-authorize.component.scss',
 })

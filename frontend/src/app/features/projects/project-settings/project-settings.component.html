@@ -26,7 +26,7 @@
         <div class="form-group">
           <label for="project-name">Name</label>
           <input
-            pInputText
+            grInput
             id="project-name"
             [value]="project.name"
             disabled
@@ -38,7 +38,7 @@
         <div class="form-group">
           <label for="display-name">Display Name</label>
           <input
-            pInputText
+            grInput
             id="display-name"
             [(ngModel)]="formData.display_name"
             class="w-full"
@@ -49,7 +49,7 @@
         <div class="form-group">
           <label for="description">Description</label>
           <textarea
-            pInputTextarea
+            grInput
             id="description"
             [(ngModel)]="formData.description"
             rows="3"
@@ -68,7 +68,7 @@
         </div>
 
         <div class="form-group checkbox-group">
-          <p-checkbox
+          <gr-checkbox
             inputId="hide-build-requests"
             [(ngModel)]="formData.hide_build_requests"
             [binary]="true"
@@ -93,9 +93,9 @@
         <div class="form-actions">
           <button
             *appWritable="access()"
-            pButton
+            grButton
             label="Save Changes"
-            icon="pi pi-check"
+            icon="check"
             (click)="saveSettings()"
             [loading]="saving()"
             [appManagedDisable]="access()"
@@ -113,7 +113,7 @@
             <h3>Members & Roles</h3>
             <p class="text-secondary">Manage who is in this project and what they can do</p>
           </div>
-          <a pButton label="Manage Members" icon="pi pi-users" severity="secondary" [routerLink]="['/project', projectName, 'members']"></a>
+          <a grButton label="Manage Members" icon="group" severity="secondary" [routerLink]="['/project', projectName, 'members']"></a>
         </div>
       </div>
     </div>
@@ -127,23 +127,23 @@
             <h3>Workers</h3>
             <p class="text-secondary">Manage build workers for this project</p>
           </div>
-          <button pButton label="Manage Workers" icon="pi pi-cog" severity="secondary" [routerLink]="['/project', projectName, 'workers']"></button>
+          <button grButton label="Manage Workers" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'workers']"></button>
         </div>
-        <p-divider />
+        <gr-divider />
         <div class="nav-row">
           <div>
             <h3>Cache Subscriptions</h3>
             <p class="text-secondary">Nix binary caches this project pushes builds to</p>
           </div>
-          <button pButton label="Manage Caches" icon="pi pi-database" severity="secondary" [routerLink]="['/project', projectName, 'caches']"></button>
+          <button grButton label="Manage Caches" icon="database" severity="secondary" [routerLink]="['/project', projectName, 'caches']"></button>
         </div>
-        <p-divider />
+        <gr-divider />
         <div class="nav-row">
           <div>
             <h3>Integrations</h3>
             <p class="text-secondary">Inbound forge webhooks and outbound status reporters</p>
           </div>
-          <a pButton label="Manage Integrations" icon="pi pi-sitemap" severity="secondary" [routerLink]="['/project', projectName, 'integrations']"></a>
+          <a grButton label="Manage Integrations" icon="account_tree" severity="secondary" [routerLink]="['/project', projectName, 'integrations']"></a>
         </div>
       </div>
     </div>
@@ -160,7 +160,7 @@
             <div class="form-group">
               <label>Public Key</label>
               <textarea
-                pInputTextarea
+                grInput
                 [value]="sshKey()"
                 readonly
                 rows="4"
@@ -168,14 +168,14 @@
               ></textarea>
             </div>
             <div class="form-actions">
-              <button pButton label="Copy Key" icon="pi pi-copy" severity="secondary" (click)="copySSHKey()"></button>
+              <button grButton label="Copy Key" icon="content_copy" severity="secondary" (click)="copySSHKey()"></button>
             </div>
           } @else {
             <p class="text-secondary">No SSH key generated yet.</p>
             <button
-              pButton
+              grButton
               label="Generate SSH Key"
-              icon="pi pi-key"
+              icon="key"
               (click)="generateSSHKey()"
               [loading]="generatingSSH()"
               [disabled]="generatingSSH()"
@@ -197,16 +197,16 @@
                 <p class="text-secondary">Generate a new SSH key. The existing key will stop working immediately.</p>
               </div>
               <button
-                pButton
+                grButton
                 label="Regenerate Key"
-                icon="pi pi-refresh"
+                icon="refresh"
                 severity="danger"
                 (click)="showRegenerateKeyDialog.set(true)"
                 [disabled]="generatingSSH()"
                 [appManagedDisable]="access()"
               ></button>
             </div>
-            <p-divider />
+            <gr-divider />
           }
           <div class="danger-row">
             <div>
@@ -214,9 +214,9 @@
               <p class="text-secondary">Permanently delete this project and all its tasks.</p>
             </div>
             <button
-              pButton
+              grButton
               label="Delete Project"
-              icon="pi pi-trash"
+              icon="delete"
               severity="danger"
               (click)="showDeleteDialog.set(true)"
               [appManagedDisable]="access()"
@@ -229,33 +229,27 @@
 </div>
 
 <!-- Regenerate SSH Key Confirmation Dialog -->
-<p-dialog
+<gr-dialog
   header="Regenerate SSH Key"
   [(visible)]="showRegenerateKeyDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="400px"
 >
   <p>Are you sure you want to regenerate the SSH key? The existing key will stop working immediately and any repositories using it will lose access.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showRegenerateKeyDialog.set(false)" [disabled]="generatingSSH()"></button>
-    <button pButton label="Regenerate" severity="danger" icon="pi pi-refresh" (click)="confirmRegenerateSSHKey()" [loading]="generatingSSH()" [disabled]="generatingSSH()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showRegenerateKeyDialog.set(false)" [disabled]="generatingSSH()"></button>
+    <button grButton label="Regenerate" severity="danger" icon="refresh" (click)="confirmRegenerateSSHKey()" [loading]="generatingSSH()" [disabled]="generatingSSH()"></button>
+  </div>
+</gr-dialog>
 
 <!-- Delete Confirmation Dialog -->
-<p-dialog
+<gr-dialog
   header="Delete Project"
   [(visible)]="showDeleteDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="400px"
 >
   <p>Are you sure you want to delete <strong>{{ project()?.display_name }}</strong>? This action cannot be undone.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button pButton label="Delete" severity="danger" (click)="deleteProject()" [loading]="deleting()" [disabled]="deleting()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
+    <button grButton label="Delete" severity="danger" (click)="deleteProject()" [loading]="deleting()" [disabled]="deleting()"></button>
+  </div>
+</gr-dialog>

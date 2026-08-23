@@ -4,14 +4,11 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<p-dialog
+<gr-dialog
   header="NAR details"
   [visible]="visible()"
   (visibleChange)="onVisibleChange($event)"
-  [modal]="true"
-  [style]="{ width: '640px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="640px"
 >
   @if (loading()) {
     <app-loading-spinner message="Loading NAR..." />
@@ -91,7 +88,7 @@
       </div>
     </div>
   }
-  <ng-template pTemplate="footer">
-    <button pButton label="Close" severity="secondary" (click)="onVisibleChange(false)"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Close" severity="secondary" (click)="onVisibleChange(false)"></button>
+  </div>
+</gr-dialog>

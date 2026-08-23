@@ -18,10 +18,10 @@
         <p>This server requires SSO sign-in. Use the button below to create or access your account.</p>
       </div>
       <button
-        pButton
+        grButton
         type="button"
         class="w-full"
-        icon="pi pi-sign-in"
+        icon="login"
         label="Continue with SSO"
         (click)="loginWithOIDC()"
       ></button>
@@ -188,7 +188,7 @@
           </div>
 
           <button
-            pButton
+            grButton
             type="submit"
             class="w-full"
             [label]="loading() ? 'Creating account...' : 'Create Account'"

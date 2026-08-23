@@ -10,10 +10,6 @@ import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, EMPTY } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { TextareaModule } from 'primeng/textarea';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
@@ -21,6 +17,7 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
 import { slugify } from '@shared/text';
 import { Project } from '@core/models';
+import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-project-list',
@@ -29,10 +26,10 @@ import { Project } from '@core/models';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    TextareaModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
+    InputDirective,
     LoadingSpinnerComponent,
     EmptyStateComponent,
   ],
