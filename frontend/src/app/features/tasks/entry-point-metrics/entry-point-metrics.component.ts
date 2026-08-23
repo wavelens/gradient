@@ -7,18 +7,7 @@
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import {
-  NgApexchartsModule,
-  ApexChart,
-  ApexStroke,
-  ApexFill,
-  ApexXAxis,
-  ApexYAxis,
-  ApexTooltip,
-  ApexGrid,
-  ApexDataLabels,
-  ApexMarkers,
-} from 'ng-apexcharts';
+import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 import { ButtonModule } from 'primeng/button';
 import { TasksService, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -30,31 +19,12 @@ const CHART_COLORS = {
   closureSize: '#fd7e14',
   runtimeClosure: '#20c997',
   deps: '#e83e8c',
-  background: '#21262d',
-  border: '#2d333b',
-  text: '#abb0b4',
-  grid: '#2d333b',
-};
-
-type ChartOptions = {
-  chart: ApexChart;
-  theme: { mode: 'dark' | 'light' };
-  stroke: ApexStroke;
-  fill: ApexFill;
-  colors: string[];
-  series: { name: string; data: (number | null)[] }[];
-  xaxis: ApexXAxis;
-  yaxis: ApexYAxis;
-  grid: ApexGrid;
-  tooltip: ApexTooltip;
-  dataLabels: ApexDataLabels;
-  markers: ApexMarkers;
 };
 
 @Component({
   selector: 'app-entry-point-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, ButtonModule, NgApexchartsModule, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, ButtonModule, MetricChartComponent, LoadingSpinnerComponent],
   templateUrl: './entry-point-metrics.component.html',
   styleUrl: './entry-point-metrics.component.scss',
 })
@@ -96,81 +66,33 @@ export class EntryPointMetricsComponent implements OnInit {
     });
   }
 
-  private get labels(): string[] {
-    return this.points().map((p) => this.formatDate(p.created_at));
-  }
+  labels = computed(() => this.points().map((p) => this.formatDate(p.created_at)));
 
-  private baseChart(color: string): ChartOptions {
-    return {
-      chart: {
-        type: 'area',
-        height: 220,
-        background: CHART_COLORS.background,
-        toolbar: { show: false },
-        animations: { enabled: true, speed: 400 },
-        zoom: { enabled: false, allowMouseWheelZoom: false },
-      },
-      theme: { mode: 'dark' },
-      stroke: { curve: 'smooth', width: 2 },
-      fill: {
-        type: 'gradient',
-        gradient: { shadeIntensity: 0.3, opacityFrom: 0.4, opacityTo: 0.02, stops: [0, 100] },
-      },
-      colors: [color],
-      series: [],
-      xaxis: {
-        categories: this.labels,
-        labels: { style: { colors: CHART_COLORS.text, fontSize: '11px' }, rotate: -30 },
-        axisBorder: { color: CHART_COLORS.border },
-        axisTicks: { color: CHART_COLORS.border },
-      },
-      yaxis: { labels: { style: { colors: CHART_COLORS.text } } },
-      grid: { borderColor: CHART_COLORS.grid, strokeDashArray: 3 },
-      tooltip: { theme: 'dark' },
-      dataLabels: { enabled: false },
-      markers: { size: 3, strokeWidth: 0 },
-    };
-  }
+  buildTimeSeries = computed(() => [
+    {
+      name: 'Build time',
+      data: this.points().map((p) => (p.build_time_ms !== null ? Math.round(p.build_time_ms / 1000) : null)),
+    },
+  ]);
+  outputSizeSeries = computed(() => [
+    { name: 'Output size', data: this.points().map((p) => p.output_size_bytes) },
+  ]);
+  closureSizeSeries = computed(() => [
+    { name: 'Build closure', data: this.points().map((p) => p.closure_size_bytes) },
+    { name: 'Runtime closure', data: this.points().map((p) => p.runtime_closure_size_bytes) },
+  ]);
+  depsSeries = computed(() => [
+    { name: 'Dependencies', data: this.points().map((p) => p.dependencies_count) },
+  ]);
 
-  buildTimeChart = computed<ChartOptions>(() => {
-    const pts = this.points();
-    const opts = this.baseChart(CHART_COLORS.buildTime);
-    opts.series = [{ name: 'Build time', data: pts.map((p) => p.build_time_ms !== null ? Math.round(p.build_time_ms / 1000) : null) }];
-    opts.yaxis = { ...opts.yaxis, title: { text: 'seconds', style: { color: CHART_COLORS.text } }, labels: { style: { colors: CHART_COLORS.text }, formatter: (v: number) => `${v}s` } };
-    opts.tooltip = { theme: 'dark', y: { formatter: (v: number) => this.formatDuration(v * 1000) } };
-    return opts;
-  });
+  readonly buildTimeColor = [CHART_COLORS.buildTime];
+  readonly outputSizeColor = [CHART_COLORS.outputSize];
+  readonly closureSizeColors = [CHART_COLORS.closureSize, CHART_COLORS.runtimeClosure];
+  readonly depsColor = [CHART_COLORS.deps];
 
-  outputSizeChart = computed<ChartOptions>(() => {
-    const pts = this.points();
-    const opts = this.baseChart(CHART_COLORS.outputSize);
-    opts.series = [{ name: 'Output size', data: pts.map((p) => p.output_size_bytes) }];
-    opts.yaxis = { ...opts.yaxis, labels: { style: { colors: CHART_COLORS.text }, formatter: (v: number) => this.formatBytes(v) } };
-    opts.tooltip = { theme: 'dark', y: { formatter: (v: number) => this.formatBytes(v) } };
-    return opts;
-  });
-
-  closureSizeChart = computed<ChartOptions>(() => {
-    const pts = this.points();
-    const opts = this.baseChart(CHART_COLORS.closureSize);
-    opts.colors = [CHART_COLORS.closureSize, CHART_COLORS.runtimeClosure];
-    opts.series = [
-      { name: 'Build closure', data: pts.map((p) => p.closure_size_bytes) },
-      { name: 'Runtime closure', data: pts.map((p) => p.runtime_closure_size_bytes) },
-    ];
-    opts.yaxis = { ...opts.yaxis, labels: { style: { colors: CHART_COLORS.text }, formatter: (v: number) => this.formatBytes(v) } };
-    opts.tooltip = { theme: 'dark', y: { formatter: (v: number) => this.formatBytes(v) } };
-    return opts;
-  });
-
-  depsChart = computed<ChartOptions>(() => {
-    const pts = this.points();
-    const opts = this.baseChart(CHART_COLORS.deps);
-    opts.series = [{ name: 'Dependencies', data: pts.map((p) => p.dependencies_count) }];
-    opts.yaxis = { ...opts.yaxis, labels: { style: { colors: CHART_COLORS.text }, formatter: (v: number) => String(Math.round(v)) } };
-    opts.tooltip = { theme: 'dark', y: { formatter: (v: number) => `${Math.round(v)} deps` } };
-    return opts;
-  });
+  readonly formatSeconds = (v: number) => this.formatDuration(v * 1000);
+  readonly formatSize = (v: number) => this.formatBytes(v);
+  readonly formatDeps = (v: number) => `${Math.round(v)} deps`;
 
   latestBuildId = computed(() => {
     const pts = this.points();

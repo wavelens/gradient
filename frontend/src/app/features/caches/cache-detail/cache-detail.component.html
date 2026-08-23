@@ -68,19 +68,16 @@
               </button>
             }
           </div>
-          <apx-chart
-            [series]="storageChartOptions().series"
-            [chart]="storageChartOptions().chart"
-            [theme]="storageChartOptions().theme"
-            [stroke]="storageChartOptions().stroke"
-            [fill]="storageChartOptions().fill"
-            [colors]="storageChartOptions().colors"
-            [xaxis]="storageChartOptions().xaxis"
-            [yaxis]="storageChartOptions().yaxis"
-            [grid]="storageChartOptions().grid"
-            [tooltip]="storageChartOptions().tooltip"
-            [legend]="storageChartOptions().legend!"
-            [dataLabels]="storageChartOptions().dataLabels!"
+          <app-metric-chart
+            bare
+            type="area"
+            [height]="220"
+            [series]="storageSeries()"
+            [categories]="storageCategories()"
+            [colors]="storageColors"
+            [valueFormatter]="formatSize"
+            [secondary]="storageSecondary"
+            yAxisTitle="Bytes"
           />
         </div>
       }
@@ -111,19 +108,16 @@
               </button>
             }
           </div>
-          <apx-chart
-            [series]="trafficChartOptions().series"
-            [chart]="trafficChartOptions().chart"
-            [theme]="trafficChartOptions().theme"
-            [stroke]="trafficChartOptions().stroke"
-            [fill]="trafficChartOptions().fill"
-            [colors]="trafficChartOptions().colors"
-            [xaxis]="trafficChartOptions().xaxis"
-            [yaxis]="trafficChartOptions().yaxis"
-            [grid]="trafficChartOptions().grid"
-            [tooltip]="trafficChartOptions().tooltip"
-            [legend]="trafficChartOptions().legend!"
-            [dataLabels]="trafficChartOptions().dataLabels!"
+          <app-metric-chart
+            bare
+            type="area"
+            [height]="220"
+            [series]="trafficSeries()"
+            [categories]="trafficCategories()"
+            [colors]="trafficColors"
+            [valueFormatter]="formatSize"
+            [secondary]="trafficSecondary"
+            yAxisTitle="Bytes"
           />
         </div>
       }
