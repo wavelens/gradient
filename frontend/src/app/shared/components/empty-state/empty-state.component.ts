@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, booleanAttribute, input, output } from '@angular/core';
+import { Component, booleanAttribute, input, output, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 @Component({
@@ -13,6 +13,7 @@ import { CommonModule } from '@angular/common';
   imports: [CommonModule],
   templateUrl: './empty-state.component.html',
   styleUrl: './empty-state.component.scss',
+  changeDetection: ChangeDetectionStrategy.Eager,
   host: { '[class.flat]': 'flat()' },
 })
 export class EmptyStateComponent {

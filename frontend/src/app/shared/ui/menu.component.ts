@@ -15,6 +15,7 @@ import {
   inject,
   input,
   viewChild,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { MenuItem } from './types';
@@ -64,6 +65,7 @@ import { MenuItem } from './types';
       </ul>
     </ng-template>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './menu.component.scss',
 })
 export class MenuComponent implements OnDestroy {

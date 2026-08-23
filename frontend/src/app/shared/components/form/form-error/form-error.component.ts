@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AbstractControl } from '@angular/forms';
 
@@ -42,6 +42,7 @@ const DEFAULT_MESSAGES: Record<string, (err: unknown) => string> = {
       <span class="form-error" role="alert">{{ msg }}</span>
     }
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './form-error.component.scss',
 })
 export class FormErrorComponent {

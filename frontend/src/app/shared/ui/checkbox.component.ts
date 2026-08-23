@@ -5,7 +5,7 @@
  */
 
 import { NG_VALUE_ACCESSOR, ControlValueAccessor } from '@angular/forms';
-import { Component, booleanAttribute, forwardRef, input, signal } from '@angular/core';
+import { Component, booleanAttribute, forwardRef, input, signal, ChangeDetectionStrategy } from '@angular/core';
 
 @Component({
   selector: 'gr-checkbox',
@@ -22,6 +22,7 @@ import { Component, booleanAttribute, forwardRef, input, signal } from '@angular
     />
   `,
   styleUrl: './checkbox.component.scss',
+  changeDetection: ChangeDetectionStrategy.Eager,
   providers: [
     { provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => CheckboxComponent), multi: true },
   ],

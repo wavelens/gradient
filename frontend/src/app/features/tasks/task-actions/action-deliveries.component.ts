@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, inject, input, output, signal, OnInit } from '@angular/core';
+import { Component, inject, input, output, signal, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActionsService } from '../../../core/services/actions.service';
 import { ActionDelivery, ActionDeliveryDetail } from '../../../core/models/action.model';
@@ -14,6 +14,7 @@ import { ActionDelivery, ActionDeliveryDetail } from '../../../core/models/actio
   standalone: true,
   imports: [CommonModule],
   templateUrl: './action-deliveries.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './action-deliveries.component.scss',
 })
 export class ActionDeliveriesComponent implements OnInit {

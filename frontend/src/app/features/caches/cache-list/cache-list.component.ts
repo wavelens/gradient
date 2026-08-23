@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -34,6 +34,7 @@ import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
     EmptyStateComponent,
   ],
   templateUrl: './cache-list.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache-list.component.scss',
 })
 export class CacheListComponent implements OnInit, OnDestroy {

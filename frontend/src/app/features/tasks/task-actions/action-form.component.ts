@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, OnChanges, SimpleChanges, computed, inject, input, output, signal } from '@angular/core';
+import { Component, OnChanges, SimpleChanges, computed, inject, input, output, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ConfigService } from '@core/services/config.service';
@@ -45,6 +45,7 @@ interface IntegrationOption {
     ActionEventsComponent,
   ],
   templateUrl: './action-form.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './action-form.component.scss',
 })
 export class ActionFormComponent implements OnChanges {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ButtonComponent } from './button.component';
 import { ConfirmationService } from './confirmation.service';
 import { DialogComponent } from './dialog.component';
@@ -42,6 +42,7 @@ import { DialogComponent } from './dialog.component';
       </div>
     </gr-dialog>
   `,
+  changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
       .gr-confirm { display: flex; align-items: flex-start; gap: 0.75rem; }

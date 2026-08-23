@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, signal } from '@angular/core';
+import { Component, input, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonComponent, InputDirective } from '@shared/ui';
 
@@ -13,6 +13,7 @@ import { ButtonComponent, InputDirective } from '@shared/ui';
   standalone: true,
   imports: [CommonModule, ButtonComponent, InputDirective],
   templateUrl: './copy-field.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './copy-field.component.scss',
 })
 export class CopyFieldComponent {

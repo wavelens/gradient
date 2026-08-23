@@ -14,16 +14,18 @@ import {
   inject,
   input,
   signal,
+  ChangeDetectionStrategy
 } from '@angular/core';
 
 /// Single-select dropdown on the CDK connected overlay. `optionLabel` and
-/// `optionValue` keep the PrimeNG-shaped option arrays the call sites already build.
+/// `optionValue` read plain `{ label, value }` option arrays straight from callers.
 @Component({
   selector: 'gr-select',
   standalone: true,
   imports: [CdkConnectedOverlay, CdkOverlayOrigin],
   templateUrl: './select.component.html',
   styleUrl: './select.component.scss',
+  changeDetection: ChangeDetectionStrategy.Eager,
   providers: [
     { provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => SelectComponent), multi: true },
   ],

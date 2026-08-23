@@ -16,6 +16,7 @@ import {
   ChangeDetectorRef,
   DestroyRef,
   HostListener,
+  ChangeDetectionStrategy
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -46,6 +47,7 @@ import { ButtonComponent } from '@shared/ui';
   standalone: true,
   imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent],
   templateUrl: './evaluation-log.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
     './evaluation-log.component.scss',
     './evaluation-log.sidebar.scss',

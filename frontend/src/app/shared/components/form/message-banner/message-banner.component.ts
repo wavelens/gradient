@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, input } from '@angular/core';
+import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 export type MessageBannerType = 'error' | 'success' | 'info' | 'warning';
@@ -21,6 +21,7 @@ const DEFAULT_ICONS: Record<MessageBannerType, string> = {
   standalone: true,
   imports: [CommonModule],
   templateUrl: './message-banner.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './message-banner.component.scss',
 })
 export class MessageBannerComponent {

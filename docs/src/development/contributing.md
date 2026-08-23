@@ -106,7 +106,8 @@ CI (`.github/workflows/rust.yml`) runs fmt, the grep-gate and cargo-deny; clippy
 
 - Standalone components with Angular signals (`signal()`, `computed()`).
 - Feature-based structure under `frontend/src/app/features/`.
-- PrimeNG for UI components; Apache ECharts (via `<app-metric-chart>`) for every chart; SCSS variables from `src/app/styles/_variables.scss` for colours and spacing.
+- `gr-ui` (`src/app/shared/ui/`, built on `@angular/cdk`) for UI components; Apache ECharts (via `<app-metric-chart>`) for every chart; SCSS variables from `src/app/styles/_variables.scss` for colours and spacing.
+- No third-party UI or charting dependency may impose a field-of-use restriction: the bundle ships under AGPL-3.0, so anything beyond MIT / BSD / Apache-2.0 cannot be conveyed downstream.
 
 ### Nix
 

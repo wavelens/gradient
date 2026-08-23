@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 
 interface ErrorMeta {
@@ -59,6 +59,7 @@ const FALLBACK_META: ErrorMeta = {
   standalone: true,
   imports: [RouterModule],
   templateUrl: './error-page.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './error-page.component.scss',
 })
 export class ErrorPageComponent {
