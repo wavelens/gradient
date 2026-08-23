@@ -106,7 +106,7 @@ CI (`.github/workflows/rust.yml`) runs fmt, the grep-gate and cargo-deny; clippy
 
 - Standalone components with Angular signals (`signal()`, `computed()`).
 - Feature-based structure under `frontend/src/app/features/`.
-- PrimeNG for UI components; SCSS variables from `src/app/styles/_variables.scss` for colours and spacing.
+- PrimeNG for UI components; Apache ECharts (via `<app-metric-chart>`) for every chart; SCSS variables from `src/app/styles/_variables.scss` for colours and spacing.
 
 ### Nix
 
