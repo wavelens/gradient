@@ -7245,3 +7245,23 @@ overlay. `toast.component.spec.ts` covers the `MessageService` queue including
 `life` expiry and `life: 0` meaning sticky, and `confirm-dialog.component.spec.ts`
 covers accept, reject and the default button labels.
 
+## Live Jobs decision-score fixture drifted from the API (#419)
+
+`live-jobs.component.spec.ts` "surfaces rejected/negative candidate scores when
+scope is 'incl. rejected'" had been failing since `16756b1e`. That commit moved
+the component off deriving the winner in the browser
+(`won: d.winner === c.job_id`) and onto the per-candidate `id` and `won` fields
+the server had started sending, matching `DecisionCandidateView` in
+`backend/gradient-web/src/endpoints/board.rs`. The spec's mock was never
+updated, so every row came back with `won: undefined` and `id: undefined`: the
+assertion on the winning row failed, and the `@for` track expression collapsed
+both rows onto the same empty key, which Angular reported as `NG0955`.
+
+The mock is now declared `const DECISIONS: DispatchDecisionView[]`. That is the
+actual fix, not just the added fields: the mock was previously an untyped object
+literal inside `useValue`, so nothing checked it against the interface it was
+standing in for and the drift stayed silent. With the annotation, dropping
+`won` from a candidate fails the build with `TS2741: Property 'won' is missing
+in type ... but required in type 'DecisionCandidateView'`, which is what should
+have caught this when the server contract changed.
+
