@@ -64,7 +64,7 @@
         </div>
 
         <button
-          pButton
+          grButton
           type="submit"
           class="w-full"
           [label]="loading() ? 'Signing in...' : 'Sign In'"
@@ -81,11 +81,11 @@
         </div>
       }
       <button
-        pButton
+        grButton
         type="button"
         class="w-full"
         severity="secondary"
-        icon="pi pi-sign-in"
+        icon="login"
         label="Sign in with SSO"
         (click)="loginWithOIDC()"
       ></button>

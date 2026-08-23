@@ -6,14 +6,14 @@
 
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { PopoverModule, Popover } from 'primeng/popover';
 import { BoardService, MetricPoint, RuleDescription, ScoringSummary } from '@core/services/board.service';
 import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { PopoverComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-board-scheduler',
   standalone: true,
-  imports: [CommonModule, PopoverModule, MetricChartComponent],
+  imports: [CommonModule, PopoverComponent, MetricChartComponent],
   template: `
     <div class="kpis">
       <div class="kpi"><span class="label">Scored dispatches (24h)</span><span class="value">{{ summary()?.sample_size ?? 0 }}</span></div>
@@ -60,11 +60,11 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       </tbody>
     </table>
 
-    <p-popover #rulePop>
+    <gr-popover #rulePop>
       @if (activeRule(); as a) {
         <div class="rule-help"><strong>{{ a.rule }}</strong><p>{{ a.description }}</p></div>
       }
-    </p-popover>
+    </gr-popover>
   `,
   styles: [
     `
@@ -129,7 +129,7 @@ export class BoardSchedulerComponent implements OnInit {
     }));
   });
 
-  showHelp(event: Event, row: { rule: string; description: string }, popover: Popover): void {
+  showHelp(event: Event, row: { rule: string; description: string }, popover: PopoverComponent): void {
     this.activeRule.set({ rule: row.rule, description: row.description });
     popover.toggle(event);
   }

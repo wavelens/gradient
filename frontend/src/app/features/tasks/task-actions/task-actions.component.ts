@@ -8,8 +8,6 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -25,6 +23,7 @@ import {
 } from '@core/models';
 import { ActionFormComponent } from './action-form.component';
 import { ActionDeliveriesComponent } from './action-deliveries.component';
+import { ButtonComponent, DialogComponent } from '@shared/ui';
 
 interface IntegrationOption {
   id: string;
@@ -38,8 +37,8 @@ interface IntegrationOption {
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
+    DialogComponent,
+    ButtonComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
@@ -251,10 +250,10 @@ export class TaskActionsComponent implements OnInit {
 
   typeIcon(type: ActionType): string {
     switch (type) {
-      case 'send_mail': return 'pi pi-envelope';
-      case 'send_web_request': return 'pi pi-globe';
-      case 'forge_status_report': return 'pi pi-github';
-      case 'open_pr': return 'pi pi-code';
+      case 'send_mail': return 'mail';
+      case 'send_web_request': return 'public';
+      case 'forge_status_report': return 'published_with_changes';
+      case 'open_pr': return 'code';
     }
   }
 

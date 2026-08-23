@@ -8,16 +8,16 @@ import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { ButtonModule } from 'primeng/button';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { take } from 'rxjs';
 import { environment } from '@environments/environment';
+import { ButtonComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonModule],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent],
   templateUrl: './login.component.html',
   styleUrl: './login.component.scss',
 })

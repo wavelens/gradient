@@ -4,7 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<p-toast />
+<gr-toast />
 
 <div class="container">
   <div class="page-header">
@@ -21,9 +21,9 @@
     </div>
     <button
       *appWritable="access()"
-      pButton
+      grButton
       label="Register Worker"
-      icon="pi pi-plus"
+      icon="add"
       (click)="openRegisterDialog()"
       [appManagedDisable]="access()"
     ></button>
@@ -51,9 +51,9 @@
         <div class="peer-id-hint text-secondary">Use this as <code>peer_id</code> in your worker's peers file alongside the token issued during registration.</div>
       </div>
       <button
-        pButton
+        grButton
         [label]="peerIdCopied() ? 'Copied!' : 'Copy'"
-        [icon]="peerIdCopied() ? 'pi pi-check' : 'pi pi-copy'"
+        [icon]="peerIdCopied() ? 'check' : 'content_copy'"
         severity="secondary"
         (click)="copyPeerId()"
       ></button>
@@ -70,9 +70,9 @@
         <p class="text-secondary">Register a <code>gradient-worker</code> to run builds for this project.</p>
         <button
           *appWritable="access()"
-          pButton
+          grButton
           label="Register Worker"
-          icon="pi pi-plus"
+          icon="add"
           (click)="openRegisterDialog()"
           [appManagedDisable]="access()"
         ></button>
@@ -132,9 +132,9 @@
                 {{ worker.live ? 'Connected' : 'Offline' }}
               </span>
               <a
-                pButton
+                grButton
                 label="Metrics"
-                icon="pi pi-chart-line"
+                icon="show_chart"
                 severity="secondary"
                 size="small"
                 class="worker-action-btn"
@@ -142,9 +142,9 @@
               ></a>
               <button
                 *appWritable="access()"
-                pButton
+                grButton
                 label="Edit"
-                icon="pi pi-pencil"
+                icon="edit"
                 severity="secondary"
                 size="small"
                 class="worker-action-btn"
@@ -154,9 +154,9 @@
               ></button>
               <button
                 *appWritable="access()"
-                pButton
+                grButton
                 [label]="worker.active ? 'Deactivate' : 'Activate'"
-                [icon]="worker.active ? 'pi pi-pause' : 'pi pi-play'"
+                [icon]="worker.active ? 'pause' : 'play_arrow'"
                 [severity]="worker.active ? 'warn' : 'success'"
                 size="small"
                 class="worker-action-btn"
@@ -167,9 +167,9 @@
               ></button>
               <button
                 *appWritable="access()"
-                pButton
+                grButton
                 label="Fire Test"
-                icon="pi pi-bolt"
+                icon="bolt"
                 severity="secondary"
                 size="small"
                 class="worker-action-btn"
@@ -180,9 +180,9 @@
               ></button>
               <button
                 *appWritable="access()"
-                pButton
+                grButton
                 label="Delete"
-                icon="pi pi-trash"
+                icon="delete"
                 severity="danger"
                 size="small"
                 class="worker-action-btn"
@@ -200,13 +200,10 @@
 </div>
 
 <!-- Register Worker Dialog -->
-<p-dialog
+<gr-dialog
   header="Register Worker"
   [(visible)]="showRegisterDialog"
-  [modal]="true"
-  [style]="{ width: '480px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="480px"
 >
   @if (projectId()) {
     <div class="dialog-info">
@@ -227,7 +224,7 @@
   <div class="form-group">
     <label for="worker-name">Name</label>
     <input
-      pInputText
+      grInput
       id="worker-name"
       [(ngModel)]="newWorkerName"
       placeholder="e.g. Primary Build Server"
@@ -239,7 +236,7 @@
   <div class="form-group">
     <label for="worker-id">Worker ID</label>
     <input
-      pInputText
+      grInput
       id="worker-id"
       [(ngModel)]="newWorkerId"
       placeholder="e.g. a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
@@ -251,7 +248,7 @@
   <div class="form-group">
     <label for="worker-url">Worker URL <span class="text-secondary">(optional)</span></label>
     <input
-      pInputText
+      grInput
       id="worker-url"
       [(ngModel)]="newWorkerUrl"
       placeholder="e.g. wss://worker.example.com/proto"
@@ -262,7 +259,7 @@
   <div class="form-group">
     <label for="worker-token">Token <span class="text-secondary">(optional)</span></label>
     <input
-      pInputText
+      grInput
       id="worker-token"
       [(ngModel)]="newWorkerToken"
       placeholder="Output of: openssl rand -base64 48"
@@ -306,27 +303,24 @@
     </div>
     <small class="text-secondary">Click a tag to toggle. Disabling a capability prevents the server from negotiating it with this worker, even if the worker advertises it.</small>
   </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>
     <button
-      pButton
+      grButton
       label="Register"
-      icon="pi pi-plus"
+      icon="add"
       (click)="registerWorker()"
       [loading]="registering()"
       [disabled]="registering() || !newWorkerId.trim() || !newWorkerName.trim()"
     ></button>
-  </ng-template>
-</p-dialog>
+  </div>
+</gr-dialog>
 
 <!-- Deactivate Warning Dialog -->
-<p-dialog
+<gr-dialog
   header="Deactivate Connected Worker"
   [(visible)]="showToggleWarningDialog"
-  [modal]="true"
-  [style]="{ width: '440px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="440px"
 >
   <div class="dialog-warning">
     <span class="material-symbols-outlined">warning</span>
@@ -335,20 +329,17 @@
       <strong>abort all active jobs</strong> assigned to this project. Are you sure?
     </p>
   </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="cancelToggleWorker()"></button>
-    <button pButton label="Deactivate" icon="pi pi-pause" severity="warn" (click)="confirmToggleWorker()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="cancelToggleWorker()"></button>
+    <button grButton label="Deactivate" icon="pause" severity="warn" (click)="confirmToggleWorker()"></button>
+  </div>
+</gr-dialog>
 
 <!-- Token Dialog (shown once after registration) -->
-<p-dialog
+<gr-dialog
   header="Worker Registered"
   [(visible)]="showTokenDialog"
-  [modal]="true"
-  [style]="{ width: '520px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="520px"
   [closable]="false"
 >
   @if (lastRegistration(); as reg) {
@@ -373,9 +364,9 @@
           <code class="copy-value token-value">{{ reg.token }}</code>
         </div>
         <button
-          pButton
+          grButton
           [label]="tokenCopied() ? 'Copied!' : 'Copy Token'"
-          [icon]="tokenCopied() ? 'pi pi-check' : 'pi pi-copy'"
+          [icon]="tokenCopied() ? 'check' : 'content_copy'"
           severity="secondary"
           class="copy-btn"
           (click)="copyToken()"
@@ -391,19 +382,16 @@
       <p class="text-secondary">Worker registered successfully. The token was pre-supplied and will not be echoed back.</p>
     }
   }
-  <ng-template pTemplate="footer">
-    <button pButton label="I've saved the token" icon="pi pi-check" (click)="closeTokenDialog()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="I've saved the token" icon="check" (click)="closeTokenDialog()"></button>
+  </div>
+</gr-dialog>
 
 <!-- Edit Worker Dialog -->
-<p-dialog
+<gr-dialog
   header="Edit Worker"
   [(visible)]="showRenameDialog"
-  [modal]="true"
-  [style]="{ width: '480px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="480px"
 >
   @if (renamingWorker(); as worker) {
     <div class="form-group">
@@ -412,7 +400,7 @@
     <div class="form-group">
       <label for="rename-name">Name</label>
       <input
-        pInputText
+        grInput
         id="rename-name"
         [(ngModel)]="newName"
         placeholder="e.g. Primary Build Server"
@@ -457,15 +445,15 @@
       <small class="text-secondary">Changes take effect on the worker's next reconnect (a re-auth is triggered automatically).</small>
     </div>
   }
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="cancelRename()" [disabled]="renaming()"></button>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="cancelRename()" [disabled]="renaming()"></button>
     <button
-      pButton
+      grButton
       label="Save"
-      icon="pi pi-check"
+      icon="check"
       (click)="confirmRename()"
       [loading]="renaming()"
       [disabled]="renaming() || !newName.trim()"
     ></button>
-  </ng-template>
-</p-dialog>
+  </div>
+</gr-dialog>

@@ -32,9 +32,9 @@
         </div>
       </div>
       <div class="header-actions">
-        <button pButton label="NARs" icon="pi pi-database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></button>
+        <button grButton label="NARs" icon="database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></button>
         @if (c.can_edit) {
-          <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></button>
+          <button grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></button>
         }
       </div>
     </div>

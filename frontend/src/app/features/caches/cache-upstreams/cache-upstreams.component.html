@@ -21,9 +21,9 @@
     </div>
     <button
       *appWritable="access()"
-      pButton
+      grButton
       label="Add Upstream"
-      icon="pi pi-plus"
+      icon="add"
       (click)="openAddDialog()"
       [appManagedDisable]="access()"
     ></button>
@@ -39,9 +39,9 @@
         <p class="text-secondary">Add an upstream to enable pull-through caching from another cache.</p>
         <button
           *appWritable="access()"
-          pButton
+          grButton
           label="Add Upstream"
-          icon="pi pi-plus"
+          icon="add"
           (click)="openAddDialog()"
           [appManagedDisable]="access()"
         ></button>
@@ -64,16 +64,16 @@
             <div class="upstream-actions">
               <button
                 *appWritable="access()"
-                pButton
-                icon="pi pi-pencil"
+                grButton
+                icon="edit"
                 severity="secondary"
                 [disabled]="rowDisabled()"
                 (click)="openEditDialog(u)"
               ></button>
               <button
                 *appWritable="access()"
-                pButton
-                icon="pi pi-trash"
+                grButton
+                icon="delete"
                 severity="danger"
                 [loading]="removingUpstreamId() === u.id"
                 [disabled]="rowDisabled()"
@@ -88,13 +88,10 @@
 </div>
 
 <!-- Edit Upstream Dialog -->
-<p-dialog
+<gr-dialog
   header="Edit Upstream Cache"
   [(visible)]="showEditDialog"
-  [modal]="true"
-  [style]="{ width: '480px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="480px"
 >
   @if (editError()) {
     <div class="dialog-error">
@@ -106,16 +103,16 @@
     <div class="upstream-form">
       <div class="form-group">
         <label for="edit-display-name">Display Name</label>
-        <input pInputText id="edit-display-name" [(ngModel)]="editForm.display_name" class="w-full" />
+        <input grInput id="edit-display-name" [(ngModel)]="editForm.display_name" class="w-full" />
       </div>
       @if (!u.upstream_cache_id) {
         <div class="form-group">
           <label for="edit-url">Substituter URL</label>
-          <input pInputText id="edit-url" [(ngModel)]="editForm.url" class="w-full" />
+          <input grInput id="edit-url" [(ngModel)]="editForm.url" class="w-full" />
         </div>
         <div class="form-group">
           <label for="edit-pubkey">Public Key</label>
-          <input pInputText id="edit-pubkey" [(ngModel)]="editForm.public_key" class="w-full" />
+          <input grInput id="edit-pubkey" [(ngModel)]="editForm.public_key" class="w-full" />
         </div>
         <small class="text-secondary">External caches are always Read Only.</small>
       } @else {
@@ -130,20 +127,17 @@
       }
     </div>
   }
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="savingUpstream()"></button>
-    <button pButton label="Save" icon="pi pi-check" (click)="saveUpstream()" [loading]="savingUpstream()" [disabled]="savingUpstream() || !isEditFormValid()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showEditDialog.set(false)" [disabled]="savingUpstream()"></button>
+    <button grButton label="Save" icon="check" (click)="saveUpstream()" [loading]="savingUpstream()" [disabled]="savingUpstream() || !isEditFormValid()"></button>
+  </div>
+</gr-dialog>
 
 <!-- Add Upstream Dialog -->
-<p-dialog
+<gr-dialog
   header="Add Upstream Cache"
   [(visible)]="showAddDialog"
-  [modal]="true"
-  [style]="{ width: '480px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="480px"
 >
   @if (addError()) {
     <div class="dialog-error">
@@ -164,11 +158,11 @@
     @if (upstreamType === 'internal') {
       <div class="form-group">
         <label for="up-cache-name">Cache Name</label>
-        <input pInputText id="up-cache-name" [(ngModel)]="upstreamForm.cache_name" placeholder="my-cache" class="w-full" />
+        <input grInput id="up-cache-name" [(ngModel)]="upstreamForm.cache_name" placeholder="my-cache" class="w-full" />
       </div>
       <div class="form-group">
         <label for="up-display-name-int">Display Name <span class="text-secondary">(optional)</span></label>
-        <input pInputText id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" class="w-full" />
+        <input grInput id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" class="w-full" />
       </div>
       <div class="form-group">
         <label for="up-mode">Mode</label>
@@ -184,19 +178,19 @@
     } @else if (upstreamType === 'gradient_proto') {
       <div class="form-group">
         <label for="up-gp-display-name">Display Name</label>
-        <input pInputText id="up-gp-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="My Gradient Cache" class="w-full" />
+        <input grInput id="up-gp-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="My Gradient Cache" class="w-full" />
       </div>
       <div class="form-group">
         <label for="up-gp-url">Server URL</label>
-        <input pInputText id="up-gp-url" [(ngModel)]="upstreamForm.url" placeholder="https://gradient.example.com" class="w-full" />
+        <input grInput id="up-gp-url" [(ngModel)]="upstreamForm.url" placeholder="https://gradient.example.com" class="w-full" />
       </div>
       <div class="form-group">
         <label for="up-gp-remote-cache">Remote Cache Name</label>
-        <input pInputText id="up-gp-remote-cache" [(ngModel)]="upstreamForm.remote_cache" placeholder="my-cache" class="w-full" />
+        <input grInput id="up-gp-remote-cache" [(ngModel)]="upstreamForm.remote_cache" placeholder="my-cache" class="w-full" />
       </div>
       <div class="form-group">
         <label for="up-gp-api-key">API Key <span class="text-secondary">(optional)</span></label>
-        <input pInputText type="password" id="up-gp-api-key" [(ngModel)]="upstreamForm.api_key" class="w-full" />
+        <input grInput type="password" id="up-gp-api-key" [(ngModel)]="upstreamForm.api_key" class="w-full" />
       </div>
       <div class="form-group">
         <label for="up-gp-mode">Mode</label>
@@ -209,11 +203,11 @@
     } @else {
       <div class="form-group">
         <label for="up-display-name">Display Name</label>
-        <input pInputText id="up-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="cache.nixos.org" class="w-full" />
+        <input grInput id="up-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="cache.nixos.org" class="w-full" />
       </div>
       <div class="form-group">
         <label for="up-url">Substituter URL</label>
-        <input pInputText id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" class="w-full" (blur)="probeHttpUrl()" />
+        <input grInput id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" class="w-full" (blur)="probeHttpUrl()" />
         @if (probeSuggestsProto()) {
           <div class="dialog-hint">
             <span class="material-symbols-outlined">lightbulb</span>
@@ -225,13 +219,13 @@
       </div>
       <div class="form-group">
         <label for="up-pubkey">Public Key</label>
-        <input pInputText id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" class="w-full" />
+        <input grInput id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" class="w-full" />
       </div>
       <small class="text-secondary">Http caches are always Read Only.</small>
     }
   </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showAddDialog.set(false)" [disabled]="addingUpstream()"></button>
-    <button pButton label="Add" icon="pi pi-plus" (click)="addUpstream()" [loading]="addingUpstream()" [disabled]="addingUpstream() || !isAddFormValid()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showAddDialog.set(false)" [disabled]="addingUpstream()"></button>
+    <button grButton label="Add" icon="add" (click)="addUpstream()" [loading]="addingUpstream()" [disabled]="addingUpstream() || !isAddFormValid()"></button>
+  </div>
+</gr-dialog>

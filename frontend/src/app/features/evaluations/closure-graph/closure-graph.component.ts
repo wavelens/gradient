@@ -10,10 +10,10 @@ import {
 } from '@angular/core';
 import { CommonModule, Location } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
-import { ButtonModule } from 'primeng/button';
 import { EvaluationsService, ClosureGraph } from '@core/services/evaluations.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { buildClosureSankey, SankeyNode, SankeyLink } from './closure-aggregate';
+import { ButtonComponent } from '@shared/ui';
 
 const TOP_N = 500;
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -28,7 +28,7 @@ type LaidLink = { source: LaidNode; target: LaidNode; width?: number; value: num
 @Component({
   selector: 'app-closure-graph',
   standalone: true,
-  imports: [CommonModule, ButtonModule, LoadingSpinnerComponent],
+  imports: [CommonModule, ButtonComponent, LoadingSpinnerComponent],
   templateUrl: './closure-graph.component.html',
   styleUrl: './closure-graph.component.scss',
 })

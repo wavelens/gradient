@@ -11,7 +11,7 @@
       <p class="text-secondary">Manage your build caches</p>
     </div>
     @if (canCreateCache) {
-      <button pButton label="Create Cache" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+      <button grButton label="Create Cache" icon="add" (click)="openCreateDialog()"></button>
     }
   </div>
 
@@ -130,13 +130,10 @@
 </div>
 
 <!-- Create Cache Dialog -->
-<p-dialog
+<gr-dialog
   header="Create Cache"
   [(visible)]="showCreateDialog"
-  [modal]="true"
-  [style]="{ width: '500px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="500px"
 >
   @if (createError()) {
     <div class="dialog-error">
@@ -148,7 +145,7 @@
     <div class="form-group">
       <label for="cache-display">Display Name *</label>
       <input
-        pInputText
+        grInput
         id="cache-display"
         [(ngModel)]="newCache.display_name"
         placeholder="My Cache"
@@ -161,7 +158,7 @@
       <label for="cache-name">Name *</label>
       <div class="name-input-wrapper">
         <input
-          pInputText
+          grInput
           id="cache-name"
           [(ngModel)]="newCache.name"
           placeholder="cache-name"
@@ -170,7 +167,7 @@
           (input)="onCacheNameUserInput()"
         />
         @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
+          <span class="name-check-icon"><span class="material-symbols-outlined gr-spin">progress_activity</span></span>
         } @else if (nameCheckState() === 'available') {
           <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
         } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
@@ -189,7 +186,7 @@
     <div class="form-group">
       <label for="cache-desc">Description</label>
       <textarea
-        pInputTextarea
+        grInput
         id="cache-desc"
         [(ngModel)]="newCache.description"
         placeholder="Describe your cache..."
@@ -208,20 +205,20 @@
     </div>
   </div>
 
-  <ng-template pTemplate="footer">
+  <div grDialogFooter>
     <button
-      pButton
+      grButton
       label="Cancel"
       severity="secondary"
       (click)="showCreateDialog.set(false)"
       [disabled]="creating()"
     ></button>
     <button
-      pButton
+      grButton
       label="Create"
       (click)="createCache()"
       [disabled]="!newCache.name || !newCache.display_name || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
       [loading]="creating()"
     ></button>
-  </ng-template>
-</p-dialog>
+  </div>
+</gr-dialog>

@@ -8,8 +8,6 @@ import { ApplicationConfig, APP_INITIALIZER, provideBrowserGlobalErrorListeners,
 import { provideRouter, TitleStrategy, withRouterConfig } from '@angular/router';
 import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideAnimations } from '@angular/platform-browser/animations';
-import { providePrimeNG } from 'primeng/config';
-import Aura from '@primeuix/themes/aura';
 
 import { routes } from './app.routes';
 import { authInterceptor } from '@core/interceptors/auth.interceptor';
@@ -26,15 +24,6 @@ export const appConfig: ApplicationConfig = {
       withInterceptors([authInterceptor, errorInterceptor])
     ),
     provideAnimations(),
-    providePrimeNG({
-      theme: {
-        preset: Aura,
-        options: {
-          darkModeSelector: '.app-dark',
-          cssLayer: false,
-        }
-      }
-    }),
     {
       provide: APP_INITIALIZER,
       useFactory: () => {

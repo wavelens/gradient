@@ -10,10 +10,6 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, forkJoin, EMPTY } from 'rxjs';
 import { debounceTime, switchMap } from 'rxjs/operators';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { TextareaModule } from 'primeng/textarea';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
@@ -23,6 +19,7 @@ import { LabelHelpComponent } from '@shared/components/form';
 import { EvalStatusBadgeComponent } from '@shared/components/eval-status-badge/eval-status-badge.component';
 import { slugify } from '@shared/text';
 import { Project, Task } from '@core/models';
+import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 const RESERVED_TASK_NAMES = ['build-request'];
 
@@ -33,10 +30,10 @@ const RESERVED_TASK_NAMES = ['build-request'];
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    TextareaModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
+    InputDirective,
     LoadingSpinnerComponent,
     EmptyStateComponent,
     LabelHelpComponent,

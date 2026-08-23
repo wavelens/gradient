@@ -8,14 +8,6 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { CheckboxModule } from 'primeng/checkbox';
-import { DividerModule } from 'primeng/divider';
-import { SelectModule } from 'primeng/select';
-import { SelectButtonModule } from 'primeng/selectbutton';
-import { TooltipModule } from 'primeng/tooltip';
 import { UserService } from '@core/services/user.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
@@ -24,6 +16,7 @@ import { PermissionDescriptor } from '@core/models/permission.model';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
+import { ButtonComponent, CheckboxComponent, DialogComponent, DividerComponent, InputDirective, SelectButtonComponent, SelectComponent, TooltipDirective } from '@shared/ui';
 
 type ScopeType = 'none' | 'project' | 'cache';
 
@@ -39,14 +32,14 @@ interface SelectOption {
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    CheckboxModule,
-    DividerModule,
-    SelectModule,
-    SelectButtonModule,
-    TooltipModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
+    CheckboxComponent,
+    DividerComponent,
+    SelectComponent,
+    SelectButtonComponent,
+    TooltipDirective,
     LoadingSpinnerComponent,
     ManagedDisableDirective,
   ],

@@ -28,7 +28,7 @@
         <div class="form-group">
           <label for="cache-name">Name</label>
           <input
-            pInputText
+            grInput
             id="cache-name"
             [value]="c.name"
             disabled
@@ -40,7 +40,7 @@
         <div class="form-group">
           <label for="display-name">Display Name</label>
           <input
-            pInputText
+            grInput
             id="display-name"
             [(ngModel)]="formData.display_name"
             class="w-full"
@@ -51,7 +51,7 @@
         <div class="form-group">
           <label for="description">Description</label>
           <textarea
-            pInputTextarea
+            grInput
             id="description"
             [(ngModel)]="formData.description"
             rows="3"
@@ -134,9 +134,9 @@
         <div class="form-actions">
           <button
             *appWritable="access()"
-            pButton
+            grButton
             label="Save Changes"
-            icon="pi pi-check"
+            icon="check"
             (click)="saveSettings()"
             [loading]="saving()"
             [disabled]="priorityInvalid"
@@ -155,7 +155,7 @@
             <h3>Upstream Caches</h3>
             <p class="text-secondary">External and internal caches this cache pulls through from</p>
           </div>
-          <a pButton label="Manage Upstreams" icon="pi pi-cloud-download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></a>
+          <a grButton label="Manage Upstreams" icon="cloud_download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></a>
         </div>
       </div>
     </div>
@@ -169,7 +169,7 @@
             <h3>Members & Roles</h3>
             <p class="text-secondary">Manage who has access to this cache and what they can do</p>
           </div>
-          <a pButton label="Manage Members" icon="pi pi-users" severity="secondary" [routerLink]="['/caches', cacheName, 'members-roles']"></a>
+          <a grButton label="Manage Members" icon="group" severity="secondary" [routerLink]="['/caches', cacheName, 'members-roles']"></a>
         </div>
       </div>
     </div>
@@ -185,25 +185,25 @@
               <p class="text-secondary">{{ c.active ? 'Stop serving this cache to Nix clients.' : 'Start serving this cache to Nix clients.' }}</p>
             </div>
             <button
-              pButton
+              grButton
               [label]="c.active ? 'Deactivate' : 'Activate'"
-              [icon]="c.active ? 'pi pi-times' : 'pi pi-check'"
+              [icon]="c.active ? 'close' : 'check'"
               [severity]="c.active ? 'danger' : 'success'"
               (click)="toggleActive()"
               [loading]="toggling()"
               [appManagedDisable]="access()"
             ></button>
           </div>
-          <p-divider />
+          <gr-divider />
           <div class="danger-row">
             <div>
               <h3>Delete Cache</h3>
               <p class="text-secondary">Permanently delete this cache and all its stored artifacts.</p>
             </div>
             <button
-              pButton
+              grButton
               label="Delete Cache"
-              icon="pi pi-trash"
+              icon="delete"
               severity="danger"
               (click)="showDeleteDialog.set(true)"
               [appManagedDisable]="access()"
@@ -216,17 +216,14 @@
 </div>
 
 <!-- Delete Confirmation Dialog -->
-<p-dialog
+<gr-dialog
   header="Delete Cache"
   [(visible)]="showDeleteDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="400px"
 >
   <p>Are you sure you want to delete <strong>{{ cache()?.display_name }}</strong>? This action cannot be undone.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button pButton label="Delete" severity="danger" (click)="deleteCache()" [loading]="deleting()" [disabled]="deleting()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
+    <button grButton label="Delete" severity="danger" (click)="deleteCache()" [loading]="deleting()" [disabled]="deleting()"></button>
+  </div>
+</gr-dialog>

@@ -9,11 +9,6 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
-import { ButtonModule } from 'primeng/button';
-import { DialogModule } from 'primeng/dialog';
-import { MenuModule } from 'primeng/menu';
-import { TooltipModule } from 'primeng/tooltip';
-import { MenuItem } from 'primeng/api';
 import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -26,12 +21,13 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, BuildStatusCounts } from '@core/models';
 import { commitLabel, evaluationTitle, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
+import { ButtonComponent, DialogComponent, MenuComponent, MenuItem, TooltipDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-task-detail',
   standalone: true,
   imports: [
-    CommonModule, RouterModule, ButtonModule, DialogModule, MenuModule, TooltipModule,
+    CommonModule, RouterModule, ButtonComponent, DialogComponent, MenuComponent, TooltipDirective,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
   ],
@@ -354,7 +350,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   pkgMenuModel = signal<MenuItem[]>([]);
 
   panelMenuModel = computed<MenuItem[]>(() => [
-    { label: 'Metrics', icon: 'pi pi-chart-line',
+    { label: 'Metrics', icon: 'show_chart',
       routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
   ]);
 
@@ -362,17 +358,17 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     const canArtefacts = (ep.build_status === 'Completed' || ep.build_status === 'Substituted') && ep.has_artefacts;
     return [
       {
-        label: 'Artefacts', icon: 'pi pi-download', disabled: !canArtefacts,
+        label: 'Artefacts', icon: 'download', disabled: !canArtefacts,
         routerLink: canArtefacts ? ['/project', this.projectName, 'artefacts', ep.build_id] : undefined,
         queryParams: canArtefacts ? { task: this.taskName } : undefined,
       },
       {
-        label: 'Dependency graph', icon: 'pi pi-sitemap',
+        label: 'Dependency graph', icon: 'account_tree',
         routerLink: ['/project', this.projectName, 'graph', ep.build_id],
         queryParams: { evalId: evalId, task: this.taskName },
       },
       {
-        label: 'Entry-point metrics', icon: 'pi pi-chart-line',
+        label: 'Entry-point metrics', icon: 'show_chart',
         routerLink: ['/project', this.projectName, 'task', this.taskName, 'entry-point-metrics'],
         queryParams: { eval: ep.eval },
       },

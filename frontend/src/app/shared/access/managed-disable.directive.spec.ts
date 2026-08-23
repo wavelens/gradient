@@ -25,7 +25,7 @@ class HostComponent {
 // property on a component host element does not flow into the component's
 // internal state.
 @Directive({
-  selector: 'fake-primeng-input',
+  selector: 'fake-input',
   standalone: true,
   providers: [
     { provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => FakePrimeNgInputDirective), multi: true },
@@ -45,7 +45,7 @@ class FakePrimeNgInputDirective implements ControlValueAccessor {
   selector: 'cva-host',
   standalone: true,
   imports: [FormsModule, ManagedDisableDirective, FakePrimeNgInputDirective],
-  template: `<fake-primeng-input [(ngModel)]="value" [appManagedDisable]="access()"></fake-primeng-input>`,
+  template: `<fake-input [(ngModel)]="value" [appManagedDisable]="access()"></fake-input>`,
 })
 class CvaHostComponent {
   value = '';

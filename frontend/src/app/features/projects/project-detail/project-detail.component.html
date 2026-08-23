@@ -15,8 +15,8 @@
       </div>
       @if (project.role) {
         <div class="header-actions">
-          <button pButton label="Create Task" icon="pi pi-plus" (click)="openCreateDialog()"></button>
-          <button pButton label="Settings" icon="pi pi-cog" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
+          <button grButton label="Create Task" icon="add" (click)="openCreateDialog()"></button>
+          <button grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
         </div>
       }
     </div>
@@ -63,13 +63,10 @@
 </div>
 
 <!-- Create Task Dialog -->
-<p-dialog
+<gr-dialog
   header="Create Task"
   [(visible)]="showCreateDialog"
-  [modal]="true"
-  [style]="{ width: '550px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="550px"
 >
   @if (createError()) {
     <div class="dialog-error">
@@ -81,7 +78,7 @@
     <div class="form-group">
       <label for="proj-display">Display Name *</label>
       <input
-        pInputText
+        grInput
         id="proj-display"
         [(ngModel)]="newTask.display_name"
         placeholder="My Task"
@@ -95,7 +92,7 @@
       <label for="proj-name">Name *</label>
       <div class="name-input-wrapper">
         <input
-          pInputText
+          grInput
           id="proj-name"
           [(ngModel)]="newTask.name"
           placeholder="task-name"
@@ -105,7 +102,7 @@
           (keyup.enter)="createTask()"
         />
         @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
+          <span class="name-check-icon"><span class="material-symbols-outlined gr-spin">progress_activity</span></span>
         } @else if (nameCheckState() === 'available') {
           <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
         } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved') {
@@ -126,7 +123,7 @@
     <div class="form-group">
       <label for="proj-desc">Description</label>
       <textarea
-        pInputTextarea
+        grInput
         id="proj-desc"
         [(ngModel)]="newTask.description"
         placeholder="Describe your task..."
@@ -138,7 +135,7 @@
     <div class="form-group">
       <label for="proj-repo">Repository URL *</label>
       <input
-        pInputText
+        grInput
         id="proj-repo"
         [(ngModel)]="newTask.repository"
         placeholder="https://github.com/user/repo"
@@ -154,7 +151,7 @@
         <gr-label-help href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" title="Learn about evaluation wildcards" />
       </label>
       <input
-        pInputText
+        grInput
         id="proj-wildcard"
         [(ngModel)]="newTask.wildcard"
         placeholder="**"
@@ -170,20 +167,20 @@
     </div>
   </div>
 
-  <ng-template pTemplate="footer">
+  <div grDialogFooter>
     <button
-      pButton
+      grButton
       label="Cancel"
       severity="secondary"
       (click)="showCreateDialog.set(false)"
       [disabled]="creating()"
     ></button>
     <button
-      pButton
+      grButton
       label="Create"
       (click)="createTask()"
       [disabled]="!newTask.name || !newTask.display_name || !newTask.repository || wildcardInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved' || nameCheckState() === 'checking' || creating()"
       [loading]="creating()"
     ></button>
-  </ng-template>
-</p-dialog>
+  </div>
+</gr-dialog>

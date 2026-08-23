@@ -18,7 +18,7 @@
       <p class="text-secondary">Build history over the last {{ keepEvaluations() }} completed evaluations.</p>
     </div>
     @if (latestBuildId()) {
-      <button pButton label="View Closure" icon="pi pi-sitemap" severity="secondary"
+      <button grButton label="View Closure" icon="account_tree" severity="secondary"
          [routerLink]="['/project', projectName, 'closure', 'build', latestBuildId()]"></button>
     }
   </div>

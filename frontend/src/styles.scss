@@ -7,31 +7,7 @@
 @use 'app/styles/variables' as *;
 @use 'app/styles/grids';
 
-// PrimeNG Imports
-// Note: PrimeNG 21+ requires separate theme package installation
-// For now, using custom dark theme only
-// @import 'primeng/resources/primeng.min.css';
-@import 'primeicons/primeicons.css';
-
 // Fonts are loaded via <link> tags in index.html
-
-// PrimeNG Dark Theme Customization
-:root {
-  // Override PrimeNG CSS variables with Gradient's dark theme
-  --primary-color: #{$color-primary};
-  --surface-ground: #{$color-primary};
-  --surface-section: #{$color-tertiary};
-  --surface-card: #{$color-tertiary};
-  --surface-overlay: #{$color-quaternary};
-  --surface-border: #{$color-border};
-  --text-color: #{$text-primary};
-  --text-color-secondary: #{$text-secondary};
-  --content-padding: #{$spacing-md};
-  --inline-spacing: #{$spacing-sm};
-  --border-radius: #{$border-radius-md};
-  --surface-hover: #{$color-hover};
-  --focus-ring: 0 0 0 0.2rem rgba(255, 255, 255, 0.2);
-}
 
 // Global Styles
 html, body {
@@ -115,46 +91,33 @@ a {
   direction: ltr;
 }
 
-// PrimeNG Component Overrides
-.p-component {
-  font-family: $font-family-base;
-}
-
-// PrimeNG button loading spinner animation (theme CSS is not imported)
-.p-button-loading-icon {
-  animation: fa-spin 2s infinite linear;
-}
-
-.p-button {
-  background: $color-tertiary;
-  border: 1px solid $color-border;
-  color: $text-primary;
-
-  &:hover {
-    background: $color-hover;
-    border-color: $text-secondary;
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
-    pointer-events: none;
-  }
-}
-
-.p-inputtext {
+// Shared form-control styling for the gr-ui input directive
+.gr-input {
+  padding: 0.5rem 0.7rem;
   background: $color-quaternary;
   border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
   color: $text-primary;
+  font-family: $font-family-base;
+  font-size: $font-size-sm;
 
   &:focus {
     border-color: $text-secondary;
+    outline: none;
   }
 
   &:disabled {
     cursor: not-allowed;
     opacity: 0.5;
   }
+}
+
+.gr-spin {
+  animation: gr-spin 1.2s linear infinite;
+}
+
+@keyframes gr-spin {
+  to { transform: rotate(360deg); }
 }
 
 input[type="radio"] {
@@ -173,43 +136,4 @@ select:disabled,
 textarea:disabled {
   cursor: not-allowed;
   opacity: 0.5;
-}
-
-.p-dialog {
-  background: $color-tertiary;
-  border: 1px solid $color-border;
-  color: $text-primary;
-
-  .p-dialog-header {
-    background: $color-quaternary;
-    border-bottom: 1px solid $color-border;
-  }
-
-  .p-dialog-content {
-    padding: $spacing-md;
-  }
-}
-
-.p-table {
-  background: $color-tertiary;
-  color: $text-primary;
-
-  .p-datatable-thead > tr > th {
-    background: $color-quaternary;
-    border: 1px solid $color-border;
-    color: $text-primary;
-  }
-
-  .p-datatable-tbody > tr {
-    background: $color-tertiary;
-    color: $text-primary;
-
-    &:hover {
-      background: $color-hover;
-    }
-
-    > td {
-      border: 1px solid $color-border;
-    }
-  }
 }

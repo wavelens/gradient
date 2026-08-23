@@ -8,11 +8,6 @@ import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { SelectModule } from 'primeng/select';
-import { CheckboxModule } from 'primeng/checkbox';
 import { TriggersService } from '@core/services/triggers.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -27,6 +22,7 @@ import {
   UpdateTriggerBody,
   IntegrationSummary,
 } from '@core/models';
+import { ButtonComponent, CheckboxComponent, DialogComponent, InputDirective, SelectComponent } from '@shared/ui';
 
 interface Option<T> {
   label: string;
@@ -69,11 +65,11 @@ const DEFAULT_FORM: TriggerFormState = {
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    SelectModule,
-    CheckboxModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
+    SelectComponent,
+    CheckboxComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,

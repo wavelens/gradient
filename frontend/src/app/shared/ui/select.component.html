@@ -1,0 +1,45 @@
+<button
+  type="button"
+  class="gr-select__trigger"
+  role="combobox"
+  aria-haspopup="listbox"
+  cdkOverlayOrigin
+  #trigger="cdkOverlayOrigin"
+  [id]="inputId()"
+  [disabled]="isDisabled()"
+  [attr.aria-expanded]="open()"
+  (click)="toggle()"
+  (keydown)="onKeydown($event)"
+  (blur)="onTouched()"
+>
+  <span class="gr-select__value" [class.gr-select__value--placeholder]="!selectedLabel()">
+    {{ selectedLabel() || placeholder() }}
+  </span>
+  <span class="material-symbols-outlined gr-select__arrow" aria-hidden="true">expand_more</span>
+</button>
+
+<ng-template
+  cdkConnectedOverlay
+  [cdkConnectedOverlayOrigin]="trigger"
+  [cdkConnectedOverlayOpen]="open()"
+  [cdkConnectedOverlayWidth]="triggerWidth() || 0"
+  (overlayOutsideClick)="close()"
+  (detach)="close()"
+>
+  <ul class="gr-select__panel" role="listbox">
+    @for (option of options(); track $index) {
+      <li
+        role="option"
+        class="gr-select__option"
+        [attr.aria-selected]="isSelected(option)"
+        [attr.aria-disabled]="isDisabledOption(option)"
+        [class.gr-select__option--selected]="isSelected(option)"
+        [class.gr-select__option--active]="$index === activeIndex()"
+        [class.gr-select__option--disabled]="isDisabledOption(option)"
+        (click)="pick(option)"
+      >
+        {{ labelOf(option) }}
+      </li>
+    }
+  </ul>
+</ng-template>

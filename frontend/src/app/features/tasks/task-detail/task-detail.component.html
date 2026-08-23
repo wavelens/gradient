@@ -18,18 +18,18 @@
     </div>
     <div class="head-actions">
       @if (authService.isAuthenticated()) {
-        <button *appWritable="triggerAccess()" pButton label="Start Evaluation" icon="pi pi-play"
+        <button *appWritable="triggerAccess()" grButton label="Start Evaluation" icon="play_arrow"
                 (click)="startEvaluation()" [loading]="starting()"
                 [disabled]="starting() || evaluationInProgress()"
-                [pTooltip]="evaluationInProgress() ? 'An evaluation is already in progress' : ''"></button>
-        <button *appWritable="triggerAccess()" pButton label="Restart Failed Builds" icon="pi pi-refresh"
+                [grTooltip]="evaluationInProgress() ? 'An evaluation is already in progress' : ''"></button>
+        <button *appWritable="triggerAccess()" grButton label="Restart Failed Builds" icon="refresh"
                 severity="secondary" (click)="restartFailedBuilds()" [disabled]="starting()"></button>
         @if (proj.name !== 'build-request') {
-          <button pButton label="Settings" icon="pi pi-cog" severity="secondary"
+          <button grButton label="Settings" icon="settings" severity="secondary"
                   [routerLink]="['/project', projectName, 'task', taskName, 'settings']"></button>
         }
       }
-      <button pButton label="Metrics" icon="pi pi-chart-line" severity="secondary"
+      <button grButton label="Metrics" icon="show_chart" severity="secondary"
               [routerLink]="['/project', projectName, 'task', taskName, 'metrics']"></button>
     </div>
   </div>
@@ -116,11 +116,11 @@
               </div>
             </div>
             <div class="panel-actions">
-              <button pButton size="small" icon="pi pi-ellipsis-v" severity="secondary"
+              <button grButton size="small" icon="more_vert" severity="secondary"
                       (click)="panelMenu.toggle($event)" aria-label="More"></button>
-              <p-menu #panelMenu [model]="panelMenuModel()" [popup]="true" appendTo="body" />
+              <gr-menu #panelMenu [model]="panelMenuModel()" />
               @if (isRunning(sel.status)) {
-                <button *appWritable="triggerAccess()" pButton size="small" label="Abort" icon="pi pi-times"
+                <button *appWritable="triggerAccess()" grButton size="small" label="Abort" icon="close"
                         severity="danger" (click)="abortTarget.set(sel.id)"></button>
               }
             </div>
@@ -152,7 +152,7 @@
             <app-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />
           }
-          <p-menu #pkgMenu [model]="pkgMenuModel()" [popup]="true" appendTo="body" />
+          <gr-menu #pkgMenu [model]="pkgMenuModel()" />
         </div>
       }
     </div>
@@ -165,19 +165,16 @@
     </div>
   }
 
-  <p-dialog
+  <gr-dialog
     header="Abort evaluation"
     [visible]="abortTarget() !== null"
     (visibleChange)="!$event && abortTarget.set(null)"
-    [modal]="true"
-    [style]="{ width: '400px' }"
-    [draggable]="false"
-    [resizable]="false"
+    width="400px"
   >
     <p>Do you really want to abort the eval?</p>
-    <ng-template pTemplate="footer">
-      <button pButton label="Cancel" severity="secondary" (click)="abortTarget.set(null)"></button>
-      <button pButton label="Abort" severity="danger" (click)="confirmAbort()"></button>
-    </ng-template>
-  </p-dialog>
+    <div grDialogFooter>
+      <button grButton label="Cancel" severity="secondary" (click)="abortTarget.set(null)"></button>
+      <button grButton label="Abort" severity="danger" (click)="confirmAbort()"></button>
+    </div>
+  </gr-dialog>
 }

@@ -19,7 +19,7 @@
         </div>
         <h1>Task Settings</h1>
       </div>
-      <button pButton label="Project Settings" icon="pi pi-building" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
+      <button grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
     </div>
 
     @if (errorMessage()) {
@@ -41,23 +41,23 @@
       <div class="settings-card">
         <div class="form-group">
           <label for="proj-name">Name</label>
-          <input pInputText id="proj-name" [value]="proj.name" disabled class="w-full" />
+          <input grInput id="proj-name" [value]="proj.name" disabled class="w-full" />
           <small class="text-secondary">Task name cannot be changed</small>
         </div>
 
         <div class="form-group">
           <label for="proj-display">Display Name</label>
-          <input pInputText id="proj-display" [(ngModel)]="formData.display_name" class="w-full" [appManagedDisable]="access()" />
+          <input grInput id="proj-display" [(ngModel)]="formData.display_name" class="w-full" [appManagedDisable]="access()" />
         </div>
 
         <div class="form-group">
           <label for="proj-desc">Description</label>
-          <textarea pInputTextarea id="proj-desc" [(ngModel)]="formData.description" rows="3" class="w-full" [appManagedDisable]="access()"></textarea>
+          <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" class="w-full" [appManagedDisable]="access()"></textarea>
         </div>
 
         <div class="form-group">
           <label for="proj-repo">Repository URL</label>
-          <input pInputText id="proj-repo" [(ngModel)]="formData.repository" class="w-full" [appManagedDisable]="access()" />
+          <input grInput id="proj-repo" [(ngModel)]="formData.repository" class="w-full" [appManagedDisable]="access()" />
         </div>
 
         <div class="form-group">
@@ -67,33 +67,32 @@
               <span class="material-symbols-outlined">help</span>
             </a>
           </label>
-          <input pInputText id="proj-wildcard" [(ngModel)]="formData.wildcard" class="w-full" [appManagedDisable]="access()" />
+          <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" class="w-full" [appManagedDisable]="access()" />
           <small class="text-secondary">Pattern for selecting which outputs to evaluate</small>
         </div>
 
         <div class="form-group">
           <label for="proj-keep">Keep Evaluations</label>
-          <input pInputText id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" class="w-full" [appManagedDisable]="access()" />
+          <input grInput id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" class="w-full" [appManagedDisable]="access()" />
           <small class="text-secondary">Number of completed evaluations to retain for metrics and history</small>
         </div>
 
         <div class="form-group">
           <label for="proj-concurrency">Trigger Concurrency</label>
-          <p-select
+          <gr-select
             inputId="proj-concurrency"
             [(ngModel)]="formData.concurrency"
             [options]="concurrencyOptions"
             optionLabel="label"
             optionValue="value"
             optionDisabled="disabled"
-            styleClass="w-full"
             [appManagedDisable]="access()"
           />
           <small class="text-secondary">Determines how this task handles a new trigger event when an evaluation is already running.</small>
         </div>
 
         <div class="form-group checkbox-group">
-          <p-checkbox
+          <gr-checkbox
             inputId="proj-sign-cache"
             [(ngModel)]="formData.sign_cache"
             [binary]="true"
@@ -106,9 +105,9 @@
         <div class="form-actions">
           <button
             *appWritable="access()"
-            pButton
+            grButton
             label="Save Changes"
-            icon="pi pi-check"
+            icon="check"
             (click)="saveSettings()"
             [loading]="saving()"
             [appManagedDisable]="access()"
@@ -125,7 +124,7 @@
           <p class="text-secondary">
             Triggers control how and when evaluations run for this task - polling intervals, forge push and pull-request events, and cron schedules.
           </p>
-          <a pButton label="Manage Triggers" icon="pi pi-clock" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'triggers']"></a>
+          <a grButton label="Manage Triggers" icon="schedule" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'triggers']"></a>
         </div>
       </div>
     </div>
@@ -138,7 +137,7 @@
           <p class="text-secondary">
             Actions react to evaluation and build events - send mail, post webhooks, or report status back to your forge.
           </p>
-          <a pButton label="Manage Actions" icon="pi pi-bolt" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'actions']"></a>
+          <a grButton label="Manage Actions" icon="bolt" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'actions']"></a>
         </div>
       </div>
     </div>
@@ -151,7 +150,7 @@
           <p class="text-secondary">
             Override individual flake inputs with a new git URL, or force an update of an input keeping its original URL. Inputs without an override stay at whatever flake.lock has locked.
           </p>
-          <a pButton label="Manage Flake Inputs" icon="pi pi-share-alt" severity="secondary"
+          <a grButton label="Manage Flake Inputs" icon="share" severity="secondary"
              [routerLink]="['/project', projectName, 'task', taskName, 'flake-inputs']"></a>
         </div>
       </div>
@@ -168,9 +167,9 @@
           </div>
           <button
             *appWritable="access()"
-            pButton
+            grButton
             [label]="proj.active ? 'Deactivate' : 'Activate'"
-            [icon]="proj.active ? 'pi pi-pause' : 'pi pi-play'"
+            [icon]="proj.active ? 'pause' : 'play_arrow'"
             [severity]="proj.active ? 'warn' : 'success'"
             (click)="toggleActive()"
             [loading]="toggling()"
@@ -191,9 +190,9 @@
               <p class="text-secondary">Transfer this task to another project.</p>
             </div>
             <button
-              pButton
+              grButton
               label="Transfer Ownership"
-              icon="pi pi-send"
+              icon="send"
               severity="warn"
               (click)="showTransferDialog.set(true)"
               [appManagedDisable]="access()"
@@ -206,9 +205,9 @@
               <p class="text-secondary">Permanently delete this task and all its evaluations.</p>
             </div>
             <button
-              pButton
+              grButton
               label="Delete Task"
-              icon="pi pi-trash"
+              icon="delete"
               severity="danger"
               (click)="showDeleteDialog.set(true)"
               [appManagedDisable]="access()"
@@ -221,14 +220,11 @@
 </div>
 
 <!-- Transfer Ownership Dialog -->
-<p-dialog
+<gr-dialog
   header="Transfer Ownership"
   [(visible)]="showTransferDialog"
-  [modal]="true"
-  [style]="{ width: '420px' }"
-  [draggable]="false"
-  [resizable]="false"
-  (onHide)="onTransferDialogHide()"
+  width="420px"
+  (hide)="onTransferDialogHide()"
 >
   <div class="dialog-content">
     <p>Transfer <strong>{{ task()?.display_name }}</strong> to another project. This action cannot be undone.</p>
@@ -246,36 +242,31 @@
     }
     <div class="form-group">
       <label>Target Project</label>
-      <p-autoComplete
+      <gr-autocomplete
         [(ngModel)]="transferProjectName"
         [suggestions]="transferProjectSuggestions()"
         (completeMethod)="onTransferProjectSearch($event)"
         placeholder="Project name"
-        styleClass="w-full"
         [forceSelection]="false"
         [disabled]="transferring()"
-        appendTo="body"
       />
     </div>
   </div>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
-    <button pButton label="Transfer" icon="pi pi-send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName.trim()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
+    <button grButton label="Transfer" icon="send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName.trim()"></button>
+  </div>
+</gr-dialog>
 
 <!-- Delete Confirmation Dialog -->
-<p-dialog
+<gr-dialog
   header="Delete Task"
   [(visible)]="showDeleteDialog"
-  [modal]="true"
-  [style]="{ width: '400px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="400px"
 >
   <p>Are you sure you want to delete <strong>{{ task()?.display_name }}</strong>? This action cannot be undone.</p>
-  <ng-template pTemplate="footer">
-    <button pButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button pButton label="Delete" severity="danger" (click)="deleteTask()" [loading]="deleting()" [disabled]="deleting()"></button>
-  </ng-template>
-</p-dialog>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
+    <button grButton label="Delete" severity="danger" (click)="deleteTask()" [loading]="deleting()" [disabled]="deleting()"></button>
+  </div>
+</gr-dialog>

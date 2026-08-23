@@ -8,9 +8,6 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
 import {
   CachesService,
   NarListResponse,
@@ -21,6 +18,7 @@ import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/load
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
+import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 type SortKey = 'created_at' | 'nar_size' | 'last_fetched_at';
 type SortOrder = 'asc' | 'desc';
@@ -32,9 +30,9 @@ type SortOrder = 'asc' | 'desc';
     CommonModule,
     FormsModule,
     RouterModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
     LoadingSpinnerComponent,
     WritableDirective,
     CacheNarsDetailDrawerComponent,

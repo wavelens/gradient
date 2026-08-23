@@ -8,17 +8,12 @@ import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { DividerModule } from 'primeng/divider';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { TextareaModule } from 'primeng/textarea';
-import { CheckboxModule } from 'primeng/checkbox';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { Project, AccessState } from '@core/models';
+import { ButtonComponent, CheckboxComponent, DialogComponent, DividerComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-project-settings',
@@ -27,12 +22,12 @@ import { Project, AccessState } from '@core/models';
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    DividerModule,
-    ButtonModule,
-    InputTextModule,
-    TextareaModule,
-    CheckboxModule,
+    DialogComponent,
+    DividerComponent,
+    ButtonComponent,
+    InputDirective,
+    InputDirective,
+    CheckboxComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,

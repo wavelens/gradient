@@ -11,7 +11,7 @@
       <p class="text-secondary">Manage your projects</p>
     </div>
     @if (canCreateProject) {
-      <button pButton label="Create Project" icon="pi pi-plus" (click)="openCreateDialog()"></button>
+      <button grButton label="Create Project" icon="add" (click)="openCreateDialog()"></button>
     }
   </div>
 
@@ -89,13 +89,10 @@
 </div>
 
 <!-- Create Project Dialog -->
-<p-dialog
+<gr-dialog
   header="Create Project"
   [(visible)]="showCreateDialog"
-  [modal]="true"
-  [style]="{ width: '500px' }"
-  [draggable]="false"
-  [resizable]="false"
+  width="500px"
 >
   @if (createError()) {
     <div class="dialog-error">
@@ -107,7 +104,7 @@
     <div class="form-group">
       <label for="display_name">Display Name *</label>
       <input
-        pInputText
+        grInput
         id="display_name"
         [(ngModel)]="newProject.display_name"
         placeholder="My Project"
@@ -121,7 +118,7 @@
       <label for="name">Name *</label>
       <div class="name-input-wrapper">
         <input
-          pInputText
+          grInput
           id="name"
           [(ngModel)]="newProject.name"
           placeholder="project-name"
@@ -131,7 +128,7 @@
           (keyup.enter)="createProject()"
         />
         @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><i class="pi pi-spin pi-spinner"></i></span>
+          <span class="name-check-icon"><span class="material-symbols-outlined gr-spin">progress_activity</span></span>
         } @else if (nameCheckState() === 'available') {
           <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
         } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
@@ -150,7 +147,7 @@
     <div class="form-group">
       <label for="description">Description</label>
       <textarea
-        pInputTextarea
+        grInput
         id="description"
         [(ngModel)]="newProject.description"
         placeholder="Describe your project..."
@@ -169,20 +166,20 @@
     </div>
   </div>
 
-  <ng-template pTemplate="footer">
+  <div grDialogFooter>
     <button
-      pButton
+      grButton
       label="Cancel"
       severity="secondary"
       (click)="showCreateDialog.set(false)"
       [disabled]="creating()"
     ></button>
     <button
-      pButton
+      grButton
       label="Create"
       (click)="createProject()"
       [disabled]="!newProject.name || !newProject.display_name || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'checking' || creating()"
       [loading]="creating()"
     ></button>
-  </ng-template>
-</p-dialog>
+  </div>
+</gr-dialog>

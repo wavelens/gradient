@@ -7,19 +7,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { TextareaModule } from 'primeng/textarea';
-import { SelectModule } from 'primeng/select';
-import { CheckboxModule } from 'primeng/checkbox';
-import { RadioButtonModule } from 'primeng/radiobutton';
-import { TooltipModule } from 'primeng/tooltip';
-import { ConfirmDialogModule } from 'primeng/confirmdialog';
-import { ToastModule } from 'primeng/toast';
-import { MenuModule } from 'primeng/menu';
-import { PopoverModule } from 'primeng/popover';
-import { DividerModule } from 'primeng/divider';
-import { ConfirmationService, MenuItem, MessageService } from 'primeng/api';
 
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
@@ -38,6 +25,7 @@ import {
   PageLayoutComponent,
   SettingsSectionComponent,
 } from '@shared/components/layout';
+import { ButtonComponent, CheckboxComponent, ConfirmDialogComponent, ConfirmationService, DividerComponent, InputDirective, MenuComponent, MenuItem, MessageService, PopoverComponent, SelectComponent, ToastComponent, TooltipDirective } from '@shared/ui';
 
 interface DemoCounty {
   label: string;
@@ -50,18 +38,17 @@ interface DemoCounty {
   imports: [
     CommonModule,
     ReactiveFormsModule,
-    ButtonModule,
-    InputTextModule,
-    TextareaModule,
-    SelectModule,
-    CheckboxModule,
-    RadioButtonModule,
-    TooltipModule,
-    ConfirmDialogModule,
-    ToastModule,
-    MenuModule,
-    PopoverModule,
-    DividerModule,
+    ButtonComponent,
+    InputDirective,
+    InputDirective,
+    SelectComponent,
+    CheckboxComponent,
+    TooltipDirective,
+    ConfirmDialogComponent,
+    ToastComponent,
+    MenuComponent,
+    PopoverComponent,
+    DividerComponent,
     LoadingSpinnerComponent,
     EmptyStateComponent,
     StatCardComponent,
@@ -198,10 +185,10 @@ export class StyleguideComponent {
   apiToken = 'GRAD_b3a8f9e1d2c4a6b8e0f1a3c5d7e9b1d3f5a7c9e1';
 
   rowMenuItems: MenuItem[] = [
-    { label: 'Edit', icon: 'pi pi-pencil' },
-    { label: 'Duplicate', icon: 'pi pi-clone' },
+    { label: 'Edit', icon: 'edit' },
+    { label: 'Duplicate', icon: 'content_copy' },
     { separator: true },
-    { label: 'Delete', icon: 'pi pi-trash' },
+    { label: 'Delete', icon: 'delete' },
   ];
 
   // ── Sample data ────────────────────────────────────────────────────────────
@@ -268,7 +255,7 @@ export class StyleguideComponent {
     this.confirmService.confirm({
       message: 'Are you sure you want to delete this item?',
       header: 'Confirm Delete',
-      icon: 'pi pi-exclamation-triangle',
+      icon: 'warning',
       acceptButtonProps: { label: 'Delete', severity: 'danger' },
       rejectButtonProps: { label: 'Cancel', severity: 'secondary' },
       accept: () => this.toast('success', 'Deleted', 'Item removed.'),

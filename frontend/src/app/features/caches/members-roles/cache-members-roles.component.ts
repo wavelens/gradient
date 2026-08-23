@@ -8,18 +8,13 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DialogModule } from 'primeng/dialog';
-import { ButtonModule } from 'primeng/button';
-import { InputTextModule } from 'primeng/inputtext';
-import { AutoCompleteModule } from 'primeng/autocomplete';
-import { CheckboxModule } from 'primeng/checkbox';
-import { DividerModule } from 'primeng/divider';
 import { CachesService } from '@core/services/caches.service';
 import { CacheMemberItem, CacheRole, CachePermissionDescriptor } from '@core/models/cache-permission.model';
 import { UserService } from '@core/services/user.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
+import { AutoCompleteComponent, ButtonComponent, CheckboxComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 interface RoleFormState {
   name: string;
@@ -33,12 +28,11 @@ interface RoleFormState {
     CommonModule,
     RouterModule,
     FormsModule,
-    DialogModule,
-    ButtonModule,
-    InputTextModule,
-    AutoCompleteModule,
-    CheckboxModule,
-    DividerModule,
+    DialogComponent,
+    ButtonComponent,
+    InputDirective,
+    AutoCompleteComponent,
+    CheckboxComponent,
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
