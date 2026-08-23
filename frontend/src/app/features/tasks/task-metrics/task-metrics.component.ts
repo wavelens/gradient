@@ -7,18 +7,7 @@
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import {
-  NgApexchartsModule,
-  ApexChart,
-  ApexStroke,
-  ApexFill,
-  ApexXAxis,
-  ApexYAxis,
-  ApexTooltip,
-  ApexGrid,
-  ApexDataLabels,
-  ApexMarkers,
-} from 'ng-apexcharts';
+import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
 import { TasksService, TaskMetricPoint, TaskMetricsResponse } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
@@ -30,31 +19,12 @@ const CHART_COLORS = {
   closureSize: '#fd7e14',
   runtimeClosure: '#20c997',
   deps: '#e83e8c',
-  background: '#21262d',
-  border: '#2d333b',
-  text: '#abb0b4',
-  grid: '#2d333b',
-};
-
-type ChartOptions = {
-  chart: ApexChart;
-  theme: { mode: 'dark' | 'light' };
-  stroke: ApexStroke;
-  fill: ApexFill;
-  colors: string[];
-  series: { name: string; data: (number | null)[] }[];
-  xaxis: ApexXAxis;
-  yaxis: ApexYAxis;
-  grid: ApexGrid;
-  tooltip: ApexTooltip;
-  dataLabels: ApexDataLabels;
-  markers: ApexMarkers;
 };
 
 @Component({
   selector: 'app-task-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, NgApexchartsModule, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, MetricChartComponent, LoadingSpinnerComponent],
   templateUrl: './task-metrics.component.html',
   styleUrl: './task-metrics.component.scss',
 })
@@ -92,93 +62,34 @@ export class TaskMetricsComponent implements OnInit {
     });
   }
 
-  private get labels(): string[] {
-    return this.metrics().map((p) => this.formatDate(p.created_at));
-  }
+  labels = computed(() => this.metrics().map((p) => this.formatDate(p.created_at)));
 
-  private baseChart(color: string): ChartOptions {
-    return {
-      chart: {
-        type: 'area',
-        height: 200,
-        background: CHART_COLORS.background,
-        toolbar: { show: false },
-        animations: { enabled: true, speed: 400 },
-        zoom: { enabled: false, allowMouseWheelZoom: false },
-      },
-      theme: { mode: 'dark' },
-      stroke: { curve: 'smooth', width: 2 },
-      fill: {
-        type: 'gradient',
-        gradient: { shadeIntensity: 0.3, opacityFrom: 0.4, opacityTo: 0.02, stops: [0, 100] },
-      },
-      colors: [color],
-      series: [],
-      xaxis: {
-        categories: this.labels,
-        labels: { style: { colors: CHART_COLORS.text, fontSize: '11px' }, rotate: -30 },
-        axisBorder: { color: CHART_COLORS.border },
-        axisTicks: { color: CHART_COLORS.border },
-      },
-      yaxis: {
-        labels: { style: { colors: CHART_COLORS.text } },
-      },
-      grid: { borderColor: CHART_COLORS.grid, strokeDashArray: 3 },
-      tooltip: { theme: 'dark' },
-      dataLabels: { enabled: false },
-      markers: { size: 3, strokeWidth: 0 },
-    };
-  }
+  buildTimeSeries = computed(() => [
+    { name: 'Build time', data: this.metrics().map((p) => Math.round(p.build_time_total_ms / 1000)) },
+  ]);
+  evalTimeSeries = computed(() => [
+    { name: 'Eval time', data: this.metrics().map((p) => Math.round(p.eval_time_ms / 1000)) },
+  ]);
+  outputSizeSeries = computed(() => [
+    { name: 'Output size', data: this.metrics().map((p) => p.output_size_bytes) },
+  ]);
+  closureSizeSeries = computed(() => [
+    { name: 'Build closure', data: this.metrics().map((p) => p.closure_size_bytes) },
+    { name: 'Runtime closure', data: this.metrics().map((p) => p.runtime_closure_size_bytes) },
+  ]);
+  depsSeries = computed(() => [
+    { name: 'Dependencies', data: this.metrics().map((p) => p.dependencies_count) },
+  ]);
 
-  buildTimeChart = computed<ChartOptions>(() => {
-    const pts = this.metrics();
-    const opts = this.baseChart(CHART_COLORS.buildTime);
-    opts.series = [{ name: 'Build time', data: pts.map((p) => Math.round(p.build_time_total_ms / 1000)) }];
-    opts.yaxis = { ...opts.yaxis, title: { text: 'seconds', style: { color: CHART_COLORS.text } }, labels: { style: { colors: CHART_COLORS.text }, formatter: (v: number) => `${v}s` } };
-    opts.tooltip = { theme: 'dark', y: { formatter: (v: number) => this.formatDuration(v * 1000) } };
-    return opts;
-  });
+  readonly buildTimeColor = [CHART_COLORS.buildTime];
+  readonly evalTimeColor = [CHART_COLORS.evalTime];
+  readonly outputSizeColor = [CHART_COLORS.outputSize];
+  readonly closureSizeColors = [CHART_COLORS.closureSize, CHART_COLORS.runtimeClosure];
+  readonly depsColor = [CHART_COLORS.deps];
 
-  evalTimeChart = computed<ChartOptions>(() => {
-    const pts = this.metrics();
-    const opts = this.baseChart(CHART_COLORS.evalTime);
-    opts.series = [{ name: 'Eval time', data: pts.map((p) => Math.round(p.eval_time_ms / 1000)) }];
-    opts.yaxis = { ...opts.yaxis, title: { text: 'seconds', style: { color: CHART_COLORS.text } }, labels: { style: { colors: CHART_COLORS.text }, formatter: (v: number) => `${v}s` } };
-    opts.tooltip = { theme: 'dark', y: { formatter: (v: number) => this.formatDuration(v * 1000) } };
-    return opts;
-  });
-
-  outputSizeChart = computed<ChartOptions>(() => {
-    const pts = this.metrics();
-    const opts = this.baseChart(CHART_COLORS.outputSize);
-    opts.series = [{ name: 'Output size', data: pts.map((p) => p.output_size_bytes) }];
-    opts.yaxis = { ...opts.yaxis, labels: { style: { colors: CHART_COLORS.text }, formatter: (v: number) => this.formatBytes(v) } };
-    opts.tooltip = { theme: 'dark', y: { formatter: (v: number) => this.formatBytes(v) } };
-    return opts;
-  });
-
-  closureSizeChart = computed<ChartOptions>(() => {
-    const pts = this.metrics();
-    const opts = this.baseChart(CHART_COLORS.closureSize);
-    opts.colors = [CHART_COLORS.closureSize, CHART_COLORS.runtimeClosure];
-    opts.series = [
-      { name: 'Build closure', data: pts.map((p) => p.closure_size_bytes) },
-      { name: 'Runtime closure', data: pts.map((p) => p.runtime_closure_size_bytes) },
-    ];
-    opts.yaxis = { ...opts.yaxis, labels: { style: { colors: CHART_COLORS.text }, formatter: (v: number) => this.formatBytes(v) } };
-    opts.tooltip = { theme: 'dark', y: { formatter: (v: number) => this.formatBytes(v) } };
-    return opts;
-  });
-
-  depsChart = computed<ChartOptions>(() => {
-    const pts = this.metrics();
-    const opts = this.baseChart(CHART_COLORS.deps);
-    opts.series = [{ name: 'Dependencies', data: pts.map((p) => p.dependencies_count) }];
-    opts.chart = { ...opts.chart, type: 'area' };
-    opts.yaxis = { ...opts.yaxis, labels: { style: { colors: CHART_COLORS.text }, formatter: (v: number) => String(Math.round(v)) } };
-    opts.tooltip = { theme: 'dark', y: { formatter: (v: number) => `${Math.round(v)} deps` } };
-    return opts;
-  });
+  readonly formatSeconds = (v: number) => this.formatDuration(v * 1000);
+  readonly formatSize = (v: number) => this.formatBytes(v);
+  readonly formatDeps = (v: number) => `${Math.round(v)} deps`;
 
   formatBytes(bytes: number): string {
     if (!bytes || bytes === 0) return '0 B';

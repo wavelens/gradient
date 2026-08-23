@@ -6940,3 +6940,40 @@ value.
 default, and phase 4 asserts a freshly created task reports `5`, that echoing
 that value straight back in a `PATCH` succeeds, and that `6` (over the maximum)
 and `0` (under the floor) are still refused.
+
+## Charts render without ApexCharts
+
+ApexCharts relicensed away from MIT at 5.x: the Community tier forbids use by
+organisations over $2M annual revenue and the OEM tier is required to embed it
+in a platform others deploy. Gradient is AGPL-3.0 and ships the bundle, so the
+restriction could not be passed downstream and the library had to go. Every
+chart now goes through `<app-metric-chart>` on Apache ECharts, including the
+eleven call sites in `task-metrics`, `entry-point-metrics` and `cache-detail`
+that previously hand-rolled their own ApexCharts option objects.
+
+`frontend/src/app/shared/components/metric-chart/metric-chart.options.spec.ts`
+covers `buildMetricChartOption`, the pure option builder that holds every chart
+shape and so is testable without a renderer: that `area` is a smooth line with a
+fill and `line` is not, that `bar` puts the category axis on x and `horizontal`
+swaps the axes, that nulls stay null rather than collapsing to zero (metric
+points legitimately have no build time), that the legend appears only for
+multi-series charts, and that `valueFormatter` reaches both the value axis and
+the tooltip. `radar` and `heatmap` get their own cases because they leave the
+cartesian model entirely: radar builds its indicators from the categories, and
+heatmap flattens the `{x, y}` points the board sends into the `[xIndex, yIndex,
+value]` triples ECharts wants, deriving both axes and scaling the visual map to
+the largest value present, with the empty-series case pinned so an unloaded
+board does not throw.
+
+The dual-axis cases exist for `cache-detail`, which plots bytes against requests
+on one chart: they assert two value axes with the second on the right, that a
+series marked `axis: 'right'` binds to it, and that the tooltip formats each row
+with the formatter belonging to its own axis rather than applying the left one
+to both.
+
+`frontend/src/app/shared/components/metric-chart/metric-chart.component.spec.ts`
+covers the Angular wrapper against a host component: that an ECharts SVG root is
+actually created (the SVG renderer is used rather than canvas so this is
+verifiable under jsdom), that `bare` drops the card chrome and heading for
+callers supplying their own panel, that changing the `series` input re-renders,
+and that destroying the component disposes the chart instead of leaking it.

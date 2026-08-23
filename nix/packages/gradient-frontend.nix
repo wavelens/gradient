@@ -22,7 +22,7 @@
   pnpmDeps = fetchPnpmDeps {
     inherit pnpm pname version src;
     fetcherVersion = 4;
-    hash = "sha256-aCzB0ZJAMVNa48tJF20yqkMLJlipzdsd5Aor2hUHPPQ=";
+    hash = "sha256-DM7iK9mjaIEc08fMdAIg5l+LQ5glnRfkbgsSaK8E3nI=";
   };
 
   nativeBuildInputs = [
@@ -44,6 +44,8 @@
 
     mkdir -p $out/share/gradient-frontend
     cp -r dist/gradient-frontend/browser/* $out/share/gradient-frontend/
+    install -Dm444 dist/gradient-frontend/3rdpartylicenses.txt \
+      $out/share/doc/gradient-frontend/3rdpartylicenses.txt
 
     runHook postInstall
   '';

@@ -13,18 +13,8 @@ import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint, Upstre
 import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
 import { LabelHelpComponent } from '@shared/components/form';
 import { Cache } from '@core/models';
-import {
-  NgApexchartsModule,
-  ApexChart,
-  ApexStroke,
-  ApexFill,
-  ApexXAxis,
-  ApexYAxis,
-  ApexTooltip,
-  ApexGrid,
-  ApexDataLabels,
-  ApexLegend,
-} from 'ng-apexcharts';
+import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { MetricSeries } from '@shared/components/metric-chart/metric-chart.options';
 
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';
 
@@ -33,10 +23,6 @@ const CHART_COLORS = {
   requests: '#28a745',
   storageBytes: '#fd7e14',
   storagePackages: '#6f42c1',
-  background: '#21262d',
-  border: '#2d333b',
-  text: '#abb0b4',
-  grid: '#2d333b',
 };
 
 @Component({
@@ -49,7 +35,7 @@ const CHART_COLORS = {
     CardModule,
     LoadingSpinnerComponent,
     LabelHelpComponent,
-    NgApexchartsModule,
+    MetricChartComponent,
   ],
   templateUrl: './cache-detail.component.html',
   styleUrl: './cache-detail.component.scss',
@@ -105,167 +91,28 @@ export class CacheDetailComponent implements OnInit {
     return s[key] as StorageMetricPoint[];
   });
 
-  trafficChartOptions = computed<{
-    chart: ApexChart;
-    theme: { mode: 'dark' | 'light' };
-    stroke: ApexStroke;
-    fill: ApexFill;
-    colors: string[];
-    series: { name: string; data: number[] }[];
-    xaxis: ApexXAxis;
-    yaxis: ApexYAxis | ApexYAxis[];
-    grid: ApexGrid;
-    tooltip: ApexTooltip;
-    legend: ApexLegend;
-    dataLabels: ApexDataLabels;
-  }>(() => {
-    const points = this.activePoints();
-    const categories = points.map((p) => this.formatTime(p.time, this.activeWindow()));
-    return {
-      chart: {
-        type: 'area',
-        height: 220,
-        background: CHART_COLORS.background,
-        toolbar: { show: false },
-        zoom: { allowMouseWheelZoom: false },
-        sparkline: { enabled: false },
-        animations: { enabled: true, speed: 400 },
-      },
-      theme: { mode: 'dark' },
-      stroke: { curve: 'smooth', width: [2, 2] },
-      fill: {
-        type: 'gradient',
-        gradient: {
-          shadeIntensity: 0.4,
-          opacityFrom: 0.5,
-          opacityTo: 0.05,
-          stops: [0, 100],
-        },
-      },
-      colors: [CHART_COLORS.bytes, CHART_COLORS.requests],
-      series: [
-        {
-          name: 'Bytes served',
-          data: points.map((p) => p.bytes),
-        },
-        {
-          name: 'Requests',
-          data: points.map((p) => p.requests),
-        },
-      ],
-      xaxis: {
-        categories,
-        labels: { style: { colors: CHART_COLORS.text, fontSize: '11px' }, rotate: -30 },
-        axisBorder: { color: CHART_COLORS.border },
-        axisTicks: { color: CHART_COLORS.border },
-      },
-      yaxis: [
-        {
-          title: { text: 'Bytes', style: { color: CHART_COLORS.text } },
-          labels: {
-            style: { colors: CHART_COLORS.text },
-            formatter: (v: number) => this.formatBytes(v),
-          },
-        },
-        {
-          opposite: true,
-          title: { text: 'Requests', style: { color: CHART_COLORS.text } },
-          labels: { style: { colors: CHART_COLORS.text } },
-        },
-      ],
-      grid: { borderColor: CHART_COLORS.grid, strokeDashArray: 3 },
-      tooltip: {
-        theme: 'dark',
-        y: [
-          { formatter: (v: number) => this.formatBytes(v) },
-          { formatter: (v: number) => `${v} req` },
-        ],
-      },
-      legend: { labels: { colors: CHART_COLORS.text } },
-      dataLabels: { enabled: false },
-    };
-  });
+  trafficCategories = computed(() =>
+    this.activePoints().map((p) => this.formatTime(p.time, this.activeWindow()))
+  );
+  trafficSeries = computed<MetricSeries[]>(() => [
+    { name: 'Bytes served', data: this.activePoints().map((p) => p.bytes) },
+    { name: 'Requests', data: this.activePoints().map((p) => p.requests), axis: 'right' },
+  ]);
 
-  storageChartOptions = computed<{
-    chart: ApexChart;
-    theme: { mode: 'dark' | 'light' };
-    stroke: ApexStroke;
-    fill: ApexFill;
-    colors: string[];
-    series: { name: string; data: number[] }[];
-    xaxis: ApexXAxis;
-    yaxis: ApexYAxis | ApexYAxis[];
-    grid: ApexGrid;
-    tooltip: ApexTooltip;
-    legend: ApexLegend;
-    dataLabels: ApexDataLabels;
-  }>(() => {
-    const points = this.activeStoragePoints();
-    const categories = points.map((p) => this.formatTime(p.time, this.activeWindow()));
-    return {
-      chart: {
-        type: 'area',
-        height: 220,
-        background: CHART_COLORS.background,
-        toolbar: { show: false },
-        zoom: { allowMouseWheelZoom: false },
-        sparkline: { enabled: false },
-        animations: { enabled: true, speed: 400 },
-      },
-      theme: { mode: 'dark' },
-      stroke: { curve: 'smooth', width: [2, 2] },
-      fill: {
-        type: 'gradient',
-        gradient: {
-          shadeIntensity: 0.4,
-          opacityFrom: 0.5,
-          opacityTo: 0.05,
-          stops: [0, 100],
-        },
-      },
-      colors: [CHART_COLORS.storageBytes, CHART_COLORS.storagePackages],
-      series: [
-        {
-          name: 'Bytes added',
-          data: points.map((p) => p.bytes),
-        },
-        {
-          name: 'Packages added',
-          data: points.map((p) => p.packages),
-        },
-      ],
-      xaxis: {
-        categories,
-        labels: { style: { colors: CHART_COLORS.text, fontSize: '11px' }, rotate: -30 },
-        axisBorder: { color: CHART_COLORS.border },
-        axisTicks: { color: CHART_COLORS.border },
-      },
-      yaxis: [
-        {
-          title: { text: 'Bytes', style: { color: CHART_COLORS.text } },
-          labels: {
-            style: { colors: CHART_COLORS.text },
-            formatter: (v: number) => this.formatBytes(v),
-          },
-        },
-        {
-          opposite: true,
-          title: { text: 'Packages', style: { color: CHART_COLORS.text } },
-          labels: { style: { colors: CHART_COLORS.text } },
-        },
-      ],
-      grid: { borderColor: CHART_COLORS.grid, strokeDashArray: 3 },
-      tooltip: {
-        theme: 'dark',
-        y: [
-          { formatter: (v: number) => this.formatBytes(v) },
-          { formatter: (v: number) => `${v} pkg` },
-        ],
-      },
-      legend: { labels: { colors: CHART_COLORS.text } },
-      dataLabels: { enabled: false },
-    };
-  });
+  storageCategories = computed(() =>
+    this.activeStoragePoints().map((p) => this.formatTime(p.time, this.activeWindow()))
+  );
+  storageSeries = computed<MetricSeries[]>(() => [
+    { name: 'Bytes added', data: this.activeStoragePoints().map((p) => p.bytes) },
+    { name: 'Packages added', data: this.activeStoragePoints().map((p) => p.packages), axis: 'right' },
+  ]);
+
+  readonly trafficColors = [CHART_COLORS.bytes, CHART_COLORS.requests];
+  readonly storageColors = [CHART_COLORS.storageBytes, CHART_COLORS.storagePackages];
+
+  readonly formatSize = (v: number) => this.formatBytes(v);
+  readonly trafficSecondary = { title: 'Requests', valueFormatter: (v: number) => `${v} req` };
+  readonly storageSecondary = { title: 'Packages', valueFormatter: (v: number) => `${v} pkg` };
 
   ngOnInit(): void {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
