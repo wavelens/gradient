@@ -71,6 +71,10 @@ pub struct EntryPointSummary {
     pub eval: String,
     pub build_status: gradient_entity::build::BuildStatus,
     pub has_artefacts: bool,
+    /// Output name to full `/nix/store` path, from the resolved `.drv`. Present
+    /// before the build runs; `build_status` is what says whether the path is
+    /// realised. Outputs whose path the evaluator could not resolve are omitted.
+    pub outputs: std::collections::BTreeMap<String, String>,
     pub architecture: gradient_entity::server::Architecture,
     pub build_time_ms: Option<i64>,
     pub deps: BuildStatusCounts,
@@ -94,6 +98,9 @@ pub struct EvaluationSummary {
     pub commit: String,
     pub commit_message: Option<String>,
     pub status: EvaluationStatus,
+    /// Attribute-path scope this evaluation ran with. Lets a caller tell what an
+    /// evaluation covered without waiting for its entry points to resolve.
+    pub wildcard: String,
     pub trigger: Option<EvaluationTriggerSummary>,
     pub triggered_by: Option<String>,
     /// PR/MR number for pull-request-triggered evaluations, for the "PR #42"

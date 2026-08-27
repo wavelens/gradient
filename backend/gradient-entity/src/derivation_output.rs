@@ -18,6 +18,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::{CachedPathId, DerivationId, DerivationOutputId};
 
+/// `hash` sentinel written when the evaluator could not parse an output's store
+/// path (floating CA outputs have none until built). Nothing ever rewrites it,
+/// so a row carrying it has no usable store path.
+pub const UNKNOWN_OUTPUT_HASH: &str = "unknown";
+
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation_output")]
 pub struct Model {

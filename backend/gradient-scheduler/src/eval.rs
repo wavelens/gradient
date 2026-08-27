@@ -74,8 +74,13 @@ impl DerivationInsertBatch {
                 .into_active_model(),
             );
             for output in &d.outputs {
-                let (hash, package) = get_hash_from_path(output.path.clone())
-                    .unwrap_or_else(|_| ("unknown".to_owned(), output.name.clone()));
+                let (hash, package) =
+                    get_hash_from_path(output.path.clone()).unwrap_or_else(|_| {
+                        (
+                            gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH.to_owned(),
+                            output.name.clone(),
+                        )
+                    });
                 new_outputs.push(
                     MDerivationOutput {
                         id: DerivationOutputId::now_v7(),

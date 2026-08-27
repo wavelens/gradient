@@ -1784,8 +1784,19 @@ paths:
       - $ref: '#/components/parameters/TaskSlug'
     get:
       tags: [tasks]
-      summary: List recent evaluations
-      description: Returns the `keep_evaluations` most recent evaluations for the task, newest first.
+      summary: List and search evaluations
+      description: |-
+        Returns the `keep_evaluations` most recent evaluations for the task,
+        newest first. The `commit`, `status` and `attr` filters combine (AND) to
+        answer "has this attribute at this commit been evaluated, and is it still
+        running?" without walking the whole history.
+
+        `attr` matches an evaluation's **wildcard**, not its entry points. The
+        wildcard is set when the evaluation row is created, so the filter answers
+        while the evaluation is still `Queued` or `EvaluatingFlake`; entry points
+        do not exist until derivations have resolved. The flip side is that a
+        match means the attribute was *in scope*, not that it exists in the flake
+        or that it built - read `/tasks/{project}/{task}/entry-points` for that.
       operationId: getTaskEvaluations
       security:
         - {}
@@ -1799,6 +1810,40 @@ paths:
           schema:
             type: integer
             minimum: 1
+        - name: commit
+          in: query
+          required: false
+          description: >-
+            Full 40-character hex commit hash. Short prefixes are rejected. A
+            hash with no evaluations returns an empty list, not `404`.
+          schema:
+            type: string
+            pattern: '^[0-9a-fA-F]{40}$'
+            example: "9c1a2b3c4d5e6f708192a3b4c5d6e7f809a1b2c3"
+        - name: status
+          in: query
+          required: false
+          description: >-
+            `active` (Queued, Fetching, EvaluatingFlake, EvaluatingDerivation,
+            Building, Waiting), `terminal` (Completed, Failed, Aborted), or one
+            exact status name, case-insensitive.
+          schema:
+            type: string
+            example: active
+        - name: attr
+          in: query
+          required: false
+          description: |-
+            Concrete Nix attribute path. Returns evaluations whose wildcard
+            covers it. Must not itself contain wildcard syntax (`*`, `#`, `,`);
+            double-quote segments containing dots, exactly as in a wildcard
+            (`packages."x86_64-linux".hello`), and URL-encode `"` as `%22`.
+
+            Matching runs in the server over at most the 1000 most recent
+            evaluations that pass the other filters.
+          schema:
+            type: string
+            example: "packages.x86_64-linux.hello"
       responses:
         '200':
           description: List of evaluation summaries
@@ -1814,6 +1859,14 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/EvaluationSummary'
+        '400':
+          description: >-
+            `commit` is not a 40-character hex hash, `status` is not a known
+            status or group, or `attr` carries wildcard syntax.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -1925,13 +1978,29 @@ paths:
     post:
       tags: [tasks]
       summary: Trigger evaluation
-      description: >-
-        Queues a new evaluation for the task. Returns the new evaluation UUID.
+      description: |-
+        Queues a new evaluation for the task and returns its UUID in `message`,
+        so a caller can follow the run it just started (`GET /evals/{id}`, or the
+        `GET /evals/{id}/live` stream). `mode: "restart_failed"` returns the UUID
+        of the evaluation created to re-run the previous one's failed builds.
 
         Returns `400` with `code: "repository_unreachable"` when the repository
         cannot be fetched (DNS failure, authentication failure, unreachable host,
         bad URL, …) - the message includes the underlying git error.
       operationId: triggerEvaluation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [restart_failed]
+                  description: >-
+                    Skip fetch and evaluation and re-queue the failed builds of
+                    the most recent evaluation. Omit for a normal evaluation.
       responses:
         '200':
           description: Evaluation UUID
@@ -8141,7 +8210,7 @@ components:
 
     EntryPointSummary:
       type: object
-      required: [id, build_id, derivation_path, eval, build_status, has_artefacts, architecture, deps, created_at]
+      required: [id, build_id, derivation_path, eval, build_status, has_artefacts, outputs, architecture, deps, created_at]
       properties:
         id: { type: string, format: uuid }
         build_id: { type: string, format: uuid }
@@ -8152,6 +8221,23 @@ components:
         build_status:
           $ref: '#/components/schemas/BuildStatus'
         has_artefacts: { type: boolean }
+        outputs:
+          type: object
+          additionalProperties:
+            type: string
+          description: |-
+            Map of output name to **full** `/nix/store` path (e.g.
+            `{"out": "/nix/store/xyz-hello-2.12.1"}`). Written at evaluation time
+            from the resolved `.drv`, so it is populated before the build runs -
+            `build_status` is what says whether the path is realised. Outputs
+            whose store path the evaluator could not resolve are omitted rather
+            than reported with a placeholder, so this map can be empty or miss
+            individual outputs.
+
+            Note this differs from `BuildWithOutputs.output`, which is
+            prefix-free for historical reasons.
+          example:
+            out: "/nix/store/7g0q1x3j6v8k4z5y9b1c2d3e4f5g6h7i-hello-2.12.1"
         architecture:
           type: string
           description: Nix system string, e.g. x86_64-linux
@@ -8195,7 +8281,7 @@ components:
 
     EvaluationSummary:
       type: object
-      required: [id, commit, status, total_builds, builds, errors, warnings, created_at, updated_at]
+      required: [id, commit, status, wildcard, total_builds, builds, errors, warnings, created_at, updated_at]
       properties:
         id:
           type: string
@@ -8211,6 +8297,13 @@ components:
           $ref: '#/components/schemas/EvaluationKind'
         status:
           $ref: '#/components/schemas/EvaluationStatus'
+        wildcard:
+          type: string
+          description: >-
+            Attribute-path scope the evaluation ran with. Set when the row is
+            created, so it says what an evaluation covers before its entry
+            points exist. This is what the `attr` search filter matches.
+          example: "packages.*.*"
         trigger:
           allOf:
             - $ref: '#/components/schemas/EvaluationTriggerSummary'

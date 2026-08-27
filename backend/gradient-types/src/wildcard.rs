@@ -118,6 +118,118 @@ impl Wildcard {
             excludes.join(" "),
         )
     }
+
+    /// Whether this wildcard's scope covers the concrete attribute path `attr`.
+    ///
+    /// Mirrors the evaluator's segment rules: a literal segment compares by
+    /// inner content (quotes unwrapped on both sides, so a dotted attribute
+    /// name must be quoted on the attr side too), `#` matches exactly one
+    /// segment, and `*` matches one segment - or one *or two* as the final
+    /// segment, since the walk descends one extra level there. An exclusion
+    /// pattern, always an exact path, removes a path the includes matched.
+    ///
+    /// This answers "was this attr in scope", not "was it built": the attr may
+    /// not exist in the flake at all.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use gradient_types::wildcard::Wildcard;
+    ///
+    /// let w: Wildcard = "packages.*.*,!packages.x86_64-linux.broken".parse().unwrap();
+    /// assert!(w.matches("packages.x86_64-linux.hello"));
+    /// assert!(!w.matches("packages.x86_64-linux.broken"));
+    /// ```
+    pub fn matches(&self, attr: &str) -> bool {
+        if attr.is_empty() {
+            return false;
+        }
+
+        let path = unquote_segments(attr);
+        let mut included = false;
+
+        for pattern in &self.patterns {
+            match pattern.strip_prefix('!') {
+                Some(body) => {
+                    if unquote_segments(body) == path {
+                        return false;
+                    }
+                }
+                None => included = included || pattern_covers(pattern, &path),
+            }
+        }
+
+        included
+    }
+}
+
+/// One parsed segment of an include pattern.
+enum Seg {
+    Star,
+    Hash,
+    Lit(String),
+}
+
+/// Splits a concrete attribute path into its segments, unwrapping quotes.
+fn unquote_segments(path: &str) -> Vec<String> {
+    split_segments(path)
+        .into_iter()
+        .map(|(seg, is_quoted)| {
+            if is_quoted {
+                seg.trim_matches('"').to_string()
+            } else {
+                seg
+            }
+        })
+        .collect()
+}
+
+/// Parses an include pattern into segments, collapsing consecutive `*` the same
+/// way [`path_to_nix_list`] does.
+fn pattern_segments(body: &str) -> Vec<Seg> {
+    let mut out: Vec<Seg> = Vec::new();
+
+    for (seg, is_quoted) in split_segments(body) {
+        let next = if is_quoted {
+            Seg::Lit(seg.trim_matches('"').to_string())
+        } else {
+            match seg.as_str() {
+                "*" => Seg::Star,
+                "#" => Seg::Hash,
+                _ => Seg::Lit(seg),
+            }
+        };
+
+        if matches!(next, Seg::Star) && matches!(out.last(), Some(Seg::Star)) {
+            continue;
+        }
+
+        out.push(next);
+    }
+
+    out
+}
+
+/// Whether a single include pattern covers `path`. Every segment consumes
+/// exactly one path element except a trailing `*`, which consumes one or two.
+fn pattern_covers(pattern: &str, path: &[String]) -> bool {
+    let segs = pattern_segments(pattern);
+    let Some(last) = segs.last() else {
+        return false;
+    };
+
+    if matches!(last, Seg::Star) {
+        if path.len() != segs.len() && path.len() != segs.len() + 1 {
+            return false;
+        }
+    } else if path.len() != segs.len() {
+        return false;
+    }
+
+    segs.iter().enumerate().all(|(i, seg)| match seg {
+        Seg::Star | Seg::Hash => true,
+        Seg::Lit(lit) => path[i] == *lit,
+    })
 }
 
 /// Splits a Nix attribute-path pattern on `.`, respecting double-quoted
@@ -509,5 +621,120 @@ mod tests {
             "packages.*.*,!.packages".parse::<Wildcard>().unwrap_err(),
             InputError::EvaluationWildcardStartsWithPeriod,
         );
+    }
+}
+
+#[cfg(test)]
+mod matches_tests {
+    use super::*;
+
+    fn m(pattern: &str, attr: &str) -> bool {
+        pattern.parse::<Wildcard>().unwrap().matches(attr)
+    }
+
+    #[test]
+    fn exact_path_matches_itself_only() {
+        assert!(m(
+            "packages.x86_64-linux.hello",
+            "packages.x86_64-linux.hello"
+        ));
+        assert!(!m(
+            "packages.x86_64-linux.hello",
+            "packages.x86_64-linux.world"
+        ));
+        assert!(!m("packages.x86_64-linux.hello", "packages.x86_64-linux"));
+    }
+
+    #[test]
+    fn star_mid_pattern_matches_exactly_one_segment() {
+        assert!(m("my.*.test", "my.foo.test"));
+        assert!(!m("my.*.test", "my.test"));
+        assert!(!m("my.*.test", "my.foo.bar.test"));
+    }
+
+    #[test]
+    fn hash_matches_exactly_one_segment_and_does_not_descend() {
+        assert!(m("packages.x86_64-linux.#", "packages.x86_64-linux.hello"));
+        assert!(!m(
+            "packages.x86_64-linux.#",
+            "packages.x86_64-linux.py.hello"
+        ));
+        assert!(!m("packages.x86_64-linux.#", "packages.x86_64-linux"));
+    }
+
+    /// A trailing `*` descends one extra level, so it covers both the attr at
+    /// that position and derivations one level below it.
+    #[test]
+    fn trailing_star_matches_one_or_two_segments() {
+        assert!(m("packages.*", "packages.x86_64-linux"));
+        assert!(m("packages.*", "packages.x86_64-linux.hello"));
+        assert!(!m("packages.*", "packages"));
+        assert!(!m("packages.*", "packages.x86_64-linux.py.hello"));
+    }
+
+    /// `packages.*.*` and `packages.*` are the same pattern - consecutive stars
+    /// collapse before evaluation, so they must match the same set here too.
+    #[test]
+    fn consecutive_stars_collapse() {
+        for attr in ["packages.x86_64-linux", "packages.x86_64-linux.hello"] {
+            assert_eq!(m("packages.*.*", attr), m("packages.*", attr), "{attr}");
+        }
+        assert!(m("packages.*.*", "packages.x86_64-linux.hello"));
+        assert!(!m("packages.*.*", "packages.x86_64-linux.py.hello"));
+    }
+
+    #[test]
+    fn bare_star_matches_top_two_levels() {
+        assert!(m("*", "hello"));
+        assert!(m("*", "packages.hello"));
+        assert!(!m("*", "packages.x86_64-linux.hello"));
+    }
+
+    #[test]
+    fn any_include_pattern_may_match() {
+        let w: Wildcard = "packages.*.*,checks.*.*".parse().unwrap();
+        assert!(w.matches("packages.x86_64-linux.hello"));
+        assert!(w.matches("checks.x86_64-linux.fmt"));
+        assert!(!w.matches("devShells.x86_64-linux.default"));
+    }
+
+    #[test]
+    fn exclusion_removes_an_otherwise_matching_path() {
+        let w: Wildcard = "packages.*.*,!packages.x86_64-linux.broken"
+            .parse()
+            .unwrap();
+        assert!(w.matches("packages.x86_64-linux.hello"));
+        assert!(!w.matches("packages.x86_64-linux.broken"));
+        assert!(w.matches("packages.aarch64-linux.broken"));
+    }
+
+    /// Both sides are split on unquoted `.` and compared by inner content, so a
+    /// dotted attribute name must be quoted on the attr side too - `a."b.c".d`
+    /// is three segments and is NOT the same path as the four-segment `a.b.c.d`.
+    #[test]
+    fn quoted_segments_compare_by_inner_content() {
+        assert!(m(
+            r#"packages.*."python3.12""#,
+            r#"packages.x86_64-linux."python3.12""#
+        ));
+        assert!(!m(
+            r#"packages.*."python3.12""#,
+            "packages.x86_64-linux.python3.12"
+        ));
+        assert!(m(r#"my."wild.card".test"#, r#"my."wild.card".test"#));
+        assert!(!m(r#"my."wild.card".test"#, "my.wild.card.test"));
+    }
+
+    /// The attr side is a concrete path, so a caller may quote segments that
+    /// contain dots exactly as they would in the wildcard.
+    #[test]
+    fn quoted_attr_segments_are_unwrapped_too() {
+        assert!(m("packages.*.*", r#"packages."x86_64-linux".hello"#));
+    }
+
+    #[test]
+    fn empty_attr_never_matches() {
+        assert!(!m("*", ""));
+        assert!(!m("packages.*.*", ""));
     }
 }
