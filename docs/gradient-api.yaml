@@ -2001,6 +2001,27 @@ paths:
                   description: >-
                     Skip fetch and evaluation and re-queue the failed builds of
                     the most recent evaluation. Omit for a normal evaluation.
+                commit:
+                  type: string
+                  pattern: '^[0-9a-fA-F]{40}$'
+                  description: |-
+                    Exact commit to evaluate. Omit to take the branch head, which
+                    is what a normal CI run does. The commit must be reachable in
+                    the task's repository or the request is refused with
+                    `code: "repository_unreachable"` rather than queueing an
+                    evaluation that fails fetching.
+
+                    A pinned run is marked `concurrent`, so it neither queues
+                    behind nor aborts the task's own CI run, and it does not bump
+                    tracked flake inputs - it asks for one exact revision.
+                  example: "9c1a2b3c4d5e6f708192a3b4c5d6e7f809a1b2c3"
+                attr:
+                  type: string
+                  description: >-
+                    Attribute path or wildcard to evaluate instead of the task's
+                    own, e.g. `packages.x86_64-linux.hello`. Narrowing the scope
+                    is what makes a per-deployment evaluation cheap.
+                  example: "packages.x86_64-linux.hello"
       responses:
         '200':
           description: Evaluation UUID
@@ -3366,6 +3387,93 @@ paths:
           description: Session already dispatched or has blobs still missing.
         '410':
           description: Session expired.
+
+  /build-requests/url:
+    post:
+      tags: [build-requests]
+      summary: Queue a build request against a remote repository
+      description: |-
+        The no-upload build request: the source is already published at a URL, so
+        only the URL and a revision are posted and the worker fetches the flake
+        itself. Use this to build one attribute of a repository on demand -
+        a deployment tool resolving a commit, for instance - without creating a
+        task for it.
+
+        Runs on the project's reserved `build-request` task, created lazily on
+        first use and shared by every build request in the project, so no task is
+        created per job. Evaluations queued here are `concurrent`: build requests
+        are independent one-shot jobs and never queue behind or abort each other.
+
+        Supply `rev` for an exact commit, `ref` for a branch or tag the server
+        resolves first, or neither to take the repository's default branch. SSH
+        URLs are authenticated with the project's deploy key. Local paths
+        (`file://`) are rejected.
+
+        Requires the `TriggerEvaluation` permission on the project. This lets a
+        caller have Gradient fetch and evaluate an arbitrary remote flake on the
+        build fleet - the same capability the source-upload flows already grant.
+      operationId: postBuildRequestUrl
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project, url]
+              properties:
+                project:
+                  type: string
+                  description: Project the build runs under; supplies the cache, the workers, and the deploy key.
+                url:
+                  type: string
+                  description: Repository URL, `https://`, `ssh://`, or SCP-style.
+                  example: "ssh://git@github.com/org/repo.git"
+                ref:
+                  type: string
+                  description: Branch or tag to resolve. Mutually exclusive with `rev`.
+                  example: main
+                rev:
+                  type: string
+                  pattern: '^[0-9a-fA-F]{40}$'
+                  description: Exact commit to build. Mutually exclusive with `ref`.
+                  example: "9c1a2b3c4d5e6f708192a3b4c5d6e7f809a1b2c3"
+                target:
+                  type: string
+                  description: Attribute path or wildcard to evaluate. Defaults to the reserved task's wildcard.
+                  example: "packages.x86_64-linux.k8s-resources"
+                input_overrides:
+                  type: array
+                  description: Per-run flake input overrides; only remote flake refs are accepted.
+                  items:
+                    $ref: '#/components/schemas/InputOverride'
+      responses:
+        '200':
+          description: Evaluation queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        $ref: '#/components/schemas/DispatchResponse'
+        '400':
+          description: >-
+            Empty `url`, a local `file://` URL, `ref` and `rev` given together,
+            `rev` that is not a 40-character hex hash, an input override that is
+            not a remote flake ref, or (`code: "repository_unreachable"`) a `ref`
+            the server could not resolve.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /build-requests/source:
     post:

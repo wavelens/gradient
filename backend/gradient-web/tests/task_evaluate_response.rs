@@ -148,3 +148,81 @@ fn restart_failed_answers_with_the_new_evaluation_id() {
         Uuid::parse_str(body["message"].as_str().unwrap()).expect("message must be a UUID");
     });
 }
+
+/// Sequence up to the point the pinned-commit validation runs: authorize, then
+/// `load_task` with the TriggerEvaluation permission.
+fn authorized_db(session_id: SessionId) -> MockDatabase {
+    let session = live_session(session_id);
+    MockDatabase::new(DatabaseBackend::Postgres)
+        .append_query_results([vec![session.clone()]])
+        .append_query_results([vec![session]])
+        .append_query_results([vec![user()]])
+        .append_query_results([vec![project::Model {
+            id: project_id(),
+            name: "test-project".into(),
+            display_name: "Test Project".into(),
+            public_key: "ssh-ed25519 AAAA test".into(),
+            private_key: "encrypted".into(),
+            created_by: user_id(),
+            created_at: test_date(),
+            ..Default::default()
+        }]])
+        .append_query_results([vec![task_row()]])
+        .append_query_results([vec![admin_membership()]])
+        .append_query_results([vec![admin_role()]])
+}
+
+async fn evaluate(db: MockDatabase, session_id: SessionId, body: Value) -> axum_test::TestResponse {
+    make_test_server(db.into_connection())
+        .post("/api/v1/tasks/test-project/test-task/evaluate")
+        .add_header(
+            "Authorization",
+            format!("Bearer {}", make_token(session_id)),
+        )
+        .json(&body)
+        .await
+}
+
+/// A pinned commit must be exact: a prefix would make the evaluation ambiguous,
+/// and both validations run before any git work so a bad request costs nothing.
+#[test]
+fn rejects_a_commit_that_is_not_a_full_hash() {
+    run(async {
+        let session_id = SessionId::now_v7();
+        let res = evaluate(
+            authorized_db(session_id),
+            session_id,
+            json!({ "commit": "9c1a2b3" }),
+        )
+        .await;
+
+        res.assert_status_bad_request();
+        let body: Value = res.json();
+        assert!(
+            body["message"].as_str().unwrap().contains("40-character"),
+            "unexpected message: {}",
+            body["message"]
+        );
+    });
+}
+
+#[test]
+fn rejects_an_unparsable_attr() {
+    run(async {
+        let session_id = SessionId::now_v7();
+        let res = evaluate(
+            authorized_db(session_id),
+            session_id,
+            json!({ "attr": ".packages" }),
+        )
+        .await;
+
+        res.assert_status_bad_request();
+        let body: Value = res.json();
+        assert!(
+            body["message"].as_str().unwrap().contains("attr"),
+            "unexpected message: {}",
+            body["message"]
+        );
+    });
+}

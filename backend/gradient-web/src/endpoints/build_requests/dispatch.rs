@@ -217,48 +217,98 @@ pub(super) async fn finalize_build_request(
 
     let cached_path = ensure_cached_path(&tx, nar).await?;
     queue_signature_placeholders(&tx, &cached_path, &project).await?;
-    let task = ensure_build_request_task(
+
+    let response = queue_build_request(
         &tx,
+        state,
+        project,
+        user,
+        BuildRequestSource {
+            repository: nar.store_path.clone(),
+            commit_hash: vec![0; 20],
+            commit_message: format!("Build request {}", nar.store_hash),
+            target,
+            input_overrides,
+        },
+    )
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(response)
+}
+
+/// What the evaluator should read, and how to label it. `repository` is either a
+/// `/nix/store/<hash>-source` path for an uploaded source or a `git+…?rev=` URL
+/// for a remote one; the evaluator treats both as flake sources.
+pub(super) struct BuildRequestSource {
+    pub repository: String,
+    /// Real commit hash for a remote source; the upload path has no commit and
+    /// passes a zero placeholder.
+    pub commit_hash: Vec<u8>,
+    pub commit_message: String,
+    pub target: Option<String>,
+    pub input_overrides: Vec<(String, String)>,
+}
+
+/// Queues one evaluation on the project's reserved `build-request` task,
+/// creating that task on first use. Shared by every build-request entry point.
+///
+/// Evaluations are marked `concurrent`: build requests are independent one-shot
+/// jobs, so they must not serialise behind each other on
+/// `uq_evaluation_one_active_per_task`, nor abort one another.
+pub(super) async fn queue_build_request<C: ConnectionTrait>(
+    tx: &C,
+    state: &ServerState,
+    project: gradient_types::ids::ProjectId,
+    user: &MUser,
+    source: BuildRequestSource,
+) -> WebResult<DispatchResponse> {
+    let task = ensure_build_request_task(
+        tx,
         project,
         user.id,
         state.config.storage.default_keep_evaluations(),
     )
     .await?;
 
-    let target = target
+    let target = source
+        .target
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .unwrap_or_else(|| task.wildcard.clone());
 
     let commit = MCommit {
         id: CommitId::now_v7(),
-        message: format!("Build request {}", nar.store_hash),
-        hash: vec![0; 20],
+        message: source.commit_message,
+        hash: source.commit_hash,
         author: Some(user.id),
         author_name: user.name.clone(),
     }
     .into_active_model()
-    .insert(&tx)
+    .insert(tx)
     .await?;
 
     let now_ts = now();
     let evaluation = MEvaluation {
         id: EvaluationId::now_v7(),
         task: Some(task.id),
-        repository: nar.store_path.clone(),
+        repository: source.repository,
         commit: commit.id,
         wildcard: target,
         status: gradient_entity::evaluation::EvaluationStatus::Queued,
+        concurrent: true,
         created_at: now_ts,
         updated_at: now_ts,
         ..Default::default()
     }
     .into_active_model()
-    .insert(&tx)
+    .insert(tx)
     .await?;
 
-    if !input_overrides.is_empty() {
-        let rows: Vec<AEvaluationFlakeInputOverride> = input_overrides
+    if !source.input_overrides.is_empty() {
+        let rows: Vec<AEvaluationFlakeInputOverride> = source
+            .input_overrides
             .into_iter()
             .map(|(input_name, url)| {
                 MEvaluationFlakeInputOverride {
@@ -271,13 +321,11 @@ pub(super) async fn finalize_build_request(
             })
             .collect();
         EEvaluationFlakeInputOverride::insert_many(rows)
-            .exec(&tx)
+            .exec(tx)
             .await?;
     }
 
-    let cache = resolve_project_cache_name(&tx, project).await?;
-
-    tx.commit().await?;
+    let cache = resolve_project_cache_name(tx, project).await?;
 
     Ok(DispatchResponse {
         evaluation: evaluation.id,
@@ -453,7 +501,7 @@ async fn ensure_build_request_task<C: ConnectionTrait>(
         created_at: now(),
         managed: true,
         keep_evaluations,
-        concurrency: ConcurrencyPolicy::SoftAbort,
+        concurrency: ConcurrencyPolicy::All,
         sign_cache: true,
         ..Default::default()
     }
