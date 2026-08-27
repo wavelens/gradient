@@ -150,7 +150,7 @@ fn cache_traffic_sql() -> String {
     WHERE cm.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
     GROUP BY cm.bucket_time, cm.cache \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum, \
+    DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
                   min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
         minute = i16::from(RollupGranularity::Minute)
     )
@@ -169,7 +169,7 @@ fn cache_storage_sql() -> String {
     WHERE cps.created_at >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
     GROUP BY date_trunc('minute', cps.created_at), cps.cache \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
+    DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum",
         minute = i16::from(RollupGranularity::Minute)
     )
 }
@@ -187,7 +187,7 @@ fn upstream_latency_sql() -> String {
     WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
     GROUP BY um.bucket_time, um.upstream_url \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
+    DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum",
         minute = i16::from(RollupGranularity::Minute)
     )
 }
@@ -204,7 +204,7 @@ fn upstream_hits_sql() -> String {
     WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
     GROUP BY um.bucket_time, um.upstream_url \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
+    DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum",
         minute = i16::from(RollupGranularity::Minute)
     )
 }
@@ -221,7 +221,7 @@ fn upstream_misses_sql() -> String {
     WHERE um.bucket_time >= (now() AT TIME ZONE 'UTC') - interval '15 minutes' \
     GROUP BY um.bucket_time, um.upstream_url \
     ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-    DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum",
+    DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum",
         minute = i16::from(RollupGranularity::Minute)
     )
 }
@@ -311,7 +311,7 @@ fn build_count_sql(m: &BuildCount) -> String {
            AND ({filter}) \
          GROUP BY date_trunc('minute', b.{col}), pr.project \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-         DO UPDATE SET count = EXCLUDED.count",
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count",
         name = m.name,
         col = m.time_col,
         window = MINUTE_WINDOW,
@@ -340,7 +340,7 @@ fn build_duration_sql(m: &BuildDuration) -> String {
            AND ({filter}) \
          GROUP BY date_trunc('minute', b.{end}), pr.project \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-         DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum, \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
                        min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
         name = m.name,
         end = m.end_col,
@@ -377,7 +377,7 @@ fn build_duration_attempt_sql() -> String {
            AND b.status = {completed} \
          GROUP BY date_trunc('minute', ba.build_finished_at), pr.project \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-         DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum, \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
                        min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
         ms = ms,
         window = MINUTE_WINDOW,
@@ -399,13 +399,20 @@ fn eval_count_sql(m: &EvalCount) -> String {
            AND ({filter}) \
          GROUP BY date_trunc('minute', e.finished_at), p.project \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-         DO UPDATE SET count = EXCLUDED.count",
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count",
         name = m.name,
         window = MINUTE_WINDOW,
         filter = m.filter,
     )
 }
 
+/// Fold `source` buckets into `target` buckets. The grouping key is exactly the
+/// unique index `(metric, granularity, bucket_start, scope_hash)`: grouping by
+/// `scope` as well would split one conflict key across two rows whenever the
+/// scope payload is re-shaped mid-window (the organization -> project rename,
+/// #571), and Postgres rejects the whole statement with "ON CONFLICT DO UPDATE
+/// command cannot affect row a second time". `scope_hash` identifies the series,
+/// so the newest source bucket supplies the representative `scope`.
 fn cascade_sql(target: RollupGranularity, source: RollupGranularity, window: &str) -> String {
     let unit = target.trunc_unit();
     let target = i16::from(target);
@@ -414,14 +421,14 @@ fn cascade_sql(target: RollupGranularity, source: RollupGranularity, window: &st
         "INSERT INTO metric_rollup \
          (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
          SELECT uuidv7(), metric, {target}, date_trunc('{unit}', bucket_start), \
-                scope, scope_hash, \
+                (array_agg(scope ORDER BY bucket_start DESC))[1], scope_hash, \
                 sum(count)::bigint, sum(sum), min(min), max(max), sum(sum_sq), NULL \
          FROM metric_rollup \
          WHERE granularity = {source} \
            AND bucket_start >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
-         GROUP BY metric, scope_hash, scope, date_trunc('{unit}', bucket_start) \
+         GROUP BY metric, scope_hash, date_trunc('{unit}', bucket_start) \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
-         DO UPDATE SET count = EXCLUDED.count, sum = EXCLUDED.sum, \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
                        min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq"
     )
 }
@@ -429,6 +436,25 @@ fn cascade_sql(target: RollupGranularity, source: RollupGranularity, window: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every statement the rollup pass executes, in one iterator.
+    fn all_rollup_sql() -> Vec<String> {
+        build_counts()
+            .iter()
+            .map(build_count_sql)
+            .chain(BUILD_DURATIONS.iter().map(build_duration_sql))
+            .chain(eval_counts().iter().map(eval_count_sql))
+            .chain([
+                build_duration_attempt_sql(),
+                cache_traffic_sql(),
+                cache_storage_sql(),
+                upstream_latency_sql(),
+                upstream_hits_sql(),
+                upstream_misses_sql(),
+            ])
+            .chain(CASCADES.iter().map(|(t, s, w)| cascade_sql(*t, *s, w)))
+            .collect()
+    }
 
     /// The Build/BuildAttempt split moved `build_started_at`/`build_finished_at`
     /// to `build_attempt`; rollups over `build b` must not reference them.
@@ -450,6 +476,51 @@ mod tests {
         let sql = build_duration_attempt_sql();
         assert!(sql.contains("build_attempt"));
         assert!(sql.contains("ba.build_started_at") && sql.contains("ba.build_finished_at"));
+    }
+
+    /// Every rollup statement's `GROUP BY` must be exactly the unique index
+    /// `(metric, granularity, bucket_start, scope_hash)`. A coarser grouping key
+    /// (adding `scope`, #571) proposes two rows for one conflict key and
+    /// Postgres aborts the whole statement with "ON CONFLICT DO UPDATE command
+    /// cannot affect row a second time".
+    #[test]
+    fn upserts_never_group_by_scope() {
+        for sql in all_rollup_sql() {
+            let group_by = sql
+                .split("GROUP BY")
+                .nth(1)
+                .unwrap_or_else(|| panic!("no GROUP BY: {sql}"));
+            let group_by = group_by.split("ON CONFLICT").next().unwrap();
+            assert!(
+                !group_by.contains("scope,") && !group_by.contains(" scope "),
+                "grouping by scope splits one conflict key: {group_by}"
+            );
+        }
+    }
+
+    /// A row written before a scope re-key keeps the stale shape forever unless
+    /// the upsert refreshes it, which is how the pre-rename `{'org': id}` rows
+    /// survived alongside `{'project': id}` on the same `scope_hash`.
+    #[test]
+    fn upserts_refresh_scope_on_conflict() {
+        for sql in all_rollup_sql() {
+            let update = sql
+                .split("DO UPDATE SET")
+                .nth(1)
+                .unwrap_or_else(|| panic!("no DO UPDATE: {sql}"));
+            assert!(
+                update.contains("scope = EXCLUDED.scope"),
+                "stale scope shape never self-heals: {sql}"
+            );
+        }
+    }
+
+    /// The cascade still has to carry a scope forward, just not as a grouping
+    /// column: the newest source bucket in the group supplies it.
+    #[test]
+    fn cascade_carries_the_newest_scope() {
+        let sql = cascade_sql(RollupGranularity::Day, RollupGranularity::Hour, "2 days");
+        assert!(sql.contains("(array_agg(scope ORDER BY bucket_start DESC))[1]"));
     }
 
     /// Derivations are global; build rollups must attribute project through the
