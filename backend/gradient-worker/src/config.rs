@@ -101,11 +101,13 @@ pub struct WorkerConfig {
     pub max_eval_rss: u64,
 
     /// Free-RAM safety margin in MiB for the eval-subprocess reaper. When host
-    /// `MemAvailable` falls below this, the worker SIGKILLs the largest live eval
-    /// subprocess to forestall a host OOM (the parent then reports the eval as
-    /// failed instead of the machine freezing). `0` selects an adaptive margin
-    /// of `max(1 GiB, 10% of total RAM)`. `max_eval_rss` still bounds
-    /// steady-state RSS; this is the proactive peak guard.
+    /// `MemAvailable` falls below this, the worker SIGKILLs the one live eval
+    /// subprocess holding enough resident memory to bring it back above the
+    /// margin (the parent then reports the eval as failed instead of the machine
+    /// freezing); when no eval is that large the pressure is not coming from
+    /// evaluation and nothing is killed. `0` selects an adaptive margin of
+    /// `10% of total RAM, clamped to [128 MiB, 1 GiB]`. `max_eval_rss` still
+    /// bounds steady-state RSS; this is the proactive peak guard.
     #[arg(long, env = "GRADIENT_MIN_FREE_RAM_MB", default_value_t = 0)]
     pub min_free_ram_mb: u64,
 

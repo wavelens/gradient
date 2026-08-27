@@ -230,7 +230,7 @@ in {
       };
 
       minFreeRamMb = lib.mkOption {
-        description = "Free-RAM safety margin in MiB for the eval-subprocess reaper. When host MemAvailable falls below this, the worker SIGKILLs the largest live eval subprocess to forestall a host OOM (the parent then reports the eval failed instead of the machine freezing). 0 selects an adaptive margin of max(1 GiB, 10% of total RAM). maxEvalRss still bounds steady-state RSS; this is the proactive peak guard.";
+        description = "Free-RAM safety margin in MiB for the eval-subprocess reaper. When host MemAvailable falls below this, the worker SIGKILLs the one live eval subprocess holding enough resident memory to bring it back above the margin (the parent then reports the eval failed instead of the machine freezing); when no eval is that large the pressure is not coming from evaluation and nothing is killed. 0 selects an adaptive margin of 10% of total RAM clamped to [128 MiB, 1 GiB]. maxEvalRss still bounds steady-state RSS; this is the proactive peak guard.";
         type = lib.types.ints.unsigned;
         default = 0;
       };
