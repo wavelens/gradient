@@ -21,16 +21,18 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::get_any_project_by_name;
 use gradient_entity::build::BuildStatus;
+use gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH;
+use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_sources::{check_task_updates, get_commit_info, get_path_from_derivation_output};
 use gradient_storage::nar_extract::{
     ExtractError, Extracted, extract_path_from_reader, nar_reader_from_stream,
 };
-use gradient_types::input::vec_to_hex;
+use gradient_types::input::{hex_to_vec, vec_to_hex};
 use gradient_types::*;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, Iterable, QueryFilter, QueryOrder, QuerySelect};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 #[derive(Deserialize, Default)]
@@ -146,6 +148,7 @@ pub(super) async fn evaluations_to_summaries(
             commit: commit_hash,
             commit_message,
             status: evaluation.status,
+            wildcard: evaluation.wildcard.clone(),
             trigger,
             triggered_by,
             pr_number,
@@ -196,7 +199,7 @@ pub async fn post_task_evaluate(
     let mode = body.as_ref().and_then(|b| b.mode.as_deref());
 
     if mode == Some("restart_failed") {
-        gradient_ci::trigger_restart_builds(&state.web_db, &task)
+        let eval = gradient_ci::trigger_restart_builds(&state.web_db, &task)
             .await
             .map_err(|e| match e {
                 gradient_ci::TriggerError::AlreadyInProgress => {
@@ -208,7 +211,7 @@ pub async fn post_task_evaluate(
                 gradient_ci::TriggerError::Db(db_err) => WebError::from(db_err),
             })?;
 
-        return Ok(ok_json("Restarting failed builds".to_string()));
+        return Ok(ok_json(eval.id.to_string()));
     }
 
     let mut task_for_check = task.clone();
@@ -272,7 +275,7 @@ pub async fn post_task_evaluate(
     let eval = gradient_ci::park_if_no_workers(&state.web_db, eval, task.project).await?;
     gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
 
-    Ok(ok_json("Evaluation started".to_string()))
+    Ok(ok_json(eval.id.to_string()))
 }
 
 /// `GET /tasks/{project}/{task}/evaluations`
@@ -297,12 +300,56 @@ pub async fn get_task_evaluations(
     .await?;
 
     let limit = params.limit.unwrap_or(task.keep_evaluations as u64);
-    let evaluations = EEvaluation::find()
-        .filter(CEvaluation::Task.eq(task.id))
-        .order_by_desc(CEvaluation::CreatedAt)
-        .limit(limit)
-        .all(&state.web_db)
-        .await?;
+    let attr = params.attr.as_deref().map(parse_attr_filter).transpose()?;
+
+    let mut query = EEvaluation::find().filter(CEvaluation::Task.eq(task.id));
+
+    if let Some(commit) = params.commit.as_deref() {
+        let hash = hex_to_vec(commit)
+            .ok()
+            .filter(|h| h.len() == COMMIT_HASH_BYTES)
+            .ok_or_else(|| WebError::bad_request("`commit` must be a 40-character hex hash"))?;
+
+        // A fresh `commit` row is written per evaluation, so one hash maps to
+        // many ids; resolve them first rather than joining on every scan.
+        let commit_ids: Vec<CommitId> = ECommit::find()
+            .filter(CCommit::Hash.eq(hash))
+            .all(&state.web_db)
+            .await?
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+
+        if commit_ids.is_empty() {
+            return Ok(ok_json(vec![]));
+        }
+
+        query = query.filter(CEvaluation::Commit.is_in(commit_ids));
+    }
+
+    if let Some(status) = params.status.as_deref() {
+        query = query.filter(CEvaluation::Status.is_in(parse_status_filter(status)?));
+    }
+
+    let query = query.order_by_desc(CEvaluation::CreatedAt);
+
+    // Wildcard coverage cannot be expressed in SQL, so an `attr` search reads a
+    // bounded window of the SQL-filtered rows and matches them here.
+    let evaluations = match attr {
+        Some(attr) => query
+            .limit(ATTR_SCAN_LIMIT)
+            .all(&state.web_db)
+            .await?
+            .into_iter()
+            .filter(|e| {
+                e.wildcard
+                    .parse::<Wildcard>()
+                    .is_ok_and(|w| w.matches(attr))
+            })
+            .take(limit as usize)
+            .collect(),
+        None => query.limit(limit).all(&state.web_db).await?,
+    };
 
     let summaries = evaluations_to_summaries(&state.0, evaluations).await?;
 
@@ -388,6 +435,53 @@ pub async fn get_task_details(
 #[derive(Deserialize, Debug, Default)]
 pub struct EvaluationsQuery {
     pub limit: Option<u64>,
+    /// Full 40-character commit hash, hex.
+    pub commit: Option<String>,
+    /// `active`, `terminal`, or one exact status name (`Building`, `Failed`, ...).
+    pub status: Option<String>,
+    /// Concrete attribute path. Matches evaluations whose *wildcard* covers it,
+    /// which is set when the row is created and so answers at every status -
+    /// unlike entry points, which only exist once derivations have resolved.
+    pub attr: Option<String>,
+}
+
+/// A git commit hash is 40 hex characters, so 20 bytes once decoded.
+const COMMIT_HASH_BYTES: usize = 20;
+
+/// How many rows an `attr` search reads before matching in Rust. Evaluations are
+/// GC-bounded per task by `keep_evaluations`, so this only truncates a task
+/// configured to retain more than this, and only for the oldest of them.
+const ATTR_SCAN_LIMIT: u64 = 1000;
+
+/// Validates the `attr` filter as a concrete attribute path: one of the paths a
+/// wildcard may cover, carrying no pattern syntax of its own. Segments inside
+/// double quotes are left alone so an attribute genuinely named `*` still works.
+fn parse_attr_filter(attr: &str) -> WebResult<&str> {
+    let unquoted_has = |c: char| attr.split('"').step_by(2).any(|part| part.contains(c));
+
+    if attr.is_empty() || attr.contains(',') || unquoted_has('*') || unquoted_has('#') {
+        return Err(WebError::bad_request(
+            "`attr` must be a concrete attribute path, without wildcard syntax",
+        ));
+    }
+
+    Ok(attr)
+}
+
+/// Resolves the `status` filter to the set of statuses it names.
+fn parse_status_filter(raw: &str) -> WebResult<Vec<EvaluationStatus>> {
+    match raw {
+        "active" => Ok(EvaluationStatus::ACTIVE.to_vec()),
+        "terminal" => Ok(EvaluationStatus::TERMINAL.to_vec()),
+        name => EvaluationStatus::iter()
+            .find(|s| format!("{s:?}").eq_ignore_ascii_case(name))
+            .map(|s| vec![s])
+            .ok_or_else(|| {
+                WebError::bad_request(format!(
+                    "Unknown evaluation status `{name}`; expected `active`, `terminal`, or a status name"
+                ))
+            }),
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -456,8 +550,30 @@ struct EntryPointRelatedData {
     build_jobs: HashMap<DerivationId, BuildJobId>,
     derivations: HashMap<DerivationId, MDerivation>,
     has_products: HashMap<DerivationId, bool>,
+    outputs: HashMap<DerivationId, BTreeMap<String, String>>,
     build_time_ms: HashMap<DerivationId, Option<i64>>,
     deps: HashMap<EntryPointId, BuildStatusCounts>,
+}
+
+/// Groups output rows into `output name -> full /nix/store path` per derivation.
+/// Rows whose store path the evaluator never resolved carry the
+/// [`UNKNOWN_OUTPUT_HASH`] sentinel and are dropped: there is no path to report.
+fn output_paths_by_derivation(
+    rows: &[MDerivationOutput],
+) -> HashMap<DerivationId, BTreeMap<String, String>> {
+    let mut out: HashMap<DerivationId, BTreeMap<String, String>> = HashMap::new();
+
+    for row in rows {
+        if row.hash == UNKNOWN_OUTPUT_HASH {
+            continue;
+        }
+        out.entry(row.derivation).or_default().insert(
+            row.name.clone(),
+            get_path_from_derivation_output(row.clone()).full(),
+        );
+    }
+
+    out
 }
 
 impl EntryPointRelatedData {
@@ -516,25 +632,37 @@ impl EntryPointRelatedData {
             .map(|j| (j.derivation, j.id))
             .collect();
 
-        let completed_drv_ids: Vec<DerivationId> = anchors
+        let completed_drv_ids: HashSet<DerivationId> = anchors
             .values()
             .filter(|a| a.status == BuildStatus::Completed || a.status == BuildStatus::Substituted)
             .map(|a| a.derivation)
             .collect();
 
-        // Determine which derivations have at least one build_product by looking
-        // at their outputs.
-        let has_products: HashMap<DerivationId, bool> = if completed_drv_ids.is_empty() {
-            HashMap::new()
-        } else {
-            let outputs = gradient_db::fetch_in_chunks(&completed_drv_ids, |chunk| async move {
-                EDerivationOutput::find()
-                    .filter(CDerivationOutput::Derivation.is_in(chunk))
-                    .all(db)
-                    .await
-            })
-            .await?;
-            let output_ids: Vec<DerivationOutputId> = outputs.iter().map(|o| o.id).collect();
+        // Output rows are written at eval time from the resolved `.drv`, so they
+        // exist regardless of build status; `build_status` is what tells a caller
+        // whether the path is realised. `hash` falls back to the literal
+        // "unknown" when the evaluator could not parse the output path (floating
+        // CA outputs), and nothing ever rewrites it - skip those rather than
+        // hand out a path that cannot exist.
+        let output_rows = gradient_db::fetch_in_chunks(&drv_ids, |chunk| async move {
+            EDerivationOutput::find()
+                .filter(CDerivationOutput::Derivation.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await?;
+
+        let outputs = output_paths_by_derivation(&output_rows);
+
+        // Determine which derivations have at least one build_product. Only
+        // built derivations can have products, so the product lookup stays
+        // scoped to their outputs.
+        let has_products: HashMap<DerivationId, bool> = {
+            let built: Vec<&MDerivationOutput> = output_rows
+                .iter()
+                .filter(|o| completed_drv_ids.contains(&o.derivation))
+                .collect();
+            let output_ids: Vec<DerivationOutputId> = built.iter().map(|o| o.id).collect();
             let mut m: HashMap<DerivationId, bool> = HashMap::new();
             if !output_ids.is_empty() {
                 let products = gradient_db::fetch_in_chunks(&output_ids, |chunk| async move {
@@ -546,7 +674,7 @@ impl EntryPointRelatedData {
                 .await?;
                 for bp in products {
                     // Map back from output → derivation.
-                    if let Some(output) = outputs.iter().find(|o| o.id == bp.derivation_output) {
+                    if let Some(output) = built.iter().find(|o| o.id == bp.derivation_output) {
                         m.insert(output.derivation, true);
                     }
                 }
@@ -620,6 +748,7 @@ impl EntryPointRelatedData {
             build_jobs,
             derivations,
             has_products,
+            outputs,
             build_time_ms,
             deps,
         })
@@ -647,6 +776,11 @@ impl EntryPointRelatedData {
                 eval: ep.eval.clone(),
                 build_status,
                 has_artefacts: *self.has_products.get(&ep.derivation).unwrap_or(&false),
+                outputs: self
+                    .outputs
+                    .get(&ep.derivation)
+                    .cloned()
+                    .unwrap_or_default(),
                 architecture: drv.architecture.clone(),
                 build_time_ms: self.build_time_ms.get(&ep.derivation).copied().flatten(),
                 deps: self.deps.get(&ep.id).copied().unwrap_or_default(),
@@ -926,5 +1060,113 @@ mod tests {
                 .count(),
             100
         );
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use gradient_entity::ids::DerivationOutputId;
+
+    fn output_row(drv: DerivationId, name: &str, hash: &str, package: &str) -> MDerivationOutput {
+        MDerivationOutput {
+            id: DerivationOutputId::now_v7(),
+            derivation: drv,
+            name: name.into(),
+            hash: hash.into(),
+            package: package.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn output_paths_are_absolute_store_paths_grouped_per_derivation() {
+        let a = DerivationId::now_v7();
+        let b = DerivationId::now_v7();
+        let rows = vec![
+            output_row(a, "out", "aaaa", "hello-1.0"),
+            output_row(a, "dev", "bbbb", "hello-1.0-dev"),
+            output_row(b, "out", "cccc", "world-2.0"),
+        ];
+
+        let grouped = output_paths_by_derivation(&rows);
+
+        assert_eq!(grouped[&a]["out"], "/nix/store/aaaa-hello-1.0");
+        assert_eq!(grouped[&a]["dev"], "/nix/store/bbbb-hello-1.0-dev");
+        assert_eq!(grouped[&b]["out"], "/nix/store/cccc-world-2.0");
+        assert_eq!(grouped.len(), 2);
+    }
+
+    /// The evaluator writes the sentinel when an output has no resolvable path
+    /// and nothing ever rewrites it, so reporting one would hand a deployment
+    /// tool `/nix/store/unknown-...`, which cannot exist.
+    #[test]
+    fn unresolved_output_paths_are_omitted() {
+        let drv = DerivationId::now_v7();
+        let rows = vec![
+            output_row(drv, "out", UNKNOWN_OUTPUT_HASH, "hello"),
+            output_row(drv, "dev", "bbbb", "hello-dev"),
+        ];
+
+        let grouped = output_paths_by_derivation(&rows);
+
+        assert!(!grouped[&drv].contains_key("out"));
+        assert_eq!(grouped[&drv]["dev"], "/nix/store/bbbb-hello-dev");
+    }
+
+    #[test]
+    fn derivation_with_no_resolvable_output_is_absent_entirely() {
+        let drv = DerivationId::now_v7();
+        let rows = vec![output_row(drv, "out", UNKNOWN_OUTPUT_HASH, "hello")];
+
+        assert!(output_paths_by_derivation(&rows).is_empty());
+    }
+
+    #[test]
+    fn attr_filter_accepts_a_concrete_path() {
+        assert!(parse_attr_filter("packages.x86_64-linux.hello").is_ok());
+        assert!(parse_attr_filter(r#"packages."x86_64-linux".hello"#).is_ok());
+    }
+
+    #[test]
+    fn attr_filter_rejects_pattern_syntax() {
+        for bad in ["", "packages.*.hello", "packages.x86_64-linux.#", "a.b,c.d"] {
+            assert!(parse_attr_filter(bad).is_err(), "should reject {bad:?}");
+        }
+    }
+
+    /// A `*` inside quotes is an attribute literally named `*`, not a pattern.
+    #[test]
+    fn attr_filter_allows_a_quoted_star_segment() {
+        assert!(parse_attr_filter(r#"packages.x86_64-linux."*""#).is_ok());
+    }
+
+    #[test]
+    fn status_filter_expands_the_named_groups() {
+        assert_eq!(
+            parse_status_filter("active").unwrap(),
+            EvaluationStatus::ACTIVE.to_vec()
+        );
+        assert_eq!(
+            parse_status_filter("terminal").unwrap(),
+            EvaluationStatus::TERMINAL.to_vec()
+        );
+    }
+
+    #[test]
+    fn status_filter_takes_one_status_by_name_case_insensitively() {
+        assert_eq!(
+            parse_status_filter("building").unwrap(),
+            vec![EvaluationStatus::Building]
+        );
+        assert_eq!(
+            parse_status_filter("Completed").unwrap(),
+            vec![EvaluationStatus::Completed]
+        );
+    }
+
+    #[test]
+    fn status_filter_rejects_an_unknown_name() {
+        assert!(parse_status_filter("Exploded").is_err());
     }
 }

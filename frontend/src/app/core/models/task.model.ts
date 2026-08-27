@@ -49,6 +49,7 @@ export interface EvaluationSummary {
   commit: string;
   commit_message: string | null;
   status: EvaluationStatus;
+  wildcard: string;
   trigger: { id: string; type: TriggerType } | null;
   triggered_by: string | null;
   pr_number: number | null;
@@ -67,6 +68,8 @@ export interface EntryPointSummary {
   eval: string;
   build_status: BuildStatus;
   has_artefacts: boolean;
+  /** Output name to full `/nix/store` path; empty until the evaluator resolves them. */
+  outputs: Record<string, string>;
   architecture: Architecture;
   build_time_ms: number | null;
   deps: BuildStatusCounts;

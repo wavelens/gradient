@@ -7041,3 +7041,68 @@ value.
 default, and phase 4 asserts a freshly created task reports `5`, that echoing
 that value straight back in a `PATCH` succeeds, and that `6` (over the maximum)
 and `0` (under the floor) are still refused.
+
+## Finding an evaluation by commit and attribute, before it has entry points (#564)
+
+The reported gap: no way to ask "is `packages.x86_64-linux.my-package` at commit
+XY built, or being built?" without paging every evaluation and opening each one.
+The obvious filter, matching on the entry point, cannot answer it: `entry_point`
+rows are written only once the evaluation resolves its derivations, so the filter
+returns nothing during `Queued`, `Fetching` and `EvaluatingFlake` - exactly the
+window in which "is it already running?" decides whether a caller triggers a
+duplicate. `evaluation.wildcard` is set when the row is created, so the `attr`
+filter matches against that instead.
+
+`backend/gradient-types/src/wildcard.rs` `matches_tests` pins the matcher the
+filter is built on, against the evaluator's own segment rules:
+`trailing_star_matches_one_or_two_segments` and `consecutive_stars_collapse`
+cover `*` being recursive - `packages.*.*` and `packages.*` are the same pattern
+and both reach one level below the system attribute;
+`hash_matches_exactly_one_segment_and_does_not_descend` covers `#` being the
+non-recursive form; `quoted_segments_compare_by_inner_content` pins that both
+sides split on unquoted `.` only, so `a."b.c".d` is three segments and is not the
+four-segment `a.b.c.d`; and `exclusion_removes_an_otherwise_matching_path` covers
+`!` patterns subtracting from what the includes matched.
+
+`backend/gradient-web/tests/evaluations_search.rs`
+`attr_filter_matches_queued_evaluation` is the regression that matters: a
+`Queued` evaluation with no entry points at all is still returned for an `attr`
+its wildcard covers, while a sibling evaluation scoped to `checks.*.*` is not.
+`unknown_commit_returns_empty_list` pins that a commit nothing was evaluated at
+is an empty list rather than a `404`, since the caller is asking whether an
+evaluation exists. The three rejection cases pin the filters' contracts: a short
+commit prefix, an unknown status name, and wildcard syntax inside `attr`, which
+would make "does this evaluation cover my attr" ambiguous in both directions.
+`search_tests` in `endpoints/tasks/evaluations.rs` covers the validators and the
+status-group expansion directly.
+
+## Entry points report their output store paths (#564)
+
+Reading the store path for a built entry point meant a second hop to
+`GET /builds/{build}`, whose `output` map is prefix-free (`<hash>-<name>`), while
+the entry point itself exposed only the `.drv`. `EntryPointSummary.outputs` now
+carries the full `/nix/store` paths.
+
+`search_tests::output_paths_are_absolute_store_paths_grouped_per_derivation`
+pins the `/nix/store/` prefix and the per-derivation grouping.
+`unresolved_output_paths_are_omitted` and
+`derivation_with_no_resolvable_output_is_absent_entirely` cover the sentinel
+case: the evaluator writes the literal hash `unknown` when an output has no
+resolvable store path, nothing ever rewrites that column, so reporting one would
+hand a deployment tool `/nix/store/unknown-...`. Those outputs are dropped
+instead. Outputs are read from the resolved `.drv`, so they are present before
+the build runs - `build_status` is what says whether the path is realised.
+
+## `POST /tasks/{project}/{task}/evaluate` answers with the evaluation id (#564)
+
+The endpoint returned the prose `"Evaluation started"` while its OpenAPI
+contract, the documented example, and the CLI all expected the new evaluation's
+UUID - `gradient task evaluate` printed
+`{"evaluation_id": "Evaluation started"}` - so an API-driven caller could not
+follow the run it had just started.
+
+`backend/gradient-web/tests/task_evaluate_response.rs`
+`restart_failed_answers_with_the_new_evaluation_id` asserts the response is the
+id of the evaluation the trigger created, and parses it as a UUID. It exercises
+the `restart_failed` path because the normal path resolves the branch head over
+git first; both return the same thing.

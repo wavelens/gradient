@@ -252,7 +252,7 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 | `PUT` | `/tasks/{project}` | Create task |
 | `GET/PATCH/DELETE` | `/tasks/{project}/{task}` | Get / update / delete |
 | `GET` | `/tasks/{project}/{task}/details` | Aggregated task data |
-| `GET` | `/tasks/{project}/{task}/evaluations` | List recent evaluations (optional `?limit=`) |
+| `GET` | `/tasks/{project}/{task}/evaluations` | List / search evaluations (`?limit=`, `?commit=`, `?status=`, `?attr=`) |
 | `GET` | `/tasks/{project}/{task}/entry-points` | Root builds |
 | `POST` | `/tasks/{project}/{task}/check-repository` | Test repo access |
 | `POST` | `/tasks/{project}/{task}/evaluate` | Trigger evaluation |
@@ -393,3 +393,51 @@ Response:
 ```json
 { "error": false, "message": "3fa85f64-5717-4562-b3fc-2c963f66afa6" }
 ```
+
+The `message` is the new evaluation's UUID, so you can follow the run you just
+started with `GET /evals/{id}` or the `GET /evals/{id}/live` stream.
+
+## Example: Has this attribute at this commit been built?
+
+For pull-based deployment tools that follow a branch and need the store path for
+one flake output at one commit. Search the evaluations first:
+
+```sh
+curl -s -G "https://gradient.example.com/api/v1/tasks/my-project/my-task/evaluations" \
+  -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode "commit=9c1a2b3c4d5e6f708192a3b4c5d6e7f809a1b2c3" \
+  --data-urlencode "attr=packages.x86_64-linux.my-package"
+```
+
+`attr` matches the evaluation's *wildcard*, which is set the moment the
+evaluation row is created. That means an evaluation still `Queued` or
+`EvaluatingFlake` is found too, so a caller can wait for a run already in flight
+instead of triggering a duplicate. An empty list means no evaluation covers that
+attribute at that commit; trigger one with `POST .../evaluate`.
+
+A match means the attribute was *in scope*, not that it exists in the flake or
+that it built. Confirm and read the store path from the entry points:
+
+```sh
+curl -s -G "https://gradient.example.com/api/v1/tasks/my-project/my-task/entry-points" \
+  -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode "evaluation_id=$EVAL_ID"
+```
+
+```json
+{
+  "error": false,
+  "message": [
+    {
+      "eval": "packages.x86_64-linux.my-package",
+      "build_status": "Completed",
+      "outputs": { "out": "/nix/store/7g0q1x3j...-my-package-1.0.0" }
+    }
+  ]
+}
+```
+
+`outputs` comes from the resolved `.drv`, so it is populated before the build
+finishes; `build_status` is what tells you whether that path is realised and
+fetchable from the cache. To wait rather than poll, attach to
+`GET /evals/{id}/live`.
