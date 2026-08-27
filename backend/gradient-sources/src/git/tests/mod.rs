@@ -39,6 +39,24 @@ fn git_transport_url_passes_through_bare_schemes_and_scp() {
 
 // ── parse_nix_git_url ────────────────────────────────────────────────────
 
+/// `POST /build-requests/url` builds an evaluation's source string with
+/// `repository_url_to_nix` and the worker reads it back with
+/// `parse_nix_git_url`. Pin that round trip, in both URL shapes, so a change to
+/// either side cannot silently strand remote build requests (#564).
+#[test]
+fn repository_url_to_nix_round_trips_through_parse_nix_git_url() {
+    for url in [
+        "https://example.com/repo.git",
+        "ssh://git@example.com/org/repo.git",
+    ] {
+        let nix_url = gradient_types::input::repository_url_to_nix(url, FAKE_SHA).unwrap();
+        let (parsed_url, parsed_rev) = parse_nix_git_url(&nix_url).unwrap();
+
+        assert_eq!(parsed_url, url, "url round trip for {url}");
+        assert_eq!(parsed_rev, FAKE_SHA, "rev round trip for {url}");
+    }
+}
+
 #[test]
 fn parse_nix_git_url_strips_git_plus_prefix() {
     let (url, rev) = parse_nix_git_url("git+https://example.com/repo.git?rev=deadbeef").unwrap();

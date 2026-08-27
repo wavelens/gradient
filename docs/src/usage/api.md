@@ -258,6 +258,19 @@ Set `GRADIENT_WORKER_PEERS_FILE` (or the NixOS `peersFile` option) to this path.
 | `POST` | `/tasks/{project}/{task}/evaluate` | Trigger evaluation |
 | `POST/DELETE` | `/tasks/{project}/{task}/active` | Enable / disable |
 
+### Build requests
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/build-requests/url` | Build a remote repository at a ref or commit (no upload) |
+| `POST` | `/build-requests/manifest` | Start a source upload session |
+| `POST` | `/build-requests/{session}/blobs` | Upload missing blobs |
+| `POST` | `/build-requests/{session}/dispatch` | Finalise and queue |
+| `POST` | `/build-requests/source` | Upload a packed source NAR and queue |
+
+All of these run on the project's reserved `build-request` task, created lazily
+on first use, so no task is created per job.
+
 ### Evaluations
 
 | Method | Path | Description |
@@ -441,3 +454,30 @@ curl -s -G "https://gradient.example.com/api/v1/tasks/my-project/my-task/entry-p
 finishes; `build_status` is what tells you whether that path is realised and
 fetchable from the cache. To wait rather than poll, attach to
 `GET /evals/{id}/live`.
+
+If no evaluation covers the commit yet, ask for one. There are two ways:
+
+```sh
+# On the task, so the run appears in its evaluation history.
+curl -X POST "https://gradient.example.com/api/v1/tasks/my-project/my-task/evaluate" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"commit":"9c1a2b3c4d5e6f708192a3b4c5d6e7f809a1b2c3",
+       "attr":"packages.x86_64-linux.my-package"}'
+```
+
+A pinned run is `concurrent`, so it neither queues behind nor aborts the task's
+own CI run, and it does not bump tracked flake inputs.
+
+```sh
+# Without a task at all: point Gradient at any repository URL.
+curl -X POST "https://gradient.example.com/api/v1/build-requests/url" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"project":"my-project",
+       "url":"ssh://git@github.com/org/repo.git",
+       "rev":"9c1a2b3c4d5e6f708192a3b4c5d6e7f809a1b2c3",
+       "target":"packages.x86_64-linux.my-package"}'
+```
+
+Send `ref` instead of `rev` to have the server resolve a branch or tag, or
+neither to take the repository's default branch. Both forms answer with the new
+evaluation's id, so the wait-and-read steps above are identical afterwards.

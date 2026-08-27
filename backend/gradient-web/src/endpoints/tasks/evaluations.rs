@@ -41,6 +41,11 @@ pub struct EvaluateRequest {
     /// `"restart_failed"` skips fetch+eval and re-queues failed builds from the
     /// most recent evaluation. Omit or `null` for a normal evaluation.
     pub mode: Option<String>,
+    /// Exact commit to evaluate, 40 hex characters. Omit to take the branch
+    /// head, which is what a normal CI run does.
+    pub commit: Option<String>,
+    /// Attribute path or wildcard to evaluate instead of the task's own.
+    pub attr: Option<String>,
 }
 
 /// Builds one [`EvaluationSummary`] per evaluation using grouped DB rollups
@@ -214,33 +219,85 @@ pub async fn post_task_evaluate(
         return Ok(ok_json(eval.id.to_string()));
     }
 
-    let mut task_for_check = task.clone();
-    task_for_check.force_evaluation = true;
-    let (_has_updates, commit_hash) = check_task_updates(&state.db(), &task_for_check, None)
-        .await
-        .map_err(|e| {
-            WebError::bad_request_with(
-                ErrorCode::REPOSITORY_UNREACHABLE,
-                format!("Failed to fetch repository state: {}", e),
+    let pinned = body
+        .as_ref()
+        .and_then(|b| b.commit.as_deref())
+        .map(|commit| {
+            hex_to_vec(commit)
+                .ok()
+                .filter(|h| h.len() == COMMIT_HASH_BYTES)
+                .ok_or_else(|| WebError::bad_request("`commit` must be a 40-character hex hash"))
+        })
+        .transpose()?;
+
+    let attr = body
+        .as_ref()
+        .and_then(|b| b.attr.as_deref())
+        .map(|a| {
+            a.parse::<Wildcard>()
+                .map(|w| w.to_string())
+                .map_err(|e| WebError::bad_request(format!("Invalid `attr`: {}", e)))
+        })
+        .transpose()?;
+
+    let pinned_run = pinned.is_some();
+
+    // A pinned commit skips the branch-head lookup entirely; the clone inside
+    // `get_commit_info` is what proves the commit is actually reachable, so an
+    // unknown one is refused here instead of queueing an evaluation that dies
+    // fetching.
+    let (commit_hash, commit_message, author_name) = match pinned {
+        Some(commit_hash) => {
+            let (message, _email, author) = get_commit_info(&state.db(), &task, &commit_hash)
+                .await
+                .map_err(|e| {
+                    WebError::bad_request_with(
+                        ErrorCode::REPOSITORY_UNREACHABLE,
+                        format!("Commit not found in repository: {}", e),
+                    )
+                })?;
+            (commit_hash, message, author)
+        }
+        None => {
+            let mut task_for_check = task.clone();
+            task_for_check.force_evaluation = true;
+            let (_has_updates, commit_hash) =
+                check_task_updates(&state.db(), &task_for_check, None)
+                    .await
+                    .map_err(|e| {
+                        WebError::bad_request_with(
+                            ErrorCode::REPOSITORY_UNREACHABLE,
+                            format!("Failed to fetch repository state: {}", e),
+                        )
+                    })?;
+
+            let (message, _email, author) = get_commit_info(&state.db(), &task, &commit_hash)
+                .await
+                .unwrap_or_else(|_| (String::new(), None, String::new()));
+
+            // A manual evaluation also bumps tracked flake inputs (OpenPr
+            // action). Self-gated: no-ops unless the task qualifies. A pinned
+            // run is deliberately excluded - it asks for one exact revision,
+            // not for the newest inputs.
+            if let Err(e) = gradient_ci::trigger::maybe_trigger_input_update(
+                &state.web_db,
+                &task,
+                commit_hash.clone(),
+                None,
             )
-        })?;
+            .await
+            {
+                tracing::warn!(error = %e, task = %task.name, "manual input_update trigger failed");
+            }
 
-    let (commit_message, _email, author_name) = get_commit_info(&state.db(), &task, &commit_hash)
-        .await
-        .unwrap_or_else(|_| (String::new(), None, String::new()));
+            (commit_hash, message, author)
+        }
+    };
 
-    // A manual evaluation also bumps tracked flake inputs (OpenPr action).
-    // Self-gated: no-ops unless the task qualifies.
-    if let Err(e) = gradient_ci::trigger::maybe_trigger_input_update(
-        &state.web_db,
-        &task,
-        commit_hash.clone(),
-        None,
-    )
-    .await
-    {
-        tracing::warn!(error = %e, task = %task.name, "manual input_update trigger failed");
-    }
+    // A pinned run is an out-of-band request, typically from a deployment tool.
+    // Marking it concurrent keeps it from queueing behind - or aborting - the
+    // task's own CI run, which owns the single non-concurrent slot.
+    let concurrent = pinned_run;
 
     let eval = gradient_ci::trigger_evaluation(
         &state.web_db,
@@ -249,9 +306,9 @@ pub async fn post_task_evaluate(
         Some(commit_message),
         Some(author_name),
         None,
-        false,
+        concurrent,
         None,
-        None,
+        attr,
         None,
         Some(user.id),
     )

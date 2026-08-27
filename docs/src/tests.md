@@ -7106,3 +7106,54 @@ follow the run it had just started.
 id of the evaluation the trigger created, and parses it as a UUID. It exercises
 the `restart_failed` path because the normal path resolves the branch head over
 git first; both return the same thing.
+
+## Building a remote repository without uploading it (#564)
+
+The source-upload flows exist so `gradient build` can ship a dirty working tree.
+A deployment tool already has its source published at a URL and only needs one
+attribute of it evaluated, so `POST /build-requests/url` takes the URL and a
+revision instead. It runs on the same lazily-created reserved `build-request`
+task, so no task is created per job.
+
+`backend/gradient-sources/src/git/tests/mod.rs`
+`repository_url_to_nix_round_trips_through_parse_nix_git_url` pins the contract
+the endpoint depends on: the web side writes the evaluation's source string with
+`repository_url_to_nix` and the worker reads it back with `parse_nix_git_url`, so
+a change to either side would otherwise silently strand every remote build
+request.
+
+`backend/gradient-web/tests/build_requests_url.rs`
+`queues_an_evaluation_against_the_remote_url` covers the happy path with an
+explicit `rev`, the branch that does no network work. The rejections pin the
+input contract: `ref` and `rev` together are ambiguous, a short `rev` is refused
+rather than guessed, and `rejects_a_local_file_url` covers `repository_url_to_nix`
+refusing local paths, which is what stops a build request from making the server
+read a flake off its own disk. `rejects_a_local_input_override` is the same
+defence in depth the upload dispatch already applies to `--override-input`.
+
+Build-request evaluations are inserted `concurrent`. They are independent
+one-shot jobs sharing one reserved task, so without that flag
+`uq_evaluation_one_active_per_task` would admit exactly one in flight per
+project - a latent collision between two parallel `gradient build` runs, and a
+hard blocker for a deployment tool firing one job per application. The reserved
+task's own policy moved from `SoftAbort` to `All` for the same reason: one build
+request must never abort an unrelated one.
+
+## Evaluating a task at a pinned commit (#564)
+
+`POST /tasks/{project}/{task}/evaluate` resolved the branch head and could not be
+asked for a specific revision, so a caller that knew exactly which commit it
+wanted deployed could only trigger the head and hope it had not moved.
+
+`backend/gradient-web/tests/task_evaluate_response.rs`
+`rejects_a_commit_that_is_not_a_full_hash` and `rejects_an_unparsable_attr` pin
+that both inputs are validated before any git work, so a malformed request costs
+nothing. Reachability is proved by the clone inside `get_commit_info`, which the
+pinned path now treats as fatal (`code: "repository_unreachable"`) instead of
+falling back to empty metadata - queueing an evaluation for a commit that is not
+in the repository only produces a run that dies fetching.
+
+A pinned run is marked `concurrent` and skips the flake-input bump that a manual
+head evaluation performs: it is an out-of-band request for one exact revision, so
+it must not contend for the task's single non-concurrent slot against CI, and it
+must not quietly move the inputs it was asked to pin.

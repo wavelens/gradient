@@ -49,7 +49,7 @@ pub fn fetch_options_with_ssh(ssh_key: Option<&str>) -> git2::FetchOptions<'stat
     fo
 }
 
-pub(super) fn ls_remote_head(
+pub(in crate::git) fn ls_remote_head(
     url: &str,
     private_key: Option<&str>,
     public_key: Option<&str>,

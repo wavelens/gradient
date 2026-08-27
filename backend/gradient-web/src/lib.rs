@@ -354,6 +354,7 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             "/build-requests/{session}/dispatch",
             post(build_requests::dispatch::post_dispatch),
         )
+        .route("/build-requests/url", post(build_requests::url::post_url))
         .route(
             "/build-requests/source",
             post(build_requests::source::post_source).layer(DefaultBodyLimit::max(

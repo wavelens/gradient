@@ -66,5 +66,44 @@ pub async fn resolve_head(
     Ok((commit_hash, msg, author))
 }
 
+/// Resolve a ref on an arbitrary remote repository to its commit hash, without
+/// a task to hang it off. `branch = None` resolves the remote HEAD (the default
+/// branch). SSH URLs are authenticated with `project`'s deploy key, the same key
+/// the worker later uses to fetch the flake.
+#[instrument(skip(ctx, project), fields(project_id = %project.id, repository = %url))]
+pub async fn resolve_remote_ref(
+    ctx: &DbContext,
+    project: &MProject,
+    url: &str,
+    branch: Option<&str>,
+) -> Result<Vec<u8>, SourceError> {
+    let ssh_creds = if gradient_types::input::check_repository_url_is_ssh(url) {
+        Some(crate::ssh_key::decrypt_ssh_private_key(
+            &ctx.config.secrets.crypt_secret_file,
+            project.clone(),
+            &ctx.config.server.serve_url,
+        )?)
+    } else {
+        None
+    };
+
+    let url = url.to_owned();
+    let branch = branch.map(|b| b.to_owned());
+
+    tokio::task::spawn_blocking(move || match ssh_creds {
+        Some((private_key, public_key)) => remote::ls_remote_head(
+            &url,
+            Some(&private_key),
+            Some(&public_key),
+            branch.as_deref(),
+        ),
+        None => remote::ls_remote_head(&url, None, None, branch.as_deref()),
+    })
+    .await
+    .map_err(|e| SourceError::GitExecution {
+        error: e.to_string(),
+    })?
+}
+
 #[cfg(test)]
 mod tests;
