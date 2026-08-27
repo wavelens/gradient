@@ -6257,18 +6257,50 @@ any worker silent past `worker_heartbeat_timeout_secs` (default 120 s), reusing
 
 `maxEvalRss` only recycles an eval subprocess *between* `list`/`resolve` calls, so
 a single call can balloon past it and OOM the host first. The reaper
-(`memory_reaper_loop`, `backend/gradient-worker/src/worker_pool/pool.rs`) samples
+(`memory_reaper_loop`, `backend/gradient-worker/src/worker_pool/memory.rs`) samples
 host `MemAvailable` every 500 ms and SIGKILLs the largest live eval subprocess
-when free RAM falls below the margin (`min_free_ram_mb`, `0` = adaptive
-`max(1 GiB, 10% of total RAM)`); the victim's parent reports the eval failed
-rather than the host freezing. Covered in the same file:
+whose resident memory covers the whole shortfall when free RAM falls below the
+margin (`min_free_ram_mb`, `0` = adaptive `10% of total RAM, clamped to
+[128 MiB, 1 GiB]`); the victim's parent reports the eval failed rather than the
+host freezing. Covered in the same file:
 
 - `memory_guard_bytes_configured_and_adaptive` - a configured `min_free_ram_mb`
-  wins (MiB→bytes), `0` yields 10% of total RAM, and the adaptive margin floors
-  at 1 GiB on small hosts.
+  wins (MiB→bytes), `0` yields 10% of total RAM, capped at 1 GiB on a large host
+  and floored at 128 MiB on a tiny one.
 - `pid_guard_deregisters_pid_on_drop` - the `PidGuard` RAII field removes a
   subprocess pid from the pool's live registry on drop, so the reaper never
   targets a worker that has already been discarded.
+
+## The reaper only kills an eval that can actually recover the host (#579)
+
+The reaper killed the eval subprocess 338 times in one `gradient-cache` VM test
+run, SIGKILLing one mid-checkpoint so its eval cache never committed and Phase 5b
+asserted on the 4096-byte empty SQLite header. Two independent defects: the
+adaptive margin was `max(1 GiB, 10% of total)`, so the 2 GiB CI builder demanded
+half its RAM be free and the guard was armed continuously under ordinary build
+load; and victim selection was a bare `max_by_key(rss)` with no threshold, so it
+took a 27 MiB process to recover a 44 MiB shortfall and ~336 of the 338 kills
+targeted processes holding no resident memory at all. Neither kill can lift the
+host back over the margin, so the next tick reaps again and the pool is walked to
+death one eval at a time. A kill is only worth its cost when it clears the
+pressure - an eval killed mid-run loses its work, and mid-checkpoint it loses the
+eval cache too. `backend/gradient-worker/src/worker_pool/memory.rs`:
+
+- `a_victim_too_small_to_clear_the_shortfall_is_left_alone` - the exact numbers
+  from the failing run: 27 MiB against a 44 MiB shortfall is spared, 44 MiB is
+  taken.
+- `a_victim_holding_no_resident_memory_is_never_reaped` - the `rss_mb=0` case
+  that made up nearly every kill in that run.
+- `the_largest_sufficient_victim_wins` - among victims that do clear the
+  shortfall the largest still wins; a runaway eval is what the guard is for.
+- `no_shortfall_means_no_victim` - no pressure, no kill, even with a large eval
+  resident.
+- `the_adaptive_margin_never_demands_a_large_share_of_the_host` - the margin
+  stays under a quarter of total RAM from 512 MiB to 128 GiB, so the guard is
+  armed by real pressure rather than by host size.
+
+The 5 s post-kill cooldown is not unit-tested: reclaiming the victim's pages is
+kernel-side, so it only means anything against a live process tree.
 
 ## Upstream latency ordering (#464)
 
