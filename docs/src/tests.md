@@ -798,6 +798,29 @@ carries a scope (from the newest source bucket) rather than dropping the column.
 Migration `m20260827_000000_metric_rollup_scope_project` re-keys the historical
 rows in place - `scope` is not part of `idx-metric_rollup-unique` and
 `scope_hash` is unchanged, so no merge is needed.
+## NAR packing reads store files, never maps them (#573)
+
+`harmonia-file-nar`'s dumper branches at 256 KiB and used to `mmap` everything
+above it. macOS validates a mach-o's code signature on every page fault from a
+mapped file, so packing a store path containing a binary with an invalid
+signature SIGKILL'd `gradient-worker` outright and took every build in progress
+on that worker with it; on Linux the same mapping served uprobe breakpoint bytes
+rather than the file's real contents, producing NARs that failed signature
+verification (harmonia #1140). Upstream replaced the mapping with bounded
+`read()` chunks in `be87963`; gradient's lockfiles sat 132 commits behind it, so
+the worker kept shipping the mmap dumper. Both workspaces now lock `7c1ef26`.
+
+`backend/gradient-core/tests/nar_pack.rs` packs a real tree off disk with
+`NarByteStream` (the worker's own upload path) and compares it byte-for-byte
+against `write_nar`, the reference encoder:
+`a_file_over_the_dumper_threshold_packs_its_real_bytes` covers the large-file
+route, `packing_is_byte_exact_across_the_threshold_boundary` pins both sides of
+the 256 KiB branch plus the boundary value itself, and
+`several_large_files_pack_in_order` pins that chunk boundaries neither reorder
+nor drop content across several large files in one archive. The SIGKILL itself
+is macOS-only and not reproducible on the Linux CI runners; what is testable, and
+what these pin, is that the route the dumper picks for a large file yields that
+file's real bytes.
 
 ## PostgreSQL minimum-version guard (#387)
 
