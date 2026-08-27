@@ -68,15 +68,33 @@ impl BuildError {
             missing_paths,
         }
     }
-    /// The server sent `AbortJob` while the daemon was building. Terminal: the
-    /// build is already in a terminal state server-side, so retrying is wrong.
+    /// The server sent `AbortJob` while the daemon was building. Reported as
+    /// its own kind, never `Permanent`: a `Permanent` build failure is recorded
+    /// as `BuilderNonzero`, which permanently excludes the anchor from every
+    /// requeue even though `Aborted` is a requeueable status (#572).
     pub(crate) fn aborted(drv_path: &str) -> Self {
         Self::new(
-            BuildFailureKind::Permanent,
-            anyhow::anyhow!("build aborted by server: {}", drv_path),
+            BuildFailureKind::Aborted,
+            JobAborted(format!("build aborted by server: {drv_path}")).into(),
         )
     }
 }
+
+// ── JobAborted ────────────────────────────────────────────────────────────────
+
+/// The job stopped because the server ordered it to. Carried as a typed error so
+/// [`wire_failure`] classifies it wherever the abort is noticed - inside the
+/// daemon log drain, at a NAR-push checkpoint, or between eval waves - instead of
+/// falling through to the unclassified-`Permanent` branch.
+#[derive(Debug)]
+pub struct JobAborted(pub String);
+
+impl std::fmt::Display for JobAborted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl std::error::Error for JobAborted {}
 
 // ── Builder-message classification ────────────────────────────────────────────
 
@@ -174,6 +192,11 @@ pub(crate) fn wire_failure(e: &anyhow::Error) -> (BuildFailureKind, Vec<String>)
             BuildFailureKind::CorruptEvalCache,
             vec![c.fingerprint.clone()],
         );
+    }
+    // An abort noticed outside the build itself (NAR push checkpoints, eval wave
+    // boundaries) arrives as a bare `JobAborted`, not wrapped in a `BuildError`.
+    if e.chain().any(|s| s.is::<JobAborted>()) {
+        return (BuildFailureKind::Aborted, Vec::new());
     }
     match e.downcast_ref::<BuildError>() {
         Some(be) => (be.kind, be.missing_paths.clone()),
@@ -277,6 +300,21 @@ mod tests {
             vec!["abc123".to_owned()],
             "the fingerprint rides missing_paths so the server can purge the blob"
         );
+    }
+
+    /// An abort must never reach the server as `Permanent`: that is stored as
+    /// `BuilderNonzero` and permanently blocks the anchor from being requeued
+    /// (#572). Both shapes are covered - the `BuildError` raised inside the
+    /// daemon log drain, and the bare `JobAborted` raised at a NAR-push
+    /// checkpoint or an eval wave boundary.
+    #[test]
+    fn an_abort_is_reported_as_aborted_not_permanent() {
+        let from_build: anyhow::Error = BuildError::aborted("/nix/store/x.drv").into();
+        assert_eq!(wire_failure(&from_build).0, BuildFailureKind::Aborted);
+
+        let from_checkpoint = anyhow::Error::new(JobAborted("job aborted by server".into()))
+            .context("compress and push NARs");
+        assert_eq!(wire_failure(&from_checkpoint).0, BuildFailureKind::Aborted);
     }
 
     #[test]

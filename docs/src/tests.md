@@ -798,6 +798,7 @@ carries a scope (from the newest source bucket) rather than dropping the column.
 Migration `m20260827_000000_metric_rollup_scope_project` re-keys the historical
 rows in place - `scope` is not part of `idx-metric_rollup-unique` and
 `scope_hash` is unchanged, so no merge is needed.
+
 ## NAR packing reads store files, never maps them (#573)
 
 `harmonia-file-nar`'s dumper branches at 256 KiB and used to `mmap` everything
@@ -821,6 +822,32 @@ nor drop content across several large files in one archive. The SIGKILL itself
 is macOS-only and not reproducible on the Linux CI runners; what is testable, and
 what these pin, is that the route the dumper picks for a large file yields that
 file's real bytes.
+
+## Aborting a build no longer poisons its derivation (#572)
+
+Pressing Abort made the server send `AbortJob`, the worker stop nix, and the
+worker report `JobFailed { kind: Permanent }`. The scheduler stores `Permanent`
+as `build_attempt` `outcome = Failed, reason = BuilderNonzero`, which is exactly
+the `deterministic_build_failure` predicate that `requeue_failed_anchors` and
+`requeue_failed_closure_for_eval` use to exclude reproducible builder exits from
+every thaw - so a user abort permanently blocked the derivation (and its whole
+dependent subtree) from ever being built again, even though `Aborted` is itself a
+requeueable status. The exception on `BuilderNonzero` is correct and stays: an
+identical rebuild reproduces a non-zero exit, and thawing it loops the fleet
+(the retry-storm fix). What was wrong is calling an abort one.
+
+`BuildFailureKind::Aborted` is now its own wire kind (`PROTO_VERSION` 7 -> 8;
+the handshake rejects any mismatched peer, so there is no mixed-version decode
+path). `backend/gradient-worker/src/executor/failure.rs`:
+`an_abort_is_reported_as_aborted_not_permanent` covers both shapes the abort
+takes - the `BuildError` raised inside the daemon log drain, and the bare
+`JobAborted` raised at a NAR-push checkpoint or an eval wave boundary, which
+previously fell through `wire_failure`'s unclassified-`Permanent` branch.
+`backend/gradient-scheduler/src/build/lifecycle.rs`:
+`abort_is_not_a_deterministic_build_failure` pins the anchor to
+`FailureOutcome::Aborted` at any attempt count with `AttemptOutcome::Aborted` and
+no reason, and `only_a_real_builder_exit_records_builder_nonzero` pins that
+`BuilderNonzero` is reachable from `Permanent` alone.
 
 ## PostgreSQL minimum-version guard (#387)
 

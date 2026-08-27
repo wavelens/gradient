@@ -567,4 +567,10 @@ pub enum BuildFailureKind {
     /// the evaluation so it re-evaluates cache-less. Carries the corrupt blob's
     /// fingerprint on `ClientMessage::JobFailed.missing_paths`.
     CorruptEvalCache,
+    /// The server sent `AbortJob` and the worker stopped. Not a failure of the
+    /// derivation: it is recorded as `AttemptOutcome::Aborted` with no reason,
+    /// so a later evaluation can thaw the anchor. Reporting an abort as
+    /// `Permanent` stamped `AttemptFailureReason::BuilderNonzero` on the
+    /// attempt, which permanently blocks every requeue (#572).
+    Aborted,
 }
