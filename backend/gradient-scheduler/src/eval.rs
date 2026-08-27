@@ -1310,6 +1310,15 @@ pub async fn handle_eval_job_failed(
             EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
         )
     {
+        // The API writes `Aborted` before `AbortJob` goes out, so the guard above
+        // normally catches this. If that write was lost, settle the evaluation
+        // where the abort meant to put it rather than reporting a failure the
+        // user did not cause.
+        if kind == BuildFailureKind::Aborted {
+            update_evaluation_status(&state.db(), eval, EvaluationStatus::Aborted).await;
+            return Ok(());
+        }
+
         update_evaluation_status_with_error(
             &state.db(),
             eval,

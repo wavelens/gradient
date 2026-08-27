@@ -26,7 +26,9 @@ pub use wire::{decode_client_message, decode_server_message};
 /// v5: dropped `PresignedUpload`/`PresignedDownload` and `AssignJob.timeout_secs`.
 /// v7: `CacheQuery`/`CacheStatus`/`CacheError` carry a per-query `query_id`;
 ///     `NarUploaded` carries the path's content address (`ca`).
-pub const PROTO_VERSION: u16 = 7;
+/// v8: `BuildFailureKind::Aborted` distinguishes a server-ordered abort from a
+///     deterministic build failure.
+pub const PROTO_VERSION: u16 = 8;
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 

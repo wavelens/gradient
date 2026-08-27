@@ -462,10 +462,12 @@ impl JobExecutor {
 }
 
 /// Propagate a server-side `AbortJob` as an error so the surrounding job
-/// resolves to `JobFailed` instead of `JobCompleted`.
+/// resolves to `JobFailed` instead of `JobCompleted`. Typed so the failure
+/// classifier reports `BuildFailureKind::Aborted` rather than treating it as an
+/// unclassified `Permanent` failure.
 pub(crate) fn check_abort(abort: &mut watch::Receiver<bool>) -> Result<()> {
     if *abort.borrow() {
-        anyhow::bail!("job aborted by server");
+        return Err(failure::JobAborted("job aborted by server".to_owned()).into());
     }
     Ok(())
 }

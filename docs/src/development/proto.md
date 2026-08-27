@@ -1320,7 +1320,7 @@ Credentials are encrypted in transit (TLS). Workers MUST:
 
 Either side can abort a job:
 
-**Server-initiated:** `AbortJob { job_id, reason }` → worker stops current step, cleans up, responds `JobFailed` with the abort reason. The server sends `AbortJob` when an evaluation is aborted via the API (`POST /evals/{id}` with `method: "abort"`). The scheduler finds which worker holds the active job and delivers the message through a per-worker channel. Pending (unassigned) jobs for the aborted evaluation are removed from the in-memory tracker.
+**Server-initiated:** `AbortJob { job_id, reason }` -> worker stops current step, cleans up, responds `JobFailed { kind: Aborted }` with the abort reason. The abort is its own `BuildFailureKind`: a `Permanent` build failure is stored as `build_attempt.reason = BuilderNonzero`, which the requeue predicate reads as a reproducible builder exit and excludes from every future thaw, so an aborted derivation could never be rebuilt. `Aborted` is recorded as `AttemptOutcome::Aborted` with no reason, leaves the anchor on the requeueable `Aborted` status, and cascades no `DependencyFailed`. The server sends `AbortJob` when an evaluation is aborted via the API (`POST /evals/{id}` with `method: "abort"`). The scheduler finds which worker holds the active job and delivers the message through a per-worker channel. Pending (unassigned) jobs for the aborted evaluation are removed from the in-memory tracker.
 
 **Worker-initiated:** worker sends `JobFailed` at any time.
 
@@ -1443,13 +1443,16 @@ On receiving `ServerMessage::Draining`, workers:
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `5`) is incremented on breaking wire changes.
+ - `PROTO_VERSION` (currently `8`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`; the check lives once, in
    `session::handshake::on_init_connection`, and every session flavor (worker,
    cache-scoped, outbound) goes through it.
  - v5 dropped the dead `PresignedUpload`/`PresignedDownload` messages and
    `AssignJob.timeout_secs`; presigned URLs travel exclusively in `CacheQuery`
    replies (`CachedPath.url`).
+ - v7 gave `CacheQuery`/`CacheStatus`/`CacheError` a per-query `query_id` and
+   `NarUploaded` the path's content address (`ca`).
+ - v8 added `BuildFailureKind::Aborted`.
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
 ---

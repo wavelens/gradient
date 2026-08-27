@@ -31,10 +31,11 @@ use tracing::{debug, info, warn};
 
 /// Abort error returned from the eval pipeline when the dispatch loop fires
 /// the watch signal in response to a server-side `AbortJob`. Bubbles up as a
-/// regular `Err`, which the worker translates into `JobFailed` - the server's
-/// `handle_eval_job_failed` then no-ops because the eval is already
-/// `Aborted` from the API call.
-const ABORT_ERR: &str = "evaluation aborted by server";
+/// regular `Err`, which the worker reports as `BuildFailureKind::Aborted` so the
+/// server holds the evaluation at `Aborted` instead of failing it.
+fn abort_err() -> anyhow::Error {
+    crate::executor::failure::JobAborted("evaluation aborted by server".to_owned()).into()
+}
 
 /// Returns true if the dispatch loop has flipped the abort watch to `true`.
 fn is_aborted(abort: &mut watch::Receiver<bool>) -> bool {
@@ -699,7 +700,7 @@ impl<'a> ClosureWalker<'a> {
         while !self.queue.is_empty() {
             // Honour AbortJob at every wave boundary.
             if is_aborted(abort) {
-                anyhow::bail!(ABORT_ERR);
+                return Err(abort_err());
             }
             self.process_wave(updater).await?;
         }
@@ -934,7 +935,7 @@ pub async fn evaluate_derivations_with(
     abort: &mut watch::Receiver<bool>,
 ) -> Result<EvalOutcome> {
     if is_aborted(abort) {
-        anyhow::bail!(ABORT_ERR);
+        return Err(abort_err());
     }
     updater.report_evaluating_derivations().await?;
 
@@ -986,7 +987,7 @@ pub async fn evaluate_derivations_with(
     }
 
     if is_aborted(abort) {
-        anyhow::bail!(ABORT_ERR);
+        return Err(abort_err());
     }
 
     // ── Step 2: resolve attr paths → drv paths ───────────────────────────────

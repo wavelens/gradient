@@ -67,6 +67,10 @@ pub(crate) enum FailureOutcome {
     /// Penalty-free re-queue (substitute miss): back to `Queued` without
     /// bumping `attempt`. Escalation to a real build is decided at dispatch.
     Requeue,
+    /// The server ordered the job stopped. Terminal for this evaluation but not
+    /// a verdict on the derivation, so the anchor lands on the requeueable
+    /// `Aborted` rather than `FailedPermanent`.
+    Aborted,
 }
 
 /// Decide what to do with a failed build given its classification and how many
@@ -79,6 +83,7 @@ pub(crate) fn decide_failure_outcome(
     match kind {
         BuildFailureKind::Timeout => FailureOutcome::Timeout,
         BuildFailureKind::Permanent => FailureOutcome::Permanent,
+        BuildFailureKind::Aborted => FailureOutcome::Aborted,
         BuildFailureKind::SubstituteUnavailable => FailureOutcome::Requeue,
         // A missing input self-heals: its producer is re-queued and rebuilds, so
         // the build retries in-eval like a transient failure and succeeds once
@@ -113,7 +118,8 @@ pub(crate) fn terminal_success_status(outputs_already_valid: bool) -> BuildStatu
 }
 
 /// Best-effort mapping from the worker's failure classification to a stored
-/// `build_attempt.reason`. `Transient` has no single cause, so it stays `None`.
+/// `build_attempt.reason`. `Transient` has no single cause, so it stays `None`;
+/// an abort is not a failure of the derivation and carries no reason at all.
 fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
     match kind {
         BuildFailureKind::SubstituteUnavailable => {
@@ -122,7 +128,21 @@ fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
         BuildFailureKind::InputsUnavailable => Some(AttemptFailureReason::InputsUnavailable),
         BuildFailureKind::Permanent => Some(AttemptFailureReason::BuilderNonzero),
         BuildFailureKind::Timeout => Some(AttemptFailureReason::WallClockTimeout),
-        BuildFailureKind::Transient | BuildFailureKind::CorruptEvalCache => None,
+        BuildFailureKind::Transient
+        | BuildFailureKind::CorruptEvalCache
+        | BuildFailureKind::Aborted => None,
+    }
+}
+
+/// How the attempt row is closed out. An abort is recorded as `Aborted`, so the
+/// `deterministic_build_failure` predicate (`outcome = Failed AND reason =
+/// BuilderNonzero`) cannot match it: stamping a user abort as a reproducible
+/// builder exit excluded the anchor from `requeue_failed_anchors` forever, so no
+/// later evaluation could ever rebuild it (#572).
+fn attempt_outcome(kind: BuildFailureKind) -> AttemptOutcome {
+    match kind {
+        BuildFailureKind::Aborted => AttemptOutcome::Aborted,
+        _ => AttemptOutcome::Failed,
     }
 }
 
@@ -431,7 +451,7 @@ pub async fn handle_build_job_failed(
     if let Err(e) = fail_latest_attempt(
         &state.worker_db,
         derivation_build,
-        AttemptOutcome::Failed,
+        attempt_outcome(kind),
         attempt_reason(kind),
         Some(truncate_failure_message(error)),
     )
@@ -491,6 +511,15 @@ pub async fn handle_build_job_failed(
             update_derivation_build_status(&state.db(), anchor, BuildStatus::Queued).await;
             info!(%derivation_build, "substitute unavailable; re-queued for re-dispatch/escalation");
             return Ok(());
+        }
+        FailureOutcome::Aborted => {
+            // The eval-abort path has usually already parked the anchor here (a
+            // no-op re-transition); this covers the anchor the worker gave up on
+            // before that write landed. No dependency cascade: nothing about the
+            // derivation failed, and the abort already settled the evaluation.
+            update_derivation_build_status(&state.db(), anchor, BuildStatus::Aborted).await;
+            info!(%derivation_build, "build aborted by server; anchor left requeueable");
+            return check_referencing_evals_done(state, derivation_id).await;
         }
         FailureOutcome::Permanent => {
             update_derivation_build_status(&state.db(), anchor, BuildStatus::FailedPermanent).await;
@@ -650,10 +679,62 @@ mod orphaned_eval_tests {
 #[cfg(test)]
 mod retry_tests {
     use super::{
-        FailureOutcome, decide_failure_outcome, inputs_unavailable_circuit_open,
-        retry_backoff_elapsed, truncate_failure_message,
+        FailureOutcome, attempt_outcome, attempt_reason, decide_failure_outcome,
+        inputs_unavailable_circuit_open, retry_backoff_elapsed, truncate_failure_message,
     };
+    use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
     use gradient_types::proto::BuildFailureKind;
+
+    /// The user pressed Abort: the worker stopped nix, nothing about the
+    /// derivation failed. Reporting it as `Permanent` landed the anchor on
+    /// `FailedPermanent` with `reason = BuilderNonzero`, which
+    /// `deterministic_build_failure` reads as a reproducible builder exit and
+    /// excludes from every requeue - the derivation could never be built again
+    /// (#572).
+    #[test]
+    fn abort_is_not_a_deterministic_build_failure() {
+        for attempt in [0, 1, 99] {
+            assert_eq!(
+                decide_failure_outcome(BuildFailureKind::Aborted, attempt, 3),
+                FailureOutcome::Aborted,
+                "an abort is never a build verdict, at any attempt count"
+            );
+        }
+        assert_eq!(
+            attempt_outcome(BuildFailureKind::Aborted),
+            AttemptOutcome::Aborted
+        );
+        assert_eq!(attempt_reason(BuildFailureKind::Aborted), None);
+    }
+
+    /// The exception exists for a real reason: a builder that exited non-zero
+    /// reproduces on rebuild, so thawing it loops the fleet. It must stay
+    /// attached to that one case.
+    #[test]
+    fn only_a_real_builder_exit_records_builder_nonzero() {
+        assert_eq!(
+            attempt_reason(BuildFailureKind::Permanent),
+            Some(AttemptFailureReason::BuilderNonzero)
+        );
+        assert_eq!(
+            attempt_outcome(BuildFailureKind::Permanent),
+            AttemptOutcome::Failed
+        );
+        for kind in [
+            BuildFailureKind::Transient,
+            BuildFailureKind::Timeout,
+            BuildFailureKind::SubstituteUnavailable,
+            BuildFailureKind::InputsUnavailable,
+            BuildFailureKind::CorruptEvalCache,
+            BuildFailureKind::Aborted,
+        ] {
+            assert_ne!(
+                attempt_reason(kind),
+                Some(AttemptFailureReason::BuilderNonzero),
+                "{kind:?} must not poison the anchor as a deterministic failure"
+            );
+        }
+    }
 
     #[test]
     fn permanent_is_terminal_regardless_of_attempt() {
