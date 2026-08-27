@@ -780,6 +780,25 @@ omitting one (e.g. `derivation_feature (derivation, feature)`) makes the
 re-point `UPDATE` violate the constraint when a duplicate and its survivor share
 a row. Verified by E2E CI applying the migration against real PostgreSQL.
 
+## Metric rollup scope key survived the project rename (#571)
+
+The `organization` -> `project` rename left `metric_rollup.scope` on the old
+`{'org': id}` shape while the rollup started writing `{'project': id}` for the
+same, unchanged `scope_hash`. The minute->hour->day->week cascade grouped by
+`scope` on top of the conflict key, so a bucket window spanning the rename
+proposed two rows for one `(metric, granularity, bucket_start, scope_hash)` and
+Postgres aborted the statement with `ON CONFLICT DO UPDATE command cannot affect
+row a second time`; `(scope->>'project')` read filters also missed every
+pre-rename row. `backend/gradient-db/src/rollup.rs`:
+`upserts_never_group_by_scope` pins every rollup statement's `GROUP BY` to
+exactly the unique index, `upserts_refresh_scope_on_conflict` pins
+`scope = EXCLUDED.scope` on every `DO UPDATE` so a re-keyed shape self-heals
+forward, and `cascade_carries_the_newest_scope` pins that the cascade still
+carries a scope (from the newest source bucket) rather than dropping the column.
+Migration `m20260827_000000_metric_rollup_scope_project` re-keys the historical
+rows in place - `scope` is not part of `idx-metric_rollup-unique` and
+`scope_hash` is unchanged, so no merge is needed.
+
 ## PostgreSQL minimum-version guard (#387)
 
 `connect_db` reads `server_version_num` at startup and aborts before running
