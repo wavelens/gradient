@@ -31,7 +31,7 @@ impl MetricsScope {
 
         let mut projects: Vec<String> = Vec::new();
         for row in db
-            .query_all(Statement::from_string(
+            .query_all_raw(Statement::from_string(
                 DatabaseBackend::Postgres,
                 "SELECT id FROM project WHERE public = true".to_owned(),
             ))
@@ -41,7 +41,7 @@ impl MetricsScope {
         }
         if let Some(u) = user {
             for row in db
-                .query_all(Statement::from_sql_and_values(
+                .query_all_raw(Statement::from_sql_and_values(
                     DatabaseBackend::Postgres,
                     "SELECT project AS id FROM project_user WHERE \"user\" = $1",
                     [Value::from(Uuid::from(u.id))],

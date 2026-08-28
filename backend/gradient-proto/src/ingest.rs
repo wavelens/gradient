@@ -189,7 +189,7 @@ async fn sync_reference_index<C: ConnectionTrait>(
     hash: &str,
     references: &[String],
 ) -> Result<(), sea_orm::DbErr> {
-    db.execute(sea_orm::Statement::from_sql_and_values(
+    db.execute_raw(sea_orm::Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         r#"
         INSERT INTO cached_path_reference (id, referrer, reference, reference_hash, position)
@@ -315,7 +315,7 @@ async fn upsert_and_sign<C: ConnectionTrait>(
                 .do_nothing()
                 .to_owned(),
             )
-            .do_nothing()
+            .try_insert()
             .exec(db)
             .await;
         if let Err(e) = result {

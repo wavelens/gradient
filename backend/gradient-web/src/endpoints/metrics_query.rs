@@ -189,7 +189,7 @@ pub async fn get_metrics_query(
 
     let rows = state
         .web_db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             sql,
             values,

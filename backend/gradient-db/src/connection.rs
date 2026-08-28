@@ -77,7 +77,7 @@ fn require_supported_pg_version(server_version_num: i32) -> Result<()> {
 }
 
 async fn server_version_num(db: &DatabaseConnection) -> Result<i32> {
-    db.query_one(Statement::from_string(
+    db.query_one_raw(Statement::from_string(
         DatabaseBackend::Postgres,
         "SELECT current_setting('server_version_num')::int4 AS v",
     ))
@@ -148,7 +148,7 @@ async fn prune_removed_migrations(db: &DatabaseConnection) -> Result<()> {
         placeholders.join(", ")
     );
     let rows = db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             sql,
             known,
@@ -368,7 +368,7 @@ pub async fn add_features(
                     .do_nothing()
                     .to_owned(),
                 )
-                .do_nothing()
+                .try_insert()
                 .exec(&ctx.worker_db)
                 .await
                 .context("Failed to insert derivation feature")?;

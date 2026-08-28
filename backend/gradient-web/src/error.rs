@@ -192,7 +192,9 @@ impl From<DbErr> for WebError {
 
 fn is_unique_violation(err: &DbErr) -> bool {
     let sqlx_err = match err {
-        DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e)) => e,
+        DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e)) => {
+            e.as_ref()
+        }
         _ => return false,
     };
     matches!(

@@ -207,10 +207,10 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
            AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.derivation = d.id)"
     );
     let rows = db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             &select_sql,
-            [sea_orm::Value::ChronoDateTime(Some(Box::new(cutoff)))],
+            [sea_orm::Value::ChronoDateTime(Some(cutoff))],
         ))
         .await
         .context("Failed to query orphan derivations")?;
@@ -292,7 +292,7 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     for chunk in candidate_ids.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
         match db
-            .query_all(Statement::from_sql_and_values(
+            .query_all_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 &delete_sql,
                 [ids.into()],

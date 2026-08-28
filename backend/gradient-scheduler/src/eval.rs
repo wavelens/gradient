@@ -1082,7 +1082,7 @@ pub async fn flush_ready_edges(
                 .do_nothing()
                 .to_owned(),
             )
-            .do_nothing()
+            .try_insert()
             .exec(&state.worker_db)
             .await
         {
@@ -1205,7 +1205,7 @@ pub async fn flush_deferred_deps(
                     .do_nothing()
                     .to_owned(),
                 )
-                .do_nothing()
+                .try_insert()
                 .exec(&state.worker_db)
                 .await
             {

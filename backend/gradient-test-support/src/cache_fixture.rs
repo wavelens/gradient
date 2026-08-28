@@ -623,28 +623,16 @@ pub async fn public_cache_list_one_signed_nar() -> Arc<ServerState> {
     count_row.insert("total", Value::BigInt(Some(1)));
 
     let mut nar_row: BTreeMap<&'static str, Value> = BTreeMap::new();
-    nar_row.insert(
-        "hash",
-        Value::String(Some(Box::new(FIXTURE_PATH_HASH.into()))),
-    );
+    nar_row.insert("hash", Value::String(Some(FIXTURE_PATH_HASH.into())));
     nar_row.insert(
         "store_path",
-        Value::String(Some(Box::new(format!(
-            "/nix/store/{}-hello",
-            FIXTURE_PATH_HASH
-        )))),
+        Value::String(Some(format!("/nix/store/{}-hello", FIXTURE_PATH_HASH))),
     );
-    nar_row.insert("package", Value::String(Some(Box::new("hello".into()))));
+    nar_row.insert("package", Value::String(Some("hello".into())));
     nar_row.insert("nar_size", Value::BigInt(Some(67890)));
     nar_row.insert("file_size", Value::BigInt(Some(12345)));
-    nar_row.insert(
-        "created_at",
-        Value::ChronoDateTime(Some(Box::new(test_date()))),
-    );
-    nar_row.insert(
-        "last_fetched_at",
-        Value::ChronoDateTime(Some(Box::new(test_date()))),
-    );
+    nar_row.insert("created_at", Value::ChronoDateTime(Some(test_date())));
+    nar_row.insert("last_fetched_at", Value::ChronoDateTime(Some(test_date())));
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![cache_row()]])
@@ -692,13 +680,10 @@ pub async fn public_cache_stats_row() -> Arc<ServerState> {
     row.insert("total_nars", Value::BigInt(Some(2)));
     row.insert("total_nar_size", Value::BigInt(Some(135780)));
     row.insert("total_file_size", Value::BigInt(Some(24690)));
-    row.insert(
-        "last_uploaded_at",
-        Value::ChronoDateTime(Some(Box::new(test_date()))),
-    );
+    row.insert("last_uploaded_at", Value::ChronoDateTime(Some(test_date())));
     row.insert(
         "oldest_fetched_at",
-        Value::ChronoDateTime(Some(Box::new(test_date()))),
+        Value::ChronoDateTime(Some(test_date())),
     );
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)

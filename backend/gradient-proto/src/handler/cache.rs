@@ -107,7 +107,7 @@ async fn ensure_push_signatures(
     for chunk in path_ids.chunks(SIGNATURE_PATH_BATCH) {
         let result = state
             .cache_db
-            .execute(sea_orm::Statement::from_sql_and_values(
+            .execute_raw(sea_orm::Statement::from_sql_and_values(
                 sea_orm::DatabaseBackend::Postgres,
                 r#"
                 INSERT INTO cached_path_signature (id, cached_path, cache, created_at)

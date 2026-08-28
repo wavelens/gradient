@@ -67,7 +67,7 @@ pub async fn substitute_miss_counts<C: ConnectionTrait>(
     let rows = crate::fetch_in_chunks(anchors, |chunk| {
         let ids: Vec<Uuid> = chunk.iter().map(|a| a.into_inner()).collect();
         async move {
-            db.query_all(Statement::from_sql_and_values(
+            db.query_all_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 r#"SELECT ba.derivation_build AS anchor, bj.evaluation AS evaluation,
                           count(*) AS misses

@@ -36,7 +36,7 @@ const TOKEN: &str = "metrics-token-abcdef";
 /// `IntoMockRow` for entity models and for that map type.
 fn count_row(kind: &str, status: Option<i32>, value: i64) -> BTreeMap<&'static str, Value> {
     let mut row = BTreeMap::new();
-    row.insert("kind", Value::String(Some(Box::new(kind.to_string()))));
+    row.insert("kind", Value::String(Some(kind.to_string())));
     row.insert("status", Value::Int(status));
     row.insert("value", Value::BigInt(Some(value)));
     row

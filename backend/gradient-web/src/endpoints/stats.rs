@@ -71,7 +71,7 @@ pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: CacheId, byte
     };
 
     let stmt = build_record_nar_traffic_stmt(cache_id, bucket, bytes);
-    if let Err(e) = state.web_db.execute(stmt).await {
+    if let Err(e) = state.web_db.execute_raw(stmt).await {
         tracing::warn!(error = %e, "Failed to record cache metric");
     }
 }
@@ -93,9 +93,9 @@ fn build_record_nar_traffic_stmt(
            DO UPDATE SET bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent,
                          nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count"#,
         [
-            sea_orm::Value::Uuid(Some(Box::new(Uuid::now_v7()))),
-            sea_orm::Value::Uuid(Some(Box::new(cache_id.into_inner()))),
-            sea_orm::Value::ChronoDateTime(Some(Box::new(bucket))),
+            sea_orm::Value::Uuid(Some(Uuid::now_v7())),
+            sea_orm::Value::Uuid(Some(cache_id.into_inner())),
+            sea_orm::Value::ChronoDateTime(Some(bucket)),
             sea_orm::Value::BigInt(Some(bytes)),
         ],
     )
@@ -134,12 +134,12 @@ async fn cache_series<C: sea_orm::ConnectionTrait>(
     );
 
     let rows = db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             &sql,
             [
-                sea_orm::Value::String(Some(Box::new(metric.to_owned()))),
-                sea_orm::Value::String(Some(Box::new(cache_id.to_string()))),
+                sea_orm::Value::String(Some(metric.to_owned())),
+                sea_orm::Value::String(Some(cache_id.to_string())),
             ],
         ))
         .await
@@ -215,7 +215,7 @@ pub async fn get_cache_stats(
     // Total compressed bytes and package count for this cache.
     let total_row = state
         .web_db
-        .query_one(Statement::from_sql_and_values(
+        .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"SELECT COALESCE(SUM(cp.file_size), 0)::bigint AS total_bytes,
                       COALESCE(SUM(cp.nar_size),  0)::bigint AS total_nar_bytes,
@@ -223,7 +223,7 @@ pub async fn get_cache_stats(
                FROM cached_path_signature cps
                JOIN cached_path cp ON cp.id = cps.cached_path
                WHERE cps.cache = $1"#,
-            [sea_orm::Value::Uuid(Some(Box::new(cache.id.into_inner())))],
+            [sea_orm::Value::Uuid(Some(cache.id.into_inner()))],
         ))
         .await
         .map_err(WebError::from)?;

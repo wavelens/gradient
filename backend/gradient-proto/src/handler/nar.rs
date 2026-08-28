@@ -67,7 +67,7 @@ async fn upsert_cache_metric(
     // into a duplicate-key violation (and the update arm loses each other's writes).
     state
         .worker_db
-        .execute(Statement::from_sql_and_values(
+        .execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             "INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count) \
              VALUES (uuidv7(), $1, $2, $3, 1) \
@@ -75,7 +75,7 @@ async fn upsert_cache_metric(
                  bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent, \
                  nar_count  = cache_metric.nar_count  + 1",
             [
-                Value::Uuid(Some(Box::new(cache_id.into_inner()))),
+                Value::Uuid(Some(cache_id.into_inner())),
                 bucket.into(),
                 bytes.into(),
             ],
