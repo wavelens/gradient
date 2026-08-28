@@ -13,7 +13,7 @@ use gradient_entity::build::BuildStatus;
 use gradient_entity::cache::Model as MCache;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_types::ids::{CacheId, DerivationId, ProjectId};
-use sea_orm::sea_query::{Alias, SimpleExpr};
+use sea_orm::sea_query::{Alias, Expr};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QuerySelect, Statement,
 };
@@ -24,8 +24,9 @@ pub const STORAGE_HEADROOM_BYTES: i64 = 10 * 1024 * 1024;
 
 /// `SUM(file_size)` cast back to `BIGINT`: Postgres widens `SUM(int8)` to
 /// `NUMERIC`, which would otherwise fail to decode into `Option<i64>`.
-fn file_size_sum_bigint() -> SimpleExpr {
+fn file_size_sum_bigint() -> Expr {
     use gradient_entity::cached_path::Column as CCP;
+    use sea_orm::sea_query::ExprTrait;
     CCP::FileSize.sum().cast_as(Alias::new("bigint"))
 }
 
@@ -303,7 +304,7 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     // swept up by the absent-orphan recovery) behind the closure gate.
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
-        db.execute(Statement::from_sql_and_values(
+        db.execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             format!(
                 r#"
@@ -554,12 +555,12 @@ pub async fn reconcile_cached_path_closure_complete<C: ConnectionTrait>(
 ) -> Result<(), sea_orm::DbErr> {
     let (clear, set) = cached_path_closure_statements(scope);
     let params: Vec<sea_orm::Value> = scope
-        .map(|id| vec![sea_orm::Value::Uuid(Some(Box::new(id.into_inner())))])
+        .map(|id| vec![sea_orm::Value::Uuid(Some(id.into_inner()))])
         .unwrap_or_default();
     for stmt in [clear, set] {
         loop {
             let changed = db
-                .execute(Statement::from_sql_and_values(
+                .execute_raw(Statement::from_sql_and_values(
                     DatabaseBackend::Postgres,
                     &stmt,
                     params.clone(),
@@ -590,7 +591,7 @@ pub async fn clear_gate_flags_for_hashes<C: ConnectionTrait>(
 ) -> Result<(), sea_orm::DbErr> {
     for chunk in hashes.chunks(crate::IN_CHUNK_SIZE) {
         let chunk: Vec<String> = chunk.to_vec();
-        db.execute(Statement::from_sql_and_values(
+        db.execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
             UPDATE derivation_build db SET drv_closure_cached = false
@@ -601,7 +602,7 @@ pub async fn clear_gate_flags_for_hashes<C: ConnectionTrait>(
         ))
         .await?;
 
-        db.execute(Statement::from_sql_and_values(
+        db.execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
             UPDATE derivation_build db SET closure_complete = false
@@ -613,7 +614,7 @@ pub async fn clear_gate_flags_for_hashes<C: ConnectionTrait>(
         ))
         .await?;
 
-        db.execute(Statement::from_sql_and_values(
+        db.execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"
             WITH RECURSIVE dirty(hash) AS (
@@ -688,7 +689,7 @@ async fn clear_anchor_closure_complete_for_output<C: ConnectionTrait>(
     db: &C,
     output_hash: &str,
 ) -> Result<(), sea_orm::DbErr> {
-    db.execute(Statement::from_sql_and_values(
+    db.execute_raw(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         r#"
         UPDATE derivation_build db SET closure_complete = false

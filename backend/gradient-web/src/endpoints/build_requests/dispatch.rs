@@ -463,7 +463,7 @@ async fn queue_signature_placeholders<C: ConnectionTrait>(
             .do_nothing()
             .to_owned(),
         )
-        .do_nothing()
+        .try_insert()
         .exec(tx)
         .await?;
     Ok(())
@@ -524,7 +524,9 @@ async fn ensure_build_request_task<C: ConnectionTrait>(
 
 fn is_unique_violation(err: &DbErr) -> bool {
     let sqlx_err = match err {
-        DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e)) => e,
+        DbErr::Query(RuntimeErr::SqlxError(e)) | DbErr::Exec(RuntimeErr::SqlxError(e)) => {
+            e.as_ref()
+        }
         _ => return false,
     };
     matches!(

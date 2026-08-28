@@ -58,7 +58,7 @@ async fn infra_series(
     );
 
     let rows = db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             sql,
             [metric.into()],
@@ -166,7 +166,7 @@ pub async fn get_board_upstreams(
 
     let rows = state
         .web_db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             sql,
             [],
@@ -337,7 +337,7 @@ pub async fn get_board_network(
     sql.push_str(" ORDER BY worker_id, at DESC");
     let rows = state
         .web_db
-        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
 
     let workers = rows
@@ -401,7 +401,7 @@ pub async fn get_board_fleet(
     sql.push_str(" GROUP BY bucket ORDER BY bucket");
     let rows = state
         .web_db
-        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
 
     let out = rows
@@ -489,7 +489,7 @@ pub async fn get_board_durations_heatmap(
 
     let rows = state
         .web_db
-        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
 
     let mut times: Vec<chrono::NaiveDateTime> = Vec::new();
@@ -563,7 +563,7 @@ pub async fn get_board_health(
 
     let latest: Option<chrono::NaiveDateTime> = state
         .web_db
-        .query_one(Statement::from_string(
+        .query_one_raw(Statement::from_string(
             DatabaseBackend::Postgres,
             format!(
                 "SELECT max(bucket_start) AS m FROM metric_rollup WHERE granularity = {}",

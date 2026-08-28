@@ -465,7 +465,7 @@ async fn load_active_triggers_for_integration(
                AND i.id = $1",
             i16::from(trigger_type),
         ),
-        [Value::Uuid(Some(Box::new(integration_id.into_inner())))],
+        [Value::Uuid(Some(integration_id.into_inner()))],
     );
     ETaskTrigger::find()
         .from_raw_sql(stmt)

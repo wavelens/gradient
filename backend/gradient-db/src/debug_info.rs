@@ -59,13 +59,10 @@ pub async fn lookup_for_cache<C: ConnectionTrait>(
     build_id: &str,
 ) -> Result<Option<DebugInfoTarget>, DbErr> {
     let row = db
-        .query_one(Statement::from_sql_and_values(
+        .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             LOOKUP_SQL,
-            [
-                Value::Uuid(Some(Box::new(cache.into_inner()))),
-                build_id.into(),
-            ],
+            [Value::Uuid(Some(cache.into_inner())), build_id.into()],
         ))
         .await?;
 
@@ -138,10 +135,10 @@ pub async fn index_cached_path<C: ConnectionTrait>(
 /// whole debug output to rediscover the same members is pure waste.
 async fn needs_index<C: ConnectionTrait>(db: &C, cached_path: CachedPathId) -> Result<bool, DbErr> {
     let row = db
-        .query_one(Statement::from_sql_and_values(
+        .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             "SELECT debug_info_indexed FROM cached_path WHERE id = $1",
-            [Value::Uuid(Some(Box::new(cached_path.into_inner())))],
+            [Value::Uuid(Some(cached_path.into_inner()))],
         ))
         .await?;
 
@@ -157,14 +154,14 @@ async fn insert_entries<C: ConnectionTrait>(
     build_ids: Vec<String>,
     members: Vec<String>,
 ) -> Result<(), DbErr> {
-    db.execute(Statement::from_sql_and_values(
+    db.execute_raw(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         "INSERT INTO debug_info (id, build_id, cached_path, member, created_at) \
          SELECT uuidv7(), t.build_id, $1, t.member, $2 \
          FROM unnest($3::text[], $4::text[]) AS t(build_id, member) \
          ON CONFLICT (build_id, cached_path) DO NOTHING",
         [
-            Value::Uuid(Some(Box::new(cached_path.into_inner()))),
+            Value::Uuid(Some(cached_path.into_inner())),
             gradient_types::now().into(),
             build_ids.into(),
             members.into(),
@@ -176,10 +173,10 @@ async fn insert_entries<C: ConnectionTrait>(
 }
 
 async fn mark_indexed<C: ConnectionTrait>(db: &C, cached_path: CachedPathId) -> Result<(), DbErr> {
-    db.execute(Statement::from_sql_and_values(
+    db.execute_raw(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         "UPDATE cached_path SET debug_info_indexed = true WHERE id = $1",
-        [Value::Uuid(Some(Box::new(cached_path.into_inner())))],
+        [Value::Uuid(Some(cached_path.into_inner()))],
     ))
     .await?;
 

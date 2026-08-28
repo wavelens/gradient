@@ -109,7 +109,7 @@ impl<'de> Deserialize<'de> for StorePath {
 
 impl From<StorePath> for sea_orm::Value {
     fn from(p: StorePath) -> Self {
-        sea_orm::Value::String(Some(Box::new(p.base())))
+        sea_orm::Value::String(Some(p.base()))
     }
 }
 
@@ -228,10 +228,10 @@ mod tests {
         use sea_orm::sea_query::ValueType;
         let p = StorePath::from_parts("abc123", "hello-2.12.1");
         let v = sea_orm::Value::from(p.clone());
-        assert_eq!(v, sea_orm::Value::String(Some(Box::new(p.base()))));
+        assert_eq!(v, sea_orm::Value::String(Some(p.base())));
         assert_eq!(<StorePath as ValueType>::try_from(v).unwrap(), p);
         // Full-path values written before the typed column parse identically.
-        let legacy = sea_orm::Value::String(Some(Box::new(p.full())));
+        let legacy = sea_orm::Value::String(Some(p.full()));
         assert_eq!(<StorePath as ValueType>::try_from(legacy).unwrap(), p);
     }
 }

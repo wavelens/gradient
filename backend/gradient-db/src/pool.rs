@@ -81,20 +81,20 @@ macro_rules! impl_connection_trait {
                 self.0.get_database_backend()
             }
 
-            async fn execute(&self, stmt: Statement) -> Result<ExecResult, DbErr> {
-                self.0.execute(stmt).await
+            async fn execute_raw(&self, stmt: Statement) -> Result<ExecResult, DbErr> {
+                self.0.execute_raw(stmt).await
             }
 
             async fn execute_unprepared(&self, sql: &str) -> Result<ExecResult, DbErr> {
                 self.0.execute_unprepared(sql).await
             }
 
-            async fn query_one(&self, stmt: Statement) -> Result<Option<QueryResult>, DbErr> {
-                self.0.query_one(stmt).await
+            async fn query_one_raw(&self, stmt: Statement) -> Result<Option<QueryResult>, DbErr> {
+                self.0.query_one_raw(stmt).await
             }
 
-            async fn query_all(&self, stmt: Statement) -> Result<Vec<QueryResult>, DbErr> {
-                self.0.query_all(stmt).await
+            async fn query_all_raw(&self, stmt: Statement) -> Result<Vec<QueryResult>, DbErr> {
+                self.0.query_all_raw(stmt).await
             }
 
             fn support_returning(&self) -> bool {

@@ -129,15 +129,15 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheI
     state.shutdown.spawn(async move {
         use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
         let now = gradient_types::now();
-        let now_val = sea_orm::Value::ChronoDateTimeUtc(Some(Box::new(
+        let now_val = sea_orm::Value::ChronoDateTimeUtc(Some(
             chrono::DateTime::from_naive_utc_and_offset(now, chrono::Utc),
-        )));
-        let cache_val = sea_orm::Value::Uuid(Some(Box::new(cache_id.into_inner())));
-        let hash_val = sea_orm::Value::String(Some(Box::new(hash.clone())));
+        ));
+        let cache_val = sea_orm::Value::Uuid(Some(cache_id.into_inner()));
+        let hash_val = sea_orm::Value::String(Some(hash.clone()));
 
         let _ = s
             .worker_db
-            .execute(Statement::from_sql_and_values(
+            .execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 "UPDATE cache_derivation SET last_fetched_at = $1 \
                  WHERE cache = $2 AND derivation IN ( \
@@ -149,7 +149,7 @@ fn spawn_cache_derivation_fetch_update(state: Arc<ServerState>, cache_id: CacheI
 
         let _ = s
             .worker_db
-            .execute(Statement::from_sql_and_values(
+            .execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 "UPDATE cached_path_signature \
                  SET last_fetched_at = $1, fetch_count = fetch_count + 1 \

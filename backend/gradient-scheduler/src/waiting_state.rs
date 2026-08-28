@@ -364,10 +364,10 @@ async fn eval_blocked_on_unproducible_drv(
     let row = state
         .worker_db
         .inner()
-        .query_one(Statement::from_sql_and_values(
+        .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             unproducible_drv_block_sql(),
-            [Value::Uuid(Some(Box::new(evaluation_id.into_inner())))],
+            [Value::Uuid(Some(evaluation_id.into_inner()))],
         ))
         .await
         .context("detect unproducible-drv block")?;

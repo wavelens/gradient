@@ -117,20 +117,17 @@ pub async fn list(
     };
 
     let mut where_clauses = vec!["cps.cache = $1".to_string()];
-    let mut values: Vec<sea_orm::Value> =
-        vec![sea_orm::Value::Uuid(Some(Box::new(cache.id.into_inner())))];
+    let mut values: Vec<sea_orm::Value> = vec![sea_orm::Value::Uuid(Some(cache.id.into_inner()))];
 
     if let Some(prefix) = q.hash.as_deref().filter(|s| !s.is_empty()) {
         let n = values.len() + 1;
         where_clauses.push(format!("cp.hash LIKE ${n}"));
-        values.push(sea_orm::Value::String(Some(Box::new(format!("{prefix}%")))));
+        values.push(sea_orm::Value::String(Some(format!("{prefix}%"))));
     }
     if let Some(needle) = q.package.as_deref().filter(|s| !s.is_empty()) {
         let n = values.len() + 1;
         where_clauses.push(format!("cp.package LIKE ${n}"));
-        values.push(sea_orm::Value::String(Some(Box::new(format!(
-            "%{needle}%"
-        )))));
+        values.push(sea_orm::Value::String(Some(format!("%{needle}%"))));
     }
     let where_sql = where_clauses.join(" AND ");
 
@@ -268,7 +265,7 @@ pub async fn stats(
          FROM cached_path_signature cps \
          JOIN cached_path cp ON cp.id = cps.cached_path \
          WHERE cps.cache = $1",
-        [sea_orm::Value::Uuid(Some(Box::new(cache.id.into_inner())))],
+        [sea_orm::Value::Uuid(Some(cache.id.into_inner()))],
     ))
     .one(&state.web_db)
     .await?

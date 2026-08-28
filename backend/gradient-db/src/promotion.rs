@@ -117,10 +117,10 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     db: &C,
     completed_derivation: DerivationId,
 ) -> Result<Vec<TransitionChange>, DbErr> {
-    let id = || Value::Uuid(Some(Box::new(completed_derivation.into_inner())));
+    let id = || Value::Uuid(Some(completed_derivation.into_inner()));
 
     let mut affected = returned_transitions(
-        db.query_all(Statement::from_sql_and_values(
+        db.query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             format!(
                 r#"
@@ -149,7 +149,7 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");
     affected.extend(transitions_from(
         returned_derivations(
-            db.query_all(Statement::from_sql_and_values(
+            db.query_all_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 format!(
                     r#"
@@ -236,7 +236,7 @@ pub async fn propagate_closure_complete<C: ConnectionTrait>(
     // Round-1 candidates: `completed` itself (it may now be closure_complete)
     // plus its direct dependents, which may have been waiting only on it.
     let mut frontier = returned_derivations(
-        db.query_all(Statement::from_sql_and_values(
+        db.query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = $1",
             [completed.into_inner().into()],
@@ -253,7 +253,7 @@ pub async fn propagate_closure_complete<C: ConnectionTrait>(
     while !frontier.is_empty() {
         let ids: Vec<uuid::Uuid> = frontier.iter().map(|d| d.into_inner()).collect();
         let newly = returned_derivations(
-            db.query_all(Statement::from_sql_and_values(
+            db.query_all_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 &update,
                 [ids.into()],
@@ -266,7 +266,7 @@ pub async fn propagate_closure_complete<C: ConnectionTrait>(
 
         let newly_ids: Vec<uuid::Uuid> = newly.iter().map(|d| d.into_inner()).collect();
         frontier = returned_derivations(
-            db.query_all(Statement::from_sql_and_values(
+            db.query_all_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = ANY($1)",
                 [newly_ids.into()],
@@ -326,7 +326,7 @@ fn eval_scope_fragments(scope: Option<gradient_types::EvaluationId>) -> (String,
 /// Bind the eval id as `$1` for a scoped sweep; empty values for the global pass.
 fn fixpoint_params(scope: Option<gradient_types::EvaluationId>) -> Vec<Value> {
     scope
-        .map(|id| vec![Value::Uuid(Some(Box::new(id.into_inner())))])
+        .map(|id| vec![Value::Uuid(Some(id.into_inner()))])
         .unwrap_or_default()
 }
 
@@ -343,7 +343,7 @@ async fn run_bidirectional_fixpoint<C: ConnectionTrait>(
     for stmt in [clear, set] {
         loop {
             let changed = db
-                .execute(Statement::from_sql_and_values(
+                .execute_raw(Statement::from_sql_and_values(
                     DatabaseBackend::Postgres,
                     stmt,
                     params.clone(),
@@ -450,7 +450,7 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
         ClosureDirection::Dependents,
     );
     let rows = db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             format!(
                 r#"
@@ -466,7 +466,7 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
                 dependency_failed = status_sql::build(BuildStatus::DependencyFailed),
                 cascade_target = status_sql::build_in(&CASCADE_TARGET),
             ),
-            [Value::Uuid(Some(Box::new(failed_derivation.into_inner())))],
+            [Value::Uuid(Some(failed_derivation.into_inner()))],
         ))
         .await?;
 
@@ -493,7 +493,7 @@ pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
     scope: Option<gradient_types::EvaluationId>,
 ) -> Result<Vec<TransitionChange>, DbErr> {
     let rows = db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             dependency_failed_reconcile_sql(scope),
             fixpoint_params(scope),
@@ -564,7 +564,7 @@ fn dependency_failed_reconcile_sql(scope: Option<gradient_types::EvaluationId>) 
 /// the changes it made so the caller can feed the effects emitter.
 pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<TransitionChange>, DbErr> {
     let rows = db
-        .query_all(Statement::from_string(
+        .query_all_raw(Statement::from_string(
             DatabaseBackend::Postgres,
             promote_ready_sql(),
         ))
@@ -663,7 +663,7 @@ pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
 ) -> Result<u64, DbErr> {
     let cte = eval_closure_cte();
     let affected = db
-        .execute(Statement::from_sql_and_values(
+        .execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             format!(
                 r#"
@@ -680,7 +680,7 @@ pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
               )
             "#
             ),
-            [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
+            [Value::Uuid(Some(evaluation.into_inner()))],
         ))
         .await?
         .rows_affected();
@@ -720,7 +720,7 @@ pub async fn requeue_failed_anchors<C: ConnectionTrait>(
     for chunk in derivations.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<uuid::Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
         total += db
-            .execute(Statement::from_sql_and_values(
+            .execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 &sql,
                 [ids.into()],
@@ -792,10 +792,10 @@ pub async fn requeue_failed_closure_for_eval<C: ConnectionTrait>(
     evaluation: gradient_types::EvaluationId,
 ) -> Result<u64, DbErr> {
     let affected = db
-        .execute(Statement::from_sql_and_values(
+        .execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             requeue_failed_closure_for_eval_sql(),
-            [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
+            [Value::Uuid(Some(evaluation.into_inner()))],
         ))
         .await?
         .rows_affected();
@@ -838,7 +838,7 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
 ) -> Result<Vec<TransitionChange>, DbErr> {
     let cte = eval_closure_cte();
     let rows = db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             format!(
                 r#"
@@ -862,7 +862,7 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
                 terminal_success = status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
                 completed = status_sql::build(BuildStatus::Completed),
             ),
-            [Value::Uuid(Some(Box::new(evaluation.into_inner())))],
+            [Value::Uuid(Some(evaluation.into_inner()))],
         ))
         .await?;
 

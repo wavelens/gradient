@@ -610,7 +610,7 @@ pub(super) async fn active_task_ids_for_integration(
             .to_string(),
         [
             Value::SmallInt(Some(i16::from(TriggerType::ReporterPullRequest))),
-            Value::Uuid(Some(Box::new(integration_id.into_inner()))),
+            Value::Uuid(Some(integration_id.into_inner())),
         ],
     );
 

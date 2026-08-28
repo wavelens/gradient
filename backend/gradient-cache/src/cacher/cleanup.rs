@@ -152,7 +152,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
 
     let rows = state
         .worker_db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             STALE_CACHED_NARS_SELECT,
             [
@@ -207,7 +207,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         if !output_hashes.is_empty() {
             use sea_orm::TransactionTrait;
             let txn = state.worker_db.inner().begin().await?;
-            txn.execute(Statement::from_sql_and_values(
+            txn.execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 r#"
                 DELETE FROM cached_path_signature s
@@ -220,7 +220,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             .context("TTL GC: failed to delete cached_path_signature rows")?;
 
             let dropped = txn
-                .query_all(Statement::from_sql_and_values(
+                .query_all_raw(Statement::from_sql_and_values(
                     DatabaseBackend::Postgres,
                     r#"
                     DELETE FROM cached_path cp
@@ -427,7 +427,7 @@ const ACTIVE_HASHES_SELECT: &str = r#"
 async fn active_hashes(state: &Arc<ServerState>) -> Result<HashSet<String>> {
     let rows = state
         .worker_db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             ACTIVE_HASHES_SELECT,
             [
@@ -473,7 +473,7 @@ mod tests {
 
     fn hash_row(h: &str) -> BTreeMap<String, Value> {
         let mut m = BTreeMap::new();
-        m.insert("hash".to_string(), Value::String(Some(Box::new(h.into()))));
+        m.insert("hash".to_string(), Value::String(Some(h.into())));
         m
     }
 

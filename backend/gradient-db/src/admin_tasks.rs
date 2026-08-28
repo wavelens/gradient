@@ -77,6 +77,8 @@ pub async fn find_active<C: ConnectionTrait>(
     conn: &C,
     kind: AdminTaskKind,
 ) -> Result<Option<MAdminTask>> {
+    use sea_orm::sea_query::ExprTrait;
+
     EAdminTask::find()
         .filter(CAdminTask::Kind.eq(kind))
         .filter(
@@ -170,7 +172,7 @@ pub const STARTUP_FAILURE_MESSAGE: &str = "server restarted before completion";
 
 pub async fn mark_all_active_failed<C: ConnectionTrait>(conn: &C) -> Result<u64> {
     let res = conn
-        .execute(Statement::from_sql_and_values(
+        .execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"UPDATE admin_task
                SET status = $1,
@@ -179,7 +181,7 @@ pub async fn mark_all_active_failed<C: ConnectionTrait>(conn: &C) -> Result<u64>
                WHERE status IN ($3, $4)"#,
             [
                 sea_orm::Value::Int(Some(AdminTaskStatus::Failed as i32)),
-                sea_orm::Value::String(Some(Box::new(STARTUP_FAILURE_MESSAGE.into()))),
+                sea_orm::Value::String(Some(STARTUP_FAILURE_MESSAGE.into())),
                 sea_orm::Value::Int(Some(AdminTaskStatus::Pending as i32)),
                 sea_orm::Value::Int(Some(AdminTaskStatus::Running as i32)),
             ],

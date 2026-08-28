@@ -139,7 +139,7 @@ async fn abort_anchors_for_evals<C: ConnectionTrait>(
     );
 
     let res = conn
-        .execute(Statement::from_sql_and_values(
+        .execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             sql,
             [ids.into()],

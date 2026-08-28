@@ -35,7 +35,7 @@ pub(super) async fn persist_evaluation_check_id(
     let result = ctx
         .db
         .worker_db
-        .execute(Statement::from_sql_and_values(
+        .execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             r#"UPDATE evaluation
                SET check_run_ids = jsonb_set(
@@ -46,8 +46,8 @@ pub(super) async fn persist_evaluation_check_id(
                )
                WHERE id = $1"#,
             [
-                sea_orm::Value::Uuid(Some(Box::new(evaluation_id.into_inner()))),
-                sea_orm::Value::String(Some(Box::new(context.to_string()))),
+                sea_orm::Value::Uuid(Some(evaluation_id.into_inner())),
+                sea_orm::Value::String(Some(context.to_string())),
                 sea_orm::Value::BigInt(Some(check_run_id)),
             ],
         ))

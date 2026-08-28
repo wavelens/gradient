@@ -106,7 +106,7 @@ pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
                     .do_nothing()
                     .to_owned(),
                 )
-                .do_nothing()
+                .try_insert()
                 .exec(db)
                 .await?;
         }
@@ -119,7 +119,7 @@ pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
         if count > 0 {
             healed += 1;
         }
-        db.execute(Statement::from_string(
+        db.execute_raw(Statement::from_string(
             DbBackend::Postgres,
             format!(
                 "UPDATE derivation SET dep_closure_count = {count} WHERE id = '{}'",
@@ -142,7 +142,7 @@ pub async fn init_entry_point_dep_counts<C: ConnectionTrait>(
     evaluation: EvaluationId,
 ) -> Result<(), DbErr> {
     let eval = evaluation.into_inner();
-    db.execute(Statement::from_string(
+    db.execute_raw(Statement::from_string(
         DbBackend::Postgres,
         format!(
             "DELETE FROM entry_point_dep_count \
@@ -150,7 +150,7 @@ pub async fn init_entry_point_dep_counts<C: ConnectionTrait>(
         ),
     ))
     .await?;
-    db.execute(Statement::from_string(
+    db.execute_raw(Statement::from_string(
         DbBackend::Postgres,
         format!(
             "INSERT INTO entry_point_dep_count (id, entry_point, status, count) \
@@ -230,7 +230,7 @@ pub async fn apply_dep_count_delta<C: ConnectionTrait>(
     // Both statements lock the affected `entry_point_dep_count` rows in a fixed
     // `entry_point` order so two concurrent fan-outs over overlapping entry
     // points can never acquire the same rows in opposite order (deadlock).
-    db.execute(Statement::from_sql_and_values(
+    db.execute_raw(Statement::from_sql_and_values(
         DbBackend::Postgres,
         "UPDATE entry_point_dep_count c SET count = c.count - 1 \
          FROM ( \
@@ -245,7 +245,7 @@ pub async fn apply_dep_count_delta<C: ConnectionTrait>(
     ))
     .await?;
 
-    db.execute(Statement::from_sql_and_values(
+    db.execute_raw(Statement::from_sql_and_values(
         DbBackend::Postgres,
         "INSERT INTO entry_point_dep_count (id, entry_point, status, count) \
          SELECT uuidv7(), ep.id, $1, 1 \

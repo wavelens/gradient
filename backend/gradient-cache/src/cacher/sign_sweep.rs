@@ -266,7 +266,7 @@ async fn record_newly_completed_derivations(
         // per dependency (which scanned for minutes on a large graph).
         let inserted = state
             .worker_db
-            .execute(Statement::from_sql_and_values(
+            .execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 r#"
         WITH have AS MATERIALIZED (
@@ -308,7 +308,7 @@ async fn record_newly_completed_derivations(
     while !frontier.is_empty() {
         let rows = state
             .worker_db
-            .query_all(Statement::from_sql_and_values(
+            .query_all_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 INSERT_LAYER,
                 [
@@ -328,7 +328,7 @@ async fn record_newly_completed_derivations(
         inserted_total += inserted.len();
         frontier = state
             .worker_db
-            .query_all(Statement::from_sql_and_values(
+            .query_all_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = ANY($1)",
                 [inserted.into()],

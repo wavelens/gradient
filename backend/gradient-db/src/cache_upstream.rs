@@ -159,7 +159,7 @@ pub async fn upstream_endpoints_for_project<C: ConnectionTrait>(
     );
 
     let rows = db
-        .query_all(Statement::from_sql_and_values(
+        .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             sql,
             [project_id.into_inner().into()],
@@ -193,7 +193,7 @@ pub async fn upsert_upstream_metrics<C: ConnectionTrait>(
             continue;
         }
 
-        db.execute(Statement::from_sql_and_values(
+        db.execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             "INSERT INTO upstream_metric \
                  (id, upstream_url, bucket_time, latency_ms_sum, request_count, narinfo_hits, narinfo_misses) \
@@ -231,7 +231,7 @@ pub async fn upstream_urls_for_projects<C: ConnectionTrait>(
     );
 
     Ok(db
-        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?
         .into_iter()
         .filter_map(|r| r.try_get::<String>("", "url").ok())

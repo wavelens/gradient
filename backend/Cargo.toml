@@ -52,7 +52,7 @@ async-trait  = { version = "0.1", default-features = false }
 futures      = { version = "0.3", default-features = false, features = ["std", "async-await"] }
 tokio        = { version = "1.50", default-features = false, features = ["rt-multi-thread"] }
 tokio-test   = { version = "0.4", default-features = false }
-tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "rustls-tls-native-roots"] }
 tokio-util   = { version = "0.7", default-features = false }
 
 # Error handling
@@ -64,7 +64,7 @@ sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 
 # Time / random / ids
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
-cron   = { version = "0.16", default-features = false }
+cron   = { version = "0.17", default-features = false }
 rand   = { version = "0.10", default-features = false, features = ["std", "std_rng", "thread_rng"] }
 uuid   = { version = "1.23", default-features = false, features = ["std", "v7", "fast-rng", "serde", "macro-diagnostics"] }
 
@@ -74,7 +74,7 @@ serde      = { version = "1", default-features = false, features = ["std", "deri
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 
 # Crypto / encoding
-base64          = { version = "0.22", default-features = false, features = ["std"] }
+base64          = { version = "0.23", default-features = false, features = ["std"] }
 blake3          = { version = "1.5", default-features = false, features = ["std"] }
 crypter         = { version = "0.3", default-features = false, features = ["argon"] }
 ed25519-compact = { version = "2.2", default-features = false, features = ["random"] }
@@ -101,29 +101,29 @@ arc-swap = { version = "1", default-features = false }
 
 # CLI / logging / observability
 clap               = { version = "4.6", default-features = false, features = ["std", "derive", "env", "help", "usage", "error-context"] }
-sentry             = { version = "0.48", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "reqwest", "rustls"] }
+sentry             = { version = "0.49", default-features = false, features = ["backtrace", "contexts", "debug-images", "panic", "reqwest", "rustls"] }
 tracing            = { version = "0.1", default-features = false, features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "ansi", "smallvec", "tracing-log", "env-filter", "json"] }
 
 # Database (sea-orm)
-sea-orm           = { version = "1.1", default-features = false, features = ["macros", "json-array", "mock", "postgres-array", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
-sea-orm-migration = { version = "1.1", default-features = false, features = ["cli", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
+sea-orm           = { version = "2.0", default-features = false, features = ["macros", "json-array", "mock", "postgres-array", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
+sea-orm-migration = { version = "2.0", default-features = false, features = ["cli", "runtime-tokio-rustls", "sqlx-postgres", "with-chrono", "with-json", "with-uuid"] }
 
 # HTTP / networking
 async-ssh2-lite      = { version = "0.5", default-features = false, features = ["tokio"] }
 axum                 = { version = "0.8", default-features = false }
-axum-streams         = { version = "0.25", default-features = false, features = ["json"] }
+axum-streams         = { version = "0.29", default-features = false, features = ["json"] }
 axum_typed_multipart = { version = "0.16", default-features = false, features = ["tempfile_3"] }
 badgelib             = { version = "0.5.0", default-features = false }
 email_address        = { version = "0.2", default-features = false }
 governor             = { version = "0.10", default-features = false, features = ["std"] }
 http                 = { version = "1.4", default-features = false }
 http-body-util       = { version = "0.1", default-features = false }
-jsonwebtoken         = { version = "10.3", default-features = false, features = ["aws_lc_rs"] }
+jsonwebtoken         = { version = "11.0", default-features = false, features = ["aws_lc_rs"] }
 lettre               = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls-tls"] }
 reqwest              = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "stream", "charset", "http2", "multipart", "brotli", "gzip", "deflate"] }
 tower                = { version = "0.5", default-features = false }
-tower-http           = { version = "0.6", default-features = false, features = ["cors", "request-id", "trace"] }
+tower-http           = { version = "0.7", default-features = false, features = ["cors", "request-id", "trace"] }
 tower_governor       = { version = "0.8", default-features = false, features = ["axum"] }
 
 # Object store / git
@@ -168,8 +168,8 @@ num_enum = { version = "0.7", default-features = false }
 mime_guess = { version = "2", default-features = false }
 
 # Test utilities
-axum-test = { version = "20.0", default-features = false }
-mockall   = { version = "0.14", default-features = false }
+axum-test = { version = "21.0", default-features = false }
+mockall   = { version = "0.15", default-features = false }
 wiremock  = { version = "0.6", default-features = false }
 
 # Each `tests/*.rs` file in `web` is its own binary that links the full crate

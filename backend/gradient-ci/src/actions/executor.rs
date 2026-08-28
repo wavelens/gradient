@@ -119,10 +119,10 @@ pub async fn execute_action(
              WHERE id IN (SELECT id FROM task_action WHERE id = $2 FOR UPDATE SKIP LOCKED)",
             [
                 stamp.into(),
-                sea_orm::Value::Uuid(Some(Box::new(action_id.into_inner()))),
+                sea_orm::Value::Uuid(Some(action_id.into_inner())),
             ],
         );
-        if let Err(e) = ctx.db.worker_db.execute(update).await {
+        if let Err(e) = ctx.db.worker_db.execute_raw(update).await {
             warn!(error = %e, %action_id, "Failed to update action last_fired_at");
         }
     }

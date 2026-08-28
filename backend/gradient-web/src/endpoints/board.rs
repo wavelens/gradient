@@ -666,7 +666,7 @@ pub async fn get_expensive_jobs(
 
     let rows = state
         .web_db
-        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
 
     let out = rows
@@ -766,7 +766,7 @@ pub async fn get_scoring_summary(
 
     let rows = state
         .web_db
-        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
 
     let mut scores: Vec<f64> = Vec::with_capacity(rows.len());
@@ -884,7 +884,7 @@ pub async fn get_top_projects_by_buildtime(
 
     let rows = state
         .web_db
-        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
 
     let out = rows
@@ -979,7 +979,7 @@ pub async fn get_expensive_by_resource(
 
     let rows = state
         .web_db
-        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
 
     let out = rows
@@ -1134,7 +1134,7 @@ pub async fn get_expensive_evals_by_resource(
 
     let rows = state
         .web_db
-        .query_all(Statement::from_string(DatabaseBackend::Postgres, sql))
+        .query_all_raw(Statement::from_string(DatabaseBackend::Postgres, sql))
         .await?;
 
     let out = rows
