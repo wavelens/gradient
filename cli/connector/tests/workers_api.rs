@@ -51,9 +51,6 @@ async fn create_worker_returns_response() {
                 display_name: "My Worker".into(),
                 url: None,
                 token: None,
-                enable_fetch: None,
-                enable_eval: None,
-                enable_build: None,
             },
         )
         .await

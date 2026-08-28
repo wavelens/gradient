@@ -56,6 +56,7 @@ async fn upload_nar_file_with_narinfo_succeeds() {
 
     Command::cargo_bin("gradient")
         .unwrap()
+        .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
         .args([
             "cache",
@@ -87,6 +88,7 @@ async fn upload_nar_file_without_narinfo_errors() {
 
     Command::cargo_bin("gradient")
         .unwrap()
+        .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
         .args([
             "cache",

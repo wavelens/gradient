@@ -63,6 +63,7 @@ async fn download_by_attr_filters_tree_and_writes_files() {
 
     Command::cargo_bin("gradient")
         .unwrap()
+        .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
         .args([
             "--json",
@@ -93,6 +94,7 @@ async fn download_json_without_args_exits_with_missing_argument() {
 
     let output = Command::cargo_bin("gradient")
         .unwrap()
+        .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
         .args(["--json", "download"])
         .output()

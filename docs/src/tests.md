@@ -7265,3 +7265,28 @@ standing in for and the drift stayed silent. With the annotation, dropping
 in type ... but required in type 'DecisionCandidateView'`, which is what should
 have caught this when the server contract changed.
 
+## CLI configuration path (#536)
+
+`dirs::config_dir()` returns the platform-native directory, which on macOS is
+`~/Library/Application Support` and ignores `XDG_CONFIG_HOME` entirely. Every
+CLI test seeds its config through that variable, so the whole suite read from a
+path nothing had written and `cache_upload` failed with "Server URL not set" on
+Darwin. The CLI now resolves its config through `etcetera`'s base strategy,
+which is XDG on every unix.
+
+`cli/src/config.rs` `tests` covers the pure resolution rule:
+`fresh_install_writes_the_xdg_path`, `xdg_config_wins_over_a_native_one` and
+`a_pre_xdg_native_config_keeps_being_used` - the last one pins the migration
+path, since a macOS install predating this change keeps its credentials in
+`~/Library/Application Support` and must not be silently logged out.
+
+`cli/tests/config_path.rs` drives the built binary end to end:
+`config_is_written_below_xdg_config_home` writes a server URL and asserts the
+file lands under `$XDG_CONFIG_HOME`, `config_is_read_back_from_xdg_config_home`
+seeds one and asserts the value is read back. Both would fail on macOS before
+the switch. Every CLI integration test now also pins `HOME` alongside
+`XDG_CONFIG_HOME` so a developer's real config can never leak into a run.
+
+`cli/connector/tests/workers_api.rs` still constructed `MakeWorkerRequest` with
+the `enable_*` fields dropped in `20ad765c`, so the connector test binary did not
+compile at all and took `cargo test` in the CLI workspace down with it.
