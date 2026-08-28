@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use etcetera::base_strategy::{BaseStrategy, choose_base_strategy, choose_native_strategy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{fmt, fs};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -37,11 +38,32 @@ impl std::str::FromStr for ConfigKey {
     }
 }
 
+fn config_file_in(base: &Path) -> PathBuf {
+    base.join("gradient").join("config.toml")
+}
+
+/// The XDG path wins, except when only a pre-XDG native config exists: macOS
+/// puts the native config under `~/Library/Application Support`, which ignores
+/// `XDG_CONFIG_HOME`, so installs made before #536 stay logged in.
+fn resolve_config_file(xdg: PathBuf, native: PathBuf) -> PathBuf {
+    if !xdg.exists() && native.exists() {
+        native
+    } else {
+        xdg
+    }
+}
+
 fn get_config_file() -> PathBuf {
-    let mut config_dir = dirs::config_dir().expect("Could not find configuration directory");
-    config_dir.push("gradient");
-    config_dir.push("config.toml");
-    config_dir
+    let xdg = config_file_in(
+        &choose_base_strategy()
+            .expect("Could not find configuration directory")
+            .config_dir(),
+    );
+
+    match choose_native_strategy() {
+        Ok(native) => resolve_config_file(xdg, config_file_in(&native.config_dir())),
+        Err(_) => xdg,
+    }
 }
 
 pub fn load_config() -> HashMap<ConfigKey, Option<String>> {
@@ -152,5 +174,51 @@ pub fn set_get_value(key: ConfigKey, value: Option<String>, quiet: bool) -> Opti
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn touch(base: &Path) -> PathBuf {
+        let file = config_file_in(base);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "Server = 'http://localhost'\n").unwrap();
+        file
+    }
+
+    #[test]
+    fn fresh_install_writes_the_xdg_path() {
+        let xdg = TempDir::new().unwrap();
+        let native = TempDir::new().unwrap();
+        assert_eq!(
+            resolve_config_file(config_file_in(xdg.path()), config_file_in(native.path())),
+            config_file_in(xdg.path())
+        );
+    }
+
+    #[test]
+    fn xdg_config_wins_over_a_native_one() {
+        let xdg = TempDir::new().unwrap();
+        let native = TempDir::new().unwrap();
+        touch(xdg.path());
+        touch(native.path());
+        assert_eq!(
+            resolve_config_file(config_file_in(xdg.path()), config_file_in(native.path())),
+            config_file_in(xdg.path())
+        );
+    }
+
+    #[test]
+    fn a_pre_xdg_native_config_keeps_being_used() {
+        let xdg = TempDir::new().unwrap();
+        let native = TempDir::new().unwrap();
+        touch(native.path());
+        assert_eq!(
+            resolve_config_file(config_file_in(xdg.path()), config_file_in(native.path())),
+            config_file_in(native.path())
+        );
     }
 }

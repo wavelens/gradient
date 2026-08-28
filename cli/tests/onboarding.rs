@@ -41,6 +41,7 @@ fn project_select_without_login_is_rejected() {
 
     Command::cargo_bin("gradient")
         .unwrap()
+        .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
         .args(["project", "select", "sandro"])
         .assert()
@@ -61,6 +62,7 @@ async fn project_select_rejects_non_member() {
 
     Command::cargo_bin("gradient")
         .unwrap()
+        .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
         .args(["project", "select", "sandro"])
         .assert()
@@ -80,6 +82,7 @@ async fn project_select_accepts_member() {
 
     Command::cargo_bin("gradient")
         .unwrap()
+        .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path())
         .args(["project", "select", "sandro"])
         .assert()

@@ -52,7 +52,7 @@ For unattended scripts you can still pass credentials directly:
 gradient login https://gradient.example.com --username alice --password "$PASSWORD"
 ```
 
-The server URL can also be set on its own with `gradient config server <url>`, and `gradient project select` requires a valid login and only accepts a project you belong to. Either way, the resulting token is stored in the local configuration file (`~/.config/gradient/config`).
+The server URL can also be set on its own with `gradient config server <url>`, and `gradient project select` requires a valid login and only accepts a project you belong to. Either way, the resulting token is stored in the local configuration file (`$XDG_CONFIG_HOME/gradient/config.toml`, defaulting to `~/.config/gradient/config.toml` on Linux and macOS alike).
 
 ### Self-signed certificates
 

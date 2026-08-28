@@ -156,4 +156,4 @@ Key patterns: standalone components, Angular signals (`signal()`, `computed()`),
 
 ## CLI
 
-Independent Rust crate in `cli/`. Uses the `connector` sub-crate for typed HTTP calls to the REST API. Auth state is stored in `~/.config/gradient/config`.
+Independent Rust crate in `cli/`. Uses the `connector` sub-crate for typed HTTP calls to the REST API. Auth state is stored in `~/.config/gradient/config.toml` (`$XDG_CONFIG_HOME` when set).
