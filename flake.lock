@@ -110,11 +110,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1783554656,
-        "narHash": "sha256-DMY3uaxrzz4Ss+e3Au2F++L0WgnR3Oe+jdj/2nslzHo=",
+        "lastModified": 1787921108,
+        "narHash": "sha256-e0H2As+IPAK163y8Am0nGW+FNMX90y6RDEYyA6wuS3s=",
         "owner": "DerDennisOP",
         "repo": "nix",
-        "rev": "bdf6ecd496100befa293544ed4cbff5b40ee1435",
+        "rev": "e9862aa7f45a4659c4d933310f5e8bd50530148f",
         "type": "github"
       },
       "original": {
