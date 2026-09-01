@@ -8,7 +8,8 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "tokens:generate": "node scripts/generate-tokens.mts",
-    "tokens:check": "node scripts/generate-tokens.mts --check"
+    "tokens:check": "node scripts/generate-tokens.mts --check",
+    "barrel:check": "node scripts/check-barrel.mts"
   },
   "prettier": {
     "printWidth": 100,

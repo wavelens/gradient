@@ -19,5 +19,4 @@ export class StatCardComponent {
   icon = input.required<string>();
   value = input.required<number | string>();
   label = input.required<string>();
-  link = input<string>();
 }

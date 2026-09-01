@@ -21,14 +21,14 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
       :host {
         display: block;
         margin: 1rem 0;
-        border-top: 1px solid #2d333b;
+        border-top: 1px solid var(--gr-border);
       }
       :host(.gr-divider--vertical) {
         display: inline-block;
         align-self: stretch;
         margin: 0 1rem;
         border-top: 0;
-        border-left: 1px solid #2d333b;
+        border-left: 1px solid var(--gr-border);
       }
     `,
   ],

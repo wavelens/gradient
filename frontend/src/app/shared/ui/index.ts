@@ -5,6 +5,7 @@
  */
 
 // The single entry point for the design system. Deep imports are lint errors.
+// Kept complete by `pnpm barrel:check`.
 export * from './autocomplete/autocomplete.component';
 export * from './button/button.component';
 export * from './checkbox/checkbox.component';
@@ -19,6 +20,7 @@ export * from './form-dialog/form-dialog.component';
 export * from './form-error/form-error.component';
 export * from './form-field/form-field.component';
 export * from './form-fields-builder';
+export * from './icon/icon.component';
 export * from './input/input.directive';
 export * from './label-help/label-help.component';
 export * from './loading-spinner/loading-spinner.component';
@@ -27,6 +29,7 @@ export * from './message-banner/message-banner.component';
 export * from './message/message.service';
 export * from './metric-chart/metric-chart.component';
 export * from './metric-chart/metric-chart.options';
+export * from './overlay/overlay-animation';
 export * from './page-layout/page-layout.component';
 export * from './password-input/password-input.component';
 export * from './popover/popover.component';
