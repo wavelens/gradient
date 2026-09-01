@@ -45,9 +45,16 @@ use std::sync::Arc;
 ///
 /// `sandbox` drops the response into a unique opaque origin, so its script
 /// reaches the API as nobody at all. `allow-scripts` keeps interactive reports
-/// (coverage, benchmarks) working; `allow-same-origin` must never join it, as
-/// the pair hands the origin back and undoes all of this.
-pub const UNTRUSTED_CONTENT_CSP: &str = "sandbox allow-scripts";
+/// (coverage, benchmarks) working, and `allow-top-navigation-by-user-activation`
+/// lets a multi-page report be clicked through - navigation was never what the
+/// attack needed, and requiring a real click still denies a silent redirect to
+/// somewhere else. `allow-same-origin` must never join them: that pair hands the
+/// origin back and undoes all of this.
+///
+/// A browser that does not know a token ignores it and keeps the rest, so an old
+/// one loses the click-through rather than the isolation.
+pub const UNTRUSTED_CONTENT_CSP: &str =
+    "sandbox allow-scripts allow-top-navigation-by-user-activation";
 
 /// [`UNTRUSTED_CONTENT_CSP`] plus `nosniff`, for any build-controlled body.
 pub fn untrusted_content_headers() -> [(axum::http::HeaderName, &'static str); 2] {
@@ -209,8 +216,17 @@ mod tests {
             !UNTRUSTED_CONTENT_CSP.contains("allow-same-origin"),
             "allow-same-origin defeats the sandbox: {UNTRUSTED_CONTENT_CSP}"
         );
-        // Interactive reports (coverage, benchmarks) must keep working.
+        // Interactive reports (coverage, benchmarks) must keep working, and a
+        // multi-page one must stay clickable - but only on a real activation,
+        // so the page still cannot redirect the viewer on its own.
         assert!(UNTRUSTED_CONTENT_CSP.contains("allow-scripts"));
+        assert!(UNTRUSTED_CONTENT_CSP.contains("allow-top-navigation-by-user-activation"));
+        assert!(
+            !UNTRUSTED_CONTENT_CSP
+                .split_whitespace()
+                .any(|t| t == "allow-top-navigation"),
+            "unconditional top navigation lets the page redirect the viewer: {UNTRUSTED_CONTENT_CSP}"
+        );
 
         let names: Vec<_> = untrusted_content_headers()
             .into_iter()

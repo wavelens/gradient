@@ -162,12 +162,7 @@ async fn find_and_serve_file(
                 tracing::info!(%build_id, %filename, archive_size = tar_zst.len(), "Successfully archived directory for download");
                 let archive_name = format!("{}.tar.zst", filename);
                 return Ok(Some(
-                    (
-                        StatusCode::OK,
-                        archive_headers(&archive_name),
-                        tar_zst,
-                    )
-                        .into_response(),
+                    (StatusCode::OK, archive_headers(&archive_name), tar_zst).into_response(),
                 ));
             }
             Err(ExtractError::NotFound) => {

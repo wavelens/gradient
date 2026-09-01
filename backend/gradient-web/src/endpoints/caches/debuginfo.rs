@@ -66,7 +66,13 @@ pub async fn debuginfo(
     }
 
     let upstreams = upstreams_for(&state, ctx.cache.id).await;
-    match fetch_from_upstreams(gradient_util::http::download_client(), &upstreams, &build_id).await {
+    match fetch_from_upstreams(
+        gradient_util::http::download_client(),
+        &upstreams,
+        &build_id,
+    )
+    .await
+    {
         Some(doc) => Ok(redirect_response(doc, "MISS")),
         None => Err(WebError::not_found("DebugInfo")),
     }

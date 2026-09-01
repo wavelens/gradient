@@ -7379,14 +7379,20 @@ its own, `SameSite` does not apply to a request the origin makes of itself, and
 the reply is readable, so the page could act as the viewer against every endpoint
 they can reach, `POST /user/keys` included - minting a credential that outlives
 the session. Every build-controlled body now carries `Content-Security-Policy:
-sandbox allow-scripts` (an opaque origin, so its script reaches the API as
-nobody, while interactive reports keep working) and `X-Content-Type-Options:
-nosniff`.
+sandbox allow-scripts allow-top-navigation-by-user-activation` and
+`X-Content-Type-Options: nosniff`. The sandbox is an opaque origin, so the page's
+script reaches the API as nobody; `allow-scripts` keeps interactive reports
+working and the navigation token keeps a multi-page one clickable, while still
+denying a redirect the viewer did not ask for. An older browser ignores a token
+it does not know and keeps the rest, so it loses the click-through, never the
+isolation.
 
 `backend/gradient-web/src/endpoints/mod.rs`:
 - `untrusted_content_is_sandboxed_without_returning_its_origin` - the policy
-  starts with `sandbox`, keeps `allow-scripts`, and must never gain
-  `allow-same-origin`, which would hand the origin back and undo the defence.
+  starts with `sandbox` and keeps `allow-scripts` and the by-activation
+  navigation token; it must never gain `allow-same-origin`, which would hand the
+  origin back and undo the defence, nor bare `allow-top-navigation`, which would
+  let the page redirect the viewer unprompted.
 - `html_product_renders_inline_but_always_sandboxed` - an HTML product still
   renders inline, the feature being the point, but never without the sandbox.
 - `non_html_product_downloads_and_archives_are_hardened_too` - non-HTML products

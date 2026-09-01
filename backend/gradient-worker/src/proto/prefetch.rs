@@ -994,12 +994,16 @@ mod tests {
         Mock::given(method("GET"))
             .and(path_matcher("/nar/abc.nar"))
             .respond_with(
-                ResponseTemplate::new(307).insert_header("location", &*format!("{}/blob", objects.uri())),
+                ResponseTemplate::new(307)
+                    .insert_header("location", &*format!("{}/blob", objects.uri())),
             )
             .mount(&cache)
             .await;
 
-        let mut cp = cached("/nix/store/aaaa-redirected", Some(&format!("{}/nar/abc.nar", cache.uri())));
+        let mut cp = cached(
+            "/nix/store/aaaa-redirected",
+            Some(&format!("{}/nar/abc.nar", cache.uri())),
+        );
         cp.file_size = Some(9);
 
         let http = gradient_util::http::build_download_client().expect("download client");
@@ -1026,7 +1030,10 @@ mod tests {
             .mount(&cache)
             .await;
 
-        let mut cp = cached("/nix/store/aaaa-redirected", Some(&format!("{}/nar/abc.nar", cache.uri())));
+        let mut cp = cached(
+            "/nix/store/aaaa-redirected",
+            Some(&format!("{}/nar/abc.nar", cache.uri())),
+        );
         cp.file_size = Some(227840);
 
         let http = gradient_util::http::build_client().expect("api client");
@@ -1055,7 +1062,10 @@ mod tests {
             .mount(&cache)
             .await;
 
-        let mut cp = cached("/nix/store/aaaa-truncated", Some(&format!("{}/nar/abc.nar", cache.uri())));
+        let mut cp = cached(
+            "/nix/store/aaaa-truncated",
+            Some(&format!("{}/nar/abc.nar", cache.uri())),
+        );
         cp.file_size = Some(227840);
 
         let http = gradient_util::http::build_download_client().expect("download client");

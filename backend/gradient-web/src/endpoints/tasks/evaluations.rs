@@ -950,12 +950,7 @@ async fn serve_hydra_artifact(
             Ok(Extracted::Directory { tar_zst }) => {
                 let archive_name = format!("{}.tar.zst", filename);
                 return Ok(Some(
-                    (
-                        StatusCode::OK,
-                        archive_headers(&archive_name),
-                        tar_zst,
-                    )
-                        .into_response(),
+                    (StatusCode::OK, archive_headers(&archive_name), tar_zst).into_response(),
                 ));
             }
             Err(ExtractError::NotFound) => continue,
