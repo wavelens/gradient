@@ -7362,3 +7362,38 @@ throughput rather than a cap on object size.
   size, so no object is ever refused time for being large.
 - `bounded_reports_the_operation_that_ran_out_of_time` - a future that never
   resolves fails with the operation named, rather than hanging its caller.
+
+## Build-authored pages are sandboxed out of the API's origin
+
+A build writes its own `nix-support/hydra-build-products`, and a cached NAR holds
+whatever a build put in it, so both the filename and the declared subtype of a
+served artefact are attacker-controlled. Three endpoints rendered such bytes
+inline - `builds/downloads.rs` and `tasks/evaluations.rs` on `subtype == "html"`,
+and `caches/serve.rs` on a `mime_guess` of the requested path, with no
+`Content-Disposition` at all. The frontend and the API share one origin (nginx
+serves `/` and proxies `/api/`), and no response carried a CSP.
+
+The `jwt_token` cookie is `HttpOnly; SameSite=Strict`, so such a page cannot read
+the token - but it never needed to. A same-origin `fetch` attaches the cookie on
+its own, `SameSite` does not apply to a request the origin makes of itself, and
+the reply is readable, so the page could act as the viewer against every endpoint
+they can reach, `POST /user/keys` included - minting a credential that outlives
+the session. Every build-controlled body now carries `Content-Security-Policy:
+sandbox allow-scripts` (an opaque origin, so its script reaches the API as
+nobody, while interactive reports keep working) and `X-Content-Type-Options:
+nosniff`.
+
+`backend/gradient-web/src/endpoints/mod.rs`:
+- `untrusted_content_is_sandboxed_without_returning_its_origin` - the policy
+  starts with `sandbox`, keeps `allow-scripts`, and must never gain
+  `allow-same-origin`, which would hand the origin back and undo the defence.
+- `html_product_renders_inline_but_always_sandboxed` - an HTML product still
+  renders inline, the feature being the point, but never without the sandbox.
+- `non_html_product_downloads_and_archives_are_hardened_too` - non-HTML products
+  download rather than render, and both they and `.tar.zst` archives still carry
+  the policy.
+
+`backend/gradient-web/tests/cache_serve.rs`:
+- `serve_sandboxes_build_controlled_content` - the live `/cache/{cache}/serve`
+  response carries the sandbox and `nosniff`, covering the endpoint that guesses
+  its content type from a build-controlled path.

@@ -16,6 +16,13 @@ use gradient_storage::nar_extract::{
 };
 use std::sync::Arc;
 
+/// Apply the build-controlled-content hardening headers to a response builder.
+fn hardened(builder: axum::http::response::Builder) -> axum::http::response::Builder {
+    crate::endpoints::untrusted_content_headers()
+        .into_iter()
+        .fold(builder, |b, (name, value)| b.header(name, value))
+}
+
 pub async fn serve(
     state: State<Arc<ServerState>>,
     OptionalPeer(peer): OptionalPeer,
@@ -30,7 +37,11 @@ pub async fn serve(
     match extract_path_from_reader(reader, &rel_path).await {
         Ok(Extracted::File { contents, size, .. }) => {
             let ct = mime_guess::from_path(&rel_path).first_or_octet_stream();
-            Response::builder()
+            // The bytes come from a cached NAR, so the path (and with it the
+            // guessed type) is whatever a build put there: an `.html` or `.svg`
+            // renders inline on the origin that holds the session cookie unless
+            // it is sandboxed into an opaque one first.
+            hardened(Response::builder())
                 .header(
                     header::CONTENT_TYPE,
                     HeaderValue::from_str(ct.as_ref())
@@ -46,7 +57,7 @@ pub async fn serve(
                 .find(|s| !s.is_empty())
                 .unwrap_or("dir");
             let disp = format!("attachment; filename=\"{}.tar.zst\"", basename);
-            Response::builder()
+            hardened(Response::builder())
                 .header(
                     header::CONTENT_TYPE,
                     HeaderValue::from_static("application/zstd"),

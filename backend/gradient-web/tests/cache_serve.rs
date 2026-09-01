@@ -132,3 +132,40 @@ fn private_cache_serve_requires_auth() {
         resp.assert_status(StatusCode::UNAUTHORIZED);
     });
 }
+
+/// A cached NAR holds whatever a build put there, so `serve` can be pointed at
+/// an `.html` and asked to render it on the origin that carries the session
+/// cookie. The sandbox CSP is what stops that page from acting as the viewer.
+#[test]
+fn serve_sandboxes_build_controlled_content() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt.block_on(async {
+        let state = public_cache_with_nar().await;
+        let server = TestServer::new(create_router(Arc::clone(&state)).expect("router"));
+
+        let resp = server
+            .get(&format!(
+                "/cache/{FIXTURE_CACHE_NAME}/serve/{FIXTURE_PATH_HASH}/bin/hello"
+            ))
+            .await;
+        resp.assert_status_ok();
+
+        let csp = resp
+            .headers()
+            .get("content-security-policy")
+            .expect("served cache content must be sandboxed")
+            .to_str()
+            .expect("ascii CSP");
+        assert!(csp.starts_with("sandbox"), "csp: {csp}");
+        assert!(!csp.contains("allow-same-origin"), "csp: {csp}");
+        assert_eq!(
+            resp.headers()
+                .get("x-content-type-options")
+                .map(|v| v.to_str().unwrap()),
+            Some("nosniff")
+        );
+    });
+}

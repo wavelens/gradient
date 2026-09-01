@@ -10,12 +10,12 @@ use super::{
 };
 use crate::access::{Caller, TaskAccess, has_permission, is_project_member, load_task};
 use crate::authorization::{MaybeApiKey, MaybeUser};
-use crate::endpoints::content_type_for_filename;
+use crate::endpoints::{archive_headers, build_product_headers};
 use crate::error::{ErrorCode, WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
 use crate::permissions::Permission;
 use axum::extract::{Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -936,21 +936,12 @@ async fn serve_hydra_artifact(
             }
         };
 
-        let disposition = if product.subtype == "html" {
-            "inline".to_string()
-        } else {
-            format!("attachment; filename=\"{}\"", filename)
-        };
-
         match extract_path_from_reader(nar_reader_from_stream(stream), &rel).await {
             Ok(Extracted::File { contents, .. }) => {
                 return Ok(Some(
                     (
                         StatusCode::OK,
-                        [
-                            (header::CONTENT_TYPE, content_type_for_filename(filename)),
-                            (header::CONTENT_DISPOSITION, disposition.as_str()),
-                        ],
+                        build_product_headers(filename, &product.subtype),
                         contents,
                     )
                         .into_response(),
@@ -961,13 +952,7 @@ async fn serve_hydra_artifact(
                 return Ok(Some(
                     (
                         StatusCode::OK,
-                        [
-                            (header::CONTENT_TYPE, "application/zstd"),
-                            (
-                                header::CONTENT_DISPOSITION,
-                                &format!("attachment; filename=\"{}\"", archive_name),
-                            ),
-                        ],
+                        archive_headers(&archive_name),
                         tar_zst,
                     )
                         .into_response(),

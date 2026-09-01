@@ -31,6 +31,68 @@ use gradient_types::{BaseResponse, CreatePermission};
 use serde::Serialize;
 use std::sync::Arc;
 
+/// Sandbox applied to every response whose bytes a build controls.
+///
+/// A build writes its own `nix-support/hydra-build-products`, and any path in a
+/// cache can hold an `.html`, so both the filename and the declared subtype are
+/// attacker-controlled: any build can ask to be served as `text/html`, inline,
+/// from the origin that also serves the API and holds the session cookie.
+/// Script in such a page cannot read the `HttpOnly` cookie - but it would not
+/// need to. A same-origin `fetch` carries the cookie automatically, `SameSite`
+/// does not apply to a request the origin makes of itself, and the reply is
+/// readable, so the page could act as the viewer (including minting an API key
+/// that outlives their session).
+///
+/// `sandbox` drops the response into a unique opaque origin, so its script
+/// reaches the API as nobody at all. `allow-scripts` keeps interactive reports
+/// (coverage, benchmarks) working; `allow-same-origin` must never join it, as
+/// the pair hands the origin back and undoes all of this.
+pub const UNTRUSTED_CONTENT_CSP: &str = "sandbox allow-scripts";
+
+/// [`UNTRUSTED_CONTENT_CSP`] plus `nosniff`, for any build-controlled body.
+pub fn untrusted_content_headers() -> [(axum::http::HeaderName, &'static str); 2] {
+    [
+        (
+            axum::http::header::CONTENT_SECURITY_POLICY,
+            UNTRUSTED_CONTENT_CSP,
+        ),
+        (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+    ]
+}
+
+/// Full header set for one served build product. `subtype` comes from the
+/// build's own `hydra-build-products`, so `html` renders inline - safely, behind
+/// [`UNTRUSTED_CONTENT_CSP`] - and everything else downloads.
+pub fn build_product_headers(
+    filename: &str,
+    subtype: &str,
+) -> [(axum::http::HeaderName, String); 4] {
+    let disposition = if subtype == "html" {
+        "inline".to_string()
+    } else {
+        format!("attachment; filename=\"{filename}\"")
+    };
+    hardened(content_type_for_filename(filename), disposition)
+}
+
+/// Header set for a product directory served as a `.tar.zst` archive.
+pub fn archive_headers(archive_name: &str) -> [(axum::http::HeaderName, String); 4] {
+    hardened(
+        "application/zstd",
+        format!("attachment; filename=\"{archive_name}\""),
+    )
+}
+
+fn hardened(content_type: &str, disposition: String) -> [(axum::http::HeaderName, String); 4] {
+    let [csp, nosniff] = untrusted_content_headers();
+    [
+        (axum::http::header::CONTENT_TYPE, content_type.to_string()),
+        (axum::http::header::CONTENT_DISPOSITION, disposition),
+        (csp.0, csp.1.to_string()),
+        (nosniff.0, nosniff.1.to_string()),
+    ]
+}
+
 pub fn content_type_for_filename(filename: &str) -> &'static str {
     match std::path::Path::new(filename)
         .extension()
@@ -135,6 +197,70 @@ mod tests {
         assert_eq!(parse_hydra_product_line("file doc"), None);
         assert_eq!(parse_hydra_product_line("file"), None);
         assert_eq!(parse_hydra_product_line(""), None);
+    }
+
+    /// The sandbox is the whole defence: it puts a build-authored page in an
+    /// opaque origin so its script cannot act as the viewer against our API.
+    /// `allow-same-origin` alongside `allow-scripts` would hand the origin back.
+    #[test]
+    fn untrusted_content_is_sandboxed_without_returning_its_origin() {
+        assert!(UNTRUSTED_CONTENT_CSP.starts_with("sandbox"));
+        assert!(
+            !UNTRUSTED_CONTENT_CSP.contains("allow-same-origin"),
+            "allow-same-origin defeats the sandbox: {UNTRUSTED_CONTENT_CSP}"
+        );
+        // Interactive reports (coverage, benchmarks) must keep working.
+        assert!(UNTRUSTED_CONTENT_CSP.contains("allow-scripts"));
+
+        let names: Vec<_> = untrusted_content_headers()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert!(names.contains(&axum::http::header::CONTENT_SECURITY_POLICY));
+        assert!(names.contains(&axum::http::header::X_CONTENT_TYPE_OPTIONS));
+    }
+
+    /// An HTML product still renders inline - that is the feature - but never
+    /// without the sandbox that makes rendering it safe.
+    #[test]
+    fn html_product_renders_inline_but_always_sandboxed() {
+        let headers = build_product_headers("report.html", "html");
+        let by_name = |n: axum::http::HeaderName| {
+            headers
+                .iter()
+                .find(|(h, _)| *h == n)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(by_name(axum::http::header::CONTENT_TYPE), "text/html");
+        assert_eq!(by_name(axum::http::header::CONTENT_DISPOSITION), "inline");
+        assert_eq!(
+            by_name(axum::http::header::CONTENT_SECURITY_POLICY),
+            UNTRUSTED_CONTENT_CSP
+        );
+        assert_eq!(
+            by_name(axum::http::header::X_CONTENT_TYPE_OPTIONS),
+            "nosniff"
+        );
+    }
+
+    #[test]
+    fn non_html_product_downloads_and_archives_are_hardened_too() {
+        let file = build_product_headers("out.bin", "file");
+        assert!(
+            file.iter()
+                .any(|(h, v)| *h == axum::http::header::CONTENT_DISPOSITION
+                    && v.starts_with("attachment")),
+            "a non-html product must download, not render"
+        );
+        for headers in [file, archive_headers("out.tar.zst")] {
+            assert!(
+                headers
+                    .iter()
+                    .any(|(h, v)| *h == axum::http::header::CONTENT_SECURITY_POLICY
+                        && v == UNTRUSTED_CONTENT_CSP)
+            );
+        }
     }
 
     #[test]

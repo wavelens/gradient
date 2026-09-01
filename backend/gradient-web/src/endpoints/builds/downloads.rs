@@ -8,7 +8,7 @@ use crate::authorization::{MaybeApiKey, MaybeUser, decode_download_token, encode
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use super::BuildAccessContext;
-use crate::endpoints::content_type_for_filename;
+use crate::endpoints::{archive_headers, build_product_headers};
 
 // ── Hydra build-product helpers ───────────────────────────────────────────────
 
@@ -146,22 +146,13 @@ async fn find_and_serve_file(
             }
         };
 
-        let disposition = if product.subtype == "html" {
-            "inline".to_string()
-        } else {
-            format!("attachment; filename=\"{}\"", filename)
-        };
-
         match extract_path_from_reader(nar_reader_from_stream(stream), &rel).await {
             Ok(Extracted::File { contents, .. }) => {
                 tracing::info!(%build_id, %filename, file_size = contents.len(), "Successfully extracted file for download");
                 return Ok(Some(
                     (
                         StatusCode::OK,
-                        [
-                            (header::CONTENT_TYPE, content_type_for_filename(filename)),
-                            (header::CONTENT_DISPOSITION, disposition.as_str()),
-                        ],
+                        build_product_headers(filename, &product.subtype),
                         contents,
                     )
                         .into_response(),
@@ -173,13 +164,7 @@ async fn find_and_serve_file(
                 return Ok(Some(
                     (
                         StatusCode::OK,
-                        [
-                            (header::CONTENT_TYPE, "application/zstd"),
-                            (
-                                header::CONTENT_DISPOSITION,
-                                &format!("attachment; filename=\"{}\"", archive_name),
-                            ),
-                        ],
+                        archive_headers(&archive_name),
                         tar_zst,
                     )
                         .into_response(),
