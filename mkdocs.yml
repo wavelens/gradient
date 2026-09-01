@@ -28,6 +28,7 @@ nav:
       - Caches: usage/caches.md
       - Cache NARs: usage/cache-nars.md
       - Closure View: usage/closure-view.md
+      - Diagnostic Reports: diagnostic-reports.md
   - Development:
       - Architecture: development/architecture.md
       - Internals: development/internals.md

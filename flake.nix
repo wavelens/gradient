@@ -33,6 +33,8 @@
     rustEnv = with pkgs.rustPackages; [
       clippy
     ];
+
+    report-inspector = pkgs.callPackage ./nix/tools/report-inspector { };
   in
   {
     checks = (import ./nix/tests { inherit self inputs system pkgs; }) // {
@@ -52,6 +54,8 @@
         inherit craneLib;
         cargoFeatures = [ "nix" "eval" ];
       };
+
+      inherit report-inspector;
 
       default = gradient;
     };
@@ -81,6 +85,7 @@
         pnpm
 
         openssl
+        report-inspector
         sqlite
         postgresql_18
         pgadmin4-desktopmode
