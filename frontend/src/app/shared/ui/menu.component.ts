@@ -90,6 +90,7 @@ export class MenuComponent implements OnDestroy {
     this.ref = this.overlay.create({
       hasBackdrop: true,
       backdropClass: 'cdk-overlay-transparent-backdrop',
+      panelClass: 'gr-menu-panel',
       scrollStrategy: this.overlay.scrollStrategies.reposition(),
       positionStrategy: this.overlay
         .position()

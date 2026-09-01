@@ -18,7 +18,14 @@
   &:empty { display: none; }
 }
 
+@keyframes gr-toast-enter {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: none; }
+}
+
 .gr-toast__item {
+  animation: gr-toast-enter $transition-base both;
+
   display: flex;
   align-items: flex-start;
   gap: $spacing-sm;

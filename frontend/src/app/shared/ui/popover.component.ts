@@ -50,6 +50,7 @@ export class PopoverComponent implements OnDestroy {
     this.ref = this.overlay.create({
       hasBackdrop: true,
       backdropClass: 'cdk-overlay-transparent-backdrop',
+      panelClass: 'gr-popover-panel',
       scrollStrategy: this.overlay.scrollStrategies.reposition(),
       positionStrategy: this.overlay
         .position()

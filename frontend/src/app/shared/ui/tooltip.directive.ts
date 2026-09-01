@@ -76,6 +76,7 @@ export class TooltipDirective implements OnDestroy {
         .flexibleConnectedTo(this.host)
         .withPositions([POSITIONS[this.tooltipPosition()], POSITIONS.bottom]),
       scrollStrategy: this.overlay.scrollStrategies.close(),
+      panelClass: 'gr-tooltip-overlay',
     });
     const panel = this.ref.attach(new ComponentPortal(TooltipPanelComponent));
     panel.instance.text = this.grTooltip();

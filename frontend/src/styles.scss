@@ -138,3 +138,48 @@ textarea:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
+
+// Overlay panels live outside component encapsulation, so their entrance animations
+// and the dialog footer layout belong here.
+@keyframes gr-overlay-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes gr-overlay-rise {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes gr-dialog-enter {
+  from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+.gr-dialog-panel { animation: gr-dialog-enter $transition-base both; }
+.gr-dialog-backdrop {
+  background: rgb(0 0 0 / 0.55);
+  animation: gr-overlay-fade $transition-base both;
+}
+
+.gr-popover-panel,
+.gr-menu-panel { animation: gr-overlay-rise $transition-fast both; }
+
+.gr-tooltip-overlay { animation: gr-overlay-fade $transition-fast both; }
+
+[grDialogFooter] {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: $spacing-sm;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gr-dialog-panel,
+  .gr-dialog-backdrop,
+  .gr-popover-panel,
+  .gr-menu-panel,
+  .gr-tooltip-overlay {
+    animation: none;
+  }
+}
