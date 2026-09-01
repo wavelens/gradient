@@ -22,9 +22,10 @@
   background: var(--gr-btn-bg);
   color: var(--gr-btn-fg);
   font-family: $font-family-base;
-  font-size: $font-size-sm;
+  font-size: $font-size-md;
   font-weight: 500;
-  line-height: 1.2;
+  // Matches .gr-input so buttons and fields line up when set side by side.
+  line-height: 1.4;
   cursor: pointer;
   text-decoration: none;
   transition: background-color $transition-fast, border-color $transition-fast, color $transition-fast;
@@ -77,7 +78,7 @@
 
 :host(.gr-button--small) {
   padding: 0.35rem 0.65rem;
-  font-size: $font-size-xs;
+  font-size: $font-size-sm;
 }
 
 :host(.gr-button--icon-only) { padding: 0.45rem; }
