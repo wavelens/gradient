@@ -18,7 +18,7 @@
   align-items: center;
   gap: $spacing-sm;
   padding: $spacing-sm $spacing-md;
-  background-color: rgba($color-danger, 0.1);
+  background-color: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
   border: 1px solid $color-danger;
   border-radius: $border-radius-sm;
   color: $color-danger;

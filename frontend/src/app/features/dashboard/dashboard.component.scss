@@ -140,7 +140,7 @@
 
   .status-badge {
     padding: $spacing-xs $spacing-sm;
-    background-color: rgba($color-danger, 0.1);
+    background-color: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
     border: 1px solid $color-danger;
     border-radius: $border-radius-sm;
     color: $color-danger;
@@ -148,7 +148,7 @@
     text-transform: uppercase;
 
     &.active {
-      background-color: rgba($color-success, 0.1);
+      background-color: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
       border-color: $color-success;
       color: $color-success;
     }

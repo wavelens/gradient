@@ -5,6 +5,7 @@
  */
 
 @use 'app/styles/variables' as *;
+@use 'app/styles/themes';
 @use 'app/styles/grids';
 
 // Fonts are loaded via <link> tags in index.html

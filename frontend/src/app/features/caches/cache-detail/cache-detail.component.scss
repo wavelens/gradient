@@ -70,13 +70,13 @@
 
     .status-badge {
       &.active {
-        background-color: rgba($color-success, 0.1);
+        background-color: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
         border: 1px solid $color-success;
         color: $color-success;
       }
 
       &.inactive {
-        background-color: rgba($color-border, 0.1);
+        background-color: color-mix(in srgb, var(--gr-border) 10%, transparent);
         border: 1px solid $color-border;
         color: $text-light;
       }
@@ -84,7 +84,7 @@
     }
 
     .priority-badge {
-      background-color: rgba($color-info, 0.1);
+      background-color: color-mix(in srgb, var(--gr-status-info) 10%, transparent);
       border: 1px solid $color-info;
       color: $color-info;
     }
@@ -131,7 +131,7 @@
     display: flex;
     justify-content: space-between;
     padding: $spacing-sm 0;
-    border-bottom: 1px solid rgba($color-border, 0.3);
+    border-bottom: 1px solid color-mix(in srgb, var(--gr-border) 30%, transparent);
 
     &:last-child {
       border-bottom: none;

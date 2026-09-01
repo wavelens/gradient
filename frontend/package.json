@@ -6,7 +6,9 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "tokens:generate": "node scripts/generate-tokens.mts",
+    "tokens:check": "node scripts/generate-tokens.mts --check"
   },
   "prettier": {
     "printWidth": 100,

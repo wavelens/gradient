@@ -97,18 +97,18 @@
   }
 
   &.success {
-    background-color: rgba($color-success, 0.1);
+    background-color: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
     border: 1px solid $color-success;
   }
 
   &.warning {
-    background-color: rgba($color-warning, 0.1);
+    background-color: color-mix(in srgb, var(--gr-status-warning) 10%, transparent);
     border: 1px solid $color-warning;
   }
 }
 
 .error-message {
-  background-color: rgba($color-danger, 0.1);
+  background-color: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
   border: 1px solid $color-danger;
   border-radius: $border-radius-sm;
   padding: $spacing-md;

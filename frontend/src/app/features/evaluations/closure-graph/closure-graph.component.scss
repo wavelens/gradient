@@ -5,7 +5,6 @@
  */
 
 @use '../../../styles/variables' as *;
-@use 'sass:color';
 
 :host {
   display: flex;
@@ -121,7 +120,7 @@
 
   .material-symbols-outlined { font-size: 1rem; }
 
-  &:hover { color: $text-primary; background: color.adjust($color-hover, $lightness: -5%); }
+  &:hover { color: $text-primary; background: var(--gr-surface-active); }
 }
 
 .sankey-svg {

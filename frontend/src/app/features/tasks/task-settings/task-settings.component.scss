@@ -38,20 +38,20 @@
   .material-symbols-outlined { font-size: 20px; }
 
   &.error {
-    background: rgba($color-danger, 0.1);
-    border: 1px solid rgba($color-danger, 0.5);
+    background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
     color: $color-danger;
   }
 
   &.success {
-    background: rgba($color-success, 0.1);
-    border: 1px solid rgba($color-success, 0.5);
+    background: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--gr-status-success) 50%, transparent);
     color: $color-success;
   }
 
   &.info {
-    background: rgba($color-info, 0.1);
-    border: 1px solid rgba($color-info, 0.5);
+    background: color-mix(in srgb, var(--gr-status-info) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--gr-status-info) 50%, transparent);
     color: $color-info;
   }
 }
@@ -126,7 +126,7 @@
 }
 
 .danger-section { h2 { color: $color-danger; } }
-.danger-card { border-color: rgba($color-danger, 0.5); }
+.danger-card { border-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent); }
 .danger-row {
   display: flex;
   align-items: center;
@@ -136,7 +136,7 @@
 }
 
 .danger-divider {
-  border-top: 1px solid rgba($color-danger, 0.2);
+  border-top: 1px solid color-mix(in srgb, var(--gr-status-danger) 20%, transparent);
   margin: $spacing-lg 0;
 }
 

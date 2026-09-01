@@ -36,12 +36,12 @@
   }
 
   &:hover {
-    background: rgba($color-white, 0.04);
-    border-left-color: rgba($color-white, 0.12);
+    background: color-mix(in srgb, var(--gr-white) 4%, transparent);
+    border-left-color: color-mix(in srgb, var(--gr-white) 12%, transparent);
   }
 
   &.selected {
-    background: rgba($color-white, 0.06);
+    background: color-mix(in srgb, var(--gr-white) 6%, transparent);
     border-left-color: $color-danger;
   }
 }
@@ -57,8 +57,8 @@
 
   .material-symbols-outlined { font-size: 0.85rem; }
 
-  &--error   { background: rgba($color-danger, 0.15); color: $color-danger; }
-  &--warning { background: rgba($color-warning, 0.15); color: $color-warning; }
+  &--error   { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: $color-danger; }
+  &--warning { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: $color-warning; }
 }
 
 // ── Messages panel ──────────────────────────────────────────────────────────
@@ -75,8 +75,8 @@
   font-size: $font-size-sm;
   font-weight: 600;
   color: $text-secondary;
-  background: rgba($color-white, 0.03);
-  border-bottom: 1px solid rgba($color-border, 0.5);
+  background: color-mix(in srgb, var(--gr-white) 3%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--gr-border) 50%, transparent);
   flex-shrink: 0;
 }
 
@@ -104,24 +104,24 @@
   border: 1px solid transparent;
 
   &--error {
-    background: rgba($color-danger, 0.06);
-    border-color: rgba($color-danger, 0.25);
+    background: color-mix(in srgb, var(--gr-status-danger) 6%, transparent);
+    border-color: color-mix(in srgb, var(--gr-status-danger) 25%, transparent);
 
     .message-icon { color: $color-danger; }
     .message-source { color: $color-danger; }
   }
 
   &--warning {
-    background: rgba($color-warning, 0.06);
-    border-color: rgba($color-warning, 0.25);
+    background: color-mix(in srgb, var(--gr-status-warning) 6%, transparent);
+    border-color: color-mix(in srgb, var(--gr-status-warning) 25%, transparent);
 
     .message-icon { color: $color-warning; }
     .message-source { color: $color-warning; }
   }
 
   &--notice {
-    background: rgba($color-info, 0.06);
-    border-color: rgba($color-info, 0.25);
+    background: color-mix(in srgb, var(--gr-status-info) 6%, transparent);
+    border-color: color-mix(in srgb, var(--gr-status-info) 25%, transparent);
 
     .message-icon { color: $color-info; }
     .message-source { color: $color-info; }

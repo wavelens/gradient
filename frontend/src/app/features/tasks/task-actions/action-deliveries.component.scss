@@ -9,7 +9,7 @@
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba($color-black, 0.6);
+  background: color-mix(in srgb, var(--gr-black) 60%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -70,7 +70,7 @@
     th, td {
       padding: $spacing-sm $spacing-md;
       text-align: left;
-      border-bottom: 1px solid rgba($color-border, 0.5);
+      border-bottom: 1px solid color-mix(in srgb, var(--gr-border) 50%, transparent);
     }
 
     th {
@@ -84,7 +84,7 @@
       top: 0;
     }
 
-    tbody tr:hover td { background: rgba($color-white, 0.02); }
+    tbody tr:hover td { background: color-mix(in srgb, var(--gr-white) 2%, transparent); }
   }
 }
 
@@ -114,8 +114,8 @@
   font-size: $font-size-xs;
   font-weight: 600;
 
-  &.ok   { background: rgba($color-success, 0.15); color: $color-success; }
-  &.fail { background: rgba($color-danger, 0.15);  color: $color-danger; }
+  &.ok   { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: $color-success; }
+  &.fail { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent);  color: $color-danger; }
 }
 
 .toggle-btn {

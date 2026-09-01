@@ -4,39 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// ── Base Palette ─────────────────────────────────────────────────────────────
-
-$color-white: #ffffff;
-$color-black: #000000;
-
-// ── Dark Theme ───────────────────────────────────────────────────────────────
-
-$color-primary: #0d1118;
-$color-secondary: #abb0b4;
-$color-tertiary: #21262d;
-$color-quaternary: #050708;
-
-// ── UI Colors ────────────────────────────────────────────────────────────────
-
-$color-hover: #252d33;
-$color-border: #2d333b;
-
-// ── Semantic Colors ──────────────────────────────────────────────────────────
-
-$color-success: #28a745;
-$color-danger: #dc3545;
-$color-warning: #ffc107;
-$color-info: #17a2b8;
-
-// ── Graph / Badge Status Colors (Tailwind-derived) ───────────────────────────
-
-$color-graph-success: #22c55e;
-$color-graph-danger: #ef4444;
-$color-graph-warning: #f97316;
-$color-graph-running: #3b82f6;
-
-// ── Text Colors ──────────────────────────────────────────────────────────────
-
-$text-primary: #ffffff;
-$text-secondary: #abb0b4;
-$text-light: #818181;
+// Deprecated aliases onto semantic roles. Archetype migration passes replace call sites, then this file is deleted.
+$color-white: var(--gr-white);
+$color-black: var(--gr-black);
+$color-primary: var(--gr-surface-base);
+$color-secondary: var(--gr-text-secondary);
+$color-tertiary: var(--gr-surface-raised);
+$color-quaternary: var(--gr-surface-sunken);
+$color-hover: var(--gr-surface-hover);
+$color-border: var(--gr-border);
+$color-success: var(--gr-status-success);
+$color-danger: var(--gr-status-danger);
+$color-warning: var(--gr-status-warning);
+$color-info: var(--gr-status-info);
+$color-graph-success: var(--gr-graph-success);
+$color-graph-danger: var(--gr-graph-danger);
+$color-graph-warning: var(--gr-graph-warning);
+$color-graph-running: var(--gr-graph-running);
+$text-primary: var(--gr-text-primary);
+$text-secondary: var(--gr-text-secondary);
+$text-light: var(--gr-text-muted);

@@ -1,0 +1,93 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+// GENERATED FROM tokens.ts BY scripts/generate-tokens.ts. Do not edit by hand.
+
+@mixin palette {
+  --gr-white: #ffffff;
+  --gr-black: #000000;
+  --gr-gray-950: #050708;
+  --gr-gray-900: #0d1118;
+  --gr-gray-800: #21262d;
+  --gr-gray-750: #252d33;
+  --gr-gray-700: #2d333b;
+  --gr-gray-400: #818181;
+  --gr-gray-300: #abb0b4;
+  --gr-gray-200: #d0d7de;
+  --gr-gray-100: #eaeef2;
+  --gr-gray-50: #f6f8fa;
+  --gr-ink-900: #1f2328;
+  --gr-slate-600: #656d76;
+  --gr-slate-500: #8c959f;
+  --gr-green-600: #1a7f37;
+  --gr-green-500: #28a745;
+  --gr-green-400: #22c55e;
+  --gr-red-600: #cf222e;
+  --gr-red-500: #dc3545;
+  --gr-red-400: #ef4444;
+  --gr-amber-700: #9a6700;
+  --gr-amber-500: #ffc107;
+  --gr-orange-500: #f97316;
+  --gr-cyan-500: #17a2b8;
+  --gr-blue-600: #0969da;
+  --gr-blue-500: #3b82f6;
+  --gr-purple-500: #6f42c1;
+}
+
+@mixin dark-roles {
+  --gr-surface-sunken: var(--gr-gray-950);
+  --gr-surface-base: var(--gr-gray-900);
+  --gr-surface-raised: var(--gr-gray-800);
+  --gr-surface-hover: var(--gr-gray-750);
+  --gr-surface-active: var(--gr-gray-800);
+  --gr-border: var(--gr-gray-700);
+  --gr-text-primary: var(--gr-white);
+  --gr-text-secondary: var(--gr-gray-300);
+  --gr-text-muted: var(--gr-gray-400);
+  --gr-status-success: var(--gr-green-500);
+  --gr-status-danger: var(--gr-red-500);
+  --gr-status-warning: var(--gr-amber-500);
+  --gr-status-info: var(--gr-cyan-500);
+  --gr-graph-success: var(--gr-green-400);
+  --gr-graph-danger: var(--gr-red-400);
+  --gr-graph-warning: var(--gr-orange-500);
+  --gr-graph-running: var(--gr-blue-500);
+}
+
+@mixin light-roles {
+  --gr-surface-sunken: var(--gr-gray-50);
+  --gr-surface-base: var(--gr-white);
+  --gr-surface-raised: var(--gr-gray-50);
+  --gr-surface-hover: var(--gr-gray-100);
+  --gr-surface-active: var(--gr-gray-200);
+  --gr-border: var(--gr-gray-200);
+  --gr-text-primary: var(--gr-ink-900);
+  --gr-text-secondary: var(--gr-slate-600);
+  --gr-text-muted: var(--gr-slate-500);
+  --gr-status-success: var(--gr-green-600);
+  --gr-status-danger: var(--gr-red-600);
+  --gr-status-warning: var(--gr-amber-700);
+  --gr-status-info: var(--gr-blue-600);
+  --gr-graph-success: var(--gr-green-600);
+  --gr-graph-danger: var(--gr-red-600);
+  --gr-graph-warning: var(--gr-orange-500);
+  --gr-graph-running: var(--gr-blue-600);
+}
+
+:root {
+  @include palette;
+  @include dark-roles;
+}
+
+:root[data-theme='light'] {
+  @include light-roles;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    @include light-roles;
+  }
+}

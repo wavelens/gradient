@@ -5,7 +5,6 @@
  */
 
 @use '../../../styles/variables' as *;
-@use 'sass:color';
 
 :host {
   display: flex;
@@ -141,7 +140,7 @@
 
   &:hover {
     color: $text-primary;
-    background: color.adjust($color-hover, $lightness: -5%);
+    background: var(--gr-surface-active);
   }
 }
 
@@ -155,10 +154,10 @@
   font-size: $font-size-xs;
   font-weight: 500;
 
-  &.status-success { background: rgba($color-graph-success, 0.15); color: $color-graph-success; }
-  &.status-danger  { background: rgba($color-graph-danger, 0.15); color: $color-graph-danger; }
-  &.status-warning { background: rgba($color-graph-warning, 0.15); color: $color-graph-warning; }
-  &.status-running { background: rgba($color-graph-running, 0.15); color: $color-graph-running; }
+  &.status-success { background: color-mix(in srgb, var(--gr-graph-success) 15%, transparent); color: $color-graph-success; }
+  &.status-danger  { background: color-mix(in srgb, var(--gr-graph-danger) 15%, transparent); color: $color-graph-danger; }
+  &.status-warning { background: color-mix(in srgb, var(--gr-graph-warning) 15%, transparent); color: $color-graph-warning; }
+  &.status-running { background: color-mix(in srgb, var(--gr-graph-running) 15%, transparent); color: $color-graph-running; }
 }
 
 // ── Graph SVG ─────────────────────────────────────────────────────────────────
@@ -181,7 +180,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: $spacing-md;
-  background: rgba($color-tertiary, 0.92);
+  background: color-mix(in srgb, var(--gr-surface-raised) 92%, transparent);
   border: 1px solid $color-border;
   border-radius: $border-radius-md;
   padding: $spacing-xs $spacing-md;

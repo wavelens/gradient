@@ -42,8 +42,8 @@
   align-items: center;
   gap: $spacing-sm;
   padding: $spacing-sm $spacing-md;
-  background: rgba($color-warning, 0.08);
-  border-bottom: 1px solid rgba($color-warning, 0.35);
+  background: color-mix(in srgb, var(--gr-status-warning) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--gr-status-warning) 35%, transparent);
   color: $text-secondary;
   flex-shrink: 0;
 
@@ -139,7 +139,7 @@
 
   .hint-icon {
     font-size: 40px;
-    color: rgba($color-white, 0.1);
+    color: color-mix(in srgb, var(--gr-white) 10%, transparent);
   }
 
   .hint-text {
@@ -154,8 +154,8 @@
   align-items: center;
   justify-content: space-between;
   padding: $spacing-xs $spacing-md;
-  background: rgba($color-white, 0.03);
-  border-bottom: 1px solid rgba($color-border, 0.5);
+  background: color-mix(in srgb, var(--gr-white) 3%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--gr-border) 50%, transparent);
   flex-shrink: 0;
   gap: $spacing-sm;
   min-width: 0;
@@ -201,7 +201,7 @@
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: rgba($color-tertiary, 0.9);
+  background: color-mix(in srgb, var(--gr-surface-raised) 90%, transparent);
   border: 1px solid $color-border;
   cursor: pointer;
   display: flex;

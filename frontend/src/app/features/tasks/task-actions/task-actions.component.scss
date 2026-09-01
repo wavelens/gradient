@@ -98,7 +98,7 @@
   .event-chip {
     display: inline-block;
     padding: 2px 6px;
-    background: rgba($color-info, 0.1);
+    background: color-mix(in srgb, var(--gr-status-info) 10%, transparent);
     color: $color-info;
     border-radius: $border-radius-sm;
     font-size: $font-size-xs;
@@ -122,15 +122,15 @@
   white-space: nowrap;
 
   &.badge-send_mail {
-    background: rgba($color-info, 0.15);
+    background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
     color: $color-info;
   }
   &.badge-send_web_request {
-    background: rgba($color-success, 0.15);
+    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
     color: $color-success;
   }
   &.badge-forge_status_report {
-    background: rgba($color-warning, 0.15);
+    background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
     color: $color-warning;
   }
 }
@@ -143,11 +143,11 @@
   font-weight: 500;
 
   &.status-ok {
-    background: rgba($color-success, 0.15);
+    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
     color: $color-success;
   }
   &.status-warn {
-    background: rgba($color-warning, 0.15);
+    background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
     color: $color-warning;
   }
 }
@@ -176,8 +176,8 @@
   display: flex;
   align-items: center;
   gap: $spacing-sm;
-  background: rgba($color-danger, 0.1);
-  border: 1px solid rgba($color-danger, 0.5);
+  background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
   color: $color-danger;
