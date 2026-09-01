@@ -24,6 +24,7 @@ import {
   providers: [MessageService],
   templateUrl: './elements.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
+  styleUrl: './demo.scss',
 })
 export class ElementsComponent {
   private messages = inject(MessageService);

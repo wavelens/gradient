@@ -15,6 +15,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  vertical-align: middle;
   gap: $spacing-sm;
   padding: 0 0.8rem;
   height: $control-height;
@@ -38,8 +39,8 @@
 }
 
 :host(:focus-visible) {
-  outline: 2px solid var(--gr-btn-accent);
-  outline-offset: 2px;
+  outline: $focus-ring-width solid var(--gr-focus-ring);
+  outline-offset: $focus-ring-offset;
 }
 
 :host(:disabled),

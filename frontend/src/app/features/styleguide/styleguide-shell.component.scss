@@ -6,10 +6,16 @@
 
 @use '../../styles/variables' as *;
 
+:host {
+  display: block;
+  flex: 1;
+}
+
 .sg-shell {
   display: grid;
   grid-template-columns: 220px 1fr;
   min-height: 100%;
+  height: 100%;
 }
 
 .sg-nav {

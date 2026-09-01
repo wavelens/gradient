@@ -11,7 +11,27 @@
 // Fonts are loaded via <link> tags in index.html
 
 // Global Styles
-html, body {
+html, // UA heading margins are em-based (0.67em, 0.83em) so they land off the scale
+// and change with font size. Replace them with scale steps.
+h1, h2, h3, h4 {
+  margin: 0 0 $spacing-md;
+  line-height: $line-height-tight;
+}
+
+h2, h3 {
+  margin-top: $spacing-xl;
+}
+
+p {
+  margin: 0 0 $spacing-md;
+}
+
+code {
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+}
+
+body {
   overflow-x: hidden;
 }
 
@@ -19,6 +39,26 @@ html, body {
 // Angular's router-outlet inserts activated components as siblings of the outlet element.
 app-root > *:not(app-header):not(app-footer):not(router-outlet) {
   flex: 1;
+}
+
+// UA heading margins are em-based (0.67em, 0.83em) so they land off the scale
+// and change with font size. Replace them with scale steps.
+h1, h2, h3, h4 {
+  margin: 0 0 $spacing-md;
+  line-height: $line-height-tight;
+}
+
+h2, h3 {
+  margin-top: $spacing-xl;
+}
+
+p {
+  margin: 0 0 $spacing-md;
+}
+
+code {
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
 }
 
 body {
@@ -110,7 +150,7 @@ a {
 
   &:focus-visible {
     border-color: var(--gr-accent);
-    outline: $focus-ring-width solid var(--gr-accent);
+    outline: $focus-ring-width solid var(--gr-focus-ring);
     outline-offset: $focus-ring-offset;
   }
 
@@ -154,7 +194,7 @@ textarea:disabled {
 
 // Anything focusable gets the same ring, so no control falls back to the UA default.
 :where(a, button, [tabindex], summary):focus-visible {
-  outline: $focus-ring-width solid var(--gr-accent);
+  outline: $focus-ring-width solid var(--gr-focus-ring);
   outline-offset: $focus-ring-offset;
 }
 
@@ -208,6 +248,12 @@ textarea:disabled {
 .gr-menu-panel.gr-overlay-leaving { animation: gr-overlay-sink $transition-fast both; }
 
 .gr-tooltip-overlay.gr-overlay-leaving { animation: gr-overlay-fade-out $transition-fast both; }
+
+// Projected controls carry the caller's encapsulation, so gr-form-field cannot
+// reach them from its own stylesheet.
+.form-field.has-error :is(.gr-input, .gr-select__trigger, .password-input__field) {
+  border-color: var(--gr-status-danger);
+}
 
 [grDialogFooter] {
   display: flex;

@@ -21,8 +21,8 @@
     color: var(--gr-text-secondary);
   }
 
-  &.is-success { background: color-mix(in srgb, var(--gr-status-success) 18%, transparent); color: var(--gr-status-success); }
-  &.is-danger { background: color-mix(in srgb, var(--gr-status-danger) 18%, transparent); color: var(--gr-status-danger); }
-  &.is-warning { background: color-mix(in srgb, var(--gr-status-warning) 18%, transparent); color: var(--gr-status-warning); }
-  &.is-info { background: color-mix(in srgb, var(--gr-status-info) 18%, transparent); color: var(--gr-status-info); }
+  &.is-success { background: color-mix(in srgb, var(--gr-status-success) 18%, transparent); color: var(--gr-status-success-text); }
+  &.is-danger { background: color-mix(in srgb, var(--gr-status-danger) 18%, transparent); color: var(--gr-status-danger-text); }
+  &.is-warning { background: color-mix(in srgb, var(--gr-status-warning) 18%, transparent); color: var(--gr-status-warning-text); }
+  &.is-info { background: color-mix(in srgb, var(--gr-status-info) 18%, transparent); color: var(--gr-status-info-text); }
 }

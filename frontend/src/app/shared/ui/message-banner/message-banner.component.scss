@@ -27,24 +27,24 @@
   &--error {
     background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
     border-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
-    color: var(--gr-status-danger);
+    color: var(--gr-status-danger-text);
   }
 
   &--success {
     background: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
     border-color: color-mix(in srgb, var(--gr-status-success) 50%, transparent);
-    color: var(--gr-status-success);
+    color: var(--gr-status-success-text);
   }
 
   &--warning {
     background: color-mix(in srgb, var(--gr-status-warning) 10%, transparent);
     border-color: color-mix(in srgb, var(--gr-status-warning) 50%, transparent);
-    color: var(--gr-status-warning);
+    color: var(--gr-status-warning-text);
   }
 
   &--info {
     background: color-mix(in srgb, var(--gr-status-info) 10%, transparent);
     border-color: color-mix(in srgb, var(--gr-status-info) 50%, transparent);
-    color: var(--gr-status-info);
+    color: var(--gr-status-info-text);
   }
 }

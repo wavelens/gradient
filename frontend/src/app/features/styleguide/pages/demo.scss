@@ -1,0 +1,53 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+// Demo rows lay their samples out; without this every sibling sits at a 0px gap.
+:host {
+  display: block;
+}
+
+:host ::ng-deep gr-badge,
+:host ::ng-deep gr-eval-status-badge,
+:host ::ng-deep gr-icon,
+:host ::ng-deep button[grButton] {
+  vertical-align: middle;
+}
+
+h2 + p,
+h2 + gr-badge,
+h2 + gr-icon,
+h2 + button,
+h2 + gr-copy-field,
+h2 + gr-field-row,
+h2 + gr-message-banner,
+h2 + gr-table,
+h2 + gr-form-field {
+  margin-top: 0;
+}
+
+gr-badge,
+gr-eval-status-badge,
+gr-icon,
+button[grButton] {
+  margin-right: $spacing-sm;
+}
+
+gr-copy-field,
+gr-field-row,
+gr-message-banner,
+gr-form-field,
+gr-loading-spinner,
+gr-empty-state,
+gr-stat-card,
+gr-table,
+gr-select-button,
+gr-autocomplete,
+gr-metric-chart {
+  display: block;
+  margin-bottom: $spacing-md;
+}

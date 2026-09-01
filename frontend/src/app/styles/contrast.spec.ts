@@ -47,6 +47,29 @@ const PAIRS: Array<[string, string, number]> = [
 /// Elevation is only readable if adjacent surfaces actually differ.
 const SURFACES = ['--gr-surface-sunken', '--gr-surface-base', '--gr-surface-raised', '--gr-surface-hover', '--gr-surface-active'];
 
+/// Badges and banners composite the status colour over a surface at a low alpha,
+/// so the shipped background is never the raw token. Model that here.
+function mix(fg: string, bg: string, pct: number): string {
+  const parse = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [f, b] = [parse(fg), parse(bg)];
+  const out = f.map((c, i) => Math.round((c * pct + b[i] * (100 - pct)) / 100));
+  return '#' + out.map((c) => c.toString(16).padStart(2, '0')).join('');
+}
+
+const TINTED: Array<[string, number]> = [
+  ['--gr-status-success', 18],
+  ['--gr-status-danger', 18],
+  ['--gr-status-warning', 18],
+  ['--gr-status-info', 18],
+];
+
+describe.each(['dark', 'light'] as Theme[])('%s theme tinted badges', (theme) => {
+  it.each(TINTED)('%s label reads on its own %s%% tint', (role, pct) => {
+    const tint = mix(resolveRole(role, theme), resolveRole('--gr-surface-base', theme), pct);
+    expect(ratio(resolveRole(`${role}-text`, theme), tint)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe.each(['dark', 'light'] as Theme[])('%s theme surfaces', (theme) => {
   it('gives every surface role a distinct value', () => {
     const values = SURFACES.map((r) => resolveRole(r, theme));

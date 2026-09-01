@@ -8,7 +8,7 @@
 
 .gr-toast {
   position: fixed;
-  top: $spacing-md;
+  top: calc(var(--gr-header-height, 4.5rem) + #{$spacing-md});
   right: $spacing-md;
   z-index: $z-tooltip;
   display: flex;

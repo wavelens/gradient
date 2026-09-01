@@ -22,6 +22,7 @@ import {
   ],
   templateUrl: './components.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
+  styleUrl: './demo.scss',
 })
 export class ComponentsComponent {
   name = signal('');
