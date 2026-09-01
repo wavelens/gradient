@@ -20,16 +20,28 @@
 .gr-select-button__item {
   padding: 0 0.8rem;
   height: $control-height;
-  background: var(--gr-surface-sunken);
+  background: var(--gr-surface-raised);
   border: 0;
   border-right: 1px solid var(--gr-border);
   color: var(--gr-text-secondary);
   font-family: $font-family-base;
   font-size: $font-size-md;
   cursor: pointer;
+  transition: background-color $transition-fast, color $transition-fast;
 
   &:last-child { border-right: 0; }
   &:hover:not(:disabled) { background: var(--gr-surface-hover); color: var(--gr-text-primary); }
   &:disabled { cursor: not-allowed; opacity: 0.5; }
-  &--selected { background: var(--gr-accent); color: var(--gr-accent-fg); }
+
+  &--selected {
+    background: var(--gr-accent);
+    color: var(--gr-accent-fg);
+
+    // Nested so it outranks the plain :hover above, which would otherwise
+    // repaint the selected segment grey.
+    &:hover:not(:disabled) {
+      background: var(--gr-accent-hover);
+      color: var(--gr-accent-fg);
+    }
+  }
 }
