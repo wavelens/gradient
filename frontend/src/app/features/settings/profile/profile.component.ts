@@ -18,7 +18,9 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  MessageBannerComponent,
   PageLayoutComponent,
+  SettingsSectionComponent,
 } from '@shared/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
@@ -39,6 +41,8 @@ import { AccessState } from '@core/models';
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
+    SettingsSectionComponent,
+    MessageBannerComponent,
   ],
   templateUrl: './profile.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

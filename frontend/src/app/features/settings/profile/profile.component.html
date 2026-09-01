@@ -9,80 +9,64 @@
     <gr-loading-spinner message="Loading profile..." />
   } @else {
     @if (errorMessage()) {
-      <div class="message-banner error">
-        <gr-icon name="error" />
-        {{ errorMessage() }}
-      </div>
+      <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
     }
 
     @if (successMessage()) {
-      <div class="message-banner success">
-        <gr-icon name="check_circle" />
-        {{ successMessage() }}
-      </div>
+      <gr-message-banner type="success">{{ successMessage() }}</gr-message-banner>
     }
 
     <!-- Profile Form -->
-    <div class="settings-section">
-      <h2>Personal Information</h2>
+    <gr-settings-section title="Personal Information">
       @if (isManaged()) {
-        <div class="message-banner info">
-          <gr-icon name="info" />
-          This account is managed declaratively and cannot be edited here.
-        </div>
+        <gr-message-banner type="info">This account is managed declaratively and cannot be edited here.</gr-message-banner>
       } @else if (isOidc()) {
-        <div class="message-banner info">
-          <gr-icon name="info" />
-          Your profile is managed by your identity provider and cannot be edited here.
-        </div>
+        <gr-message-banner type="info">Your profile is managed by your identity provider and cannot be edited here.</gr-message-banner>
       }
-      <div class="settings-card">
-        <gr-form-field label="Username" for="username">
-          <input grInput id="username" [(ngModel)]="formData.username" [appManagedDisable]="access()" />
-        </gr-form-field>
+      <gr-form-field label="Username" for="username">
+        <input grInput id="username" [(ngModel)]="formData.username" [appManagedDisable]="access()" />
+      </gr-form-field>
 
-        <gr-form-field label="Full Name" for="name">
-          <input grInput id="name" [(ngModel)]="formData.name" [appManagedDisable]="access()" />
-        </gr-form-field>
+      <gr-form-field label="Full Name" for="name">
+        <input grInput id="name" [(ngModel)]="formData.name" [appManagedDisable]="access()" />
+      </gr-form-field>
 
-        <gr-form-field label="Email" for="email">
-          <input grInput id="email" type="email" [(ngModel)]="formData.email" [appManagedDisable]="access()" />
-        </gr-form-field>
+      <gr-form-field label="Email" for="email">
+        <input grInput id="email" type="email" [(ngModel)]="formData.email" [appManagedDisable]="access()" />
+      </gr-form-field>
 
-        <div class="form-actions">
-          <button
-            grButton
-            label="Save Changes"
-            icon="check"
-            (click)="saveSettings()"
-            [loading]="saving()"
-            [appManagedDisable]="access()"
-          ></button>
-        </div>
+      <div class="form-actions">
+        <button
+          grButton
+          label="Save Changes"
+          icon="check"
+          (click)="saveSettings()"
+          [loading]="saving()"
+          [appManagedDisable]="access()"
+        ></button>
       </div>
-    </div>
+    
+    </gr-settings-section>
 
     <!-- Security -->
-    <div class="settings-section">
-      <h2>Security</h2>
-      <div class="settings-card">
-        <div class="nav-row">
-          <div>
-            <h3>API Keys</h3>
-            <p class="text-secondary">Manage API keys for programmatic access</p>
-          </div>
-          <button grButton label="Manage API Keys" icon="key" severity="secondary" routerLink="/settings/keys"></button>
+    <gr-settings-section title="Security">
+      <div class="nav-row">
+        <div>
+          <h3>API Keys</h3>
+          <p class="text-secondary">Manage API keys for programmatic access</p>
         </div>
-        <gr-divider />
-        <div class="nav-row">
-          <div>
-            <h3>Active Sessions</h3>
-            <p class="text-secondary">View and revoke devices currently signed in to your account</p>
-          </div>
-          <button grButton label="Manage Sessions" icon="desktop_windows" severity="secondary" routerLink="/settings/sessions"></button>
-        </div>
+        <button grButton label="Manage API Keys" icon="key" severity="secondary" routerLink="/settings/keys"></button>
       </div>
-    </div>
+      <gr-divider />
+      <div class="nav-row">
+        <div>
+          <h3>Active Sessions</h3>
+          <p class="text-secondary">View and revoke devices currently signed in to your account</p>
+        </div>
+        <button grButton label="Manage Sessions" icon="desktop_windows" severity="secondary" routerLink="/settings/sessions"></button>
+      </div>
+    
+    </gr-settings-section>
 
     <!-- Danger Zone -->
     <div class="settings-section danger-section">
@@ -108,10 +92,7 @@
 >
   <p>Are you sure you want to permanently delete your account? This action cannot be undone.</p>
   @if (deleteError()) {
-    <div class="message-banner error">
-      <gr-icon name="error" />
-      {{ deleteError() }}
-    </div>
+    <gr-message-banner type="error">{{ deleteError() }}</gr-message-banner>
   }
   @if (isOidc()) {
     <gr-form-field label="Type your username to confirm" for="confirm-username" [hint]="formData.username">

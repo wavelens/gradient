@@ -21,6 +21,7 @@ import {
   InputDirective,
   LoadingSpinnerComponent,
   PageLayoutComponent,
+  SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
@@ -48,6 +49,7 @@ interface RoleFormState {
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './cache-members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

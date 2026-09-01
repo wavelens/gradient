@@ -31,6 +31,7 @@ import {
   LoadingSpinnerComponent,
   PageLayoutComponent,
   SelectComponent,
+  SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 
@@ -58,6 +59,7 @@ interface Option<T> {
     PageLayoutComponent,
     FormFieldComponent,
     EmptyStateComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './integrations.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

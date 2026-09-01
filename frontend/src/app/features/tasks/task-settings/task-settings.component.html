@@ -10,145 +10,129 @@
     <gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: proj.display_name, link: ['/project', projectName, 'task', taskName] }, { label: 'Settings' }]" title="Task Settings">
     <button slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
     @if (errorMessage()) {
-      <div class="message-banner error">
-        <gr-icon name="error" />
-        {{ errorMessage() }}
-      </div>
+      <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
     }
     @if (saveSuccess()) {
-      <div class="message-banner success">
-        <gr-icon name="check_circle" />
-        Changes saved.
-      </div>
+      <gr-message-banner type="success">Changes saved.</gr-message-banner>
     }
 
     <!-- General Settings -->
-    <div class="settings-section">
-      <h2>General</h2>
-      <div class="settings-card">
-        <gr-form-field label="Name" for="proj-name" hint="Task name cannot be changed">
-          <input grInput id="proj-name" [value]="proj.name" disabled />
-        </gr-form-field>
+    <gr-settings-section title="General">
+      <gr-form-field label="Name" for="proj-name" hint="Task name cannot be changed">
+        <input grInput id="proj-name" [value]="proj.name" disabled />
+      </gr-form-field>
 
-        <gr-form-field label="Display Name" for="proj-display">
-          <input grInput id="proj-display" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" />
-        </gr-form-field>
+      <gr-form-field label="Display Name" for="proj-display">
+        <input grInput id="proj-display" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" />
+      </gr-form-field>
 
-        <gr-form-field label="Description" for="proj-desc">
-          <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
-        </gr-form-field>
+      <gr-form-field label="Description" for="proj-desc">
+        <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
+      </gr-form-field>
 
-        <gr-form-field label="Repository URL" for="proj-repo">
-          <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" />
-        </gr-form-field>
+      <gr-form-field label="Repository URL" for="proj-repo">
+        <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" />
+      </gr-form-field>
 
-        <gr-form-field label="Evaluation Wildcard" for="proj-wildcard" hint="Pattern for selecting which outputs to evaluate">
-          <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" title="Learn about evaluation wildcards" />
-          <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" />
-        </gr-form-field>
+      <gr-form-field label="Evaluation Wildcard" for="proj-wildcard" hint="Pattern for selecting which outputs to evaluate">
+        <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" title="Learn about evaluation wildcards" />
+        <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" />
+      </gr-form-field>
 
-        <gr-form-field label="Keep Evaluations" for="proj-keep" hint="Number of completed evaluations to retain for metrics and history">
-          <input grInput id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" />
-        </gr-form-field>
+      <gr-form-field label="Keep Evaluations" for="proj-keep" hint="Number of completed evaluations to retain for metrics and history">
+        <input grInput id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" />
+      </gr-form-field>
 
-        <gr-form-field label="Trigger Concurrency" for="proj-concurrency" hint="Determines how this task handles a new trigger event when an evaluation is already running.">
-          <gr-select
-            inputId="proj-concurrency"
-            [(ngModel)]="formData.concurrency"
-            [options]="concurrencyOptions"
-            optionLabel="label"
-            optionValue="value"
-            optionDisabled="disabled"
-            [appManagedDisable]="access()"
-          />
-        </gr-form-field>
+      <gr-form-field label="Trigger Concurrency" for="proj-concurrency" hint="Determines how this task handles a new trigger event when an evaluation is already running.">
+        <gr-select
+          inputId="proj-concurrency"
+          [(ngModel)]="formData.concurrency"
+          [options]="concurrencyOptions"
+          optionLabel="label"
+          optionValue="value"
+          optionDisabled="disabled"
+          [appManagedDisable]="access()"
+        />
+      </gr-form-field>
 
-        <gr-form-field hint="When off, build outputs are still cached for Gradient itself but narinfos remain unsigned, keeping the task's paths private to external Nix clients even when the cache is public.">
-          <gr-checkbox
-            inputId="proj-sign-cache"
-            [(ngModel)]="formData.sign_cache"
-            [binary]="true"
-            [appManagedDisable]="access()"
-            label="Sign cache (allow public access to build outputs)"
-          />
-        </gr-form-field>
+      <gr-form-field hint="When off, build outputs are still cached for Gradient itself but narinfos remain unsigned, keeping the task's paths private to external Nix clients even when the cache is public.">
+        <gr-checkbox
+          inputId="proj-sign-cache"
+          [(ngModel)]="formData.sign_cache"
+          [binary]="true"
+          [appManagedDisable]="access()"
+          label="Sign cache (allow public access to build outputs)"
+        />
+      </gr-form-field>
 
-        <div class="form-actions">
-          <button
-            *appWritable="access()"
-            grButton
-            label="Save Changes"
-            icon="check"
-            (click)="saveSettings()"
-            [loading]="saving()"
-            [appManagedDisable]="access()"
-          ></button>
-        </div>
+      <div class="form-actions">
+        <button
+          *appWritable="access()"
+          grButton
+          label="Save Changes"
+          icon="check"
+          (click)="saveSettings()"
+          [loading]="saving()"
+          [appManagedDisable]="access()"
+        ></button>
       </div>
-    </div>
+    
+    </gr-settings-section>
 
     <!-- Triggers -->
-    <div class="settings-section">
-      <h2>Triggers</h2>
-      <div class="settings-card">
-        <div class="nav-row">
-          <p class="text-secondary">
-            Triggers control how and when evaluations run for this task - polling intervals, forge push and pull-request events, and cron schedules.
-          </p>
-          <a grButton label="Manage Triggers" icon="schedule" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'triggers']"></a>
-        </div>
+    <gr-settings-section title="Triggers">
+      <div class="nav-row">
+        <p class="text-secondary">
+          Triggers control how and when evaluations run for this task - polling intervals, forge push and pull-request events, and cron schedules.
+        </p>
+        <a grButton label="Manage Triggers" icon="schedule" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'triggers']"></a>
       </div>
-    </div>
+    
+    </gr-settings-section>
 
     <!-- Actions -->
-    <div class="settings-section">
-      <h2>Actions</h2>
-      <div class="settings-card">
-        <div class="nav-row">
-          <p class="text-secondary">
-            Actions react to evaluation and build events - send mail, post webhooks, or report status back to your forge.
-          </p>
-          <a grButton label="Manage Actions" icon="bolt" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'actions']"></a>
-        </div>
+    <gr-settings-section title="Actions">
+      <div class="nav-row">
+        <p class="text-secondary">
+          Actions react to evaluation and build events - send mail, post webhooks, or report status back to your forge.
+        </p>
+        <a grButton label="Manage Actions" icon="bolt" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'actions']"></a>
       </div>
-    </div>
+    
+    </gr-settings-section>
 
     <!-- Flake Inputs -->
-    <div class="settings-section">
-      <h2>Flake Inputs</h2>
-      <div class="settings-card">
-        <div class="nav-row">
-          <p class="text-secondary">
-            Override individual flake inputs with a new git URL, or force an update of an input keeping its original URL. Inputs without an override stay at whatever flake.lock has locked.
-          </p>
-          <a grButton label="Manage Flake Inputs" icon="share" severity="secondary"
-             [routerLink]="['/project', projectName, 'task', taskName, 'flake-inputs']"></a>
-        </div>
+    <gr-settings-section title="Flake Inputs">
+      <div class="nav-row">
+        <p class="text-secondary">
+          Override individual flake inputs with a new git URL, or force an update of an input keeping its original URL. Inputs without an override stay at whatever flake.lock has locked.
+        </p>
+        <a grButton label="Manage Flake Inputs" icon="share" severity="secondary"
+           [routerLink]="['/project', projectName, 'task', taskName, 'flake-inputs']"></a>
       </div>
-    </div>
+    
+    </gr-settings-section>
 
     <!-- Status -->
-    <div class="settings-section">
-      <h2>Status</h2>
-      <div class="settings-card">
-        <div class="status-row">
-          <div>
-            <h3>{{ proj.active ? 'Task is Active' : 'Task is Inactive' }}</h3>
-            <p class="text-secondary">{{ proj.active ? 'The task is currently evaluating and building.' : 'The task is paused and not evaluating.' }}</p>
-          </div>
-          <button
-            *appWritable="access()"
-            grButton
-            [label]="proj.active ? 'Deactivate' : 'Activate'"
-            [icon]="proj.active ? 'pause' : 'play_arrow'"
-            [severity]="proj.active ? 'warn' : 'success'"
-            (click)="toggleActive()"
-            [loading]="toggling()"
-            [appManagedDisable]="access()"
-          ></button>
+    <gr-settings-section title="Status">
+      <div class="status-row">
+        <div>
+          <h3>{{ proj.active ? 'Task is Active' : 'Task is Inactive' }}</h3>
+          <p class="text-secondary">{{ proj.active ? 'The task is currently evaluating and building.' : 'The task is paused and not evaluating.' }}</p>
         </div>
+        <button
+          *appWritable="access()"
+          grButton
+          [label]="proj.active ? 'Deactivate' : 'Activate'"
+          [icon]="proj.active ? 'pause' : 'play_arrow'"
+          [severity]="proj.active ? 'warn' : 'success'"
+          (click)="toggleActive()"
+          [loading]="toggling()"
+          [appManagedDisable]="access()"
+        ></button>
       </div>
-    </div>
+    
+    </gr-settings-section>
 
     @if (access().canEdit) {
       <!-- Danger Zone -->

@@ -137,23 +137,6 @@
 
 // ── Error banner ──────────────────────────────────────────────────────────────
 
-.message-banner {
-  display: flex;
-  gap: $spacing-sm;
-  flex-shrink: 0;
-  font-size: $font-size-sm;
-
-  gr-icon { flex-shrink: 0; margin-top: 1px; }
-
-  &.error {
-    align-items: flex-start;
-    background: color-mix(in srgb, var(--gr-status-danger) 8%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--gr-status-danger) 40%, transparent);
-    padding: $spacing-sm $spacing-lg;
-    color: var(--gr-status-danger);
-  }
-}
-
 .error-text {
   margin: $spacing-xs 0 0;
   font-family: $font-family-mono;

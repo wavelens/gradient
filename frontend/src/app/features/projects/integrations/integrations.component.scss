@@ -8,16 +8,7 @@
   margin-bottom: $spacing-xxl;
 
   h2 { font-size: $font-size-xl; margin: 0 0 $spacing-md 0; }
-}
-
-.settings-card {
-  padding: $spacing-lg;
-  background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-md;
-}
-
-.empty-state {
+}.empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;

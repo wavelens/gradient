@@ -9,160 +9,146 @@
   } @else if (project(); as project) {
     <gr-page-layout [breadcrumb]="[{ label: project.display_name, link: ['/project', projectName] }, { label: 'Settings' }]" title="Project Settings">
         <!-- General Settings -->
-    <div class="settings-section">
-      <h2>General</h2>
-      <div class="settings-card">
-        <gr-form-field label="Name" for="project-name" hint="Project name cannot be changed">
-          <input
-            grInput
-            id="project-name"
-            [value]="project.name"
-            disabled
-          />
-        </gr-form-field>
+    <gr-settings-section title="General">
+      <gr-form-field label="Name" for="project-name" hint="Project name cannot be changed">
+        <input
+          grInput
+          id="project-name"
+          [value]="project.name"
+          disabled
+        />
+      </gr-form-field>
 
-        <gr-form-field label="Display Name" for="display-name">
-          <input
-            grInput
-            id="display-name"
-            [(ngModel)]="formData.display_name"
-            [appManagedDisable]="access()"
-          />
-        </gr-form-field>
+      <gr-form-field label="Display Name" for="display-name">
+        <input
+          grInput
+          id="display-name"
+          [(ngModel)]="formData.display_name"
+          [appManagedDisable]="access()"
+        />
+      </gr-form-field>
 
-        <gr-form-field label="Description" for="description">
-          <textarea
-            grInput
-            id="description"
-            [(ngModel)]="formData.description"
-            rows="3"
-            [appManagedDisable]="access()"
-          ></textarea>
-        </gr-form-field>
+      <gr-form-field label="Description" for="description">
+        <textarea
+          grInput
+          id="description"
+          [(ngModel)]="formData.description"
+          rows="3"
+          [appManagedDisable]="access()"
+        ></textarea>
+      </gr-form-field>
 
-        <gr-form-field label="Visibility" for="visibility" hint="Public projects are visible and readable by all users">
-          <select id="visibility" [(ngModel)]="formData.public" class="role-select" [appManagedDisable]="access()">
-            <option [ngValue]="false">Private</option>
-            <option [ngValue]="true">Public</option>
-          </select>
-        </gr-form-field>
+      <gr-form-field label="Visibility" for="visibility" hint="Public projects are visible and readable by all users">
+        <select id="visibility" [(ngModel)]="formData.public" class="role-select" [appManagedDisable]="access()">
+          <option [ngValue]="false">Private</option>
+          <option [ngValue]="true">Public</option>
+        </select>
+      </gr-form-field>
 
-        <gr-form-field>
-          <span slot="hint">When enabled, the auto-managed <code>build-request</code> task that receives CLI build artefacts is hidden from task listings.</span>
-          <gr-checkbox
-            inputId="hide-build-requests"
-            [(ngModel)]="formData.hide_build_requests"
-            [binary]="true"
-            [appManagedDisable]="access()"
-            label="Hide Build Requests task"
-          />
-        </gr-form-field>
+      <gr-form-field>
+        <span slot="hint">When enabled, the auto-managed <code>build-request</code> task that receives CLI build artefacts is hidden from task listings.</span>
+        <gr-checkbox
+          inputId="hide-build-requests"
+          [(ngModel)]="formData.hide_build_requests"
+          [binary]="true"
+          [appManagedDisable]="access()"
+          label="Hide Build Requests task"
+        />
+      </gr-form-field>
 
-        @if (saveError()) {
-          <div class="message-banner error">
-            <gr-icon name="error" />
-            {{ saveError() }}
-          </div>
-        }
-        @if (saveSuccess()) {
-          <div class="message-banner success">
-            <gr-icon name="check_circle" />
-            Changes saved.
-          </div>
-        }
-        <div class="form-actions">
-          <button
-            *appWritable="access()"
-            grButton
-            label="Save Changes"
-            icon="check"
-            (click)="saveSettings()"
-            [loading]="saving()"
-            [appManagedDisable]="access()"
-          ></button>
-        </div>
+      @if (saveError()) {
+        <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
+      }
+      @if (saveSuccess()) {
+        <gr-message-banner type="success">Changes saved.</gr-message-banner>
+      }
+      <div class="form-actions">
+        <button
+          *appWritable="access()"
+          grButton
+          label="Save Changes"
+          icon="check"
+          (click)="saveSettings()"
+          [loading]="saving()"
+          [appManagedDisable]="access()"
+        ></button>
       </div>
-    </div>
+    
+    </gr-settings-section>
 
     <!-- Members & Roles -->
-    <div class="settings-section">
-      <h2>Access</h2>
-      <div class="settings-card">
-        <div class="nav-row">
-          <div>
-            <h3>Members & Roles</h3>
-            <p class="text-secondary">Manage who is in this project and what they can do</p>
-          </div>
-          <a grButton label="Manage Members" icon="group" severity="secondary" [routerLink]="['/project', projectName, 'members']"></a>
+    <gr-settings-section title="Access">
+      <div class="nav-row">
+        <div>
+          <h3>Members & Roles</h3>
+          <p class="text-secondary">Manage who is in this project and what they can do</p>
         </div>
+        <a grButton label="Manage Members" icon="group" severity="secondary" [routerLink]="['/project', projectName, 'members']"></a>
       </div>
-    </div>
+    
+    </gr-settings-section>
 
     <!-- Infrastructure -->
-    <div class="settings-section">
-      <h2>Infrastructure</h2>
-      <div class="settings-card">
-        <div class="nav-row">
-          <div>
-            <h3>Workers</h3>
-            <p class="text-secondary">Manage build workers for this project</p>
-          </div>
-          <button grButton label="Manage Workers" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'workers']"></button>
+    <gr-settings-section title="Infrastructure">
+      <div class="nav-row">
+        <div>
+          <h3>Workers</h3>
+          <p class="text-secondary">Manage build workers for this project</p>
         </div>
-        <gr-divider />
-        <div class="nav-row">
-          <div>
-            <h3>Cache Subscriptions</h3>
-            <p class="text-secondary">Nix binary caches this project pushes builds to</p>
-          </div>
-          <button grButton label="Manage Caches" icon="database" severity="secondary" [routerLink]="['/project', projectName, 'caches']"></button>
-        </div>
-        <gr-divider />
-        <div class="nav-row">
-          <div>
-            <h3>Integrations</h3>
-            <p class="text-secondary">Inbound forge webhooks and outbound status reporters</p>
-          </div>
-          <a grButton label="Manage Integrations" icon="account_tree" severity="secondary" [routerLink]="['/project', projectName, 'integrations']"></a>
-        </div>
+        <button grButton label="Manage Workers" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'workers']"></button>
       </div>
-    </div>
+      <gr-divider />
+      <div class="nav-row">
+        <div>
+          <h3>Cache Subscriptions</h3>
+          <p class="text-secondary">Nix binary caches this project pushes builds to</p>
+        </div>
+        <button grButton label="Manage Caches" icon="database" severity="secondary" [routerLink]="['/project', projectName, 'caches']"></button>
+      </div>
+      <gr-divider />
+      <div class="nav-row">
+        <div>
+          <h3>Integrations</h3>
+          <p class="text-secondary">Inbound forge webhooks and outbound status reporters</p>
+        </div>
+        <a grButton label="Manage Integrations" icon="account_tree" severity="secondary" [routerLink]="['/project', projectName, 'integrations']"></a>
+      </div>
+    
+    </gr-settings-section>
 
     <!-- SSH Key -->
-    <div class="settings-section">
-      <h2>SSH Key</h2>
+    <gr-settings-section title="SSH Key">
       @if (sshLoading()) {
         <gr-loading-spinner message="Loading SSH key..." />
       } @else {
-        <div class="settings-card">
-          <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
-          @if (sshKey()) {
-            <gr-form-field label="Public Key">
-              <textarea
-                grInput
-                [value]="sshKey()"
-                readonly
-                rows="4"
-                class="w-full ssh-key-area"
-              ></textarea>
-            </gr-form-field>
-            <div class="form-actions">
-              <button grButton label="Copy Key" icon="content_copy" severity="secondary" (click)="copySSHKey()"></button>
-            </div>
-          } @else {
-            <p class="text-secondary">No SSH key generated yet.</p>
-            <button
-              grButton
-              label="Generate SSH Key"
-              icon="key"
-              (click)="generateSSHKey()"
-              [loading]="generatingSSH()"
-              [disabled]="generatingSSH()"
-            ></button>
-          }
-        </div>
+        <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
+        @if (sshKey()) {
+          <gr-form-field label="Public Key">
+            <textarea
+              grInput
+              [value]="sshKey()"
+              readonly
+              rows="4"
+              class="w-full ssh-key-area"
+            ></textarea>
+          </gr-form-field>
+          <div class="form-actions">
+            <button grButton label="Copy Key" icon="content_copy" severity="secondary" (click)="copySSHKey()"></button>
+          </div>
+        } @else {
+          <p class="text-secondary">No SSH key generated yet.</p>
+          <button
+            grButton
+            label="Generate SSH Key"
+            icon="key"
+            (click)="generateSSHKey()"
+            [loading]="generatingSSH()"
+            [disabled]="generatingSSH()"
+          ></button>
+        }
       }
-    </div>
+    
+    </gr-settings-section>
 
     <!-- Danger Zone -->
     @if (access().canEdit) {

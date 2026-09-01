@@ -19,7 +19,9 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  MessageBannerComponent,
   PageLayoutComponent,
+  SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { Project, AccessState } from '@core/models';
@@ -43,6 +45,8 @@ import { Project, AccessState } from '@core/models';
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
+    SettingsSectionComponent,
+    MessageBannerComponent,
   ],
   templateUrl: './project-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

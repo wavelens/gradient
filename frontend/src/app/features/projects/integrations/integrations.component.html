@@ -17,32 +17,29 @@
     <gr-loading-spinner message="Loading integrations..." />
   } @else {
     @if (githubAppAvailable()) {
-      <div class="settings-section">
-        <h2>GitHub App</h2>
-        <div class="settings-card">
-          <div class="github-row">
-            <div>
-              <h3>GitHub App installations</h3>
-              @if (githubAppInstalled()) {
-                @for (inst of githubInstallations(); track inst.id) {
-                  <p class="text-secondary">
-                    <strong>{{ inst.account_login ? '@' + inst.account_login : 'unknown' }}</strong> — installation <code>{{ inst.installation_id ?? 'N/A' }}</code>
-                  </p>
-                }
-              } @else {
+      <gr-settings-section title="GitHub App">
+        <div class="github-row">
+          <div>
+            <h3>GitHub App installations</h3>
+            @if (githubAppInstalled()) {
+              @for (inst of githubInstallations(); track inst.id) {
                 <p class="text-secondary">
-                  No GitHub App installation is linked to this project yet.
-                  Install the App on your GitHub account, then add an integration here with the installation ID.
+                  <strong>{{ inst.account_login ? '@' + inst.account_login : 'unknown' }}</strong> — installation <code>{{ inst.installation_id ?? 'N/A' }}</code>
                 </p>
               }
-            </div>
+            } @else {
+              <p class="text-secondary">
+                No GitHub App installation is linked to this project yet.
+                Install the App on your GitHub account, then add an integration here with the installation ID.
+              </p>
+            }
           </div>
         </div>
-      </div>
+      
+      </gr-settings-section>
     }
 
-    <div class="settings-section">
-      <h2>Configured Integrations</h2>
+    <gr-settings-section title="Configured Integrations">
       @if (integrations().length === 0) {
         <gr-empty-state icon="hub" title="No integrations" message="Create an inbound integration to receive forge webhooks, or an outbound integration to report build statuses.">
           <button slot="action"
@@ -170,7 +167,8 @@
           }
         </div>
       }
-    </div>
+    
+    </gr-settings-section>
   }
 </gr-page-layout>
 

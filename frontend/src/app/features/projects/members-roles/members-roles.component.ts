@@ -26,6 +26,7 @@ import {
   InputDirective,
   LoadingSpinnerComponent,
   PageLayoutComponent,
+  SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
@@ -53,6 +54,7 @@ interface RoleFormState {
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
+    SettingsSectionComponent,
   ],
   templateUrl: './members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

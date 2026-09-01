@@ -17,7 +17,9 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  MessageBannerComponent,
   PageLayoutComponent,
+  SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
@@ -41,6 +43,8 @@ import { Cache } from '@core/models';
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
+    SettingsSectionComponent,
+    MessageBannerComponent,
   ],
   templateUrl: './cache-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
