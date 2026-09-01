@@ -63,8 +63,9 @@ sqlite3 gradient-report-01a05a38-2026-09-01.db \
   "SELECT name, status FROM derivation_build JOIN derivation ON derivation.id = derivation_build.derivation"
 ```
 
-The `gradient-report` inspector, on `PATH` inside `nix develop` and available as
-`nix run .#report-inspector`, adds curated views over the same file:
+The inspector adds curated views over the same file. It is called
+`gradient-report`, is on `PATH` inside `nix develop`, and runs standalone as
+`nix run .#gradient-report`:
 
 ```
 gradient-report REPORT summary      status, timings, build and failure counts

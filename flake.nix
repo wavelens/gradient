@@ -34,7 +34,7 @@
       clippy
     ];
 
-    report-inspector = pkgs.callPackage ./nix/tools/report-inspector { };
+    gradient-report = pkgs.callPackage ./nix/tools/report-inspector { };
   in
   {
     checks = (import ./nix/tests { inherit self inputs system pkgs; }) // {
@@ -55,7 +55,7 @@
         cargoFeatures = [ "nix" "eval" ];
       };
 
-      inherit report-inspector;
+      inherit gradient-report;
 
       default = gradient;
     };
@@ -84,8 +84,8 @@
         nodejs
         pnpm
 
+        gradient-report
         openssl
-        report-inspector
         sqlite
         postgresql_18
         pgadmin4-desktopmode
