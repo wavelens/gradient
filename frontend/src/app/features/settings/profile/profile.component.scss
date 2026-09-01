@@ -14,4 +14,6 @@
   max-width: 640px;
 }
 
-.form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }.danger-card { border-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent); }
+.form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }
+
+.danger-card { border-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent); }

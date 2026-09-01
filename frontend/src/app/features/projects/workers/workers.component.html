@@ -316,29 +316,17 @@
     }
 
     <gr-form-field label="Peer ID">
-      <div class="copy-row">
-        <code class="copy-value">{{ reg.peer_id }}</code>
-      </div>
+      <gr-copy-field [value]="reg.peer_id" />
     </gr-form-field>
 
     @if (reg.token) {
-      <gr-form-field label="Token">
-        <div class="copy-row">
-          <code class="copy-value token-value">{{ reg.token }}</code>
-        </div>
-        <button
-          grButton
-          [label]="tokenCopied() ? 'Copied!' : 'Copy Token'"
-          [icon]="tokenCopied() ? 'check' : 'content_copy'"
-          severity="secondary"
-          class="copy-btn"
-          (click)="copyToken()"
-        ></button>
+      <gr-form-field label="Token" hint="Shown once. Copy it before closing this dialog.">
+        <gr-copy-field [value]="reg.token" />
       </gr-form-field>
 
       <gr-form-field label="Peers file entry">
         <span slot="hint">Add this line to <code>/run/secrets/gradient-worker-peers</code> on your worker host, then set <code>peersFile</code> in your NixOS config.</span>
-        <pre class="peers-file-example">{{ reg.peer_id }}:{{ reg.token }}</pre>
+        <gr-copy-field multiline [rows]="1" [value]="reg.peer_id + ':' + reg.token" />
       </gr-form-field>
     } @else {
       <p class="text-secondary">Worker registered successfully. The token was pre-supplied and will not be echoed back.</p>

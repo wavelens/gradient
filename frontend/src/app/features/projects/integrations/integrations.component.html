@@ -17,7 +17,7 @@
     <gr-loading-spinner message="Loading integrations..." />
   } @else {
     @if (githubAppAvailable()) {
-      <gr-settings-section title="GitHub App">
+      <gr-settings-section title="GitHub App" maxWidth="none">
         <div class="github-row">
           <div>
             <h3>GitHub App installations</h3>
@@ -39,7 +39,7 @@
       </gr-settings-section>
     }
 
-    <gr-settings-section title="Configured Integrations">
+    <gr-settings-section title="Configured Integrations" maxWidth="none">
       @if (integrations().length === 0) {
         <gr-empty-state icon="hub" title="No integrations" message="Create an inbound integration to receive forge webhooks, or an outbound integration to report build statuses.">
           <button slot="action"
@@ -103,46 +103,30 @@
               @if (integration.forge_type === 'github') {
                 <div class="integration-body">
                   @if (integration.account_login) {
-                    <gr-form-field label="Account">
-                      <div class="mono-value">@{{ integration.account_login }}</div>
-                    </gr-form-field>
+                    <gr-field-row label="Account" [value]="'@' + integration.account_login" mono />
                   }
-                  <gr-form-field label="Installation ID">
-                    <div class="mono-value">{{ integration.installation_id ?? 'N/A' }}</div>
-                  </gr-form-field>
+                  <gr-field-row label="Installation ID" [value]="integration.installation_id ?? 'N/A'" mono />
                 </div>
               } @else if (integration.kind === 'inbound') {
                 <div class="integration-body">
                   <gr-form-field label="Forge" hint="This integration can serve webhooks from any supported forge. Pick the one you are configuring.">
-                    <div class="forge-selector">
-                      @for (opt of inboundForgeOptions; track opt.value) {
-                        <button
-                          grButton
-                          type="button"
-                          [label]="opt.label"
-                          size="small"
-                          [severity]="inboundForge(integration.id) === opt.value ? 'primary' : 'secondary'"
-                          (click)="setInboundForge(integration.id, opt.value)"
-                        ></button>
-                      }
-                    </div>
+                    <gr-tab-switch
+                      ariaLabel="Forge"
+                      [options]="inboundForgeOptions"
+                      optionLabel="label"
+                      optionValue="value"
+                      [ngModel]="inboundForge(integration.id)"
+                      (ngModelChange)="setInboundForge(integration.id, $event)"
+                    />
                   </gr-form-field>
                   <gr-form-field label="Webhook URL">
-                    <div class="copy-row">
-                      <input grInput [value]="inboundUrl(integration)" readonly />
-                      <button
-                        grButton
-                        [icon]="copiedUrlId() === integration.id ? 'check' : 'content_copy'"
-                        [severity]="copiedUrlId() === integration.id ? 'success' : 'secondary'"
-                        (click)="copyInboundUrl(integration)"
-                      ></button>
-                    </div>
+                    <gr-copy-field [value]="inboundUrl(integration)" />
                   </gr-form-field>
                   <gr-form-field label="Secret">
                     @if (integration.has_secret) {
-                      <span class="status-chip status-ok">Configured</span>
+                      <gr-badge severity="success">Configured</gr-badge>
                     } @else {
-                      <span class="status-chip status-warn">Not set</span>
+                      <gr-badge severity="warning">Not set</gr-badge>
                     }
                   </gr-form-field>
                   <gr-form-field label="Events to enable">
@@ -151,14 +135,12 @@
                 </div>
               } @else {
                 <div class="integration-body">
-                  <gr-form-field label="Endpoint URL">
-                    <div class="mono-value">{{ integration.endpoint_url || '(not set - defaults will be used)' }}</div>
-                  </gr-form-field>
+                  <gr-field-row label="Endpoint URL" [value]="integration.endpoint_url || '(not set - defaults will be used)'" mono />
                   <gr-form-field label="Access Token">
                     @if (integration.has_access_token) {
-                      <span class="status-chip status-ok">Configured</span>
+                      <gr-badge severity="success">Configured</gr-badge>
                     } @else {
-                      <span class="status-chip status-warn">Not set</span>
+                      <gr-badge severity="warning">Not set</gr-badge>
                     }
                   </gr-form-field>
                 </div>
@@ -228,7 +210,7 @@
       The webhook URL is shown after the integration is created. Enable push, pull/merge-request, comment, and review events on the forge webhook - a push-only webhook never delivers PR CI or <code>/gradient</code> commands.
     </div>
     <gr-form-field label="Webhook Secret" for="int-secret" hint="Copy this into your forge's webhook secret field. Store it now - it will not be shown again.">
-      <div class="copy-row">
+      <div class="field-actions">
         <input grInput id="int-secret" [(ngModel)]="formData.secret" placeholder="Leave blank to omit verification" />
         <button grButton type="button" icon="refresh" severity="secondary" (click)="generateSecret()"></button>
       </div>
@@ -283,7 +265,7 @@
     </gr-form-field>
     @if (target.kind === 'inbound') {
       <gr-form-field label="Webhook Secret" for="edit-secret">
-        <div class="copy-row">
+        <div class="field-actions">
           <input grInput id="edit-secret" [(ngModel)]="formData.secret" placeholder="Leave blank to keep existing" />
           <button grButton type="button" icon="refresh" severity="secondary" (click)="generateSecret()"></button>
         </div>

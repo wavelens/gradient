@@ -46,7 +46,9 @@
 .filter-actions {
   display: flex;
   gap: $spacing-sm;
-}.nar-row {
+}
+
+.nar-row {
   display: grid;
   grid-template-columns: 220px 1fr 110px 110px 160px 160px 100px;
   gap: $spacing-md;
@@ -69,7 +71,9 @@
     color: var(--gr-text-secondary);
     font-weight: 600;
   }
-}.col-actions {
+}
+
+.col-actions {
   display: flex;
   justify-content: flex-end;
   gap: $spacing-xs;

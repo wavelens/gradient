@@ -82,37 +82,10 @@
   border-top: 1px solid var(--gr-border-subtle);
 }
 
-.status-chip {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-sm;
-  font-weight: 500;
-
-  &.status-ok {
-    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: var(--gr-status-success);
-  }
-  &.status-warn {
-    background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: var(--gr-status-warning);
-  }
-  &.status-info {
-    background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent);
-    color: var(--gr-text-secondary);
-  }
-}
-
 .forge-selector {
   display: flex;
   gap: $spacing-sm;
   margin-bottom: $spacing-xs;
-}
-
-.copy-row {
-  display: flex;
-  gap: $spacing-sm;
-  align-items: stretch;
 }
 
 .mono-value {

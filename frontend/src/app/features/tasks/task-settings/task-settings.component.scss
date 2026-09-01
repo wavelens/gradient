@@ -49,7 +49,11 @@
   &:hover { color: var(--gr-text-primary); }
 }
 
-.form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }.danger-card { border-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent); }.danger-divider {
+.form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }
+
+.danger-card { border-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent); }
+
+.danger-divider {
   border-top: 1px solid color-mix(in srgb, var(--gr-status-danger) 20%, transparent);
   margin: $spacing-lg 0;
 }

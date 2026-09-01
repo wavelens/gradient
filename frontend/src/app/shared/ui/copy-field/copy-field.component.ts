@@ -6,7 +6,8 @@
 
 import { Component, input, signal, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ButtonComponent, InputDirective } from '@shared/ui';
+import { ButtonComponent } from '../button/button.component';
+import { InputDirective } from '../input/input.directive';
 
 @Component({
   selector: 'gr-copy-field',

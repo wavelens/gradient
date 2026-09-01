@@ -6,7 +6,8 @@
 
 import { Component, input, model, output, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ButtonComponent, DialogComponent } from '@shared/ui';
+import { ButtonComponent } from '../button/button.component';
+import { DialogComponent } from '../dialog/dialog.component';
 
 @Component({
   selector: 'gr-form-dialog',

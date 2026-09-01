@@ -114,6 +114,15 @@ a {
   font-family: $font-family-mono;
 }
 
+// A control with an action beside it: a secret and its regenerate button.
+.field-actions {
+  display: flex;
+  align-items: stretch;
+  gap: $spacing-sm;
+
+  > :first-child { flex: 1; min-width: 0; }
+}
+
 // Names a control for assistive tech without showing the label.
 .sr-only {
   position: absolute;

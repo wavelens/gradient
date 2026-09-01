@@ -35,6 +35,25 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-explicit-any': 'error' },
   },
   {
+    // A primitive reaching for its own barrel is a cycle: the barrel is still
+    // initialising when the component asks for a sibling, so the sibling is
+    // undefined. Inside the layer, import the sibling directly.
+    files: ['src/app/shared/ui/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@shared/ui', '@shared/ui/*'],
+              message: 'Import the sibling directly; the barrel is for consumers.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Specs probe library option objects whose own types are deliberately loose.
     files: ['**/*.spec.ts'],
     rules: {

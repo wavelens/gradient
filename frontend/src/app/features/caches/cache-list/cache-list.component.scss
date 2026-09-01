@@ -155,7 +155,9 @@
 
 }
 
-.text-danger { color: var(--gr-status-danger); }.name-check-icon {
+.text-danger { color: var(--gr-status-danger); }
+
+.name-check-icon {
   position: absolute;
   right: $spacing-sm;
   display: flex;

@@ -68,13 +68,6 @@
   gr-icon { flex-shrink: 0; }
 }
 
-.copy-row {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  margin-bottom: $spacing-xs;
-}
-
 .copy-value {
   display: block;
   font-family: $font-family-mono;
@@ -87,26 +80,10 @@
   width: 100%;
 }
 
-.token-value {
-  font-size: $font-size-xs;
-  letter-spacing: 0.02em;
-}
-
 .copy-btn {
   margin-top: $spacing-xs;
 }
 
-.peers-file-example {
-  font-family: $font-family-mono;
-  font-size: $font-size-xs;
-  background: var(--gr-text-secondary);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-sm;
-  padding: $spacing-sm $spacing-md;
-  margin: 0 0 $spacing-xs;
-  word-break: break-all;
-  white-space: pre-wrap;
-}
 .cap-toggles {
   display: flex;
   gap: $spacing-md;

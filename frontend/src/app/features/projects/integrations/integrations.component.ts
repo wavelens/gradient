@@ -23,8 +23,10 @@ import {
 import {
   BadgeComponent,
   ButtonComponent,
+  CopyFieldComponent,
   DialogComponent,
   EmptyStateComponent,
+  FieldRowComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
@@ -33,6 +35,7 @@ import {
   PageLayoutComponent,
   SelectComponent,
   SettingsSectionComponent,
+  TabSwitchComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 
@@ -62,6 +65,9 @@ interface Option<T> {
     EmptyStateComponent,
     SettingsSectionComponent,
     BadgeComponent,
+    CopyFieldComponent,
+    TabSwitchComponent,
+    FieldRowComponent,
   ],
   templateUrl: './integrations.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

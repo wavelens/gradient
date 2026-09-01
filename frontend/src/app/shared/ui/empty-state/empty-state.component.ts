@@ -7,7 +7,7 @@
 import { Component, booleanAttribute, input, output, ChangeDetectionStrategy } from '@angular/core';
 import { IconComponent } from '../icon/icon.component';
 import { CommonModule } from '@angular/common';
-import { ButtonComponent } from '@shared/ui';
+import { ButtonComponent } from '../button/button.component';
 
 @Component({
   selector: 'gr-empty-state',

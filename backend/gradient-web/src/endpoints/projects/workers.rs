@@ -376,9 +376,19 @@ pub struct WorkerConnectionEntry {
 
 #[derive(Serialize)]
 pub struct WorkerMetricsResponse {
+    pub worker_id: String,
+    /// None when neither a registration nor a base worker carries the id, which
+    /// is how history outlives the worker that produced it.
+    pub display_name: Option<String>,
     pub samples: Vec<WorkerSamplePoint>,
     pub connections: Vec<WorkerConnectionEntry>,
     pub jobs_dispatched: u64,
+}
+
+/// A project's own registration shadows a base worker of the same `worker_id`,
+/// exactly as it does in the worker list.
+fn worker_display_name(registration: Option<String>, base: Option<String>) -> Option<String> {
+    registration.or(base)
 }
 
 /// Full metrics for one worker: the live-metric sample time-series, the
@@ -442,7 +452,24 @@ pub async fn get_project_worker_metrics(
         .count(&state.web_db)
         .await?;
 
+    let registration_name = EWorkerRegistration::find()
+        .filter(worker_registration::Column::PeerId.eq(project.id))
+        .filter(worker_registration::Column::WorkerId.eq(&worker_id))
+        .one(&state.web_db)
+        .await?
+        .map(|r| r.display_name);
+
+    // Not filtered by `enabled`: a base worker switched off after it served this
+    // project still named the samples below, and a name is not a secret.
+    let base_name = EBaseWorker::find()
+        .filter(base_worker::Column::WorkerId.eq(&worker_id))
+        .one(&state.web_db)
+        .await?
+        .map(|bw| bw.display_name);
+
     Ok(ok_json(WorkerMetricsResponse {
+        display_name: worker_display_name(registration_name, base_name),
+        worker_id,
         samples,
         connections,
         jobs_dispatched,
