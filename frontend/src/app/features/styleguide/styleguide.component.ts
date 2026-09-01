@@ -177,6 +177,10 @@ export class StyleguideComponent {
   // ── Sample copy values & menu items ──────────────────────────────────────
   webhookUrl = 'https://gradient.example.com/api/v1/hooks/gitea/acme/web-app';
   apiToken = 'GRAD_b3a8f9e1d2c4a6b8e0f1a3c5d7e9b1d3f5a7c9e1';
+  publicKey = [
+    'cache.gradient.example-1:8Xk2mQ9vR4tL6nW3pY7sD1fH5jK0aZcVbNmQwErTyUi=',
+    'cache.gradient.example-2:3Jd8sK1mP5qX9wZ2vB6nR4tY7uI0oL3aS5dF8gH1jK2=',
+  ].join('\n');
 
   rowMenuItems: MenuItem[] = [
     { label: 'Edit', icon: 'edit' },

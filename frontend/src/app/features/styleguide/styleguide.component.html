@@ -135,7 +135,7 @@
         <button grButton label="Success" severity="success"></button>
         <button grButton label="Danger" severity="danger"></button>
         <button grButton label="Warn" severity="warn"></button>
-        <button grButton label="Info" severity="info"></button>
+        <button grButton label="Info" severity="secondary"></button>
       </div>
 
       <h3>Variants</h3>
@@ -143,8 +143,6 @@
         <button grButton label="With icon" icon="add"></button>
         <button grButton icon="delete" severity="danger" aria-label="Delete"></button>
         <button grButton label="Text" [text]="true"></button>
-        <button grButton label="Outlined" [outlined]="true"></button>
-        <button grButton label="Rounded" [rounded]="true"></button>
       </div>
 
       <h3>States</h3>
@@ -276,6 +274,9 @@
         <gr-form-field label="Plain (no mono)" for="sg-cf-plain">
           <gr-copy-field id="sg-cf-plain" [value]="'short value'" [mono]="false" />
         </gr-form-field>
+        <gr-form-field label="Public key (multiline)" for="sg-cf-multi">
+          <gr-copy-field id="sg-cf-multi" [value]="publicKey" [multiline]="true" [rows]="4" />
+        </gr-form-field>
       </div>
 
       <h3>Label Help Link</h3>
@@ -307,7 +308,7 @@
         <button grButton label="Confirm delete" severity="danger" icon="delete" (click)="confirmDelete()"></button>
         <button grButton label="Toast: success" severity="success" (click)="toast('success', 'Saved', 'Looking good.')"></button>
         <button grButton label="Toast: error" severity="danger" (click)="toast('error', 'Failed', 'Could not save.')"></button>
-        <button grButton label="Toast: info" severity="info" (click)="toast('info', 'FYI', 'Just an info note.')"></button>
+        <button grButton label="Toast: info" severity="secondary" (click)="toast('info', 'FYI', 'Just an info note.')"></button>
         <button grButton label="Toast: warn" severity="warn" (click)="toast('warn', 'Heads up', 'Be careful.')"></button>
         <button grButton label="Hover for tooltip" grTooltip="Tooltip content" tooltipPosition="top"></button>
       </div>
