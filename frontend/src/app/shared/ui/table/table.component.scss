@@ -1,0 +1,51 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+:host {
+  display: block;
+  border: 1px solid var(--gr-border);
+  border-radius: $border-radius-md;
+  overflow: hidden;
+  background: var(--gr-surface-raised);
+}
+
+.gr-table__scroll {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: $font-size-md;
+}
+
+// A header sits above the card, so it takes the hover surface rather than the sunken one.
+:host ::ng-deep {
+  th,
+  td {
+    padding: $spacing-sm $spacing-md;
+    text-align: left;
+    border-bottom: 1px solid var(--gr-border);
+  }
+
+  thead th {
+    background: var(--gr-surface-hover);
+    color: var(--gr-text-secondary);
+    font-size: $font-size-sm;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  tbody tr:hover td {
+    background: var(--gr-surface-hover);
+  }
+}

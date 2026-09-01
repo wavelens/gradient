@@ -1,5 +1,17 @@
 <div class="page-layout" [style.max-width]="maxWidth()">
   <header class="page-layout__header">
+  @if (breadcrumb().length) {
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      @for (crumb of breadcrumb(); track crumb.label; let last = $last) {
+        @if (last) {
+          <span class="breadcrumb-current" aria-current="page">{{ crumb.label }}</span>
+        } @else {
+          <a class="breadcrumb-link" [routerLink]="crumb.link">{{ crumb.label }}</a>
+          <span class="breadcrumb-separator" aria-hidden="true">/</span>
+        }
+      }
+    </nav>
+  }
     <h1>{{ title() }}</h1>
     @if (subtitle()) {
       <p class="page-layout__subtitle">{{ subtitle() }}</p>

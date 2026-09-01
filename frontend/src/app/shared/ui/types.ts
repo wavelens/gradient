@@ -26,3 +26,5 @@ export interface Message {
   detail?: string;
   life?: number;
 }
+
+export type BadgeSeverity = 'neutral' | 'success' | 'danger' | 'warning' | 'info';

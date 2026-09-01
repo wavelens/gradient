@@ -6,6 +6,7 @@
 
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import { PageLayoutComponent } from './page-layout.component';
 
 @Component({
@@ -22,6 +23,32 @@ import { PageLayoutComponent } from './page-layout.component';
 class Host {}
 
 describe('gr-page-layout', () => {
+  beforeEach(() => TestBed.configureTestingModule({ providers: [provideRouter([])] }));
+
+  async function renderCrumbs(crumbs: unknown) {
+    const fixture = TestBed.createComponent(PageLayoutComponent);
+    fixture.componentRef.setInput('title', 'Integrations');
+    fixture.componentRef.setInput('breadcrumb', crumbs);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    return fixture.nativeElement as HTMLElement;
+  }
+
+  it('renders no breadcrumb when the trail is empty', async () => {
+    expect((await renderCrumbs([])).querySelector('.breadcrumb')).toBeNull();
+  });
+
+  it('renders all but the last crumb as links', async () => {
+    const root = await renderCrumbs([
+      { label: 'my-project', link: ['/project', 'my-project'] },
+      { label: 'Settings', link: ['/project', 'my-project', 'settings'] },
+      { label: 'Integrations' },
+    ]);
+    expect(root.querySelectorAll('.breadcrumb-link').length).toBe(2);
+    expect(root.querySelectorAll('.breadcrumb-separator').length).toBe(2);
+    expect(root.querySelector('.breadcrumb-current')?.textContent).toContain('Integrations');
+  });
+
   async function render() {
     const fixture = TestBed.createComponent(Host);
     fixture.detectChanges();

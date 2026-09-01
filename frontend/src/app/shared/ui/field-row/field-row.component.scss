@@ -1,0 +1,30 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.field-row {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-md;
+}
+
+.field-row-label {
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+  font-weight: 500;
+}
+
+.field-row-value {
+  color: var(--gr-text-primary);
+  font-size: $font-size-md;
+
+  &.is-mono {
+    font-family: $font-family-mono;
+    font-size: $font-size-sm;
+  }
+}
