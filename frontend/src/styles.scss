@@ -29,8 +29,12 @@ h1, h2, h3, h4 {
   line-height: $line-height-tight;
 }
 
-h2, h3 {
-  margin-top: $spacing-xl;
+h2 {
+  margin-top: $space-section;
+}
+
+h3 {
+  margin-top: $space-block;
 }
 
 p {

@@ -19,7 +19,7 @@
 }
 
 h2 {
-  margin-top: $spacing-xxl;
+  margin-top: $space-section;
 }
 
 h2 + p,
@@ -42,18 +42,23 @@ button[grButton] {
   margin-bottom: $spacing-md;
 }
 
+// Light specimens sit close together; heavy ones get a block of air.
 gr-copy-field,
 gr-field-row,
 gr-message-banner,
 gr-form-field,
+gr-select-button,
+gr-checkbox,
+gr-autocomplete {
+  display: block;
+  margin-bottom: $space-pair;
+}
+
 gr-loading-spinner,
 gr-empty-state,
 gr-stat-card,
 gr-table,
-gr-select-button,
-gr-checkbox,
-gr-autocomplete,
 gr-metric-chart {
   display: block;
-  margin-bottom: $spacing-md;
+  margin-bottom: $space-block;
 }

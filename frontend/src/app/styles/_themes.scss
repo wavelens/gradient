@@ -34,6 +34,8 @@
   --gr-green-550: #23913d;
   --gr-emerald-400: #34d399;
   --gr-emerald-500: #10b981;
+  --gr-emerald-700: #047857;
+  --gr-emerald-800: #065f46;
   --gr-green-500: #28a745;
   --gr-green-400: #22c55e;
   --gr-red-300: #f87171;
@@ -102,8 +104,8 @@
   --gr-surface-hover: var(--gr-gray-75);
   --gr-surface-active: var(--gr-gray-60);
   --gr-border: var(--gr-gray-200);
-  --gr-accent: var(--gr-green-700);
-  --gr-accent-hover: var(--gr-green-800);
+  --gr-accent: var(--gr-emerald-700);
+  --gr-accent-hover: var(--gr-emerald-800);
   --gr-accent-fg: var(--gr-white);
   --gr-focus-ring: var(--gr-ink-900);
   --gr-text-primary: var(--gr-ink-900);

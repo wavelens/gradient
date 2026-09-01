@@ -8,13 +8,13 @@
 
 .form-field {
   display: block;
-  margin-bottom: $spacing-lg;
+  margin-bottom: $space-block;
 
   label {
     display: flex;
     align-items: center;
     gap: $spacing-xs;
-    margin-bottom: $spacing-sm;
+    margin-bottom: $space-pair;
     font-size: $font-size-md;
     font-weight: 600;
     color: var(--gr-text-primary);

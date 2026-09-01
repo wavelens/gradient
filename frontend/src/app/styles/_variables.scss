@@ -15,6 +15,12 @@ $spacing-lg: 1.5rem;    // 24px
 $spacing-xl: 2rem;      // 32px
 $spacing-xxl: 3rem;     // 48px
 
+// Rhythm tiers. A single gap repeated everywhere cannot signal grouping, so
+// these three carry the structure: section > block > pair.
+$space-section: $spacing-xxl;  // between major sections
+$space-block: $spacing-lg;     // between blocks inside a section
+$space-pair: $spacing-sm;      // between a label and the thing it labels
+
 // Border Radius
 $border-radius-sm: 5px;
 $border-radius-md: 8px;
