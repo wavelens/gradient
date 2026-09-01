@@ -6,6 +6,10 @@
 
 @use '../../../styles/variables' as *;
 
+:host {
+  display: inline-block;
+}
+
 .gr-select-button {
   display: inline-flex;
   border: 1px solid var(--gr-border);

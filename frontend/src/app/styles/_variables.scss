@@ -41,6 +41,10 @@ $line-height-relaxed: 1.7;
 // One height for every interactive control, so they align when set side by side.
 $control-height: 34px;
 
+// One focus affordance for the whole system.
+$focus-ring-width: 2px;
+$focus-ring-offset: 2px;
+
 // Z-index layers
 $z-dropdown: 1000;
 $z-sticky: 1020;

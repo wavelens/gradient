@@ -32,5 +32,10 @@
   }
 
   .hint { color: var(--gr-text-secondary); }
+
+  // The class existed but nothing used it, so the field itself never showed the error.
+  &.has-error :is(input, textarea, select) {
+    border-color: var(--gr-status-danger);
+  }
   .field-error { color: var(--gr-status-danger); }
 }

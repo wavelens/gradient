@@ -99,6 +99,8 @@ a {
   padding: 0 0.7rem;
   height: $control-height;
   line-height: $line-height-tight;
+  width: 100%;
+  box-sizing: border-box;
   background: var(--gr-surface-sunken);
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
@@ -106,15 +108,22 @@ a {
   font-family: $font-family-base;
   font-size: $font-size-md;
 
-  &:focus {
-    border-color: var(--gr-text-secondary);
-    outline: none;
+  &:focus-visible {
+    border-color: var(--gr-accent);
+    outline: $focus-ring-width solid var(--gr-accent);
+    outline-offset: $focus-ring-offset;
   }
 
   &:disabled {
     cursor: not-allowed;
     opacity: 0.5;
   }
+}
+
+textarea.gr-input {
+  height: auto;
+  padding: 0.4rem 0.7rem;
+  line-height: $line-height-base;
 }
 
 .gr-spin {
@@ -141,6 +150,12 @@ select:disabled,
 textarea:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+// Anything focusable gets the same ring, so no control falls back to the UA default.
+:where(a, button, [tabindex], summary):focus-visible {
+  outline: $focus-ring-width solid var(--gr-accent);
+  outline-offset: $focus-ring-offset;
 }
 
 // Overlay panels live outside component encapsulation, so their entrance animations

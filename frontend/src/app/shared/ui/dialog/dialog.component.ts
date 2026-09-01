@@ -25,6 +25,8 @@ import {
 } from '@angular/core';
 import { TemplateRef } from '@angular/core';
 
+let dialogSeq = 0;
+
 /// Modal dialog on the CDK overlay. Escape closes it, the backdrop does not,
 /// matching what every call site relied on before.
 @Component({
@@ -37,13 +39,13 @@ import { TemplateRef } from '@angular/core';
         class="gr-dialog"
         role="dialog"
         aria-modal="true"
-        [attr.aria-label]="header()"
+        [attr.aria-labelledby]="titleId"
         [style.width]="width()"
         cdkTrapFocus
         [cdkTrapFocusAutoCapture]="true"
       >
         <div class="gr-dialog__header">
-          <h2 class="gr-dialog__title">{{ header() }}</h2>
+          <h2 class="gr-dialog__title" [id]="titleId">{{ header() }}</h2>
           @if (closable()) {
             <button type="button" class="gr-dialog__close" aria-label="Close" (click)="close()">
               <gr-icon name="close" />
@@ -66,6 +68,7 @@ export class DialogComponent implements OnDestroy {
   hide = output<void>();
 
   private panel = viewChild.required<TemplateRef<unknown>>('panel');
+  protected titleId = `gr-dialog-title-${dialogSeq++}`;
   private overlay = inject(Overlay);
   private vcr = inject(ViewContainerRef);
   private ref?: OverlayRef;

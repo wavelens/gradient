@@ -10,8 +10,8 @@
   }
   <ng-content></ng-content>
   @if (showError()) {
-    <small class="field-error">{{ errorText() }}</small>
+    <small class="field-error" [id]="messageId()" role="alert">{{ errorText() }}</small>
   } @else if (hint()) {
-    <small class="hint">{{ hint() }}</small>
+    <small class="hint" [id]="messageId()">{{ hint() }}</small>
   }
 </div>

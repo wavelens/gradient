@@ -37,6 +37,13 @@ describe('CopyFieldComponent', () => {
     expect(root.querySelector('textarea')?.rows).toBe(6);
   });
 
+  it('lets the textarea grow with its rows instead of clipping', async () => {
+    const { root } = await render({ value, multiline: true, rows: 4 });
+    const ta = root.querySelector('textarea')!;
+    // A fixed control height would leave scrollHeight above clientHeight.
+    expect(getComputedStyle(ta).height).not.toBe('34px');
+  });
+
   it('places the copy button inside the field', async () => {
     const { root } = await render({ value });
     expect(root.querySelector('.copy-field__button')).not.toBeNull();

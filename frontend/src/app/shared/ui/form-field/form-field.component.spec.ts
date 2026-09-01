@@ -77,6 +77,29 @@ describe('gr-form-field', () => {
     expect(root.querySelector('.field-error')?.textContent).toContain('Required field');
   });
 
+  it('marks the projected control invalid and points it at the message', async () => {
+    const fixture = await render(TemplateDrivenHost);
+    const input = (fixture.nativeElement as HTMLElement).querySelector('input')!;
+    expect(input.getAttribute('aria-invalid')).toBe('false');
+    expect(input.getAttribute('aria-describedby')).toBeTruthy();
+
+    fixture.componentInstance.bad.set(true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('announces the error and links it by id', async () => {
+    const fixture = await render(TemplateDrivenHost);
+    fixture.componentInstance.bad.set(true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    const error = root.querySelector('.field-error')!;
+    expect(error.getAttribute('role')).toBe('alert');
+    expect(root.querySelector('input')!.getAttribute('aria-describedby')).toBe(error.id);
+  });
+
   it('prefers an explicit invalid input over the control state', async () => {
     const fixture = TestBed.createComponent(FormFieldComponent);
     const ctrl = new FormControl('', Validators.required);

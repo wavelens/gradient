@@ -41,6 +41,7 @@ const PAIRS: Array<[string, string, number]> = [
   ['--gr-status-warning', '--gr-surface-raised', 3],
   ['--gr-status-info', '--gr-surface-raised', 3],
   ['--gr-accent', '--gr-surface-raised', 3],
+  ['--gr-status-success-fg', '--gr-status-success', 4.5],
 ];
 
 /// Elevation is only readable if adjacent surfaces actually differ.

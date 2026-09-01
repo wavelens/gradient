@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, effect, inject, input, computed, ChangeDetectionStrategy } from '@angular/core';
 import { AbstractControl, NgControl } from '@angular/forms';
 
 type FieldControl = AbstractControl | NgControl | null;
@@ -34,6 +34,25 @@ export class FormFieldComponent {
     const ctrl = this.control();
     return !!ctrl?.invalid && !!ctrl?.touched;
   });
+
+  messageId = computed(() => `${this.for() ?? 'gr-field'}-message`);
+
+  /// The projected control is owned by the caller, so the error semantics are
+  /// applied to it here rather than duplicated at every call site.
+  private hostRef = inject(ElementRef<HTMLElement>);
+
+  constructor() {
+    effect(() => {
+      const control = (this.hostRef.nativeElement as HTMLElement).querySelector<HTMLElement>(
+        'input, textarea, select, [role=combobox]',
+      );
+      if (!control) return;
+      const invalid = this.showError();
+      control.setAttribute('aria-invalid', String(invalid));
+      control.setAttribute('aria-describedby', this.messageId());
+      if (this.required()) control.setAttribute('aria-required', 'true');
+    });
+  }
 
   errorText = computed(() => {
     const explicit = this.error();
