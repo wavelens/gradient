@@ -50,42 +50,6 @@
   gap: $spacing-sm;
   flex-shrink: 0;
 }
-
-.upstream-type-badge,
-.upstream-mode-badge {
-  display: inline-block;
-  padding: 2px $spacing-sm;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-weight: 500;
-  white-space: nowrap;
-
-  &.internal {
-    background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
-    color: var(--gr-status-info);
-  }
-
-  &.external {
-    background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: var(--gr-status-warning);
-  }
-
-  &.mode-readwrite {
-    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: var(--gr-status-success);
-  }
-
-  &.mode-readonly {
-    background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
-    color: var(--gr-status-info);
-  }
-
-  &.mode-writeonly {
-    background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: var(--gr-status-warning);
-  }
-}
-
 .upstream-form {
   display: flex;
   flex-direction: column;

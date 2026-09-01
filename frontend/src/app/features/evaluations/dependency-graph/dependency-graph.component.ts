@@ -23,7 +23,13 @@ import { Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
 import { EvaluationsService, BuildGraph } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
-import { ButtonComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  BadgeComponent,
+  BadgeSeverity,
+  ButtonComponent,
+  IconComponent,
+  LoadingSpinnerComponent,
+} from '@shared/ui';
 
 const CARD_W = 200;
 const CARD_H = 78;
@@ -49,7 +55,7 @@ interface LayoutEdge {
 @Component({
   selector: 'app-dependency-graph',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent],
   templateUrl: './dependency-graph.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './dependency-graph.component.scss',
@@ -604,6 +610,26 @@ export class DependencyGraphComponent implements OnInit, OnDestroy {
       case 'DependencyFailed':  return '#6b7280';
       case 'Created':           return '#6b7280';
       default:                  return '#abb0b4';
+    }
+  }
+
+  /// The legend restates the node colours, so it reads them from the same tokens.
+  readonly legend = [
+    { label: 'Created', tone: 'idle' },
+    { label: 'Queued', tone: 'queued' },
+    { label: 'Building', tone: 'running' },
+    { label: 'Completed', tone: 'success' },
+    { label: 'Failed', tone: 'danger' },
+    { label: 'Aborted', tone: 'idle' },
+    { label: 'Dependency Failed', tone: 'idle' },
+  ];
+
+  statusSeverity(status: string): BadgeSeverity {
+    switch (this.statusClass(status)) {
+      case 'status-success': return 'success';
+      case 'status-danger': return 'danger';
+      case 'status-running': return 'info';
+      default: return 'neutral';
     }
   }
 

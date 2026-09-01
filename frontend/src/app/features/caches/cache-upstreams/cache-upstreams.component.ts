@@ -10,6 +10,8 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { CachesService, UpstreamCache, CacheSubscriptionMode } from '@core/services/caches.service';
 import {
+  BadgeComponent,
+  BadgeSeverity,
   ButtonComponent,
   DialogComponent,
   EmptyStateComponent,
@@ -42,6 +44,7 @@ import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
     FormFieldComponent,
     EmptyStateComponent,
     SelectComponent,
+    BadgeComponent,
   ],
   templateUrl: './cache-upstreams.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -272,6 +275,15 @@ export class CacheUpstreamsComponent implements OnInit {
       },
       error: () => this.removingUpstreamId.set(null),
     });
+  }
+
+  /// Writing is the consequential mode, so it reads warmer than reading.
+  modeSeverity(mode: CacheSubscriptionMode): BadgeSeverity {
+    switch (mode) {
+      case 'ReadOnly': return 'neutral';
+      case 'WriteOnly': return 'warning';
+      default: return 'info';
+    }
   }
 
   modeLabel(mode: CacheSubscriptionMode): string {

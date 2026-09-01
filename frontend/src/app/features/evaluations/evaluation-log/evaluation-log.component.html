@@ -197,13 +197,12 @@
       <!-- Log area -->
       <div class="log-area">
         @if (ev.status === 'Waiting' && selectedSection() !== 'messages' && selectedBuildId()) {
-          <div class="waiting-banner">
-            <gr-icon name="pause_circle" />
-            <span class="waiting-banner-title">{{ waitingTitle(ev.waiting_reason) }}</span>
+          <gr-message-banner type="warning" icon="pause_circle">
+            <strong>{{ waitingTitle(ev.waiting_reason) }}</strong>
             @if (ev.waiting_reason) {
-              <span class="waiting-banner-sub">{{ formatWaitingReason(ev.waiting_reason) }}</span>
+              {{ formatWaitingReason(ev.waiting_reason) }}
             }
-          </div>
+          </gr-message-banner>
         }
         @if (selectedSection() === 'messages') {
           <div class="messages-panel">

@@ -24,21 +24,10 @@
   }
 
   @if (projectId()) {
-    <div class="peer-id-banner">
-      <gr-icon name="vpn_key" />
-      <div>
-        <div class="peer-id-label">Project Peer ID</div>
-        <div class="peer-id-value">{{ projectId() }}</div>
-        <div class="peer-id-hint text-secondary">Use this as <code>peer_id</code> in your worker's peers file alongside the token issued during registration.</div>
-      </div>
-      <button
-        grButton
-        [label]="peerIdCopied() ? 'Copied!' : 'Copy'"
-        [icon]="peerIdCopied() ? 'check' : 'content_copy'"
-        severity="secondary"
-        (click)="copyPeerId()"
-      ></button>
-    </div>
+    <gr-form-field label="Project Peer ID">
+      <span slot="hint">Use this as <code>peer_id</code> in your worker's peers file alongside the token issued during registration.</span>
+      <gr-copy-field [value]="projectId()!" />
+    </gr-form-field>
   }
 
   @if (loading()) {

@@ -36,21 +36,6 @@
   color: var(--gr-status-warning);
 }
 
-.waiting-banner {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  padding: $spacing-sm $spacing-md;
-  background: color-mix(in srgb, var(--gr-status-warning) 8%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--gr-status-warning) 35%, transparent);
-  color: var(--gr-text-secondary);
-  flex-shrink: 0;
-
-  gr-icon { color: var(--gr-status-warning); }
-  .waiting-banner-title { font-weight: 600; color: var(--gr-text-primary); }
-  .waiting-banner-sub { font-size: $font-size-sm; color: var(--gr-text-muted); }
-}
-
 .queued-hint {
   display: flex;
   flex-direction: column;

@@ -45,6 +45,7 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  MessageBannerComponent,
 } from '@shared/ui';
 import { commitLabel, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { environment } from '@environments/environment';
@@ -52,7 +53,7 @@ import { environment } from '@environments/environment';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, MessageBannerComponent],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [

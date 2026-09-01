@@ -26,7 +26,7 @@
         <div class="header-info">
           <div class="header-title">
             <span class="header-name">{{ rootName() }}</span>
-            <span class="status-badge" [ngClass]="statusClass(rootStatus())">{{ rootStatus() }}</span>
+            <gr-badge [severity]="statusSeverity(rootStatus())">{{ rootStatus() }}</gr-badge>
           </div>
           <div class="header-meta">
             <span>{{ nodeCount() }} packages</span>
@@ -71,13 +71,11 @@
 
     <!-- Legend -->
     <div class="legend">
-      <div class="legend-item"><span class="dot" style="background:#6b7280"></span>Created</div>
-      <div class="legend-item"><span class="dot" style="background:#eab308"></span>Queued</div>
-      <div class="legend-item"><span class="dot" style="background:#3b82f6"></span>Building</div>
-      <div class="legend-item"><span class="dot" style="background:#22c55e"></span>Completed</div>
-      <div class="legend-item"><span class="dot" style="background:#ef4444"></span>Failed</div>
-      <div class="legend-item"><span class="dot" style="background:#6b7280"></span>Aborted</div>
-      <div class="legend-item"><span class="dot" style="background:#6b7280"></span>Dependency Failed</div>
+      @for (entry of legend; track entry.label) {
+        <div class="legend-item">
+          <span class="dot" [class]="'is-' + entry.tone"></span>{{ entry.label }}
+        </div>
+      }
     </div>
 
     <!-- Node tooltip -->

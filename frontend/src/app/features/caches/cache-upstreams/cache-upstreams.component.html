@@ -37,10 +37,10 @@
                 <span class="upstream-name">{{ u.display_name }}</span>
                 <span class="upstream-target text-secondary">{{ u.url ?? u.upstream_cache_id }}</span>
               </div>
-              <span class="upstream-type-badge" [class.internal]="u.upstream_cache_id" [class.external]="!u.upstream_cache_id">
+              <gr-badge [severity]="u.upstream_cache_id ? 'info' : 'neutral'">
                 {{ u.upstream_cache_id ? 'Internal' : 'External' }}
-              </span>
-              <span class="upstream-mode-badge mode-{{ u.mode.toLowerCase() }}">{{ modeLabel(u.mode) }}</span>
+              </gr-badge>
+              <gr-badge [severity]="modeSeverity(u.mode)">{{ modeLabel(u.mode) }}</gr-badge>
             </div>
             <div class="upstream-actions">
               <button

@@ -138,23 +138,6 @@
     background: var(--gr-surface-active);
   }
 }
-
-// Status badges (reused from task-detail patterns)
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: $font-size-xs;
-  font-weight: 500;
-
-  &.status-success { background: color-mix(in srgb, var(--gr-graph-success) 15%, transparent); color: var(--gr-graph-success); }
-  &.status-danger  { background: color-mix(in srgb, var(--gr-graph-danger) 15%, transparent); color: var(--gr-graph-danger); }
-  &.status-warning { background: color-mix(in srgb, var(--gr-graph-warning) 15%, transparent); color: var(--gr-graph-warning); }
-  &.status-running { background: color-mix(in srgb, var(--gr-graph-running) 15%, transparent); color: var(--gr-graph-running); }
-}
-
 // ── Graph SVG ─────────────────────────────────────────────────────────────────
 
 .graph-svg {
@@ -194,6 +177,12 @@
     height: 9px;
     border-radius: 50%;
     flex-shrink: 0;
+
+    &.is-idle { background: var(--gr-text-muted); }
+    &.is-queued { background: var(--gr-graph-warning); }
+    &.is-running { background: var(--gr-graph-running); }
+    &.is-success { background: var(--gr-graph-success); }
+    &.is-danger { background: var(--gr-graph-danger); }
   }
 }
 
