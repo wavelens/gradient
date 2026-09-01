@@ -16,7 +16,7 @@
   align-items: center;
   justify-content: center;
   gap: $spacing-sm;
-  padding: 0.5rem 0.9rem;
+  padding: 0.4rem 0.8rem;
   border: 1px solid var(--gr-btn-bg);
   border-radius: $border-radius-sm;
   background: var(--gr-btn-bg);
@@ -25,7 +25,7 @@
   font-size: $font-size-md;
   font-weight: 500;
   // Matches .gr-input so buttons and fields line up when set side by side.
-  line-height: 1.4;
+  line-height: 1.25;
   cursor: pointer;
   text-decoration: none;
   transition: background-color $transition-fast, border-color $transition-fast, color $transition-fast;
@@ -77,11 +77,11 @@
 }
 
 :host(.gr-button--small) {
-  padding: 0.35rem 0.65rem;
+  padding: 0.25rem 0.6rem;
   font-size: $font-size-sm;
 }
 
-:host(.gr-button--icon-only) { padding: 0.45rem; }
+:host(.gr-button--icon-only) { padding: 0.4rem; }
 
 :host(.gr-button--text) {
   background: none;
