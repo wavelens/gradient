@@ -331,6 +331,100 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
     SPECS
 }
 
+/// Fleet and upstream state, scoped to the evaluation's project. Gated behind
+/// `include_instance` and the `ManageWorkers` permission, since it describes
+/// more than the evaluation that asked for it.
+pub fn instance_tables() -> &'static [TableSpec] {
+    const SPECS: &[TableSpec] = &[
+        spec!(
+            "worker_registration",
+            "CREATE TABLE worker_registration (id TEXT, peer_id TEXT, worker_id TEXT, created_at TEXT, managed INTEGER, url TEXT, active INTEGER, display_name TEXT, created_by TEXT, enable_fetch INTEGER, enable_eval INTEGER, enable_build INTEGER)",
+            "SELECT id::text, peer_id::text, worker_id::text, created_at::text, managed::int::text, url::text, active::int::text, display_name::text, created_by::text, enable_fetch::int::text, enable_eval::int::text, enable_build::int::text FROM worker_registration WHERE $1 IS NOT NULL",
+            [
+                "id",
+                "peer_id",
+                "worker_id",
+                "created_at",
+                "managed",
+                "url",
+                "active",
+                "display_name",
+                "created_by",
+                "enable_fetch",
+                "enable_eval",
+                "enable_build"
+            ]
+        ),
+        spec!(
+            "worker_connection",
+            "CREATE TABLE worker_connection (id TEXT, worker_id TEXT, project TEXT, display_name TEXT, connected_at TEXT, disconnected_at TEXT, capabilities TEXT, reason INTEGER)",
+            "SELECT id::text, worker_id::text, project::text, display_name::text, connected_at::text, disconnected_at::text, capabilities::text, reason::text FROM worker_connection WHERE project = $1::uuid",
+            [
+                "id",
+                "worker_id",
+                "project",
+                "display_name",
+                "connected_at",
+                "disconnected_at",
+                "capabilities",
+                "reason"
+            ]
+        ),
+        spec!(
+            "worker_sample",
+            "CREATE TABLE worker_sample (id TEXT, worker_id TEXT, project TEXT, at TEXT, cpu_usage_pct REAL, ram_free_mb INTEGER, ram_total_mb INTEGER, disk_speed_mbps REAL, network_speed_mbps REAL, assigned_jobs INTEGER, max_concurrent_builds INTEGER, state INTEGER, capabilities TEXT)",
+            "SELECT id::text, worker_id::text, project::text, at::text, cpu_usage_pct::text, ram_free_mb::text, ram_total_mb::text, disk_speed_mbps::text, network_speed_mbps::text, assigned_jobs::text, max_concurrent_builds::text, state::text, capabilities::text FROM worker_sample WHERE project = $1::uuid AND at > (now() AT TIME ZONE \'UTC\') - interval \'7 days\'",
+            [
+                "id",
+                "worker_id",
+                "project",
+                "at",
+                "cpu_usage_pct",
+                "ram_free_mb",
+                "ram_total_mb",
+                "disk_speed_mbps",
+                "network_speed_mbps",
+                "assigned_jobs",
+                "max_concurrent_builds",
+                "state",
+                "capabilities"
+            ]
+        ),
+        spec!(
+            "cache_upstream",
+            "CREATE TABLE cache_upstream (id TEXT, cache TEXT, display_name TEXT, mode INTEGER, upstream_cache TEXT, url TEXT, public_key TEXT, kind INTEGER, remote_cache_name TEXT)",
+            "SELECT u.id::text, u.cache::text, u.display_name::text, u.mode::text, u.upstream_cache::text, u.url::text, u.public_key::text, u.kind::text, u.remote_cache_name::text FROM cache_upstream u WHERE u.cache IN (SELECT cache FROM project_cache WHERE project = $1::uuid)",
+            [
+                "id",
+                "cache",
+                "display_name",
+                "mode",
+                "upstream_cache",
+                "url",
+                "public_key",
+                "kind",
+                "remote_cache_name"
+            ]
+        ),
+        spec!(
+            "upstream_metric",
+            "CREATE TABLE upstream_metric (id TEXT, bucket_time TEXT, latency_ms_sum INTEGER, request_count INTEGER, narinfo_hits INTEGER, narinfo_misses INTEGER, upstream_url TEXT)",
+            "SELECT id::text, bucket_time::text, latency_ms_sum::text, request_count::text, narinfo_hits::text, narinfo_misses::text, upstream_url::text FROM upstream_metric WHERE $1 IS NOT NULL AND bucket_time > (now() AT TIME ZONE \'UTC\') - interval \'7 days\'",
+            [
+                "id",
+                "bucket_time",
+                "latency_ms_sum",
+                "request_count",
+                "narinfo_hits",
+                "narinfo_misses",
+                "upstream_url"
+            ]
+        ),
+    ];
+
+    SPECS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,7 +443,7 @@ mod tests {
             "from session",
             "github_installation",
         ];
-        for spec in eval_scope_tables() {
+        for spec in eval_scope_tables().iter().chain(instance_tables()) {
             let sql = spec.sql.to_ascii_lowercase();
             assert!(
                 !sql.contains('*'),
@@ -368,7 +462,7 @@ mod tests {
 
     #[test]
     fn every_spec_is_scoped_and_internally_consistent() {
-        for spec in eval_scope_tables() {
+        for spec in eval_scope_tables().iter().chain(instance_tables()) {
             assert!(
                 spec.ddl.contains(spec.name),
                 "{}: ddl names another table",

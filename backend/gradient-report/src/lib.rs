@@ -12,14 +12,16 @@
 //! the redaction path takes rows directly, so what the file ends up containing
 //! is testable without a database.
 
+mod config_snapshot;
 mod extract;
 mod redact;
 mod schema;
 mod tables;
 
+pub use config_snapshot::write_config_snapshot;
 pub use extract::{create_table, export_tables, fetch_rows, redact_row, write_rows};
 pub use redact::Redactor;
 pub use schema::{
     ManifestRow, ReportOptions, SCHEMA_VERSION, open_report, write_manifest, write_meta,
 };
-pub use tables::{Row, TableSpec, eval_scope_tables, redact_value};
+pub use tables::{Row, TableSpec, eval_scope_tables, instance_tables, redact_value};
