@@ -106,6 +106,17 @@ pub async fn export_tables<C: ConnectionTrait>(
     Ok(manifest)
 }
 
+/// A manifest entry for one exported table.
+pub fn manifest_row(spec: &TableSpec, redactor: &Redactor, rows: i64) -> ManifestRow {
+    ManifestRow {
+        table: spec.name.to_owned(),
+        rows_included: rows,
+        rows_available: rows,
+        filter: "scoped to the evaluation".to_owned(),
+        redactions: redaction_summary(spec, redactor),
+    }
+}
+
 /// Which of a table's columns the current options actually rewrote, so the
 /// manifest says what happened rather than what was requested.
 fn redaction_summary(spec: &TableSpec, redactor: &Redactor) -> String {

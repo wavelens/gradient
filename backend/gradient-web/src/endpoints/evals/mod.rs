@@ -8,12 +8,14 @@ pub mod actions;
 pub mod artefacts;
 pub mod log;
 pub mod query;
+pub mod report;
 pub mod types;
 
 pub use self::actions::*;
 pub use self::artefacts::*;
 pub use self::log::*;
 pub use self::query::*;
+pub use self::report::*;
 pub use self::types::*;
 
 use crate::access::is_project_member;

@@ -2533,6 +2533,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
+ "tokio",
  "tracing",
 ]
 
@@ -2782,6 +2783,7 @@ dependencies = [
  "gradient-nix",
  "gradient-notify",
  "gradient-proto",
+ "gradient-report",
  "gradient-scheduler",
  "gradient-score",
  "gradient-sources",

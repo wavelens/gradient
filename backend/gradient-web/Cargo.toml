@@ -31,6 +31,7 @@ gradient-scheduler = { workspace = true }
 gradient-score = { workspace = true }
 gradient-cache = { workspace = true }
 gradient-entity = { workspace = true }
+gradient-report = { workspace = true }
 
 anyhow        = { workspace = true }
 async-stream  = { workspace = true }

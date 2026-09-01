@@ -499,6 +499,10 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             get(evals::get_evaluation_builds),
         )
         .route("/evals/{evaluation}/artefacts", get(evals::get_artefacts))
+        .route(
+            "/evals/{evaluation}/report",
+            get(evals::get_evaluation_report),
+        )
         .route("/evals/{evaluation}/closure", get(builds::get_eval_closure))
         .route(
             "/evals/{evaluation}/flake-graph",

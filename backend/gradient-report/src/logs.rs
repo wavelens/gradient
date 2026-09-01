@@ -47,14 +47,19 @@ pub fn insert_log(conn: &Connection, attempt: &str, log: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn export_failed_logs<C: ConnectionTrait>(
+/// The logs a report will carry, plus how many attempts existed in total so the
+/// manifest can show the failed-only filter. Async half; the write is separate
+/// because a rusqlite connection cannot cross an await.
+pub struct FetchedLogs {
+    pub entries: Vec<(String, String)>,
+    pub attempts_available: i64,
+}
+
+pub async fn fetch_failed_logs<C: ConnectionTrait>(
     db: &C,
-    conn: &Connection,
     logs: &dyn LogStorage,
     evaluation: &str,
-) -> Result<ManifestRow> {
-    create_log_table(conn)?;
-
+) -> Result<FetchedLogs> {
     let failed = db
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
@@ -64,7 +69,7 @@ pub async fn export_failed_logs<C: ConnectionTrait>(
         .await
         .context("query failed attempts")?;
 
-    let mut written = 0i64;
+    let mut entries = Vec::with_capacity(failed.len());
     for row in &failed {
         let Some(id) = row.try_get_by_index::<Option<String>>(0).ok().flatten() else {
             continue;
@@ -74,16 +79,13 @@ pub async fn export_failed_logs<C: ConnectionTrait>(
         };
 
         match logs.read(attempt_id).await {
-            Ok(text) if !text.is_empty() => {
-                insert_log(conn, &id, &text)?;
-                written += 1;
-            }
+            Ok(text) if !text.is_empty() => entries.push((id, text)),
             Ok(_) => {}
             Err(e) => tracing::warn!(attempt = %id, error = %e, "report: log unreadable, skipping"),
         }
     }
 
-    let available = db
+    let attempts_available = db
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             ALL_ATTEMPT_SQL,
@@ -93,12 +95,24 @@ pub async fn export_failed_logs<C: ConnectionTrait>(
         .context("count attempts")?
         .and_then(|r| r.try_get_by_index::<Option<String>>(0).ok().flatten())
         .and_then(|c| c.parse::<i64>().ok())
-        .unwrap_or(written);
+        .unwrap_or(entries.len() as i64);
+
+    Ok(FetchedLogs {
+        entries,
+        attempts_available,
+    })
+}
+
+pub fn write_failed_logs(conn: &Connection, logs: &FetchedLogs) -> Result<ManifestRow> {
+    create_log_table(conn)?;
+    for (attempt, text) in &logs.entries {
+        insert_log(conn, attempt, text)?;
+    }
 
     Ok(ManifestRow {
         table: "build_log".to_owned(),
-        rows_included: written,
-        rows_available: available,
+        rows_included: logs.entries.len() as i64,
+        rows_available: logs.attempts_available,
         filter: "failed attempts only".to_owned(),
         redactions: "none".to_owned(),
     })

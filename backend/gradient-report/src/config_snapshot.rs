@@ -11,7 +11,7 @@
 //! re-reviewed, so adding one has to be a deliberate edit here.
 
 use anyhow::{Context as _, Result};
-use gradient_types::{EvalArgs, ProtoArgs, S3Args, StorageArgs};
+use gradient_types::{EvalArgs, ProtoArgs, S3Config, StorageArgs};
 use rusqlite::Connection;
 
 /// Takes the four argument groups it actually reads rather than the whole
@@ -21,7 +21,7 @@ pub fn write_config_snapshot(
     eval: &EvalArgs,
     proto: &ProtoArgs,
     storage: &StorageArgs,
-    s3: &S3Args,
+    s3: Option<&S3Config>,
 ) -> Result<()> {
     conn.execute(
         "CREATE TABLE config_snapshot (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -29,7 +29,7 @@ pub fn write_config_snapshot(
     )
     .context("create config_snapshot")?;
 
-    let entries: [(&str, String); 13] = [
+    let mut entries: Vec<(&str, String)> = vec![
         (
             "inputs_unavailable_max_loops",
             eval.inputs_unavailable_max_loops.to_string(),
@@ -61,13 +61,25 @@ pub fn write_config_snapshot(
             storage.nar_upload_grace_hours.to_string(),
         ),
         ("nar_verify_digest", storage.nar_verify_digest.to_string()),
-        ("s3_read_timeout_secs", s3.s3_read_timeout_secs.to_string()),
-        ("s3_max_retries", s3.s3_max_retries.to_string()),
-        (
-            "s3_retry_timeout_secs",
-            s3.s3_retry_timeout_secs.to_string(),
-        ),
     ];
+
+    // The resolved S3 policy, not the raw arguments, so the file says what the
+    // server is actually doing; a local-disk instance says so instead.
+    match s3 {
+        Some(s3) => {
+            entries.push(("storage_backend", "s3".to_owned()));
+            entries.push((
+                "s3_read_timeout_secs",
+                s3.read_timeout.as_secs().to_string(),
+            ));
+            entries.push(("s3_max_retries", s3.max_retries.to_string()));
+            entries.push((
+                "s3_retry_timeout_secs",
+                s3.retry_timeout.as_secs().to_string(),
+            ));
+        }
+        None => entries.push(("storage_backend", "local disk".to_owned())),
+    }
 
     for (key, value) in entries {
         conn.execute(
@@ -94,7 +106,7 @@ mod tests {
             &EvalArgs::default(),
             &ProtoArgs::default(),
             &StorageArgs::default(),
-            &S3Args::default(),
+            None,
         )
         .expect("snapshot");
 
@@ -125,7 +137,7 @@ mod tests {
             &eval,
             &ProtoArgs::default(),
             &StorageArgs::default(),
-            &S3Args::default(),
+            None,
         )
         .expect("snapshot");
 

@@ -3118,6 +3118,63 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /evals/{evaluation}/report:
+    parameters:
+      - $ref: '#/components/parameters/EvaluationId'
+    get:
+      tags: [evals]
+      summary: Download an evaluation diagnostic report
+      description: |-
+        Exports the evaluation, the instance context that explains it, and its
+        failed-build logs as a SQLite database, for attaching to a bug report.
+        Open it with any SQLite client, or with the `gradient-report` inspector.
+
+        Reading the evaluation requires `ViewProject`. `include_instance` also
+        requires `ManageWorkers`, since the fleet and upstream sections describe
+        more than the evaluation that asked for them; it is refused rather than
+        silently dropped, so the report's manifest always matches the request.
+
+        Anonymisation replaces identifying strings with tokens derived from a
+        per-report salt, stable within one file and uncorrelatable across two.
+        Nix store hashes are always preserved: they are one-way, and they are
+        what makes an upstream cache check possible.
+      operationId: getEvaluationReport
+      parameters:
+        - name: anonymize_identities
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+          description: Replace repository URLs, project and task names, user emails and worker names with per-report tokens.
+        - name: anonymize_packages
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+          description: Replace the name half of store paths and flake attribute paths. Off by default, since knowing which package broke is usually the point.
+        - name: include_logs
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+          description: Include the full log of every failed or aborted attempt.
+        - name: include_instance
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+          description: Include worker fleet, upstream caches and the resolved server config. Requires `ManageWorkers`.
+      responses:
+        '200':
+          description: SQLite report
+          content:
+            application/vnd.sqlite3:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Instance context requested without the ManageWorkers permission
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /evals/{evaluation}/artefacts:
     parameters:
       - $ref: '#/components/parameters/EvaluationId'
