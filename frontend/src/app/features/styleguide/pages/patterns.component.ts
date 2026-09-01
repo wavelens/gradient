@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ChangeDetectionStrategy } from '@angular/core';
+import { Component, signal, ChangeDetectionStrategy } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -14,6 +15,7 @@ import {
   FormFieldComponent,
   InputDirective,
   NavCardComponent,
+  SelectComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
@@ -26,8 +28,8 @@ import {
   imports: [
     PageLayoutComponent, RowListComponent, RowComponent, CardGridComponent,
     SettingsSectionComponent, FormFieldComponent, FieldRowComponent, ButtonComponent,
-    BadgeComponent, InputDirective,
-    NavCardComponent,
+    BadgeComponent, InputDirective, FormsModule,
+    NavCardComponent, SelectComponent,
   ],
   templateUrl: './patterns.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -38,6 +40,11 @@ export class PatternsComponent {
     { label: 'my-project', link: ['/styleguide'] },
     { label: 'Settings', link: ['/styleguide'] },
     { label: 'Integrations' },
+  ];
+  role = signal('admin');
+  roleOptions = [
+    { label: 'Admin', value: 'admin' },
+    { label: 'Viewer', value: 'viewer' },
   ];
   cards = [
     { name: 'gradient', status: 'passing', severity: 'success' as const },

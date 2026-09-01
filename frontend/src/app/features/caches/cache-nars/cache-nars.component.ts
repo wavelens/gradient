@@ -28,6 +28,7 @@ import {
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
+import { relativeTime } from '@shared/text';
 
 type SortKey = 'created_at' | 'nar_size' | 'last_fetched_at';
 type SortOrder = 'asc' | 'desc';
@@ -219,11 +220,7 @@ export class CacheNarsComponent implements OnInit {
     });
   }
 
-  formatDate(iso: string | null | undefined, fallback = '-'): string {
-    if (!iso) return fallback;
-    const d = new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z');
-    return isNaN(d.getTime()) ? iso : d.toLocaleString();
-  }
+  relativeTime = relativeTime;
 
   formatBytes(bytes: number | null | undefined): string {
     if (bytes === null || bytes === undefined || bytes <= 0) return '0 B';

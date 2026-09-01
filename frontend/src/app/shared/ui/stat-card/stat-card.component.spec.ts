@@ -39,21 +39,7 @@ describe('gr-stat-card', () => {
     const root = await render({ icon: 'inbox', value: 1, label: 'A' });
     expect(root.querySelector('.material-symbols-outlined')?.textContent).toContain('inbox');
   });
-  it('keeps a short metric on the largest step', async () => {
-    const root = await render({ value: 128, label: 'Packages' });
-    expect(root.querySelector('.stat-value')?.classList).toContain('is-xxl');
-  });
 
-  it('steps a long value down so the card keeps its height', async () => {
-    const root = await render({ value: '14 Aug 2026, 09:42:11', label: 'Last uploaded' });
-    const cls = root.querySelector('.stat-value')?.classList;
-    expect(cls).not.toContain('is-xxl');
-    expect(cls).toContain('is-lg');
-  });
 
-  it('uses the middle step for a mid-length value', async () => {
-    const root = await render({ value: '4.2 GB of 10 GB', label: 'Used' });
-    expect(root.querySelector('.stat-value')?.classList).toContain('is-xl');
-  });
 });
 

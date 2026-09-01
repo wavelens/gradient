@@ -64,31 +64,3 @@
   border-radius: $border-radius-md;
   padding: $spacing-lg;
 }
-
-.window-tabs {
-  display: flex;
-  gap: $spacing-xs;
-  margin-bottom: $spacing-md;
-
-  .window-tab {
-    background: none;
-    border: 1px solid var(--gr-border);
-    border-radius: $border-radius-sm;
-    color: var(--gr-text-secondary);
-    cursor: pointer;
-    font-size: $font-size-sm;
-    padding: $spacing-xs $spacing-md;
-    transition: color $transition-fast, border-color $transition-fast, background-color $transition-fast;
-
-    &:hover {
-      color: var(--gr-text-primary);
-      border-color: var(--gr-text-secondary);
-    }
-
-    &.active {
-      background-color: var(--gr-status-info);
-      border-color: var(--gr-status-info);
-      color: var(--gr-text-primary);
-    }
-  }
-}

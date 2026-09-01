@@ -4,145 +4,145 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading project..." />
-  } @else if (project(); as project) {
-    <gr-page-layout [title]="project.display_name" [subtitle]="project.description || 'No description'">
-    @if (project.role) {
-      <div slot="actions">
-        <button grButton label="Create Task" icon="add" (click)="openCreateDialog()"></button>
-        <button grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
+@if (loading()) {
+  <gr-loading-spinner message="Loading project..." />
+} @else if (project(); as project) {
+  <gr-page-layout [title]="project.display_name" [subtitle]="project.description || 'No description'">
+  @if (project.role) {
+    <div slot="actions">
+      <button grButton label="Create Task" icon="add" (click)="openCreateDialog()"></button>
+      <button grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
+    </div>
+  }
+  <!-- Tasks -->
+  @if (tasks().length > 0) {
+    <div class="section">
+      <h2>Tasks</h2>
+      <div class="task-grid">
+        @for (task of tasks(); track task.id) {
+          <a [routerLink]="['/project', projectName, 'task', task.name]" class="task-card">
+            <div class="task-icon">
+              <gr-icon name="folder" size="xl" />
+            </div>
+            <div class="task-content">
+              <h3>{{ task.display_name || task.name }}</h3>
+              <p class="text-secondary">{{ task.description || 'No description' }}</p>
+              <div class="task-meta">
+                @if (task.last_evaluation_status) {
+                  <gr-eval-status-badge [status]="task.last_evaluation_status" />
+                }
+              </div>
+            </div>
+            <div class="task-arrow">
+              <gr-icon name="arrow_forward" />
+            </div>
+          </a>
+        }
       </div>
-    }
-    <!-- Tasks -->
-    @if (tasks().length > 0) {
-      <div class="section">
-        <h2>Tasks</h2>
-        <div class="task-grid">
-          @for (task of tasks(); track task.id) {
-            <a [routerLink]="['/project', projectName, 'task', task.name]" class="task-card">
-              <div class="task-icon">
-                <gr-icon name="folder" size="xl" />
-              </div>
-              <div class="task-content">
-                <h3>{{ task.display_name || task.name }}</h3>
-                <p class="text-secondary">{{ task.description || 'No description' }}</p>
-                <div class="task-meta">
-                  @if (task.last_evaluation_status) {
-                    <gr-eval-status-badge [status]="task.last_evaluation_status" />
-                  }
-                </div>
-              </div>
-              <div class="task-arrow">
-                <gr-icon name="arrow_forward" />
-              </div>
-            </a>
-          }
-        </div>
-      </div>
-    }
+    </div>
+  }
 
-    <!-- Empty State -->
-    @if (tasks().length === 0) {
-      <gr-empty-state
-        icon="folder"
-        title="No tasks yet"
-        [message]="project.role ? 'Create your first task to start evaluating Nix builds' : 'No tasks have been created yet'"
-        [actionLabel]="project.role ? 'Create Task' : ''"
-        (actionClick)="project.role && openCreateDialog()"
-      />
-    }
-  </gr-page-layout>
+  <!-- Empty State -->
+  @if (tasks().length === 0) {
+    <gr-empty-state
+      icon="folder"
+      title="No tasks yet"
+      [message]="project.role ? 'Create your first task to start evaluating Nix builds' : 'No tasks have been created yet'"
+      [actionLabel]="project.role ? 'Create Task' : ''"
+      (actionClick)="project.role && openCreateDialog()"
+    />
+  }
+</gr-page-layout>
 }
 
 <!-- Create Task Dialog -->
 <gr-dialog
-  header="Create Task"
-  [(visible)]="showCreateDialog"
-  width="550px"
+header="Create Task"
+[(visible)]="showCreateDialog"
+width="550px"
 >
-  @if (createError()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ createError() }}
-    </div>
-  }
-  <div>
-    <gr-form-field label="Display Name *" for="proj-display">
-      <input
-        grInput
-        id="proj-display"
-        [(ngModel)]="newTask.display_name"
-        placeholder="My Task"
-        (ngModelChange)="onTaskDisplayNameChange($event)"
-        (keyup.enter)="createTask()"
-      />
-    </gr-form-field>
-
-    <gr-name-field
-      required
-      inputId="proj-name"
-      placeholder="task-name"
-      [state]="nameCheckState()"
-      [ngModel]="newTask.name"
-      (ngModelChange)="onTaskNameChange($event)"
-      (input)="onTaskNameUserInput()"
+@if (createError()) {
+  <div class="dialog-error">
+    <gr-icon name="error" />
+    {{ createError() }}
+  </div>
+}
+<div>
+  <gr-form-field label="Display Name *" for="proj-display">
+    <input
+      grInput
+      id="proj-display"
+      [(ngModel)]="newTask.display_name"
+      placeholder="My Task"
+      (ngModelChange)="onTaskDisplayNameChange($event)"
       (keyup.enter)="createTask()"
-      name="taskName"
     />
+  </gr-form-field>
 
-    <gr-form-field label="Description" for="proj-desc">
-      <textarea
-        grInput
-        id="proj-desc"
-        [(ngModel)]="newTask.description"
-        placeholder="Describe your task..."
-        rows="2"
-      ></textarea>
-    </gr-form-field>
+  <gr-name-field
+    required
+    inputId="proj-name"
+    placeholder="task-name"
+    [state]="nameCheckState()"
+    [ngModel]="newTask.name"
+    (ngModelChange)="onTaskNameChange($event)"
+    (input)="onTaskNameUserInput()"
+    (keyup.enter)="createTask()"
+    name="taskName"
+  />
 
-    <gr-form-field label="Repository URL *" for="proj-repo" hint="Git repository URL to evaluate">
-      <input
-        grInput
-        id="proj-repo"
-        [(ngModel)]="newTask.repository"
-        placeholder="https://github.com/user/repo"
-        (keyup.enter)="createTask()"
-      />
-    </gr-form-field>
+  <gr-form-field label="Description" for="proj-desc">
+    <textarea
+      grInput
+      id="proj-desc"
+      [(ngModel)]="newTask.description"
+      placeholder="Describe your task..."
+      rows="2"
+    ></textarea>
+  </gr-form-field>
 
-    <gr-form-field
-      label="Evaluation Wildcard"
-      for="proj-wildcard"
-      [invalid]="wildcardInvalid"
-      error="Each pattern must be non-empty, not start with a period, and contain no spaces."
-      hint="Pattern for selecting which outputs to evaluate (default: packages.x86_64-linux.*)"
-    >
-      <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" title="Learn about evaluation wildcards" />
-      <input
-        grInput
-        id="proj-wildcard"
-        [(ngModel)]="newTask.wildcard"
-        placeholder="**"
-        (keyup.enter)="createTask()"
-      />
-    </gr-form-field>
-  </div>
+  <gr-form-field label="Repository URL *" for="proj-repo" hint="Git repository URL to evaluate">
+    <input
+      grInput
+      id="proj-repo"
+      [(ngModel)]="newTask.repository"
+      placeholder="https://github.com/user/repo"
+      (keyup.enter)="createTask()"
+    />
+  </gr-form-field>
 
-  <div grDialogFooter>
-    <button
-      grButton
-      label="Cancel"
-      severity="secondary"
-      (click)="showCreateDialog.set(false)"
-      [disabled]="creating()"
-    ></button>
-    <button
-      grButton
-      label="Create"
-      (click)="createTask()"
-      [disabled]="!newTask.name || !newTask.display_name || !newTask.repository || wildcardInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved' || nameCheckState() === 'checking' || creating()"
-      [loading]="creating()"
-    ></button>
-  </div>
+  <gr-form-field
+    label="Evaluation Wildcard"
+    for="proj-wildcard"
+    [invalid]="wildcardInvalid"
+    error="Each pattern must be non-empty, not start with a period, and contain no spaces."
+    hint="Pattern for selecting which outputs to evaluate (default: packages.x86_64-linux.*)"
+  >
+    <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" title="Learn about evaluation wildcards" />
+    <input
+      grInput
+      id="proj-wildcard"
+      [(ngModel)]="newTask.wildcard"
+      placeholder="**"
+      (keyup.enter)="createTask()"
+    />
+  </gr-form-field>
+</div>
+
+<div grDialogFooter>
+  <button
+    grButton
+    label="Cancel"
+    severity="secondary"
+    (click)="showCreateDialog.set(false)"
+    [disabled]="creating()"
+  ></button>
+  <button
+    grButton
+    label="Create"
+    (click)="createTask()"
+    [disabled]="!newTask.name || !newTask.display_name || !newTask.repository || wildcardInvalid || nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved' || nameCheckState() === 'checking' || creating()"
+    [loading]="creating()"
+  ></button>
+</div>
 </gr-dialog>

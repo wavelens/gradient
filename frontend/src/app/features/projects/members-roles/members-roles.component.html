@@ -127,10 +127,7 @@
 >
   <div>
     @if (memberError()) {
-      <div class="dialog-error">
-        <gr-icon name="error" />
-        {{ memberError() }}
-      </div>
+      <gr-message-banner type="error">{{ memberError() }}</gr-message-banner>
     }
     <gr-form-field label="Username" for="member-name">
       <gr-autocomplete
@@ -179,10 +176,7 @@
 >
   <div>
     @if (roleError()) {
-      <div class="dialog-error">
-        <gr-icon name="error" />
-        {{ roleError() }}
-      </div>
+      <gr-message-banner type="error">{{ roleError() }}</gr-message-banner>
     }
     <gr-form-field label="Name" for="role-name" hint="Lowercase letters, digits, and hyphens.">
       <input
@@ -193,22 +187,19 @@
       />
     </gr-form-field>
     <gr-form-field label="Permissions">
-      <div class="permissions-grid">
+      <div class="permissions-list">
         @for (perm of availablePermissions(); track perm.id) {
-          <label class="permission-row">
+          <div class="permission-row">
             <gr-checkbox
+              [inputId]="'perm-' + perm.id"
+              [label]="perm.id"
               [(ngModel)]="roleForm.permissions[perm.id]"
               [binary]="true"
             />
-            <span class="permission-label">
-              {{ perm.id }}
-              @if (perm.mutating) {
-                <span class="permission-tag mutating">mutating</span>
-              } @else {
-                <span class="permission-tag readonly">read-only</span>
-              }
-            </span>
-          </label>
+            <gr-badge [severity]="perm.mutating ? 'warning' : 'success'">
+              {{ perm.mutating ? 'mutating' : 'read-only' }}
+            </gr-badge>
+          </div>
         }
       </div>
     </gr-form-field>

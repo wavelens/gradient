@@ -56,7 +56,7 @@ describe('gr-settings-section', () => {
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelector('.settings-section')?.classList).toContain('is-danger');
   });
-  it('measures a card body, so fields stay readable', async () => {
+  it('measures the body, so a settings page lines up section to section', async () => {
     const fixture = TestBed.createComponent(SettingsSectionComponent);
     fixture.componentRef.setInput('title', 'General');
     fixture.detectChanges();
@@ -65,14 +65,14 @@ describe('gr-settings-section', () => {
     expect(body.style.maxWidth).toBe('640px');
   });
 
-  it('lets a bodiless-card section run full width, since a list measures itself', async () => {
+  it('keeps the same measure without a card, so a list lines up with the forms', async () => {
     const fixture = TestBed.createComponent(SettingsSectionComponent);
     fixture.componentRef.setInput('title', 'Members');
     fixture.componentRef.setInput('card', false);
     fixture.detectChanges();
     await fixture.whenStable();
     const body = (fixture.nativeElement as HTMLElement).querySelector('.settings-section__body') as HTMLElement;
-    expect(body.style.maxWidth).toBe('');
+    expect(body.style.maxWidth).toBe('640px');
   });
 
   it('honours an explicit measure either way', async () => {

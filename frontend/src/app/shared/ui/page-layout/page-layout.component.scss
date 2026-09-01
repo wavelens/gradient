@@ -48,6 +48,15 @@
     gap: $spacing-sm;
   }
 
+  // A page body is a stack of blocks. Sections add the same space again after
+  // themselves, so section-to-section reads as the larger break it should.
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: $space-block;
+    padding-bottom: $space-section;
+  }
+
   &__banners {
     margin-bottom: $spacing-md;
 

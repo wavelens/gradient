@@ -53,6 +53,18 @@
   <gr-select-button [options]="regions" optionLabel="label" optionValue="value" [(ngModel)]="region" />
 </gr-form-field>
 
+<h2>Switcher</h2>
+<p>The segmented control also switches what a panel shows, without a field around it.
+   The selected segment slides on hover and on change, so the switch reads as one control
+   rather than a row of buttons.</p>
+<gr-select-button
+  ariaLabel="Time window"
+  [options]="windows"
+  optionLabel="label"
+  optionValue="value"
+  [(ngModel)]="window"
+/>
+
 <gr-checkbox inputId="sg-accept" label="Accept terms" [binary]="true" [(ngModel)]="accepted" />
 
 <gr-form-field label="Region search" for="sg-ac" hint="Type to filter the suggestions.">

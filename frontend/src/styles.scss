@@ -120,7 +120,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: $space-block;
-  margin-bottom: $space-section;
+  margin-bottom: $space-block;
 
   > h2 {
     margin: 0;
@@ -280,12 +280,35 @@ textarea:disabled {
 }
 
 // Projected content carries the caller's encapsulation, so a slotted group of
-// buttons cannot be reached from the primitive's own stylesheet.
-.page-layout__actions > div,
-.empty-state > [slot='action'] {
+// controls cannot be reached from the primitive's own stylesheet. Any wrapper
+// a caller uses to group several controls is a row.
+// Consecutive rows are separated by a rule. Inside a list they sit flush against
+// it; sharing a card they also take the block gap. Stated once, for both, because
+// a row cannot see whether it is in a list from its own stylesheet.
+gr-row + gr-row {
+  display: block;
+  border-top: 1px solid var(--gr-border-subtle);
+  margin-top: $space-block;
+  padding-top: $space-block;
+}
+
+gr-row-list gr-row + gr-row {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+div[slot='actions'],
+div[slot='action'],
+.nav-card__meta > div,
+.page-layout__actions > div {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
+}
+
+// An empty state centres its content, so a slotted group of actions centres too.
+.empty-state > div[slot='action'] {
+  justify-content: center;
 }
 
 [grDialogFooter] {

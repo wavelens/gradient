@@ -33,6 +33,13 @@ export class ComponentsComponent {
   nameInvalid = signal(false);
   accepted = signal(false);
   region = signal('eu');
+  window = signal('hours');
+  windows = [
+    { label: 'Minutes', value: 'minutes' },
+    { label: 'Hours', value: 'hours' },
+    { label: 'Days', value: 'days' },
+    { label: 'Weeks', value: 'weeks' },
+  ];
   dialogOpen = signal(false);
   suggestions = ['europe', 'north-america', 'asia'];
   regions = [

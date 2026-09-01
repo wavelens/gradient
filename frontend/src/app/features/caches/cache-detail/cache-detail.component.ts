@@ -21,10 +21,12 @@ import {
   MetricChartComponent,
   MetricSeries,
   PageLayoutComponent,
+  SelectButtonComponent,
   SettingsSectionComponent,
   StatCardComponent,
 } from '@shared/ui';
 import { Cache } from '@core/models';
+import { FormsModule } from '@angular/forms';
 
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';
 
@@ -54,6 +56,8 @@ const CHART_COLORS = {
     FormFieldComponent,
     StatCardComponent,
     CardGridComponent,
+    SelectButtonComponent,
+    FormsModule,
   ],
   templateUrl: './cache-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -69,6 +73,10 @@ export class CacheDetailComponent implements OnInit {
   upstreams = signal<UpstreamCache[]>([]);
   stats = signal<CacheStats | null>(null);
   activeWindow = signal<Window>('hours');
+
+  setWindow(value: unknown): void {
+    this.activeWindow.set(value as Window);
+  }
 
   externalUpstreamKeys = computed(() =>
     this.upstreams()

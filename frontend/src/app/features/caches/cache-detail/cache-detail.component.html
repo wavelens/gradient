@@ -4,127 +4,129 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading cache..." />
-  } @else if (cache(); as c) {
-    <gr-page-layout
-      [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: c.display_name }]"
-      [title]="c.display_name"
-      [subtitle]="c.description || 'No description'"
-    >
-      <div slot="meta">
-        <gr-badge [severity]="c.active ? 'success' : 'danger'">
-          {{ c.active ? 'Active' : 'Inactive' }}
-        </gr-badge>
-      </div>
-      <div slot="actions">
-        <button grButton label="NARs" icon="database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></button>
-        @if (c.can_edit) {
-          <button grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></button>
-        }
-      </div>
-
-      <!-- Stats -->
-    <div class="section">
-      <h2>Storage</h2>
-      @if (statsLoading()) {
-        <gr-loading-spinner message="Loading stats..." />
-      } @else {
-        <gr-card-grid min="220px">
-          <gr-stat-card label="Packages stored" [value]="stats()?.total_packages ?? 0" />
-          <gr-stat-card label="Uncompressed size" [value]="formatBytes(stats()?.total_nar_bytes ?? 0)" />
-          <gr-stat-card label="Compressed stored" [value]="formatBytes(stats()?.total_bytes ?? 0)" />
-        </gr-card-grid>
-
-        <div class="chart-card">
-          <div class="window-tabs">
-            @for (w of windows; track w.key) {
-              <button class="window-tab" [class.active]="activeWindow() === w.key" (click)="activeWindow.set(w.key)">
-                {{ w.label }}
-              </button>
-            }
-          </div>
-          <gr-metric-chart
-            bare
-            type="area"
-            [height]="220"
-            [series]="storageSeries()"
-            [categories]="storageCategories()"
-            [colors]="storageColors"
-            [valueFormatter]="formatSize"
-            [secondary]="storageSecondary"
-            yAxisTitle="Bytes"
-          />
-        </div>
+@if (loading()) {
+  <gr-loading-spinner message="Loading cache..." />
+} @else if (cache(); as c) {
+  <gr-page-layout
+    [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: c.display_name }]"
+    [title]="c.display_name"
+    [subtitle]="c.description || 'No description'"
+  >
+    <div slot="meta">
+      <gr-badge [severity]="c.active ? 'success' : 'danger'">
+        {{ c.active ? 'Active' : 'Inactive' }}
+      </gr-badge>
+    </div>
+    <div slot="actions">
+      <button grButton label="NARs" icon="database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></button>
+      @if (c.can_edit) {
+        <button grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></button>
       }
     </div>
 
-    <!-- Traffic -->
-    <div class="section">
-      <h2>Traffic</h2>
-      @if (statsLoading()) {
-        <gr-loading-spinner message="Loading stats..." />
-      } @else {
-        <gr-card-grid min="220px">
-          <gr-stat-card label="Requests (last hour)" [value]="$any(stats()?.hours | slice:-1)[0]?.requests ?? 0" />
-          <gr-stat-card label="Traffic (last hour)" [value]="formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0)" />
-        </gr-card-grid>
+    <!-- Stats -->
+  <div class="section">
+    <h2>Storage</h2>
+    @if (statsLoading()) {
+      <gr-loading-spinner message="Loading stats..." />
+    } @else {
+      <gr-card-grid min="220px">
+        <gr-stat-card label="Packages stored" [value]="stats()?.total_packages ?? 0" />
+        <gr-stat-card label="Uncompressed size" [value]="formatBytes(stats()?.total_nar_bytes ?? 0)" />
+        <gr-stat-card label="Compressed stored" [value]="formatBytes(stats()?.total_bytes ?? 0)" />
+      </gr-card-grid>
 
-        <div class="chart-card">
-          <div class="window-tabs">
-            @for (w of windows; track w.key) {
-              <button class="window-tab" [class.active]="activeWindow() === w.key" (click)="activeWindow.set(w.key)">
-                {{ w.label }}
-              </button>
-            }
-          </div>
-          <gr-metric-chart
-            bare
-            type="area"
-            [height]="220"
-            [series]="trafficSeries()"
-            [categories]="trafficCategories()"
-            [colors]="trafficColors"
-            [valueFormatter]="formatSize"
-            [secondary]="trafficSecondary"
-            yAxisTitle="Bytes"
-          />
-        </div>
-      }
-    </div>
+      <div class="chart-card">
+        <gr-select-button
+          ariaLabel="Time window"
+          [options]="windows"
+          optionLabel="label"
+          optionValue="key"
+          [ngModel]="activeWindow()"
+          (ngModelChange)="setWindow($event)"
+        />
+        <gr-metric-chart
+          bare
+          type="area"
+          [height]="220"
+          [series]="storageSeries()"
+          [categories]="storageCategories()"
+          [colors]="storageColors"
+          [valueFormatter]="formatSize"
+          [secondary]="storageSecondary"
+          yAxisTitle="Bytes"
+        />
+      </div>
+    }
+  </div>
 
-    <gr-settings-section
-      title="How to Use This Cache"
-      description="Add the following to your /etc/nix/nix.conf or NixOS configuration."
-      maxWidth="none"
-    >
-      <gr-form-field label="Substituter URL" for="cache-url">
-        <gr-copy-field id="cache-url" [value]="cacheUrl" />
+  <!-- Traffic -->
+  <div class="section">
+    <h2>Traffic</h2>
+    @if (statsLoading()) {
+      <gr-loading-spinner message="Loading stats..." />
+    } @else {
+      <gr-card-grid min="220px">
+        <gr-stat-card label="Requests (last hour)" [value]="$any(stats()?.hours | slice:-1)[0]?.requests ?? 0" />
+        <gr-stat-card label="Traffic (last hour)" [value]="formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0)" />
+      </gr-card-grid>
+
+      <div class="chart-card">
+        <gr-select-button
+          ariaLabel="Time window"
+          [options]="windows"
+          optionLabel="label"
+          optionValue="key"
+          [ngModel]="activeWindow()"
+          (ngModelChange)="setWindow($event)"
+        />
+        <gr-metric-chart
+          bare
+          type="area"
+          [height]="220"
+          [series]="trafficSeries()"
+          [categories]="trafficCategories()"
+          [colors]="trafficColors"
+          [valueFormatter]="formatSize"
+          [secondary]="trafficSecondary"
+          yAxisTitle="Bytes"
+        />
+      </div>
+    }
+  </div>
+
+  <gr-settings-section
+    title="How to Use This Cache"
+    description="Add the following to your /etc/nix/nix.conf or NixOS configuration."
+    maxWidth="none"
+  >
+    <gr-form-field label="Substituter URL" for="cache-url">
+      <gr-copy-field id="cache-url" [value]="cacheUrl" />
+    </gr-form-field>
+
+    <gr-form-field label="Trusted Public Keys" for="cache-keys">
+      <gr-copy-field id="cache-keys" [value]="allPublicKeys().join(' ') || 'Not available'" />
+    </gr-form-field>
+
+    <gr-form-field label="nix.conf snippet" for="cache-conf">
+      <gr-copy-field id="cache-conf" multiline [rows]="2" [value]="nixConfSnippet()" />
+    </gr-form-field>
+
+    @if (!c.public) {
+      <gr-divider />
+      <gr-form-field label="Install netrc" for="cache-netrc">
+        <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/caches/#authentication" title="Cache authentication docs" />
+        <gr-copy-field id="cache-netrc" multiline [rows]="2" [value]="installNetrcCommand" />
+        <span slot="hint">
+          This cache is private. Run the command as root, replacing <code>&lt;YOUR_TOKEN&gt;</code> with your
+          API key or login token. It writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon
+          can authenticate. Prefer a declarative NixOS setup? See the
+          <a href="https://wavelens.github.io/gradient/usage/caches/#declarative-netrc" target="_blank" rel="noopener noreferrer">declarative netrc example</a>
+          in the docs.
+        </span>
       </gr-form-field>
+    }
+  </gr-settings-section>
 
-      <gr-form-field label="Trusted Public Keys" for="cache-keys">
-        <gr-copy-field id="cache-keys" [value]="allPublicKeys().join(' ') || 'Not available'" />
-      </gr-form-field>
-
-      <gr-form-field label="nix.conf snippet" for="cache-conf">
-        <gr-copy-field id="cache-conf" multiline [rows]="2" [value]="nixConfSnippet()" />
-      </gr-form-field>
-
-      @if (!c.public) {
-        <gr-divider />
-        <gr-form-field label="Install netrc" for="cache-netrc">
-          <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/caches/#authentication" title="Cache authentication docs" />
-          <gr-copy-field id="cache-netrc" multiline [rows]="2" [value]="installNetrcCommand" />
-          <span slot="hint">
-            This cache is private. Run the command as root, replacing <code>&lt;YOUR_TOKEN&gt;</code> with your
-            API key or login token. It writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon
-            can authenticate. Prefer a declarative NixOS setup? See the
-            <a href="https://wavelens.github.io/gradient/usage/caches/#declarative-netrc" target="_blank" rel="noopener noreferrer">declarative netrc example</a>
-            in the docs.
-          </span>
-        </gr-form-field>
-      }
-    </gr-settings-section>
-
-    </gr-page-layout>
-  }
+  </gr-page-layout>
+}

@@ -4,196 +4,196 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading project settings..." />
-  } @else if (project(); as project) {
-    <gr-page-layout [breadcrumb]="[{ label: project.display_name, link: ['/project', projectName] }, { label: 'Settings' }]" title="Project Settings">
-        <!-- General Settings -->
-    <gr-settings-section title="General">
-      <gr-form-field label="Name" for="project-name" hint="Project name cannot be changed">
-        <input
-          grInput
-          id="project-name"
-          [value]="project.name"
-          disabled
-        />
-      </gr-form-field>
+@if (loading()) {
+  <gr-loading-spinner message="Loading project settings..." />
+} @else if (project(); as project) {
+  <gr-page-layout [breadcrumb]="[{ label: project.display_name, link: ['/project', projectName] }, { label: 'Settings' }]" title="Project Settings">
+      <!-- General Settings -->
+  <gr-settings-section title="General">
+    <gr-form-field label="Name" for="project-name" hint="Project name cannot be changed">
+      <input
+        grInput
+        id="project-name"
+        [value]="project.name"
+        disabled
+      />
+    </gr-form-field>
 
-      <gr-form-field label="Display Name" for="display-name">
-        <input
-          grInput
-          id="display-name"
-          [(ngModel)]="formData.display_name"
-          [appManagedDisable]="access()"
-        />
-      </gr-form-field>
+    <gr-form-field label="Display Name" for="display-name">
+      <input
+        grInput
+        id="display-name"
+        [(ngModel)]="formData.display_name"
+        [appManagedDisable]="access()"
+      />
+    </gr-form-field>
 
-      <gr-form-field label="Description" for="description">
-        <textarea
-          grInput
-          id="description"
-          [(ngModel)]="formData.description"
-          rows="3"
-          [appManagedDisable]="access()"
-        ></textarea>
-      </gr-form-field>
+    <gr-form-field label="Description" for="description">
+      <textarea
+        grInput
+        id="description"
+        [(ngModel)]="formData.description"
+        rows="3"
+        [appManagedDisable]="access()"
+      ></textarea>
+    </gr-form-field>
 
-      <gr-form-field label="Visibility" for="visibility" hint="Public projects are visible and readable by all users">
-        <gr-select
-          inputId="visibility"
-          [options]="visibilityOptions"
-          optionLabel="label"
-          optionValue="value"
-          [(ngModel)]="formData.public"
-          [appManagedDisable]="access()"
-        />
-      </gr-form-field>
+    <gr-form-field label="Visibility" for="visibility" hint="Public projects are visible and readable by all users">
+      <gr-select
+        inputId="visibility"
+        [options]="visibilityOptions"
+        optionLabel="label"
+        optionValue="value"
+        [(ngModel)]="formData.public"
+        [appManagedDisable]="access()"
+      />
+    </gr-form-field>
 
-      <gr-form-field>
-        <span slot="hint">When enabled, the auto-managed <code>build-request</code> task that receives CLI build artefacts is hidden from task listings.</span>
-        <gr-checkbox
-          inputId="hide-build-requests"
-          [(ngModel)]="formData.hide_build_requests"
-          [binary]="true"
-          [appManagedDisable]="access()"
-          label="Hide Build Requests task"
-        />
-      </gr-form-field>
+    <gr-form-field>
+      <span slot="hint">When enabled, the auto-managed <code>build-request</code> task that receives CLI build artefacts is hidden from task listings.</span>
+      <gr-checkbox
+        inputId="hide-build-requests"
+        [(ngModel)]="formData.hide_build_requests"
+        [binary]="true"
+        [appManagedDisable]="access()"
+        label="Hide Build Requests task"
+      />
+    </gr-form-field>
 
-      @if (saveError()) {
-        <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
-      }
-      @if (saveSuccess()) {
-        <gr-message-banner type="success">Changes saved.</gr-message-banner>
-      }
-      <div class="form-actions">
-        <button
-          *appWritable="access()"
-          grButton
-          label="Save Changes"
-          icon="check"
-          (click)="saveSettings()"
-          [loading]="saving()"
-          [appManagedDisable]="access()"
-        ></button>
-      </div>
-    
-    </gr-settings-section>
+    @if (saveError()) {
+      <gr-message-banner type="error">{{ saveError() }}</gr-message-banner>
+    }
+    @if (saveSuccess()) {
+      <gr-message-banner type="success">Changes saved.</gr-message-banner>
+    }
+    <div class="form-actions">
+      <button
+        *appWritable="access()"
+        grButton
+        label="Save Changes"
+        icon="check"
+        (click)="saveSettings()"
+        [loading]="saving()"
+        [appManagedDisable]="access()"
+      ></button>
+    </div>
 
-    <gr-settings-section title="More Settings" [card]="false">
-      <gr-row-list>
-        <gr-row icon="group" linkLabel="Members and roles" [link]="['/project', projectName, 'members']">
-          Members &amp; Roles
-          <span slot="meta">Who is in this project and what they can do</span>
-        </gr-row>
-        <gr-row icon="construction" linkLabel="Workers" [link]="['/project', projectName, 'workers']">
-          Workers
-          <span slot="meta">Build workers registered to this project</span>
-        </gr-row>
-        <gr-row icon="database" linkLabel="Cache subscriptions" [link]="['/project', projectName, 'caches']">
-          Cache Subscriptions
-          <span slot="meta">Nix binary caches this project pushes builds to</span>
-        </gr-row>
-        <gr-row icon="account_tree" linkLabel="Integrations" [link]="['/project', projectName, 'integrations']">
-          Integrations
-          <span slot="meta">Inbound forge webhooks and outbound status reporters</span>
-        </gr-row>
-      </gr-row-list>
-    </gr-settings-section>
+  </gr-settings-section>
 
-    <!-- SSH Key -->
-    <gr-settings-section title="SSH Key">
-      @if (sshLoading()) {
-        <gr-loading-spinner message="Loading SSH key..." />
+  <gr-settings-section title="More Settings" [card]="false">
+    <gr-row-list>
+      <gr-row icon="group" linkLabel="Members and roles" [link]="['/project', projectName, 'members']">
+        Members &amp; Roles
+        <span slot="meta">Who is in this project and what they can do</span>
+      </gr-row>
+      <gr-row icon="construction" linkLabel="Workers" [link]="['/project', projectName, 'workers']">
+        Workers
+        <span slot="meta">Build workers registered to this project</span>
+      </gr-row>
+      <gr-row icon="database" linkLabel="Cache subscriptions" [link]="['/project', projectName, 'caches']">
+        Cache Subscriptions
+        <span slot="meta">Nix binary caches this project pushes builds to</span>
+      </gr-row>
+      <gr-row icon="account_tree" linkLabel="Integrations" [link]="['/project', projectName, 'integrations']">
+        Integrations
+        <span slot="meta">Inbound forge webhooks and outbound status reporters</span>
+      </gr-row>
+    </gr-row-list>
+  </gr-settings-section>
+
+  <!-- SSH Key -->
+  <gr-settings-section title="SSH Key">
+    @if (sshLoading()) {
+      <gr-loading-spinner message="Loading SSH key..." />
+    } @else {
+      <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
+      @if (sshKey()) {
+        <gr-form-field label="Public Key">
+          <textarea
+            grInput
+            [value]="sshKey()"
+            readonly
+            rows="4"
+            class="w-full ssh-key-area"
+          ></textarea>
+        </gr-form-field>
+        <div class="form-actions">
+          <button grButton label="Copy Key" icon="content_copy" severity="secondary" (click)="copySSHKey()"></button>
+        </div>
       } @else {
-        <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
-        @if (sshKey()) {
-          <gr-form-field label="Public Key">
-            <textarea
-              grInput
-              [value]="sshKey()"
-              readonly
-              rows="4"
-              class="w-full ssh-key-area"
-            ></textarea>
-          </gr-form-field>
-          <div class="form-actions">
-            <button grButton label="Copy Key" icon="content_copy" severity="secondary" (click)="copySSHKey()"></button>
-          </div>
-        } @else {
-          <p class="text-secondary">No SSH key generated yet.</p>
-          <button
-            grButton
-            label="Generate SSH Key"
-            icon="key"
-            (click)="generateSSHKey()"
-            [loading]="generatingSSH()"
-            [disabled]="generatingSSH()"
-          ></button>
-        }
+        <p class="text-secondary">No SSH key generated yet.</p>
+        <button
+          grButton
+          label="Generate SSH Key"
+          icon="key"
+          (click)="generateSSHKey()"
+          [loading]="generatingSSH()"
+          [disabled]="generatingSSH()"
+        ></button>
       }
-    
-    </gr-settings-section>
+    }
 
-    <!-- Danger Zone -->
-    @if (access().canEdit) {
-      <gr-settings-section title="Danger Zone" danger>
-        @if (sshKey()) {
-          <gr-row>
-            Regenerate SSH Key
-            <span slot="meta">Generate a new SSH key. The existing key will stop working immediately.</span>
-            <button
-              slot="actions"
-              grButton
-              label="Regenerate Key"
-              icon="refresh"
-              severity="danger"
-              (click)="showRegenerateKeyDialog.set(true)"
-              [disabled]="generatingSSH()"
-              [appManagedDisable]="access()"
-            ></button>
-          </gr-row>
-        }
+  </gr-settings-section>
+
+  <!-- Danger Zone -->
+  @if (access().canEdit) {
+    <gr-settings-section title="Danger Zone" danger>
+      @if (sshKey()) {
         <gr-row>
-          Delete Project
-          <span slot="meta">Permanently delete this project and all its tasks.</span>
+          Regenerate SSH Key
+          <span slot="meta">Generate a new SSH key. The existing key will stop working immediately.</span>
           <button
             slot="actions"
             grButton
-            label="Delete Project"
-            icon="delete"
+            label="Regenerate Key"
+            icon="refresh"
             severity="danger"
-            (click)="showDeleteDialog.set(true)"
+            (click)="showRegenerateKeyDialog.set(true)"
+            [disabled]="generatingSSH()"
             [appManagedDisable]="access()"
           ></button>
         </gr-row>
-      </gr-settings-section>
-    }
-  </gr-page-layout>
+      }
+      <gr-row>
+        Delete Project
+        <span slot="meta">Permanently delete this project and all its tasks.</span>
+        <button
+          slot="actions"
+          grButton
+          label="Delete Project"
+          icon="delete"
+          severity="danger"
+          (click)="showDeleteDialog.set(true)"
+          [appManagedDisable]="access()"
+        ></button>
+      </gr-row>
+    </gr-settings-section>
+  }
+</gr-page-layout>
 }
 
 <!-- Regenerate SSH Key Confirmation Dialog -->
 <gr-dialog
-  header="Regenerate SSH Key"
-  [(visible)]="showRegenerateKeyDialog"
-  width="400px"
+header="Regenerate SSH Key"
+[(visible)]="showRegenerateKeyDialog"
+width="400px"
 >
-  <p>Are you sure you want to regenerate the SSH key? The existing key will stop working immediately and any repositories using it will lose access.</p>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showRegenerateKeyDialog.set(false)" [disabled]="generatingSSH()"></button>
-    <button grButton label="Regenerate" severity="danger" icon="refresh" (click)="confirmRegenerateSSHKey()" [loading]="generatingSSH()" [disabled]="generatingSSH()"></button>
-  </div>
+<p>Are you sure you want to regenerate the SSH key? The existing key will stop working immediately and any repositories using it will lose access.</p>
+<div grDialogFooter>
+  <button grButton label="Cancel" severity="secondary" (click)="showRegenerateKeyDialog.set(false)" [disabled]="generatingSSH()"></button>
+  <button grButton label="Regenerate" severity="danger" icon="refresh" (click)="confirmRegenerateSSHKey()" [loading]="generatingSSH()" [disabled]="generatingSSH()"></button>
+</div>
 </gr-dialog>
 
 <!-- Delete Confirmation Dialog -->
 <gr-dialog
-  header="Delete Project"
-  [(visible)]="showDeleteDialog"
-  width="400px"
+header="Delete Project"
+[(visible)]="showDeleteDialog"
+width="400px"
 >
-  <p>Are you sure you want to delete <strong>{{ project()?.display_name }}</strong>? This action cannot be undone.</p>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button grButton label="Delete" severity="danger" (click)="deleteProject()" [loading]="deleting()" [disabled]="deleting()"></button>
-  </div>
+<p>Are you sure you want to delete <strong>{{ project()?.display_name }}</strong>? This action cannot be undone.</p>
+<div grDialogFooter>
+  <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
+  <button grButton label="Delete" severity="danger" (click)="deleteProject()" [loading]="deleting()" [disabled]="deleting()"></button>
+</div>
 </gr-dialog>

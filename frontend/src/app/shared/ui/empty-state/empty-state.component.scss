@@ -36,3 +36,12 @@
   margin: 0 auto $spacing-lg;
   max-width: 52ch;
 }
+
+// The action sits in its own row so it centres on the card, not on the line box
+// it happens to share with the projected whitespace around it.
+.empty-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: $spacing-sm;
+}

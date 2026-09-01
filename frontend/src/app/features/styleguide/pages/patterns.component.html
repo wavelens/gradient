@@ -82,13 +82,15 @@
       <gr-row icon="person">
         <span class="mono">alice</span>
         <div slot="actions">
-          <gr-badge>Admin</gr-badge>
+          <gr-select [options]="roleOptions" optionLabel="label" optionValue="value" [(ngModel)]="role" />
+          <button grButton icon="close" severity="danger" size="small"></button>
         </div>
       </gr-row>
       <gr-row icon="person">
         <span class="mono">bob</span>
         <div slot="actions">
-          <gr-badge>Viewer</gr-badge>
+          <gr-select [options]="roleOptions" optionLabel="label" optionValue="value" [(ngModel)]="role" />
+          <button grButton icon="close" severity="danger" size="small"></button>
         </div>
       </gr-row>
     </gr-row-list>

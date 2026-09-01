@@ -10,8 +10,8 @@
       <gr-stat-card label="Total NARs" [value]="s.total_nars" />
       <gr-stat-card label="NAR size" [value]="formatBytes(s.total_nar_size)" />
       <gr-stat-card label="File size" [value]="formatBytes(s.total_file_size)" />
-      <gr-stat-card label="Last uploaded" [value]="formatDate(s.last_uploaded_at)" />
-      <gr-stat-card label="Oldest fetched" [value]="formatDate(s.oldest_fetched_at)" />
+      <gr-stat-card label="Last uploaded" [value]="relativeTime(s.last_uploaded_at)" />
+      <gr-stat-card label="Oldest fetched" [value]="relativeTime(s.oldest_fetched_at)" />
     </gr-card-grid>
   }
 
@@ -52,7 +52,7 @@
             <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
           }
         </span>
-        <span class="col">Compressed size</span>
+        <span class="col">Compressed</span>
         <span class="col sortable" (click)="sortBy('created_at')">
           Created
           @if (sort() === 'created_at') {
@@ -73,8 +73,8 @@
           <span class="col">{{ row.package }}</span>
           <span class="col">{{ formatBytes(row.nar_size) }}</span>
           <span class="col">{{ formatBytes(row.file_size) }}</span>
-          <span class="col text-secondary">{{ formatDate(row.created_at) }}</span>
-          <span class="col text-secondary">{{ formatDate(row.last_fetched_at, 'never') }}</span>
+          <span class="col text-secondary">{{ relativeTime(row.created_at) }}</span>
+          <span class="col text-secondary">{{ relativeTime(row.last_fetched_at) }}</span>
           <span class="col col-actions" (click)="$event.stopPropagation()">
             <button grButton icon="info" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
             <button

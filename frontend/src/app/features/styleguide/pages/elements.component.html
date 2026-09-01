@@ -44,6 +44,12 @@
 <h2>Feedback</h2>
 <gr-loading-spinner message="Loading integrations..." />
 <gr-empty-state icon="hub" title="No integrations" message="Create one to receive forge webhooks." />
+
+<p>With the action that resolves it. The button centres under the message.</p>
+<gr-empty-state icon="schedule_send" title="No triggers configured"
+  message="Create a trigger to start evaluations on a schedule, push event, or pull request.">
+  <button slot="action" grButton label="New Trigger" icon="add"></button>
+</gr-empty-state>
 <gr-stat-card icon="inbox" [value]="12" label="Queued" />
 
 <p>Without an icon, in the grid the cache pages use.</p>
@@ -51,7 +57,7 @@
   <gr-stat-card label="Packages stored" [value]="128" />
   <gr-stat-card label="Uncompressed size" value="4.2 GB" />
   <gr-stat-card label="Compressed stored" value="1.1 GB" />
-  <gr-stat-card label="Last uploaded" value="14 Aug 2026, 09:42:11" />
+  <gr-stat-card label="Last uploaded" value="3d ago" />
 </gr-card-grid>
 
 <h2>Evaluation status</h2>

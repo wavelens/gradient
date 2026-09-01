@@ -42,11 +42,8 @@
   color: var(--gr-text-primary);
   line-height: $line-height-tight;
   margin-bottom: $spacing-xs;
+  font-size: $font-size-xxl;
   overflow-wrap: anywhere;
-
-  &.is-xxl { font-size: $font-size-xxl; }
-  &.is-xl { font-size: $font-size-xl; }
-  &.is-lg { font-size: $font-size-lg; }
 }
 
 .stat-label {

@@ -45,4 +45,11 @@ describe('gr-empty-state', () => {
     root.querySelector('button')!.click();
     expect(fired).toBe(1);
   });
+  it('puts the action in its own centred row, not in the message line box', async () => {
+    const { root } = await render({ ...base, actionLabel: 'Create' });
+    const actions = root.querySelector('.empty-actions');
+    expect(actions).not.toBeNull();
+    expect(actions?.querySelector('button')?.textContent).toContain('Create');
+  });
 });
+

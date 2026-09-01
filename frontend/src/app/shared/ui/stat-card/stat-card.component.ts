@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, ChangeDetectionStrategy } from '@angular/core';
 import { IconComponent } from '../icon/icon.component';
 import { CommonModule } from '@angular/common';
 
@@ -21,12 +21,4 @@ export class StatCardComponent {
   value = input.required<number | string>();
   label = input.required<string>();
 
-  /// A metric is meant to be read at a glance, so the value takes the largest
-  /// step it fits on. Without this a timestamp wraps and the row of cards
-  /// grows to match the longest one.
-  protected valueScale = computed(() => {
-    const length = String(this.value()).length;
-    if (length <= 8) return 'is-xxl';
-    return length <= 15 ? 'is-xl' : 'is-lg';
-  });
 }

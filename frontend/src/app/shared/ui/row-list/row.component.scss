@@ -63,10 +63,6 @@
   color: var(--gr-text-muted);
 }
 
-:host(:not(:last-child)) .row {
-  border-bottom: 1px solid var(--gr-border-subtle);
-}
-
 .row-info {
   display: flex;
   align-items: center;

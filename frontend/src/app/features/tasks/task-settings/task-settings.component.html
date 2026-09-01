@@ -4,191 +4,191 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading task settings..." />
-  } @else if (task(); as proj) {
-    <gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: proj.display_name, link: ['/project', projectName, 'task', taskName] }, { label: 'Settings' }]" title="Task Settings">
-    <button slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
-    @if (errorMessage()) {
-      <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
-    }
-    @if (saveSuccess()) {
-      <gr-message-banner type="success">Changes saved.</gr-message-banner>
-    }
+@if (loading()) {
+  <gr-loading-spinner message="Loading task settings..." />
+} @else if (task(); as proj) {
+  <gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: proj.display_name, link: ['/project', projectName, 'task', taskName] }, { label: 'Settings' }]" title="Task Settings">
+  <button slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
+  @if (errorMessage()) {
+    <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
+  }
+  @if (saveSuccess()) {
+    <gr-message-banner type="success">Changes saved.</gr-message-banner>
+  }
 
-    <!-- General Settings -->
-    <gr-settings-section title="General">
-      <gr-form-field label="Name" for="proj-name" hint="Task name cannot be changed">
-        <input grInput id="proj-name" [value]="proj.name" disabled />
-      </gr-form-field>
+  <!-- General Settings -->
+  <gr-settings-section title="General">
+    <gr-form-field label="Name" for="proj-name" hint="Task name cannot be changed">
+      <input grInput id="proj-name" [value]="proj.name" disabled />
+    </gr-form-field>
 
-      <gr-form-field label="Display Name" for="proj-display">
-        <input grInput id="proj-display" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" />
-      </gr-form-field>
+    <gr-form-field label="Display Name" for="proj-display">
+      <input grInput id="proj-display" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" />
+    </gr-form-field>
 
-      <gr-form-field label="Description" for="proj-desc">
-        <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
-      </gr-form-field>
+    <gr-form-field label="Description" for="proj-desc">
+      <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
+    </gr-form-field>
 
-      <gr-form-field label="Repository URL" for="proj-repo">
-        <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" />
-      </gr-form-field>
+    <gr-form-field label="Repository URL" for="proj-repo">
+      <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" />
+    </gr-form-field>
 
-      <gr-form-field label="Evaluation Wildcard" for="proj-wildcard" hint="Pattern for selecting which outputs to evaluate">
-        <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" title="Learn about evaluation wildcards" />
-        <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" />
-      </gr-form-field>
+    <gr-form-field label="Evaluation Wildcard" for="proj-wildcard" hint="Pattern for selecting which outputs to evaluate">
+      <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" title="Learn about evaluation wildcards" />
+      <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" />
+    </gr-form-field>
 
-      <gr-form-field label="Keep Evaluations" for="proj-keep" hint="Number of completed evaluations to retain for metrics and history">
-        <input grInput id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" />
-      </gr-form-field>
+    <gr-form-field label="Keep Evaluations" for="proj-keep" hint="Number of completed evaluations to retain for metrics and history">
+      <input grInput id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" />
+    </gr-form-field>
 
-      <gr-form-field label="Trigger Concurrency" for="proj-concurrency" hint="Determines how this task handles a new trigger event when an evaluation is already running.">
-        <gr-select
-          inputId="proj-concurrency"
-          [(ngModel)]="formData.concurrency"
-          [options]="concurrencyOptions"
-          optionLabel="label"
-          optionValue="value"
-          optionDisabled="disabled"
-          [appManagedDisable]="access()"
-        />
-      </gr-form-field>
+    <gr-form-field label="Trigger Concurrency" for="proj-concurrency" hint="Determines how this task handles a new trigger event when an evaluation is already running.">
+      <gr-select
+        inputId="proj-concurrency"
+        [(ngModel)]="formData.concurrency"
+        [options]="concurrencyOptions"
+        optionLabel="label"
+        optionValue="value"
+        optionDisabled="disabled"
+        [appManagedDisable]="access()"
+      />
+    </gr-form-field>
 
-      <gr-form-field hint="When off, build outputs are still cached for Gradient itself but narinfos remain unsigned, keeping the task's paths private to external Nix clients even when the cache is public.">
-        <gr-checkbox
-          inputId="proj-sign-cache"
-          [(ngModel)]="formData.sign_cache"
-          [binary]="true"
-          [appManagedDisable]="access()"
-          label="Sign cache (allow public access to build outputs)"
-        />
-      </gr-form-field>
+    <gr-form-field hint="When off, build outputs are still cached for Gradient itself but narinfos remain unsigned, keeping the task's paths private to external Nix clients even when the cache is public.">
+      <gr-checkbox
+        inputId="proj-sign-cache"
+        [(ngModel)]="formData.sign_cache"
+        [binary]="true"
+        [appManagedDisable]="access()"
+        label="Sign cache (allow public access to build outputs)"
+      />
+    </gr-form-field>
 
-      <div class="form-actions">
-        <button
-          *appWritable="access()"
-          grButton
-          label="Save Changes"
-          icon="check"
-          (click)="saveSettings()"
-          [loading]="saving()"
-          [appManagedDisable]="access()"
-        ></button>
-      </div>
-    
-    </gr-settings-section>
+    <div class="form-actions">
+      <button
+        *appWritable="access()"
+        grButton
+        label="Save Changes"
+        icon="check"
+        (click)="saveSettings()"
+        [loading]="saving()"
+        [appManagedDisable]="access()"
+      ></button>
+    </div>
 
-    <gr-settings-section title="More Settings" [card]="false">
-      <gr-row-list>
-        <gr-row icon="schedule" linkLabel="Triggers" [link]="['/project', projectName, 'task', taskName, 'triggers']">
-          Triggers
-          <span slot="meta">Polling intervals, forge push and pull-request events, and cron schedules</span>
-        </gr-row>
-        <gr-row icon="bolt" linkLabel="Actions" [link]="['/project', projectName, 'task', taskName, 'actions']">
-          Actions
-          <span slot="meta">Send mail, post webhooks, or report status back to your forge</span>
-        </gr-row>
-        <gr-row icon="share" linkLabel="Flake inputs" [link]="['/project', projectName, 'task', taskName, 'flake-inputs']">
-          Flake Inputs
-          <span slot="meta">Override an input's git URL, or force an update keeping the original</span>
-        </gr-row>
-      </gr-row-list>
-    </gr-settings-section>
+  </gr-settings-section>
 
-    <!-- Status -->
-    <gr-settings-section title="Status">
+  <gr-settings-section title="More Settings" [card]="false">
+    <gr-row-list>
+      <gr-row icon="schedule" linkLabel="Triggers" [link]="['/project', projectName, 'task', taskName, 'triggers']">
+        Triggers
+        <span slot="meta">Polling intervals, forge push and pull-request events, and cron schedules</span>
+      </gr-row>
+      <gr-row icon="bolt" linkLabel="Actions" [link]="['/project', projectName, 'task', taskName, 'actions']">
+        Actions
+        <span slot="meta">Send mail, post webhooks, or report status back to your forge</span>
+      </gr-row>
+      <gr-row icon="share" linkLabel="Flake inputs" [link]="['/project', projectName, 'task', taskName, 'flake-inputs']">
+        Flake Inputs
+        <span slot="meta">Override an input's git URL, or force an update keeping the original</span>
+      </gr-row>
+    </gr-row-list>
+  </gr-settings-section>
+
+  <!-- Status -->
+  <gr-settings-section title="Status">
+    <gr-row>
+      {{ proj.active ? 'Task is Active' : 'Task is Inactive' }}
+      <span slot="meta">{{ proj.active ? 'The task is currently evaluating and building.' : 'The task is paused and not evaluating.' }}</span>
+      <button
+        slot="actions"
+        *appWritable="access()"
+        grButton
+        [label]="proj.active ? 'Deactivate' : 'Activate'"
+        [icon]="proj.active ? 'pause' : 'play_arrow'"
+        [severity]="proj.active ? 'warn' : 'success'"
+        (click)="toggleActive()"
+        [loading]="toggling()"
+        [appManagedDisable]="access()"
+      ></button>
+    </gr-row>
+  </gr-settings-section>
+
+  @if (access().canEdit) {
+    <gr-settings-section title="Danger Zone" danger>
       <gr-row>
-        {{ proj.active ? 'Task is Active' : 'Task is Inactive' }}
-        <span slot="meta">{{ proj.active ? 'The task is currently evaluating and building.' : 'The task is paused and not evaluating.' }}</span>
+        Transfer Ownership
+        <span slot="meta">Transfer this task to another project.</span>
         <button
-          slot="actions"
-          *appWritable="access()"
-          grButton
-          [label]="proj.active ? 'Deactivate' : 'Activate'"
-          [icon]="proj.active ? 'pause' : 'play_arrow'"
-          [severity]="proj.active ? 'warn' : 'success'"
-          (click)="toggleActive()"
-          [loading]="toggling()"
-          [appManagedDisable]="access()"
+            slot="actions"
+            grButton
+            label="Transfer Ownership"
+            icon="send"
+            severity="warn"
+            (click)="showTransferDialog.set(true)"
+            [appManagedDisable]="access()"
+        ></button>
+      </gr-row>
+      <gr-row>
+        Delete Task
+        <span slot="meta">Permanently delete this task and all its evaluations.</span>
+        <button
+            slot="actions"
+            grButton
+            label="Delete Task"
+            icon="delete"
+            severity="danger"
+            (click)="showDeleteDialog.set(true)"
+            [appManagedDisable]="access()"
         ></button>
       </gr-row>
     </gr-settings-section>
-
-    @if (access().canEdit) {
-      <gr-settings-section title="Danger Zone" danger>
-        <gr-row>
-          Transfer Ownership
-          <span slot="meta">Transfer this task to another project.</span>
-          <button
-              slot="actions"
-              grButton
-              label="Transfer Ownership"
-              icon="send"
-              severity="warn"
-              (click)="showTransferDialog.set(true)"
-              [appManagedDisable]="access()"
-          ></button>
-        </gr-row>
-        <gr-row>
-          Delete Task
-          <span slot="meta">Permanently delete this task and all its evaluations.</span>
-          <button
-              slot="actions"
-              grButton
-              label="Delete Task"
-              icon="delete"
-              severity="danger"
-              (click)="showDeleteDialog.set(true)"
-              [appManagedDisable]="access()"
-          ></button>
-        </gr-row>
-      </gr-settings-section>
-    }
-  </gr-page-layout>
+  }
+</gr-page-layout>
 }
 
 <!-- Transfer Ownership Dialog -->
 <gr-dialog
-  header="Transfer Ownership"
-  [(visible)]="showTransferDialog"
-  width="420px"
-  (hide)="onTransferDialogHide()"
+header="Transfer Ownership"
+[(visible)]="showTransferDialog"
+width="420px"
+(hide)="onTransferDialogHide()"
 >
-  <div>
-    <p>Transfer <strong>{{ task()?.display_name }}</strong> to another project. This action cannot be undone.</p>
-    @if (transferError()) {
-      <gr-message-banner type="error">{{ transferError() }}</gr-message-banner>
-    }
-    @if (transferSuccess()) {
-      <gr-message-banner type="success">Ownership transferred successfully.</gr-message-banner>
-    }
-    <gr-form-field label="Target Project">
-      <gr-autocomplete
-        [(ngModel)]="transferProjectName"
-        [suggestions]="transferProjectSuggestions()"
-        (completeMethod)="onTransferProjectSearch($event)"
-        placeholder="Project name"
-        [forceSelection]="false"
-        [disabled]="transferring()"
-      />
-    </gr-form-field>
-  </div>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
-    <button grButton label="Transfer" icon="send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName.trim()"></button>
-  </div>
+<div>
+  <p>Transfer <strong>{{ task()?.display_name }}</strong> to another project. This action cannot be undone.</p>
+  @if (transferError()) {
+    <gr-message-banner type="error">{{ transferError() }}</gr-message-banner>
+  }
+  @if (transferSuccess()) {
+    <gr-message-banner type="success">Ownership transferred successfully.</gr-message-banner>
+  }
+  <gr-form-field label="Target Project">
+    <gr-autocomplete
+      [(ngModel)]="transferProjectName"
+      [suggestions]="transferProjectSuggestions()"
+      (completeMethod)="onTransferProjectSearch($event)"
+      placeholder="Project name"
+      [forceSelection]="false"
+      [disabled]="transferring()"
+    />
+  </gr-form-field>
+</div>
+<div grDialogFooter>
+  <button grButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>
+  <button grButton label="Transfer" icon="send" severity="warn" (click)="transferOwnership()" [loading]="transferring()" [disabled]="transferring() || !transferProjectName.trim()"></button>
+</div>
 </gr-dialog>
 
 <!-- Delete Confirmation Dialog -->
 <gr-dialog
-  header="Delete Task"
-  [(visible)]="showDeleteDialog"
-  width="400px"
+header="Delete Task"
+[(visible)]="showDeleteDialog"
+width="400px"
 >
-  <p>Are you sure you want to delete <strong>{{ task()?.display_name }}</strong>? This action cannot be undone.</p>
-  <div grDialogFooter>
-    <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
-    <button grButton label="Delete" severity="danger" (click)="deleteTask()" [loading]="deleting()" [disabled]="deleting()"></button>
-  </div>
+<p>Are you sure you want to delete <strong>{{ task()?.display_name }}</strong>? This action cannot be undone.</p>
+<div grDialogFooter>
+  <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>
+  <button grButton label="Delete" severity="danger" (click)="deleteTask()" [loading]="deleting()" [disabled]="deleting()"></button>
+</div>
 </gr-dialog>
