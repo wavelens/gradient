@@ -29,11 +29,14 @@
     color: var(--gr-text-secondary);
   }
 
-  // Clears the textarea scrollbar, which the single-line variant does not have.
+  // Same inset as the single-line variant; only the vertical anchor differs.
   &--multiline &__button {
     top: $spacing-xs;
-    right: $spacing-md;
     transform: none;
+  }
+
+  &--multiline &__input {
+    scrollbar-gutter: stable;
   }
 
   &--inline {

@@ -95,6 +95,8 @@ a {
 // Shared form-control styling for the gr-ui input directive
 .gr-input {
   padding: 0.5rem 0.7rem;
+  // Explicit line-height keeps the control height identical across font families.
+  line-height: 1.4;
   background: $color-quaternary;
   border: 1px solid $color-border;
   border-radius: $border-radius-sm;
