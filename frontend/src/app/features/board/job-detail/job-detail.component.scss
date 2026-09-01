@@ -19,9 +19,7 @@ h2 { color: var(--gr-text-primary); font-size: $font-size-lg; margin: 1.75rem 0 
 .ids { display: flex; gap: 2rem; flex-wrap: wrap; background: var(--gr-surface-raised); border: 1px solid var(--gr-border); border-radius: $border-radius-md; padding: 1rem; }
 .timeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-top: 1rem; }
 .step { background: var(--gr-surface-raised); border: 1px solid var(--gr-border); border-radius: $border-radius-md; padding: 0.75rem; color: var(--gr-text-secondary); font-size: $font-size-sm; }
-.step .hl { color: var(--gr-status-info); font-weight: 600; }
-.mono { font-family: $font-family-mono; color: var(--gr-text-primary); font-size: $font-size-sm; }
-.reason { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step .hl { color: var(--gr-status-info); font-weight: 600; }.reason { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .worker-link { text-decoration: none; cursor: pointer; }
 .worker-link:hover { color: var(--gr-status-info); }
 .build-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }

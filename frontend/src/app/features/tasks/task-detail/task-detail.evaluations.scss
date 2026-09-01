@@ -18,10 +18,7 @@
   background: var(--gr-surface-base);
 }
 
-.pad { padding-left: $space-section; padding-right: $space-section; }
-.mono { font-family: $font-family-mono; }
-
-.pp-head {
+.pad { padding-left: $space-section; padding-right: $space-section; }.pp-head {
   display: flex;
   justify-content: space-between;
   align-items: center;

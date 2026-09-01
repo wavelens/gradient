@@ -12,20 +12,7 @@
   max-width: 640px;
 }
 
-.form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }
-.nav-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-lg;
-
-  h3 { margin: 0 0 $spacing-xs 0; }
-  p { margin: 0; }
-
-  a, button { flex-shrink: 0; white-space: nowrap; }
-}
-
-.danger-section { h2 { color: var(--gr-status-danger); } }
+.form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }.danger-section { h2 { color: var(--gr-status-danger); } }
 .danger-card { border-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent); }
 .danger-row {
   display: flex;

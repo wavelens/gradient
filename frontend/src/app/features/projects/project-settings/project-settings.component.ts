@@ -21,6 +21,7 @@ import {
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
+  RowComponent,
   SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
@@ -47,6 +48,7 @@ import { Project, AccessState } from '@core/models';
     FormFieldComponent,
     SettingsSectionComponent,
     MessageBannerComponent,
+    RowComponent,
   ],
   templateUrl: './project-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

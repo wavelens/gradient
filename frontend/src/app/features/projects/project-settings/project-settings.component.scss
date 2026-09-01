@@ -70,21 +70,7 @@
     align-items: center;
     gap: $spacing-sm;
   }
-}
-
-.nav-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-lg;
-
-  h3 { margin: 0 0 $spacing-xs 0; }
-  p { margin: 0; }
-
-  a, button { flex-shrink: 0; white-space: nowrap; }
-}
-
-.ssh-key-area {
+}.ssh-key-area {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
 }

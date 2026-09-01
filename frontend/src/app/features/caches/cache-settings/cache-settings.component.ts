@@ -19,6 +19,7 @@ import {
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
+  RowComponent,
   SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
@@ -45,6 +46,7 @@ import { Cache } from '@core/models';
     FormFieldComponent,
     SettingsSectionComponent,
     MessageBannerComponent,
+    RowComponent,
   ],
   templateUrl: './cache-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -20,6 +20,7 @@ import {
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
+  RowComponent,
   SettingsSectionComponent,
 } from '@shared/ui';
 import { ManagedDisableDirective } from '@shared/access';
@@ -43,6 +44,7 @@ import { AccessState } from '@core/models';
     FormFieldComponent,
     SettingsSectionComponent,
     MessageBannerComponent,
+    RowComponent,
   ],
   templateUrl: './profile.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

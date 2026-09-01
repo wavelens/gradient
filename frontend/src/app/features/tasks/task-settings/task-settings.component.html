@@ -81,35 +81,29 @@
 
     <!-- Triggers -->
     <gr-settings-section title="Triggers">
-      <div class="nav-row">
-        <p class="text-secondary">
-          Triggers control how and when evaluations run for this task - polling intervals, forge push and pull-request events, and cron schedules.
-        </p>
-        <a grButton label="Manage Triggers" icon="schedule" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'triggers']"></a>
-      </div>
+      <gr-row>
+        <span slot="meta">Triggers control how and when evaluations run for this task - polling intervals, forge push and pull-request events, and cron schedules.</span>
+        <a slot="actions" grButton label="Manage Triggers" icon="schedule" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'triggers']"></a>
+      </gr-row>
     
     </gr-settings-section>
 
     <!-- Actions -->
     <gr-settings-section title="Actions">
-      <div class="nav-row">
-        <p class="text-secondary">
-          Actions react to evaluation and build events - send mail, post webhooks, or report status back to your forge.
-        </p>
-        <a grButton label="Manage Actions" icon="bolt" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'actions']"></a>
-      </div>
+      <gr-row>
+        <span slot="meta">Actions react to evaluation and build events - send mail, post webhooks, or report status back to your forge.</span>
+        <a slot="actions" grButton label="Manage Actions" icon="bolt" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'actions']"></a>
+      </gr-row>
     
     </gr-settings-section>
 
     <!-- Flake Inputs -->
     <gr-settings-section title="Flake Inputs">
-      <div class="nav-row">
-        <p class="text-secondary">
-          Override individual flake inputs with a new git URL, or force an update of an input keeping its original URL. Inputs without an override stay at whatever flake.lock has locked.
-        </p>
-        <a grButton label="Manage Flake Inputs" icon="share" severity="secondary"
+      <gr-row>
+        <span slot="meta">Override individual flake inputs with a new git URL, or force an update of an input keeping its original URL. Inputs without an override stay at whatever flake.lock has locked.</span>
+        <a slot="actions" grButton label="Manage Flake Inputs" icon="share" severity="secondary"
            [routerLink]="['/project', projectName, 'task', taskName, 'flake-inputs']"></a>
-      </div>
+      </gr-row>
     
     </gr-settings-section>
 

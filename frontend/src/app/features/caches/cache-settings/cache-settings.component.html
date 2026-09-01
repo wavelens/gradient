@@ -106,25 +106,21 @@
 
     <!-- Upstream Caches -->
     <gr-settings-section title="Upstream Caches">
-      <div class="nav-row">
-        <div>
-          <h3>Upstream Caches</h3>
-          <p class="text-secondary">External and internal caches this cache pulls through from</p>
-        </div>
-        <a grButton label="Manage Upstreams" icon="cloud_download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></a>
-      </div>
+      <gr-row>
+        Upstream Caches
+        <span slot="meta">External and internal caches this cache pulls through from</span>
+        <a slot="actions" grButton label="Manage Upstreams" icon="cloud_download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></a>
+      </gr-row>
     
     </gr-settings-section>
 
     <!-- Members & Roles -->
     <gr-settings-section title="Members & Roles">
-      <div class="nav-row">
-        <div>
-          <h3>Members & Roles</h3>
-          <p class="text-secondary">Manage who has access to this cache and what they can do</p>
-        </div>
-        <a grButton label="Manage Members" icon="group" severity="secondary" [routerLink]="['/caches', cacheName, 'members-roles']"></a>
-      </div>
+      <gr-row>
+        Members & Roles
+        <span slot="meta">Manage who has access to this cache and what they can do</span>
+        <a slot="actions" grButton label="Manage Members" icon="group" severity="secondary" [routerLink]="['/caches', cacheName, 'members-roles']"></a>
+      </gr-row>
     
     </gr-settings-section>
 

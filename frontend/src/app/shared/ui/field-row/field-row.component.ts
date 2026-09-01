@@ -16,6 +16,6 @@ import { Component, input, ChangeDetectionStrategy, booleanAttribute } from '@an
 })
 export class FieldRowComponent {
   label = input.required<string>();
-  value = input<string>();
+  value = input<string | number>();
   mono = input(false, { transform: booleanAttribute });
 }

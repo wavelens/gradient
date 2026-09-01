@@ -78,41 +78,33 @@
 
     <!-- Members & Roles -->
     <gr-settings-section title="Access">
-      <div class="nav-row">
-        <div>
-          <h3>Members & Roles</h3>
-          <p class="text-secondary">Manage who is in this project and what they can do</p>
-        </div>
-        <a grButton label="Manage Members" icon="group" severity="secondary" [routerLink]="['/project', projectName, 'members']"></a>
-      </div>
+      <gr-row>
+        Members & Roles
+        <span slot="meta">Manage who is in this project and what they can do</span>
+        <a slot="actions" grButton label="Manage Members" icon="group" severity="secondary" [routerLink]="['/project', projectName, 'members']"></a>
+      </gr-row>
     
     </gr-settings-section>
 
     <!-- Infrastructure -->
     <gr-settings-section title="Infrastructure">
-      <div class="nav-row">
-        <div>
-          <h3>Workers</h3>
-          <p class="text-secondary">Manage build workers for this project</p>
-        </div>
-        <button grButton label="Manage Workers" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'workers']"></button>
-      </div>
+      <gr-row>
+        Workers
+        <span slot="meta">Manage build workers for this project</span>
+        <button slot="actions" grButton label="Manage Workers" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'workers']"></button>
+      </gr-row>
       <gr-divider />
-      <div class="nav-row">
-        <div>
-          <h3>Cache Subscriptions</h3>
-          <p class="text-secondary">Nix binary caches this project pushes builds to</p>
-        </div>
-        <button grButton label="Manage Caches" icon="database" severity="secondary" [routerLink]="['/project', projectName, 'caches']"></button>
-      </div>
+      <gr-row>
+        Cache Subscriptions
+        <span slot="meta">Nix binary caches this project pushes builds to</span>
+        <button slot="actions" grButton label="Manage Caches" icon="database" severity="secondary" [routerLink]="['/project', projectName, 'caches']"></button>
+      </gr-row>
       <gr-divider />
-      <div class="nav-row">
-        <div>
-          <h3>Integrations</h3>
-          <p class="text-secondary">Inbound forge webhooks and outbound status reporters</p>
-        </div>
-        <a grButton label="Manage Integrations" icon="account_tree" severity="secondary" [routerLink]="['/project', projectName, 'integrations']"></a>
-      </div>
+      <gr-row>
+        Integrations
+        <span slot="meta">Inbound forge webhooks and outbound status reporters</span>
+        <a slot="actions" grButton label="Manage Integrations" icon="account_tree" severity="secondary" [routerLink]="['/project', projectName, 'integrations']"></a>
+      </gr-row>
     
     </gr-settings-section>
 

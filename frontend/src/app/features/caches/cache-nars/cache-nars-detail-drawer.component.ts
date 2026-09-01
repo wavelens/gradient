@@ -17,12 +17,19 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CachesService, NarDetail, NarSummary } from '@core/services/caches.service';
-import { ButtonComponent, DialogComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  BadgeComponent,
+  ButtonComponent,
+  DialogComponent,
+  FieldRowComponent,
+  IconComponent,
+  LoadingSpinnerComponent,
+} from '@shared/ui';
 
 @Component({
   selector: 'app-cache-nars-detail-drawer',
   standalone: true,
-  imports: [CommonModule, DialogComponent, ButtonComponent, LoadingSpinnerComponent, IconComponent],
+  imports: [CommonModule, DialogComponent, ButtonComponent, LoadingSpinnerComponent, IconComponent, FieldRowComponent, BadgeComponent],
   templateUrl: './cache-nars-detail-drawer.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache-nars-detail-drawer.component.scss',

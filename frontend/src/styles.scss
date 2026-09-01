@@ -110,6 +110,10 @@ a {
   width: 100%;
 }
 
+.mono {
+  font-family: $font-family-mono;
+}
+
 .text-light {
   color: var(--gr-text-muted);
 }

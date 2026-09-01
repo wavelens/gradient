@@ -1,7 +1,7 @@
 <div class="field-row">
   <span class="field-row-label">{{ label() }}</span>
   <span class="field-row-value" [class.is-mono]="mono()">
-    @if (value()) {
+    @if (value() !== undefined && value() !== null && value() !== '') {
       {{ value() }}
     } @else {
       <ng-content></ng-content>

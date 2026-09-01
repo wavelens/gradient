@@ -13,31 +13,17 @@
   padding-top: $spacing-md;
 }
 
-.detail-row {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: $spacing-md;
-  align-items: baseline;
-  padding: $spacing-xs 0;
-  border-bottom: 1px solid var(--gr-border);
-
-  &:last-child { border-bottom: none; }
-  &.references-row { grid-template-columns: 1fr; gap: $spacing-xs; }
+.references-row {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-md;
 }
 
-.detail-label {
-  font-size: $font-size-xs;
+.references-label {
   color: var(--gr-text-secondary);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.detail-value {
   font-size: $font-size-sm;
-  word-break: break-all;
-
-  &.mono { font-family: $font-family-mono; font-size: $font-size-xs; }
+  font-weight: 600;
 }
 
 .references-list {

@@ -50,21 +50,17 @@
 
     <!-- Security -->
     <gr-settings-section title="Security">
-      <div class="nav-row">
-        <div>
-          <h3>API Keys</h3>
-          <p class="text-secondary">Manage API keys for programmatic access</p>
-        </div>
-        <button grButton label="Manage API Keys" icon="key" severity="secondary" routerLink="/settings/keys"></button>
-      </div>
+      <gr-row>
+        API Keys
+        <span slot="meta">Manage API keys for programmatic access</span>
+        <button slot="actions" grButton label="Manage API Keys" icon="key" severity="secondary" routerLink="/settings/keys"></button>
+      </gr-row>
       <gr-divider />
-      <div class="nav-row">
-        <div>
-          <h3>Active Sessions</h3>
-          <p class="text-secondary">View and revoke devices currently signed in to your account</p>
-        </div>
-        <button grButton label="Manage Sessions" icon="desktop_windows" severity="secondary" routerLink="/settings/sessions"></button>
-      </div>
+      <gr-row>
+        Active Sessions
+        <span slot="meta">View and revoke devices currently signed in to your account</span>
+        <button slot="actions" grButton label="Manage Sessions" icon="desktop_windows" severity="secondary" routerLink="/settings/sessions"></button>
+      </gr-row>
     
     </gr-settings-section>
 
