@@ -18,6 +18,7 @@ import { SelectButtonComponent } from './select-button.component';
       optionLabel="label"
       optionValue="value"
       [allowEmpty]="allowEmpty()"
+      ariaLabel="Scope"
       [ngModel]="scope()"
       (ngModelChange)="scope.set($event)"
     ></gr-select-button>
@@ -48,6 +49,12 @@ describe('SelectButtonComponent', () => {
     expect(items().map((i) => i.textContent!.trim())).toEqual(['Mine', 'All']);
     expect(items()[0].getAttribute('aria-checked')).toBe('true');
     expect(items()[1].getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('names the group so a screen reader can announce it', async () => {
+    const { fixture } = await render();
+    const group = fixture.nativeElement.querySelector('[role=radiogroup]') as HTMLElement;
+    expect(group.getAttribute('aria-label')).toBe('Scope');
   });
 
   it('writes the picked option value back', async () => {

@@ -11,7 +11,7 @@ import { Component, booleanAttribute, forwardRef, input, signal, ChangeDetection
   selector: 'gr-select-button',
   standalone: true,
   template: `
-    <div class="gr-select-button" role="radiogroup">
+    <div class="gr-select-button" role="radiogroup" [attr.aria-label]="ariaLabel() || null">
       @for (option of options(); track $index) {
         <button
           type="button"
@@ -38,6 +38,9 @@ export class SelectButtonComponent implements ControlValueAccessor {
   optionLabel = input('label');
   optionValue = input('value');
   allowEmpty = input(true, { transform: booleanAttribute });
+  /// A radiogroup carries no label of its own, so a projected form-field label
+  /// never reaches it.
+  ariaLabel = input('');
 
   protected value = signal<unknown>(null);
   protected isDisabled = signal(false);
