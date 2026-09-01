@@ -6,6 +6,10 @@
 
 @use '../../../styles/variables' as *;
 
+:host {
+  display: block;
+}
+
 .message-banner {
   display: flex;
   align-items: center;

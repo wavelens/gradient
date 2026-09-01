@@ -6,6 +6,10 @@
 
 @use '../../../styles/variables' as *;
 
+:host {
+  display: block;
+}
+
 .form-field {
   display: block;
   margin-bottom: $space-block;

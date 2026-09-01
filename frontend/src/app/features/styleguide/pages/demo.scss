@@ -48,9 +48,13 @@ gr-field-row,
 gr-message-banner,
 gr-form-field,
 gr-select-button,
-gr-checkbox,
 gr-autocomplete {
-  display: block;
+  margin-bottom: $space-pair;
+}
+
+// Never override a component's own display from outside; gr-checkbox needs its
+// inline-flex for the gap between box and label.
+gr-checkbox {
   margin-bottom: $space-pair;
 }
 
@@ -59,6 +63,5 @@ gr-empty-state,
 gr-stat-card,
 gr-table,
 gr-metric-chart {
-  display: block;
   margin-bottom: $space-block;
 }

@@ -6,6 +6,10 @@
 
 @use '../../../styles/variables' as *;
 
+:host {
+  display: block;
+}
+
 .loading-spinner {
   display: flex;
   flex-direction: column;

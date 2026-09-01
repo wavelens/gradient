@@ -6,6 +6,10 @@
 
 @use '../../../styles/variables' as *;
 
+:host {
+  display: block;
+}
+
 .field-row {
   display: flex;
   flex-direction: column;

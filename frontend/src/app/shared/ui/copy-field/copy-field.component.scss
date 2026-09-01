@@ -6,6 +6,10 @@
 
 @use '../../../styles/variables' as *;
 
+:host {
+  display: block;
+}
+
 .copy-field {
   position: relative;
   width: 100%;

@@ -73,7 +73,38 @@ for (const entry of readdirSync(UI)) {
   }
 }
 
+// Overriding a primitive's host display from outside silently breaks its internal
+// layout: gr-checkbox loses the gap between box and label, gr-icon loses its
+// rotation centre. The component owns its own display.
+function hostDisplayOverrides(): string[] {
+  const hits: string[] = [];
+  const scan = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) {
+        scan(path);
+        continue;
+      }
+      if (!entry.endsWith('.scss') && !entry.endsWith('.ts')) continue;
+      const text = readFileSync(path, 'utf8');
+      const rule = /(^|\n)\s*(gr-[a-z-]+)(?:\s*,\s*gr-[a-z-]+)*\s*\{([^}]*)\}/g;
+      for (const [, , selector, body] of text.matchAll(rule)) {
+        if (/\bdisplay\s*:/.test(body)) hits.push(`${path.split('/src/')[1]} sets display on ${selector}`);
+      }
+    }
+  };
+  scan(SG);
+  return hits;
+}
+
+const overrides = hostDisplayOverrides();
+
 let failed = false;
+if (overrides.length) {
+  console.error(`Host display overridden from outside the component (${overrides.length}):`);
+  overrides.forEach((m) => console.error(`  ${m}`));
+  failed = true;
+}
 if (undemoed.length) {
   console.error(`Primitives with no styleguide demo (${undemoed.length}):`);
   undemoed.forEach((m) => console.error(`  ${m}`));
