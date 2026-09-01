@@ -56,4 +56,30 @@ table {
   tbody tr:hover td {
     background: var(--gr-surface-hover);
   }
+
+  tbody tr.is-clickable {
+    cursor: pointer;
+  }
+
+  // A sortable column header is a button, so it reads and behaves as one
+  // everywhere a table sorts.
+  th .gr-th-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-xs;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+
+    &:hover { color: var(--gr-text-primary); }
+  }
+
+  th[aria-sort] .gr-th-sort {
+    color: var(--gr-text-primary);
+  }
 }

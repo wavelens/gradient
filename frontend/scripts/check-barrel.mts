@@ -176,6 +176,20 @@ function orphanClasses(): string[] {
     ...scssClasses(readFileSync(join(root, 'src/app/styles/_grids.scss'), 'utf8')),
     ...scssClasses(readFileSync(join(root, 'src/app/app.scss'), 'utf8')),
   ]);
+
+  // A primitive's stylesheet also defines the classes it styles on projected
+  // content (a sortable header, a clickable row). Those are its contract with
+  // consumers, so a consumer using one is not an orphan.
+  const collectUi = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) collectUi(path);
+      else if (entry.endsWith('.scss')) {
+        scssClasses(readFileSync(path, 'utf8')).forEach((c) => globals.add(c));
+      }
+    }
+  };
+  collectUi(UI);
   const hits: string[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir)) {

@@ -30,13 +30,29 @@
 <gr-divider />
 
 <h2>Table</h2>
+<p>A sortable column is a button in the header cell; the sorted one carries
+   <code>aria-sort</code>. Rows that open something are marked
+   <code>is-clickable</code>.</p>
 <gr-table>
   <thead>
-    <tr><th>Name</th><th>Status</th><th>Updated</th></tr>
+    <tr>
+      <th>Name</th>
+      <th>Status</th>
+      <th aria-sort="descending">
+        <button class="gr-th-sort" type="button">
+          Updated
+          <gr-icon name="arrow_downward" size="sm" />
+        </button>
+      </th>
+    </tr>
   </thead>
   <tbody>
     @for (row of rows; track row.name) {
-      <tr><td>{{ row.name }}</td><td>{{ row.status }}</td><td>{{ row.updated }}</td></tr>
+      <tr class="is-clickable">
+        <td>{{ row.name }}</td>
+        <td>{{ row.status }}</td>
+        <td>{{ row.updated }}</td>
+      </tr>
     }
   </tbody>
 </gr-table>

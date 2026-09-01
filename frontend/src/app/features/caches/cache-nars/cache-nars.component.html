@@ -42,56 +42,66 @@
   } @else if (rows().length === 0) {
     <gr-empty-state icon="inbox" title="No NARs found" message="No archives match the current filters." />
   } @else {
-    <div class="nar-table">
-      <div class="nar-row nar-head">
-        <span class="col">Hash</span>
-        <span class="col">Package</span>
-        <span class="col sortable" (click)="sortBy('nar_size')">
-          NAR size
-          @if (sort() === 'nar_size') {
-            <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
-          }
-        </span>
-        <span class="col">Compressed</span>
-        <span class="col sortable" (click)="sortBy('created_at')">
-          Created
-          @if (sort() === 'created_at') {
-            <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
-          }
-        </span>
-        <span class="col sortable" (click)="sortBy('last_fetched_at')">
-          Last fetched
-          @if (sort() === 'last_fetched_at') {
-            <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
-          }
-        </span>
-        <span class="col col-actions"></span>
-      </div>
-      @for (row of rows(); track row.hash) {
-        <div class="nar-row" (click)="show(row)">
-          <code class="col mono">{{ row.hash }}</code>
-          <span class="col">{{ row.package }}</span>
-          <span class="col">{{ formatBytes(row.nar_size) }}</span>
-          <span class="col">{{ formatBytes(row.file_size) }}</span>
-          <span class="col text-secondary">{{ relativeTime(row.created_at) }}</span>
-          <span class="col text-secondary">{{ relativeTime(row.last_fetched_at) }}</span>
-          <span class="col col-actions" (click)="$event.stopPropagation()">
-            <button grButton icon="info" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
-            <button
-              *appWritable="access()"
-              grButton
-              icon="delete"
-              severity="danger"
-              [text]="true"
-              [loading]="deletingHash() === row.hash"
-              [disabled]="rowDisabled()"
-              (click)="askDelete(row)"
-              title="Delete"
-            ></button>
-          </span>
-        </div>
-      }
-    </div>
+    <gr-table>
+      <thead>
+        <tr>
+          <th>Hash</th>
+          <th>Package</th>
+          <th [attr.aria-sort]="ariaSort('nar_size')">
+            <button class="gr-th-sort" type="button" (click)="sortBy('nar_size')">
+              NAR size
+              @if (sort() === 'nar_size') {
+                <gr-icon [name]="order() === 'asc' ? 'arrow_upward' : 'arrow_downward'" size="sm" />
+              }
+            </button>
+          </th>
+          <th>Compressed</th>
+          <th [attr.aria-sort]="ariaSort('created_at')">
+            <button class="gr-th-sort" type="button" (click)="sortBy('created_at')">
+              Created
+              @if (sort() === 'created_at') {
+                <gr-icon [name]="order() === 'asc' ? 'arrow_upward' : 'arrow_downward'" size="sm" />
+              }
+            </button>
+          </th>
+          <th [attr.aria-sort]="ariaSort('last_fetched_at')">
+            <button class="gr-th-sort" type="button" (click)="sortBy('last_fetched_at')">
+              Last fetched
+              @if (sort() === 'last_fetched_at') {
+                <gr-icon [name]="order() === 'asc' ? 'arrow_upward' : 'arrow_downward'" size="sm" />
+              }
+            </button>
+          </th>
+          <th><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of rows(); track row.hash) {
+          <tr class="is-clickable" (click)="show(row)">
+            <td><code class="mono">{{ row.hash }}</code></td>
+            <td>{{ row.package }}</td>
+            <td>{{ formatBytes(row.nar_size) }}</td>
+            <td>{{ formatBytes(row.file_size) }}</td>
+            <td class="text-secondary">{{ relativeTime(row.created_at) }}</td>
+            <td class="text-secondary">{{ relativeTime(row.last_fetched_at) }}</td>
+            <td class="nar-actions" (click)="$event.stopPropagation()">
+              <button grButton icon="info" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
+              <button
+                *appWritable="access()"
+                grButton
+                icon="delete"
+                severity="danger"
+                [text]="true"
+                [loading]="deletingHash() === row.hash"
+                [disabled]="rowDisabled()"
+                (click)="askDelete(row)"
+                title="Delete"
+              ></button>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </gr-table>
 
     <div class="pagination">
       <span class="text-secondary">

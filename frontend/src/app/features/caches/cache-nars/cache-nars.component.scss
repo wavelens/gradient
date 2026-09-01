@@ -46,17 +46,7 @@
 .filter-actions {
   display: flex;
   gap: $spacing-sm;
-}
-
-.nar-table {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-md;
-  overflow: hidden;
-}
-
-.nar-row {
+}.nar-row {
   display: grid;
   grid-template-columns: 220px 1fr 110px 110px 160px 160px 100px;
   gap: $spacing-md;
@@ -78,31 +68,8 @@
     letter-spacing: 0.04em;
     color: var(--gr-text-secondary);
     font-weight: 600;
-
-    .sortable {
-      cursor: pointer;
-      user-select: none;
-      display: inline-flex;
-      align-items: center;
-      gap: $spacing-xs;
-
-      &:hover { color: var(--gr-text-primary); }
-
-      .pi { font-size: $font-size-xs; }
-    }
   }
-}
-
-.col {
-  font-size: $font-size-sm;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-
-  &.mono { font-family: $font-family-mono; font-size: $font-size-xs; }
-}
-
-.col-actions {
+}.col-actions {
   display: flex;
   justify-content: flex-end;
   gap: $spacing-xs;
@@ -132,4 +99,11 @@
   color: var(--gr-status-danger);
   font-size: $font-size-sm;
   margin-bottom: $spacing-md;
+}
+
+.nar-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: $spacing-xs;
+  white-space: nowrap;
 }

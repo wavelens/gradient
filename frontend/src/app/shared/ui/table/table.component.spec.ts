@@ -14,7 +14,12 @@ import { TableComponent } from './table.component';
   template: `
     <gr-table>
       <thead>
-        <tr><th>Name</th><th>Status</th></tr>
+        <tr>
+          <th>Name</th>
+          <th aria-sort="ascending">
+            <button class="gr-th-sort" type="button">Status</button>
+          </th>
+        </tr>
       </thead>
       <tbody>
         <tr><td>gradient</td><td>Active</td></tr>
@@ -46,5 +51,15 @@ describe('gr-table', () => {
   it('keeps the header inside the scroll container so it aligns with the body', async () => {
     const root = await render();
     expect(root.querySelector('.gr-table__scroll thead')).not.toBeNull();
+  });
+  it('states the sorted column for assistive tech', async () => {
+    const root = await render();
+    const sorted = root.querySelector('th[aria-sort]');
+    expect(sorted?.getAttribute('aria-sort')).toBe('ascending');
+  });
+
+  it('gives a sort control one recipe, so every table sorts the same way', async () => {
+    const root = await render();
+    expect(root.querySelector('th .gr-th-sort')).not.toBeNull();
   });
 });

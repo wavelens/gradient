@@ -24,6 +24,7 @@ import {
   LoadingSpinnerComponent,
   PageLayoutComponent,
   StatCardComponent,
+  TableComponent,
 } from '@shared/ui';
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
@@ -51,6 +52,7 @@ type SortOrder = 'asc' | 'desc';
     EmptyStateComponent,
     StatCardComponent,
     CardGridComponent,
+    TableComponent,
   ],
   templateUrl: './cache-nars.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -170,6 +172,12 @@ export class CacheNarsComponent implements OnInit {
       queryParams: { page: target },
       queryParamsHandling: 'merge',
     });
+  }
+
+  /// `aria-sort` belongs on the header cell, and only on the sorted one.
+  ariaSort(key: SortKey): 'ascending' | 'descending' | null {
+    if (this.sort() !== key) return null;
+    return this.order() === 'asc' ? 'ascending' : 'descending';
   }
 
   sortBy(key: SortKey): void {
