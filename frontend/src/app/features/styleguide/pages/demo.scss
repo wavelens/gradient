@@ -18,6 +18,10 @@
   vertical-align: middle;
 }
 
+h2 {
+  margin-top: $spacing-xxl;
+}
+
 h2 + p,
 h2 + gr-badge,
 h2 + gr-icon,
