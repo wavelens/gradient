@@ -17,7 +17,6 @@ export * from './divider/divider.component';
 export * from './empty-state/empty-state.component';
 export * from './eval-status-badge/eval-status-badge.component';
 export * from './form-dialog/form-dialog.component';
-export * from './form-error/form-error.component';
 export * from './form-field/form-field.component';
 export * from './form-fields-builder';
 export * from './icon/icon.component';
