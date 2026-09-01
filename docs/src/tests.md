@@ -7343,8 +7343,22 @@ request that died on the 60s read timeout had already spent the budget and was
 never retried. The budget is now 250s, and `exhausted` is consulted only on the
 error path, so raising it cannot interrupt a download that is still progressing.
 
+Dropping the total request timeout also removed the only bound on a *write*.
+The read timeout covers response bytes, so a peer that stops draining a request
+body wedges the upload indefinitely - and an upload holds one of the two
+per-connection NAR-commit permits while it runs, so two of them stall every NAR
+commit on that worker. Every object write is now bounded: the multipart path per
+part, and single-shot writes (NAR objects, eval-cache blobs, build logs and log
+chunks) by a budget that grows with the payload, so the bound is a floor on
+throughput rather than a cap on object size.
+
 `backend/gradient-storage/src/nar.rs`:
 - `retry_budget_outlasts_every_attempt_it_should_cover` - the shipped
   `S3Timeouts` defaults satisfy `retry_timeout > (max_retries + 1) *
   read_timeout` and stay under the 5-minute credential-validity ceiling, so a
   future tweak to any one of the three cannot silently disable retries again.
+- `single_write_budget_scales_with_the_payload` - a `.drv`-sized payload gets the
+  flat stall floor, a 256 MiB blob gets far more, and the budget is monotonic in
+  size, so no object is ever refused time for being large.
+- `bounded_reports_the_operation_that_ran_out_of_time` - a future that never
+  resolves fails with the operation named, rather than hanging its caller.

@@ -351,9 +351,14 @@ impl LogStorage for S3LogStorage {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
                 Err(e) => return Err(e.into()),
             };
-            self.object_store
-                .put(&self.object_path(attempt_id), PutPayload::from(data))
-                .await?;
+            let budget = crate::nar::single_write_budget(data.len());
+            crate::nar::bounded(
+                self.object_store
+                    .put(&self.object_path(attempt_id), PutPayload::from(data)),
+                budget,
+                "upload build log",
+            )
+            .await?;
             // Local copy is kept as a read cache; the existing GC paths remove it
             // through `LogStorage::delete` when the evaluation is GC'd.
             Ok(())
@@ -415,12 +420,16 @@ impl LogStorage for S3LogStorage {
         // backend never accumulates finalized build logs locally. Reads fetch
         // them back from S3.
         Box::pin(async move {
-            self.object_store
-                .put(
+            let budget = crate::nar::single_write_budget(bytes.len());
+            crate::nar::bounded(
+                self.object_store.put(
                     &self.chunk_object_path(attempt_id, index),
                     PutPayload::from(bytes.to_vec()),
-                )
-                .await?;
+                ),
+                budget,
+                "upload build-log chunk",
+            )
+            .await?;
             Ok(())
         })
     }

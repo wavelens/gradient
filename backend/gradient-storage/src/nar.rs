@@ -38,10 +38,9 @@ impl Default for S3Timeouts {
 }
 
 /// How long a multipart part upload may make no progress before the write is
-/// abandoned. The client has no total request timeout (see [`NarStore::s3`]) and
-/// its read timeout only covers *response* bytes, so a peer that stops draining
-/// the request body would otherwise wedge the upload forever - and an upload
-/// holds one of the few per-connection NAR-commit permits while it runs.
+/// abandoned, and the fixed floor under [`single_write_budget`]. An upload holds
+/// one of the few per-connection NAR-commit permits while it runs, so a wedged
+/// one takes the whole connection's commit path down with it.
 const WRITE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Unified NAR file storage abstraction over local disk or an S3-compatible backend.
@@ -60,17 +59,37 @@ pub struct NarStore {
     s3_signer: Option<Arc<object_store::aws::AmazonS3>>,
 }
 
-/// Await `op`, failing it once [`WRITE_STALL_TIMEOUT`] passes with no progress.
-async fn stall_bounded<T, E>(
+/// Slowest write we are willing to wait out. Sets how [`single_write_budget`]
+/// scales with payload size; well under any healthy link, since the budget only
+/// has to separate "slow" from "wedged forever".
+const MIN_WRITE_THROUGHPUT_BYTES_PER_SEC: u64 = 256 * 1024;
+
+/// Ceiling for one single-shot object write. A whole payload goes out as one
+/// request with no progress signal to watch, so the bound has to be a duration -
+/// but scaling it with the payload keeps it a floor on *throughput* rather than
+/// a cap on size, and a multi-hundred-MB eval-cache blob is never cut off just
+/// for being large. The multipart path bounds each part instead, so it needs no
+/// size term at all.
+pub(crate) fn single_write_budget(len: usize) -> std::time::Duration {
+    WRITE_STALL_TIMEOUT
+        + std::time::Duration::from_secs(len as u64 / MIN_WRITE_THROUGHPUT_BYTES_PER_SEC)
+}
+
+/// Await `op`, failing it once `budget` elapses. Every object write goes through
+/// here: the S3 client deliberately has no total request timeout (see
+/// [`NarStore::s3`]) and its read timeout covers only *response* bytes, so a peer
+/// that stops draining a request body would otherwise wedge the write forever.
+pub(crate) async fn bounded<T, E>(
     op: impl std::future::Future<Output = std::result::Result<T, E>>,
+    budget: std::time::Duration,
     what: &'static str,
 ) -> Result<T>
 where
     E: std::error::Error + Send + Sync + 'static,
 {
-    match tokio::time::timeout(WRITE_STALL_TIMEOUT, op).await {
+    match tokio::time::timeout(budget, op).await {
         Ok(r) => r.context(what),
-        Err(_) => anyhow::bail!("{what} stalled for {}s", WRITE_STALL_TIMEOUT.as_secs()),
+        Err(_) => anyhow::bail!("{what} made no progress within {}s", budget.as_secs()),
     }
 }
 
@@ -194,10 +213,13 @@ impl NarStore {
     }
 
     async fn put_object(&self, path: Path, data: Vec<u8>) -> Result<()> {
-        self.inner
-            .put(&path, PutPayload::from(data))
-            .await
-            .context("Failed to upload object")?;
+        let budget = single_write_budget(data.len());
+        bounded(
+            self.inner.put(&path, PutPayload::from(data)),
+            budget,
+            "Failed to upload object",
+        )
+        .await?;
         Ok(())
     }
 
@@ -398,13 +420,19 @@ impl NarStore {
                 break;
             }
             upload.write(&buf[..n]);
-            stall_bounded(
+            bounded(
                 upload.wait_for_capacity(MAX_INFLIGHT_PARTS),
+                WRITE_STALL_TIMEOUT,
                 "multipart upload backpressure",
             )
             .await?;
         }
-        stall_bounded(upload.finish(), "finish multipart NAR upload").await?;
+        bounded(
+            upload.finish(),
+            WRITE_STALL_TIMEOUT,
+            "finish multipart NAR upload",
+        )
+        .await?;
         Ok(())
     }
 
@@ -837,6 +865,36 @@ mod tests {
         let (size, mut stream) = store.get_stream_from("jkl012", 99).await.unwrap().unwrap();
         assert_eq!(size, 3);
         assert!(stream.next().await.is_none());
+    }
+
+    /// The single-shot write budget is a throughput floor, not a size cap: it
+    /// must grow with the payload so a large eval-cache blob is never cut off
+    /// for being big, and never drop below the fixed stall budget.
+    #[test]
+    fn single_write_budget_scales_with_the_payload() {
+        assert_eq!(single_write_budget(0), WRITE_STALL_TIMEOUT);
+        // A `.drv` NAR is a couple of KiB - it gets the flat floor, no more.
+        assert_eq!(single_write_budget(2 * 1024), WRITE_STALL_TIMEOUT);
+        // A 256 MiB eval-cache blob must be allowed far longer than the floor.
+        let big = single_write_budget(256 * 1024 * 1024);
+        assert!(big > WRITE_STALL_TIMEOUT * 8, "big blob budget: {big:?}");
+        // Monotonic, so a larger object is never given less time than a smaller.
+        assert!(single_write_budget(16 * 1024 * 1024) > single_write_budget(1024));
+    }
+
+    #[tokio::test]
+    async fn bounded_reports_the_operation_that_ran_out_of_time() {
+        let err = bounded(
+            std::future::pending::<std::result::Result<(), std::io::Error>>(),
+            std::time::Duration::from_millis(1),
+            "wedged write",
+        )
+        .await
+        .expect_err("a future that never resolves must not hang the caller");
+        assert!(
+            format!("{err:#}").contains("wedged write"),
+            "error must name the operation: {err:#}"
+        );
     }
 
     /// A request that dies on the read timeout has already burned that long, so
