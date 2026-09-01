@@ -70,9 +70,4 @@
   width: 100%;
 
   h1 { margin-top: 0; }
-
-  // Prose gets a readable measure; tables and charts still run the full column.
-  p {
-    max-width: 68ch;
-  }
 }

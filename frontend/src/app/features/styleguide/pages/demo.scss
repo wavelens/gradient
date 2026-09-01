@@ -20,6 +20,13 @@
 
 h2 {
   margin-top: $space-section;
+  margin-bottom: $space-pair;
+}
+
+// A section's description belongs to its heading, so it sits tight beneath it
+// and pushes the demo away instead.
+h2 + p {
+  margin-bottom: $space-block;
 }
 
 h2 + p,

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, inject, signal, effect, ChangeDetectionStrategy } from '@angular/core';
+import { Component, DestroyRef, inject, signal, effect, ChangeDetectionStrategy } from '@angular/core';
 import { SEMANTIC_ROLES } from '../../../styles/tokens';
 import { ThemeService } from '@core/services/theme.service';
 import { TableComponent } from '@shared/ui';
@@ -33,10 +33,20 @@ export class FoundationsComponent {
   constructor() {
     effect(() => {
       this.theme.resolved();
-      const style = getComputedStyle(document.documentElement);
-      const map: Record<string, string> = {};
-      for (const role of SEMANTIC_ROLES) map[role.name] = style.getPropertyValue(role.name).trim();
-      this.resolved.set(map);
+      this.read();
     });
+
+    // The swatches follow the theme through CSS whatever changes it; the printed
+    // values must too, or this table quietly contradicts its own claim.
+    const observer = new MutationObserver(() => this.read());
+    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] });
+    inject(DestroyRef).onDestroy(() => observer.disconnect());
+  }
+
+  private read(): void {
+    const style = getComputedStyle(document.documentElement);
+    const map: Record<string, string> = {};
+    for (const role of SEMANTIC_ROLES) map[role.name] = style.getPropertyValue(role.name).trim();
+    this.resolved.set(map);
   }
 }

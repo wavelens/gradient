@@ -25,7 +25,7 @@ app-root > *:not(app-header):not(app-footer):not(router-outlet) {
 // UA heading margins are em-based (0.67em, 0.83em) so they land off the scale
 // and change with font size. Replace them with scale steps.
 h1, h2, h3, h4 {
-  margin: 0 0 $spacing-md;
+  margin: 0 0 $space-pair;
   line-height: $line-height-tight;
 }
 
@@ -238,6 +238,12 @@ textarea:disabled {
 // reach them from its own stylesheet.
 .form-field.has-error :is(.gr-input, .gr-select__trigger, .password-input__field) {
   border-color: var(--gr-status-danger);
+}
+
+// Routed children carry their own encapsulation, so a measure set on the shell
+// never reaches them. Prose is capped globally; tables and charts stay full width.
+.sg-content :is(p, li) {
+  max-width: 68ch;
 }
 
 [grDialogFooter] {
