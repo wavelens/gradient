@@ -25,9 +25,27 @@
 .metric-chart__plot {
   width: 100%;
 }
+.metric-chart__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: $spacing-md;
+  margin-bottom: $space-pair;
+}
+
+.metric-chart__actions:empty {
+  display: none;
+}
+
 h3 {
   color: var(--gr-text-primary);
   font-size: $font-size-sm;
-  margin: 0 0 $space-pair;
+  margin: 0;
+}
+
+.metric-chart__subtitle {
+  margin: 2px 0 0;
+  color: var(--gr-text-muted);
+  font-size: $font-size-xs;
 }
     

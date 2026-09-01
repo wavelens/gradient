@@ -7491,3 +7491,26 @@ Appearance section, which is the only thing that ever calls `ThemeService.set`:
 `names the group so a screen reader can announce it` - a `role=radiogroup` gets
 no name from a projected `gr-form-field` label, so the group carries its own
 `ariaLabel`.
+
+## A worker's metrics page names the worker
+
+`backend/gradient-web/src/endpoints/projects/workers.rs`: the metrics response
+carried no identity at all, so the page could only echo the id from its own URL.
+- `a_registration_names_the_worker_over_a_base_of_the_same_id` - the project's
+  own registration shadows a base worker of the same `worker_id`, the same rule
+  the worker list applies.
+- `a_base_worker_names_itself_when_the_project_has_no_registration` - a shared
+  base worker is named without a per-project row existing.
+- `an_unnamed_worker_resolves_to_nothing_rather_than_an_id` - resolution returns
+  `None` rather than substituting the id, leaving that fallback to the caller.
+
+`frontend/src/app/features/projects/workers/worker-metrics/worker-metrics.component.spec.ts`:
+- `names the worker rather than repeating its id` - the reported defect.
+- `keeps the id visible, since jobs and samples are recorded against it` - the
+  name replaces the id in the heading but not on the page; correlating a sample
+  row or a dispatched job still needs it.
+- `falls back to the id when nothing names the worker any more` - samples and
+  connection history outlive the registration that produced them, so a page for
+  a deregistered worker still has to render.
+- `walks back through breadcrumbs rather than a lone back arrow` - the trail is
+  project / Workers / worker, which the bespoke back link could not express.

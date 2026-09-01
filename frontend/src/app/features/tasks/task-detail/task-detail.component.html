@@ -59,7 +59,6 @@
       @if (proj.last_check_at) {
         <span class="chip">checked {{ proj.last_check_at + 'Z' | date: 'MMM d, HH:mm' }}</span>
       }
-      <span class="chip">created {{ proj.created_at + 'Z' | date: 'MMM d, y' }}</span>
       @if (proj.queue.building + proj.queue.queued > 0) {
         <span class="chip queue">{{ proj.queue.building }} building · {{ proj.queue.queued }} queued</span>
       }

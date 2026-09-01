@@ -36,27 +36,26 @@
         <gr-stat-card label="Compressed stored" [value]="formatBytes(stats()?.total_bytes ?? 0)" />
       </gr-card-grid>
 
-      <div class="chart-card">
+      <gr-metric-chart title="Storage over time"
+        type="area"
+        [height]="220"
+        [series]="storageSeries()"
+        [categories]="storageCategories()"
+        [colors]="storageColors"
+        [valueFormatter]="formatSize"
+        [secondary]="storageSecondary"
+        yAxisTitle="Bytes"
+      >
         <gr-tab-switch
+          slot="actions"
           ariaLabel="Time window"
           [options]="windows"
           optionLabel="label"
           optionValue="key"
           [ngModel]="activeWindow()"
           (ngModelChange)="setWindow($event)"
-        />
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="220"
-          [series]="storageSeries()"
-          [categories]="storageCategories()"
-          [colors]="storageColors"
-          [valueFormatter]="formatSize"
-          [secondary]="storageSecondary"
-          yAxisTitle="Bytes"
-        />
-      </div>
+          />
+      </gr-metric-chart>
     }
   </div>
 
@@ -71,27 +70,26 @@
         <gr-stat-card label="Traffic (last hour)" [value]="formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0)" />
       </gr-card-grid>
 
-      <div class="chart-card">
+      <gr-metric-chart title="Traffic over time"
+        type="area"
+        [height]="220"
+        [series]="trafficSeries()"
+        [categories]="trafficCategories()"
+        [colors]="trafficColors"
+        [valueFormatter]="formatSize"
+        [secondary]="trafficSecondary"
+        yAxisTitle="Bytes"
+      >
         <gr-tab-switch
+          slot="actions"
           ariaLabel="Time window"
           [options]="windows"
           optionLabel="label"
           optionValue="key"
           [ngModel]="activeWindow()"
           (ngModelChange)="setWindow($event)"
-        />
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="220"
-          [series]="trafficSeries()"
-          [categories]="trafficCategories()"
-          [colors]="trafficColors"
-          [valueFormatter]="formatSize"
-          [secondary]="trafficSecondary"
-          yAxisTitle="Bytes"
-        />
-      </div>
+          />
+      </gr-metric-chart>
     }
   </div>
 

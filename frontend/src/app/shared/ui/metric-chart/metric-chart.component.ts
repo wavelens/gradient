@@ -54,7 +54,17 @@ echarts.use([
   template: `
     <div class="metric-chart" [class.metric-chart--bare]="bare()">
       @if (title() && !bare()) {
-        <h3>{{ title() }}</h3>
+        <header class="metric-chart__header">
+          <div>
+            <h3>{{ title() }}</h3>
+            @if (subtitle()) {
+              <p class="metric-chart__subtitle">{{ subtitle() }}</p>
+            }
+          </div>
+          <div class="metric-chart__actions">
+            <ng-content select="[slot=actions]"></ng-content>
+          </div>
+        </header>
       }
       <div #host class="metric-chart__plot" [style.height.px]="height()"></div>
     </div>
@@ -64,6 +74,7 @@ echarts.use([
 })
 export class MetricChartComponent implements OnDestroy {
   title = input('');
+  subtitle = input('');
   type = input<MetricChartType>('area');
   height = input(260, { transform: numberAttribute });
   horizontal = input(false, { transform: booleanAttribute });

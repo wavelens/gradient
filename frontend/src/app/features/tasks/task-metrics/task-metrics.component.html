@@ -12,87 +12,63 @@
   } @else {
     <div class="charts-grid">
 
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">Total Build Time</span>
-          <span class="chart-sub">Sum of all completed build durations</span>
-        </div>
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="200"
-          [series]="buildTimeSeries()"
-          [categories]="labels()"
-          [colors]="buildTimeColor"
-          [valueFormatter]="formatSeconds"
-          yAxisTitle="seconds"
-        />
-      </div>
+      <gr-metric-chart
+        title="Total Build Time"
+        subtitle="Sum of all completed build durations"
+        type="area"
+        [height]="200"
+        [series]="buildTimeSeries()"
+        [categories]="labels()"
+        [colors]="buildTimeColor"
+        [valueFormatter]="formatSeconds"
+        yAxisTitle="seconds"
+      />
 
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">Evaluation Time</span>
-          <span class="chart-sub">Wall-clock time from start to finish</span>
-        </div>
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="200"
-          [series]="evalTimeSeries()"
-          [categories]="labels()"
-          [colors]="evalTimeColor"
-          [valueFormatter]="formatSeconds"
-          yAxisTitle="seconds"
-        />
-      </div>
+      <gr-metric-chart
+        title="Evaluation Time"
+        subtitle="Wall-clock time from start to finish"
+        type="area"
+        [height]="200"
+        [series]="evalTimeSeries()"
+        [categories]="labels()"
+        [colors]="evalTimeColor"
+        [valueFormatter]="formatSeconds"
+        yAxisTitle="seconds"
+      />
 
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">Output Size</span>
-          <span class="chart-sub">Entry-point packages only, excluding dependencies</span>
-        </div>
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="200"
-          [series]="outputSizeSeries()"
-          [categories]="labels()"
-          [colors]="outputSizeColor"
-          [valueFormatter]="formatSize"
-        />
-      </div>
+      <gr-metric-chart
+        title="Output Size"
+        subtitle="Entry-point packages only, excluding dependencies"
+        type="area"
+        [height]="200"
+        [series]="outputSizeSeries()"
+        [categories]="labels()"
+        [colors]="outputSizeColor"
+        [valueFormatter]="formatSize"
+      />
 
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">Closure Size</span>
-          <span class="chart-sub">All packages including transitive dependencies</span>
-        </div>
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="200"
-          [series]="closureSizeSeries()"
-          [categories]="labels()"
-          [colors]="closureSizeColors"
-          [valueFormatter]="formatSize"
-        />
-      </div>
+      <gr-metric-chart
+        title="Closure Size"
+        subtitle="All packages including transitive dependencies"
+        type="area"
+        [height]="200"
+        [series]="closureSizeSeries()"
+        [categories]="labels()"
+        [colors]="closureSizeColors"
+        [valueFormatter]="formatSize"
+      />
 
-      <div class="chart-card chart-card--full">
-        <div class="chart-header">
-          <span class="chart-title">Dependencies Count</span>
-          <span class="chart-sub">Number of dependency builds (excluding entry points)</span>
-        </div>
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="200"
-          [series]="depsSeries()"
-          [categories]="labels()"
-          [colors]="depsColor"
-          [valueFormatter]="formatDeps"
-        />
-      </div>
+      <gr-metric-chart
+        class="chart--full"
+        title="Dependencies Count"
+        subtitle="Number of dependency builds (excluding entry points)"
+        type="area"
+        [height]="200"
+        [series]="depsSeries()"
+        [categories]="labels()"
+        [colors]="depsColor"
+        [valueFormatter]="formatDeps"
+      />
 
     </div>
   }

@@ -68,4 +68,46 @@ describe('MetricChartComponent', () => {
     fixture.destroy();
     expect(fixture.nativeElement.querySelector('.metric-chart__plot svg')).toBeNull();
   });
+  it('renders a subtitle under the title', async () => {
+    const fixture = TestBed.createComponent(MetricChartComponent);
+    fixture.componentRef.setInput('title', 'Total Build Time');
+    fixture.componentRef.setInput('subtitle', 'Sum of all completed build durations');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('h3')?.textContent).toContain('Total Build Time');
+    expect(root.querySelector('.metric-chart__subtitle')?.textContent).toContain('Sum of all');
+  });
+
+  it('drops the header entirely when bare', async () => {
+    const fixture = TestBed.createComponent(MetricChartComponent);
+    fixture.componentRef.setInput('title', 'Total');
+    fixture.componentRef.setInput('subtitle', 'Sum');
+    fixture.componentRef.setInput('bare', true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('h3')).toBeNull();
+    expect(root.querySelector('.metric-chart__subtitle')).toBeNull();
+  });
+  it('projects a control into the chart header', async () => {
+    TestBed.configureTestingModule({ imports: [ActionHost] });
+    const fixture = TestBed.createComponent(ActionHost);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.metric-chart__actions button')?.textContent).toContain('Hours');
+  });
 });
+
+@Component({
+  standalone: true,
+  imports: [MetricChartComponent],
+  template: `
+    <gr-metric-chart title="Storage">
+      <button slot="actions">Hours</button>
+    </gr-metric-chart>
+  `,
+})
+class ActionHost {}
+

@@ -34,70 +34,54 @@
     </div>
 
     <div class="charts-grid">
-      <div class="chart-card chart-card--full">
-        <div class="chart-header">
-          <span class="chart-title">Build Time</span>
-          <span class="chart-sub">Time to build this package per evaluation</span>
-        </div>
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="200"
-          [series]="buildTimeSeries()"
-          [categories]="labels()"
-          [colors]="buildTimeColor"
-          [valueFormatter]="formatSeconds"
-          yAxisTitle="seconds"
-        />
-      </div>
+      <gr-metric-chart
+        class="chart--full"
+        title="Build Time"
+        subtitle="Time to build this package per evaluation"
+        type="area"
+        [height]="200"
+        [series]="buildTimeSeries()"
+        [categories]="labels()"
+        [colors]="buildTimeColor"
+        [valueFormatter]="formatSeconds"
+        yAxisTitle="seconds"
+      />
 
-      <div class="chart-card chart-card--full">
-        <div class="chart-header">
-          <span class="chart-title">Output Size</span>
-          <span class="chart-sub">Size of this package's build output per evaluation</span>
-        </div>
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="200"
-          [series]="outputSizeSeries()"
-          [categories]="labels()"
-          [colors]="outputSizeColor"
-          [valueFormatter]="formatSize"
-        />
-      </div>
+      <gr-metric-chart
+        class="chart--full"
+        title="Output Size"
+        subtitle="Size of this package's build output per evaluation"
+        type="area"
+        [height]="200"
+        [series]="outputSizeSeries()"
+        [categories]="labels()"
+        [colors]="outputSizeColor"
+        [valueFormatter]="formatSize"
+      />
 
-      <div class="chart-card chart-card--full">
-        <div class="chart-header">
-          <span class="chart-title">Closure Size</span>
-          <span class="chart-sub">Size including all transitive dependencies</span>
-        </div>
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="200"
-          [series]="closureSizeSeries()"
-          [categories]="labels()"
-          [colors]="closureSizeColors"
-          [valueFormatter]="formatSize"
-        />
-      </div>
+      <gr-metric-chart
+        class="chart--full"
+        title="Closure Size"
+        subtitle="Size including all transitive dependencies"
+        type="area"
+        [height]="200"
+        [series]="closureSizeSeries()"
+        [categories]="labels()"
+        [colors]="closureSizeColors"
+        [valueFormatter]="formatSize"
+      />
 
-      <div class="chart-card chart-card--full">
-        <div class="chart-header">
-          <span class="chart-title">Dependencies Count</span>
-          <span class="chart-sub">Number of transitive dependency builds</span>
-        </div>
-        <gr-metric-chart
-          bare
-          type="area"
-          [height]="200"
-          [series]="depsSeries()"
-          [categories]="labels()"
-          [colors]="depsColor"
-          [valueFormatter]="formatDeps"
-        />
-      </div>
+      <gr-metric-chart
+        class="chart--full"
+        title="Dependencies Count"
+        subtitle="Number of transitive dependency builds"
+        type="area"
+        [height]="200"
+        [series]="depsSeries()"
+        [categories]="labels()"
+        [colors]="depsColor"
+        [valueFormatter]="formatDeps"
+      />
     </div>
   }
 </gr-page-layout>

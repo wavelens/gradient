@@ -41,7 +41,6 @@
                   grButton
                   icon="close"
                   severity="danger"
-                  size="small"
                   [loading]="removingMember() === member.id"
                   [disabled]="removingMember() !== null || updatingRole() !== null"
                   [appManagedDisable]="access()"
@@ -90,7 +89,7 @@
                     grButton
                     icon="edit"
                     severity="secondary"
-                    size="small"
+                   
                     [disabled]="savingRole() || deletingRole() !== null"
                     [appManagedDisable]="access()"
                     (click)="openEditRoleDialog(role)"
@@ -100,7 +99,7 @@
                     grButton
                     icon="delete"
                     severity="danger"
-                    size="small"
+                   
                     [loading]="deletingRole() === role.id"
                     [disabled]="deletingRole() !== null"
                     [appManagedDisable]="access()"

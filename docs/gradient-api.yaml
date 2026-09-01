@@ -6849,6 +6849,34 @@ paths:
       responses:
         '200':
           description: Worker statistics
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          worker_id:
+                            type: string
+                            description: The worker's own id, as used on every sample and job row.
+                          display_name:
+                            type: string
+                            nullable: true
+                            description: >-
+                              Human-readable name, taken from this project's registration
+                              or, failing that, from a base worker of the same id. Null once
+                              neither exists, since the history outlives the worker.
+                          samples:
+                            type: array
+                            items: { type: object }
+                          connections:
+                            type: array
+                            items: { type: object }
+                          jobs_dispatched:
+                            type: integer
         '404':
           description: Project or worker not found
 
