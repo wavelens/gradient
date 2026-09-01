@@ -20,11 +20,11 @@
   gap: $spacing-xs;
   margin-bottom: $spacing-sm;
   font-size: $font-size-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 
-  .breadcrumb-link { color: $text-secondary; &:hover { color: $text-primary; } }
-  .breadcrumb-separator { color: $text-light; }
-  .breadcrumb-current { color: $text-primary; }
+  .breadcrumb-link { color: var(--gr-text-secondary); &:hover { color: var(--gr-text-primary); } }
+  .breadcrumb-separator { color: var(--gr-text-muted); }
+  .breadcrumb-current { color: var(--gr-text-primary); }
 }
 
 .empty-state {
@@ -34,11 +34,11 @@
   justify-content: center;
   padding: $spacing-xxl;
   text-align: center;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 
-  .material-symbols-outlined { font-size: 48px; color: $text-secondary; margin-bottom: $spacing-md; }
+  gr-icon { color: var(--gr-text-secondary); margin-bottom: $spacing-md; }
   h3 { margin: 0 0 $spacing-sm 0; }
   p { margin: 0 0 $spacing-lg 0; }
 }
@@ -51,8 +51,8 @@
 
 .action-row {
   padding: $spacing-md $spacing-lg;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 }
 
@@ -69,14 +69,14 @@
   gap: $spacing-md;
 
   .type-icon {
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     font-size: 20px;
     margin-top: 2px;
   }
 
   .action-name {
     font-weight: 500;
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
 
   .action-meta {
@@ -99,7 +99,7 @@
     display: inline-block;
     padding: 2px 6px;
     background: color-mix(in srgb, var(--gr-status-info) 10%, transparent);
-    color: $color-info;
+    color: var(--gr-status-info);
     border-radius: $border-radius-sm;
     font-size: $font-size-xs;
     font-family: monospace;
@@ -123,15 +123,15 @@
 
   &.badge-send_mail {
     background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
-    color: $color-info;
+    color: var(--gr-status-info);
   }
   &.badge-send_web_request {
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: $color-success;
+    color: var(--gr-status-success);
   }
   &.badge-forge_status_report {
     background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: $color-warning;
+    color: var(--gr-status-warning);
   }
 }
 
@@ -144,11 +144,11 @@
 
   &.status-ok {
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: $color-success;
+    color: var(--gr-status-success);
   }
   &.status-warn {
     background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: $color-warning;
+    color: var(--gr-status-warning);
   }
 }
 
@@ -156,20 +156,18 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: $color-success;
+  color: var(--gr-status-success);
   font-size: $font-size-sm;
 
-  .material-symbols-outlined { font-size: 16px; }
 }
 
 .fire-fail {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: $color-danger;
+  color: var(--gr-status-danger);
   font-size: $font-size-sm;
 
-  .material-symbols-outlined { font-size: 16px; }
 }
 
 .dialog-error {
@@ -180,15 +178,14 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $color-danger;
+  color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-  .material-symbols-outlined { font-size: 20px; }
 }
 
 .token-reveal {
-  background: $color-secondary;
-  border: 1px solid $color-border;
+  background: var(--gr-text-secondary);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
   padding: $spacing-sm $spacing-md;
   font-family: monospace;

@@ -23,8 +23,7 @@ import { Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
 import { EvaluationsService, BuildGraph } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
-import { ButtonComponent } from '@shared/ui';
+import { ButtonComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
 
 const CARD_W = 200;
 const CARD_H = 78;
@@ -50,7 +49,7 @@ interface LayoutEdge {
 @Component({
   selector: 'app-dependency-graph',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent],
   templateUrl: './dependency-graph.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './dependency-graph.component.scss',

@@ -11,7 +11,7 @@
 
   h1 {
     font-size: $font-size-xxl;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-sm 0;
   }
 
@@ -40,18 +40,18 @@
 
   h2 {
     font-size: $font-size-xl;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0;
   }
 
   .view-all {
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     font-size: $font-size-sm;
     padding: $spacing-sm $spacing-md;
     transition: $transition-fast;
 
     &:hover {
-      color: $text-primary;
+      color: var(--gr-text-primary);
     }
   }
 }
@@ -63,8 +63,8 @@
 }
 
 .card {
-  background-color: $color-tertiary;
-  border: 1px solid $color-border;
+  background-color: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-lg;
   display: flex;
@@ -74,7 +74,7 @@
   cursor: pointer;
 
   &:hover {
-    border-color: $text-secondary;
+    border-color: var(--gr-text-secondary);
     transform: translateX(4px);
 
     .card-arrow {
@@ -84,7 +84,7 @@
 }
 
 .card-icon {
-  background-color: $color-quaternary;
+  background-color: var(--gr-surface-sunken);
   border-radius: $border-radius-md;
   width: 48px;
   height: 48px;
@@ -93,9 +93,8 @@
   justify-content: center;
   flex-shrink: 0;
 
-  .material-symbols-outlined {
-    font-size: 24px;
-    color: $text-primary;
+  gr-icon {
+    color: var(--gr-text-primary);
   }
 }
 
@@ -105,7 +104,7 @@
 
   h3 {
     font-size: $font-size-lg;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-xs 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -123,11 +122,11 @@
   .badge {
     display: inline-block;
     padding: $spacing-xs $spacing-sm;
-    background-color: $color-quaternary;
-    border: 1px solid $color-border;
+    background-color: var(--gr-surface-sunken);
+    border: 1px solid var(--gr-border);
     border-radius: $border-radius-sm;
     font-size: $font-size-xs;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     text-transform: uppercase;
   }
 
@@ -141,26 +140,23 @@
   .status-badge {
     padding: $spacing-xs $spacing-sm;
     background-color: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-    border: 1px solid $color-danger;
+    border: 1px solid var(--gr-status-danger);
     border-radius: $border-radius-sm;
-    color: $color-danger;
+    color: var(--gr-status-danger);
     font-weight: 500;
     text-transform: uppercase;
 
     &.active {
       background-color: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
-      border-color: $color-success;
-      color: $color-success;
+      border-color: var(--gr-status-success);
+      color: var(--gr-status-success);
     }
   }
 }
 
 .card-arrow {
   flex-shrink: 0;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   transition: $transition-base;
 
-  .material-symbols-outlined {
-    font-size: 20px;
-  }
 }

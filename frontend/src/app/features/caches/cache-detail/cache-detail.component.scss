@@ -20,26 +20,26 @@
     font-size: $font-size-sm;
 
     .breadcrumb-link {
-      color: $text-secondary;
+      color: var(--gr-text-secondary);
       text-decoration: none;
 
       &:hover {
-        color: $text-primary;
+        color: var(--gr-text-primary);
       }
     }
 
     .breadcrumb-separator {
-      color: $text-light;
+      color: var(--gr-text-muted);
     }
 
     .breadcrumb-current {
-      color: $text-primary;
+      color: var(--gr-text-primary);
     }
   }
 
   h1 {
     font-size: $font-size-xxl;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-sm 0;
   }
 
@@ -63,30 +63,27 @@
       font-weight: 500;
       text-transform: uppercase;
 
-      .material-symbols-outlined {
-        font-size: 16px;
-      }
     }
 
     .status-badge {
       &.active {
         background-color: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
-        border: 1px solid $color-success;
-        color: $color-success;
+        border: 1px solid var(--gr-status-success);
+        color: var(--gr-status-success);
       }
 
       &.inactive {
         background-color: color-mix(in srgb, var(--gr-border) 10%, transparent);
-        border: 1px solid $color-border;
-        color: $text-light;
+        border: 1px solid var(--gr-border);
+        color: var(--gr-text-muted);
       }
 
     }
 
     .priority-badge {
       background-color: color-mix(in srgb, var(--gr-status-info) 10%, transparent);
-      border: 1px solid $color-info;
-      color: $color-info;
+      border: 1px solid var(--gr-status-info);
+      color: var(--gr-status-info);
     }
   }
 
@@ -109,22 +106,19 @@
 }
 
 .detail-card {
-  background-color: $color-tertiary;
-  border: 1px solid $color-border;
+  background-color: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-lg;
 
   h3 {
     font-size: $font-size-lg;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-md 0;
     display: flex;
     align-items: center;
     gap: $spacing-xs;
 
-    .material-symbols-outlined {
-      font-size: 20px;
-    }
   }
 
   .detail-row {
@@ -138,12 +132,12 @@
     }
 
     .detail-label {
-      color: $text-secondary;
+      color: var(--gr-text-secondary);
       font-size: $font-size-sm;
     }
 
     .detail-value {
-      color: $text-primary;
+      color: var(--gr-text-primary);
       font-size: $font-size-sm;
       display: flex;
       align-items: center;
@@ -153,17 +147,17 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background-color: $color-border;
+        background-color: var(--gr-border);
 
         &.active {
-          background-color: $color-success;
+          background-color: var(--gr-status-success);
         }
       }
     }
   }
 
   .description-text {
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     font-size: $font-size-sm;
     line-height: 1.6;
     margin: 0;
@@ -175,7 +169,7 @@
 
   h2 {
     font-size: $font-size-xl;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-lg 0;
   }
 }
@@ -188,8 +182,8 @@
 }
 
 .stat-card {
-  background-color: $color-tertiary;
-  border: 1px solid $color-border;
+  background-color: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-md $spacing-lg;
   display: flex;
@@ -198,7 +192,7 @@
 
   .stat-label {
     font-size: $font-size-xs;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
@@ -206,13 +200,13 @@
   .stat-value {
     font-size: $font-size-xl;
     font-weight: 600;
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
 }
 
 .chart-card {
-  background-color: $color-tertiary;
-  border: 1px solid $color-border;
+  background-color: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-lg;
 }
@@ -224,35 +218,35 @@
 
   .window-tab {
     background: none;
-    border: 1px solid $color-border;
+    border: 1px solid var(--gr-border);
     border-radius: $border-radius-sm;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     cursor: pointer;
     font-size: $font-size-sm;
     padding: $spacing-xs $spacing-md;
     transition: color $transition-fast, border-color $transition-fast, background-color $transition-fast;
 
     &:hover {
-      color: $text-primary;
-      border-color: $text-secondary;
+      color: var(--gr-text-primary);
+      border-color: var(--gr-text-secondary);
     }
 
     &.active {
-      background-color: $color-info;
-      border-color: $color-info;
-      color: $text-primary;
+      background-color: var(--gr-status-info);
+      border-color: var(--gr-status-info);
+      color: var(--gr-text-primary);
     }
   }
 }
 
 .info-card {
-  background-color: $color-tertiary;
-  border: 1px solid $color-border;
+  background-color: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-lg;
 
   p {
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     font-size: $font-size-sm;
     line-height: 1.6;
     margin: 0 0 $spacing-md 0;
@@ -264,20 +258,19 @@
       margin-bottom: 0;
     }
 
-    .material-symbols-outlined {
-      font-size: 16px;
+    gr-icon {
       flex-shrink: 0;
       margin-top: 2px;
     }
   }
 
   code {
-    background-color: $color-quaternary;
+    background-color: var(--gr-surface-sunken);
     padding: 2px 6px;
     border-radius: $border-radius-sm;
     font-family: $font-family-mono;
     font-size: $font-size-sm;
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
 
   .usage-row {
@@ -289,7 +282,7 @@
       display: block;
       font-size: $font-size-sm;
       font-weight: 500;
-      color: $text-secondary;
+      color: var(--gr-text-secondary);
       margin-bottom: $spacing-xs;
     }
   }
@@ -298,8 +291,8 @@
     display: flex;
     align-items: center;
     gap: $spacing-sm;
-    background-color: $color-quaternary;
-    border: 1px solid $color-border;
+    background-color: var(--gr-surface-sunken);
+    border: 1px solid var(--gr-border);
     border-radius: $border-radius-md;
     padding: $spacing-sm $spacing-md;
     overflow-x: auto;
@@ -312,7 +305,7 @@
         margin: 0;
         font-family: $font-family-mono;
         font-size: $font-size-sm;
-        color: $text-primary;
+        color: var(--gr-text-primary);
         white-space: pre;
       }
     }
@@ -321,7 +314,7 @@
       flex: 1;
       background-color: transparent;
       padding: 0;
-      color: $text-primary;
+      color: var(--gr-text-primary);
       font-size: $font-size-sm;
       word-break: break-all;
     }
@@ -331,29 +324,28 @@
       background: none;
       border: none;
       cursor: pointer;
-      color: $text-light;
+      color: var(--gr-text-muted);
       padding: 2px;
       display: flex;
       align-items: center;
       border-radius: $border-radius-sm;
       transition: color $transition-fast;
 
-      &:hover { color: $text-primary; }
+      &:hover { color: var(--gr-text-primary); }
 
-      .material-symbols-outlined { font-size: 16px; }
     }
   }
 
   .usage-divider {
     border: none;
-    border-top: 1px solid $color-border;
+    border-top: 1px solid var(--gr-border);
     margin: $spacing-lg 0;
   }
 
   .usage-section-title {
     font-size: $font-size-md;
     font-weight: 600;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-sm 0;
   }
 
@@ -369,7 +361,7 @@
 
       &:hover {
         background: none;
-        color: $text-primary;
+        color: var(--gr-text-primary);
       }
     }
   }

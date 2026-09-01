@@ -15,9 +15,9 @@
 
 .error {
   padding: 0.75rem 1rem;
-  border: 1px solid $color-danger;
-  background: $color-tertiary;
-  color: $color-danger;
+  border: 1px solid var(--gr-status-danger);
+  background: var(--gr-surface-raised);
+  color: var(--gr-status-danger);
   border-radius: 0.5rem;
 }
 
@@ -34,9 +34,9 @@
   pre {
     margin: 0;
     overflow: auto;
-    background: $color-tertiary;
-    color: $text-primary;
-    border: 1px solid $color-border;
+    background: var(--gr-surface-raised);
+    color: var(--gr-text-primary);
+    border: 1px solid var(--gr-border);
     padding: 0.5rem;
     border-radius: 0.25rem;
   }

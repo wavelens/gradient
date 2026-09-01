@@ -16,7 +16,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { ApiService } from '@core/services/api.service';
 import { AuthService } from '@core/services/auth.service';
 import { take } from 'rxjs';
-import { ButtonComponent } from '@shared/ui';
+import { ButtonComponent, IconComponent } from '@shared/ui';
 
 interface CliDeviceInfo {
   user_code: string;
@@ -28,7 +28,7 @@ interface CliDeviceInfo {
 @Component({
   selector: 'app-cli-authorize',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ButtonComponent],
+  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, IconComponent],
   templateUrl: './cli-authorize.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cli-authorize.component.scss',

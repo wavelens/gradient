@@ -13,13 +13,9 @@ import { debounceTime, switchMap } from 'rxjs/operators';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
-import { EmptyStateComponent } from '@shared/ui';
-import { LabelHelpComponent } from '@shared/ui';
-import { EvalStatusBadgeComponent } from '@shared/ui';
+import { ButtonComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, InputDirective, LabelHelpComponent, LoadingSpinnerComponent } from '@shared/ui';
 import { slugify } from '@shared/text';
 import { Project, Task } from '@core/models';
-import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 const RESERVED_TASK_NAMES = ['build-request'];
 
@@ -38,6 +34,7 @@ const RESERVED_TASK_NAMES = ['build-request'];
     EmptyStateComponent,
     LabelHelpComponent,
     EvalStatusBadgeComponent,
+    IconComponent,
   ],
   templateUrl: './project-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

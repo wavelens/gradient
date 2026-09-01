@@ -14,7 +14,7 @@
 
     @if (errorMessage()) {
       <div class="error-message">
-        <span class="material-symbols-outlined">error</span>
+        <gr-icon name="error" />
         {{ errorMessage() }}
       </div>
     }
@@ -48,7 +48,7 @@
               autocomplete="current-password"
             />
             <button type="button" class="eye-btn" (click)="showPassword.set(!showPassword())" tabindex="-1">
-              <span class="material-symbols-outlined">{{ showPassword() ? 'visibility_off' : 'visibility' }}</span>
+              <gr-icon [name]="showPassword() ? 'visibility_off' : 'visibility'" />
             </button>
           </div>
           @if (loginForm.get('password')?.touched && loginForm.get('password')?.errors) {

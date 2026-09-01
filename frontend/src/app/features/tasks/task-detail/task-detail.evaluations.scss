@@ -17,7 +17,7 @@
 .mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
 
 .pp-head { display: flex; justify-content: space-between; align-items: center; padding-top: 26px; margin-bottom: 18px; }
-.breadcrumb { color: #818181; font-size: 13px; a { color: #abb0b4; text-decoration: none; &:hover { color: $text-primary; text-decoration: underline; } } }
+.breadcrumb { color: #818181; font-size: 13px; a { color: #abb0b4; text-decoration: none; &:hover { color: var(--gr-text-primary); text-decoration: underline; } } }
 h1 { font-size: $font-size-xxl; margin: 0; }
 .head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -29,7 +29,6 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   border: 1px solid rgba(255,255,255,.07); border-radius: 14px;
   padding: 3px 12px; font-size: 12.5px; color: #abb0b4;
   a { color: #abb0b4; text-decoration: none; }
-  .material-symbols-outlined { font-size: 15px; }
   &.queue { color: var(--running); border-color: color-mix(in srgb, var(--running) 32%, transparent); }
 }
 
@@ -82,7 +81,7 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 .panel-actions { display: flex; gap: 8px; align-items: center; }
 
 .bar-line { display: flex; align-items: center; gap: 16px; margin-top: 16px; color: #abb0b4; font-size: 13px; flex-wrap: wrap; b { color: #fff; } }
-.bar-line .dur { display: inline-flex; align-items: center; gap: 5px; .material-symbols-outlined { font-size: 17px; color: #818181; } }
+.bar-line .dur { display: inline-flex; align-items: center; gap: 5px; gr-icon { color: #818181; } }
 .eval-bar { width: 460px; max-width: 50vw; --segbar-h: 9px; }
 .msg-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; border: 1px solid; border-radius: 12px; padding: 1.5px 10px; text-decoration: none;
   &.warn { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 32%, transparent); }

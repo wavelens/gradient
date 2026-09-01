@@ -6,6 +6,7 @@
 
 import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { IconComponent } from '@shared/ui';
 
 interface ErrorMeta {
   title: string;
@@ -57,7 +58,7 @@ const FALLBACK_META: ErrorMeta = {
 @Component({
   selector: 'app-error-page',
   standalone: true,
-  imports: [RouterModule],
+  imports: [RouterModule, IconComponent],
   templateUrl: './error-page.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './error-page.component.scss',

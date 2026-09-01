@@ -34,7 +34,7 @@
   } @else {
     @if (upstreams().length === 0) {
       <div class="empty-state">
-        <span class="material-symbols-outlined">cloud_download</span>
+        <gr-icon name="cloud_download" size="xl" />
         <h3>No upstream caches</h3>
         <p class="text-secondary">Add an upstream to enable pull-through caching from another cache.</p>
         <button
@@ -51,7 +51,7 @@
         @for (u of upstreams(); track u.id) {
           <div class="upstream-row">
             <div class="upstream-info">
-              <span class="material-symbols-outlined">cloud_download</span>
+              <gr-icon name="cloud_download" />
               <div class="upstream-details">
                 <span class="upstream-name">{{ u.display_name }}</span>
                 <span class="upstream-target text-secondary">{{ u.url ?? u.upstream_cache_id }}</span>
@@ -95,7 +95,7 @@
 >
   @if (editError()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ editError() }}
     </div>
   }
@@ -141,7 +141,7 @@
 >
   @if (addError()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ addError() }}
     </div>
   }
@@ -210,7 +210,7 @@
         <input grInput id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" class="w-full" (blur)="probeHttpUrl()" />
         @if (probeSuggestsProto()) {
           <div class="dialog-hint">
-            <span class="material-symbols-outlined">lightbulb</span>
+            <gr-icon name="lightbulb" size="sm" />
             This looks like a Gradient cache.
             <button type="button" class="hint-link-btn" (click)="switchToGradientProto()">Switch to Gradient Proto</button>
             for native protocol pulling.

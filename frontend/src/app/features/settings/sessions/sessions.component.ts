@@ -9,13 +9,12 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { UserService } from '@core/services/user.service';
 import { Session } from '@core/models';
-import { LoadingSpinnerComponent } from '@shared/ui';
-import { ButtonComponent } from '@shared/ui';
+import { ButtonComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-sessions',
   standalone: true,
-  imports: [CommonModule, RouterModule, ButtonComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, ButtonComponent, LoadingSpinnerComponent, IconComponent],
   templateUrl: './sessions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './sessions.component.scss',

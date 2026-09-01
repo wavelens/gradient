@@ -14,7 +14,7 @@
     <gr-loading-spinner message="Loading NAR..." />
   } @else if (error()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ error() }}
     </div>
   } @else if (detail(); as d) {
@@ -70,7 +70,7 @@
       <div class="detail-row">
         <span class="detail-label">Signed</span>
         <span class="signed-badge" [class.signed]="d.signed" [class.unsigned]="!d.signed">
-          <span class="material-symbols-outlined">{{ d.signed ? 'verified' : 'gpp_maybe' }}</span>
+          <gr-icon [name]="d.signed ? 'verified' : 'gpp_maybe'" size="sm" />
           {{ d.signed ? 'Signed' : 'Unsigned' }}
         </span>
       </div>

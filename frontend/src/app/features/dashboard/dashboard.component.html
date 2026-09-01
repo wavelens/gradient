@@ -17,26 +17,26 @@
     <div class="dashboard-stats">
       <a routerLink="/projects" class="card">
         <div class="card-icon">
-          <span class="material-symbols-outlined">corporate_fare</span>
+          <gr-icon name="corporate_fare" />
         </div>
         <div class="card-content">
           <h3>{{ projects().length }}</h3>
           <p class="text-secondary">Projects</p>
         </div>
         <div class="card-arrow">
-          <span class="material-symbols-outlined">arrow_forward</span>
+          <gr-icon name="arrow_forward" />
         </div>
       </a>
       <a routerLink="/caches" class="card">
         <div class="card-icon">
-          <span class="material-symbols-outlined">inventory_2</span>
+          <gr-icon name="inventory_2" />
         </div>
         <div class="card-content">
           <h3>{{ caches().length }}</h3>
           <p class="text-secondary">Caches</p>
         </div>
         <div class="card-arrow">
-          <span class="material-symbols-outlined">arrow_forward</span>
+          <gr-icon name="arrow_forward" />
         </div>
       </a>
     </div>
@@ -53,7 +53,7 @@
           @for (project of recentProjects; track project.id) {
             <a [routerLink]="['/project', project.name]" class="card">
               <div class="card-icon">
-                <span class="material-symbols-outlined">corporate_fare</span>
+                <gr-icon name="corporate_fare" />
               </div>
               <div class="card-content">
                 <h3>{{ project.display_name || project.name }}</h3>
@@ -63,7 +63,7 @@
                 }
               </div>
               <div class="card-arrow">
-                <span class="material-symbols-outlined">arrow_forward</span>
+                <gr-icon name="arrow_forward" />
               </div>
             </a>
           }
@@ -91,7 +91,7 @@
           @for (cache of recentCaches; track cache.id) {
             <a [routerLink]="['/caches', cache.name]" class="card">
               <div class="card-icon">
-                <span class="material-symbols-outlined">inventory_2</span>
+                <gr-icon name="inventory_2" />
               </div>
               <div class="card-content">
                 <h3>{{ cache.display_name || cache.name }}</h3>
@@ -104,7 +104,7 @@
                 </div>
               </div>
               <div class="card-arrow">
-                <span class="material-symbols-outlined">arrow_forward</span>
+                <gr-icon name="arrow_forward" />
               </div>
             </a>
           }

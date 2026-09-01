@@ -16,8 +16,8 @@
 }
 
 .auth-card {
-  background-color: $color-tertiary;
-  border: 1px solid $color-border;
+  background-color: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-lg;
   padding: $spacing-xxl;
   max-width: 500px;
@@ -35,7 +35,7 @@
 
   h1 {
     font-size: $font-size-xxl;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-sm 0;
   }
 
@@ -55,21 +55,18 @@
   gap: $spacing-sm;
   font-size: $font-size-sm;
 
-  .material-symbols-outlined {
-    font-size: 20px;
-  }
 }
 
 .error-message {
   background-color: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-  border: 1px solid $color-danger;
-  color: $color-danger;
+  border: 1px solid var(--gr-status-danger);
+  color: var(--gr-status-danger);
 }
 
 .success-message {
   background-color: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
-  border: 1px solid $color-success;
-  color: $color-success;
+  border: 1px solid var(--gr-status-success);
+  color: var(--gr-status-success);
 }
 
 .auth-form {
@@ -82,7 +79,7 @@
   label {
     display: block;
     margin-bottom: $spacing-sm;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     font-size: $font-size-sm;
     font-weight: 500;
   }
@@ -90,34 +87,34 @@
   .form-input {
     width: 100%;
     padding: $spacing-md;
-    background-color: $color-quaternary;
-    border: 1px solid $color-border;
+    background-color: var(--gr-surface-sunken);
+    border: 1px solid var(--gr-border);
     border-radius: $border-radius-sm;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     font-size: $font-size-md;
     transition: $transition-fast;
 
     &:focus {
       outline: none;
-      border-color: $text-secondary;
+      border-color: var(--gr-text-secondary);
     }
 
     &::placeholder {
-      color: $text-light;
+      color: var(--gr-text-muted);
     }
   }
 
   .field-error {
     display: block;
     margin-top: $spacing-xs;
-    color: $color-danger;
+    color: var(--gr-status-danger);
     font-size: $font-size-xs;
   }
 
   .field-info {
     display: block;
     margin-top: $spacing-xs;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     font-size: $font-size-xs;
   }
 }
@@ -135,23 +132,22 @@
     background: none;
     border: none;
     cursor: pointer;
-    color: $text-light;
+    color: var(--gr-text-muted);
     padding: $spacing-xs;
     display: flex;
     align-items: center;
     border-radius: $border-radius-sm;
     transition: color $transition-fast;
 
-    &:hover { color: $text-primary; }
+    &:hover { color: var(--gr-text-primary); }
 
-    .material-symbols-outlined { font-size: 20px; }
   }
 }
 
 .password-requirements {
   margin-top: $spacing-sm;
   padding: $spacing-sm;
-  background-color: $color-quaternary;
+  background-color: var(--gr-surface-sunken);
   border-radius: $border-radius-sm;
   font-size: $font-size-xs;
 
@@ -160,18 +156,17 @@
     align-items: center;
     gap: $spacing-xs;
     padding: $spacing-xs 0;
-    color: $text-light;
+    color: var(--gr-text-muted);
 
-    .material-symbols-outlined {
-      font-size: 16px;
-      color: $color-danger;
+    gr-icon {
+      color: var(--gr-status-danger);
     }
 
     &.met {
-      color: $text-secondary;
+      color: var(--gr-text-secondary);
 
-      .material-symbols-outlined {
-        color: $color-success;
+      gr-icon {
+        color: var(--gr-status-success);
       }
     }
   }
@@ -189,19 +184,18 @@
   text-align: center;
   gap: $spacing-sm;
   padding: $spacing-lg;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   margin-bottom: $spacing-lg;
 
-  .material-symbols-outlined {
-    font-size: 40px;
-    color: $text-secondary;
+  gr-icon {
+    color: var(--gr-text-secondary);
   }
 
   p {
     margin: 0;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     font-size: $font-size-sm;
     line-height: 1.5;
   }
@@ -210,11 +204,11 @@
 .auth-footer {
   text-align: center;
   margin-top: $spacing-lg;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   font-size: $font-size-sm;
 
   a {
-    color: $text-primary;
+    color: var(--gr-text-primary);
     padding: 0;
     margin-left: $spacing-xs;
 

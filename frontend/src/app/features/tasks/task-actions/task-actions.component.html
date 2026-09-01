@@ -31,7 +31,7 @@
 
   @if (error()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ error() }}
     </div>
   }
@@ -41,7 +41,7 @@
   } @else {
     @if (actions().length === 0) {
       <div class="empty-state">
-        <span class="material-symbols-outlined">notifications_active</span>
+        <gr-icon name="notifications_active" size="xl" />
         <h3>No actions configured</h3>
         <p class="text-secondary">Create an action to send mail, post webhooks, or report build status back to your forge.</p>
         <button
@@ -70,13 +70,13 @@
                     <span>Last fired: {{ relativeTime(action.last_fired_at) }}</span>
                     @if (testSuccessId() === action.id) {
                       <span class="fire-success">
-                        <span class="material-symbols-outlined">check_circle</span>
+                        <gr-icon name="check_circle" size="sm" />
                         Test fired
                       </span>
                     }
                     @if (testFailureId() === action.id) {
                       <span class="fire-fail">
-                        <span class="material-symbols-outlined">error</span>
+                        <gr-icon name="error" size="sm" />
                         Test failed
                       </span>
                     }

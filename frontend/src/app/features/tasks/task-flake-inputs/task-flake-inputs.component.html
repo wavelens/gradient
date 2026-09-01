@@ -34,7 +34,7 @@
   } @else {
     @if (overrides().length === 0) {
       <div class="empty-state">
-        <span class="material-symbols-outlined">tune</span>
+        <gr-icon name="tune" size="xl" />
         <h3>No overrides configured</h3>
         <p class="text-secondary">No overrides configured. The task's flake.lock is used as-is.</p>
         <button
@@ -130,7 +130,7 @@
 <ng-template #overrideForm>
   @if (error()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ error() }}
     </div>
   }

@@ -10,7 +10,7 @@
   </div>
 } @else if (!evaluation()) {
   <div class="error-state">
-    <span class="material-symbols-outlined">error</span>
+    <gr-icon name="error" size="xl" />
     <h2>Evaluation not found</h2>
   </div>
 } @else if (evaluation(); as ev) {
@@ -51,13 +51,13 @@
         <span class="evaluation-label">Evaluation</span>
         @if (errorMessages().length > 0) {
           <span class="msg-badge msg-badge--error">
-            <span class="material-symbols-outlined">error</span>
+            <gr-icon name="error" size="sm" />
             {{ errorMessages().length }}
           </span>
         }
         @if (warningMessages().length > 0) {
           <span class="msg-badge msg-badge--warning">
-            <span class="material-symbols-outlined">warning</span>
+            <gr-icon name="warning" size="sm" />
             {{ warningMessages().length }}
           </span>
         }
@@ -123,7 +123,7 @@
                       (click)="$event.stopPropagation()"
                       title="View build artefacts"
                     >
-                      <span class="material-symbols-outlined">download</span>
+                      <gr-icon name="download" size="sm" />
                     </a>
                   }
                   <a
@@ -133,7 +133,7 @@
                     (click)="$event.stopPropagation()"
                     title="View dependency graph"
                   >
-                    <span class="material-symbols-outlined">account_tree</span>
+                    <gr-icon name="account_tree" size="sm" />
                   </a>
                 </div>
               }
@@ -206,7 +206,7 @@
       <div class="log-area">
         @if (ev.status === 'Waiting' && selectedSection() !== 'messages' && selectedBuildId()) {
           <div class="waiting-banner">
-            <span class="material-symbols-outlined">pause_circle</span>
+            <gr-icon name="pause_circle" />
             <span class="waiting-banner-title">{{ waitingTitle(ev.waiting_reason) }}</span>
             @if (ev.waiting_reason) {
               <span class="waiting-banner-sub">{{ formatWaitingReason(ev.waiting_reason) }}</span>
@@ -222,9 +222,7 @@
               <div class="messages-list">
                 @for (msg of messages(); track msg.id) {
                   <div class="message-item message-item--{{ msg.level.toLowerCase() }}">
-                    <span class="material-symbols-outlined message-icon">
-                      {{ msg.level === 'Error' ? 'error' : msg.level === 'Warning' ? 'warning' : 'info' }}
-                    </span>
+                    <gr-icon [name]="msg.level === 'Error' ? 'error' : msg.level === 'Warning' ? 'warning' : 'info'" class="message-icon" />
                     <div class="message-body">
                       @if (msg.source) {
                         <span class="message-source">{{ msg.source }}</span>
@@ -239,19 +237,19 @@
         } @else if (!selectedBuildId()) {
           @if (ev.status === 'Fetching') {
             <div class="evaluating-hint">
-              <span class="material-symbols-outlined evaluating-icon">cloud_download</span>
+              <gr-icon name="cloud_download" class="evaluating-icon" />
               <span class="evaluating-title">Fetching</span>
               <span class="evaluating-sub">Prefetching the Nix flake&hellip;</span>
             </div>
           } @else if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {
             <div class="evaluating-hint">
-              <span class="material-symbols-outlined evaluating-icon">manage_search</span>
+              <gr-icon name="manage_search" class="evaluating-icon" />
               <span class="evaluating-title">Evaluating</span>
               <span class="evaluating-sub">Discovering builds from the Nix flake&hellip;</span>
             </div>
           } @else if (ev.status === 'Waiting') {
             <div class="queued-hint">
-              <span class="material-symbols-outlined queued-icon">pause_circle</span>
+              <gr-icon name="pause_circle" class="queued-icon" />
               <span class="queued-title">{{ waitingTitle(ev.waiting_reason) }}</span>
               @if (ev.waiting_reason && ev.waiting_reason.kind === 'workers' && ev.waiting_reason.unmet.length > 0) {
                 <span class="queued-sub">{{ formatWaitingReason(ev.waiting_reason) }}</span>
@@ -277,13 +275,13 @@
             </div>
           } @else if (ev.status === 'Queued') {
             <div class="queued-hint">
-              <span class="material-symbols-outlined queued-icon">hourglass_empty</span>
+              <gr-icon name="hourglass_empty" class="queued-icon" />
               <span class="queued-title">Waiting in Queue</span>
               <span class="queued-sub">The evaluation will start when a slot becomes available&hellip;</span>
             </div>
           } @else {
             <div class="select-build-hint">
-              <span class="material-symbols-outlined hint-icon">terminal</span>
+              <gr-icon name="terminal" class="hint-icon" />
               <span class="hint-text">Select a build to view its log</span>
             </div>
           }
@@ -291,7 +289,7 @@
           <gr-loading-spinner message="Loading log..." />
         } @else if (selectedBuild()?.status === 'Queued') {
           <div class="queued-hint">
-            <span class="material-symbols-outlined queued-icon">schedule</span>
+            <gr-icon name="schedule" class="queued-icon" />
             <span class="queued-title">Build Queued</span>
             <span class="queued-sub">This build is waiting to start. Logs will appear once it begins.</span>
           </div>
@@ -319,7 +317,7 @@
                 />
                 <span class="log-search-count">
                   @if (searchLoading()) {
-                    <span class="material-symbols-outlined gr-spin">progress_activity</span>
+                    <gr-icon name="progress_activity" class="gr-spin" />
                   } @else {
                     {{ searchHits().length === 0 ? 0 : currentHit() + 1 }} / {{ searchTotal() }}
                   }
@@ -347,14 +345,14 @@
                 <div class="log-spacer" [style.height.px]="bottomSpacerPx()"></div>
               } @else {
                 <div class="no-log-hint">
-                  <span class="material-symbols-outlined">article</span>
+                  <gr-icon name="article" size="xl" />
                   <span>No log available</span>
                 </div>
               }
             </div>
             @if (showScrollBtn()) {
               <button class="scroll-btn" (click)="scrollToBottom()" title="Scroll to bottom">
-                <span class="material-symbols-outlined">keyboard_arrow_down</span>
+                <gr-icon name="keyboard_arrow_down" size="sm" />
               </button>
             }
           </div>

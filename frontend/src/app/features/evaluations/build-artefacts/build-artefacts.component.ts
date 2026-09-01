@@ -9,13 +9,13 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { EvaluationsService, BuildProduct, isHtmlArtefact } from '@core/services/evaluations.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { IconComponent, LoadingSpinnerComponent } from '@shared/ui';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-build-artefacts',
   standalone: true,
-  imports: [RouterModule, LoadingSpinnerComponent],
+  imports: [RouterModule, LoadingSpinnerComponent, IconComponent],
   templateUrl: './build-artefacts.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './build-artefacts.component.scss',

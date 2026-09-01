@@ -14,11 +14,10 @@ import {
   NarStats,
   NarSummary,
 } from '@core/services/caches.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { ButtonComponent, DialogComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
-import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 type SortKey = 'created_at' | 'nar_size' | 'last_fetched_at';
 type SortOrder = 'asc' | 'desc';
@@ -36,6 +35,7 @@ type SortOrder = 'asc' | 'desc';
     LoadingSpinnerComponent,
     WritableDirective,
     CacheNarsDetailDrawerComponent,
+    IconComponent,
   ],
   templateUrl: './cache-nars.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

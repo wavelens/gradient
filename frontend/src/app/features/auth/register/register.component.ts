@@ -20,12 +20,12 @@ import { ConfigService } from '@core/services/config.service';
 import { environment } from '@environments/environment';
 import { switchMap, map } from 'rxjs/operators';
 import { of, timer } from 'rxjs';
-import { ButtonComponent } from '@shared/ui';
+import { ButtonComponent, IconComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-register',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent, IconComponent],
   templateUrl: './register.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './register.component.scss',

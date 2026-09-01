@@ -15,8 +15,8 @@
 }
 
 .auth-card {
-  background-color: $color-tertiary;
-  border: 1px solid $color-border;
+  background-color: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-lg;
   padding: $spacing-xxl;
   max-width: 520px;
@@ -34,7 +34,7 @@
 
   h1 {
     font-size: $font-size-xxl;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-sm 0;
   }
 
@@ -55,7 +55,7 @@
 
   dt {
     font-weight: 600;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
   }
 
   dd {
@@ -98,18 +98,18 @@
 
   &.success {
     background-color: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
-    border: 1px solid $color-success;
+    border: 1px solid var(--gr-status-success);
   }
 
   &.warning {
     background-color: color-mix(in srgb, var(--gr-status-warning) 10%, transparent);
-    border: 1px solid $color-warning;
+    border: 1px solid var(--gr-status-warning);
   }
 }
 
 .error-message {
   background-color: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-  border: 1px solid $color-danger;
+  border: 1px solid var(--gr-status-danger);
   border-radius: $border-radius-sm;
   padding: $spacing-md;
   margin-bottom: $spacing-lg;

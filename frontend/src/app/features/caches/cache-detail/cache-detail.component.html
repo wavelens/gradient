@@ -20,13 +20,11 @@
         <p class="text-secondary">{{ c.description || 'No description' }}</p>
         <div class="cache-status">
           <span class="status-badge" [class.active]="c.active" [class.inactive]="!c.active">
-            <span class="material-symbols-outlined">
-              {{ c.active ? 'check_circle' : 'cancel' }}
-            </span>
+            <gr-icon [name]="c.active ? 'check_circle' : 'cancel'" size="sm" />
             {{ c.active ? 'Active' : 'Inactive' }}
           </span>
           <span class="priority-badge">
-            <span class="material-symbols-outlined">sort</span>
+            <gr-icon name="sort" size="sm" />
             Priority: {{ c.priority }}
           </span>
         </div>
@@ -134,7 +132,7 @@
           <div class="code-block">
             <code>{{ cacheUrl }}</code>
             <button class="copy-btn" (click)="copy(cacheUrl, 'url')" [title]="copied() === 'url' ? 'Copied!' : 'Copy'">
-              <span class="material-symbols-outlined">{{ copied() === 'url' ? 'check' : 'content_copy' }}</span>
+              <gr-icon [name]="copied() === 'url' ? 'check' : 'content_copy'" size="sm" />
             </button>
           </div>
         </div>
@@ -145,7 +143,7 @@
             @if (allPublicKeys().length > 0) {
               <code>{{ allPublicKeys().join(' ') }}</code>
               <button class="copy-btn" (click)="copy(allPublicKeys().join(' '), 'key')" [title]="copied() === 'key' ? 'Copied!' : 'Copy'">
-                <span class="material-symbols-outlined">{{ copied() === 'key' ? 'check' : 'content_copy' }}</span>
+                <gr-icon [name]="copied() === 'key' ? 'check' : 'content_copy'" size="sm" />
               </button>
             } @else {
               <code class="text-secondary">Not available</code>
@@ -160,7 +158,7 @@
               <pre>substituters = {{ cacheUrl }}
 trusted-public-keys = {{ allPublicKeys().join(' ') }}</pre>
               <button class="copy-btn" (click)="copy('substituters = ' + cacheUrl + '\ntrusted-public-keys = ' + allPublicKeys().join(' '), 'conf')" [title]="copied() === 'conf' ? 'Copied!' : 'Copy'">
-                <span class="material-symbols-outlined">{{ copied() === 'conf' ? 'check' : 'content_copy' }}</span>
+                <gr-icon [name]="copied() === 'conf' ? 'check' : 'content_copy'" size="sm" />
               </button>
             } @else {
               <pre class="text-secondary">substituters = {{ cacheUrl }}
@@ -181,7 +179,7 @@ trusted-public-keys = &lt;unavailable&gt;</pre>
             <div class="code-block multiline">
               <pre>{{ installNetrcCommand }}</pre>
               <button class="copy-btn" (click)="copy(installNetrcCommand, 'netrc')" [title]="copied() === 'netrc' ? 'Copied!' : 'Copy'">
-                <span class="material-symbols-outlined">{{ copied() === 'netrc' ? 'check' : 'content_copy' }}</span>
+                <gr-icon [name]="copied() === 'netrc' ? 'check' : 'content_copy'" size="sm" />
               </button>
             </div>
             <p class="text-secondary usage-hint">Replace <code>&lt;YOUR_TOKEN&gt;</code> with your API key or login token. The command writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon can authenticate against this cache.</p>

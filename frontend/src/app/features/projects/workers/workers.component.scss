@@ -21,11 +21,11 @@
   gap: $spacing-xs;
   margin-bottom: $spacing-sm;
   font-size: $font-size-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 
-  .breadcrumb-link { color: $text-secondary; &:hover { color: $text-primary; } }
-  .breadcrumb-separator { color: $text-light; }
-  .breadcrumb-current { color: $text-primary; }
+  .breadcrumb-link { color: var(--gr-text-secondary); &:hover { color: var(--gr-text-primary); } }
+  .breadcrumb-separator { color: var(--gr-text-muted); }
+  .breadcrumb-current { color: var(--gr-text-primary); }
 }
 
 .peer-id-banner {
@@ -33,12 +33,12 @@
   align-items: center;
   gap: $spacing-md;
   padding: $spacing-md $spacing-lg;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   margin-bottom: $spacing-xl;
 
-  .material-symbols-outlined { font-size: 24px; color: $text-secondary; flex-shrink: 0; }
+  gr-icon { color: var(--gr-text-secondary); flex-shrink: 0; }
 
   & > div { flex: 1; }
 
@@ -54,11 +54,11 @@
   justify-content: center;
   padding: $spacing-xxl;
   text-align: center;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 
-  .material-symbols-outlined { font-size: 48px; color: $text-secondary; margin-bottom: $spacing-md; }
+  gr-icon { color: var(--gr-text-secondary); margin-bottom: $spacing-md; }
   h3 { margin: 0 0 $spacing-sm 0; }
   p { margin: 0 0 $spacing-lg 0; }
 }
@@ -74,8 +74,8 @@
   align-items: center;
   justify-content: space-between;
   padding: $spacing-md $spacing-lg;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 }
 
@@ -84,11 +84,11 @@
   align-items: center;
   gap: $spacing-md;
 
-  .material-symbols-outlined { font-size: 20px; color: $text-secondary; }
+  gr-icon { color: var(--gr-text-secondary); }
   .worker-id { font-weight: 500; font-family: $font-family-mono; }
   .worker-caps { display: flex; gap: $spacing-xs; flex-wrap: wrap; margin-top: $spacing-xs; }
   .worker-archs { font-size: $font-size-sm; font-family: $font-family-mono; margin-top: $spacing-xs; }
-  .worker-features { color: $text-light; }
+  .worker-features { color: var(--gr-text-muted); }
   .worker-stats { font-size: $font-size-sm; margin-top: $spacing-xs; }
 }
 
@@ -109,8 +109,8 @@
   font-size: $font-size-xs;
   font-family: $font-family-mono;
 
-  &.cap-on  { background: color-mix(in srgb, var(--gr-status-success) 12%, transparent); color: $color-success; }
-  &.cap-off { background: color-mix(in srgb, var(--gr-text-secondary) 8%, transparent); color: $text-light; opacity: 0.5; }
+  &.cap-on  { background: color-mix(in srgb, var(--gr-status-success) 12%, transparent); color: var(--gr-status-success); }
+  &.cap-off { background: color-mix(in srgb, var(--gr-text-secondary) 8%, transparent); color: var(--gr-text-muted); opacity: 0.5; }
 }
 
 .badge {
@@ -119,10 +119,10 @@
   font-size: $font-size-xs;
   font-weight: 500;
 
-  &.badge-connected { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: $color-success; }
-  &.badge-offline { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: $text-secondary; }
-  &.badge-base { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: $color-info; }
-  &.badge-managed { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: $color-info; }
-  &.badge-draining { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: $color-warning; }
-  &.badge-inactive { background: color-mix(in srgb, var(--gr-status-danger) 12%, transparent); color: $color-danger; }
+  &.badge-connected { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); }
+  &.badge-offline { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: var(--gr-text-secondary); }
+  &.badge-base { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: var(--gr-status-info); }
+  &.badge-managed { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: var(--gr-status-info); }
+  &.badge-draining { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); }
+  &.badge-inactive { background: color-mix(in srgb, var(--gr-status-danger) 12%, transparent); color: var(--gr-status-danger); }
 }

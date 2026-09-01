@@ -4,9 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@forward 'colors';
-@use 'colors' as *;
-
 // Spacing System
 $spacing-xs: 0.25rem;   // 4px
 $spacing-sm: 0.5rem;    // 8px

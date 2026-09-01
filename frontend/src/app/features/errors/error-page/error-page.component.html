@@ -6,7 +6,7 @@
 
 <div class="error-page">
   <div class="error-card">
-    <span class="material-symbols-outlined error-icon">{{ meta().icon }}</span>
+    <gr-icon [name]="meta().icon" class="error-icon" />
     <div class="error-code">{{ code() || '' }}</div>
     <h1 class="error-title">{{ meta().title }}</h1>
     <p class="error-description">{{ meta().description }}</p>

@@ -14,7 +14,7 @@
 
   h1 {
     font-size: $font-size-xxl;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-sm 0;
   }
 
@@ -39,7 +39,7 @@
 
   h2 {
     font-size: $font-size-xl;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-lg 0;
   }
 }
@@ -51,8 +51,8 @@
 }
 
 .task-card {
-  background-color: $color-tertiary;
-  border: 1px solid $color-border;
+  background-color: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-lg;
   display: flex;
@@ -64,7 +64,7 @@
   color: inherit;
 
   &:hover {
-    border-color: $text-secondary;
+    border-color: var(--gr-text-secondary);
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 
@@ -83,7 +83,7 @@
 }
 
 .task-icon {
-  background-color: $color-quaternary;
+  background-color: var(--gr-surface-sunken);
   border-radius: $border-radius-md;
   width: 56px;
   height: 56px;
@@ -92,9 +92,8 @@
   justify-content: center;
   flex-shrink: 0;
 
-  .material-symbols-outlined {
-    font-size: 28px;
-    color: $text-primary;
+  gr-icon {
+    color: var(--gr-text-primary);
   }
 }
 
@@ -104,7 +103,7 @@
 
   h3 {
     font-size: $font-size-lg;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-xs 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -124,7 +123,7 @@
     align-items: center;
     gap: $spacing-md;
     font-size: $font-size-xs;
-    color: $text-light;
+    color: var(--gr-text-muted);
 
     .meta-item {
       display: flex;
@@ -134,21 +133,15 @@
       text-overflow: ellipsis;
       white-space: nowrap;
 
-      .material-symbols-outlined {
-        font-size: 14px;
-      }
     }
   }
 }
 
 .task-arrow {
   flex-shrink: 0;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   transition: $transition-base;
 
-  .material-symbols-outlined {
-    font-size: 20px;
-  }
 }
 
 .dialog-error {
@@ -159,10 +152,9 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $color-danger;
+  color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-  .material-symbols-outlined { font-size: 20px; }
 }
 
 .form-group {
@@ -171,7 +163,7 @@
   label {
     display: block;
     margin-bottom: $spacing-sm;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     font-size: $font-size-sm;
     font-weight: 500;
   }
@@ -189,10 +181,10 @@
 
 .w-full { width: 100%; }
 
-.text-danger { color: $color-danger; }
+.text-danger { color: var(--gr-status-danger); }
 
 .input-invalid {
-  border-color: $color-danger !important;
+  border-color: var(--gr-status-danger) !important;
 }
 
 .name-input-wrapper {
@@ -208,11 +200,10 @@
   right: $spacing-sm;
   display: flex;
   align-items: center;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 
-  .material-symbols-outlined { font-size: 18px; }
   i { font-size: 14px; }
 
-  &.available { color: $color-success; }
-  &.taken { color: $color-danger; }
+  &.available { color: var(--gr-status-success); }
+  &.taken { color: var(--gr-status-danger); }
 }

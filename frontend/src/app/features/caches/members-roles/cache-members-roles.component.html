@@ -44,7 +44,7 @@
             @for (member of members(); track member.id) {
               <div class="member-row">
                 <div class="member-info">
-                  <span class="material-symbols-outlined">person</span>
+                  <gr-icon name="person" />
                   <div class="member-username">{{ member.id }}</div>
                 </div>
                 <div class="member-actions">
@@ -160,7 +160,7 @@
   <div class="dialog-content">
     @if (memberError()) {
       <div class="dialog-error">
-        <span class="material-symbols-outlined">error</span>
+        <gr-icon name="error" />
         {{ memberError() }}
       </div>
     }
@@ -212,7 +212,7 @@
   <div class="dialog-content">
     @if (roleError()) {
       <div class="dialog-error">
-        <span class="material-symbols-outlined">error</span>
+        <gr-icon name="error" />
         {{ roleError() }}
       </div>
     }

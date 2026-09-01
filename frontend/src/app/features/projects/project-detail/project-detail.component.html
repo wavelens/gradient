@@ -29,7 +29,7 @@
           @for (task of tasks(); track task.id) {
             <a [routerLink]="['/project', projectName, 'task', task.name]" class="task-card">
               <div class="task-icon">
-                <span class="material-symbols-outlined">folder</span>
+                <gr-icon name="folder" size="xl" />
               </div>
               <div class="task-content">
                 <h3>{{ task.display_name || task.name }}</h3>
@@ -41,7 +41,7 @@
                 </div>
               </div>
               <div class="task-arrow">
-                <span class="material-symbols-outlined">arrow_forward</span>
+                <gr-icon name="arrow_forward" />
               </div>
             </a>
           }
@@ -70,7 +70,7 @@
 >
   @if (createError()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ createError() }}
     </div>
   }
@@ -102,11 +102,11 @@
           (keyup.enter)="createTask()"
         />
         @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><span class="material-symbols-outlined gr-spin">progress_activity</span></span>
+          <span class="name-check-icon"><gr-icon name="progress_activity" class="gr-spin" size="sm" /></span>
         } @else if (nameCheckState() === 'available') {
-          <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
+          <span class="name-check-icon available"><gr-icon name="check" size="sm" /></span>
         } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved') {
-          <span class="name-check-icon taken"><span class="material-symbols-outlined">close</span></span>
+          <span class="name-check-icon taken"><gr-icon name="close" size="sm" /></span>
         }
       </div>
       @if (nameCheckState() === 'taken') {

@@ -14,15 +14,12 @@ import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { TasksService, ReportOptions } from '@core/services/tasks.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
-import { EmptyStateComponent } from '@shared/ui';
-import { EvalStatusBadgeComponent } from '@shared/ui';
+import { ButtonComponent, CheckboxComponent, DialogComponent, EmptyStateComponent, EvalStatusBadgeComponent, IconComponent, LoadingSpinnerComponent, MenuComponent, MenuItem, TooltipDirective } from '@shared/ui';
 import { AccessService, WritableDirective } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, BuildStatusCounts } from '@core/models';
 import { commitLabel, evaluationTitle, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
-import { ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, MenuItem, TooltipDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-task-detail',
@@ -31,6 +28,7 @@ import { ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, Men
     CommonModule, FormsModule, RouterModule, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
+    IconComponent,
   ],
   templateUrl: './task-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

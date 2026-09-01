@@ -32,7 +32,7 @@
   } @else {
     @if (caches().length === 0) {
       <div class="empty-state">
-        <span class="material-symbols-outlined">storage</span>
+        <gr-icon name="storage" size="xl" />
         <h3>No cache subscriptions</h3>
         <p class="text-secondary">Subscribe to a Nix binary cache to have builds pushed there automatically.</p>
         <button
@@ -49,7 +49,7 @@
         @for (cache of caches(); track cache.id) {
           <div class="cache-row">
             <div class="cache-info">
-              <span class="material-symbols-outlined">storage</span>
+              <gr-icon name="storage" />
               <a [routerLink]="['/caches', cache.name]" class="cache-name">{{ cache.name }}</a>
             </div>
             <div class="cache-actions">
@@ -80,7 +80,7 @@
 >
   @if (errorMessage()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ errorMessage() }}
     </div>
   }

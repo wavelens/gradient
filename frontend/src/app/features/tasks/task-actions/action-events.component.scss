@@ -13,17 +13,17 @@
 }
 
 fieldset {
-  border: 1px solid $color-border;
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
   padding: $spacing-sm $spacing-md $spacing-md;
-  background: $color-quaternary;
+  background: var(--gr-surface-sunken);
   min-width: 160px;
 
   legend {
     padding: 0 $spacing-xs;
     font-size: $font-size-xs;
     font-weight: 600;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
@@ -34,7 +34,7 @@ fieldset {
     gap: $spacing-sm;
     padding: $spacing-xs 0;
     font-size: $font-size-sm;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     cursor: pointer;
 
     input[type='checkbox'] { cursor: pointer; }

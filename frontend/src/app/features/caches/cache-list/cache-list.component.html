@@ -26,14 +26,14 @@
           @for (cache of activeCaches; track cache.id) {
             <a [routerLink]="['/caches', cache.name]" class="cache-card">
               <div class="cache-icon">
-                <span class="material-symbols-outlined">storage</span>
+                <gr-icon name="storage" size="xl" />
               </div>
               <div class="cache-content">
                 <h3>{{ cache.display_name }}</h3>
                 <p class="text-secondary">{{ cache.description || 'No description' }}</p>
                 <div class="cache-meta">
                   <span class="meta-item">
-                    <span class="material-symbols-outlined">sort</span>
+                    <gr-icon name="sort" size="sm" />
                     Priority: {{ cache.priority }}
                   </span>
                   <span class="status-badge active">Active</span>
@@ -43,7 +43,7 @@
                 </div>
               </div>
               <div class="cache-arrow">
-                <span class="material-symbols-outlined">arrow_forward</span>
+                <gr-icon name="arrow_forward" />
               </div>
             </a>
           }
@@ -59,14 +59,14 @@
           @for (cache of inactiveCaches; track cache.id) {
             <a [routerLink]="['/caches', cache.name]" class="cache-card inactive">
               <div class="cache-icon">
-                <span class="material-symbols-outlined">cloud_off</span>
+                <gr-icon name="cloud_off" size="xl" />
               </div>
               <div class="cache-content">
                 <h3>{{ cache.display_name }}</h3>
                 <p class="text-secondary">{{ cache.description || 'No description' }}</p>
                 <div class="cache-meta">
                   <span class="meta-item">
-                    <span class="material-symbols-outlined">sort</span>
+                    <gr-icon name="sort" size="sm" />
                     Priority: {{ cache.priority }}
                   </span>
                   <span class="status-badge inactive">Inactive</span>
@@ -76,7 +76,7 @@
                 </div>
               </div>
               <div class="cache-arrow">
-                <span class="material-symbols-outlined">arrow_forward</span>
+                <gr-icon name="arrow_forward" />
               </div>
             </a>
           }
@@ -107,21 +107,21 @@
       @for (cache of filteredPublicCaches; track cache.id) {
         <a [routerLink]="['/caches', cache.name]" class="cache-card">
           <div class="cache-icon">
-            <span class="material-symbols-outlined">public</span>
+            <gr-icon name="public" size="xl" />
           </div>
           <div class="cache-content">
             <h3>{{ cache.display_name }}</h3>
             <p class="text-secondary">{{ cache.description || 'No description' }}</p>
             <div class="cache-meta">
               <span class="meta-item">
-                <span class="material-symbols-outlined">sort</span>
+                <gr-icon name="sort" size="sm" />
                 Priority: {{ cache.priority }}
               </span>
               <span class="status-badge public-badge">Public</span>
             </div>
           </div>
           <div class="cache-arrow">
-            <span class="material-symbols-outlined">arrow_forward</span>
+            <gr-icon name="arrow_forward" />
           </div>
         </a>
       }
@@ -137,7 +137,7 @@
 >
   @if (createError()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ createError() }}
     </div>
   }
@@ -167,11 +167,11 @@
           (input)="onCacheNameUserInput()"
         />
         @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><span class="material-symbols-outlined gr-spin">progress_activity</span></span>
+          <span class="name-check-icon"><gr-icon name="progress_activity" class="gr-spin" size="sm" /></span>
         } @else if (nameCheckState() === 'available') {
-          <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
+          <span class="name-check-icon available"><gr-icon name="check" size="sm" /></span>
         } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
-          <span class="name-check-icon taken"><span class="material-symbols-outlined">close</span></span>
+          <span class="name-check-icon taken"><gr-icon name="close" size="sm" /></span>
         }
       </div>
       @if (nameCheckState() === 'taken') {

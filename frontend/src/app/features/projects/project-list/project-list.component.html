@@ -23,7 +23,7 @@
         @for (project of projects(); track project.id) {
           <a [routerLink]="['/project', project.name]" class="project-card">
             <div class="project-icon">
-              <span class="material-symbols-outlined">corporate_fare</span>
+              <gr-icon name="corporate_fare" size="xl" />
             </div>
             <div class="project-content">
               <h3>{{ project.display_name || project.name }}</h3>
@@ -39,14 +39,14 @@
                 }
                 @if (project.running_evaluations && project.running_evaluations > 0) {
                   <span class="activity-badge">
-                    <span class="material-symbols-outlined spinning">sync</span>
+                    <gr-icon name="sync" class="spinning" size="sm" />
                     {{ project.running_evaluations }} running
                   </span>
                 }
               </div>
             </div>
             <div class="project-arrow">
-              <span class="material-symbols-outlined">arrow_forward</span>
+              <gr-icon name="arrow_forward" />
             </div>
           </a>
         }
@@ -72,7 +72,7 @@
       @for (project of filteredPublicProjects; track project.id) {
         <a [routerLink]="['/project', project.name]" class="project-card">
           <div class="project-icon">
-            <span class="material-symbols-outlined">public</span>
+            <gr-icon name="public" size="xl" />
           </div>
           <div class="project-content">
             <h3>{{ project.display_name || project.name }}</h3>
@@ -80,7 +80,7 @@
             <span class="role-badge public-badge">Public</span>
           </div>
           <div class="project-arrow">
-            <span class="material-symbols-outlined">arrow_forward</span>
+            <gr-icon name="arrow_forward" />
           </div>
         </a>
       }
@@ -96,7 +96,7 @@
 >
   @if (createError()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ createError() }}
     </div>
   }
@@ -128,11 +128,11 @@
           (keyup.enter)="createProject()"
         />
         @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><span class="material-symbols-outlined gr-spin">progress_activity</span></span>
+          <span class="name-check-icon"><gr-icon name="progress_activity" class="gr-spin" size="sm" /></span>
         } @else if (nameCheckState() === 'available') {
-          <span class="name-check-icon available"><span class="material-symbols-outlined">check</span></span>
+          <span class="name-check-icon available"><gr-icon name="check" size="sm" /></span>
         } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
-          <span class="name-check-icon taken"><span class="material-symbols-outlined">close</span></span>
+          <span class="name-check-icon taken"><gr-icon name="close" size="sm" /></span>
         }
       </div>
       @if (nameCheckState() === 'taken') {

@@ -20,11 +20,11 @@
   gap: $spacing-xs;
   margin-bottom: $spacing-sm;
   font-size: $font-size-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 
-  .breadcrumb-link { color: $text-secondary; &:hover { color: $text-primary; } }
-  .breadcrumb-separator { color: $text-light; }
-  .breadcrumb-current { color: $text-primary; }
+  .breadcrumb-link { color: var(--gr-text-secondary); &:hover { color: var(--gr-text-primary); } }
+  .breadcrumb-separator { color: var(--gr-text-muted); }
+  .breadcrumb-current { color: var(--gr-text-primary); }
 }
 
 .empty-state {
@@ -34,11 +34,11 @@
   justify-content: center;
   padding: $spacing-xxl;
   text-align: center;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 
-  .material-symbols-outlined { font-size: 48px; color: $text-secondary; margin-bottom: $spacing-md; }
+  gr-icon { color: var(--gr-text-secondary); margin-bottom: $spacing-md; }
   h3 { margin: 0 0 $spacing-sm 0; }
   p { margin: 0 0 $spacing-lg 0; }
 }
@@ -51,8 +51,8 @@
 
 .trigger-row {
   padding: $spacing-md $spacing-lg;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 }
 
@@ -70,7 +70,7 @@
 
   .trigger-summary {
     font-weight: 500;
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
 
   .trigger-meta {
@@ -99,19 +99,19 @@
 
   &.badge-polling {
     background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
-    color: $color-info;
+    color: var(--gr-status-info);
   }
   &.badge-reporter_push {
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: $color-success;
+    color: var(--gr-status-success);
   }
   &.badge-reporter_pull_request {
     background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: $color-warning;
+    color: var(--gr-status-warning);
   }
   &.badge-time {
     background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent);
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
 }
 
@@ -124,11 +124,11 @@
 
   &.status-ok {
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: $color-success;
+    color: var(--gr-status-success);
   }
   &.status-warn {
     background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: $color-warning;
+    color: var(--gr-status-warning);
   }
 }
 
@@ -136,10 +136,9 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: $color-success;
+  color: var(--gr-status-success);
   font-size: $font-size-sm;
 
-  .material-symbols-outlined { font-size: 16px; }
 }
 
 .form-group {
@@ -168,10 +167,9 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $color-danger;
+  color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-  .material-symbols-outlined { font-size: 20px; }
 }
 
 .dialog-warn {
@@ -182,11 +180,10 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-warning) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-sm $spacing-md;
-  color: $color-warning;
+  color: var(--gr-status-warning);
   margin-top: $spacing-xs;
   font-size: $font-size-sm;
 
-  .material-symbols-outlined { font-size: 18px; }
 }
 
 .w-full { width: 100%; }

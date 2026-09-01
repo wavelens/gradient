@@ -5,12 +5,7 @@
  */
 
 import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
-import {
-  BadgeComponent, BadgeSeverity, CopyFieldComponent, FieldRowComponent, IconComponent,
-  IconSize, MessageBannerComponent, EmptyStateComponent, LoadingSpinnerComponent,
-  StatCardComponent, TableComponent, DividerComponent, EvalStatusBadgeComponent,
-  MetricChartComponent, ToastComponent, MessageService, ButtonComponent,
-} from '@shared/ui';
+import { BadgeComponent, BadgeSeverity, ButtonComponent, CopyFieldComponent, DividerComponent, EmptyStateComponent, EvalStatusBadgeComponent, FieldRowComponent, IconComponent, IconSize, LoadingSpinnerComponent, MessageBannerComponent, MessageService, MetricChartComponent, StatCardComponent, TableComponent, ToastComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-sg-elements',

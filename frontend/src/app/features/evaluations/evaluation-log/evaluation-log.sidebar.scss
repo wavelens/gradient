@@ -11,8 +11,8 @@
 .builds-sidebar {
   width: 260px;
   flex-shrink: 0;
-  border-right: 1px solid $color-border;
-  background: $color-primary;
+  border-right: 1px solid var(--gr-border);
+  background: var(--gr-surface-base);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -24,14 +24,14 @@
   gap: $spacing-xs;
   padding: $spacing-sm $spacing-md;
   font-size: $font-size-xs;
-  color: $text-light;
+  color: var(--gr-text-muted);
 
   .breadcrumb-link {
-    color: $text-secondary;
-    &:hover { color: $text-primary; }
+    color: var(--gr-text-secondary);
+    &:hover { color: var(--gr-text-primary); }
   }
-  .breadcrumb-sep { color: $text-light; }
-  .breadcrumb-cur { color: $text-primary; font-weight: 500; }
+  .breadcrumb-sep { color: var(--gr-text-muted); }
+  .breadcrumb-cur { color: var(--gr-text-primary); font-weight: 500; }
 }
 
 .overview-block {
@@ -63,17 +63,17 @@
     flex-shrink: 0;
   }
 
-  &.status-queued    { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: $color-warning; .dot { background: $color-warning; } }
-  &.status-fetching, &.status-evaluating, &.status-evaluatingflake, &.status-evaluatingderivation, &.status-building { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: $color-info; .dot { background: $color-info; } }
-  &.status-waiting { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: $color-warning; .dot { background: $color-warning; } }
-  &.status-completed, &.status-substituted { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: $color-success; .dot { background: $color-success; } }
-  &.status-failed  { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: $color-danger; .dot { background: $color-danger; } }
-  &.status-aborted, &.status-dependencyfailed { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: $color-secondary; .dot { background: $color-secondary; } }
+  &.status-queued    { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); .dot { background: var(--gr-status-warning); } }
+  &.status-fetching, &.status-evaluating, &.status-evaluatingflake, &.status-evaluatingderivation, &.status-building { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: var(--gr-status-info); .dot { background: var(--gr-status-info); } }
+  &.status-waiting { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); .dot { background: var(--gr-status-warning); } }
+  &.status-completed, &.status-substituted { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); .dot { background: var(--gr-status-success); } }
+  &.status-failed  { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: var(--gr-status-danger); .dot { background: var(--gr-status-danger); } }
+  &.status-aborted, &.status-dependencyfailed { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: var(--gr-text-secondary); .dot { background: var(--gr-text-secondary); } }
 }
 
 .builds-count {
   font-size: $font-size-xs;
-  color: $text-light;
+  color: var(--gr-text-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -83,16 +83,16 @@
   input {
     width: 100%;
     box-sizing: border-box;
-    background: $color-primary;
-    border: 1px solid $color-border;
+    background: var(--gr-surface-base);
+    border: 1px solid var(--gr-border);
     border-radius: $border-radius-sm;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     font-size: $font-size-xs;
     padding: 6px 8px;
     outline: none;
 
-    &:focus { border-color: $color-info; }
-    &::placeholder { color: $text-light; }
+    &:focus { border-color: var(--gr-status-info); }
+    &::placeholder { color: var(--gr-text-muted); }
   }
 }
 
@@ -100,7 +100,7 @@
   padding: $spacing-xs $spacing-md;
   font-size: $font-size-xs;
   font-weight: 600;
-  color: $text-light;
+  color: var(--gr-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   user-select: none;
@@ -113,8 +113,8 @@
   gap: $spacing-sm;
   padding: $spacing-xs $spacing-md;
   font-size: $font-size-xs;
-  color: $text-secondary;
-  border-bottom: 1px solid $color-border;
+  color: var(--gr-text-secondary);
+  border-bottom: 1px solid var(--gr-border);
 }
 
 .builds-scope-clear {
@@ -124,7 +124,7 @@
   cursor: pointer;
   font-size: $font-size-xs;
   font-weight: 600;
-  color: $color-primary;
+  color: var(--gr-surface-base);
 
   &:hover {
     text-decoration: underline;
@@ -141,7 +141,7 @@
 .no-builds {
   padding: $spacing-md;
   font-size: $font-size-sm;
-  color: $text-light;
+  color: var(--gr-text-muted);
 }
 
 .build-item {
@@ -165,11 +165,11 @@
     background: color-mix(in srgb, var(--gr-white) 6%, transparent);
 
     &.status-completed,
-    &.status-substituted            { border-left-color: $color-success; }
-    &.status-building               { border-left-color: $color-info; }
-    &.status-queued                 { border-left-color: $color-warning; }
-    &.status-failed  { border-left-color: $color-danger; }
-    &.status-aborted, &.status-dependencyfailed { border-left-color: $color-secondary; }
+    &.status-substituted            { border-left-color: var(--gr-status-success); }
+    &.status-building               { border-left-color: var(--gr-status-info); }
+    &.status-queued                 { border-left-color: var(--gr-status-warning); }
+    &.status-failed  { border-left-color: var(--gr-status-danger); }
+    &.status-aborted, &.status-dependencyfailed { border-left-color: var(--gr-text-secondary); }
   }
 }
 
@@ -179,12 +179,12 @@
   border-radius: 50%;
   flex-shrink: 0;
 
-  &.status-queued                 { background: $color-warning; }
-  &.status-building               { background: $color-info; }
+  &.status-queued                 { background: var(--gr-status-warning); }
+  &.status-building               { background: var(--gr-status-info); }
   &.status-completed,
-  &.status-substituted            { background: $color-success; }
-  &.status-failed  { background: $color-danger; }
-  &.status-aborted, &.status-dependencyfailed { background: $color-secondary; }
+  &.status-substituted            { background: var(--gr-status-success); }
+  &.status-failed  { background: var(--gr-status-danger); }
+  &.status-aborted, &.status-dependencyfailed { background: var(--gr-text-secondary); }
 }
 
 // Status sections (issue #32): the labelled, sticky header names the status so
@@ -197,18 +197,18 @@
   align-items: center;
   gap: $spacing-xs;
   padding: $spacing-xs $spacing-md;
-  background: $color-primary;
-  border-bottom: 1px solid $color-border;
+  background: var(--gr-surface-base);
+  border-bottom: 1px solid var(--gr-border);
   font-size: $font-size-xs;
   font-weight: 600;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   user-select: none;
 
   .build-group-count {
     margin-left: auto;
-    color: $text-light;
+    color: var(--gr-text-muted);
     font-weight: 500;
   }
 }
@@ -217,25 +217,25 @@
   flex: 1;
   min-width: 0;
   font-size: $font-size-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   transition: color $transition-fast;
 
   .build-item:hover &,
-  .build-item.selected & { color: $text-primary; }
+  .build-item.selected & { color: var(--gr-text-primary); }
 }
 
 .build-elapsed {
   font-size: $font-size-xs;
-  color: $text-light;
+  color: var(--gr-text-muted);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
   white-space: nowrap;
 
   &--running {
-    color: $color-info;
+    color: var(--gr-status-info);
   }
 }
 
@@ -243,18 +243,16 @@
 .graph-link {
   display: none;
   align-items: center;
-  color: $text-light;
+  color: var(--gr-text-muted);
   text-decoration: none;
   flex-shrink: 0;
   padding: 2px;
   border-radius: $border-radius-sm;
   transition: color $transition-fast, background $transition-fast;
 
-  .material-symbols-outlined { font-size: 0.95rem; }
-
   &:hover {
-    color: $text-primary;
-    background: $color-hover;
+    color: var(--gr-text-primary);
+    background: var(--gr-surface-hover);
   }
 }
 

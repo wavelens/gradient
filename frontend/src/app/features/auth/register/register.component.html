@@ -14,7 +14,7 @@
 
     @if (oidcRequired) {
       <div class="auth-blocked">
-        <span class="material-symbols-outlined">lock</span>
+        <gr-icon name="lock" size="xl" />
         <p>This server requires SSO sign-in. Use the button below to create or access your account.</p>
       </div>
       <button
@@ -31,7 +31,7 @@
       </div>
     } @else if (registrationDisabled) {
       <div class="auth-blocked">
-        <span class="material-symbols-outlined">person_off</span>
+        <gr-icon name="person_off" size="xl" />
         <p>Registration is currently disabled. Contact your administrator for access.</p>
       </div>
       <div class="auth-footer">
@@ -41,14 +41,14 @@
     } @else {
       @if (errorMessage()) {
         <div class="error-message">
-          <span class="material-symbols-outlined">error</span>
+          <gr-icon name="error" />
           {{ errorMessage() }}
         </div>
       }
 
       @if (successMessage()) {
         <div class="success-message">
-          <span class="material-symbols-outlined">check_circle</span>
+          <gr-icon name="check_circle" />
           {{ successMessage() }}
         </div>
         <div class="auth-footer">
@@ -131,7 +131,7 @@
                 autocomplete="new-password"
               />
               <button type="button" class="eye-btn" (click)="showPassword.set(!showPassword())" tabindex="-1">
-                <span class="material-symbols-outlined">{{ showPassword() ? 'visibility_off' : 'visibility' }}</span>
+                <gr-icon [name]="showPassword() ? 'visibility_off' : 'visibility'" />
               </button>
             </div>
             @if (password?.touched && password?.errors) {
@@ -144,19 +144,19 @@
               @if (password?.errors?.['passwordStrength']; as strength) {
                 <div class="password-requirements">
                   <div class="requirement" [class.met]="strength.hasUpperCase">
-                    <span class="material-symbols-outlined">{{ strength.hasUpperCase ? 'check' : 'close' }}</span>
+                    <gr-icon [name]="strength.hasUpperCase ? 'check' : 'close'" size="sm" />
                     Uppercase letter
                   </div>
                   <div class="requirement" [class.met]="strength.hasLowerCase">
-                    <span class="material-symbols-outlined">{{ strength.hasLowerCase ? 'check' : 'close' }}</span>
+                    <gr-icon [name]="strength.hasLowerCase ? 'check' : 'close'" size="sm" />
                     Lowercase letter
                   </div>
                   <div class="requirement" [class.met]="strength.hasNumeric">
-                    <span class="material-symbols-outlined">{{ strength.hasNumeric ? 'check' : 'close' }}</span>
+                    <gr-icon [name]="strength.hasNumeric ? 'check' : 'close'" size="sm" />
                     Number
                   </div>
                   <div class="requirement" [class.met]="strength.hasSpecialChar">
-                    <span class="material-symbols-outlined">{{ strength.hasSpecialChar ? 'check' : 'close' }}</span>
+                    <gr-icon [name]="strength.hasSpecialChar ? 'check' : 'close'" size="sm" />
                     Special character
                   </div>
                 </div>
@@ -176,7 +176,7 @@
                 autocomplete="new-password"
               />
               <button type="button" class="eye-btn" (click)="showConfirmPassword.set(!showConfirmPassword())" tabindex="-1">
-                <span class="material-symbols-outlined">{{ showConfirmPassword() ? 'visibility_off' : 'visibility' }}</span>
+                <gr-icon [name]="showConfirmPassword() ? 'visibility_off' : 'visibility'" />
               </button>
             </div>
             @if (confirmPassword?.touched && confirmPassword?.errors?.['required']) {

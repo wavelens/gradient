@@ -11,10 +11,9 @@ import { FormsModule } from '@angular/forms';
 import { CachesService } from '@core/services/caches.service';
 import { CacheMemberItem, CacheRole, CachePermissionDescriptor } from '@core/models/cache-permission.model';
 import { UserService } from '@core/services/user.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { AutoCompleteComponent, ButtonComponent, CheckboxComponent, DialogComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
-import { AutoCompleteComponent, ButtonComponent, CheckboxComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 interface RoleFormState {
   name: string;
@@ -36,6 +35,7 @@ interface RoleFormState {
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
+    IconComponent,
   ],
   templateUrl: './cache-members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -6,7 +6,7 @@
 
 <div class="page-header">
   <button class="icon-btn" (click)="goBack()" title="Back">
-    <span class="material-symbols-outlined">arrow_back</span>
+    <gr-icon name="arrow_back" />
   </button>
   <div class="header-info">
     <span class="header-title">Build Artefacts</span>
@@ -20,7 +20,7 @@
     <gr-loading-spinner message="Loading artefacts..." />
   } @else if (artefacts().length === 0) {
     <div class="empty-state">
-      <span class="material-symbols-outlined">inventory_2</span>
+      <gr-icon name="inventory_2" size="xl" />
       <p>No artefacts available for this build.</p>
       <span class="empty-hint">Artefacts are produced via <code>hydra-build-products</code> in the build output.</span>
     </div>
@@ -40,7 +40,7 @@
             [attr.rel]="isHtml(artefact) ? 'noopener noreferrer' : null"
             [title]="(isHtml(artefact) ? 'Open ' : 'Download ') + artefact.name"
           >
-            <span class="material-symbols-outlined">{{ isHtml(artefact) ? 'open_in_new' : 'download' }}</span>
+            <gr-icon [name]="isHtml(artefact) ? 'open_in_new' : 'download'" size="sm" />
             <span>{{ isHtml(artefact) ? 'Open' : 'Download' }}</span>
           </a>
         </div>

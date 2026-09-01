@@ -14,24 +14,22 @@
   padding: $spacing-md;
   margin-bottom: $spacing-lg;
 
-  .material-symbols-outlined { font-size: 20px; }
-
   &.error {
     background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
-    color: $color-danger;
+    color: var(--gr-status-danger);
   }
 
   &.success {
     background: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--gr-status-success) 50%, transparent);
-    color: $color-success;
+    color: var(--gr-status-success);
   }
 
   &.info {
     background: color-mix(in srgb, var(--gr-status-info) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--gr-status-info) 50%, transparent);
-    color: $color-info;
+    color: var(--gr-status-info);
   }
 }
 
@@ -50,16 +48,16 @@
   gap: $spacing-xs;
   margin-bottom: $spacing-sm;
   font-size: $font-size-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 
   .breadcrumb-link {
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     text-decoration: none;
-    &:hover { color: $text-primary; }
+    &:hover { color: var(--gr-text-primary); }
   }
 
-  .breadcrumb-separator { color: $text-light; }
-  .breadcrumb-current { color: $text-primary; }
+  .breadcrumb-separator { color: var(--gr-text-muted); }
+  .breadcrumb-current { color: var(--gr-text-primary); }
 }
 
 .settings-section {
@@ -72,8 +70,8 @@
 }
 
 .settings-card {
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-lg;
   max-width: 640px;
@@ -109,24 +107,24 @@
 .role-select {
   width: 100%;
   padding: $spacing-sm $spacing-md;
-  background: $color-quaternary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-sunken);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   font-size: $font-size-md;
   cursor: pointer;
 
   &:focus {
     outline: none;
-    border-color: $text-secondary;
+    border-color: var(--gr-text-secondary);
   }
 }
 
 input[type="number"] {
-  background: $color-quaternary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-sunken);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   font-size: $font-size-md;
   padding: $spacing-sm $spacing-md;
   width: 100%;
@@ -134,20 +132,20 @@ input[type="number"] {
 
   &:focus {
     outline: none;
-    border-color: $text-secondary;
+    border-color: var(--gr-text-secondary);
   }
 
   &.input-invalid {
-    border-color: $color-danger;
+    border-color: var(--gr-status-danger);
   }
 }
 
 .text-danger {
-  color: $color-danger;
+  color: var(--gr-status-danger);
 }
 
 .danger-section {
-  h2 { color: $color-danger; }
+  h2 { color: var(--gr-status-danger); }
 }
 
 .danger-card {

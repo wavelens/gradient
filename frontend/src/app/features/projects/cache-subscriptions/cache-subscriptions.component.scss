@@ -21,11 +21,11 @@
   gap: $spacing-xs;
   margin-bottom: $spacing-sm;
   font-size: $font-size-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 
-  .breadcrumb-link { color: $text-secondary; &:hover { color: $text-primary; } }
-  .breadcrumb-separator { color: $text-light; }
-  .breadcrumb-current { color: $text-primary; }
+  .breadcrumb-link { color: var(--gr-text-secondary); &:hover { color: var(--gr-text-primary); } }
+  .breadcrumb-separator { color: var(--gr-text-muted); }
+  .breadcrumb-current { color: var(--gr-text-primary); }
 }
 
 .empty-state {
@@ -35,11 +35,11 @@
   justify-content: center;
   padding: $spacing-xxl;
   text-align: center;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 
-  .material-symbols-outlined { font-size: 48px; color: $text-secondary; margin-bottom: $spacing-md; }
+  gr-icon { color: var(--gr-text-secondary); margin-bottom: $spacing-md; }
   h3 { margin: 0 0 $spacing-sm 0; }
   p { margin: 0 0 $spacing-lg 0; }
 }
@@ -55,8 +55,8 @@
   align-items: center;
   justify-content: space-between;
   padding: $spacing-md $spacing-lg;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 }
 
@@ -65,11 +65,11 @@
   align-items: center;
   gap: $spacing-md;
 
-  .material-symbols-outlined { font-size: 20px; color: $text-secondary; }
+  gr-icon { color: var(--gr-text-secondary); }
   .cache-name {
     font-weight: 500;
     font-family: $font-family-mono;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     text-decoration: none;
     &:hover { text-decoration: underline; }
   }
@@ -89,10 +89,9 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-warning) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $color-warning;
+  color: var(--gr-status-warning);
   margin-bottom: $spacing-lg;
 
-  .material-symbols-outlined { font-size: 20px; }
 }
 
 .dialog-error {
@@ -103,10 +102,9 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $color-danger;
+  color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-  .material-symbols-outlined { font-size: 20px; }
 }
 
 .form-group {

@@ -9,11 +9,10 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { CachesService, UpstreamCache, CacheSubscriptionMode } from '@core/services/caches.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { ButtonComponent, DialogComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
-import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-cache-upstreams',
@@ -28,6 +27,7 @@ import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
+    IconComponent,
   ],
   templateUrl: './cache-upstreams.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

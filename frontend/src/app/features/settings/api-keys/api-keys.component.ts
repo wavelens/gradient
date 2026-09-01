@@ -13,10 +13,9 @@ import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ApiKey } from '@core/models';
 import { PermissionDescriptor } from '@core/models/permission.model';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { ButtonComponent, CheckboxComponent, DialogComponent, DividerComponent, IconComponent, InputDirective, LoadingSpinnerComponent, SelectButtonComponent, SelectComponent, TooltipDirective } from '@shared/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
-import { ButtonComponent, CheckboxComponent, DialogComponent, DividerComponent, InputDirective, SelectButtonComponent, SelectComponent, TooltipDirective } from '@shared/ui';
 
 type ScopeType = 'none' | 'project' | 'cache';
 
@@ -42,6 +41,7 @@ interface SelectOption {
     TooltipDirective,
     LoadingSpinnerComponent,
     ManagedDisableDirective,
+    IconComponent,
   ],
   templateUrl: './api-keys.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

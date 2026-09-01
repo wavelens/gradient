@@ -37,15 +37,14 @@ import { LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { ButtonComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
 import { commitLabel, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { environment } from '@environments/environment';
-import { ButtonComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [

@@ -27,7 +27,7 @@
   height: 100%;
   text-align: center;
 
-  .material-symbols-outlined { font-size: 48px; color: $color-danger; margin-bottom: $spacing-md; }
+  gr-icon { color: var(--gr-status-danger); margin-bottom: $spacing-md; }
 }
 
 .eval-layout {
@@ -42,7 +42,7 @@
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
-  background: $color-quaternary;
+  background: var(--gr-surface-sunken);
 }
 
 // ── Info bar ──────────────────────────────────────────────────────────────────
@@ -53,8 +53,8 @@
   justify-content: space-between;
   padding: 0 $spacing-lg;
   height: 48px;
-  background: $color-tertiary;
-  border-bottom: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border-bottom: 1px solid var(--gr-border);
   flex-shrink: 0;
   gap: $spacing-md;
 }
@@ -94,7 +94,7 @@
 
 .metric-label {
   font-size: $font-size-xs;
-  color: $text-light;
+  color: var(--gr-text-muted);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -103,14 +103,14 @@
 
 .metric-value {
   font-size: $font-size-sm;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   white-space: nowrap;
 }
 
 .commit-hash {
   font-family: $font-family-mono;
   font-size: $font-size-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   background: color-mix(in srgb, var(--gr-white) 6%, transparent);
   padding: 1px 6px;
   border-radius: $border-radius-sm;
@@ -126,13 +126,13 @@
   font-size: $font-size-xs;
   font-weight: 600;
 
-  &.status-queued    { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: $color-warning; }
-  &.status-fetching, &.status-evaluating, &.status-evaluatingflake, &.status-evaluatingderivation, &.status-building { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: $color-info; }
-  &.status-waiting { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: $color-warning; }
-  &.status-completed, &.status-substituted { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: $color-success; }
-  &.status-failed  { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: $color-danger; }
-  &.status-aborted, &.status-dependencyfailed { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: $color-secondary; }
-  &.trigger { background: color-mix(in srgb, var(--gr-border) 40%, transparent); border: 1px solid color-mix(in srgb, var(--gr-border) 80%, transparent); color: $text-secondary; font-weight: 500; text-transform: uppercase; }
+  &.status-queued    { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); }
+  &.status-fetching, &.status-evaluating, &.status-evaluatingflake, &.status-evaluatingderivation, &.status-building { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: var(--gr-status-info); }
+  &.status-waiting { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); }
+  &.status-completed, &.status-substituted { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); }
+  &.status-failed  { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: var(--gr-status-danger); }
+  &.status-aborted, &.status-dependencyfailed { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: var(--gr-text-secondary); }
+  &.trigger { background: color-mix(in srgb, var(--gr-border) 40%, transparent); border: 1px solid color-mix(in srgb, var(--gr-border) 80%, transparent); color: var(--gr-text-secondary); font-weight: 500; text-transform: uppercase; }
 }
 
 // ── Error banner ──────────────────────────────────────────────────────────────
@@ -143,14 +143,14 @@
   flex-shrink: 0;
   font-size: $font-size-sm;
 
-  .material-symbols-outlined { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+  gr-icon { flex-shrink: 0; margin-top: 1px; }
 
   &.error {
     align-items: flex-start;
     background: color-mix(in srgb, var(--gr-status-danger) 8%, transparent);
     border-bottom: 1px solid color-mix(in srgb, var(--gr-status-danger) 40%, transparent);
     padding: $spacing-sm $spacing-lg;
-    color: $color-danger;
+    color: var(--gr-status-danger);
   }
 }
 

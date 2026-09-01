@@ -17,10 +17,9 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $color-danger;
+  color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-  .material-symbols-outlined { font-size: 20px; }
 }
 
 .dialog-info {
@@ -33,9 +32,9 @@
   padding: $spacing-md;
   margin-bottom: $spacing-md;
 
-  .material-symbols-outlined { font-size: 20px; color: $color-info; flex-shrink: 0; }
+  gr-icon { color: var(--gr-status-info); flex-shrink: 0; }
 
-  .dialog-info-label { font-size: $font-size-xs; font-weight: 600; color: $color-info; margin-bottom: $spacing-xs; }
+  .dialog-info-label { font-size: $font-size-xs; font-weight: 600; color: var(--gr-status-info); margin-bottom: $spacing-xs; }
   .dialog-info-value { display: block; font-family: $font-family-mono; font-size: $font-size-sm; word-break: break-all; }
   .dialog-info-hint { display: block; font-size: $font-size-xs; margin-top: $spacing-xs; }
 }
@@ -48,10 +47,10 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-warning) 40%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   margin-bottom: $spacing-md;
 
-  .material-symbols-outlined { font-size: 22px; color: $color-warning; flex-shrink: 0; margin-top: 2px; }
+  gr-icon { color: var(--gr-status-warning); flex-shrink: 0; margin-top: 2px; }
   p { margin: 0; font-size: $font-size-sm; }
 }
 
@@ -63,10 +62,10 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-warning) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $color-warning;
+  color: var(--gr-status-warning);
   margin-bottom: $spacing-lg;
 
-  .material-symbols-outlined { font-size: 20px; flex-shrink: 0; }
+  gr-icon { flex-shrink: 0; }
 }
 
 .form-group {
@@ -86,8 +85,8 @@
   font-family: $font-family-mono;
   font-size: $font-size-sm;
   word-break: break-all;
-  background: $color-secondary;
-  border: 1px solid $color-border;
+  background: var(--gr-text-secondary);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
   padding: $spacing-xs $spacing-sm;
   width: 100%;
@@ -105,8 +104,8 @@
 .peers-file-example {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
-  background: $color-secondary;
-  border: 1px solid $color-border;
+  background: var(--gr-text-secondary);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
   padding: $spacing-sm $spacing-md;
   margin: 0 0 $spacing-xs;
@@ -127,8 +126,7 @@
   color: var(--p-yellow-900, #78350f);
   border-radius: 0.5rem;
 
-  .material-symbols-outlined {
-    font-size: 1.5rem;
+  gr-icon {
     line-height: 1;
   }
 
@@ -178,17 +176,17 @@
   font-weight: 500;
   cursor: pointer;
   user-select: none;
-  border: 1px solid $color-border;
-  background: $color-quaternary;
+  border: 1px solid var(--gr-border);
+  background: var(--gr-surface-sunken);
 
   input { cursor: pointer; margin: 0; }
 
   &.cap-gate-on {
     border-color: color-mix(in srgb, var(--gr-status-success) 50%, transparent);
-    color: $color-success;
+    color: var(--gr-status-success);
   }
   &.cap-gate-off {
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     opacity: 0.7;
   }
 }
@@ -210,24 +208,22 @@
   font-weight: 500;
   cursor: pointer;
   user-select: none;
-  border: 1px solid $color-border;
-  background: $color-quaternary;
-  color: $text-primary;
+  border: 1px solid var(--gr-border);
+  background: var(--gr-surface-sunken);
+  color: var(--gr-text-primary);
   transition: $transition-base;
 
-  .material-symbols-outlined { font-size: 16px; }
-
-  &:hover { border-color: $text-secondary; }
+  &:hover { border-color: var(--gr-text-secondary); }
 
   &.cap-tag-on {
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    border-color: $color-success;
-    color: $color-success;
+    border-color: var(--gr-status-success);
+    color: var(--gr-status-success);
   }
   &.cap-tag-off {
     background: color-mix(in srgb, var(--gr-status-danger) 8%, transparent);
     border-color: color-mix(in srgb, var(--gr-status-danger) 40%, transparent);
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     text-decoration: line-through;
     text-decoration-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
   }
@@ -248,11 +244,11 @@
 
   &.gate-on {
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: $color-success;
+    color: var(--gr-status-success);
   }
   &.gate-off {
     background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-    color: $color-danger;
+    color: var(--gr-status-danger);
     text-decoration: line-through;
   }
 }

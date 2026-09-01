@@ -24,23 +24,23 @@
     align-items: center;
     gap: $spacing-xs;
     font-size: $font-size-sm;
-    color: $text-light;
+    color: var(--gr-text-muted);
     margin-bottom: $spacing-sm;
 
     .breadcrumb-link {
-      color: $text-secondary;
+      color: var(--gr-text-secondary);
       text-decoration: none;
-      &:hover { color: $text-primary; }
+      &:hover { color: var(--gr-text-primary); }
     }
 
-    .breadcrumb-separator { color: $text-light; }
-    .breadcrumb-current { color: $text-primary; }
+    .breadcrumb-separator { color: var(--gr-text-muted); }
+    .breadcrumb-current { color: var(--gr-text-primary); }
   }
 
   h1 {
     font-size: $font-size-xl;
     font-weight: 600;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-xs;
     font-family: monospace, Arial, sans-serif;
     word-break: break-all;
@@ -54,9 +54,9 @@
   justify-content: center;
   gap: $spacing-md;
   padding: $spacing-xl * 2;
-  color: $text-light;
+  color: var(--gr-text-muted);
 
-  .material-symbols-outlined { font-size: 48px; opacity: 0.4; }
+  gr-icon { opacity: 0.4; }
 }
 
 .summary-row {
@@ -70,8 +70,8 @@
   flex-direction: column;
   align-items: center;
   gap: $spacing-xs;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-md $spacing-xl;
   min-width: 100px;
@@ -80,15 +80,15 @@
 .summary-value {
   font-size: $font-size-xl;
   font-weight: 700;
-  color: $text-primary;
+  color: var(--gr-text-primary);
 
-  &.success { color: $color-graph-success; }
-  &.error   { color: $color-graph-danger; }
+  &.success { color: var(--gr-graph-success); }
+  &.error   { color: var(--gr-graph-danger); }
 }
 
 .summary-label {
   font-size: $font-size-xs;
-  color: $text-light;
+  color: var(--gr-text-muted);
 }
 
 .charts-grid {
@@ -98,8 +98,8 @@
 }
 
 .chart-card {
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-md $spacing-md $spacing-sm;
 
@@ -116,10 +116,10 @@
 .chart-title {
   font-size: $font-size-sm;
   font-weight: 600;
-  color: $text-primary;
+  color: var(--gr-text-primary);
 }
 
 .chart-sub {
   font-size: $font-size-xs;
-  color: $text-light;
+  color: var(--gr-text-muted);
 }

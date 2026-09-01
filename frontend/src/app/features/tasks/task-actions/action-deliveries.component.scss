@@ -17,8 +17,8 @@
 }
 
 .modal {
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   width: min(90vw, 860px);
   max-height: 80vh;
@@ -31,7 +31,7 @@
     align-items: center;
     justify-content: space-between;
     padding: $spacing-md $spacing-lg;
-    border-bottom: 1px solid $color-border;
+    border-bottom: 1px solid var(--gr-border);
     flex-shrink: 0;
 
     h2 { margin: 0; font-size: $font-size-lg; }
@@ -41,21 +41,21 @@
 .close-btn {
   background: none;
   border: none;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   font-size: $font-size-xl;
   cursor: pointer;
   line-height: 1;
   padding: 0 $spacing-xs;
 
-  &:hover { color: $text-primary; }
+  &:hover { color: var(--gr-text-primary); }
 }
 
 .state-msg {
   padding: $spacing-lg;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   text-align: center;
 
-  &.error { color: $color-danger; }
+  &.error { color: var(--gr-status-danger); }
 }
 
 .table-wrap {
@@ -76,10 +76,10 @@
     th {
       font-size: $font-size-xs;
       font-weight: 600;
-      color: $text-secondary;
+      color: var(--gr-text-secondary);
       text-transform: uppercase;
       letter-spacing: 0.06em;
-      background: $color-primary;
+      background: var(--gr-surface-base);
       position: sticky;
       top: 0;
     }
@@ -89,7 +89,7 @@
 }
 
 .detail-row td {
-  background: $color-quaternary;
+  background: var(--gr-surface-sunken);
   padding: $spacing-md $spacing-lg;
 
   pre {
@@ -98,14 +98,14 @@
     font-size: $font-size-xs;
     white-space: pre-wrap;
     word-break: break-word;
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
 
   details { margin-top: $spacing-sm; }
-  summary { cursor: pointer; font-size: $font-size-sm; color: $text-secondary; }
+  summary { cursor: pointer; font-size: $font-size-sm; color: var(--gr-text-secondary); }
 }
 
-.error { color: $color-danger; }
+.error { color: var(--gr-status-danger); }
 
 .badge {
   display: inline-block;
@@ -114,20 +114,20 @@
   font-size: $font-size-xs;
   font-weight: 600;
 
-  &.ok   { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: $color-success; }
-  &.fail { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent);  color: $color-danger; }
+  &.ok   { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); }
+  &.fail { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent);  color: var(--gr-status-danger); }
 }
 
 .toggle-btn {
   background: none;
-  border: 1px solid $color-border;
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   font-size: $font-size-xs;
   padding: 2px 8px;
   cursor: pointer;
 
-  &:hover { border-color: $text-secondary; color: $text-primary; }
+  &:hover { border-color: var(--gr-text-secondary); color: var(--gr-text-primary); }
 }
 
 footer {
@@ -135,19 +135,19 @@ footer {
   gap: $spacing-sm;
   justify-content: flex-end;
   padding: $spacing-sm $spacing-lg;
-  border-top: 1px solid $color-border;
+  border-top: 1px solid var(--gr-border);
   flex-shrink: 0;
 
   button {
-    background: $color-quaternary;
-    border: 1px solid $color-border;
+    background: var(--gr-surface-sunken);
+    border: 1px solid var(--gr-border);
     border-radius: $border-radius-sm;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     font-size: $font-size-sm;
     padding: $spacing-xs $spacing-md;
     cursor: pointer;
 
-    &:hover:not(:disabled) { border-color: $text-secondary; }
+    &:hover:not(:disabled) { border-color: var(--gr-text-secondary); }
     &:disabled { opacity: 0.4; cursor: not-allowed; }
   }
 }

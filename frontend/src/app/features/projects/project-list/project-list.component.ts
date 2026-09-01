@@ -13,11 +13,9 @@ import { debounceTime, switchMap } from 'rxjs/operators';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
-import { EmptyStateComponent } from '@shared/ui';
+import { ButtonComponent, DialogComponent, EmptyStateComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
 import { slugify } from '@shared/text';
 import { Project } from '@core/models';
-import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-project-list',
@@ -32,6 +30,7 @@ import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
     InputDirective,
     LoadingSpinnerComponent,
     EmptyStateComponent,
+    IconComponent,
   ],
   templateUrl: './project-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

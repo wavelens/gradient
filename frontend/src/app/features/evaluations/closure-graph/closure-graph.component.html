@@ -11,7 +11,7 @@
     </div>
   } @else if (errorMsg()) {
     <div class="error-state">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" size="xl" />
       <p>{{ errorMsg() }}</p>
       <button grButton label="Go Back" severity="secondary" (click)="goBack()"></button>
     </div>
@@ -19,7 +19,7 @@
     <div class="closure-header">
       <div class="header-left">
         <button class="icon-btn" (click)="goBack()" title="Back">
-          <span class="material-symbols-outlined">arrow_back</span>
+          <gr-icon name="arrow_back" />
         </button>
         <div class="header-info">
           <div class="header-title">
@@ -39,13 +39,13 @@
 
       <div class="header-controls">
         <button class="ctrl-btn" (click)="zoomIn()" title="Zoom in">
-          <span class="material-symbols-outlined">add</span>
+          <gr-icon name="add" size="sm" />
         </button>
         <button class="ctrl-btn" (click)="zoomOut()" title="Zoom out">
-          <span class="material-symbols-outlined">remove</span>
+          <gr-icon name="remove" size="sm" />
         </button>
         <button class="ctrl-btn" (click)="fitToScreen()" title="Fit to screen">
-          <span class="material-symbols-outlined">fit_screen</span>
+          <gr-icon name="fit_screen" size="sm" />
         </button>
       </div>
     </div>

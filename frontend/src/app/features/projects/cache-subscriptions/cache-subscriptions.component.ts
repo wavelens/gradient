@@ -11,10 +11,9 @@ import { FormsModule } from '@angular/forms';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { AutoCompleteComponent, ButtonComponent, DialogComponent, IconComponent, LoadingSpinnerComponent, TooltipDirective } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
-import { AutoCompleteComponent, ButtonComponent, DialogComponent, TooltipDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-cache-subscriptions',
@@ -29,6 +28,7 @@ import { AutoCompleteComponent, ButtonComponent, DialogComponent, TooltipDirecti
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
+    IconComponent,
   ],
   templateUrl: './cache-subscriptions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

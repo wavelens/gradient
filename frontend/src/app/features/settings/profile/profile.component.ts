@@ -10,10 +10,9 @@ import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { ButtonComponent, DialogComponent, DividerComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
-import { ButtonComponent, DialogComponent, DividerComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-profile',
@@ -28,6 +27,7 @@ import { ButtonComponent, DialogComponent, DividerComponent, InputDirective } fr
     InputDirective,
     LoadingSpinnerComponent,
     ManagedDisableDirective,
+    IconComponent,
   ],
   templateUrl: './profile.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

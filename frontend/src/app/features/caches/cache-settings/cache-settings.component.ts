@@ -9,11 +9,10 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { CachesService } from '@core/services/caches.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { ButtonComponent, DialogComponent, DividerComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { Cache } from '@core/models';
-import { ButtonComponent, DialogComponent, DividerComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-cache-settings',
@@ -30,6 +29,7 @@ import { ButtonComponent, DialogComponent, DividerComponent, InputDirective } fr
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
+    IconComponent,
   ],
   templateUrl: './cache-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

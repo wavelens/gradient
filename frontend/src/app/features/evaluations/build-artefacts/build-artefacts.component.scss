@@ -13,14 +13,14 @@
   align-items: center;
   gap: $spacing-md;
   padding: $spacing-sm $spacing-lg;
-  background: $color-tertiary;
-  border-bottom: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border-bottom: 1px solid var(--gr-border);
 }
 
 .icon-btn {
   background: none;
   border: none;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   cursor: pointer;
   padding: 6px;
   border-radius: $border-radius-sm;
@@ -29,11 +29,9 @@
   flex-shrink: 0;
   transition: color $transition-fast, background $transition-fast;
 
-  .material-symbols-outlined { font-size: 1.25rem; }
-
   &:hover {
-    color: $text-primary;
-    background: $color-hover;
+    color: var(--gr-text-primary);
+    background: var(--gr-surface-hover);
   }
 }
 
@@ -46,13 +44,13 @@
 .header-title {
   font-size: $font-size-md;
   font-weight: 600;
-  color: $text-primary;
+  color: var(--gr-text-primary);
 }
 
 .header-id {
   font-size: $font-size-xs;
   font-family: monospace;
-  color: $text-light;
+  color: var(--gr-text-muted);
 }
 
 // ── Content ───────────────────────────────────────────────────────────────────
@@ -73,17 +71,16 @@
   gap: $spacing-sm;
   padding: $spacing-xxl $spacing-lg;
   text-align: center;
-  color: $text-light;
+  color: var(--gr-text-muted);
 
-  .material-symbols-outlined {
-    font-size: 48px;
+  gr-icon {
     opacity: 0.4;
   }
 
   p {
     margin: 0;
     font-size: $font-size-md;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
   }
 
   .empty-hint {
@@ -91,7 +88,7 @@
 
     code {
       font-size: $font-size-xs;
-      background: $color-secondary;
+      background: var(--gr-text-secondary);
       padding: 1px 5px;
       border-radius: $border-radius-sm;
     }
@@ -111,8 +108,8 @@
   align-items: center;
   gap: $spacing-md;
   padding: $spacing-sm $spacing-md;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
   transition: border-color $transition-fast;
 
@@ -128,7 +125,7 @@
   padding: 2px 7px;
   border-radius: $border-radius-sm;
   background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
-  color: $color-info;
+  color: var(--gr-status-info);
   flex-shrink: 0;
   text-transform: uppercase;
 }
@@ -136,7 +133,7 @@
 .artefact-name {
   flex: 1;
   font-size: $font-size-sm;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   font-family: monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -145,7 +142,7 @@
 
 .artefact-size {
   font-size: $font-size-xs;
-  color: $text-light;
+  color: var(--gr-text-muted);
   flex-shrink: 0;
   white-space: nowrap;
 }
@@ -157,17 +154,15 @@
   background: none;
   border: 1px solid transparent;
   border-radius: $border-radius-sm;
-  color: $text-light;
+  color: var(--gr-text-muted);
   cursor: pointer;
   flex-shrink: 0;
   transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
 
-  .material-symbols-outlined { font-size: 1rem; }
-
   &:hover {
-    color: $text-secondary;
-    border-color: $color-border;
-    background: $color-hover;
+    color: var(--gr-text-secondary);
+    border-color: var(--gr-border);
+    background: var(--gr-surface-hover);
   }
 }
 
@@ -176,20 +171,18 @@
   align-items: center;
   gap: $spacing-xs;
   padding: $spacing-xs $spacing-sm;
-  background: $color-hover;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-hover);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   font-size: $font-size-sm;
   text-decoration: none;
   flex-shrink: 0;
   transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
 
-  .material-symbols-outlined { font-size: 1rem; }
-
   &:hover {
-    color: $text-primary;
+    color: var(--gr-text-primary);
     border-color: color-mix(in srgb, var(--gr-text-secondary) 40%, transparent);
-    background: $color-border;
+    background: var(--gr-border);
   }
 }

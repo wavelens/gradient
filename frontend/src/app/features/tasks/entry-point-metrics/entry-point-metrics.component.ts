@@ -7,11 +7,9 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import { MetricChartComponent } from '@shared/ui';
+import { ButtonComponent, IconComponent, LoadingSpinnerComponent, MetricChartComponent } from '@shared/ui';
 import { TasksService, EntryPointMetricPoint, EntryPointMetricsResponse } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
-import { ButtonComponent } from '@shared/ui';
 
 const CHART_COLORS = {
   buildTime: '#17a2b8',
@@ -24,7 +22,7 @@ const CHART_COLORS = {
 @Component({
   selector: 'app-entry-point-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, ButtonComponent, MetricChartComponent, LoadingSpinnerComponent],
+  imports: [CommonModule, RouterModule, ButtonComponent, MetricChartComponent, LoadingSpinnerComponent, IconComponent],
   templateUrl: './entry-point-metrics.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './entry-point-metrics.component.scss',

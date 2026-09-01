@@ -31,7 +31,7 @@
 
   @if (hasNoCacheSubscribed()) {
     <div class="no-cache-banner" data-testid="no-cache-banner" role="alert">
-      <span class="material-symbols-outlined">warning</span>
+      <gr-icon name="warning" />
       <div>
         <div class="no-cache-title">No cache subscribed</div>
         <div class="no-cache-body">
@@ -44,7 +44,7 @@
 
   @if (projectId()) {
     <div class="peer-id-banner">
-      <span class="material-symbols-outlined">vpn_key</span>
+      <gr-icon name="vpn_key" />
       <div>
         <div class="peer-id-label">Project Peer ID</div>
         <div class="peer-id-value">{{ projectId() }}</div>
@@ -65,7 +65,7 @@
   } @else {
     @if (workers().length === 0) {
       <div class="empty-state">
-        <span class="material-symbols-outlined">construction</span>
+        <gr-icon name="construction" size="xl" />
         <h3>No workers registered</h3>
         <p class="text-secondary">Register a <code>gradient-worker</code> to run builds for this project.</p>
         <button
@@ -82,7 +82,7 @@
         @for (worker of workers(); track worker.worker_id) {
           <div class="worker-row">
             <div class="worker-info">
-              <span class="material-symbols-outlined">construction</span>
+              <gr-icon name="construction" />
               <div>
                 <div class="worker-name">{{ worker.display_name }}</div>
                 <div class="worker-id text-secondary">{{ worker.worker_id }}</div>
@@ -207,7 +207,7 @@
 >
   @if (projectId()) {
     <div class="dialog-info">
-      <span class="material-symbols-outlined">vpn_key</span>
+      <gr-icon name="vpn_key" />
       <div>
         <div class="dialog-info-label">Peer ID (this project)</div>
         <code class="dialog-info-value">{{ projectId() }}</code>
@@ -217,7 +217,7 @@
   }
   @if (errorMessage()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ errorMessage() }}
     </div>
   }
@@ -277,7 +277,7 @@
         [class.cap-tag-off]="!newEnableFetch"
         (click)="newEnableFetch = !newEnableFetch"
       >
-        <span class="material-symbols-outlined">{{ newEnableFetch ? 'check' : 'close' }}</span>
+        <gr-icon [name]="newEnableFetch ? 'check' : 'close'" size="sm" />
         fetch
       </button>
       <button
@@ -287,7 +287,7 @@
         [class.cap-tag-off]="!newEnableEval"
         (click)="newEnableEval = !newEnableEval"
       >
-        <span class="material-symbols-outlined">{{ newEnableEval ? 'check' : 'close' }}</span>
+        <gr-icon [name]="newEnableEval ? 'check' : 'close'" size="sm" />
         eval
       </button>
       <button
@@ -297,7 +297,7 @@
         [class.cap-tag-off]="!newEnableBuild"
         (click)="newEnableBuild = !newEnableBuild"
       >
-        <span class="material-symbols-outlined">{{ newEnableBuild ? 'check' : 'close' }}</span>
+        <gr-icon [name]="newEnableBuild ? 'check' : 'close'" size="sm" />
         build
       </button>
     </div>
@@ -323,7 +323,7 @@
   width="440px"
 >
   <div class="dialog-warning">
-    <span class="material-symbols-outlined">warning</span>
+    <gr-icon name="warning" />
     <p>
       This worker is currently <strong>connected</strong>. Deactivating it will immediately disconnect it and
       <strong>abort all active jobs</strong> assigned to this project. Are you sure?
@@ -345,7 +345,7 @@
   @if (lastRegistration(); as reg) {
     @if (reg.token) {
       <div class="token-warning">
-        <span class="material-symbols-outlined">warning</span>
+        <gr-icon name="warning" />
         <strong>Save this token now.</strong> It will not be shown again.
       </div>
     }
@@ -418,7 +418,7 @@
           [class.cap-tag-off]="!editEnableFetch"
           (click)="editEnableFetch = !editEnableFetch"
         >
-          <span class="material-symbols-outlined">{{ editEnableFetch ? 'check' : 'close' }}</span>
+          <gr-icon [name]="editEnableFetch ? 'check' : 'close'" size="sm" />
           fetch
         </button>
         <button
@@ -428,7 +428,7 @@
           [class.cap-tag-off]="!editEnableEval"
           (click)="editEnableEval = !editEnableEval"
         >
-          <span class="material-symbols-outlined">{{ editEnableEval ? 'check' : 'close' }}</span>
+          <gr-icon [name]="editEnableEval ? 'check' : 'close'" size="sm" />
           eval
         </button>
         <button
@@ -438,7 +438,7 @@
           [class.cap-tag-off]="!editEnableBuild"
           (click)="editEnableBuild = !editEnableBuild"
         >
-          <span class="material-symbols-outlined">{{ editEnableBuild ? 'check' : 'close' }}</span>
+          <gr-icon [name]="editEnableBuild ? 'check' : 'close'" size="sm" />
           build
         </button>
       </div>

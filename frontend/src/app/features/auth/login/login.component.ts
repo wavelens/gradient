@@ -12,12 +12,12 @@ import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import { take } from 'rxjs';
 import { environment } from '@environments/environment';
-import { ButtonComponent } from '@shared/ui';
+import { ButtonComponent, IconComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent, IconComponent],
   templateUrl: './login.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './login.component.scss',

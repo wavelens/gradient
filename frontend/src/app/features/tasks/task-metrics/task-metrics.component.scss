@@ -20,23 +20,23 @@
     align-items: center;
     gap: $spacing-xs;
     font-size: $font-size-sm;
-    color: $text-light;
+    color: var(--gr-text-muted);
     margin-bottom: $spacing-sm;
 
     .breadcrumb-link {
-      color: $text-secondary;
+      color: var(--gr-text-secondary);
       text-decoration: none;
-      &:hover { color: $text-primary; }
+      &:hover { color: var(--gr-text-primary); }
     }
 
-    .breadcrumb-separator { color: $text-light; }
-    .breadcrumb-current { color: $text-primary; }
+    .breadcrumb-separator { color: var(--gr-text-muted); }
+    .breadcrumb-current { color: var(--gr-text-primary); }
   }
 
   h1 {
     font-size: $font-size-xl;
     font-weight: 600;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     margin: 0 0 $spacing-xs;
   }
 }
@@ -48,9 +48,9 @@
   justify-content: center;
   gap: $spacing-md;
   padding: $spacing-xl * 2;
-  color: $text-light;
+  color: var(--gr-text-muted);
 
-  .material-symbols-outlined { font-size: 48px; opacity: 0.4; }
+  gr-icon { opacity: 0.4; }
 }
 
 .charts-grid {
@@ -60,8 +60,8 @@
 }
 
 .chart-card {
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-md $spacing-md $spacing-sm;
 
@@ -80,10 +80,10 @@
 .chart-title {
   font-size: $font-size-sm;
   font-weight: 600;
-  color: $text-primary;
+  color: var(--gr-text-primary);
 }
 
 .chart-sub {
   font-size: $font-size-xs;
-  color: $text-light;
+  color: var(--gr-text-muted);
 }

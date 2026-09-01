@@ -23,7 +23,7 @@
   } @else {
     @if (keys().length === 0) {
       <div class="empty-state">
-        <span class="material-symbols-outlined">key</span>
+        <gr-icon name="key" size="xl" />
         <h3>No API keys</h3>
         <p class="text-secondary">Create an API key to access Gradient programmatically.</p>
         <button grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
@@ -33,7 +33,7 @@
         @for (key of keys(); track key.id) {
           <div class="key-row" [class.revoked]="key.revoked_at">
             <div class="key-info">
-              <span class="material-symbols-outlined">key</span>
+              <gr-icon name="key" />
               <div>
                 <div class="key-name">
                   {{ key.name }}
@@ -111,7 +111,7 @@
 >
   @if (errorMessage()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ errorMessage() }}
     </div>
   }

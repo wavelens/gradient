@@ -12,7 +12,7 @@
   padding: $spacing-xs $spacing-md;
   font-size: $font-size-xs;
   font-weight: 600;
-  color: $text-light;
+  color: var(--gr-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   user-select: none;
@@ -31,7 +31,7 @@
   .evaluation-label {
     flex: 1;
     font-size: $font-size-sm;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     font-weight: 500;
   }
 
@@ -42,7 +42,7 @@
 
   &.selected {
     background: color-mix(in srgb, var(--gr-white) 6%, transparent);
-    border-left-color: $color-danger;
+    border-left-color: var(--gr-status-danger);
   }
 }
 
@@ -55,10 +55,8 @@
   font-size: $font-size-xs;
   font-weight: 600;
 
-  .material-symbols-outlined { font-size: 0.85rem; }
-
-  &--error   { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: $color-danger; }
-  &--warning { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: $color-warning; }
+  &--error   { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: var(--gr-status-danger); }
+  &--warning { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); }
 }
 
 // ── Messages panel ──────────────────────────────────────────────────────────
@@ -74,7 +72,7 @@
   padding: $spacing-sm $spacing-lg;
   font-size: $font-size-sm;
   font-weight: 600;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   background: color-mix(in srgb, var(--gr-white) 3%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--gr-border) 50%, transparent);
   flex-shrink: 0;
@@ -92,7 +90,7 @@
 .no-messages {
   padding: $spacing-lg;
   font-size: $font-size-sm;
-  color: $text-light;
+  color: var(--gr-text-muted);
   text-align: center;
 }
 
@@ -107,24 +105,24 @@
     background: color-mix(in srgb, var(--gr-status-danger) 6%, transparent);
     border-color: color-mix(in srgb, var(--gr-status-danger) 25%, transparent);
 
-    .message-icon { color: $color-danger; }
-    .message-source { color: $color-danger; }
+    .message-icon { color: var(--gr-status-danger); }
+    .message-source { color: var(--gr-status-danger); }
   }
 
   &--warning {
     background: color-mix(in srgb, var(--gr-status-warning) 6%, transparent);
     border-color: color-mix(in srgb, var(--gr-status-warning) 25%, transparent);
 
-    .message-icon { color: $color-warning; }
-    .message-source { color: $color-warning; }
+    .message-icon { color: var(--gr-status-warning); }
+    .message-source { color: var(--gr-status-warning); }
   }
 
   &--notice {
     background: color-mix(in srgb, var(--gr-status-info) 6%, transparent);
     border-color: color-mix(in srgb, var(--gr-status-info) 25%, transparent);
 
-    .message-icon { color: $color-info; }
-    .message-source { color: $color-info; }
+    .message-icon { color: var(--gr-status-info); }
+    .message-source { color: var(--gr-status-info); }
   }
 }
 
@@ -152,7 +150,7 @@
   margin: 0;
   font-family: $font-family-mono;
   font-size: $font-size-xs;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.6;

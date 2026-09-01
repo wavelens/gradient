@@ -21,11 +21,11 @@
   gap: $spacing-xs;
   margin-bottom: $spacing-sm;
   font-size: $font-size-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 
-  .breadcrumb-link { color: $text-secondary; &:hover { color: $text-primary; } }
-  .breadcrumb-separator { color: $text-light; }
-  .breadcrumb-current { color: $text-primary; }
+  .breadcrumb-link { color: var(--gr-text-secondary); &:hover { color: var(--gr-text-primary); } }
+  .breadcrumb-separator { color: var(--gr-text-muted); }
+  .breadcrumb-current { color: var(--gr-text-primary); }
 }
 
 .settings-section {
@@ -36,8 +36,8 @@
 
 .settings-card {
   padding: $spacing-lg;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 }
 
@@ -48,11 +48,11 @@
   justify-content: center;
   padding: $spacing-xxl;
   text-align: center;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 
-  .material-symbols-outlined { font-size: 48px; color: $text-secondary; margin-bottom: $spacing-md; }
+  gr-icon { color: var(--gr-text-secondary); margin-bottom: $spacing-md; }
   h3 { margin: 0 0 $spacing-sm 0; }
   p { margin: 0 0 $spacing-lg 0; }
 }
@@ -67,8 +67,8 @@
   display: flex;
   flex-direction: column;
   padding: $spacing-md $spacing-lg;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
 }
 
@@ -84,11 +84,11 @@
   align-items: center;
   gap: $spacing-md;
 
-  .material-symbols-outlined { font-size: 24px; color: $text-secondary; }
+  gr-icon { color: var(--gr-text-secondary); }
   .integration-name {
     font-weight: 500;
     font-family: $font-family-mono;
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
   .integration-meta {
     display: flex;
@@ -108,7 +108,7 @@
 .integration-body {
   margin-top: $spacing-md;
   padding-top: $spacing-md;
-  border-top: 1px solid $color-border;
+  border-top: 1px solid var(--gr-border);
 }
 
 .badge {
@@ -120,15 +120,15 @@
 
   &.badge-inbound {
     background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
-    color: $color-info;
+    color: var(--gr-status-info);
   }
   &.badge-outbound {
     background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: $color-warning;
+    color: var(--gr-status-warning);
   }
   &.badge-forge {
     background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent);
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
 }
 
@@ -141,15 +141,15 @@
 
   &.status-ok {
     background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: $color-success;
+    color: var(--gr-status-success);
   }
   &.status-warn {
     background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: $color-warning;
+    color: var(--gr-status-warning);
   }
   &.status-info {
     background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent);
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
   }
 }
 
@@ -167,7 +167,7 @@
 
 .mono-value {
   font-family: $font-family-mono;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   word-break: break-all;
 }
 
@@ -185,10 +185,9 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $color-danger;
+  color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-  .material-symbols-outlined { font-size: 20px; }
 }
 
 .dialog-info {
@@ -199,10 +198,9 @@
   border: 1px solid color-mix(in srgb, var(--gr-status-info) 50%, transparent);
   border-radius: $border-radius-md;
   padding: $spacing-md;
-  color: $color-info;
+  color: var(--gr-status-info);
   margin-bottom: $spacing-md;
 
-  .material-symbols-outlined { font-size: 20px; }
 }
 
 .github-row {

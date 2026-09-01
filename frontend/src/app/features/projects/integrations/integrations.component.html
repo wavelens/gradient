@@ -59,7 +59,7 @@
       <h2>Configured Integrations</h2>
       @if (integrations().length === 0) {
         <div class="empty-state">
-          <span class="material-symbols-outlined">hub</span>
+          <gr-icon name="hub" size="xl" />
           <h3>No integrations</h3>
           <p class="text-secondary">Create an inbound integration to receive forge webhooks, or an outbound integration to report build statuses.</p>
           <button
@@ -77,7 +77,7 @@
             <div class="integration-row">
               <div class="integration-header">
                 <div class="integration-info">
-                  <span class="material-symbols-outlined">{{ integration.kind === 'inbound' ? 'call_received' : 'call_made' }}</span>
+                  <gr-icon [name]="integration.kind === 'inbound' ? 'call_received' : 'call_made'" />
                   <div>
                     <div class="integration-name">{{ integration.display_name || integration.name }}</div>
                     @if (integration.display_name && integration.display_name !== integration.name) {
@@ -208,7 +208,7 @@
 >
   @if (errorMessage()) {
     <div class="dialog-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ errorMessage() }}
     </div>
   }
@@ -262,7 +262,7 @@
     </div>
   } @else if (formData.kind === 'inbound') {
     <div class="dialog-info">
-      <span class="material-symbols-outlined">info</span>
+      <gr-icon name="info" />
       The webhook URL is shown after the integration is created. Enable push, pull/merge-request, comment, and review events on the forge webhook - a push-only webhook never delivers PR CI or <code>/gradient</code> commands.
     </div>
     <div class="form-group">
@@ -307,7 +307,7 @@
   @if (editingIntegration(); as target) {
     @if (errorMessage()) {
       <div class="dialog-error">
-        <span class="material-symbols-outlined">error</span>
+        <gr-icon name="error" />
         {{ errorMessage() }}
       </div>
     }

@@ -13,11 +13,9 @@ import { debounceTime, switchMap } from 'rxjs/operators';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
-import { EmptyStateComponent } from '@shared/ui';
+import { ButtonComponent, DialogComponent, EmptyStateComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
 import { slugify } from '@shared/text';
 import { Cache } from '@core/models';
-import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-cache-list',
@@ -32,6 +30,7 @@ import { ButtonComponent, DialogComponent, InputDirective } from '@shared/ui';
     InputDirective,
     LoadingSpinnerComponent,
     EmptyStateComponent,
+    IconComponent,
   ],
   templateUrl: './cache-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

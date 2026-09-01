@@ -8,12 +8,8 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint, UpstreamCache } from '@core/services/caches.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
-import { LabelHelpComponent } from '@shared/ui';
+import { ButtonComponent, IconComponent, LabelHelpComponent, LoadingSpinnerComponent, MetricChartComponent, MetricSeries } from '@shared/ui';
 import { Cache } from '@core/models';
-import { MetricChartComponent } from '@shared/ui';
-import { MetricSeries } from '@shared/ui';
-import { ButtonComponent } from '@shared/ui';
 
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';
 
@@ -34,6 +30,7 @@ const CHART_COLORS = {
     LoadingSpinnerComponent,
     LabelHelpComponent,
     MetricChartComponent,
+    IconComponent,
   ],
   templateUrl: './cache-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

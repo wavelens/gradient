@@ -80,13 +80,13 @@
 
         @if (saveError()) {
           <div class="message-banner error">
-            <span class="material-symbols-outlined">error</span>
+            <gr-icon name="error" />
             {{ saveError() }}
           </div>
         }
         @if (saveSuccess()) {
           <div class="message-banner success">
-            <span class="material-symbols-outlined">check_circle</span>
+            <gr-icon name="check_circle" />
             Changes saved.
           </div>
         }

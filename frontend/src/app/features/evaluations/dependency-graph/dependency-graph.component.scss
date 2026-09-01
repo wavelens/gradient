@@ -19,7 +19,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: $color-primary;
+  background: var(--gr-surface-base);
   overflow: hidden;
   position: relative;
   user-select: none;
@@ -39,11 +39,10 @@
   justify-content: center;
   height: 100%;
   gap: $spacing-md;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 
-  .material-symbols-outlined {
-    font-size: 3rem;
-    color: $color-danger;
+  gr-icon {
+    color: var(--gr-status-danger);
   }
 }
 
@@ -54,8 +53,8 @@
   align-items: center;
   justify-content: space-between;
   padding: $spacing-sm $spacing-lg;
-  background: $color-tertiary;
-  border-bottom: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border-bottom: 1px solid var(--gr-border);
   flex-shrink: 0;
   gap: $spacing-md;
 
@@ -79,7 +78,7 @@
   .header-name {
     font-size: $font-size-md;
     font-weight: 600;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     font-family: $font-family-mono;
     white-space: nowrap;
     overflow: hidden;
@@ -92,11 +91,11 @@
     align-items: center;
     gap: $spacing-xs;
     font-size: $font-size-xs;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     margin-top: 2px;
 
     .sep { opacity: 0.4; }
-    .zoom-hint-inline { color: $text-light; font-style: italic; }
+    .zoom-hint-inline { color: var(--gr-text-muted); font-style: italic; }
   }
 
   .header-controls {
@@ -109,7 +108,7 @@
 .icon-btn {
   background: none;
   border: none;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   cursor: pointer;
   padding: 6px;
   border-radius: $border-radius-sm;
@@ -117,18 +116,16 @@
   align-items: center;
   transition: color $transition-fast, background $transition-fast;
 
-  .material-symbols-outlined { font-size: 1.25rem; }
-
   &:hover {
-    color: $text-primary;
-    background: $color-hover;
+    color: var(--gr-text-primary);
+    background: var(--gr-surface-hover);
   }
 }
 
 .ctrl-btn {
-  background: $color-hover;
-  border: 1px solid $color-border;
-  color: $text-secondary;
+  background: var(--gr-surface-hover);
+  border: 1px solid var(--gr-border);
+  color: var(--gr-text-secondary);
   cursor: pointer;
   padding: 5px 10px;
   border-radius: $border-radius-sm;
@@ -136,10 +133,8 @@
   align-items: center;
   transition: color $transition-fast, background $transition-fast;
 
-  .material-symbols-outlined { font-size: 1rem; }
-
   &:hover {
-    color: $text-primary;
+    color: var(--gr-text-primary);
     background: var(--gr-surface-active);
   }
 }
@@ -154,10 +149,10 @@
   font-size: $font-size-xs;
   font-weight: 500;
 
-  &.status-success { background: color-mix(in srgb, var(--gr-graph-success) 15%, transparent); color: $color-graph-success; }
-  &.status-danger  { background: color-mix(in srgb, var(--gr-graph-danger) 15%, transparent); color: $color-graph-danger; }
-  &.status-warning { background: color-mix(in srgb, var(--gr-graph-warning) 15%, transparent); color: $color-graph-warning; }
-  &.status-running { background: color-mix(in srgb, var(--gr-graph-running) 15%, transparent); color: $color-graph-running; }
+  &.status-success { background: color-mix(in srgb, var(--gr-graph-success) 15%, transparent); color: var(--gr-graph-success); }
+  &.status-danger  { background: color-mix(in srgb, var(--gr-graph-danger) 15%, transparent); color: var(--gr-graph-danger); }
+  &.status-warning { background: color-mix(in srgb, var(--gr-graph-warning) 15%, transparent); color: var(--gr-graph-warning); }
+  &.status-running { background: color-mix(in srgb, var(--gr-graph-running) 15%, transparent); color: var(--gr-graph-running); }
 }
 
 // ── Graph SVG ─────────────────────────────────────────────────────────────────
@@ -181,7 +176,7 @@
   flex-wrap: wrap;
   gap: $spacing-md;
   background: color-mix(in srgb, var(--gr-surface-raised) 92%, transparent);
-  border: 1px solid $color-border;
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-xs $spacing-md;
   backdrop-filter: blur(4px);
@@ -191,7 +186,7 @@
     align-items: center;
     gap: $spacing-xs;
     font-size: $font-size-xs;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
   }
 
   .dot {
@@ -206,8 +201,8 @@
 
 .node-tooltip {
   position: fixed;
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-sm $spacing-md;
   pointer-events: none;
@@ -217,7 +212,7 @@
 
   .tt-name {
     font-weight: 600;
-    color: $text-primary;
+    color: var(--gr-text-primary);
     font-family: $font-family-mono;
     font-size: $font-size-sm;
     margin-bottom: 3px;
@@ -228,15 +223,15 @@
     font-weight: 500;
     margin-bottom: 4px;
 
-    &.status-success { color: $color-graph-success; }
-    &.status-danger  { color: $color-graph-danger; }
-    &.status-warning { color: $color-graph-warning; }
-    &.status-running { color: $color-graph-running; }
+    &.status-success { color: var(--gr-graph-success); }
+    &.status-danger  { color: var(--gr-graph-danger); }
+    &.status-warning { color: var(--gr-graph-warning); }
+    &.status-running { color: var(--gr-graph-running); }
   }
 
   .tt-path {
     font-size: $font-size-xs;
-    color: $text-light;
+    color: var(--gr-text-muted);
     font-family: $font-family-mono;
     word-break: break-all;
     line-height: 1.4;

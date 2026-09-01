@@ -22,19 +22,18 @@
   justify-content: center;
   gap: $spacing-sm;
   height: 100%;
-  color: $text-light;
+  color: var(--gr-text-muted);
 
-  .material-symbols-outlined { font-size: 32px; }
 }
 
 .metric-sep {
   font-size: $font-size-xs;
-  color: $text-light;
+  color: var(--gr-text-muted);
   margin: 0 2px;
 }
 
 .queue-waiting {
-  color: $color-warning;
+  color: var(--gr-status-warning);
 }
 
 .waiting-banner {
@@ -44,12 +43,12 @@
   padding: $spacing-sm $spacing-md;
   background: color-mix(in srgb, var(--gr-status-warning) 8%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--gr-status-warning) 35%, transparent);
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   flex-shrink: 0;
 
-  .material-symbols-outlined { font-size: 20px; color: $color-warning; }
-  .waiting-banner-title { font-weight: 600; color: $text-primary; }
-  .waiting-banner-sub { font-size: $font-size-sm; color: $text-light; }
+  gr-icon { color: var(--gr-status-warning); }
+  .waiting-banner-title { font-weight: 600; color: var(--gr-text-primary); }
+  .waiting-banner-sub { font-size: $font-size-sm; color: var(--gr-text-muted); }
 }
 
 .queued-hint {
@@ -59,23 +58,23 @@
   justify-content: center;
   gap: $spacing-sm;
   height: 100%;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 
   .queued-icon {
     font-size: 56px;
-    color: $color-warning;
+    color: var(--gr-status-warning);
     animation: pulse 2s ease-in-out infinite;
   }
 
   .queued-title {
     font-size: $font-size-lg;
     font-weight: 600;
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
 
   .queued-sub {
     font-size: $font-size-sm;
-    color: $text-light;
+    color: var(--gr-text-muted);
   }
 
   .waiting-unmet {
@@ -83,7 +82,7 @@
     padding: 0;
     list-style: none;
     font-size: $font-size-sm;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     text-align: left;
 
     li {
@@ -103,23 +102,23 @@
   justify-content: center;
   gap: $spacing-sm;
   height: 100%;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 
   .evaluating-icon {
     font-size: 56px;
-    color: $color-info;
+    color: var(--gr-status-info);
     animation: pulse 1.8s ease-in-out infinite;
   }
 
   .evaluating-title {
     font-size: $font-size-lg;
     font-weight: 600;
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
 
   .evaluating-sub {
     font-size: $font-size-sm;
-    color: $text-light;
+    color: var(--gr-text-muted);
   }
 }
 
@@ -135,7 +134,7 @@
   justify-content: center;
   gap: $spacing-sm;
   height: 100%;
-  color: $text-light;
+  color: var(--gr-text-muted);
 
   .hint-icon {
     font-size: 40px;
@@ -144,7 +143,7 @@
 
   .hint-text {
     font-size: $font-size-sm;
-    color: $text-light;
+    color: var(--gr-text-muted);
   }
 }
 
@@ -164,7 +163,7 @@
 .log-build-path {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -174,7 +173,7 @@
 
 .log-line-count {
   font-size: $font-size-xs;
-  color: $text-light;
+  color: var(--gr-text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   flex-shrink: 0;
@@ -202,7 +201,7 @@
   height: 32px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--gr-surface-raised) 90%, transparent);
-  border: 1px solid $color-border;
+  border: 1px solid var(--gr-border);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -210,9 +209,9 @@
   transition: background $transition-fast;
   backdrop-filter: blur(4px);
 
-  &:hover { background: $color-hover; }
+  &:hover { background: var(--gr-surface-hover); }
 
-  .material-symbols-outlined { font-size: 18px; color: $text-primary; }
+  gr-icon { color: var(--gr-text-primary); }
 }
 
 // ── Chunked log viewer ──────────────────────────────────────────────────────
@@ -222,8 +221,8 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background: $color-tertiary;
-  border-bottom: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border-bottom: 1px solid var(--gr-border);
 }
 
 .log-search-input {
@@ -231,27 +230,27 @@
   padding: 4px 8px;
   font-family: $font-family-mono;
   font-size: $font-size-xs;
-  background: $color-primary;
-  color: $text-primary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-base);
+  color: var(--gr-text-primary);
+  border: 1px solid var(--gr-border);
   border-radius: 4px;
 }
 
 .log-search-count {
   font-size: $font-size-xs;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   white-space: nowrap;
 }
 
 .log-search-btn {
   background: transparent;
-  border: 1px solid $color-border;
+  border: 1px solid var(--gr-border);
   border-radius: 4px;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   cursor: pointer;
   padding: 2px 8px;
 
-  &:hover { color: $text-primary; }
+  &:hover { color: var(--gr-text-primary); }
 }
 
 .log-spacer {
@@ -280,7 +279,7 @@
   width: 56px;
   padding-right: 12px;
   text-align: right;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   user-select: none;
   -webkit-user-select: none;
   cursor: pointer;
@@ -291,7 +290,7 @@
 
 .log-line-content {
   display: inline;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
 }

@@ -61,7 +61,7 @@
 
   @if (loadError()) {
     <div class="inline-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ loadError() }}
     </div>
   }
@@ -70,7 +70,7 @@
     <gr-loading-spinner message="Loading NARs..." />
   } @else if (rows().length === 0) {
     <div class="empty-state">
-      <span class="material-symbols-outlined">inbox</span>
+      <gr-icon name="inbox" size="xl" />
       <h3>No NARs found</h3>
       <p class="text-secondary">No archives match the current filters.</p>
     </div>
@@ -155,7 +155,7 @@
 >
   @if (deleteError()) {
     <div class="inline-error">
-      <span class="material-symbols-outlined">error</span>
+      <gr-icon name="error" />
       {{ deleteError() }}
     </div>
   }

@@ -26,7 +26,7 @@
 
 .error-icon {
   font-size: 64px;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   margin-bottom: $spacing-lg;
 }
 
@@ -34,7 +34,7 @@
   font-size: 96px;
   font-weight: 700;
   line-height: 1;
-  color: $text-light;
+  color: var(--gr-text-muted);
   margin-bottom: $spacing-md;
   font-family: $font-family-mono;
   letter-spacing: -4px;
@@ -44,12 +44,12 @@
   font-size: $font-size-xxl;
   font-weight: 600;
   margin: 0 0 $spacing-md;
-  color: $text-primary;
+  color: var(--gr-text-primary);
 }
 
 .error-description {
   font-size: $font-size-md;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   line-height: 1.6;
   margin: 0 0 $spacing-xxl;
 }
@@ -77,13 +77,13 @@
   &:hover { opacity: 0.85; }
 
   &.btn-primary {
-    background: $color-info;
-    color: $text-primary;
+    background: var(--gr-status-info);
+    color: var(--gr-text-primary);
   }
 
   &.btn-secondary {
-    background: $color-tertiary;
-    color: $text-primary;
-    border: 1px solid $color-border;
+    background: var(--gr-surface-raised);
+    color: var(--gr-text-primary);
+    border: 1px solid var(--gr-border);
   }
 }

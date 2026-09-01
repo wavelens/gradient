@@ -11,7 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { LoadingSpinnerComponent } from '@shared/ui';
+import { ButtonComponent, DialogComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import {
@@ -23,7 +23,6 @@ import {
 } from '@core/models';
 import { ActionFormComponent } from './action-form.component';
 import { ActionDeliveriesComponent } from './action-deliveries.component';
-import { ButtonComponent, DialogComponent } from '@shared/ui';
 
 interface IntegrationOption {
   id: string;
@@ -44,6 +43,7 @@ interface IntegrationOption {
     ManagedDisableDirective,
     ActionFormComponent,
     ActionDeliveriesComponent,
+    IconComponent,
   ],
   templateUrl: './task-actions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
