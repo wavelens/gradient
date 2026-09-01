@@ -10,12 +10,9 @@
     <gr-loading-spinner message="Loading API keys..." />
   } @else {
     @if (keys().length === 0) {
-      <div class="empty-state">
-        <gr-icon name="key" size="xl" />
-        <h3>No API keys</h3>
-        <p class="text-secondary">Create an API key to access Gradient programmatically.</p>
-        <button grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
-      </div>
+      <gr-empty-state icon="key" title="No API keys" message="Create an API key to access Gradient programmatically.">
+        <button slot="action" grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
+      </gr-empty-state>
     } @else {
       <div class="keys-list">
         @for (key of keys(); track key.id) {

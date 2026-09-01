@@ -8,10 +8,7 @@
   @if (loading()) {
     <gr-loading-spinner message="Loading metrics..." />
   } @else if (metrics().length === 0) {
-    <div class="empty-state">
-      <gr-icon name="bar_chart" size="xl" />
-      <p>No completed evaluations yet.</p>
-    </div>
+    <gr-empty-state icon="bar_chart" title="No completed evaluations yet." />
   } @else {
     <div class="charts-grid">
 

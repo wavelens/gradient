@@ -9,6 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import {
   ButtonComponent,
+  EmptyStateComponent,
   IconComponent,
   LoadingSpinnerComponent,
   MetricChartComponent,
@@ -28,7 +29,7 @@ const CHART_COLORS = {
 @Component({
   selector: 'app-entry-point-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, ButtonComponent, MetricChartComponent, LoadingSpinnerComponent, IconComponent, PageLayoutComponent],
+  imports: [CommonModule, RouterModule, ButtonComponent, MetricChartComponent, LoadingSpinnerComponent, IconComponent, PageLayoutComponent, EmptyStateComponent],
   templateUrl: './entry-point-metrics.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './entry-point-metrics.component.scss',

@@ -53,6 +53,7 @@ const tooltipChrome = (t: ChartTheme) => ({
 
 const axisLabel = (t: ChartTheme) => ({ color: t.text, fontSize: 12, fontFamily: t.mono });
 const axisLine = (t: ChartTheme) => ({ lineStyle: { color: t.border } });
+const AXIS_TICKS = 4;
 const splitLine = (t: ChartTheme) => ({ lineStyle: { color: t.grid, type: 'dashed' as const } });
 
 /// Builds the full ECharts option for `gr-metric-chart`. Kept pure and free of
@@ -86,13 +87,16 @@ export function buildMetricChartOption(cfg: MetricChartConfig, theme: ChartTheme
 
 function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, theme: ChartTheme): EChartsOption {
   const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: cfg.type === 'bar', axisLabel: axisLabel(theme), axisLine: axisLine(theme) };
+  // Two value axes tick independently, so each draws its own grid: one set of
+  // lines, and a shared tick count so the right-hand labels land on them.
   const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false) => ({
     type: 'value' as const,
     name: title || undefined,
     nameTextStyle: { color: theme.text },
     axisLabel: { ...axisLabel(theme), formatter: (v: number) => fmt(v) },
     axisLine: axisLine(theme),
-    splitLine: splitLine(theme),
+    splitNumber: AXIS_TICKS,
+    splitLine: opposite ? { show: false } : splitLine(theme),
     ...(opposite ? { position: 'right' as const } : {}),
   });
 

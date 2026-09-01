@@ -17,6 +17,7 @@ import {
 import {
   ButtonComponent,
   DialogComponent,
+  EmptyStateComponent,
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
@@ -44,6 +45,7 @@ type SortOrder = 'asc' | 'desc';
     CacheNarsDetailDrawerComponent,
     IconComponent,
     PageLayoutComponent,
+    EmptyStateComponent,
   ],
   templateUrl: './cache-nars.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

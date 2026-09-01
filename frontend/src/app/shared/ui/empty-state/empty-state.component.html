@@ -12,7 +12,9 @@
   @if (message()) {
     <p class="empty-message">{{ message() }}</p>
   }
+  <ng-content></ng-content>
   @if (actionLabel()) {
     <button grButton [label]="actionLabel() ?? ''" (click)="onActionClick()"></button>
   }
+  <ng-content select="[slot=action]"></ng-content>
 </div>

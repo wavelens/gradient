@@ -11,12 +11,16 @@ import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint, Upstre
 import {
   BadgeComponent,
   ButtonComponent,
+  CopyFieldComponent,
+  DividerComponent,
+  FormFieldComponent,
   IconComponent,
   LabelHelpComponent,
   LoadingSpinnerComponent,
   MetricChartComponent,
   MetricSeries,
   PageLayoutComponent,
+  SettingsSectionComponent,
 } from '@shared/ui';
 import { Cache } from '@core/models';
 
@@ -42,6 +46,10 @@ const CHART_COLORS = {
     IconComponent,
     PageLayoutComponent,
     BadgeComponent,
+    CopyFieldComponent,
+    SettingsSectionComponent,
+    DividerComponent,
+    FormFieldComponent,
   ],
   templateUrl: './cache-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -56,7 +64,6 @@ export class CacheDetailComponent implements OnInit {
   cache = signal<Cache | null>(null);
   upstreams = signal<UpstreamCache[]>([]);
   stats = signal<CacheStats | null>(null);
-  copied = signal<string | null>(null);
   activeWindow = signal<Window>('hours');
 
   externalUpstreamKeys = computed(() =>
@@ -73,6 +80,11 @@ export class CacheDetailComponent implements OnInit {
   cacheName = '';
   cacheUrl = '';
   serverUrl = '';
+
+  nixConfSnippet = computed(() => {
+    const keys = this.allPublicKeys();
+    return `substituters = ${this.cacheUrl}\ntrusted-public-keys = ${keys.length ? keys.join(' ') : '<unavailable>'}`;
+  });
 
   get installNetrcCommand(): string {
     return `nix run github:wavelens/gradient#gradient-cli -- cache install-netrc --server ${this.serverUrl} --token <YOUR_TOKEN> --cache ${this.cacheName}`;
@@ -159,13 +171,6 @@ export class CacheDetailComponent implements OnInit {
         this.statsLoading.set(false);
       },
       error: () => this.statsLoading.set(false),
-    });
-  }
-
-  copy(text: string, label: string): void {
-    navigator.clipboard.writeText(text).then(() => {
-      this.copied.set(label);
-      setTimeout(() => this.copied.set(null), 2000);
     });
   }
 

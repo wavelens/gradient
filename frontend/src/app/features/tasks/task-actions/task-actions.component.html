@@ -24,19 +24,16 @@
     <gr-loading-spinner message="Loading actions..." />
   } @else {
     @if (actions().length === 0) {
-      <div class="empty-state">
-        <gr-icon name="notifications_active" size="xl" />
-        <h3>No actions configured</h3>
-        <p class="text-secondary">Create an action to send mail, post webhooks, or report build status back to your forge.</p>
-        <button
+      <gr-empty-state icon="notifications_active" title="No actions configured" message="Create an action to send mail, post webhooks, or report build status back to your forge.">
+        <button slot="action"
           *appWritable="access()"
           grButton
           label="New Action"
           icon="add"
           (click)="startCreate()"
           [appManagedDisable]="access()"
-        ></button>
-      </div>
+          ></button>
+      </gr-empty-state>
     } @else {
       <div class="actions-list">
         @for (action of actions(); track action.id) {

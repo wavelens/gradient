@@ -211,6 +211,18 @@ describe('buildMetricChartOption dual axis', () => {
     expect(text).toContain('10:00');
   });
 
+  it('draws one set of grid lines across both axes', () => {
+    const y = buildMetricChartOption(dual, THEME).yAxis as any[];
+    expect(y[0].splitLine.show).not.toBe(false);
+    expect(y[1].splitLine.show).toBe(false);
+  });
+
+  it('ticks both axes the same number of times so their grid lines coincide', () => {
+    const y = buildMetricChartOption(dual, THEME).yAxis as any[];
+    expect(y[0].splitNumber).toBe(y[1].splitNumber);
+    expect(y[0].splitNumber).toBeGreaterThan(0);
+  });
+
   it('keeps a single axis when no secondary is configured', () => {
     const opt = buildMetricChartOption({ type: 'area', series: one, categories: cats }, THEME);
     expect(Array.isArray(opt.yAxis)).toBe(false);

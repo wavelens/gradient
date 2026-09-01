@@ -45,19 +45,17 @@
     <gr-loading-spinner message="Loading workers..." />
   } @else {
     @if (workers().length === 0) {
-      <div class="empty-state">
-        <gr-icon name="construction" size="xl" />
-        <h3>No workers registered</h3>
-        <p class="text-secondary">Register a <code>gradient-worker</code> to run builds for this project.</p>
-        <button
+      <gr-empty-state icon="construction" title="No workers registered">
+        <p class="empty-message">Register a <code>gradient-worker</code> to run builds for this project.</p>
+        <button slot="action"
           *appWritable="access()"
           grButton
           label="Register Worker"
           icon="add"
           (click)="openRegisterDialog()"
           [appManagedDisable]="access()"
-        ></button>
-      </div>
+          ></button>
+      </gr-empty-state>
     } @else {
       <div class="workers-list">
         @for (worker of workers(); track worker.worker_id) {

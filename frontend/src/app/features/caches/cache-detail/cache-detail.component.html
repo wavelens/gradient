@@ -24,7 +24,7 @@
         }
       </div>
 
-    <!-- Stats -->
+      <!-- Stats -->
     <div class="section">
       <h2>Storage</h2>
       @if (statsLoading()) {
@@ -108,75 +108,38 @@
       }
     </div>
 
-    <!-- Usage Information -->
-    <div class="section">
-      <h2>How to Use This Cache</h2>
-      <div class="info-card">
-        <p>Add the following to your <code>/etc/nix/nix.conf</code> or NixOS configuration:</p>
+    <gr-settings-section
+      title="How to Use This Cache"
+      description="Add the following to your /etc/nix/nix.conf or NixOS configuration."
+      maxWidth="none"
+    >
+      <gr-form-field label="Substituter URL" for="cache-url">
+        <gr-copy-field id="cache-url" [value]="cacheUrl" />
+      </gr-form-field>
 
-        <div class="usage-row">
-          <span class="usage-label">Substituter URL</span>
-          <div class="code-block">
-            <code>{{ cacheUrl }}</code>
-            <button class="copy-btn" (click)="copy(cacheUrl, 'url')" [title]="copied() === 'url' ? 'Copied!' : 'Copy'">
-              <gr-icon [name]="copied() === 'url' ? 'check' : 'content_copy'" size="sm" />
-            </button>
-          </div>
-        </div>
+      <gr-form-field label="Trusted Public Keys" for="cache-keys">
+        <gr-copy-field id="cache-keys" [value]="allPublicKeys().join(' ') || 'Not available'" />
+      </gr-form-field>
 
-        <div class="usage-row">
-          <span class="usage-label">Trusted Public Keys</span>
-          <div class="code-block">
-            @if (allPublicKeys().length > 0) {
-              <code>{{ allPublicKeys().join(' ') }}</code>
-              <button class="copy-btn" (click)="copy(allPublicKeys().join(' '), 'key')" [title]="copied() === 'key' ? 'Copied!' : 'Copy'">
-                <gr-icon [name]="copied() === 'key' ? 'check' : 'content_copy'" size="sm" />
-              </button>
-            } @else {
-              <code class="text-secondary">Not available</code>
-            }
-          </div>
-        </div>
+      <gr-form-field label="nix.conf snippet" for="cache-conf">
+        <gr-copy-field id="cache-conf" multiline [rows]="2" [value]="nixConfSnippet()" />
+      </gr-form-field>
 
-        <div class="usage-row">
-          <span class="usage-label">nix.conf snippet</span>
-          <div class="code-block multiline">
-            @if (allPublicKeys().length > 0) {
-              <pre>substituters = {{ cacheUrl }}
-trusted-public-keys = {{ allPublicKeys().join(' ') }}</pre>
-              <button class="copy-btn" (click)="copy('substituters = ' + cacheUrl + '\ntrusted-public-keys = ' + allPublicKeys().join(' '), 'conf')" [title]="copied() === 'conf' ? 'Copied!' : 'Copy'">
-                <gr-icon [name]="copied() === 'conf' ? 'check' : 'content_copy'" size="sm" />
-              </button>
-            } @else {
-              <pre class="text-secondary">substituters = {{ cacheUrl }}
-trusted-public-keys = &lt;unavailable&gt;</pre>
-            }
-          </div>
-        </div>
+      @if (!c.public) {
+        <gr-divider />
+        <gr-form-field label="Install netrc" for="cache-netrc">
+          <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/caches/#authentication" title="Cache authentication docs" />
+          <gr-copy-field id="cache-netrc" multiline [rows]="2" [value]="installNetrcCommand" />
+          <span slot="hint">
+            This cache is private. Run the command as root, replacing <code>&lt;YOUR_TOKEN&gt;</code> with your
+            API key or login token. It writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon
+            can authenticate. Prefer a declarative NixOS setup? See the
+            <a href="https://wavelens.github.io/gradient/usage/caches/#declarative-netrc" target="_blank" rel="noopener noreferrer">declarative netrc example</a>
+            in the docs.
+          </span>
+        </gr-form-field>
+      }
+    </gr-settings-section>
 
-        @if (!c.public) {
-          <div class="usage-divider"></div>
-          <h3 class="usage-section-title">
-            Authentication
-            <gr-label-help href="https://wavelens.github.io/gradient/usage/caches/#authentication" title="Cache authentication docs" />
-          </h3>
-          <p class="text-secondary">This cache is private. Run the following command as root to install the credentials Nix needs to access it:</p>
-          <div class="usage-row">
-            <span class="usage-label">Install netrc</span>
-            <div class="code-block multiline">
-              <pre>{{ installNetrcCommand }}</pre>
-              <button class="copy-btn" (click)="copy(installNetrcCommand, 'netrc')" [title]="copied() === 'netrc' ? 'Copied!' : 'Copy'">
-                <gr-icon [name]="copied() === 'netrc' ? 'check' : 'content_copy'" size="sm" />
-              </button>
-            </div>
-            <p class="text-secondary usage-hint">Replace <code>&lt;YOUR_TOKEN&gt;</code> with your API key or login token. The command writes the credentials to <code>/etc/nix/netrc</code> so the Nix daemon can authenticate against this cache.</p>
-          </div>
-          <p class="text-secondary usage-hint">
-            Prefer a declarative NixOS setup? See the
-            <a href="https://wavelens.github.io/gradient/usage/caches/#declarative-netrc" target="_blank" rel="noopener noreferrer">declarative netrc example</a> in the docs.
-          </p>
-        }
-      </div>
-    </div>
     </gr-page-layout>
   }

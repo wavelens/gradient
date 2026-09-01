@@ -21,11 +21,7 @@
 
 .empty-icon {
   margin-bottom: $spacing-lg;
-
-  .material-symbols-outlined {
-    color: var(--gr-text-secondary);
-    opacity: 0.5;
-  }
+  color: var(--gr-text-muted);
 }
 
 .empty-title {
@@ -37,5 +33,6 @@
 .empty-message {
   font-size: $font-size-md;
   color: var(--gr-text-secondary);
-  margin: 0 0 $spacing-lg 0;
+  margin: 0 auto $spacing-lg;
+  max-width: 52ch;
 }

@@ -44,19 +44,16 @@
     <div class="settings-section">
       <h2>Configured Integrations</h2>
       @if (integrations().length === 0) {
-        <div class="empty-state">
-          <gr-icon name="hub" size="xl" />
-          <h3>No integrations</h3>
-          <p class="text-secondary">Create an inbound integration to receive forge webhooks, or an outbound integration to report build statuses.</p>
-          <button
+        <gr-empty-state icon="hub" title="No integrations" message="Create an inbound integration to receive forge webhooks, or an outbound integration to report build statuses.">
+          <button slot="action"
             *appWritable="access()"
             grButton
             label="New Integration"
             icon="add"
             (click)="openCreateDialog()"
             [appManagedDisable]="access()"
-          ></button>
-        </div>
+            ></button>
+        </gr-empty-state>
       } @else {
         <div class="integrations-list">
           @for (integration of integrations(); track integration.id) {

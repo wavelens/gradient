@@ -17,19 +17,16 @@
     <gr-loading-spinner message="Loading cache subscriptions..." />
   } @else {
     @if (caches().length === 0) {
-      <div class="empty-state">
-        <gr-icon name="storage" size="xl" />
-        <h3>No cache subscriptions</h3>
-        <p class="text-secondary">Subscribe to a Nix binary cache to have builds pushed there automatically.</p>
-        <button
+      <gr-empty-state icon="storage" title="No cache subscriptions" message="Subscribe to a Nix binary cache to have builds pushed there automatically.">
+        <button slot="action"
           *appWritable="access()"
           grButton
           label="Subscribe to Cache"
           icon="add"
           [appManagedDisable]="access()"
           (click)="openSubscribeDialog()"
-        ></button>
-      </div>
+          ></button>
+      </gr-empty-state>
     } @else {
       <div class="caches-list">
         @for (cache of caches(); track cache.id) {

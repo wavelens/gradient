@@ -8,6 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import {
+  EmptyStateComponent,
   IconComponent,
   LoadingSpinnerComponent,
   MetricChartComponent,
@@ -28,7 +29,7 @@ const CHART_COLORS = {
 @Component({
   selector: 'app-task-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, MetricChartComponent, LoadingSpinnerComponent, IconComponent, PageLayoutComponent],
+  imports: [CommonModule, RouterModule, MetricChartComponent, LoadingSpinnerComponent, IconComponent, PageLayoutComponent, EmptyStateComponent],
   templateUrl: './task-metrics.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './task-metrics.component.scss',

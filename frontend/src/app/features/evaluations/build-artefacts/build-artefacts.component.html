@@ -17,11 +17,9 @@
   @if (loading()) {
     <gr-loading-spinner message="Loading artefacts..." />
   } @else if (artefacts().length === 0) {
-    <div class="empty-state">
-      <gr-icon name="inventory_2" size="xl" />
-      <p>No artefacts available for this build.</p>
+    <gr-empty-state icon="inventory_2" title="No artefacts available for this build.">
       <span class="empty-hint">Artefacts are produced via <code>hydra-build-products</code> in the build output.</span>
-    </div>
+    </gr-empty-state>
   } @else {
     <div class="artefacts-list">
       @for (artefact of artefacts(); track artefact.name) {

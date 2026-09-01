@@ -14,6 +14,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import {
   ButtonComponent,
   DialogComponent,
+  EmptyStateComponent,
   IconComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
@@ -51,6 +52,7 @@ interface IntegrationOption {
     ActionDeliveriesComponent,
     IconComponent,
     PageLayoutComponent,
+    EmptyStateComponent,
   ],
   templateUrl: './task-actions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

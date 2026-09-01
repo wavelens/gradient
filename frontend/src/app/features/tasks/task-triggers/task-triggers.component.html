@@ -17,19 +17,16 @@
     <gr-loading-spinner message="Loading triggers..." />
   } @else {
     @if (triggers().length === 0) {
-      <div class="empty-state">
-        <gr-icon name="schedule_send" size="xl" />
-        <h3>No triggers configured</h3>
-        <p class="text-secondary">Create a trigger to automatically start evaluations on a schedule, push event, or pull request.</p>
-        <button
+      <gr-empty-state icon="schedule_send" title="No triggers configured" message="Create a trigger to automatically start evaluations on a schedule, push event, or pull request.">
+        <button slot="action"
           *appWritable="access()"
           grButton
           label="New Trigger"
           icon="add"
           (click)="startCreate()"
           [appManagedDisable]="access()"
-        ></button>
-      </div>
+          ></button>
+      </gr-empty-state>
     } @else {
       <div class="triggers-list">
         @for (trigger of triggers(); track trigger.id) {

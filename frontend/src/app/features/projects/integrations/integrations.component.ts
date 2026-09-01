@@ -23,6 +23,7 @@ import {
 import {
   ButtonComponent,
   DialogComponent,
+  EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
@@ -56,6 +57,7 @@ interface Option<T> {
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
+    EmptyStateComponent,
   ],
   templateUrl: './integrations.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

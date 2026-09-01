@@ -19,19 +19,16 @@
     <gr-loading-spinner message="Loading overrides..." />
   } @else {
     @if (overrides().length === 0) {
-      <div class="empty-state">
-        <gr-icon name="tune" size="xl" />
-        <h3>No overrides configured</h3>
-        <p class="text-secondary">No overrides configured. The task's flake.lock is used as-is.</p>
-        <button
+      <gr-empty-state icon="tune" title="No overrides configured" message="No overrides configured. The task's flake.lock is used as-is.">
+        <button slot="action"
           *appWritable="access()"
           grButton
           label="New Override"
           icon="add"
           (click)="startCreate()"
           [appManagedDisable]="access()"
-        ></button>
-      </div>
+          ></button>
+      </gr-empty-state>
     } @else {
       <div class="overrides-list">
         @for (override of overrides(); track override.id) {

@@ -17,19 +17,16 @@
     <gr-loading-spinner message="Loading upstream caches..." />
   } @else {
     @if (upstreams().length === 0) {
-      <div class="empty-state">
-        <gr-icon name="cloud_download" size="xl" />
-        <h3>No upstream caches</h3>
-        <p class="text-secondary">Add an upstream to enable pull-through caching from another cache.</p>
-        <button
+      <gr-empty-state icon="cloud_download" title="No upstream caches" message="Add an upstream to enable pull-through caching from another cache.">
+        <button slot="action"
           *appWritable="access()"
           grButton
           label="Add Upstream"
           icon="add"
           (click)="openAddDialog()"
           [appManagedDisable]="access()"
-        ></button>
-      </div>
+          ></button>
+      </gr-empty-state>
     } @else {
       <div class="upstreams-list">
         @for (u of upstreams(); track u.id) {

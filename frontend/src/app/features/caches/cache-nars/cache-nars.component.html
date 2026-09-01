@@ -55,11 +55,7 @@
   @if (loading()) {
     <gr-loading-spinner message="Loading NARs..." />
   } @else if (rows().length === 0) {
-    <div class="empty-state">
-      <gr-icon name="inbox" size="xl" />
-      <h3>No NARs found</h3>
-      <p class="text-secondary">No archives match the current filters.</p>
-    </div>
+    <gr-empty-state icon="inbox" title="No NARs found" message="No archives match the current filters." />
   } @else {
     <div class="nar-table">
       <div class="nar-row nar-head">

@@ -12,6 +12,7 @@ import { CachesService, UpstreamCache, CacheSubscriptionMode } from '@core/servi
 import {
   ButtonComponent,
   DialogComponent,
+  EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
@@ -38,6 +39,7 @@ import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
+    EmptyStateComponent,
   ],
   templateUrl: './cache-upstreams.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
