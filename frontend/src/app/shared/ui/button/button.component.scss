@@ -66,10 +66,10 @@
 }
 
 :host(.gr-button--success) {
-  --gr-btn-bg: var(--gr-status-success);
-  --gr-btn-bg-hover: var(--gr-status-success-hover);
-  --gr-btn-fg: var(--gr-status-success-fg);
-  --gr-btn-accent: var(--gr-status-success);
+  --gr-btn-bg: var(--gr-accent);
+  --gr-btn-bg-hover: var(--gr-accent-hover);
+  --gr-btn-fg: var(--gr-accent-fg);
+  --gr-btn-accent: var(--gr-accent);
 }
 
 :host(.gr-button--warn) {

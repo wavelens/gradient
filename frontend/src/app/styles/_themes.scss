@@ -11,14 +11,17 @@
   --gr-black: #000000;
   --gr-gray-950: #050708;
   --gr-gray-900: #0d1118;
+  --gr-gray-870: #161c24;
   --gr-gray-800: #2e3742;
   --gr-gray-750: #3a4552;
   --gr-gray-725: #465262;
   --gr-gray-700: #2d333b;
+  --gr-gray-650: #5f6c80;
   --gr-gray-400: #818181;
   --gr-gray-350: #aab3bd;
   --gr-gray-300: #c2c9d1;
   --gr-gray-200: #d0d7de;
+  --gr-gray-250: #7d8898;
   --gr-gray-100: #eaeef2;
   --gr-gray-75: #dde3ea;
   --gr-gray-60: #d1d9e2;
@@ -56,9 +59,6 @@
   --gr-blue-900: #064a9c;
   --gr-blue-500: #3b82f6;
   --gr-purple-500: #6f42c1;
-  --gr-shadow-raised: 0 1px 2px rgb(0 0 0 / 0.28);
-  --gr-shadow-overlay: 0 8px 20px rgb(0 0 0 / 0.35);
-  --gr-shadow-modal: 0 16px 40px rgb(0 0 0 / 0.45);
 }
 
 @mixin dark-roles {
@@ -66,9 +66,10 @@
   --gr-surface-sunken: var(--gr-gray-950);
   --gr-surface-base: var(--gr-gray-900);
   --gr-surface-raised: var(--gr-gray-800);
+  --gr-surface-control: var(--gr-gray-870);
   --gr-surface-hover: var(--gr-gray-750);
   --gr-surface-active: var(--gr-gray-725);
-  --gr-border: var(--gr-gray-700);
+  --gr-border: var(--gr-gray-650);
   --gr-accent: var(--gr-emerald-400);
   --gr-accent-hover: var(--gr-emerald-500);
   --gr-accent-fg: var(--gr-gray-900);
@@ -94,6 +95,9 @@
   --gr-graph-danger: var(--gr-red-400);
   --gr-graph-warning: var(--gr-orange-500);
   --gr-graph-running: var(--gr-blue-500);
+  --gr-shadow-raised: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  --gr-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.07);
+  --gr-shadow-modal: 0 20px 48px rgb(0 0 0 / 0.65), 0 0 0 1px rgb(255 255 255 / 0.09);
 }
 
 @mixin light-roles {
@@ -101,9 +105,10 @@
   --gr-surface-sunken: var(--gr-gray-100);
   --gr-surface-base: var(--gr-gray-50);
   --gr-surface-raised: var(--gr-white);
+  --gr-surface-control: var(--gr-white);
   --gr-surface-hover: var(--gr-gray-75);
   --gr-surface-active: var(--gr-gray-60);
-  --gr-border: var(--gr-gray-200);
+  --gr-border: var(--gr-gray-250);
   --gr-accent: var(--gr-emerald-700);
   --gr-accent-hover: var(--gr-emerald-800);
   --gr-accent-fg: var(--gr-white);
@@ -129,6 +134,9 @@
   --gr-graph-danger: var(--gr-red-600);
   --gr-graph-warning: var(--gr-orange-500);
   --gr-graph-running: var(--gr-blue-600);
+  --gr-shadow-raised: 0 1px 2px rgb(31 35 40 / 0.08);
+  --gr-shadow-overlay: 0 8px 24px rgb(31 35 40 / 0.16);
+  --gr-shadow-modal: 0 20px 48px rgb(31 35 40 / 0.24);
 }
 
 :root {

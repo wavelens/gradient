@@ -4,10 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-export const SHADOWS = {
-  '--gr-shadow-raised': '0 1px 2px rgb(0 0 0 / 0.28)',
-  '--gr-shadow-overlay': '0 8px 20px rgb(0 0 0 / 0.35)',
-  '--gr-shadow-modal': '0 16px 40px rgb(0 0 0 / 0.45)',
+export const DARK_SHADOWS = {
+  '--gr-shadow-raised': 'inset 0 1px 0 rgb(255 255 255 / 0.05)',
+  '--gr-shadow-overlay': '0 8px 24px rgb(0 0 0 / 0.55), 0 0 0 1px rgb(255 255 255 / 0.07)',
+  '--gr-shadow-modal': '0 20px 48px rgb(0 0 0 / 0.65), 0 0 0 1px rgb(255 255 255 / 0.09)',
+} as const;
+
+export const LIGHT_SHADOWS = {
+  '--gr-shadow-raised': '0 1px 2px rgb(31 35 40 / 0.08)',
+  '--gr-shadow-overlay': '0 8px 24px rgb(31 35 40 / 0.16)',
+  '--gr-shadow-modal': '0 20px 48px rgb(31 35 40 / 0.24)',
 } as const;
 
 export const LINE_HEIGHTS = { tight: 1.25, base: 1.5, relaxed: 1.7 } as const;
@@ -24,14 +30,17 @@ export const PALETTE: Record<string, string> = {
   '--gr-black': '#000000',
   '--gr-gray-950': '#050708',
   '--gr-gray-900': '#0d1118',
+  '--gr-gray-870': '#161c24',
   '--gr-gray-800': '#2e3742',
   '--gr-gray-750': '#3a4552',
   '--gr-gray-725': '#465262',
   '--gr-gray-700': '#2d333b',
+  '--gr-gray-650': '#5f6c80',
   '--gr-gray-400': '#818181',
   '--gr-gray-350': '#aab3bd',
   '--gr-gray-300': '#c2c9d1',
   '--gr-gray-200': '#d0d7de',
+  '--gr-gray-250': '#7d8898',
   '--gr-gray-100': '#eaeef2',
   '--gr-gray-75': '#dde3ea',
   '--gr-gray-60': '#d1d9e2',
@@ -76,9 +85,10 @@ export const DARK_ROLES: Record<string, string> = {
   '--gr-surface-sunken': '--gr-gray-950',
   '--gr-surface-base': '--gr-gray-900',
   '--gr-surface-raised': '--gr-gray-800',
+  '--gr-surface-control': '--gr-gray-870',
   '--gr-surface-hover': '--gr-gray-750',
   '--gr-surface-active': '--gr-gray-725',
-  '--gr-border': '--gr-gray-700',
+  '--gr-border': '--gr-gray-650',
   '--gr-accent': '--gr-emerald-400',
   '--gr-accent-hover': '--gr-emerald-500',
   '--gr-accent-fg': '--gr-gray-900',
@@ -110,9 +120,10 @@ export const LIGHT_ROLES: Record<string, string> = {
   '--gr-surface-sunken': '--gr-gray-100',
   '--gr-surface-base': '--gr-gray-50',
   '--gr-surface-raised': '--gr-white',
+  '--gr-surface-control': '--gr-white',
   '--gr-surface-hover': '--gr-gray-75',
   '--gr-surface-active': '--gr-gray-60',
-  '--gr-border': '--gr-gray-200',
+  '--gr-border': '--gr-gray-250',
   '--gr-accent': '--gr-emerald-700',
   '--gr-accent-hover': '--gr-emerald-800',
   '--gr-accent-fg': '--gr-white',
@@ -144,6 +155,7 @@ export const SEMANTIC_ROLES: readonly RoleDoc[] = [
   { name: '--gr-surface-sunken', usage: 'Page background behind raised cards' },
   { name: '--gr-surface-base', usage: 'Default page background' },
   { name: '--gr-surface-raised', usage: 'Cards, dialogs, popovers' },
+  { name: '--gr-surface-control', usage: 'Form control fill, distinct from the card it sits in' },
   { name: '--gr-surface-hover', usage: 'Hover row and control backgrounds' },
   { name: '--gr-surface-active', usage: 'Pressed and active control backgrounds' },
   { name: '--gr-border', usage: 'All borders and dividers' },

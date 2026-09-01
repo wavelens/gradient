@@ -10,6 +10,7 @@
   display: block;
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
+  box-shadow: var(--gr-shadow-raised);
   overflow: hidden;
   background: var(--gr-surface-raised);
 }
