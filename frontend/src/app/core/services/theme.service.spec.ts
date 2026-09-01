@@ -7,12 +7,19 @@
 import { TestBed } from '@angular/core/testing';
 import { ThemeService } from './theme.service';
 
+type MediaListener = (event: { matches: boolean }) => void;
+
+let listener: MediaListener | null = null;
+
 function stubPrefersLight(matches: boolean): void {
+  listener = null;
   window.matchMedia = ((query: string) => ({
     matches,
     media: query,
     onchange: null,
-    addEventListener: () => undefined,
+    addEventListener: (_: string, fn: MediaListener) => {
+      listener = fn;
+    },
     removeEventListener: () => undefined,
     addListener: () => undefined,
     removeListener: () => undefined,
@@ -28,24 +35,33 @@ describe('ThemeService', () => {
     TestBed.configureTestingModule({});
   });
 
-  it('defaults to dark and stamps it', () => {
+  it('defaults to system and stamps no attribute', () => {
     const svc = TestBed.inject(ThemeService);
-    expect(svc.preference()).toBe('dark');
-    expect(svc.resolved()).toBe('dark');
-    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(svc.preference()).toBe('system');
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   });
 
-  it('stays dark even when the OS prefers light', () => {
-    stubPrefersLight(true);
+  it('resolves system to dark when the OS does not prefer light', () => {
     expect(TestBed.inject(ThemeService).resolved()).toBe('dark');
   });
 
-  it('follows the OS only when system is chosen explicitly', () => {
+  it('resolves system to light when the OS prefers light', () => {
     stubPrefersLight(true);
+    expect(TestBed.inject(ThemeService).resolved()).toBe('light');
+  });
+
+  it('follows a live OS change while the preference is system', () => {
     const svc = TestBed.inject(ThemeService);
-    svc.set('system');
+    expect(svc.resolved()).toBe('dark');
+    listener?.({ matches: true });
     expect(svc.resolved()).toBe('light');
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
+
+  it('ignores a live OS change once a theme is chosen explicitly', () => {
+    const svc = TestBed.inject(ThemeService);
+    svc.set('dark');
+    listener?.({ matches: true });
+    expect(svc.resolved()).toBe('dark');
   });
 
   it('stamps data-theme for an explicit choice', () => {
@@ -62,11 +78,10 @@ describe('ThemeService', () => {
     expect(TestBed.inject(ThemeService).preference()).toBe('light');
   });
 
-  it('returns to dark when the choice is cleared', () => {
+  it('clears the attribute when returning to system', () => {
     const svc = TestBed.inject(ThemeService);
-    svc.set('light');
     svc.set('dark');
-    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(localStorage.getItem('gradient.theme')).toBeNull();
+    svc.set('system');
+    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   });
 });

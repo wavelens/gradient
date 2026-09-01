@@ -10,47 +10,49 @@ export type ThemePreference = 'light' | 'dark' | 'system';
 
 const STORAGE_KEY = 'gradient.theme';
 
-/// Dark is the default. Light and system are opt-in, and the resolved theme is always stamped.
+/// The stylesheet already follows the OS preference, so this only has to stamp an explicit override.
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
+  private query = window.matchMedia?.('(prefers-color-scheme: light)');
+  private systemLight = signal(this.query?.matches ?? false);
   private pref = signal<ThemePreference>(this.restore());
 
   preference: Signal<ThemePreference> = this.pref.asReadonly();
 
   resolved: Signal<'light' | 'dark'> = computed(() => {
     const pref = this.pref();
-    return pref === 'system' ? this.systemTheme() : pref;
+    if (pref !== 'system') return pref;
+    return this.systemLight() ? 'light' : 'dark';
   });
 
   constructor() {
-    this.stamp(this.resolved());
+    this.stamp(this.pref());
+    this.query?.addEventListener?.('change', (e) => this.systemLight.set(e.matches));
   }
 
   set(pref: ThemePreference): void {
     this.pref.set(pref);
-    this.stamp(this.resolved());
+    this.stamp(pref);
     try {
-      if (pref === 'dark') localStorage.removeItem(STORAGE_KEY);
+      if (pref === 'system') localStorage.removeItem(STORAGE_KEY);
       else localStorage.setItem(STORAGE_KEY, pref);
     } catch {
       // Storage can be denied in private windows; the in-memory preference still applies.
     }
   }
 
-  private stamp(theme: 'light' | 'dark'): void {
-    document.documentElement.setAttribute('data-theme', theme);
-  }
-
-  private systemTheme(): 'light' | 'dark' {
-    return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  private stamp(pref: ThemePreference): void {
+    const root = document.documentElement;
+    if (pref === 'system') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', pref);
   }
 
   private restore(): ThemePreference {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      return stored === 'light' || stored === 'system' ? stored : 'dark';
+      return stored === 'light' || stored === 'dark' ? stored : 'system';
     } catch {
-      return 'dark';
+      return 'system';
     }
   }
 }
