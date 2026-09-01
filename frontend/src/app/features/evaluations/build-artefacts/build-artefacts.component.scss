@@ -6,6 +6,12 @@
 
 @use '../../../styles/variables' as *;
 
+.empty-hint {
+  display: block;
+  color: var(--gr-text-muted);
+  font-size: $font-size-sm;
+}
+
 // ── Empty state ───────────────────────────────────────────────────────────────// ── Artefacts list ────────────────────────────────────────────────────────────
 
 .artefacts-list {

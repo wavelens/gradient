@@ -46,7 +46,7 @@
   } @else {
     @if (workers().length === 0) {
       <gr-empty-state icon="construction" title="No workers registered">
-        <p class="empty-message">Register a <code>gradient-worker</code> to run builds for this project.</p>
+        <p>Register a <code>gradient-worker</code> to run builds for this project.</p>
         <button slot="action"
           *appWritable="access()"
           grButton

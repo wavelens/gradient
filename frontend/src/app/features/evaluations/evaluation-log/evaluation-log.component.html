@@ -26,7 +26,7 @@
           <a [routerLink]="['/project', projectName, 'task', ev.task_name]" class="breadcrumb-link">{{ ev.task_display_name || ev.task_name }}</a>
         }
         <span class="breadcrumb-sep">/</span>
-        <span class="breadcrumb-cur">Evaluation</span>
+        <span class="breadcrumb-current" aria-current="page">Evaluation</span>
       </div>
 
       <div class="overview-block">

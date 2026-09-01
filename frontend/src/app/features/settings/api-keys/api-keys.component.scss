@@ -27,6 +27,9 @@
 }
 
 .key-row {
+  // A revoked key stays readable; only its emphasis drops.
+  &.revoked .key-name { color: var(--gr-text-muted); }
+
   display: flex;
   align-items: center;
   justify-content: space-between;

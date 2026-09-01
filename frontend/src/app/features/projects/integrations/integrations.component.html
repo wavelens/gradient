@@ -61,7 +61,7 @@
                   <div>
                     <div class="integration-name">{{ integration.display_name || integration.name }}</div>
                     @if (integration.display_name && integration.display_name !== integration.name) {
-                      <div class="integration-id text-secondary">{{ integration.name }}</div>
+                      <div class="text-secondary">{{ integration.name }}</div>
                     }
                     <div class="integration-meta text-secondary">
                       <gr-badge [severity]="integration.kind === 'inbound' ? 'info' : 'warning'">

@@ -122,12 +122,98 @@ function inlineStyles(): string[] {
 }
 
 const inlined = inlineStyles();
+
+// Rule 6: a class in markup with no rule anywhere is either a typo or the
+// remains of a deleted stylesheet. Pure structural hooks are named here.
+const STRUCTURAL = new Set([
+  'build-group', 'log-lines', 'page-layout__body', 'row-text', 'settings-section__body',
+]);
+
+function scssClasses(text: string): Set<string> {
+  const cleaned = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const out = new Set<string>();
+  const stack: string[][] = [];
+  let buf = '';
+  for (const ch of cleaned) {
+    if (ch === '{') {
+      const parents = stack.length ? stack[stack.length - 1] : [''];
+      const names = new Set<string>();
+      for (const part of buf.trim().replace(/\n/g, ' ').split(',')) {
+        for (const m of part.matchAll(/&([\w-]+)/g)) {
+          for (const parent of parents) if (parent) names.add(parent + m[1]);
+        }
+        for (const m of part.replace(/&/g, ' ').matchAll(/\.([a-zA-Z][\w-]*)/g)) names.add(m[1]);
+      }
+      names.forEach((n) => out.add(n));
+      stack.push(names.size ? [...names] : parents);
+      buf = '';
+    } else if (ch === '}') {
+      stack.pop();
+      buf = '';
+    } else if (ch === ';') {
+      buf = '';
+    } else {
+      buf += ch;
+    }
+  }
+  return out;
+}
+
+function htmlClasses(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of text.matchAll(/class="([^"]*)"/g)) {
+    if (m[1].includes('{{')) continue;
+    for (const tok of m[1].split(/\s+/)) if (/^[a-zA-Z][\w-]*$/.test(tok)) out.add(tok);
+  }
+  for (const m of text.matchAll(/\[class\.([\w-]+)\]/g)) out.add(m[1]);
+  return out;
+}
+
+function orphanClasses(): string[] {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const globals = new Set<string>([
+    ...scssClasses(readFileSync(join(root, 'src/styles.scss'), 'utf8')),
+    ...scssClasses(readFileSync(join(root, 'src/app/styles/_grids.scss'), 'utf8')),
+    ...scssClasses(readFileSync(join(root, 'src/app/app.scss'), 'utf8')),
+  ]);
+  const hits: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) {
+        walk(path);
+        continue;
+      }
+      if (!entry.endsWith('.html')) continue;
+      const stem = entry.split('.')[0];
+      const styles = new Set(globals);
+      for (const sibling of readdirSync(dir)) {
+        if (sibling.startsWith(stem) && (sibling.endsWith('.scss') || sibling.endsWith('.ts'))) {
+          scssClasses(readFileSync(join(dir, sibling), 'utf8')).forEach((c) => styles.add(c));
+        }
+      }
+      for (const cls of htmlClasses(readFileSync(path, 'utf8'))) {
+        if (styles.has(cls) || STRUCTURAL.has(cls)) continue;
+        if (/^(gr-|pi-|pi$|ng-|cdk-|material-symbols)/.test(cls)) continue;
+        hits.push(`${path.split('/src/')[1]} uses .${cls} with no rule`);
+      }
+    }
+  };
+  walk(join(root, 'src/app'));
+  return hits;
+}
+
+const orphans = orphanClasses();
+if (orphans.length) {
+  console.error(`Classes in markup with no rule (${orphans.length}):`);
+  orphans.forEach((m) => console.error(`  ${m}`));
+}
 if (inlined.length) {
   console.error(`Components with inline styles, invisible to stylelint (${inlined.length}):`);
   inlined.forEach((m) => console.error(`  ${m}`));
 }
 
-let failed = inlined.length > 0;
+let failed = inlined.length > 0 || orphans.length > 0;
 if (overrides.length) {
   console.error(`Host display overridden from outside the component (${overrides.length}):`);
   overrides.forEach((m) => console.error(`  ${m}`));

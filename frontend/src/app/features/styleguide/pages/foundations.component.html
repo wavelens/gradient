@@ -8,7 +8,7 @@
   </thead>
   <tbody>
     @for (role of roles; track role.name) {
-      <tr class="sg-token-row">
+      <tr>
         <td><span class="sg-swatch" [style.background]="'var(' + role.name + ')'"></span></td>
         <td><code>{{ role.name }}</code></td>
         <td><code>{{ resolved()[role.name] || 'not resolved' }}</code></td>
@@ -20,7 +20,7 @@
 
 <h2>Type scale</h2>
 @for (size of sizes; track size) {
-  <p class="sg-type-row" [class]="'fs-' + size">$font-size-{{ size }} &mdash; the quick brown fox</p>
+  <p [class]="'fs-' + size">$font-size-{{ size }} &mdash; the quick brown fox</p>
 }
 
 <h2>Spacing</h2>

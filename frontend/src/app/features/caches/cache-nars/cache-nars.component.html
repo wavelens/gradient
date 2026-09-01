@@ -59,22 +59,22 @@
   } @else {
     <div class="nar-table">
       <div class="nar-row nar-head">
-        <span class="col col-hash">Hash</span>
-        <span class="col col-package">Package</span>
-        <span class="col col-size sortable" (click)="sortBy('nar_size')">
+        <span class="col">Hash</span>
+        <span class="col">Package</span>
+        <span class="col sortable" (click)="sortBy('nar_size')">
           NAR size
           @if (sort() === 'nar_size') {
             <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
           }
         </span>
-        <span class="col col-size">Compressed size</span>
-        <span class="col col-time sortable" (click)="sortBy('created_at')">
+        <span class="col">Compressed size</span>
+        <span class="col sortable" (click)="sortBy('created_at')">
           Created
           @if (sort() === 'created_at') {
             <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
           }
         </span>
-        <span class="col col-time sortable" (click)="sortBy('last_fetched_at')">
+        <span class="col sortable" (click)="sortBy('last_fetched_at')">
           Last fetched
           @if (sort() === 'last_fetched_at') {
             <i class="pi" [class.pi-sort-amount-up]="order() === 'asc'" [class.pi-sort-amount-down]="order() === 'desc'"></i>
@@ -84,12 +84,12 @@
       </div>
       @for (row of rows(); track row.hash) {
         <div class="nar-row" (click)="show(row)">
-          <code class="col col-hash mono">{{ row.hash }}</code>
-          <span class="col col-package">{{ row.package }}</span>
-          <span class="col col-size">{{ formatBytes(row.nar_size) }}</span>
-          <span class="col col-size">{{ formatBytes(row.file_size) }}</span>
-          <span class="col col-time text-secondary">{{ formatDate(row.created_at) }}</span>
-          <span class="col col-time text-secondary">{{ formatDate(row.last_fetched_at, 'never') }}</span>
+          <code class="col mono">{{ row.hash }}</code>
+          <span class="col">{{ row.package }}</span>
+          <span class="col">{{ formatBytes(row.nar_size) }}</span>
+          <span class="col">{{ formatBytes(row.file_size) }}</span>
+          <span class="col text-secondary">{{ formatDate(row.created_at) }}</span>
+          <span class="col text-secondary">{{ formatDate(row.last_fetched_at, 'never') }}</span>
           <span class="col col-actions" (click)="$event.stopPropagation()">
             <button grButton icon="info" severity="secondary" [text]="true" (click)="show(row)" title="Show details"></button>
             <button

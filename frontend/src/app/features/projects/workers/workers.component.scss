@@ -45,7 +45,9 @@
   gap: $spacing-md;
 
   gr-icon { color: var(--gr-text-secondary); }
-  .worker-id { font-weight: 500; font-family: $font-family-mono; }
+  .worker-name { font-weight: 600; }
+  .worker-id { font-family: $font-family-mono; font-size: $font-size-sm; }
+  .worker-url { font-size: $font-size-sm; }
   .worker-caps { display: flex; gap: $spacing-xs; flex-wrap: wrap; margin-top: $spacing-xs; }
   .worker-archs { font-size: $font-size-sm; font-family: $font-family-mono; margin-top: $spacing-xs; }
   .worker-features { color: var(--gr-text-muted); }
