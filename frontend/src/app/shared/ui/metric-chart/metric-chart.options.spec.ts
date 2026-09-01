@@ -17,6 +17,7 @@ const THEME = {
   text: '#abb0b4',
   textStrong: '#ffffff',
   muted: '#8b949e',
+  mono: "'Space Mono', monospace",
   grid: '#2d333b',
   border: '#2d333b',
   surface: '#21262d',

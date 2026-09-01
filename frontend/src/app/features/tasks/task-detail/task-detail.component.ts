@@ -6,13 +6,14 @@
 
 import { Component, OnInit, OnDestroy, ElementRef, HostListener, computed, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { interval, Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
 import { LiveService } from '@core/services/live.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { TasksService } from '@core/services/tasks.service';
+import { TasksService, ReportOptions } from '@core/services/tasks.service';
 import { LoadingSpinnerComponent } from '@shared/ui';
 import { EmptyStateComponent } from '@shared/ui';
 import { EvalStatusBadgeComponent } from '@shared/ui';
@@ -21,13 +22,13 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { TaskDetail, EvaluationSummary, EvaluationStatus, EntryPointSummary, BuildStatus, BuildStatusCounts } from '@core/models';
 import { commitLabel, evaluationTitle, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { SegmentedBarComponent } from './segmented-bar/segmented-bar.component';
-import { ButtonComponent, DialogComponent, MenuComponent, MenuItem, TooltipDirective } from '@shared/ui';
+import { ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, MenuItem, TooltipDirective } from '@shared/ui';
 
 @Component({
   selector: 'app-task-detail',
   standalone: true,
   imports: [
-    CommonModule, RouterModule, ButtonComponent, DialogComponent, MenuComponent, TooltipDirective,
+    CommonModule, FormsModule, RouterModule, ButtonComponent, CheckboxComponent, DialogComponent, MenuComponent, TooltipDirective,
     LoadingSpinnerComponent, EmptyStateComponent, WritableDirective,
     SegmentedBarComponent, EvalStatusBadgeComponent,
   ],
@@ -353,7 +354,58 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   panelMenuModel = computed<MenuItem[]>(() => [
     { label: 'Metrics', icon: 'show_chart',
       routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
+    { label: 'Diagnostic report', icon: 'bug_report', disabled: !this.selected(),
+      command: () => this.reportDialogOpen.set(true) },
   ]);
+
+  reportDialogOpen = signal(false);
+  reportBusy = signal(false);
+  reportOptions = signal<ReportOptions>({
+    anonymize_identities: true,
+    anonymize_packages: false,
+    include_logs: true,
+    include_instance: true,
+  });
+
+  // The instance section needs ManageWorkers, which the task access payload
+  // does not carry, so the box stays enabled and the server's 403 explains
+  // itself. Disabling it up front needs `can_manage_workers` on AccessState.
+
+  setReportOption(key: keyof ReportOptions, value: boolean): void {
+    this.reportOptions.update(o => ({ ...o, [key]: value }));
+  }
+
+  generateReport(): void {
+    const evaluation = this.selected();
+    if (!evaluation || this.reportBusy()) return;
+
+    this.reportBusy.set(true);
+    this.tasksService.downloadReport(evaluation.id, this.reportOptions()).subscribe({
+      next: response => {
+        this.reportBusy.set(false);
+        this.reportDialogOpen.set(false);
+        if (response.body) {
+          this.saveReport(response.body, filenameFromDisposition(
+            response.headers.get('content-disposition'),
+            `gradient-report-${evaluation.id.split('-')[0]}.db`,
+          ));
+        }
+      },
+      error: (e: Error) => {
+        this.reportBusy.set(false);
+        this.errorMessage.set(e.message);
+      },
+    });
+  }
+
+  private saveReport(blob: Blob, filename: string): void {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
 
   private buildPkgMenu(ep: EntryPointSummary, evalId: string): MenuItem[] {
     const canArtefacts = (ep.build_status === 'Completed' || ep.build_status === 'Substituted') && ep.has_artefacts;
@@ -404,4 +456,10 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
     }
     return c;
   }
+}
+
+/// Prefer the server's filename, since it names the evaluation and the date.
+export function filenameFromDisposition(header: string | null, fallback: string): string {
+  const match = header?.match(/filename="([^"]+)"/);
+  return match?.[1] ?? fallback;
 }

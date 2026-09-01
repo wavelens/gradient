@@ -36,6 +36,8 @@
 }
 
 .stat-value {
+  font-family: $font-family-mono;
+  font-variant-numeric: tabular-nums;
   font-size: $font-size-xxl;
   font-weight: 700;
   color: var(--gr-text-primary);

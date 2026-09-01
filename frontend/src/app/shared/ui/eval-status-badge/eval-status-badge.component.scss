@@ -6,8 +6,11 @@
   gap: $spacing-xs;
   padding: 0.1rem $spacing-sm;
   border-radius: $border-radius-sm;
+  font-family: $font-family-mono;
   font-size: $font-size-xs;
-  font-weight: 600;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 
   &.status-success   { background: color-mix(in srgb, var(--gr-status-success) 18%, transparent); color: var(--gr-status-success-text); }
   &.status-danger    { background: color-mix(in srgb, var(--gr-status-danger) 18%, transparent);  color: var(--gr-status-danger-text); }

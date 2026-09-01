@@ -5,7 +5,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpHeaders } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpResponse } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 import { environment } from '@environments/environment';
@@ -55,6 +55,17 @@ export class ApiService {
    */
   get<T>(endpoint: string, options?: { headers?: HttpHeaders }): Observable<T> {
     return this.request<T>('GET', endpoint, undefined, options);
+  }
+
+  /**
+   * GET a binary body. Bypasses the JSON envelope unwrapping in `request`, and
+   * keeps the full response so callers can read `Content-Disposition`.
+   */
+  getBlob(endpoint: string): Observable<HttpResponse<Blob>> {
+    return this.http.get(`${this.baseUrl}/${endpoint}`, {
+      observe: 'response',
+      responseType: 'blob',
+    });
   }
 
   /**

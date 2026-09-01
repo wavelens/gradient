@@ -20,6 +20,7 @@ export function resolveChartTheme(): ChartTheme {
     text: read('--gr-text-secondary'),
     textStrong: read('--gr-text-primary'),
     muted: read('--gr-text-muted'),
+    mono: getComputedStyle(document.body).getPropertyValue('--gr-font-mono') || "'Space Mono', monospace",
     grid: read('--gr-border'),
     border: read('--gr-border'),
     surface: read('--gr-surface-raised'),

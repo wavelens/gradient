@@ -6,6 +6,7 @@
 
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
+import { HttpResponse } from '@angular/common/http';
 import { ApiService } from './api.service';
 import { Task, TaskDetail, EntryPointSummary, EvaluationSummary, Paginated } from '@core/models';
 
@@ -99,6 +100,20 @@ export class TasksService {
       `metrics/tasks/${project}/${task}/entry-point?eval=${encodeURIComponent(eval_attr)}`
     );
   }
+
+  downloadReport(evaluationId: string, options: ReportOptions): Observable<HttpResponse<Blob>> {
+    const query = Object.entries(options)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('&');
+    return this.api.getBlob(`evals/${evaluationId}/report?${query}`);
+  }
+}
+
+export interface ReportOptions {
+  anonymize_identities: boolean;
+  anonymize_packages: boolean;
+  include_logs: boolean;
+  include_instance: boolean;
 }
 
 export interface TaskMetricPoint {

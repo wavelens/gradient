@@ -10,7 +10,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { vi } from 'vitest';
 import { of, throwError } from 'rxjs';
-import { TaskDetailComponent } from './task-detail.component';
+import { TaskDetailComponent, filenameFromDisposition } from './task-detail.component';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
@@ -293,5 +293,58 @@ describe('TaskDetailComponent - abort modal', () => {
     component.abortTarget.set('e1');
     component.confirmAbort();
     expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, 'e1');
+  });
+});
+
+describe('TaskDetailComponent diagnostic report', () => {
+  function component(): TaskDetailComponent {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true });
+    return fixture.componentInstance;
+  }
+
+  it('offers the diagnostic report below Metrics', () => {
+    const labels = component().panelMenuModel().map(i => i.label);
+    expect(labels).toEqual(['Metrics', 'Diagnostic report']);
+  });
+
+  it('opens the dialog from the menu command', () => {
+    const c = component();
+    const item = c.panelMenuModel().find(i => i.label === 'Diagnostic report');
+    expect(item?.icon).toBe('bug_report');
+    item!.command!();
+    expect(c.reportDialogOpen()).toBe(true);
+  });
+
+  /// The shipped default hands over a report that names which package broke
+  /// but not whose repository it is.
+  it('defaults to hidden identities and real package names', () => {
+    const o = component().reportOptions();
+    expect(o.anonymize_identities).toBe(true);
+    expect(o.anonymize_packages).toBe(false);
+    expect(o.include_logs).toBe(true);
+    expect(o.include_instance).toBe(true);
+  });
+
+  it('toggles one option without disturbing the others', () => {
+    const c = component();
+    c.setReportOption('anonymize_packages', true);
+    expect(c.reportOptions().anonymize_packages).toBe(true);
+    expect(c.reportOptions().anonymize_identities).toBe(true);
+  });
+});
+
+describe('filenameFromDisposition', () => {
+  it('prefers the server filename, which names the evaluation and date', () => {
+    expect(
+      filenameFromDisposition(
+        'attachment; filename="gradient-report-01a05a38-2026-09-01.db"',
+        'fallback.db',
+      ),
+    ).toBe('gradient-report-01a05a38-2026-09-01.db');
+  });
+
+  it('falls back when the header is absent or unparseable', () => {
+    expect(filenameFromDisposition(null, 'fallback.db')).toBe('fallback.db');
+    expect(filenameFromDisposition('attachment', 'fallback.db')).toBe('fallback.db');
   });
 });

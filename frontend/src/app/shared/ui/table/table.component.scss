@@ -34,11 +34,18 @@ table {
     border-bottom: 1px solid var(--gr-border);
   }
 
+  td {
+    font-variant-numeric: tabular-nums;
+  }
+
   thead th {
     background: var(--gr-surface-hover);
     color: var(--gr-text-secondary);
-    font-size: $font-size-sm;
-    font-weight: 600;
+    font-family: $font-family-mono;
+    font-size: $font-size-xs;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     white-space: nowrap;
   }
 

@@ -28,6 +28,7 @@ export interface ChartTheme {
   text: string;
   textStrong: string;
   muted: string;
+  mono: string;
   grid: string;
   border: string;
   surface: string;
@@ -50,7 +51,7 @@ const tooltipChrome = (t: ChartTheme) => ({
   },
 });
 
-const axisLabel = (t: ChartTheme) => ({ color: t.text, fontSize: 11 });
+const axisLabel = (t: ChartTheme) => ({ color: t.text, fontSize: 12, fontFamily: t.mono });
 const axisLine = (t: ChartTheme) => ({ lineStyle: { color: t.border } });
 const splitLine = (t: ChartTheme) => ({ lineStyle: { color: t.grid, type: 'dashed' as const } });
 
@@ -144,7 +145,7 @@ function radarOption(cfg: MetricChartConfig, theme: ChartTheme): EChartsOption {
   return {
     radar: {
       indicator: (cfg.categories ?? []).map((name) => ({ name })),
-      axisName: { color: theme.text, fontSize: 11 },
+      axisName: { color: theme.text, fontSize: 12, fontFamily: theme.mono },
       splitLine: { lineStyle: { color: theme.grid } },
       splitArea: { show: false },
       axisLine: { lineStyle: { color: theme.grid } },
