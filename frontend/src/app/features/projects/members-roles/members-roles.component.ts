@@ -18,6 +18,7 @@ import { UserService } from '@core/services/user.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import {
   AutoCompleteComponent,
+  BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
@@ -26,6 +27,9 @@ import {
   InputDirective,
   LoadingSpinnerComponent,
   PageLayoutComponent,
+  RowComponent,
+  RowListComponent,
+  SelectComponent,
   SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
@@ -55,6 +59,10 @@ interface RoleFormState {
     PageLayoutComponent,
     FormFieldComponent,
     SettingsSectionComponent,
+    RowListComponent,
+    RowComponent,
+    BadgeComponent,
+    SelectComponent,
   ],
   templateUrl: './members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

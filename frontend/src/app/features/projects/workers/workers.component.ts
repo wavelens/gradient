@@ -25,6 +25,8 @@ import {
   MessageBannerComponent,
   MessageService,
   PageLayoutComponent,
+  RowComponent,
+  RowListComponent,
   ToastComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
@@ -49,6 +51,8 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
     FieldRowComponent,
     EmptyStateComponent,
     BadgeComponent,
+    RowListComponent,
+    RowComponent,
   ],
   providers: [MessageService],
   templateUrl: './workers.component.html',

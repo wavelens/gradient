@@ -23,25 +23,20 @@
       <gr-loading-spinner message="Loading members..." />
     } @else {
       @if (members().length > 0) {
-        <div class="members-list">
+        <gr-row-list>
           @for (member of members(); track member.id) {
-            <div class="member-row">
-              <div class="member-info">
-                <gr-icon name="person" />
-                <div class="member-username">{{ member.id }}</div>
-              </div>
-              <div class="member-actions">
-                <select
-                  class="role-select"
+            <gr-row icon="person">
+              <span class="mono">{{ member.id }}</span>
+              <div slot="actions">
+                <gr-select
                   [ngModel]="member.name"
+                  [options]="roles()"
+                  optionLabel="name"
+                  optionValue="name"
                   [disabled]="updatingRole() === member.id || removingMember() !== null || rolesLoading()"
                   [appManagedDisable]="access()"
                   (ngModelChange)="updateMemberRole(member.id, $event)"
-                >
-                  @for (role of roles(); track role.id) {
-                    <option [value]="role.name">{{ role.name }}</option>
-                  }
-                </select>
+                />
                 <button
                   *appWritable="access()"
                   grButton
@@ -54,9 +49,9 @@
                   (click)="removeMember(member.id)"
                 ></button>
               </div>
-            </div>
+            </gr-row>
           }
-        </div>
+        </gr-row-list>
       } @else {
         <p class="text-secondary">No members found.</p>
       }
@@ -82,21 +77,15 @@
       <gr-loading-spinner message="Loading roles..." />
     } @else {
       @if (roles().length > 0) {
-        <div class="roles-list">
+        <gr-row-list>
           @for (role of roles(); track role.id) {
-            <div class="role-row">
-              <div class="role-info">
-                <div class="role-name">
-                  {{ role.name }}
-                  @if (role.builtin) {
-                    <span class="role-badge">Built-in</span>
-                  }
-                </div>
-                <div class="role-permissions">
-                  {{ rolePermissionLabel(role) }}
-                </div>
-              </div>
-              <div class="role-actions">
+            <gr-row icon="shield">
+              {{ role.name }}
+              @if (role.builtin) {
+                <gr-badge>Built-in</gr-badge>
+              }
+              <span slot="meta">{{ rolePermissionLabel(role) }}</span>
+              <div slot="actions">
                 @if (!role.builtin) {
                   <button
                     *appWritable="access()"
@@ -121,9 +110,9 @@
                   ></button>
                 }
               </div>
-            </div>
+            </gr-row>
           }
-        </div>
+        </gr-row-list>
       } @else {
         <p class="text-secondary">No roles found.</p>
       }

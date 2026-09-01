@@ -57,14 +57,12 @@
           ></button>
       </gr-empty-state>
     } @else {
-      <div class="workers-list">
+      <gr-row-list>
         @for (worker of workers(); track worker.worker_id) {
-          <div class="worker-row">
-            <div class="worker-info">
-              <gr-icon name="construction" />
-              <div>
-                <div class="worker-name">{{ worker.display_name }}</div>
-                <div class="worker-id text-secondary">{{ worker.worker_id }}</div>
+          <gr-row icon="construction">
+            {{ worker.display_name }}
+            <div slot="meta">
+                <div class="worker-id">{{ worker.worker_id }}</div>
                 @if (worker.url) {
                   <div class="worker-url text-secondary">{{ worker.url }}</div>
                 }
@@ -92,9 +90,8 @@
                     <div class="worker-stats text-secondary">{{ worker.live.assigned_job_count }} active job{{ worker.live.assigned_job_count === 1 ? '' : 's' }}</div>
                   }
                 }
-              </div>
             </div>
-            <div class="worker-meta">
+            <div slot="actions">
               @if (worker.is_base) {
                 <gr-badge severity="info">Base</gr-badge>
               }
@@ -171,9 +168,9 @@
                 (click)="deleteWorker(worker)"
               ></button>
             </div>
-          </div>
+          </gr-row>
         }
-      </div>
+      </gr-row-list>
     }
   }
 </gr-page-layout>

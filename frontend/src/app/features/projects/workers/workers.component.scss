@@ -21,15 +21,7 @@
   .peer-id-label { font-size: $font-size-sm; font-weight: 600; margin-bottom: $spacing-xs; }
   .peer-id-value { font-family: $font-family-mono; font-size: $font-size-sm; margin-bottom: $spacing-xs; }
   .peer-id-hint { font-size: $font-size-xs; }
-}
-
-.workers-list {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-sm;
-}
-
-.worker-row {
+}.worker-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -37,24 +29,7 @@
   background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
-}
-
-.worker-info {
-  display: flex;
-  align-items: center;
-  gap: $spacing-md;
-
-  gr-icon { color: var(--gr-text-secondary); }
-  .worker-name { font-weight: 600; }
-  .worker-id { font-family: $font-family-mono; font-size: $font-size-sm; }
-  .worker-url { font-size: $font-size-sm; }
-  .worker-caps { display: flex; gap: $spacing-xs; flex-wrap: wrap; margin-top: $spacing-xs; }
-  .worker-archs { font-size: $font-size-sm; font-family: $font-family-mono; margin-top: $spacing-xs; }
-  .worker-features { color: var(--gr-text-muted); }
-  .worker-stats { font-size: $font-size-sm; margin-top: $spacing-xs; }
-}
-
-.worker-meta {
+}.worker-meta {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
@@ -73,4 +48,26 @@
 
   &.cap-on  { background: color-mix(in srgb, var(--gr-status-success) 12%, transparent); color: var(--gr-status-success); }
   &.cap-off { background: color-mix(in srgb, var(--gr-text-secondary) 8%, transparent); color: var(--gr-text-muted); opacity: 0.5; }
+}
+
+// The row's meta lines: an id, an address and the live capability summary.
+.worker-id {
+  font-family: $font-family-mono;
+  font-size: $font-size-sm;
+}
+
+.worker-url,
+.worker-archs,
+.worker-stats {
+  font-size: $font-size-sm;
+}
+
+.worker-archs { font-family: $font-family-mono; }
+.worker-features { color: var(--gr-text-muted); }
+
+.worker-caps {
+  display: flex;
+  gap: $spacing-xs;
+  flex-wrap: wrap;
+  margin-top: $spacing-xs;
 }

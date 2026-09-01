@@ -15,7 +15,9 @@
   background: var(--gr-surface-raised);
 
   &:hover { background: var(--gr-surface-hover); }
-  &.is-muted { opacity: 0.6; }
+  // A muted row drops emphasis, not legibility: blanket opacity would take the
+  // text under the contrast floor.
+  &.is-muted .row-name { color: var(--gr-text-secondary); }
 }
 
 :host(:not(:last-child)) .row {
