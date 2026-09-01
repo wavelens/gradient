@@ -74,7 +74,7 @@
   font-weight: 600;
   color: var(--gr-text-secondary);
   background: color-mix(in srgb, var(--gr-white) 3%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--gr-border) 50%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
   flex-shrink: 0;
 }
 

@@ -7,14 +7,14 @@
 @use '../../../styles/variables' as *;
 
 .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
-.tabs button { background: var(--gr-surface-raised); color: var(--gr-text-secondary); border: 1px solid var(--gr-border); border-radius: $border-radius-sm; padding: 0.35rem 0.8rem; cursor: pointer; }
+.tabs button { background: var(--gr-surface-raised); color: var(--gr-text-secondary); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.35rem 0.8rem; cursor: pointer; }
 .tabs button.active { color: var(--gr-text-primary); border-color: var(--gr-status-info); }
 .controls { display: flex; gap: 1.5rem; margin-bottom: 1rem; color: var(--gr-text-secondary); align-items: center; }
 .controls label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
-select { background: var(--gr-surface-raised); color: var(--gr-text-primary); border: 1px solid var(--gr-border); border-radius: $border-radius-sm; padding: 0.25rem; }
+select { background: var(--gr-surface-raised); color: var(--gr-text-primary); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.25rem; }
 .note { color: var(--gr-text-muted); font-size: $font-size-xs; margin: 0 0 0.75rem; }
-table.expensive { width: 100%; border-collapse: collapse; background: var(--gr-surface-raised); border: 1px solid var(--gr-border); border-radius: $border-radius-md; overflow: hidden; }
-th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--gr-border); color: var(--gr-text-secondary); font-size: $font-size-sm; }
+table.expensive { width: 100%; border-collapse: collapse; background: var(--gr-surface-raised); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-md; overflow: hidden; }
+th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--gr-border-subtle); color: var(--gr-text-secondary); font-size: $font-size-sm; }
 th { color: var(--gr-text-primary); }.muted { color: var(--gr-text-muted); }
 h2 { color: var(--gr-text-primary); font-size: $font-size-lg; margin: 1.5rem 0 0.75rem; }
     

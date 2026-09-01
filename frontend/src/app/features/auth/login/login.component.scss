@@ -16,7 +16,7 @@
 
 .auth-card {
   background-color: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-lg;
   padding: $spacing-xxl;
   max-width: 450px;
@@ -59,7 +59,7 @@
     top: 50%;
     width: 40%;
     height: 1px;
-    background-color: var(--gr-border);
+    background-color: var(--gr-border-subtle);
   }
 
   &::before {

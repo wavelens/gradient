@@ -9,7 +9,7 @@
 :host {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   box-shadow: var(--gr-shadow-raised);
   overflow: hidden;

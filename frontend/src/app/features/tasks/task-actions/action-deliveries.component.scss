@@ -18,7 +18,7 @@
 
 .modal {
   background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   width: min(90vw, 860px);
   max-height: 80vh;
@@ -31,7 +31,7 @@
     align-items: center;
     justify-content: space-between;
     padding: $spacing-md $spacing-lg;
-    border-bottom: 1px solid var(--gr-border);
+    border-bottom: 1px solid var(--gr-border-subtle);
     flex-shrink: 0;
 
     h2 { margin: 0; font-size: $font-size-lg; }
@@ -122,7 +122,7 @@ footer {
   gap: $spacing-sm;
   justify-content: flex-end;
   padding: $spacing-sm $spacing-lg;
-  border-top: 1px solid var(--gr-border);
+  border-top: 1px solid var(--gr-border-subtle);
   flex-shrink: 0;
 
   button {

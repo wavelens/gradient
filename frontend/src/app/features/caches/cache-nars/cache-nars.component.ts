@@ -16,12 +16,14 @@ import {
 } from '@core/services/caches.service';
 import {
   ButtonComponent,
+  CardGridComponent,
   DialogComponent,
   EmptyStateComponent,
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
   PageLayoutComponent,
+  StatCardComponent,
 } from '@shared/ui';
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
@@ -46,6 +48,8 @@ type SortOrder = 'asc' | 'desc';
     IconComponent,
     PageLayoutComponent,
     EmptyStateComponent,
+    StatCardComponent,
+    CardGridComponent,
   ],
   templateUrl: './cache-nars.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

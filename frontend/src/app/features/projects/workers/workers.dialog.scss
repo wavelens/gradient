@@ -81,7 +81,7 @@
   font-size: $font-size-sm;
   word-break: break-all;
   background: var(--gr-text-secondary);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-sm;
   padding: $spacing-xs $spacing-sm;
   width: 100%;
@@ -100,7 +100,7 @@
   font-family: $font-family-mono;
   font-size: $font-size-xs;
   background: var(--gr-text-secondary);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-sm;
   padding: $spacing-sm $spacing-md;
   margin: 0 0 $spacing-xs;
@@ -173,7 +173,7 @@
   font-weight: 500;
   cursor: pointer;
   user-select: none;
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   background: var(--gr-surface-sunken);
   color: var(--gr-text-primary);
   transition: $transition-base;

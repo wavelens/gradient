@@ -54,7 +54,7 @@
   padding: 0 $spacing-lg;
   height: 48px;
   background: var(--gr-surface-raised);
-  border-bottom: 1px solid var(--gr-border);
+  border-bottom: 1px solid var(--gr-border-subtle);
   flex-shrink: 0;
   gap: $spacing-md;
 }
@@ -81,7 +81,7 @@
   gap: $spacing-xs;
   padding: 0 $spacing-md;
   height: 48px;
-  border-right: 1px solid color-mix(in srgb, var(--gr-border) 50%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
   flex-shrink: 0;
 
   &:first-child { padding-left: 0; }
@@ -132,7 +132,7 @@
   &.status-completed, &.status-substituted { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); }
   &.status-failed  { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: var(--gr-status-danger); }
   &.status-aborted, &.status-dependencyfailed { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: var(--gr-text-secondary); }
-  &.trigger { background: color-mix(in srgb, var(--gr-border) 40%, transparent); border: 1px solid color-mix(in srgb, var(--gr-border) 80%, transparent); color: var(--gr-text-secondary); font-weight: 500; text-transform: uppercase; }
+  &.trigger { background: color-mix(in srgb, var(--gr-border-subtle) 40%, transparent); border: 1px solid color-mix(in srgb, var(--gr-border-subtle) 80%, transparent); color: var(--gr-text-secondary); font-weight: 500; text-transform: uppercase; }
 }
 
 // ── Error banner ──────────────────────────────────────────────────────────────

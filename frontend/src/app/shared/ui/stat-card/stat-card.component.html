@@ -5,9 +5,11 @@
 -->
 
 <div class="stat-card">
-  <div class="stat-icon">
-    <gr-icon [name]="icon()" size="xl" />
-  </div>
+  @if (icon(); as name) {
+    <div class="stat-icon">
+      <gr-icon [name]="name" size="xl" />
+    </div>
+  }
   <div class="stat-content">
     <div class="stat-value">{{ value() }}</div>
     <div class="stat-label">{{ label() }}</div>

@@ -8,7 +8,7 @@
 
 :host {
   display: block;
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   box-shadow: var(--gr-shadow-raised);
   overflow: hidden;
@@ -31,7 +31,7 @@ table {
   td {
     padding: $spacing-sm $spacing-md;
     text-align: left;
-    border-bottom: 1px solid var(--gr-border);
+    border-bottom: 1px solid var(--gr-border-subtle);
   }
 
   td {

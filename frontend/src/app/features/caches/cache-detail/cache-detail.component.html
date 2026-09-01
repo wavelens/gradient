@@ -30,20 +30,11 @@
       @if (statsLoading()) {
         <gr-loading-spinner message="Loading stats..." />
       } @else {
-        <div class="stat-cards">
-          <div class="stat-card">
-            <span class="stat-label">Packages stored</span>
-            <span class="stat-value">{{ stats()?.total_packages ?? 0 }}</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Uncompressed size</span>
-            <span class="stat-value">{{ formatBytes(stats()?.total_nar_bytes ?? 0) }}</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Compressed stored</span>
-            <span class="stat-value">{{ formatBytes(stats()?.total_bytes ?? 0) }}</span>
-          </div>
-        </div>
+        <gr-card-grid min="220px">
+          <gr-stat-card label="Packages stored" [value]="stats()?.total_packages ?? 0" />
+          <gr-stat-card label="Uncompressed size" [value]="formatBytes(stats()?.total_nar_bytes ?? 0)" />
+          <gr-stat-card label="Compressed stored" [value]="formatBytes(stats()?.total_bytes ?? 0)" />
+        </gr-card-grid>
 
         <div class="chart-card">
           <div class="window-tabs">
@@ -74,16 +65,10 @@
       @if (statsLoading()) {
         <gr-loading-spinner message="Loading stats..." />
       } @else {
-        <div class="stat-cards">
-          <div class="stat-card">
-            <span class="stat-label">Requests (last hour)</span>
-            <span class="stat-value">{{ $any(stats()?.hours | slice:-1)[0]?.requests ?? 0 }}</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Traffic (last hour)</span>
-            <span class="stat-value">{{ formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0) }}</span>
-          </div>
-        </div>
+        <gr-card-grid min="220px">
+          <gr-stat-card label="Requests (last hour)" [value]="$any(stats()?.hours | slice:-1)[0]?.requests ?? 0" />
+          <gr-stat-card label="Traffic (last hour)" [value]="formatBytes($any(stats()?.hours | slice:-1)[0]?.bytes ?? 0)" />
+        </gr-card-grid>
 
         <div class="chart-card">
           <div class="window-tabs">

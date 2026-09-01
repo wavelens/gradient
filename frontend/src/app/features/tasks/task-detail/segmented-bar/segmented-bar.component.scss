@@ -16,7 +16,7 @@
   width: 100%;
   border-radius: $border-radius-sm;
   overflow: hidden;
-  background: var(--idle, var(--gr-border));
+  background: var(--idle, var(--gr-border-subtle));
 }
 
 .seg {
@@ -31,7 +31,7 @@
 .seg-completed { background: var(--ok, var(--gr-status-success)); }
 .seg-failed { background: var(--err, var(--gr-status-danger)); }
 .seg-building { background: var(--run, var(--gr-status-info)); animation: seg-pulse 1.8s ease-in-out infinite; }
-.seg-queued { background: var(--idle, var(--gr-border)); }
+.seg-queued { background: var(--idle, var(--gr-border-subtle)); }
 
 .tipbox {
   position: absolute;
@@ -41,7 +41,7 @@
   color: var(--gr-text-primary);
   font-size: $font-size-xs;
   white-space: nowrap;
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-sm;
   padding: 3px 9px;
   box-shadow: var(--gr-shadow-overlay);

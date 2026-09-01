@@ -12,7 +12,7 @@
   padding: $spacing-xxl;
   text-align: center;
   background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
 
   gr-icon { color: var(--gr-text-secondary); margin-bottom: $spacing-md; }
@@ -29,7 +29,7 @@
 .action-row {
   padding: $spacing-md $spacing-lg;
   background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
 }
 
@@ -137,7 +137,7 @@
 
 .token-reveal {
   background: var(--gr-text-secondary);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-sm;
   padding: $spacing-sm $spacing-md;
   font-family: monospace;

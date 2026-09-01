@@ -29,6 +29,12 @@ describe('gr-stat-card', () => {
     expect((await render({ icon: 'inbox', value: 'n/a', label: 'Queued' })).textContent).toContain('n/a');
   });
 
+  it('drops the icon block when no icon is given', async () => {
+    const root = await render({ value: 12, label: 'Queued' });
+    expect(root.querySelector('.stat-icon')).toBeNull();
+    expect(root.textContent).toContain('Queued');
+  });
+
   it('renders the icon ligature', async () => {
     const root = await render({ icon: 'inbox', value: 1, label: 'A' });
     expect(root.querySelector('.material-symbols-outlined')?.textContent).toContain('inbox');

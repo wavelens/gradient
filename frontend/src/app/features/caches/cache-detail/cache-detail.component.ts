@@ -11,6 +11,7 @@ import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint, Upstre
 import {
   BadgeComponent,
   ButtonComponent,
+  CardGridComponent,
   CopyFieldComponent,
   DividerComponent,
   FormFieldComponent,
@@ -21,6 +22,7 @@ import {
   MetricSeries,
   PageLayoutComponent,
   SettingsSectionComponent,
+  StatCardComponent,
 } from '@shared/ui';
 import { Cache } from '@core/models';
 
@@ -50,6 +52,8 @@ const CHART_COLORS = {
     SettingsSectionComponent,
     DividerComponent,
     FormFieldComponent,
+    StatCardComponent,
+    CardGridComponent,
   ],
   templateUrl: './cache-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

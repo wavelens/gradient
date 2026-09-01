@@ -22,7 +22,7 @@
   flex-direction: column;
   gap: $spacing-xs;
   padding: $spacing-lg;
-  border-right: 1px solid var(--gr-border);
+  border-right: 1px solid var(--gr-border-subtle);
   background: var(--gr-surface-sunken);
 
   h2 {

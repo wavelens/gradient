@@ -26,7 +26,7 @@
   gap: $spacing-md;
   padding: $spacing-sm $spacing-md;
   background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-sm;
   transition: border-color $transition-fast;
 
@@ -70,7 +70,7 @@
   gap: $spacing-xs;
   padding: $spacing-xs $spacing-sm;
   background: var(--gr-surface-hover);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-sm;
   color: var(--gr-text-secondary);
   font-size: $font-size-sm;
@@ -81,6 +81,6 @@
   &:hover {
     color: var(--gr-text-primary);
     border-color: color-mix(in srgb, var(--gr-text-secondary) 40%, transparent);
-    background: var(--gr-border);
+    background: var(--gr-border-subtle);
   }
 }

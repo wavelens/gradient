@@ -9,14 +9,14 @@
 .sg-frame {
   padding: $spacing-lg;
   margin-bottom: $spacing-xl;
-  border: 1px dashed var(--gr-border);
+  border: 1px dashed var(--gr-border-subtle);
   border-radius: $border-radius-md;
   background: var(--gr-surface-base);
 }
 
 .sg-card {
   padding: $spacing-md;
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   background: var(--gr-surface-raised);
 

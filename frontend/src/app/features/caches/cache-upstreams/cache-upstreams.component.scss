@@ -12,7 +12,7 @@
   padding: $spacing-xxl;
   text-align: center;
   background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
 
   gr-icon { color: var(--gr-text-secondary); margin-bottom: $spacing-md; }
@@ -32,7 +32,7 @@
   justify-content: space-between;
   padding: $spacing-md $spacing-lg;
   background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
 }
 
@@ -126,7 +126,7 @@
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 
-  & + & { border-left: 1px solid var(--gr-border); }
+  & + & { border-left: 1px solid var(--gr-border-subtle); }
 
   &.active {
     background: var(--gr-status-info);

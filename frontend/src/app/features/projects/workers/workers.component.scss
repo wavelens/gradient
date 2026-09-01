@@ -10,7 +10,7 @@
   gap: $spacing-md;
   padding: $spacing-md $spacing-lg;
   background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   margin-bottom: $spacing-xl;
 
@@ -35,7 +35,7 @@
   justify-content: space-between;
   padding: $spacing-md $spacing-lg;
   background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
 }
 

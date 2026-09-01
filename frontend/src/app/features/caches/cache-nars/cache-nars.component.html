@@ -6,28 +6,13 @@
 
 <gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cacheDisplayName || cacheName, link: ['/caches', cacheName] }, { label: 'NARs' }]" title="NARs" subtitle="Browse and manage Nix archives stored in this cache.">
   @if (stats(); as s) {
-    <div class="stat-cards">
-      <div class="stat-card">
-        <span class="stat-label">Total NARs</span>
-        <span class="stat-value">{{ s.total_nars }}</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">NAR size</span>
-        <span class="stat-value">{{ formatBytes(s.total_nar_size) }}</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">File size</span>
-        <span class="stat-value">{{ formatBytes(s.total_file_size) }}</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Last uploaded</span>
-        <span class="stat-value small">{{ formatDate(s.last_uploaded_at) }}</span>
-      </div>
-      <div class="stat-card">
-        <span class="stat-label">Oldest fetched</span>
-        <span class="stat-value small">{{ formatDate(s.oldest_fetched_at) }}</span>
-      </div>
-    </div>
+    <gr-card-grid min="220px">
+      <gr-stat-card label="Total NARs" [value]="s.total_nars" />
+      <gr-stat-card label="NAR size" [value]="formatBytes(s.total_nar_size)" />
+      <gr-stat-card label="File size" [value]="formatBytes(s.total_file_size)" />
+      <gr-stat-card label="Last uploaded" [value]="formatDate(s.last_uploaded_at)" />
+      <gr-stat-card label="Oldest fetched" [value]="formatDate(s.oldest_fetched_at)" />
+    </gr-card-grid>
   }
 
   <div class="filter-row">

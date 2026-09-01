@@ -86,6 +86,17 @@ describe.each(['dark', 'light'] as Theme[])('%s theme surfaces', (theme) => {
     expect(Math.max(byFill, byBorder), `fill ${byFill.toFixed(2)} border ${byBorder.toFixed(2)}`).toBeGreaterThanOrEqual(3);
   });
 
+  it('keeps the subtle border quieter than the control border', () => {
+    const control = resolveRole('--gr-surface-control', theme);
+    expect(ratio(resolveRole('--gr-border-subtle', theme), control))
+      .toBeLessThan(ratio(resolveRole('--gr-border', theme), control));
+  });
+
+  it('keeps the subtle border visible against the surface it divides', () => {
+    const raised = resolveRole('--gr-surface-raised', theme);
+    expect(ratio(resolveRole('--gr-border-subtle', theme), raised)).toBeGreaterThanOrEqual(1.2);
+  });
+
   it('keeps the border distinct from every surface', () => {
     const border = resolveRole('--gr-border', theme);
     for (const role of SURFACES) {

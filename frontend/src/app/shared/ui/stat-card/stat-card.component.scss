@@ -8,7 +8,7 @@
 
 .stat-card {
   background-color: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   box-shadow: var(--gr-shadow-raised);
   padding: $spacing-lg;
@@ -26,7 +26,7 @@
   align-items: center;
   justify-content: center;
 
-  .material-symbols-outlined {
+  gr-icon {
     color: var(--gr-text-primary);
   }
 }

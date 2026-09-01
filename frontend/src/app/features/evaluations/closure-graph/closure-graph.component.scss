@@ -44,7 +44,7 @@
   justify-content: space-between;
   padding: $spacing-sm $spacing-lg;
   background: var(--gr-surface-raised);
-  border-bottom: 1px solid var(--gr-border);
+  border-bottom: 1px solid var(--gr-border-subtle);
   flex-shrink: 0;
   gap: $spacing-md;
 
@@ -86,7 +86,7 @@
 .type-badge {
   color: var(--gr-text-secondary);
   font-size: $font-size-sm;
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-sm;
   padding: 1px 8px;
 }
@@ -107,7 +107,7 @@
 
 .ctrl-btn {
   background: var(--gr-surface-hover);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   color: var(--gr-text-secondary);
   cursor: pointer;
   padding: 5px 10px;

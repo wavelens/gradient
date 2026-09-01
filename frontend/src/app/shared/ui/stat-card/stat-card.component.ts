@@ -17,7 +17,7 @@ import { CommonModule } from '@angular/common';
   styleUrl: './stat-card.component.scss',
 })
 export class StatCardComponent {
-  icon = input.required<string>();
+  icon = input<string>();
   value = input.required<number | string>();
   label = input.required<string>();
 }

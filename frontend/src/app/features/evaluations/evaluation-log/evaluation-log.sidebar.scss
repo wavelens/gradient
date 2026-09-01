@@ -11,7 +11,7 @@
 .builds-sidebar {
   width: 260px;
   flex-shrink: 0;
-  border-right: 1px solid var(--gr-border);
+  border-right: 1px solid var(--gr-border-subtle);
   background: var(--gr-surface-base);
   display: flex;
   flex-direction: column;
@@ -29,7 +29,7 @@
 
 .overview-block {
   padding: $spacing-sm $spacing-md $spacing-md;
-  border-bottom: 1px solid color-mix(in srgb, var(--gr-border) 50%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--gr-border-subtle) 50%, transparent);
 }
 
 .eval-status-row {
@@ -107,7 +107,7 @@
   padding: $spacing-xs $spacing-md;
   font-size: $font-size-xs;
   color: var(--gr-text-secondary);
-  border-bottom: 1px solid var(--gr-border);
+  border-bottom: 1px solid var(--gr-border-subtle);
 }
 
 .builds-scope-clear {
@@ -191,7 +191,7 @@
   gap: $spacing-xs;
   padding: $spacing-xs $spacing-md;
   background: var(--gr-surface-base);
-  border-bottom: 1px solid var(--gr-border);
+  border-bottom: 1px solid var(--gr-border-subtle);
   font-size: $font-size-xs;
   font-weight: 600;
   color: var(--gr-text-secondary);

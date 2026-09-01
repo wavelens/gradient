@@ -16,7 +16,7 @@
   align-items: center;
   gap: $spacing-xs;
   background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   padding: $spacing-md $spacing-xl;
   min-width: 100px;
@@ -44,7 +44,7 @@
 
 .chart-card {
   background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   padding: $spacing-md $spacing-md $spacing-sm;
 

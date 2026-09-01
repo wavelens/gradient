@@ -10,14 +10,14 @@
 .muted { color: var(--gr-text-muted); }
 .filters { display: flex; gap: 1.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .filters label { display: flex; flex-direction: column; gap: 0.25rem; color: var(--gr-text-muted); font-size: $font-size-xs; }
-.filters select, .filters input { background: var(--gr-surface-raised); color: var(--gr-text-primary); border: 1px solid var(--gr-border); border-radius: $border-radius-sm; padding: 0.25rem 0.4rem; min-width: 7rem; }
-table.jobs { width: 100%; border-collapse: collapse; background: var(--gr-surface-raised); border: 1px solid var(--gr-border); border-radius: $border-radius-md; overflow: hidden; }
-th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--gr-border); color: var(--gr-text-secondary); font-size: $font-size-sm; }
+.filters select, .filters input { background: var(--gr-surface-raised); color: var(--gr-text-primary); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.25rem 0.4rem; min-width: 7rem; }
+table.jobs { width: 100%; border-collapse: collapse; background: var(--gr-surface-raised); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-md; overflow: hidden; }
+th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--gr-border-subtle); color: var(--gr-text-secondary); font-size: $font-size-sm; }
 th { color: var(--gr-text-primary); }
 tbody tr.clickable { cursor: pointer; }
 tbody tr.clickable:hover { background: var(--gr-surface-hover); }
 tbody tr.live { opacity: 0.7; font-style: italic; }
 tbody tr.negative td { color: var(--gr-status-warning); }.view-toggle { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-.view-toggle button { background: var(--gr-surface-raised); color: var(--gr-text-secondary); border: 1px solid var(--gr-border); border-radius: $border-radius-sm; padding: 0.3rem 0.8rem; cursor: pointer; }
+.view-toggle button { background: var(--gr-surface-raised); color: var(--gr-text-secondary); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.3rem 0.8rem; cursor: pointer; }
 .view-toggle button.active { background: var(--gr-surface-hover); color: var(--gr-text-primary); }
     

@@ -23,7 +23,7 @@
 
 .task-card {
   background-color: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   padding: $spacing-lg;
   display: flex;
@@ -48,7 +48,7 @@
     opacity: 0.6;
 
     .task-icon {
-      background-color: color-mix(in srgb, var(--gr-border) 30%, transparent);
+      background-color: color-mix(in srgb, var(--gr-border-subtle) 30%, transparent);
     }
   }
 }

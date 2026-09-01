@@ -11,7 +11,7 @@
 
 .pkg {
   background-color: var(--gr-surface-control);
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   border-left: 4px solid var(--rail-c, var(--idle));
   padding: $spacing-sm $spacing-md;
@@ -61,7 +61,7 @@
     color: var(--gr-text-muted);
     padding-left: $spacing-sm;
     border: none;
-    border-left: 1px solid var(--gr-border);
+    border-left: 1px solid var(--gr-border-subtle);
     background: none;
     cursor: pointer;
   }

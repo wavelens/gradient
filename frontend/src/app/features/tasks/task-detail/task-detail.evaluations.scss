@@ -13,7 +13,7 @@
   --err: var(--gr-status-danger);
   --warn: var(--gr-status-warning);
   --run: var(--gr-status-info);
-  --idle: var(--gr-border);
+  --idle: var(--gr-border-subtle);
   display: block;
   background: var(--gr-surface-base);
 }
@@ -73,7 +73,7 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 .eval-strip { display: flex; gap: $spacing-sm; align-items: flex-start; }
 
 .eval-card {
-  border: 1px solid var(--gr-border);
+  border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
   // Status rail as a thick left border: it tapers cleanly around the corner
   // radius and ends flush at the panel surface.
@@ -123,12 +123,12 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 
   &::before {
     left: -7px;
-    background: radial-gradient(circle at top left, transparent 6.75px, var(--gr-border) 6.75px, var(--gr-border) 7.5px, var(--gr-surface-raised) 7.5px);
+    background: radial-gradient(circle at top left, transparent 6.75px, var(--gr-border-subtle) 6.75px, var(--gr-border-subtle) 7.5px, var(--gr-surface-raised) 7.5px);
   }
 
   &::after {
     right: -7px;
-    background: radial-gradient(circle at top right, transparent 6.75px, var(--gr-border) 6.75px, var(--gr-border) 7.5px, var(--gr-surface-raised) 7.5px);
+    background: radial-gradient(circle at top right, transparent 6.75px, var(--gr-border-subtle) 6.75px, var(--gr-border-subtle) 7.5px, var(--gr-surface-raised) 7.5px);
   }
 
   &.selected {
@@ -146,7 +146,7 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 
 .panel {
   background: var(--gr-surface-raised);
-  border-top: 1px solid var(--gr-border);
+  border-top: 1px solid var(--gr-border-subtle);
   margin-top: -3px;
   padding-top: $spacing-lg;
   padding-bottom: $spacing-xl;
