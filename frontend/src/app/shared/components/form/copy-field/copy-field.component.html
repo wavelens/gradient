@@ -1,15 +1,35 @@
-<div class="copy-field">
-  <input
-    grInput
-    [id]="id() ?? null"
-    [value]="value()"
-    [class.copy-field__input--mono]="mono()"
-    class="copy-field__input"
-    readonly
-  />
+<div
+  class="copy-field"
+  [class.copy-field--inline]="inline()"
+  [class.copy-field--multiline]="multiline()"
+>
+  @if (inline()) {
+    <code class="copy-field__code">{{ value() }}</code>
+  } @else if (multiline()) {
+    <textarea
+      grInput
+      class="copy-field__input"
+      [class.copy-field__input--mono]="mono()"
+      [id]="id() ?? null"
+      [value]="value()"
+      [rows]="rows()"
+      readonly
+    ></textarea>
+  } @else {
+    <input
+      grInput
+      class="copy-field__input"
+      [class.copy-field__input--mono]="mono()"
+      [id]="id() ?? null"
+      [value]="value()"
+      readonly
+    />
+  }
   <button
     grButton
+    class="copy-field__button"
     type="button"
+    [text]="true"
     [icon]="copied() ? 'check' : 'content_copy'"
     [severity]="copied() ? 'success' : 'secondary'"
     [attr.aria-label]="copied() ? 'Copied' : 'Copy to clipboard'"
