@@ -7473,6 +7473,9 @@ read the result back, rather than mocking a database and pinning query order.
 Appearance section, which is the only thing that ever calls `ThemeService.set`:
 - `offers system, light and dark, with the active one checked` - the three
   segments render and the current preference is the checked radio.
+- `sits on a row, since one control does not fill a form card` - every settings
+  section is measured at 640px, so a card holding one segmented control is
+  mostly empty space; the theme is a row with the control at its end.
 - `applies a chosen theme immediately without writing it to the profile` - the
   theme is a per-browser preference, so picking one stamps `data-theme` and
   persists locally while sending nothing to `updateUserSettings`. A profile

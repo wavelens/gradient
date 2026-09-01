@@ -48,18 +48,23 @@
     
     </gr-settings-section>
 
-    <gr-settings-section title="Appearance">
-      <gr-form-field label="Theme" hint="Stored in this browser, so each device can differ.">
-        <gr-select-button
-          [options]="themeOptions"
-          optionLabel="label"
-          optionValue="value"
-          [allowEmpty]="false"
-          ariaLabel="Theme"
-          [ngModel]="theme.preference()"
-          (ngModelChange)="setTheme($event)"
-        />
-      </gr-form-field>
+    <gr-settings-section title="Appearance" [card]="false">
+      <gr-row-list>
+        <gr-row icon="palette">
+          Theme
+          <span slot="meta">Stored in this browser, so each device can differ.</span>
+          <gr-select-button
+            slot="actions"
+            [options]="themeOptions"
+            optionLabel="label"
+            optionValue="value"
+            [allowEmpty]="false"
+            ariaLabel="Theme"
+            [ngModel]="theme.preference()"
+            (ngModelChange)="setTheme($event)"
+          />
+        </gr-row>
+      </gr-row-list>
     </gr-settings-section>
 
     <!-- Security -->

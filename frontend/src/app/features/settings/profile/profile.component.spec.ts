@@ -101,6 +101,12 @@ describe('ProfileComponent - appearance', () => {
     return fixture;
   }
 
+  function sectionTitled(fixture: ComponentFixture<ProfileComponent>, title: string): HTMLElement {
+    return (Array.from(fixture.nativeElement.querySelectorAll('gr-settings-section')) as HTMLElement[]).find(
+      (el) => (el.querySelector('h2')?.textContent ?? '').trim() === title,
+    )!;
+  }
+
   function group(fixture: ComponentFixture<ProfileComponent>): HTMLElement {
     return fixture.nativeElement.querySelector('gr-select-button [role=radiogroup]');
   }
@@ -116,6 +122,13 @@ describe('ProfileComponent - appearance', () => {
     const labels = Array.from(group(fixture).querySelectorAll('button')).map((el) => el.textContent!.trim());
     expect(labels).toEqual(['System', 'Light', 'Dark']);
     expect(themeButton(fixture, 'System').getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('sits on a row, since one control does not fill a form card', async () => {
+    const fixture = await ready({ managed: false, oidc: false });
+    const section = sectionTitled(fixture, 'Appearance');
+    expect(section.querySelector('.settings-section__body--card')).toBeNull();
+    expect(section.querySelector('.row-actions gr-select-button')).not.toBeNull();
   });
 
   it('applies a chosen theme immediately without writing it to the profile', async () => {
