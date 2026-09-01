@@ -74,9 +74,16 @@ impl NarStore {
         prefix: &str,
         virtual_hosted_style: bool,
     ) -> Result<Self> {
+        let retry_config = object_store::RetryConfig {
+            max_retries: 3,
+            retry_timeout: std::time::Duration::from_secs(9),
+            ..Default::default()
+        };
+
         let mut builder = object_store::aws::AmazonS3Builder::new()
             .with_bucket_name(bucket)
             .with_region(region)
+            .with_retry(retry_config)
             .with_client_options(
                 ClientOptions::new()
                     .with_user_agent(
