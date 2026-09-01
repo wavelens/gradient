@@ -30,6 +30,7 @@ const PAIRS: Array<[string, string, number]> = [
   ['--gr-status-info', '--gr-surface-base', 3],
   ['--gr-accent', '--gr-surface-base', 3],
   ['--gr-accent-fg', '--gr-accent', 4.5],
+  ['--gr-accent-fg', '--gr-accent-hover', 4.5],
   ['--gr-status-danger-fg', '--gr-status-danger', 4.5],
   ['--gr-status-warning-fg', '--gr-status-warning', 4.5],
 ];

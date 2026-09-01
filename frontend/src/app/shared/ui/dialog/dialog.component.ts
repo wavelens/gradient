@@ -8,6 +8,7 @@ import { CdkTrapFocus } from '@angular/cdk/a11y';
 import { ESCAPE } from '@angular/cdk/keycodes';
 import { Overlay, OverlayRef } from '@angular/cdk/overlay';
 import { TemplatePortal } from '@angular/cdk/portal';
+import { detachAnimated } from '../overlay/overlay-animation';
 import {
   Component,
   OnDestroy,
@@ -96,8 +97,6 @@ export class DialogComponent implements OnDestroy {
   }
 
   private detach(): void {
-    if (!this.ref?.hasAttached()) return;
-    this.ref.detach();
-    this.hide.emit();
+    detachAnimated(this.ref, () => this.hide.emit());
   }
 }

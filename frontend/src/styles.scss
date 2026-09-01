@@ -169,6 +169,29 @@ textarea:disabled {
 
 .gr-tooltip-overlay { animation: gr-overlay-fade $transition-fast both; }
 
+@keyframes gr-overlay-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes gr-overlay-sink {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(6px) scale(0.98); }
+}
+
+@keyframes gr-dialog-exit {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(-12px) scale(0.97); }
+}
+
+.gr-dialog-panel.gr-overlay-leaving { animation: gr-dialog-exit $transition-fast both; }
+.gr-dialog-backdrop.gr-overlay-leaving { animation: gr-overlay-fade-out $transition-fast both; }
+
+.gr-popover-panel.gr-overlay-leaving,
+.gr-menu-panel.gr-overlay-leaving { animation: gr-overlay-sink $transition-fast both; }
+
+.gr-tooltip-overlay.gr-overlay-leaving { animation: gr-overlay-fade-out $transition-fast both; }
+
 [grDialogFooter] {
   display: flex;
   align-items: center;
@@ -181,7 +204,12 @@ textarea:disabled {
   .gr-dialog-backdrop,
   .gr-popover-panel,
   .gr-menu-panel,
-  .gr-tooltip-overlay {
+  .gr-tooltip-overlay,
+  .gr-dialog-panel.gr-overlay-leaving,
+  .gr-dialog-backdrop.gr-overlay-leaving,
+  .gr-popover-panel.gr-overlay-leaving,
+  .gr-menu-panel.gr-overlay-leaving,
+  .gr-tooltip-overlay.gr-overlay-leaving {
     animation: none;
   }
 }

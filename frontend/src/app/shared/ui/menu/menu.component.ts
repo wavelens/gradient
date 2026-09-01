@@ -7,6 +7,7 @@
 import { ESCAPE } from '@angular/cdk/keycodes';
 import { Overlay, OverlayRef } from '@angular/cdk/overlay';
 import { TemplatePortal } from '@angular/cdk/portal';
+import { disposeAnimated } from '../overlay/overlay-animation';
 import {
   Component,
   OnDestroy,
@@ -106,8 +107,9 @@ export class MenuComponent implements OnDestroy {
   }
 
   hide(): void {
-    this.ref?.dispose();
+    const ref = this.ref;
     this.ref = undefined;
+    disposeAnimated(ref);
   }
 
   protected run(item: MenuItem): void {

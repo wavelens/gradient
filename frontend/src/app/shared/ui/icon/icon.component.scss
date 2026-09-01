@@ -1,0 +1,24 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+:host {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.gr-icon {
+  font-family: 'Material Symbols Outlined';
+  line-height: 1;
+  user-select: none;
+
+  &--xs { font-size: 14px; }
+  &--sm { font-size: 16px; }
+  &--md { font-size: 20px; }
+  &--lg { font-size: 24px; }
+  &--xl { font-size: 32px; }
+  &--xxl { font-size: 48px; }
+}

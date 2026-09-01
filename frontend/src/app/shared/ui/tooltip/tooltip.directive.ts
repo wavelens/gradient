@@ -11,6 +11,7 @@ import {
   OverlayRef,
 } from '@angular/cdk/overlay';
 import { ComponentPortal } from '@angular/cdk/portal';
+import { disposeAnimated } from '../overlay/overlay-animation';
 import { Component, Directive, ElementRef, OnDestroy, inject, input, ChangeDetectionStrategy } from '@angular/core';
 
 export type TooltipPosition = 'top' | 'bottom' | 'left' | 'right';
@@ -84,7 +85,8 @@ export class TooltipDirective implements OnDestroy {
   }
 
   hide(): void {
-    this.ref?.dispose();
+    const ref = this.ref;
     this.ref = undefined;
+    disposeAnimated(ref);
   }
 }
