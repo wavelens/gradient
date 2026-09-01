@@ -4,16 +4,16 @@
   display: inline-flex;
   align-items: center;
   gap: $spacing-xs;
-  padding: 2px $spacing-sm;
+  padding: 0.1rem $spacing-sm;
   border-radius: $border-radius-sm;
   font-size: $font-size-xs;
-  font-weight: 500;
+  font-weight: 600;
 
-  &.status-success   { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); }
-  &.status-danger    { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent);  color: var(--gr-status-danger); }
-  &.status-secondary { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: var(--gr-text-secondary); }
-  &.status-warning   { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); }
-  &.status-running   { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: var(--gr-status-info); }
+  &.status-success   { background: color-mix(in srgb, var(--gr-status-success) 18%, transparent); color: var(--gr-status-success-text); }
+  &.status-danger    { background: color-mix(in srgb, var(--gr-status-danger) 18%, transparent);  color: var(--gr-status-danger-text); }
+  &.status-secondary { background: color-mix(in srgb, var(--gr-text-secondary) 18%, transparent); color: var(--gr-text-secondary); }
+  &.status-warning   { background: color-mix(in srgb, var(--gr-status-warning) 18%, transparent); color: var(--gr-status-warning-text); }
+  &.status-running   { background: color-mix(in srgb, var(--gr-status-info) 18%, transparent); color: var(--gr-status-info-text); }
 }
 
 @keyframes spin { to { transform: rotate(-360deg); } }

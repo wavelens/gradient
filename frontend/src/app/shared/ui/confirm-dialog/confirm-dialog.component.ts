@@ -23,7 +23,7 @@ import { DialogComponent } from '../dialog/dialog.component';
     >
       <div class="gr-confirm">
         @if (pending()?.icon) {
-          <gr-icon [name]="pending()?.icon ?? ''" size="lg" class="gr-confirm__icon" />
+          <gr-icon [name]="pending()?.icon ?? ''" size="xl" class="gr-confirm__icon" />
         }
         <p class="gr-confirm__message">{{ pending()?.message }}</p>
       </div>

@@ -10,7 +10,7 @@ import { ThemeService } from '@core/services/theme.service';
 import { TableComponent } from '@shared/ui';
 
 const SPACING = ['xs', 'sm', 'md', 'lg', 'xl', 'xxl'];
-const RADIUS = ['sm', 'md', 'lg'];
+const RADIUS = ['sm', 'md'];
 const SIZES = ['xs', 'sm', 'md', 'lg', 'xl', 'xxl'];
 
 @Component({

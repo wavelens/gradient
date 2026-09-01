@@ -6,7 +6,7 @@
 
 import { Component, input, ChangeDetectionStrategy } from '@angular/core';
 
-export type IconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl' | 'xxl';
+export type IconSize = 'sm' | 'md' | 'xl';
 
 /// Decorative by default; pass a label to expose the icon to assistive tech.
 @Component({

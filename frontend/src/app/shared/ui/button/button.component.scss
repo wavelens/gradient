@@ -25,7 +25,7 @@
   color: var(--gr-btn-fg);
   font-family: $font-family-base;
   font-size: $font-size-md;
-  font-weight: 500;
+  font-weight: 600;
   // Matches .gr-input so buttons and fields line up when set side by side.
   line-height: $line-height-tight;
   cursor: pointer;
@@ -48,6 +48,13 @@
   opacity: 0.6;
   cursor: not-allowed;
   pointer-events: none;
+}
+
+:host(.gr-button--primary) {
+  --gr-btn-bg: var(--gr-accent);
+  --gr-btn-bg-hover: var(--gr-accent-hover);
+  --gr-btn-fg: var(--gr-accent-fg);
+  --gr-btn-accent: var(--gr-accent);
 }
 
 :host(.gr-button--secondary) {
@@ -80,7 +87,8 @@
 }
 
 :host(.gr-button--small) {
-  padding: 0.25rem 0.6rem;
+  height: $control-height-sm;
+  padding: 0 $spacing-sm;
   font-size: $font-size-sm;
 }
 

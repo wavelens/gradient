@@ -4,21 +4,23 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+@use '../../../styles/variables' as *;
+
 :host {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
+  vertical-align: middle;
 }
 
 .gr-icon {
-  font-family: 'Material Symbols Outlined';
+  font-family: $font-family-icons;
   line-height: 1;
   user-select: none;
 
-  &--xs { font-size: 14px; }
+  /* stylelint-disable declaration-property-unit-allowed-list -- this component defines the icon scale */
   &--sm { font-size: 16px; }
   &--md { font-size: 20px; }
-  &--lg { font-size: 24px; }
   &--xl { font-size: 32px; }
-  &--xxl { font-size: 48px; }
+  /* stylelint-enable declaration-property-unit-allowed-list */
 }

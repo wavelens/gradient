@@ -11,26 +11,7 @@
 // Fonts are loaded via <link> tags in index.html
 
 // Global Styles
-html, // UA heading margins are em-based (0.67em, 0.83em) so they land off the scale
-// and change with font size. Replace them with scale steps.
-h1, h2, h3, h4 {
-  margin: 0 0 $spacing-md;
-  line-height: $line-height-tight;
-}
-
-h2, h3 {
-  margin-top: $spacing-xl;
-}
-
-p {
-  margin: 0 0 $spacing-md;
-}
-
-code {
-  font-family: $font-family-mono;
-  font-size: $font-size-sm;
-}
-
+html,
 body {
   overflow-x: hidden;
 }
@@ -121,7 +102,7 @@ a {
 // Material Symbols icon class
 .material-symbols-outlined {
   font-family: $font-family-icons;
-  font-weight: normal;
+  font-weight: 400;
   font-style: normal;
   /* stylelint-disable-next-line declaration-property-unit-allowed-list -- icon font default, gr-icon overrides */
   font-size: 24px;
@@ -175,7 +156,7 @@ textarea.gr-input {
 }
 
 input[type="radio"] {
-  accent-color: $color-info;
+  accent-color: var(--gr-accent);
   width: 1rem;
   height: 1rem;
   cursor: pointer;

@@ -13,7 +13,7 @@ import { IconComponent } from './icon.component';
   imports: [IconComponent],
   template: `
     <gr-icon name="delete" />
-    <gr-icon name="check" size="lg" label="Copied" />
+    <gr-icon name="check" size="xl" label="Copied" />
   `,
 })
 class Host {}
@@ -37,7 +37,7 @@ describe('gr-icon', () => {
   it('defaults to medium and applies the size class', async () => {
     const icons = await render();
     expect(icons[0].querySelector('.gr-icon--md')).not.toBeNull();
-    expect(icons[1].querySelector('.gr-icon--lg')).not.toBeNull();
+    expect(icons[1].querySelector('.gr-icon--xl')).not.toBeNull();
   });
 
   it('is decorative by default', async () => {

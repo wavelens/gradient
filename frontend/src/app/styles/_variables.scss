@@ -18,7 +18,7 @@ $spacing-xxl: 3rem;     // 48px
 // Border Radius
 $border-radius-sm: 5px;
 $border-radius-md: 8px;
-$border-radius-lg: 12px;
+$border-radius-lg: 12px;  // auth cards only
 
 // Typography
 $font-family-base: Arial, sans-serif;
@@ -40,6 +40,7 @@ $line-height-relaxed: 1.7;
 
 // One height for every interactive control, so they align when set side by side.
 $control-height: 34px;
+$control-height-sm: 28px;
 
 // One focus affordance for the whole system.
 $focus-ring-width: 2px;

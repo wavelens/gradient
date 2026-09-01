@@ -38,7 +38,7 @@ export class ElementsComponent {
   }
 
   severities: BadgeSeverity[] = ['neutral', 'success', 'danger', 'warning', 'info'];
-  iconSizes: IconSize[] = ['xs', 'sm', 'md', 'lg', 'xl', 'xxl'];
+  iconSizes: IconSize[] = ['sm', 'md', 'xl'];
   storePath = '/nix/store/9k3m1x0a4b2c-hello-2.12.1';
   publicKey = [
     'cache.gradient.example-1:8Xk2mQ9vR4tL6nW3pY7sD1fH5jK0aZcVbNmQwErTyUi=',
