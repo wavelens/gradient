@@ -14,8 +14,9 @@
   justify-content: space-between;
   gap: $spacing-sm;
   width: 100%;
-  padding: 0.5rem 0.7rem;
-  background: var(--gr-surface-sunken);
+  padding: 0 0.7rem;
+  height: $control-height;
+  background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
   color: var(--gr-text-primary);
@@ -44,7 +45,7 @@
   padding: $spacing-xs 0;
   list-style: none;
   overflow-y: auto;
-  background: var(--gr-surface-sunken);
+  background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);

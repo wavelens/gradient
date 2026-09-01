@@ -33,7 +33,7 @@ const POSITIONS: Record<TooltipPosition, ConnectedPosition> = {
       .gr-tooltip {
         max-width: 18rem;
         padding: 0.35rem 0.55rem;
-        background: var(--gr-surface-sunken);
+        background: var(--gr-surface-raised);
         border: 1px solid var(--gr-border);
         border-radius: 5px;
         color: var(--gr-text-primary);

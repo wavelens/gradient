@@ -25,6 +25,7 @@ body {
   background-color: var(--gr-surface-base);
   color: var(--gr-text-primary);
   font-family: $font-family-base;
+  line-height: $line-height-base;
   margin: 0;
   padding: 0;
 }
@@ -95,9 +96,9 @@ a {
 
 // Shared form-control styling for the gr-ui input directive
 .gr-input {
-  padding: 0.4rem 0.7rem;
-  // Explicit line-height keeps the control height identical across font families.
-  line-height: 1.25;
+  padding: 0 0.7rem;
+  height: $control-height;
+  line-height: $line-height-tight;
   background: var(--gr-surface-sunken);
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;

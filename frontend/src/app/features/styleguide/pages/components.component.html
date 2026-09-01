@@ -36,14 +36,26 @@
 <gr-form-field label="Region" for="sg-region">
   <gr-select inputId="sg-region" [options]="regions" optionLabel="label" optionValue="value" [(ngModel)]="region" />
 </gr-form-field>
-<gr-select-button [options]="regions" optionLabel="label" optionValue="value" [(ngModel)]="region" />
-<gr-checkbox inputId="sg-accept" [binary]="true" [(ngModel)]="accepted" />
-<gr-autocomplete inputId="sg-ac" [suggestions]="suggestions" />
+<gr-form-field label="Region (segmented)">
+  <gr-select-button [options]="regions" optionLabel="label" optionValue="value" [(ngModel)]="region" />
+</gr-form-field>
+
+<gr-form-field label="Accept terms" for="sg-accept">
+  <gr-checkbox inputId="sg-accept" [binary]="true" [(ngModel)]="accepted" />
+</gr-form-field>
+
+<gr-form-field label="Region search" for="sg-ac" hint="Type to filter the suggestions.">
+  <gr-autocomplete inputId="sg-ac" [suggestions]="suggestions" placeholder="Start typing..." />
+</gr-form-field>
 
 <h2>Overlays</h2>
-<gr-menu [model]="menuItems" />
-<gr-popover><p>Popover body</p></gr-popover>
-<span [grTooltip]="'Tooltip copy'" tooltipPosition="top">Hover me</span>
+<button grButton label="Open menu" icon="more_vert" severity="secondary" (click)="menu.toggle($event)"></button>
+<gr-menu #menu [model]="menuItems" />
+
+<button grButton label="Open popover" severity="secondary" (click)="popover.toggle($event)"></button>
+<gr-popover #popover><p>Popover body</p></gr-popover>
+
+<button grButton label="Hover for tooltip" severity="secondary" [grTooltip]="'Tooltip copy'" tooltipPosition="top"></button>
 <button grButton label="Open dialog" (click)="dialogOpen.set(true)"></button>
 <gr-dialog header="Edit label" [(visible)]="dialogOpen" width="420px">
   <gr-form-field label="Label" for="sg-dlg"><input grInput id="sg-dlg" /></gr-form-field>

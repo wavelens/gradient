@@ -14,7 +14,8 @@
 }
 
 .gr-select-button__item {
-  padding: 0.4rem 0.8rem;
+  padding: 0 0.8rem;
+  height: $control-height;
   background: var(--gr-surface-sunken);
   border: 0;
   border-right: 1px solid var(--gr-border);

@@ -33,7 +33,32 @@ const PAIRS: Array<[string, string, number]> = [
   ['--gr-accent-fg', '--gr-accent-hover', 4.5],
   ['--gr-status-danger-fg', '--gr-status-danger', 4.5],
   ['--gr-status-warning-fg', '--gr-status-warning', 4.5],
+  // Muted is real text, and every status colour is also used on a raised surface.
+  ['--gr-text-muted', '--gr-surface-base', 4.5],
+  ['--gr-text-muted', '--gr-surface-raised', 4.5],
+  ['--gr-status-success', '--gr-surface-raised', 3],
+  ['--gr-status-danger', '--gr-surface-raised', 3],
+  ['--gr-status-warning', '--gr-surface-raised', 3],
+  ['--gr-status-info', '--gr-surface-raised', 3],
+  ['--gr-accent', '--gr-surface-raised', 3],
 ];
+
+/// Elevation is only readable if adjacent surfaces actually differ.
+const SURFACES = ['--gr-surface-sunken', '--gr-surface-base', '--gr-surface-raised', '--gr-surface-hover', '--gr-surface-active'];
+
+describe.each(['dark', 'light'] as Theme[])('%s theme surfaces', (theme) => {
+  it('gives every surface role a distinct value', () => {
+    const values = SURFACES.map((r) => resolveRole(r, theme));
+    expect(new Set(values).size, values.join(' ')).toBe(SURFACES.length);
+  });
+
+  it('keeps the border distinct from every surface', () => {
+    const border = resolveRole('--gr-border', theme);
+    for (const role of SURFACES) {
+      expect(resolveRole(role, theme), `${role} equals the border`).not.toBe(border);
+    }
+  });
+});
 
 describe.each(['dark', 'light'] as Theme[])('%s theme contrast', (theme) => {
   it.each(PAIRS)('%s on %s meets %sx', (fg, bg, min) => {

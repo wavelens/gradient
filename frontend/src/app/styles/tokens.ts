@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+export const LINE_HEIGHTS = { tight: 1.25, base: 1.5, relaxed: 1.7 } as const;
+export const CONTROL_HEIGHT_PX = 34;
+
 export interface RoleDoc {
   name: string;
   usage: string;
@@ -17,15 +20,20 @@ export const PALETTE: Record<string, string> = {
   '--gr-gray-900': '#0d1118',
   '--gr-gray-800': '#21262d',
   '--gr-gray-750': '#252d33',
+  '--gr-gray-725': '#2b333c',
   '--gr-gray-700': '#2d333b',
   '--gr-gray-400': '#818181',
+  '--gr-gray-350': '#8b949e',
   '--gr-gray-300': '#abb0b4',
   '--gr-gray-200': '#d0d7de',
   '--gr-gray-100': '#eaeef2',
+  '--gr-gray-75': '#f0f3f6',
+  '--gr-gray-60': '#e4e9ee',
   '--gr-gray-50': '#f6f8fa',
   '--gr-ink-900': '#1f2328',
   '--gr-slate-600': '#656d76',
   '--gr-slate-500': '#8c959f',
+  '--gr-slate-550': '#6a737d',
   '--gr-green-800': '#115c26',
   '--gr-green-700': '#166c2e',
   '--gr-green-600': '#1a7f37',
@@ -57,14 +65,14 @@ export const DARK_ROLES: Record<string, string> = {
   '--gr-surface-base': '--gr-gray-900',
   '--gr-surface-raised': '--gr-gray-800',
   '--gr-surface-hover': '--gr-gray-750',
-  '--gr-surface-active': '--gr-gray-800',
+  '--gr-surface-active': '--gr-gray-725',
   '--gr-border': '--gr-gray-700',
   '--gr-accent': '--gr-emerald-400',
   '--gr-accent-hover': '--gr-emerald-500',
   '--gr-accent-fg': '--gr-gray-900',
   '--gr-text-primary': '--gr-white',
   '--gr-text-secondary': '--gr-gray-300',
-  '--gr-text-muted': '--gr-gray-400',
+  '--gr-text-muted': '--gr-gray-350',
   '--gr-status-success': '--gr-green-500',
   '--gr-status-danger': '--gr-red-300',
   '--gr-status-danger-hover': '--gr-red-400',
@@ -80,18 +88,18 @@ export const DARK_ROLES: Record<string, string> = {
 };
 
 export const LIGHT_ROLES: Record<string, string> = {
-  '--gr-surface-sunken': '--gr-gray-50',
-  '--gr-surface-base': '--gr-white',
-  '--gr-surface-raised': '--gr-gray-50',
-  '--gr-surface-hover': '--gr-gray-100',
-  '--gr-surface-active': '--gr-gray-200',
+  '--gr-surface-sunken': '--gr-gray-100',
+  '--gr-surface-base': '--gr-gray-50',
+  '--gr-surface-raised': '--gr-white',
+  '--gr-surface-hover': '--gr-gray-75',
+  '--gr-surface-active': '--gr-gray-60',
   '--gr-border': '--gr-gray-200',
   '--gr-accent': '--gr-green-700',
   '--gr-accent-hover': '--gr-green-800',
   '--gr-accent-fg': '--gr-white',
   '--gr-text-primary': '--gr-ink-900',
   '--gr-text-secondary': '--gr-slate-600',
-  '--gr-text-muted': '--gr-slate-500',
+  '--gr-text-muted': '--gr-slate-550',
   '--gr-status-success': '--gr-green-600',
   '--gr-status-danger': '--gr-red-600',
   '--gr-status-danger-hover': '--gr-red-700',

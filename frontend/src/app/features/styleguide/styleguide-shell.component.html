@@ -3,7 +3,7 @@
     <h2>Style Guide</h2>
     @for (section of nav; track section.path) {
       <a
-        [routerLink]="['/styleguide', section.path]"
+        [routerLink]="section.path ? ['/styleguide', section.path] : ['/styleguide']"
         routerLinkActive="is-active"
         [routerLinkActiveOptions]="{ exact: section.path === '' }"
         >{{ section.label }}</a

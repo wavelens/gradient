@@ -16,7 +16,8 @@
   align-items: center;
   justify-content: center;
   gap: $spacing-sm;
-  padding: 0.4rem 0.8rem;
+  padding: 0 0.8rem;
+  height: $control-height;
   border: 1px solid var(--gr-btn-bg);
   border-radius: $border-radius-sm;
   background: var(--gr-btn-bg);
@@ -25,7 +26,7 @@
   font-size: $font-size-md;
   font-weight: 500;
   // Matches .gr-input so buttons and fields line up when set side by side.
-  line-height: 1.25;
+  line-height: $line-height-tight;
   cursor: pointer;
   text-decoration: none;
   transition: background-color $transition-fast, border-color $transition-fast, color $transition-fast;

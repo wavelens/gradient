@@ -33,6 +33,14 @@ $font-size-lg: 1.25rem;    // 20px
 $font-size-xl: 1.5rem;     // 24px
 $font-size-xxl: 2rem;      // 32px
 
+// Leading. Absent until now, so nearly all text fell through to `normal`.
+$line-height-tight: 1.25;
+$line-height-base: 1.5;
+$line-height-relaxed: 1.7;
+
+// One height for every interactive control, so they align when set side by side.
+$control-height: 34px;
+
 // Z-index layers
 $z-dropdown: 1000;
 $z-sticky: 1020;
