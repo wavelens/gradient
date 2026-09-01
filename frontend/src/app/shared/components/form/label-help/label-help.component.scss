@@ -9,24 +9,28 @@
 :host {
   display: inline-flex;
   align-items: center;
+  vertical-align: middle;
   margin-left: $spacing-xs;
+  line-height: 1;
 }
 
 .label-help {
   display: inline-flex;
   align-items: center;
-  color: $text-light;
+  color: var(--gr-text-muted);
   line-height: 1;
   padding: 0;
   border-radius: 0;
 
   &:hover {
-    color: $text-primary;
+    color: var(--gr-text-primary);
     background: transparent;
     border-radius: 0;
   }
 
   .material-symbols-outlined {
+    display: block;
     font-size: 16px;
+    line-height: 1;
   }
 }
