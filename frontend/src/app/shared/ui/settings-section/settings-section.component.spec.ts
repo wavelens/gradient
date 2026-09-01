@@ -56,6 +56,36 @@ describe('gr-settings-section', () => {
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelector('.settings-section')?.classList).toContain('is-danger');
   });
+  it('measures a card body, so fields stay readable', async () => {
+    const fixture = TestBed.createComponent(SettingsSectionComponent);
+    fixture.componentRef.setInput('title', 'General');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const body = (fixture.nativeElement as HTMLElement).querySelector('.settings-section__body') as HTMLElement;
+    expect(body.style.maxWidth).toBe('640px');
+  });
+
+  it('lets a bodiless-card section run full width, since a list measures itself', async () => {
+    const fixture = TestBed.createComponent(SettingsSectionComponent);
+    fixture.componentRef.setInput('title', 'Members');
+    fixture.componentRef.setInput('card', false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const body = (fixture.nativeElement as HTMLElement).querySelector('.settings-section__body') as HTMLElement;
+    expect(body.style.maxWidth).toBe('');
+  });
+
+  it('honours an explicit measure either way', async () => {
+    const fixture = TestBed.createComponent(SettingsSectionComponent);
+    fixture.componentRef.setInput('title', 'Usage');
+    fixture.componentRef.setInput('card', false);
+    fixture.componentRef.setInput('maxWidth', '900px');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const body = (fixture.nativeElement as HTMLElement).querySelector('.settings-section__body') as HTMLElement;
+    expect(body.style.maxWidth).toBe('900px');
+  });
+
   it('projects a header action beside the title', async () => {
     TestBed.configureTestingModule({ imports: [ActionHost] });
     const fixture = TestBed.createComponent(ActionHost);

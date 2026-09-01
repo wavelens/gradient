@@ -71,3 +71,56 @@
     <button grButton label="Save"></button>
   </gr-settings-section>
 </div>
+
+<h2>Section with an action</h2>
+<p>A section owns its primary action, so the action never sits boxed inside the card
+   it acts on.</p>
+<div class="sg-frame">
+  <gr-settings-section title="Members" [card]="false">
+    <button slot="actions" grButton label="Add Member" icon="add" severity="secondary"></button>
+    <gr-row-list>
+      <gr-row icon="person">
+        <span class="mono">alice</span>
+        <div slot="actions">
+          <gr-badge>Admin</gr-badge>
+        </div>
+      </gr-row>
+      <gr-row icon="person">
+        <span class="mono">bob</span>
+        <div slot="actions">
+          <gr-badge>Viewer</gr-badge>
+        </div>
+      </gr-row>
+    </gr-row-list>
+  </gr-settings-section>
+</div>
+
+<h2>Settings destinations</h2>
+<p>A settings page that only points elsewhere uses linked rows, not buttons. The whole
+   row navigates and the chevron says so.</p>
+<div class="sg-frame">
+  <gr-settings-section title="More Settings" [card]="false">
+    <gr-row-list>
+      <gr-row icon="group" linkLabel="Members and roles" [link]="['/styleguide']">
+        Members &amp; Roles
+        <span slot="meta">Who has access, and what they can do</span>
+      </gr-row>
+      <gr-row icon="cloud_download" linkLabel="Upstream caches" [link]="['/styleguide']">
+        Upstream Caches
+        <span slot="meta">Caches this one pulls through from</span>
+      </gr-row>
+    </gr-row-list>
+  </gr-settings-section>
+</div>
+
+<h2>Danger zone</h2>
+<p>Destructive groups are a variant of the same section, so the red is defined once.</p>
+<div class="sg-frame">
+  <gr-settings-section title="Danger Zone" danger>
+    <gr-row>
+      Delete Project
+      <span slot="meta">Permanently delete this project and all its tasks.</span>
+      <button slot="actions" grButton label="Delete Project" icon="delete" severity="danger"></button>
+    </gr-row>
+  </gr-settings-section>
+</div>
