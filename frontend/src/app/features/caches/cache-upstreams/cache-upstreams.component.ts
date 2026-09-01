@@ -20,6 +20,8 @@ import {
   InputDirective,
   LoadingSpinnerComponent,
   PageLayoutComponent,
+  RowComponent,
+  RowListComponent,
   SelectComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
@@ -45,6 +47,8 @@ import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
     EmptyStateComponent,
     SelectComponent,
     BadgeComponent,
+    RowListComponent,
+    RowComponent,
   ],
   templateUrl: './cache-upstreams.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

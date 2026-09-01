@@ -20,6 +20,8 @@ import {
   IconComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
+  RowComponent,
+  RowListComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
@@ -41,6 +43,8 @@ import { AccessState } from '@core/models';
     PageLayoutComponent,
     FormFieldComponent,
     EmptyStateComponent,
+    RowListComponent,
+    RowComponent,
   ],
   templateUrl: './cache-subscriptions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

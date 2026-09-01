@@ -16,13 +16,15 @@ import {
   IconComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
+  RowComponent,
+  RowListComponent,
 } from '@shared/ui';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-build-artefacts',
   standalone: true,
-  imports: [RouterModule, LoadingSpinnerComponent, IconComponent, PageLayoutComponent, EmptyStateComponent, BadgeComponent, ButtonComponent],
+  imports: [RouterModule, LoadingSpinnerComponent, IconComponent, PageLayoutComponent, EmptyStateComponent, BadgeComponent, ButtonComponent, RowListComponent, RowComponent],
   templateUrl: './build-artefacts.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './build-artefacts.component.scss',

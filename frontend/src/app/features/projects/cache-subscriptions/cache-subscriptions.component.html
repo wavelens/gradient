@@ -28,14 +28,11 @@
           ></button>
       </gr-empty-state>
     } @else {
-      <div class="caches-list">
+      <gr-row-list>
         @for (cache of caches(); track cache.id) {
-          <div class="cache-row">
-            <div class="cache-info">
-              <gr-icon name="storage" />
-              <a [routerLink]="['/caches', cache.name]" class="cache-name">{{ cache.name }}</a>
-            </div>
-            <div class="cache-actions">
+          <gr-row icon="storage" [link]="['/caches', cache.name]" [linkLabel]="cache.name">
+            {{ cache.name }}
+            <div slot="actions">
               <button
                 *appWritable="access()"
                 grButton
@@ -48,9 +45,9 @@
                 (click)="unsubscribeCache(cache)"
               ></button>
             </div>
-          </div>
+          </gr-row>
         }
-      </div>
+      </gr-row-list>
     }
   }
 </gr-page-layout>

@@ -28,21 +28,16 @@
           ></button>
       </gr-empty-state>
     } @else {
-      <div class="upstreams-list">
+      <gr-row-list>
         @for (u of upstreams(); track u.id) {
-          <div class="upstream-row">
-            <div class="upstream-info">
-              <gr-icon name="cloud_download" />
-              <div class="upstream-details">
-                <span class="upstream-name">{{ u.display_name }}</span>
-                <span class="upstream-target text-secondary">{{ u.url ?? u.upstream_cache_id }}</span>
-              </div>
-              <gr-badge [severity]="u.upstream_cache_id ? 'info' : 'neutral'">
-                {{ u.upstream_cache_id ? 'Internal' : 'External' }}
-              </gr-badge>
-              <gr-badge [severity]="modeSeverity(u.mode)">{{ modeLabel(u.mode) }}</gr-badge>
-            </div>
-            <div class="upstream-actions">
+          <gr-row icon="cloud_download">
+            {{ u.display_name }}
+            <gr-badge [severity]="u.upstream_cache_id ? 'info' : 'neutral'">
+              {{ u.upstream_cache_id ? 'Internal' : 'External' }}
+            </gr-badge>
+            <gr-badge [severity]="modeSeverity(u.mode)">{{ modeLabel(u.mode) }}</gr-badge>
+            <span slot="meta">{{ u.url ?? u.upstream_cache_id }}</span>
+            <div slot="actions">
               <button
                 *appWritable="access()"
                 grButton
@@ -61,9 +56,9 @@
                 (click)="removeUpstream(u.id)"
               ></button>
             </div>
-          </div>
+          </gr-row>
         }
-      </div>
+      </gr-row-list>
     }
   }
 </gr-page-layout>

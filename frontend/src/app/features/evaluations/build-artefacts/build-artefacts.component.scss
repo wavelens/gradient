@@ -14,12 +14,6 @@
 
 // ── Empty state ───────────────────────────────────────────────────────────────// ── Artefacts list ────────────────────────────────────────────────────────────
 
-.artefacts-list {
-  display: flex;
-  flex-direction: column;
-  gap: $spacing-xs;
-}
-
 .artefact-row {
   display: flex;
   align-items: center;
@@ -35,40 +29,9 @@
   }
 }
 
-.artefact-name {
-  flex: 1;
-  font-size: $font-size-sm;
-  color: var(--gr-text-primary);
-  font-family: monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .artefact-size {
   font-size: $font-size-xs;
   color: var(--gr-text-muted);
   flex-shrink: 0;
   white-space: nowrap;
-}
-
-.download-btn {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-  padding: $spacing-xs $spacing-sm;
-  background: var(--gr-surface-hover);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-sm;
-  color: var(--gr-text-secondary);
-  font-size: $font-size-sm;
-  text-decoration: none;
-  flex-shrink: 0;
-  transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
-
-  &:hover {
-    color: var(--gr-text-primary);
-    border-color: color-mix(in srgb, var(--gr-text-secondary) 40%, transparent);
-    background: var(--gr-border-subtle);
-  }
 }

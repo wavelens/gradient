@@ -21,26 +21,27 @@
       <span class="empty-hint">Artefacts are produced via <code>hydra-build-products</code> in the build output.</span>
     </gr-empty-state>
   } @else {
-    <div class="artefacts-list">
+    <gr-row-list>
       @for (artefact of artefacts(); track artefact.name) {
-        <div class="artefact-row">
+        <gr-row>
           <gr-badge>{{ fileTypeLabel(artefact) }}</gr-badge>
-          <span class="artefact-name">{{ artefact.name }}</span>
+          {{ artefact.name }}
           @if (artefact.size !== undefined) {
-            <span class="artefact-size">{{ formatSize(artefact.size) }}</span>
+            <span slot="meta">{{ formatSize(artefact.size) }}</span>
           }
           <a
-            class="download-btn"
+            slot="actions"
+            grButton
+            severity="secondary"
             [href]="downloadUrl(artefact)"
             [attr.target]="isHtml(artefact) ? '_blank' : null"
             [attr.rel]="isHtml(artefact) ? 'noopener noreferrer' : null"
             [title]="(isHtml(artefact) ? 'Open ' : 'Download ') + artefact.name"
-          >
-            <gr-icon [name]="isHtml(artefact) ? 'open_in_new' : 'download'" size="sm" />
-            <span>{{ isHtml(artefact) ? 'Open' : 'Download' }}</span>
-          </a>
-        </div>
+            [icon]="isHtml(artefact) ? 'open_in_new' : 'download'"
+            [label]="isHtml(artefact) ? 'Open' : 'Download'"
+          ></a>
+        </gr-row>
       }
-    </div>
+    </gr-row-list>
   }
 </gr-page-layout>

@@ -14,40 +14,29 @@
         <button slot="action" grButton label="Create API Key" icon="add" (click)="openCreateDialog()"></button>
       </gr-empty-state>
     } @else {
-      <div class="keys-list">
+      <gr-row-list>
         @for (key of keys(); track key.id) {
-          <div class="key-row" [class.revoked]="key.revoked_at">
-            <div class="key-info">
-              <gr-icon name="key" />
-              <div>
-                <div class="key-name">
-                  {{ key.name }}
-                  @if (key.managed) {
-                    <gr-badge severity="info">Managed</gr-badge>
-                  }
-                  @if (key.revoked_at) {
-                    <gr-badge severity="danger">Revoked</gr-badge>
-                  }
-                </div>
-                <div class="key-meta text-secondary">
-                  <span
-                    severity="info"
-                    [grTooltip]="permissionTooltip(key)"
-                    tooltipPosition="top"
-                  >
-                    {{ key.permissions.length }} permission{{ key.permissions.length === 1 ? '' : 's' }}
-                  </span>
-                  <gr-badge>{{ scopeBadge(key) }}</gr-badge>
-                  <span>
-                    Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
-                  </span>
-                  @if (key.expires_at) {
-                    <span>· Expires: {{ key.expires_at | date: 'medium' }}</span>
-                  }
-                </div>
-              </div>
+          <gr-row icon="key" [muted]="!!key.revoked_at">
+            {{ key.name }}
+            @if (key.managed) {
+              <gr-badge severity="info">Managed</gr-badge>
+            }
+            @if (key.revoked_at) {
+              <gr-badge severity="danger">Revoked</gr-badge>
+            }
+            <div slot="meta">
+              <span [grTooltip]="permissionTooltip(key)" tooltipPosition="top">
+                {{ key.permissions.length }} permission{{ key.permissions.length === 1 ? '' : 's' }}
+              </span>
+              <gr-badge>{{ scopeBadge(key) }}</gr-badge>
+              <span>
+                Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
+              </span>
+              @if (key.expires_at) {
+                <span>· Expires: {{ key.expires_at | date: 'medium' }}</span>
+              }
             </div>
-            <div class="key-actions">
+            <div slot="actions">
               @if (!key.revoked_at) {
                 <button
                   grButton
@@ -79,9 +68,9 @@
                 [appManagedDisable]="rowAccess(key)"
               ></button>
             </div>
-          </div>
+          </gr-row>
         }
-      </div>
+      </gr-row-list>
     }
   }
 </gr-page-layout>
@@ -93,10 +82,7 @@
   [header]="editingKey() ? 'Edit API Key' : 'Create API Key'"
 >
   @if (errorMessage()) {
-    <div class="dialog-error">
-      <gr-icon name="error" />
-      {{ errorMessage() }}
-    </div>
+    <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
   }
 
   <gr-form-field label="Name" for="key-name">
