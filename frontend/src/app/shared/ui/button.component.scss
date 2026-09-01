@@ -64,13 +64,14 @@
 :host(.gr-button--warn) {
   --gr-btn-bg: var(--gr-status-warning);
   --gr-btn-bg-hover: var(--gr-status-warning-hover);
-  --gr-btn-fg: var(--gr-black);
+  --gr-btn-fg: var(--gr-status-warning-fg);
   --gr-btn-accent: var(--gr-status-warning);
 }
 
 :host(.gr-button--danger) {
   --gr-btn-bg: var(--gr-status-danger);
   --gr-btn-bg-hover: var(--gr-status-danger-hover);
+  --gr-btn-fg: var(--gr-status-danger-fg);
   --gr-btn-accent: var(--gr-status-danger);
 }
 
