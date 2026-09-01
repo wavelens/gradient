@@ -100,6 +100,12 @@
   color: var(--gr-btn-accent);
 }
 
+// The neutral text button is an affordance, not a call to action: it rests
+// quiet and brightens under the pointer.
+:host(.gr-button--text.gr-button--secondary) {
+  color: var(--gr-text-muted);
+}
+
 // A text button has no box to tint, so the hover reads on the glyph itself.
 :host(.gr-button--text:hover:not(:disabled)) {
   background: none;

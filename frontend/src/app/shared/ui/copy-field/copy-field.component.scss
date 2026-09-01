@@ -30,9 +30,6 @@
     top: 50%;
     right: $spacing-xs;
     transform: translateY(-50%);
-    color: var(--gr-text-muted);
-
-    &:hover:not(:disabled) { color: var(--gr-text-primary); }
   }
 
   // Same inset as the single-line variant; only the vertical anchor differs.
