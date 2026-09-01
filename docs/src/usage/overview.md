@@ -100,6 +100,19 @@ automatically.
 A role currently assigned to one or more members cannot be deleted; reassign
 the affected members first.
 
+## Appearance
+
+**Settings -> Profile -> Appearance** picks the colour theme: **System**,
+**Light** or **Dark**. It applies as soon as you choose it.
+
+System follows the operating system's `prefers-color-scheme` setting and keeps
+following it, so a machine that switches to dark at sunset switches Gradient
+with it. Light and Dark pin the choice regardless of the OS.
+
+The preference lives in the browser's local storage rather than on your account,
+so it is per browser: a second device starts on System until it is set there
+too. Clearing site data returns it to System.
+
 ## SSH Keys
 
 Each project has one Ed25519 SSH key pair, generated automatically. The public key is shown in **Project → Settings → SSH**.

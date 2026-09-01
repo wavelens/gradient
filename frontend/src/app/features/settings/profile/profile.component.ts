@@ -10,18 +10,18 @@ import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
+import { ThemeService, ThemePreference } from '@core/services/theme.service';
 import {
   ButtonComponent,
   DialogComponent,
-  DividerComponent,
   FormFieldComponent,
-  IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
+  SelectButtonComponent,
   SettingsSectionComponent,
 } from '@shared/ui';
 import { ManagedDisableDirective } from '@shared/access';
@@ -35,18 +35,17 @@ import { AccessState } from '@core/models';
     RouterModule,
     FormsModule,
     DialogComponent,
-    DividerComponent,
     ButtonComponent,
     InputDirective,
     LoadingSpinnerComponent,
     ManagedDisableDirective,
-    IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
     SettingsSectionComponent,
     MessageBannerComponent,
     RowComponent,
     RowListComponent,
+    SelectButtonComponent,
   ],
   templateUrl: './profile.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -56,6 +55,7 @@ export class ProfileComponent implements OnInit {
   private userService = inject(UserService);
   private authService = inject(AuthService);
   private router = inject(Router);
+  theme = inject(ThemeService);
 
   loading = signal(true);
   saving = signal(false);
@@ -84,6 +84,16 @@ export class ProfileComponent implements OnInit {
     name: '',
     email: '',
   };
+
+  themeOptions: readonly { label: string; value: ThemePreference }[] = [
+    { label: 'System', value: 'system' },
+    { label: 'Light', value: 'light' },
+    { label: 'Dark', value: 'dark' },
+  ];
+
+  setTheme(preference: ThemePreference): void {
+    this.theme.set(preference);
+  }
 
   ngOnInit(): void {
     this.loadSettings();

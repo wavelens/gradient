@@ -7466,3 +7466,25 @@ read the result back, rather than mocking a database and pinning query order.
   `the_self_heal_threshold_is_present_and_real` - the snapshot is a hand-written
   key list, since it is the part most likely to gain a secret field later and
   the least likely to be re-reviewed.
+
+## Theme preference is reachable and stays device-local
+
+`frontend/src/app/features/settings/profile/profile.component.spec.ts` covers the
+Appearance section, which is the only thing that ever calls `ThemeService.set`:
+- `offers system, light and dark, with the active one checked` - the three
+  segments render and the current preference is the checked radio.
+- `applies a chosen theme immediately without writing it to the profile` - the
+  theme is a per-browser preference, so picking one stamps `data-theme` and
+  persists locally while sending nothing to `updateUserSettings`. A profile
+  write here would push one device's choice onto every other device.
+- `keeps the theme editable on an account whose profile is managed` - the page
+  disables its fields for declaratively-managed and OIDC accounts; appearance is
+  not profile data, so it stays editable.
+- `returns to system, dropping the explicit override` - going back to System
+  removes the attribute rather than pinning the resolved value, which is what
+  lets the OS keep steering the theme afterwards.
+
+`frontend/src/app/shared/ui/select-button/select-button.component.spec.ts`:
+`names the group so a screen reader can announce it` - a `role=radiogroup` gets
+no name from a projected `gr-form-field` label, so the group carries its own
+`ariaLabel`.

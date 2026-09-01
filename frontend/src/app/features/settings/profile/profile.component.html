@@ -48,6 +48,20 @@
     
     </gr-settings-section>
 
+    <gr-settings-section title="Appearance">
+      <gr-form-field label="Theme" hint="Stored in this browser, so each device can differ.">
+        <gr-select-button
+          [options]="themeOptions"
+          optionLabel="label"
+          optionValue="value"
+          [allowEmpty]="false"
+          ariaLabel="Theme"
+          [ngModel]="theme.preference()"
+          (ngModelChange)="setTheme($event)"
+        />
+      </gr-form-field>
+    </gr-settings-section>
+
     <!-- Security -->
     <gr-settings-section title="Security" [card]="false">
       <gr-row-list>
