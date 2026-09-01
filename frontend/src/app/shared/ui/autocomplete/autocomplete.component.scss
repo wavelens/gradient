@@ -16,17 +16,17 @@
   padding: $spacing-xs 0;
   list-style: none;
   overflow-y: auto;
-  background: $color-quaternary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-sunken);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 }
 
 .gr-autocomplete__option {
   padding: 0.45rem 0.7rem;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   font-size: $font-size-md;
   cursor: pointer;
 
-  &:hover { background: $color-hover; }
+  &:hover { background: var(--gr-surface-hover); }
 }

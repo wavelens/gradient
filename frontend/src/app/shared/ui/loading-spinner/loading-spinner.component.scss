@@ -15,8 +15,8 @@
 }
 
 .spinner {
-  border: 3px solid $color-tertiary;
-  border-top: 3px solid $text-primary;
+  border: 3px solid var(--gr-surface-raised);
+  border-top: 3px solid var(--gr-text-primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -40,7 +40,7 @@
 
 .loading-message {
   margin-top: $spacing-md;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   font-size: $font-size-sm;
 }
 

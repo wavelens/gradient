@@ -7,8 +7,8 @@
 @use '../../../styles/variables' as *;
 
 .app-footer {
-  border-top: 1px solid $color-border;
-  background-color: $color-primary;
+  border-top: 1px solid var(--gr-border);
+  background-color: var(--gr-surface-base);
   padding: $spacing-sm $spacing-lg;
   margin-top: auto;
 }
@@ -20,16 +20,16 @@
   align-items: center;
   gap: $spacing-sm;
   font-size: $font-size-sm;
-  color: $text-light;
+  color: var(--gr-text-muted);
 }
 
 .footer-sep {
-  color: $color-border;
+  color: var(--gr-border);
 }
 
 .footer-license,
 .footer-version {
-  color: $text-light;
+  color: var(--gr-text-muted);
 }
 
 .footer-link,
@@ -37,12 +37,12 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: $text-light;
+  color: var(--gr-text-muted);
   padding: 0;
   border-radius: 0;
 
   &:hover {
-    color: $text-primary;
+    color: var(--gr-text-primary);
     background: none;
   }
 

@@ -39,7 +39,46 @@ for (const entry of readdirSync(UI)) {
   }
 }
 
+// Rule 3: a primitive that is not demonstrated in the styleguide does not exist as far as
+// consumers are concerned, so an undemoed selector is a conformance failure.
+const SG = join(dirname(fileURLToPath(import.meta.url)), '../src/app/features/styleguide');
+
+function styleguideMarkup(): string {
+  const parts: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (entry.endsWith('.html') || entry.endsWith('.ts')) parts.push(readFileSync(path, 'utf8'));
+    }
+  };
+  walk(SG);
+  return parts.join('\n');
+}
+
+const SELECTOR = /selector:\s*'([^']+)'/;
+const EXEMPT = new Set(['gr-tooltip-panel', 'gr-confirm-dialog', 'gr-form-dialog']);
+
+const markup = styleguideMarkup();
+const undemoed: string[] = [];
+for (const entry of readdirSync(UI)) {
+  const path = join(UI, entry);
+  if (!statSync(path).isDirectory()) continue;
+  for (const file of readdirSync(path)) {
+    if (!file.endsWith('.component.ts') || file.endsWith('.spec.ts')) continue;
+    const match = SELECTOR.exec(readFileSync(join(path, file), 'utf8'));
+    const selector = match?.[1];
+    if (!selector || !selector.startsWith('gr-') || EXEMPT.has(selector)) continue;
+    if (!markup.includes(`<${selector}`)) undemoed.push(selector);
+  }
+}
+
 let failed = false;
+if (undemoed.length) {
+  console.error(`Primitives with no styleguide demo (${undemoed.length}):`);
+  undemoed.forEach((m) => console.error(`  ${m}`));
+  failed = true;
+}
 if (missing.length) {
   console.error(`Not exported from @shared/ui (${missing.length}):`);
   missing.forEach((m) => console.error(`  ${m}`));
@@ -52,4 +91,4 @@ if (specless.length) {
 }
 
 if (failed) process.exit(1);
-console.log(`@shared/ui barrel is complete; every module has a spec.`);
+console.log('@shared/ui is complete: every module is exported, specced and demonstrated.');

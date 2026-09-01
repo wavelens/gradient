@@ -9,10 +9,10 @@
 .gr-popover {
   max-width: 22rem;
   padding: $spacing-md;
-  background: $color-quaternary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-sunken);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   font-size: $font-size-md;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 }

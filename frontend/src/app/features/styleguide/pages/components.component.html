@@ -1,0 +1,54 @@
+<h1>Components</h1>
+<p>Interactive primitives. Every control below is the same one features import.</p>
+
+<h2>Buttons</h2>
+<button grButton label="Primary"></button>
+<button grButton label="Secondary" severity="secondary"></button>
+<button grButton label="Success" severity="success"></button>
+<button grButton label="Danger" severity="danger"></button>
+<button grButton label="Warn" severity="warn"></button>
+<button grButton label="With icon" icon="add"></button>
+<button grButton icon="delete" severity="danger" aria-label="Delete"></button>
+<button grButton label="Text" [text]="true"></button>
+<button grButton label="Loading" [loading]="true"></button>
+
+<h2>Form field</h2>
+<p>Works with template-driven forms, which is what most of the app uses. The help link is
+   projected into the label rather than sitting beside it.</p>
+<gr-form-field
+  label="Name"
+  for="sg-name"
+  hint="Lowercase letters, digits and dashes."
+  error="Cannot start or end with a dash."
+  [invalid]="nameInvalid()"
+  [required]="true"
+>
+  <gr-label-help slot="label" href="https://wavelens.github.io/gradient/" title="Naming rules" />
+  <input grInput id="sg-name" [(ngModel)]="name" />
+</gr-form-field>
+<button grButton label="Toggle error" severity="secondary" (click)="nameInvalid.set(!nameInvalid())"></button>
+
+<gr-form-field label="Password" for="sg-pw">
+  <gr-password-input id="sg-pw" [control]="password" />
+</gr-form-field>
+
+<h2>Selection</h2>
+<gr-form-field label="Region" for="sg-region">
+  <gr-select inputId="sg-region" [options]="regions" optionLabel="label" optionValue="value" [(ngModel)]="region" />
+</gr-form-field>
+<gr-select-button [options]="regions" optionLabel="label" optionValue="value" [(ngModel)]="region" />
+<gr-checkbox inputId="sg-accept" [binary]="true" [(ngModel)]="accepted" />
+<gr-autocomplete inputId="sg-ac" [suggestions]="suggestions" />
+
+<h2>Overlays</h2>
+<gr-menu [model]="menuItems" />
+<gr-popover><p>Popover body</p></gr-popover>
+<span [grTooltip]="'Tooltip copy'" tooltipPosition="top">Hover me</span>
+<button grButton label="Open dialog" (click)="dialogOpen.set(true)"></button>
+<gr-dialog header="Edit label" [(visible)]="dialogOpen" width="420px">
+  <gr-form-field label="Label" for="sg-dlg"><input grInput id="sg-dlg" /></gr-form-field>
+  <div grDialogFooter>
+    <button grButton label="Cancel" severity="secondary" (click)="dialogOpen.set(false)"></button>
+    <button grButton label="Save"></button>
+  </div>
+</gr-dialog>

@@ -11,8 +11,8 @@
   margin: 0;
   padding: $spacing-xs 0;
   list-style: none;
-  background: $color-quaternary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-sunken);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 }
@@ -20,7 +20,7 @@
 .gr-menu__separator {
   height: 1px;
   margin: $spacing-xs 0;
-  background: $color-border;
+  background: var(--gr-border);
 }
 
 .gr-menu__item {
@@ -31,14 +31,14 @@
   padding: 0.45rem 0.7rem;
   background: none;
   border: 0;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   font-family: $font-family-base;
   font-size: $font-size-md;
   text-align: left;
   cursor: pointer;
 
-  &:hover:not(:disabled) { background: $color-hover; }
+  &:hover:not(:disabled) { background: var(--gr-surface-hover); }
   &:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
-.gr-menu__icon { color: $text-secondary; }
+.gr-menu__icon { color: var(--gr-text-secondary); }

@@ -101,6 +101,8 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string):
 function dualAxisTooltip(cfg: MetricChartConfig, left: (v: number) => string, right: (v: number) => string) {
   return {
     trigger: 'axis' as const,
+    // ECharts does not export a usable public type for the axis tooltip payload.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     formatter: (params: any) => {
       const rows = (Array.isArray(params) ? params : [params]).map((p) => {
         const fmt = cfg.series[p.seriesIndex]?.axis === 'right' ? right : left;

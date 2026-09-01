@@ -1,0 +1,24 @@
+{
+  "customSyntax": "postcss-scss",
+  "rules": {
+    "color-no-hex": true,
+    "declaration-property-value-disallowed-list": {
+      "/^(color|background|background-color|border|border-color|border-top|border-bottom|border-left|border-right|fill|stroke)$/": [
+        "/\\$(color|text)-/"
+      ]
+    },
+    "declaration-property-unit-allowed-list": {
+      "font-size": []
+    }
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/app/shared/ui/icon/**/*.scss"
+      ],
+      "rules": {
+        "declaration-property-unit-allowed-list": null
+      }
+    }
+  ]
+}

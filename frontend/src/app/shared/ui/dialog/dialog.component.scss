@@ -11,10 +11,10 @@
   flex-direction: column;
   max-width: calc(100vw - #{$spacing-xl});
   max-height: calc(100vh - #{$spacing-xl});
-  background: $color-tertiary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
@@ -24,8 +24,8 @@
   justify-content: space-between;
   gap: $spacing-md;
   padding: $spacing-md;
-  background: $color-quaternary;
-  border-bottom: 1px solid $color-border;
+  background: var(--gr-surface-sunken);
+  border-bottom: 1px solid var(--gr-border);
   border-radius: $border-radius-md $border-radius-md 0 0;
 }
 
@@ -41,10 +41,10 @@
   background: none;
   border: 0;
   border-radius: $border-radius-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   cursor: pointer;
 
-  &:hover { background: $color-hover; color: $text-primary; }
+  &:hover { background: var(--gr-surface-hover); color: var(--gr-text-primary); }
 }
 
 .gr-dialog__content {
@@ -58,7 +58,7 @@
   justify-content: flex-end;
   gap: $spacing-sm;
   padding: $spacing-md;
-  border-top: 1px solid $color-border;
+  border-top: 1px solid var(--gr-border);
 
   &:empty { display: none; }
 }

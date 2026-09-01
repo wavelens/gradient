@@ -1,0 +1,54 @@
+<h1>Patterns</h1>
+<p>How the primitives compose into the page shapes the application uses.</p>
+
+<h2>Page shell</h2>
+<p>Container, breadcrumb, title and primary action. Every non-focused page starts here.</p>
+<div class="sg-frame">
+  <gr-page-layout title="Integrations" subtitle="Forge webhooks and status reporters" [breadcrumb]="crumbs">
+    <button slot="actions" grButton label="New Integration" icon="add"></button>
+    <p>Page body goes here.</p>
+  </gr-page-layout>
+</div>
+
+<h2>Row list</h2>
+<p>An entity per row with a name line, a meta line and per-row actions.</p>
+<div class="sg-frame">
+  <gr-row-list>
+    <gr-row icon="key">
+      production-deploy
+      <gr-badge>Managed</gr-badge>
+      <span slot="meta">3 permissions &middot; last used 2 hours ago</span>
+      <button slot="actions" grButton label="Edit" icon="edit" severity="secondary"></button>
+    </gr-row>
+    <gr-row icon="key" [muted]="true">
+      old-ci-token
+      <gr-badge severity="danger">Revoked</gr-badge>
+      <span slot="meta">revoked on 2026-08-14</span>
+    </gr-row>
+  </gr-row-list>
+</div>
+
+<h2>Card grid</h2>
+<p>Equally weighted cards for index pages and dashboards.</p>
+<div class="sg-frame">
+  <gr-card-grid>
+    @for (card of cards; track card.name) {
+      <div class="sg-card">
+        <h3>{{ card.name }}</h3>
+        <gr-badge [severity]="card.severity">{{ card.status }}</gr-badge>
+      </div>
+    }
+  </gr-card-grid>
+</div>
+
+<h2>Settings</h2>
+<p>Grouped sections of editable fields, with read-only rows for values the user cannot change.</p>
+<div class="sg-frame">
+  <gr-settings-section title="General" description="Names and descriptions for this project.">
+    <gr-form-field label="Display name" for="sg-p-name" hint="Shown throughout the UI.">
+      <input grInput id="sg-p-name" value="my-project" />
+    </gr-form-field>
+    <gr-field-row label="Created" value="2026-04-11" />
+    <button grButton label="Save"></button>
+  </gr-settings-section>
+</div>

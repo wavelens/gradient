@@ -1,0 +1,21 @@
+<div class="sg-shell">
+  <aside class="sg-nav">
+    <h2>Style Guide</h2>
+    @for (section of nav; track section.path) {
+      <a
+        [routerLink]="['/styleguide', section.path]"
+        routerLinkActive="is-active"
+        [routerLinkActiveOptions]="{ exact: section.path === '' }"
+        >{{ section.label }}</a
+      >
+    }
+    <div class="sg-theme">
+      @for (pref of themes; track pref) {
+        <button type="button" [class.is-active]="theme() === pref" (click)="setTheme(pref)">
+          {{ pref }}
+        </button>
+      }
+    </div>
+  </aside>
+  <main class="sg-content"><router-outlet /></main>
+</div>

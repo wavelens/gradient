@@ -15,6 +15,7 @@
     display: grid;
     grid-template-columns: 1fr auto;
     grid-template-areas:
+      'crumbs actions'
       'title actions'
       'subtitle actions';
     gap: $spacing-xs $spacing-md;
@@ -28,7 +29,7 @@
 
   &__subtitle {
     grid-area: subtitle;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     margin: 0;
   }
 
@@ -49,6 +50,7 @@
 }
 
 .breadcrumb {
+  grid-area: crumbs;
   display: flex;
   align-items: center;
   gap: $spacing-xs;

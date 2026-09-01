@@ -9,7 +9,10 @@
     "test": "ng test",
     "tokens:generate": "node scripts/generate-tokens.mts",
     "tokens:check": "node scripts/generate-tokens.mts --check",
-    "barrel:check": "node scripts/check-barrel.mts"
+    "barrel:check": "node scripts/check-barrel.mts",
+    "lint:styles": "stylelint \"src/**/*.scss\" \"src/styles.scss\"",
+    "lint:ts": "eslint src/app/shared src/app/features/styleguide",
+    "verify": "pnpm tokens:check && pnpm barrel:check && pnpm lint:styles && pnpm lint:ts"
   },
   "prettier": {
     "printWidth": 100,
@@ -47,9 +50,14 @@
     "@angular/build": "^22.1.5",
     "@angular/cli": "^22.1.5",
     "@angular/compiler-cli": "^22.1.3",
+    "@eslint/js": "^10.0.1",
     "@types/d3-sankey": "^0.12.5",
+    "eslint": "^10.9.1",
     "jsdom": "^30.0.1",
+    "postcss-scss": "^4.0.9",
+    "stylelint": "^17.14.1",
     "typescript": "~6.0.3",
+    "typescript-eslint": "^8.69.0",
     "vitest": "^4.1.11"
   }
 }

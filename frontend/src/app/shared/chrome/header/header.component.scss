@@ -7,8 +7,8 @@
 @use '../../../styles/variables' as *;
 
 .main-header {
-  background-color: $color-quaternary;
-  border-bottom: 1px solid $color-border;
+  background-color: var(--gr-surface-sunken);
+  border-bottom: 1px solid var(--gr-border);
   padding: $spacing-md $spacing-lg;
   position: sticky;
   top: 0;
@@ -46,18 +46,18 @@
 
   a {
     padding: $spacing-sm $spacing-md;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     transition: $transition-fast;
     border-radius: $border-radius-sm;
 
     &:hover {
-      color: $text-primary;
-      background-color: $color-hover;
+      color: var(--gr-text-primary);
+      background-color: var(--gr-surface-hover);
     }
 
     &.active {
-      color: $text-primary;
-      background-color: $color-tertiary;
+      color: var(--gr-text-primary);
+      background-color: var(--gr-surface-raised);
     }
   }
 }
@@ -68,23 +68,23 @@
   gap: $spacing-md;
 
   .user-name {
-    color: $text-primary;
+    color: var(--gr-text-primary);
     font-weight: 500;
   }
 
   .user-link {
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     padding: $spacing-sm $spacing-md;
 
     &:hover {
-      color: $text-primary;
+      color: var(--gr-text-primary);
     }
   }
 
   .logout-btn {
     background: none;
     border: none;
-    color: $text-secondary;
+    color: var(--gr-text-secondary);
     cursor: pointer;
     padding: $spacing-sm;
     display: flex;
@@ -94,8 +94,8 @@
     transition: $transition-fast;
 
     &:hover {
-      color: $text-primary;
-      background-color: $color-hover;
+      color: var(--gr-text-primary);
+      background-color: var(--gr-surface-hover);
     }
 
     .material-symbols-outlined {

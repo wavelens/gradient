@@ -15,10 +15,10 @@
   gap: $spacing-sm;
   width: 100%;
   padding: 0.5rem 0.7rem;
-  background: $color-quaternary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-sunken);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   font-family: $font-family-base;
   font-size: $font-size-md;
   text-align: left;
@@ -34,9 +34,9 @@
   white-space: nowrap;
 }
 
-.gr-select__value--placeholder { color: $text-light; }
+.gr-select__value--placeholder { color: var(--gr-text-muted); }
 
-.gr-select__arrow { color: $text-secondary; }
+.gr-select__arrow { color: var(--gr-text-secondary); }
 
 .gr-select__panel {
   max-height: 16rem;
@@ -44,19 +44,19 @@
   padding: $spacing-xs 0;
   list-style: none;
   overflow-y: auto;
-  background: $color-quaternary;
-  border: 1px solid $color-border;
+  background: var(--gr-surface-sunken);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 }
 
 .gr-select__option {
   padding: 0.45rem 0.7rem;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   font-size: $font-size-md;
   cursor: pointer;
 
-  &:hover, &--active { background: $color-hover; }
-  &--selected { background: $color-hover; font-weight: 600; }
+  &:hover, &--active { background: var(--gr-surface-hover); }
+  &--selected { background: var(--gr-surface-hover); font-weight: 600; }
   &--disabled { opacity: 0.5; cursor: not-allowed; }
 }

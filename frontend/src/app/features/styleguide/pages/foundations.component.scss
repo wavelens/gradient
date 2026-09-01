@@ -1,0 +1,55 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+:host {
+  --sg-spacing-xs: #{$spacing-xs};
+  --sg-spacing-sm: #{$spacing-sm};
+  --sg-spacing-md: #{$spacing-md};
+  --sg-spacing-lg: #{$spacing-lg};
+  --sg-spacing-xl: #{$spacing-xl};
+  --sg-spacing-xxl: #{$spacing-xxl};
+}
+
+.sg-swatch {
+  display: inline-block;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--gr-border);
+  border-radius: $border-radius-sm;
+}
+
+.sg-spacing-row,
+.sg-radius-row {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  margin-bottom: $spacing-sm;
+}
+
+.sg-bar {
+  height: 1rem;
+  background: var(--gr-accent);
+}
+
+.sg-box {
+  width: 3rem;
+  height: 2rem;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
+
+  &.r-sm { border-radius: $border-radius-sm; }
+  &.r-md { border-radius: $border-radius-md; }
+  &.r-lg { border-radius: $border-radius-lg; }
+}
+
+.fs-xs { font-size: $font-size-xs; }
+.fs-sm { font-size: $font-size-sm; }
+.fs-md { font-size: $font-size-md; }
+.fs-lg { font-size: $font-size-lg; }
+.fs-xl { font-size: $font-size-xl; }
+.fs-xxl { font-size: $font-size-xxl; }

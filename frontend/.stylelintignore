@@ -1,0 +1,3 @@
+src/app/features/**
+src/app/styles/_themes.scss
+src/app/styles/_colors.scss

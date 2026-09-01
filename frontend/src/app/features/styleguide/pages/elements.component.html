@@ -1,0 +1,60 @@
+<h1>Elements</h1>
+<p>Presentational pieces with no behaviour of their own.</p>
+
+<h2>Icons</h2>
+<p>One primitive, six sizes. Decorative by default; pass a label to expose it to assistive tech.</p>
+@for (size of iconSizes; track size) {
+  <gr-icon name="deployed_code" [size]="size" />
+}
+
+<h2>Badges</h2>
+<p>Replaces the former badge, status-badge and status-chip classes.</p>
+@for (severity of severities; track severity) {
+  <gr-badge [severity]="severity">{{ severity }}</gr-badge>
+}
+
+<h2>Copy fields</h2>
+<p>Rule 1: any store path, hash, key, ID or URL is a copy field, never a bare code span.</p>
+<gr-copy-field [value]="storePath" />
+<gr-copy-field [value]="storePath" [inline]="true" />
+<gr-copy-field [value]="publicKey" [multiline]="true" [rows]="4" />
+
+<h2>Read-only rows</h2>
+<gr-field-row label="Endpoint URL" value="https://forge.example/api/v1" />
+<gr-field-row label="Secret"><gr-badge severity="success">Configured</gr-badge></gr-field-row>
+<gr-field-row label="Closure hash" value="sha256-3f9a" [mono]="true" />
+
+<h2>Message banners</h2>
+<gr-message-banner type="error" message="Evaluation failed: attribute not found" />
+<gr-message-banner type="info" message="This project has no builds yet" />
+
+<gr-divider />
+
+<h2>Table</h2>
+<gr-table>
+  <thead>
+    <tr><th>Name</th><th>Status</th><th>Updated</th></tr>
+  </thead>
+  <tbody>
+    @for (row of rows; track row.name) {
+      <tr><td>{{ row.name }}</td><td>{{ row.status }}</td><td>{{ row.updated }}</td></tr>
+    }
+  </tbody>
+</gr-table>
+
+<h2>Feedback</h2>
+<gr-loading-spinner message="Loading integrations..." />
+<gr-empty-state icon="hub" title="No integrations" message="Create one to receive forge webhooks." />
+<gr-stat-card icon="inbox" [value]="12" label="Queued" />
+
+<h2>Evaluation status</h2>
+@for (status of evalStatuses; track status) {
+  <gr-eval-status-badge [status]="status" />
+}
+
+<h2>Charts</h2>
+<gr-metric-chart title="Throughput" type="line" [series]="chartSeries" [categories]="chartCategories" />
+
+<h2>Toasts</h2>
+<button grButton label="Show toast" (click)="toast()"></button>
+<gr-toast />

@@ -7,8 +7,8 @@
 @use '../../../styles/variables' as *;
 
 .stat-card {
-  background-color: $color-tertiary;
-  border: 1px solid $color-border;
+  background-color: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-lg;
   display: flex;
@@ -17,7 +17,7 @@
 }
 
 .stat-icon {
-  background-color: $color-quaternary;
+  background-color: var(--gr-surface-sunken);
   border-radius: $border-radius-md;
   width: 48px;
   height: 48px;
@@ -26,7 +26,7 @@
   justify-content: center;
 
   .material-symbols-outlined {
-    color: $text-primary;
+    color: var(--gr-text-primary);
   }
 }
 
@@ -37,12 +37,12 @@
 .stat-value {
   font-size: $font-size-xxl;
   font-weight: 700;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   line-height: 1;
   margin-bottom: $spacing-xs;
 }
 
 .stat-label {
   font-size: $font-size-sm;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
 }

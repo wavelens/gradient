@@ -32,17 +32,17 @@
   min-width: 18rem;
   max-width: 26rem;
   padding: $spacing-sm $spacing-md;
-  background: $color-quaternary;
-  border: 1px solid $color-border;
-  border-left: 3px solid $color-info;
+  background: var(--gr-surface-sunken);
+  border: 1px solid var(--gr-border);
+  border-left: 3px solid var(--gr-status-info);
   border-radius: $border-radius-sm;
-  color: $text-primary;
+  color: var(--gr-text-primary);
   font-size: $font-size-sm;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 
-  &--success { border-left-color: $color-success; }
-  &--warn { border-left-color: $color-warning; }
-  &--error { border-left-color: $color-danger; }
+  &--success { border-left-color: var(--gr-status-success); }
+  &--warn { border-left-color: var(--gr-status-warning); }
+  &--error { border-left-color: var(--gr-status-danger); }
 }
 
 .gr-toast__text {
@@ -51,15 +51,15 @@
   flex-direction: column;
   gap: 2px;
 
-  span { color: $text-secondary; }
+  span { color: var(--gr-text-secondary); }
 }
 
 .gr-toast__close {
   padding: 0;
   background: none;
   border: 0;
-  color: $text-secondary;
+  color: var(--gr-text-secondary);
   cursor: pointer;
 
-  &:hover { color: $text-primary; }
+  &:hover { color: var(--gr-text-primary); }
 }

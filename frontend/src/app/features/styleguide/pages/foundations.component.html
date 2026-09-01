@@ -1,0 +1,41 @@
+<h1>Foundations</h1>
+
+<h2>Colour roles</h2>
+<p>Read from the live document, so this table cannot drift from the stylesheet. Switch the theme
+   in the sidebar to see both sets.</p>
+<gr-table>
+  <thead>
+    <tr><th>Swatch</th><th>Role</th><th>Value</th><th>Usage</th></tr>
+  </thead>
+  <tbody>
+    @for (role of roles; track role.name) {
+      <tr class="sg-token-row">
+        <td><span class="sg-swatch" [style.background]="'var(' + role.name + ')'"></span></td>
+        <td><code>{{ role.name }}</code></td>
+        <td><code>{{ resolved()[role.name] || 'not resolved' }}</code></td>
+        <td>{{ role.usage }}</td>
+      </tr>
+    }
+  </tbody>
+</gr-table>
+
+<h2>Type scale</h2>
+@for (size of sizes; track size) {
+  <p class="sg-type-row" [class]="'fs-' + size">$font-size-{{ size }} &mdash; the quick brown fox</p>
+}
+
+<h2>Spacing</h2>
+@for (step of spacing; track step) {
+  <div class="sg-spacing-row">
+    <code>$spacing-{{ step }}</code>
+    <span class="sg-bar" [style.width]="'var(--sg-spacing-' + step + ')'"></span>
+  </div>
+}
+
+<h2>Border radius</h2>
+@for (step of radius; track step) {
+  <div class="sg-radius-row">
+    <code>$border-radius-{{ step }}</code>
+    <span class="sg-box" [class]="'r-' + step"></span>
+  </div>
+}

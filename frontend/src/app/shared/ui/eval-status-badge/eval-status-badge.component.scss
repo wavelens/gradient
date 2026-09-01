@@ -9,11 +9,11 @@
   font-size: $font-size-xs;
   font-weight: 500;
 
-  &.status-success   { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: $color-success; }
-  &.status-danger    { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent);  color: $color-danger; }
-  &.status-secondary { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: $text-secondary; }
-  &.status-warning   { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: $color-warning; }
-  &.status-running   { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: $color-info; }
+  &.status-success   { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); }
+  &.status-danger    { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent);  color: var(--gr-status-danger); }
+  &.status-secondary { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: var(--gr-text-secondary); }
+  &.status-warning   { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); }
+  &.status-running   { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: var(--gr-status-info); }
 }
 
 @keyframes spin { to { transform: rotate(-360deg); } }

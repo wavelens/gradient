@@ -53,7 +53,7 @@
   --gr-btn-bg-hover: var(--gr-surface-hover);
   --gr-btn-fg: var(--gr-text-primary);
   --gr-btn-accent: var(--gr-text-primary);
-  border-color: $color-border;
+  border-color: var(--gr-border);
 }
 
 :host(.gr-button--success) {
@@ -96,6 +96,7 @@
 
 .gr-button__icon {
   font-family: $font-family-icons;
+  /* stylelint-disable-next-line declaration-property-unit-allowed-list -- icon tracks its label */
   font-size: 1.15em;
   line-height: 1;
 }

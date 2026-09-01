@@ -1,0 +1,66 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../styles/variables' as *;
+
+.sg-shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100%;
+}
+
+.sg-nav {
+  display: flex;
+  flex-direction: column;
+  gap: $spacing-xs;
+  padding: $spacing-lg;
+  border-right: 1px solid var(--gr-border);
+  background: var(--gr-surface-sunken);
+
+  h2 {
+    margin: 0 0 $spacing-md;
+    font-size: $font-size-sm;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--gr-text-secondary);
+  }
+
+  a {
+    padding: $spacing-xs $spacing-sm;
+    border-radius: $border-radius-sm;
+    color: var(--gr-text-secondary);
+    text-decoration: none;
+
+    &:hover { background: var(--gr-surface-hover); }
+    &.is-active { background: var(--gr-surface-raised); color: var(--gr-text-primary); }
+  }
+}
+
+.sg-theme {
+  display: flex;
+  gap: $spacing-xs;
+  margin-top: $spacing-lg;
+
+  button {
+    flex: 1;
+    padding: $spacing-xs;
+    border: 1px solid var(--gr-border);
+    border-radius: $border-radius-sm;
+    background: transparent;
+    color: var(--gr-text-secondary);
+    font-size: $font-size-sm;
+    cursor: pointer;
+
+    &.is-active { background: var(--gr-surface-raised); color: var(--gr-text-primary); }
+  }
+}
+
+.sg-content {
+  padding: $spacing-xl;
+  max-width: 1100px;
+
+  h1 { margin-top: 0; }
+}
