@@ -30,6 +30,7 @@
   --gr-emerald-500: #10b981;
   --gr-green-500: #28a745;
   --gr-green-400: #22c55e;
+  --gr-red-300: #f87171;
   --gr-red-700: #a40e19;
   --gr-red-600: #cf222e;
   --gr-red-550: #bd2130;
@@ -61,9 +62,9 @@
   --gr-text-secondary: var(--gr-gray-300);
   --gr-text-muted: var(--gr-gray-400);
   --gr-status-success: var(--gr-green-500);
-  --gr-status-danger: var(--gr-red-500);
-  --gr-status-danger-hover: var(--gr-red-550);
-  --gr-status-danger-fg: var(--gr-white);
+  --gr-status-danger: var(--gr-red-300);
+  --gr-status-danger-hover: var(--gr-red-400);
+  --gr-status-danger-fg: var(--gr-black);
   --gr-status-warning: var(--gr-amber-500);
   --gr-status-warning-hover: var(--gr-amber-550);
   --gr-status-warning-fg: var(--gr-black);
