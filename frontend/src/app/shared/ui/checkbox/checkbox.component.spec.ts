@@ -37,6 +37,30 @@ async function render() {
   return { fixture, input };
 }
 
+describe('gr-checkbox label', () => {
+  it('renders no label by default', async () => {
+    const fixture = TestBed.createComponent(CheckboxComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect((fixture.nativeElement as HTMLElement).querySelector('label')).toBeNull();
+  });
+
+  it('renders the label beside the box and links it to the input', async () => {
+    const fixture = TestBed.createComponent(CheckboxComponent);
+    fixture.componentRef.setInput('inputId', 'accept');
+    fixture.componentRef.setInput('label', 'Accept terms');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    const box = root.querySelector('input')!;
+    const label = root.querySelector('label')!;
+    expect(label.textContent).toContain('Accept terms');
+    expect(label.getAttribute('for')).toBe('accept');
+    // beside, not stacked: the label starts to the right of the box
+    expect(label.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+});
+
 describe('CheckboxComponent', () => {
   it('renders a native checkbox carrying the given id', async () => {
     const { input } = await render();

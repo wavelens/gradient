@@ -20,6 +20,9 @@ import { Component, booleanAttribute, forwardRef, input, signal, ChangeDetection
       (change)="onToggle($event)"
       (blur)="onTouched()"
     />
+    @if (label()) {
+      <label class="gr-checkbox__label" [attr.for]="inputId()">{{ label() }}</label>
+    }
   `,
   styleUrl: './checkbox.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -29,6 +32,7 @@ import { Component, booleanAttribute, forwardRef, input, signal, ChangeDetection
 })
 export class CheckboxComponent implements ControlValueAccessor {
   inputId = input('');
+  label = input('');
   binary = input(true, { transform: booleanAttribute });
 
   protected checked = signal(false);

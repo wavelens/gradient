@@ -27,12 +27,12 @@ describe('EvalStatusBadgeComponent', () => {
 
   it('spins the icon for an actively running status', () => {
     const fixture = render('Building');
-    expect(fixture.nativeElement.querySelector('.material-symbols-outlined.spinning')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('gr-icon.spinning')).toBeTruthy();
   });
 
   it('pulses (not spins) the icon while queued', () => {
     const fixture = render('Queued');
-    expect(fixture.nativeElement.querySelector('.material-symbols-outlined.pulsing')).toBeTruthy();
-    expect(fixture.nativeElement.querySelector('.material-symbols-outlined.spinning')).toBeNull();
+    expect(fixture.nativeElement.querySelector('gr-icon.pulsing')).toBeTruthy();
+    expect(fixture.nativeElement.querySelector('gr-icon.spinning')).toBeNull();
   });
 });

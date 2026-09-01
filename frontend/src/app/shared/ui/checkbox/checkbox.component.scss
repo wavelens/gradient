@@ -9,6 +9,15 @@
 :host {
   display: inline-flex;
   align-items: center;
+  gap: $spacing-sm;
+}
+
+// A checkbox label belongs beside the box, not stacked above it like a field label.
+.gr-checkbox__label {
+  font-size: $font-size-md;
+  color: var(--gr-text-primary);
+  cursor: pointer;
+  user-select: none;
 }
 
 .gr-checkbox__input {

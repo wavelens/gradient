@@ -35,6 +35,7 @@ gr-eval-status-badge,
 gr-icon,
 button[grButton] {
   margin-right: $spacing-sm;
+  margin-bottom: $spacing-md;
 }
 
 gr-copy-field,
@@ -46,6 +47,7 @@ gr-empty-state,
 gr-stat-card,
 gr-table,
 gr-select-button,
+gr-checkbox,
 gr-autocomplete,
 gr-metric-chart {
   display: block;

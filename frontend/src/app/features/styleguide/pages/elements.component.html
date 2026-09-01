@@ -48,6 +48,8 @@
 <gr-stat-card icon="inbox" [value]="12" label="Queued" />
 
 <h2>Evaluation status</h2>
+<p>All nine statuses the API can return. The two evaluating states deliberately share
+   one label, so they render identically.</p>
 @for (status of evalStatuses; track status) {
   <gr-eval-status-badge [status]="status" />
 }

@@ -6,18 +6,22 @@
 
 import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { IconComponent } from '../icon/icon.component';
 import { EvaluationStatus } from '@core/models/task.model';
 import { isRunningEvaluationStatus } from '@shared/evaluation';
 
 @Component({
   selector: 'gr-eval-status-badge',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, IconComponent],
   template: `
     <span class="eval-status-badge" [class]="statusClass()">
-      <span class="material-symbols-outlined" [class.spinning]="spinning()" [class.pulsing]="pulsing()">
-        {{ icon() }}
-      </span>
+      <gr-icon
+        [name]="icon()"
+        size="sm"
+        [class.spinning]="spinning()"
+        [class.pulsing]="pulsing()"
+      />
       {{ label() }}
     </span>
   `,

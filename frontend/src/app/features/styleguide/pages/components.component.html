@@ -40,9 +40,7 @@
   <gr-select-button [options]="regions" optionLabel="label" optionValue="value" [(ngModel)]="region" />
 </gr-form-field>
 
-<gr-form-field label="Accept terms" for="sg-accept">
-  <gr-checkbox inputId="sg-accept" [binary]="true" [(ngModel)]="accepted" />
-</gr-form-field>
+<gr-checkbox inputId="sg-accept" label="Accept terms" [binary]="true" [(ngModel)]="accepted" />
 
 <gr-form-field label="Region search" for="sg-ac" hint="Type to filter the suggestions.">
   <gr-autocomplete inputId="sg-ac" [suggestions]="suggestions" placeholder="Start typing..." />

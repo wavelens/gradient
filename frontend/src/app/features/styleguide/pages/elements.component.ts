@@ -29,7 +29,10 @@ import {
 export class ElementsComponent {
   private messages = inject(MessageService);
 
-  evalStatuses = ['Queued', 'Building', 'Completed', 'Failed'] as const;
+  evalStatuses = [
+    'Queued', 'Fetching', 'EvaluatingFlake', 'EvaluatingDerivation',
+    'Building', 'Waiting', 'Completed', 'Failed', 'Aborted',
+  ] as const;
   chartSeries = [{ name: 'Completed', data: [12, 18, 9, 24, 21] }];
   chartCategories = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 
