@@ -12,38 +12,30 @@
     <gr-loading-spinner message="Loading projects..." />
   } @else {
     @if (projects().length > 0) {
-      <div class="project-grid">
+      <gr-card-grid>
         @for (project of projects(); track project.id) {
-          <a [routerLink]="['/project', project.name]" class="project-card">
-            <div class="project-icon">
-              <gr-icon name="corporate_fare" size="xl" />
+          <gr-nav-card
+            icon="corporate_fare"
+            [title]="project.display_name || project.name"
+            [description]="project.description || 'No description'"
+            [link]="['/project', project.name]"
+          >
+            <div slot="meta">
+              @if (project.role) {
+                <gr-badge [severity]="project.role === 'Admin' ? 'info' : 'neutral'">
+                  {{ project.role }}
+                </gr-badge>
+              }
+              @if (project.public) {
+                <gr-badge severity="info">Public</gr-badge>
+              }
+              @if (project.running_evaluations && project.running_evaluations > 0) {
+                <gr-badge severity="warning">{{ project.running_evaluations }} running</gr-badge>
+              }
             </div>
-            <div class="project-content">
-              <h3>{{ project.display_name || project.name }}</h3>
-              <p class="text-secondary">{{ project.description || 'No description' }}</p>
-              <div class="project-badges">
-                @if (project.role) {
-                  <span class="role-badge" [class.owner]="project.role === 'Admin'">
-                    {{ project.role }}
-                  </span>
-                }
-                @if (project.public) {
-                  <span class="role-badge public-badge">Public</span>
-                }
-                @if (project.running_evaluations && project.running_evaluations > 0) {
-                  <span class="activity-badge">
-                    <gr-icon name="sync" class="spinning" size="sm" />
-                    {{ project.running_evaluations }} running
-                  </span>
-                }
-              </div>
-            </div>
-            <div class="project-arrow">
-              <gr-icon name="arrow_forward" />
-            </div>
-          </a>
+          </gr-nav-card>
         }
-      </div>
+      </gr-card-grid>
     } @else {
       <gr-empty-state
         icon="corporate_fare"
@@ -61,23 +53,18 @@
     <div class="discover-header">
       <h2>Discover Public Projects</h2>
     </div>
-    <div class="project-grid">
+    <gr-card-grid>
       @for (project of filteredPublicProjects; track project.id) {
-        <a [routerLink]="['/project', project.name]" class="project-card">
-          <div class="project-icon">
-            <gr-icon name="public" size="xl" />
-          </div>
-          <div class="project-content">
-            <h3>{{ project.display_name || project.name }}</h3>
-            <p class="text-secondary">{{ project.description || 'No description' }}</p>
-            <span class="role-badge public-badge">Public</span>
-          </div>
-          <div class="project-arrow">
-            <gr-icon name="arrow_forward" />
-          </div>
-        </a>
+        <gr-nav-card
+          icon="public"
+          [title]="project.display_name || project.name"
+          [description]="project.description || 'No description'"
+          [link]="['/project', project.name]"
+        >
+          <gr-badge slot="meta" severity="info">Public</gr-badge>
+        </gr-nav-card>
       }
-    </div>
+    </gr-card-grid>
   }
 </gr-page-layout>
 

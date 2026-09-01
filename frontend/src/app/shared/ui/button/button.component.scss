@@ -58,11 +58,13 @@
 }
 
 :host(.gr-button--secondary) {
-  --gr-btn-bg: var(--gr-surface-raised);
+  // The fill separates it from the card it sits on, so the outline can stay as
+  // quiet as every other panel edge.
+  --gr-btn-bg: var(--gr-surface-active);
   --gr-btn-bg-hover: var(--gr-surface-hover);
   --gr-btn-fg: var(--gr-text-primary);
   --gr-btn-accent: var(--gr-text-primary);
-  border-color: var(--gr-border);
+  border-color: var(--gr-border-subtle);
 }
 
 :host(.gr-button--success) {

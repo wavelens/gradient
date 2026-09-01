@@ -26,17 +26,6 @@
     margin: 0;
   }
 }
-
-.section {
-  margin-bottom: $spacing-xxl;
-
-  h2 {
-    font-size: $font-size-xl;
-    color: var(--gr-text-primary);
-    margin: 0 0 $spacing-lg 0;
-  }
-}
-
 .stat-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

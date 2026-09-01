@@ -114,6 +114,20 @@ a {
   font-family: $font-family-mono;
 }
 
+// A block of page body: a heading and the content under it. Children stack on
+// the block rhythm, so a card grid followed by a chart never collides.
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: $space-block;
+  margin-bottom: $space-section;
+
+  > h2 {
+    margin: 0;
+    font-size: $font-size-xl;
+  }
+}
+
 .text-light {
   color: var(--gr-text-muted);
 }

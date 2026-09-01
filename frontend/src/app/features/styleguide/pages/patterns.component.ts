@@ -6,9 +6,18 @@
 
 import { Component, ChangeDetectionStrategy } from '@angular/core';
 import {
-  PageLayoutComponent, Crumb, RowListComponent, RowComponent, CardGridComponent,
-  SettingsSectionComponent, FormFieldComponent, FieldRowComponent, ButtonComponent,
-  BadgeComponent, InputDirective,
+  BadgeComponent,
+  ButtonComponent,
+  CardGridComponent,
+  Crumb,
+  FieldRowComponent,
+  FormFieldComponent,
+  InputDirective,
+  NavCardComponent,
+  PageLayoutComponent,
+  RowComponent,
+  RowListComponent,
+  SettingsSectionComponent,
 } from '@shared/ui';
 
 @Component({
@@ -18,6 +27,7 @@ import {
     PageLayoutComponent, RowListComponent, RowComponent, CardGridComponent,
     SettingsSectionComponent, FormFieldComponent, FieldRowComponent, ButtonComponent,
     BadgeComponent, InputDirective,
+    NavCardComponent,
   ],
   templateUrl: './patterns.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

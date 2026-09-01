@@ -4,18 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
-.section {
-  margin-bottom: $spacing-xxl;
-
-  h2 {
-    font-size: $font-size-xl;
-    color: var(--gr-text-primary);
-    margin: 0 0 $spacing-lg 0;
-  }
-}
-
-.cache-grid {
+@use '../../../styles/variables' as *;.cache-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
   gap: $spacing-lg;

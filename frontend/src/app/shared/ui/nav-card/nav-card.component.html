@@ -1,0 +1,13 @@
+<a class="nav-card" [class.is-muted]="muted()" [routerLink]="link() ?? null">
+  <div class="nav-card__icon">
+    <gr-icon [name]="icon()" size="xl" />
+  </div>
+  <div class="nav-card__body">
+    <h3 class="nav-card__title">{{ title() }}</h3>
+    @if (description(); as text) {
+      <p class="nav-card__description">{{ text }}</p>
+    }
+    <div class="nav-card__meta"><ng-content select="[slot=meta]"></ng-content></div>
+  </div>
+  <gr-icon class="nav-card__arrow" name="chevron_right" />
+</a>

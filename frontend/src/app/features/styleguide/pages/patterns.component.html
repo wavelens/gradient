@@ -30,6 +30,23 @@
   </gr-row-list>
 </div>
 
+<h2>Index cards</h2>
+<p>The shape every index page uses: icon, name, description, state and a chevron.
+   The whole card is the link, so nothing inside it may be one.</p>
+<div class="sg-frame">
+  <gr-card-grid>
+    <gr-nav-card icon="corporate_fare" title="gradient" description="The build server itself" [link]="['/styleguide']">
+      <div slot="meta">
+        <gr-badge severity="info">Admin</gr-badge>
+        <gr-badge severity="warning">2 running</gr-badge>
+      </div>
+    </gr-nav-card>
+    <gr-nav-card muted icon="cloud_off" title="nixpkgs-mirror" description="Archived last month" [link]="['/styleguide']">
+      <gr-badge slot="meta" severity="danger">Inactive</gr-badge>
+    </gr-nav-card>
+  </gr-card-grid>
+</div>
+
 <h2>Card grid</h2>
 <p>Equally weighted cards for index pages and dashboards.</p>
 <div class="sg-frame">

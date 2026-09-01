@@ -4,18 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
-.section {
-  margin-bottom: $spacing-xxl;
-
-  h2 {
-    font-size: $font-size-xl;
-    color: var(--gr-text-primary);
-    margin: 0 0 $spacing-lg 0;
-  }
-}
-
-.task-grid {
+@use '../../../styles/variables' as *;.task-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
   gap: $spacing-lg;
@@ -95,16 +84,6 @@
     gap: $spacing-md;
     font-size: $font-size-xs;
     color: var(--gr-text-muted);
-
-    .meta-item {
-      display: flex;
-      align-items: center;
-      gap: $spacing-xs;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-
-    }
   }
 }
 

@@ -15,32 +15,23 @@
     @if (activeCaches.length > 0) {
       <div class="section">
         <h2>Active Caches</h2>
-        <div class="cache-grid">
+        <gr-card-grid>
           @for (cache of activeCaches; track cache.id) {
-            <a [routerLink]="['/caches', cache.name]" class="cache-card">
-              <div class="cache-icon">
-                <gr-icon name="storage" size="xl" />
+            <gr-nav-card
+              icon="storage"
+              [title]="cache.display_name"
+              [description]="cache.description || 'No description'"
+              [link]="['/caches', cache.name]"
+            >
+              <div slot="meta">
+                <gr-badge severity="success">Active</gr-badge>
+                @if (cache.public) {
+                  <gr-badge severity="info">Public</gr-badge>
+                }
               </div>
-              <div class="cache-content">
-                <h3>{{ cache.display_name }}</h3>
-                <p class="text-secondary">{{ cache.description || 'No description' }}</p>
-                <div class="cache-meta">
-                  <span class="meta-item">
-                    <gr-icon name="sort" size="sm" />
-                    Priority: {{ cache.priority }}
-                  </span>
-                  <span class="status-badge active">Active</span>
-                  @if (cache.public) {
-                    <span class="status-badge public-badge">Public</span>
-                  }
-                </div>
-              </div>
-              <div class="cache-arrow">
-                <gr-icon name="arrow_forward" />
-              </div>
-            </a>
+            </gr-nav-card>
           }
-        </div>
+        </gr-card-grid>
       </div>
     }
 
@@ -48,32 +39,24 @@
     @if (inactiveCaches.length > 0) {
       <div class="section">
         <h2>Inactive Caches</h2>
-        <div class="cache-grid">
+        <gr-card-grid>
           @for (cache of inactiveCaches; track cache.id) {
-            <a [routerLink]="['/caches', cache.name]" class="cache-card inactive">
-              <div class="cache-icon">
-                <gr-icon name="cloud_off" size="xl" />
+            <gr-nav-card
+              muted
+              icon="cloud_off"
+              [title]="cache.display_name"
+              [description]="cache.description || 'No description'"
+              [link]="['/caches', cache.name]"
+            >
+              <div slot="meta">
+                <gr-badge severity="danger">Inactive</gr-badge>
+                @if (cache.public) {
+                  <gr-badge severity="info">Public</gr-badge>
+                }
               </div>
-              <div class="cache-content">
-                <h3>{{ cache.display_name }}</h3>
-                <p class="text-secondary">{{ cache.description || 'No description' }}</p>
-                <div class="cache-meta">
-                  <span class="meta-item">
-                    <gr-icon name="sort" size="sm" />
-                    Priority: {{ cache.priority }}
-                  </span>
-                  <span class="status-badge inactive">Inactive</span>
-                  @if (cache.public) {
-                    <span class="status-badge public-badge">Public</span>
-                  }
-                </div>
-              </div>
-              <div class="cache-arrow">
-                <gr-icon name="arrow_forward" />
-              </div>
-            </a>
+            </gr-nav-card>
           }
-        </div>
+        </gr-card-grid>
       </div>
     }
 

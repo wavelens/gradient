@@ -4,14 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
-.project-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: $spacing-lg;
-}
-
-.project-card {
+@use '../../../styles/variables' as *;.project-card {
   background-color: var(--gr-surface-raised);
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
@@ -28,29 +21,8 @@
     border-color: var(--gr-text-secondary);
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-
-    .project-arrow {
-      transform: translateX(4px);
-    }
   }
-}
-
-.project-icon {
-  background-color: var(--gr-surface-sunken);
-  border-radius: $border-radius-md;
-  width: 56px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-
-  gr-icon {
-    color: var(--gr-text-primary);
-  }
-}
-
-.project-content {
+}.project-content {
   flex: 1;
   min-width: 0;
 
@@ -70,41 +42,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
-  .role-badge {
-    display: inline-block;
-    padding: $spacing-xs $spacing-sm;
-    background-color: color-mix(in srgb, var(--gr-status-info) 10%, transparent);
-    border: 1px solid var(--gr-status-info);
-    border-radius: $border-radius-sm;
-    font-size: $font-size-xs;
-    color: var(--gr-status-info);
-    text-transform: uppercase;
-    font-weight: 500;
-
-    &.owner {
-      background-color: color-mix(in srgb, var(--gr-status-warning) 10%, transparent);
-      border-color: var(--gr-status-warning);
-      color: var(--gr-status-warning);
-    }
-  }
-}
-
-.project-arrow {
-  flex-shrink: 0;
-  color: var(--gr-text-secondary);
-  transition: $transition-base;
-
-}
-
-.project-badges {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-  flex-wrap: wrap;
-}
-
-.activity-badge {
+}.activity-badge {
   display: inline-flex;
   align-items: center;
   gap: $spacing-xs;
@@ -130,15 +68,7 @@
     color: var(--gr-text-primary);
     margin: 0;
   }
-}
-
-.role-badge.public-badge {
-  background-color: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
-  border-color: var(--gr-status-success);
-  color: var(--gr-status-success);
-}
-
-.role-select {
+}.role-select {
   background: var(--gr-surface-sunken);
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;

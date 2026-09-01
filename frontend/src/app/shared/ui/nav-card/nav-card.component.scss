@@ -1,0 +1,83 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+:host {
+  display: block;
+}
+
+.nav-card {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  height: 100%;
+  padding: $spacing-lg;
+  background: var(--gr-surface-raised);
+  border: 1px solid var(--gr-border-subtle);
+  border-radius: $border-radius-md;
+  box-shadow: var(--gr-shadow-raised);
+  color: var(--gr-text-primary);
+  text-decoration: none;
+  transition: border-color $transition-fast, background-color $transition-fast;
+
+  &:hover {
+    background: var(--gr-surface-hover);
+    border-color: var(--gr-border);
+    border-radius: $border-radius-md;
+  }
+
+  // A muted card drops emphasis, not legibility.
+  &.is-muted .nav-card__title { color: var(--gr-text-secondary); }
+}
+
+.nav-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: $border-radius-md;
+  background: var(--gr-surface-sunken);
+  color: var(--gr-text-secondary);
+}
+
+.nav-card__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-card__title {
+  margin: 0;
+  font-size: $font-size-md;
+  line-height: $line-height-tight;
+}
+
+.nav-card__description {
+  margin: $spacing-xs 0 0;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-card__meta {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  margin-top: $spacing-sm;
+  color: var(--gr-text-secondary);
+  font-size: $font-size-sm;
+
+  &:empty { display: none; }
+}
+
+.nav-card__arrow {
+  flex-shrink: 0;
+  color: var(--gr-text-muted);
+}

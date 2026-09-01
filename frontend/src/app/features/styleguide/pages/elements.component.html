@@ -46,6 +46,13 @@
 <gr-empty-state icon="hub" title="No integrations" message="Create one to receive forge webhooks." />
 <gr-stat-card icon="inbox" [value]="12" label="Queued" />
 
+<p>Without an icon, in the grid the cache pages use.</p>
+<gr-card-grid min="220px">
+  <gr-stat-card label="Packages stored" [value]="128" />
+  <gr-stat-card label="Uncompressed size" value="4.2 GB" />
+  <gr-stat-card label="Compressed stored" value="1.1 GB" />
+</gr-card-grid>
+
 <h2>Evaluation status</h2>
 <p>All nine statuses the API can return. The two evaluating states deliberately share
    one label, so they render identically.</p>

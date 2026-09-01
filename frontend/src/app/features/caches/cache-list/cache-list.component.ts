@@ -14,13 +14,16 @@ import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import {
+  BadgeComponent,
   ButtonComponent,
+  CardGridComponent,
   DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  NavCardComponent,
   PageLayoutComponent,
 } from '@shared/ui';
 import { slugify } from '@shared/text';
@@ -42,6 +45,9 @@ import { Cache } from '@core/models';
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
+    NavCardComponent,
+    CardGridComponent,
+    BadgeComponent,
   ],
   templateUrl: './cache-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

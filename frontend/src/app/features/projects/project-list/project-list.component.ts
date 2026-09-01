@@ -14,13 +14,16 @@ import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
 import {
+  BadgeComponent,
   ButtonComponent,
+  CardGridComponent,
   DialogComponent,
   EmptyStateComponent,
   FormFieldComponent,
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  NavCardComponent,
   PageLayoutComponent,
 } from '@shared/ui';
 import { slugify } from '@shared/text';
@@ -42,6 +45,9 @@ import { Project } from '@core/models';
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
+    NavCardComponent,
+    CardGridComponent,
+    BadgeComponent,
   ],
   templateUrl: './project-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
