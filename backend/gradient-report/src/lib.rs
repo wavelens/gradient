@@ -14,6 +14,7 @@
 
 mod config_snapshot;
 mod extract;
+mod guarantee;
 mod logs;
 mod redact;
 mod schema;

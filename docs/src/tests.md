@@ -7403,3 +7403,66 @@ isolation.
 - `serve_sandboxes_build_controlled_content` - the live `/cache/{cache}/serve`
   response carries the sandbox and `nosniff`, covering the endpoint that guesses
   its content type from a build-controlled path.
+
+## Evaluation diagnostic reports
+
+`GET /evals/{evaluation}/report` exports one evaluation, the instance context
+that explains it, and its failed-build logs as a SQLite file a maintainer can
+diagnose from without access to the instance. Two properties have to hold: it
+must never carry a credential, and anonymisation must actually anonymise.
+
+The first is structural. Every exported column is named in
+`gradient-report/src/tables.rs`, never `SELECT *`, so a table that later gains a
+secret cannot start exporting it. `api`, `session`, `cli_device_authorization`,
+`worker_registration.token_hash`, `cache_upstream.api_key`, `user.password` and
+the `github_installation` credentials are absent rather than redacted.
+
+The second is proved against the artefact. Fetching rows and redacting them are
+separate functions, so the tests build a real report from rows they control and
+read the result back, rather than mocking a database and pinning query order.
+
+`backend/gradient-report/src/guarantee.rs`:
+- `an_anonymized_report_contains_no_original_identifier` - seeds a repo URL,
+  email, package name and store path across four tables and a log, then walks
+  every column of every table in the generated file asserting zero occurrences.
+  Verified to fail when `Redactor::identity` is made a no-op.
+- `store_path_hashes_survive_full_anonymization` - the 32-char hash is one-way
+  and is what makes an upstream cache check possible, so it outlives the name.
+- `an_unanonymized_report_keeps_every_identifier` - the complement, so the first
+  test proves redaction rather than data loss.
+- `packages_can_be_kept_while_identities_are_hidden` - the shipped default: a
+  report that names which package broke but not whose repo it is.
+
+`backend/gradient-report/src/tables.rs`:
+- `no_exported_query_touches_a_secret_table_or_column` - scans every eval-scope
+  and instance query for `*` and for the forbidden names.
+- `every_spec_is_scoped_and_internally_consistent` - each spec is scoped by `$1`
+  and its column list matches its DDL width.
+- `redaction_policy_covers_the_identifying_columns` and
+  `a_column_with_no_policy_passes_through_untouched` - the policy is one
+  auditable match, and silence in it means verbatim export.
+
+`backend/gradient-report/src/extract.rs`:
+- `a_written_row_survives_the_round_trip_with_its_types` - Postgres hands every
+  column over as text and SQLite affinity converts it back, so `status` reads as
+  integer 7 rather than the string.
+- `the_manifest_reports_what_was_rewritten_not_what_was_asked` - the manifest
+  probes each column, so it records what redaction did rather than what was
+  requested.
+
+`backend/gradient-report/src/schema.rs`:
+- `manifest_distinguishes_filtered_from_empty` - every table records rows kept
+  against rows available, so a filtered report is never read as an empty one.
+
+`backend/gradient-report/src/logs.rs`:
+- `log_table_stores_readable_text` - logs are plain text, so any SQLite client
+  can read one without a decompression step.
+- `only_failed_attempts_are_selected` - outcome 3 and 4 (Failed, Aborted); an
+  abort counts because its partial log is often the only record of what a worker
+  was doing before it went quiet.
+
+`backend/gradient-report/src/config_snapshot.rs`:
+- `config_snapshot_is_an_explicit_key_list_with_no_secret` and
+  `the_self_heal_threshold_is_present_and_real` - the snapshot is a hand-written
+  key list, since it is the part most likely to gain a secret field later and
+  the least likely to be re-reviewed.
