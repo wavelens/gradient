@@ -104,20 +104,17 @@
     </div>
   }
 
-  <div class="form-group">
-    <label for="key-name">Name</label>
+  <gr-form-field label="Name" for="key-name">
     <input
       grInput
       id="key-name"
       [(ngModel)]="formName"
       placeholder="e.g. CI/CD Pipeline"
-      class="w-full"
     />
-  </div>
+  </gr-form-field>
 
   @if (!editingKey()) {
-    <div class="form-group">
-      <label for="key-expires">Expires in (days)</label>
+    <gr-form-field label="Expires in (days)" for="key-expires">
       <input
         grInput
         id="key-expires"
@@ -125,15 +122,13 @@
         min="1"
         [(ngModel)]="formExpiresInDays"
         placeholder="Leave blank for no expiry"
-        class="w-full"
       />
-    </div>
+    </gr-form-field>
   }
 
   <gr-divider />
 
-  <div class="form-group">
-    <label>Scope</label>
+  <gr-form-field label="Scope">
     <gr-select-button
       [options]="scopeOptions"
       [(ngModel)]="formScope"
@@ -141,11 +136,10 @@
       optionValue="value"
       (ngModelChange)="onScopeChange()"
     />
-  </div>
+  </gr-form-field>
 
   @if (formScope === 'project') {
-    <div class="form-group">
-      <label for="key-project">Project</label>
+    <gr-form-field label="Project" for="key-project">
       <gr-select
         inputId="key-project"
         [options]="projectOptions()"
@@ -154,12 +148,11 @@
         [(ngModel)]="formProject"
         placeholder="Any project"
       />
-    </div>
+    </gr-form-field>
   }
 
   @if (formScope === 'cache') {
-    <div class="form-group">
-      <label for="key-cache">Cache</label>
+    <gr-form-field label="Cache" for="key-cache">
       <gr-select
         inputId="key-cache"
         [options]="cacheOptions()"
@@ -168,28 +161,23 @@
         [(ngModel)]="formCache"
         placeholder="Select a cache"
       />
-    </div>
+    </gr-form-field>
   }
 
-  <div class="form-group">
-    <label for="key-allowed-ips">
-      Allowed source IPs / CIDRs
-      <span class="hint">(one per line; leave blank to allow any source)</span>
-    </label>
+  <gr-form-field label="Allowed source IPs / CIDRs" for="key-allowed-ips">
+    <span slot="label" class="hint">(one per line; leave blank to allow any source)</span>
     <textarea
       id="key-allowed-ips"
       grInput
       rows="3"
-      class="w-full"
       [(ngModel)]="formAllowedIps"
       placeholder="10.0.0.0/8&#10;203.0.113.5"
     ></textarea>
-  </div>
+  </gr-form-field>
 
   <gr-divider />
 
-  <div class="form-group">
-    <label>Permissions</label>
+  <gr-form-field label="Permissions">
     <div class="permission-grid">
       @for (p of activePermissions(); track p.id) {
         <div class="permission-row">
@@ -202,7 +190,7 @@
         </div>
       }
     </div>
-  </div>
+  </gr-form-field>
 
   <div grDialogFooter>
     <button

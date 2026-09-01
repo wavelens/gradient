@@ -70,8 +70,7 @@
       {{ errorMessage() }}
     </div>
   }
-  <div class="form-group">
-    <label for="cache-name">Cache Name</label>
+  <gr-form-field label="Cache Name" for="cache-name" hint="The name of the binary cache you own.">
     <gr-autocomplete
       inputId="cache-name"
       [(ngModel)]="newCacheName"
@@ -81,8 +80,7 @@
       [forceSelection]="false"
       (enter)="subscribeCache()"
     />
-    <small class="text-secondary">The name of the binary cache you own.</small>
-  </div>
+  </gr-form-field>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showSubscribeDialog.set(false)" [disabled]="subscribing()"></button>
     <button

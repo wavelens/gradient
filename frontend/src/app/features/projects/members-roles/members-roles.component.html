@@ -149,8 +149,7 @@
         {{ memberError() }}
       </div>
     }
-    <div class="form-group">
-      <label for="member-name">Username</label>
+    <gr-form-field label="Username" for="member-name">
       <gr-autocomplete
         inputId="member-name"
         [(ngModel)]="newMember.user"
@@ -160,15 +159,14 @@
         [forceSelection]="false"
         (enter)="addMember()"
       />
-    </div>
-    <div class="form-group">
-      <label for="member-role">Role</label>
+    </gr-form-field>
+    <gr-form-field label="Role" for="member-role">
       <select id="member-role" [(ngModel)]="newMember.role" class="role-select">
         @for (role of roles(); track role.id) {
           <option [value]="role.name">{{ role.name }}</option>
         }
       </select>
-    </div>
+    </gr-form-field>
   </div>
   <div grDialogFooter>
     <button
@@ -201,19 +199,15 @@
         {{ roleError() }}
       </div>
     }
-    <div class="form-group">
-      <label for="role-name">Name</label>
+    <gr-form-field label="Name" for="role-name" hint="Lowercase letters, digits, and hyphens.">
       <input
         grInput
         id="role-name"
         [(ngModel)]="roleForm.name"
-        class="w-full"
         placeholder="e.g. releaser"
       />
-      <small class="text-secondary">Lowercase letters, digits, and hyphens.</small>
-    </div>
-    <div class="form-group">
-      <label>Permissions</label>
+    </gr-form-field>
+    <gr-form-field label="Permissions">
       <div class="permissions-grid">
         @for (perm of availablePermissions(); track perm.id) {
           <label class="permission-row">
@@ -232,7 +226,7 @@
           </label>
         }
       </div>
-    </div>
+    </gr-form-field>
   </div>
   <div grDialogFooter>
     <button

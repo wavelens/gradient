@@ -40,17 +40,11 @@
       </div>
     } @else {
       @if (errorMessage()) {
-        <div class="error-message">
-          <gr-icon name="error" />
-          {{ errorMessage() }}
-        </div>
+        <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
       }
 
       @if (successMessage()) {
-        <div class="success-message">
-          <gr-icon name="check_circle" />
-          {{ successMessage() }}
-        </div>
+        <gr-message-banner type="success">{{ successMessage() }}</gr-message-banner>
         <div class="auth-footer">
           <a routerLink="/account/login">Go to Sign In</a>
         </div>
@@ -58,89 +52,77 @@
 
       @if (!successMessage()) {
         <form [formGroup]="registerForm" (ngSubmit)="onSubmit()" class="auth-form">
-          <div class="form-group">
-            <label for="username">Username</label>
+          <gr-form-field
+            label="Username"
+            for="username"
+            [control]="username"
+            [errorMessages]="{
+              required: 'Username is required',
+              pattern: 'Username can only contain letters, numbers, hyphens, and underscores',
+              usernameTaken: 'This username is already taken'
+            }"
+          >
             <input
               type="text"
               id="username"
               formControlName="username"
-              class="form-input"
+              grInput
               placeholder="Choose a username"
               autocomplete="username"
             />
-            @if (username?.touched && username?.errors) {
-              @if (username?.errors?.['required']) {
-                <span class="field-error">Username is required</span>
-              }
-              @if (username?.errors?.['pattern']) {
-                <span class="field-error">Username can only contain letters, numbers, hyphens, and underscores</span>
-              }
-              @if (username?.errors?.['usernameTaken']) {
-                <span class="field-error">This username is already taken</span>
-              }
-            }
             @if (username?.pending) {
               <span class="field-info">Checking availability...</span>
             }
-          </div>
+          </gr-form-field>
 
-          <div class="form-group">
-            <label for="name">Full Name</label>
+          <gr-form-field
+            label="Full Name"
+            for="name"
+            [control]="name"
+            [errorMessages]="{ required: 'Full name is required' }"
+          >
             <input
               type="text"
               id="name"
               formControlName="name"
-              class="form-input"
+              grInput
               placeholder="Enter your full name"
               autocomplete="name"
             />
-            @if (name?.touched && name?.errors?.['required']) {
-              <span class="field-error">Full name is required</span>
-            }
-          </div>
+          </gr-form-field>
 
-          <div class="form-group">
-            <label for="email">Email</label>
+          <gr-form-field
+            label="Email"
+            for="email"
+            [control]="email"
+            [errorMessages]="{ required: 'Email is required', email: 'Please enter a valid email address' }"
+          >
             <input
               type="email"
               id="email"
               formControlName="email"
-              class="form-input"
+              grInput
               placeholder="Enter your email"
               autocomplete="email"
             />
-            @if (email?.touched && email?.errors) {
-              @if (email?.errors?.['required']) {
-                <span class="field-error">Email is required</span>
-              }
-              @if (email?.errors?.['email']) {
-                <span class="field-error">Please enter a valid email address</span>
-              }
-            }
-          </div>
+          </gr-form-field>
 
-          <div class="form-group">
-            <label for="password">Password</label>
-            <div class="password-wrapper">
-              <input
-                [type]="showPassword() ? 'text' : 'password'"
-                id="password"
-                formControlName="password"
-                class="form-input"
-                placeholder="Create a password"
-                autocomplete="new-password"
-              />
-              <button type="button" class="eye-btn" (click)="showPassword.set(!showPassword())" tabindex="-1">
-                <gr-icon [name]="showPassword() ? 'visibility_off' : 'visibility'" />
-              </button>
-            </div>
-            @if (password?.touched && password?.errors) {
-              @if (password?.errors?.['required']) {
-                <span class="field-error">Password is required</span>
-              }
-              @if (password?.errors?.['minlength']) {
-                <span class="field-error">Password must be at least 8 characters</span>
-              }
+          <gr-form-field
+            label="Password"
+            for="password"
+            [control]="password"
+            [errorMessages]="{
+              required: 'Password is required',
+              minlength: 'Password must be at least 8 characters'
+            }"
+          >
+            <gr-password-input
+              inputId="password"
+              formControlName="password"
+              placeholder="Create a password"
+              autocomplete="new-password"
+            />
+            @if (password?.touched) {
               @if (password?.errors?.['passwordStrength']; as strength) {
                 <div class="password-requirements">
                   <div class="requirement" [class.met]="strength.hasUpperCase">
@@ -162,30 +144,21 @@
                 </div>
               }
             }
-          </div>
+          </gr-form-field>
 
-          <div class="form-group">
-            <label for="confirmPassword">Confirm Password</label>
-            <div class="password-wrapper">
-              <input
-                [type]="showConfirmPassword() ? 'text' : 'password'"
-                id="confirmPassword"
-                formControlName="confirmPassword"
-                class="form-input"
-                placeholder="Confirm your password"
-                autocomplete="new-password"
-              />
-              <button type="button" class="eye-btn" (click)="showConfirmPassword.set(!showConfirmPassword())" tabindex="-1">
-                <gr-icon [name]="showConfirmPassword() ? 'visibility_off' : 'visibility'" />
-              </button>
-            </div>
-            @if (confirmPassword?.touched && confirmPassword?.errors?.['required']) {
-              <span class="field-error">Please confirm your password</span>
-            }
-            @if (registerForm.errors?.['passwordMismatch'] && confirmPassword?.touched) {
-              <span class="field-error">Passwords do not match</span>
-            }
-          </div>
+          <gr-form-field
+            label="Confirm Password"
+            for="confirmPassword"
+            [invalid]="confirmInvalid"
+            [error]="confirmError"
+          >
+            <gr-password-input
+              inputId="confirmPassword"
+              formControlName="confirmPassword"
+              placeholder="Confirm your password"
+              autocomplete="new-password"
+            />
+          </gr-form-field>
 
           <button
             grButton

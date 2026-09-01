@@ -23,6 +23,7 @@ import {
 import {
   ButtonComponent,
   DialogComponent,
+  FormFieldComponent,
   IconComponent,
   InputDirective,
   LabelHelpComponent,
@@ -54,6 +55,7 @@ interface Option<T> {
     ManagedDisableDirective,
     IconComponent,
     PageLayoutComponent,
+    FormFieldComponent,
   ],
   templateUrl: './integrations.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -75,17 +75,16 @@
       </div>
     } @else {
       <form [formGroup]="form" (ngSubmit)="onLookup()" class="auth-form">
-        <div class="form-group">
-          <label for="userCode">Confirmation code</label>
+        <gr-form-field label="Confirmation code" for="userCode">
           <input
             type="text"
             id="userCode"
             formControlName="userCode"
-            class="form-input"
+            grInput
             placeholder="XXXX-XXXX"
             autocomplete="off"
           />
-        </div>
+        </gr-form-field>
         <button
           grButton
           type="submit"

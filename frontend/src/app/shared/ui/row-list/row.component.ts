@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { IconComponent } from '../icon/icon.component';
 
 @Component({
@@ -17,5 +17,5 @@ import { IconComponent } from '../icon/icon.component';
 })
 export class RowComponent {
   icon = input<string>();
-  muted = input<boolean>(false);
+  muted = input(false, { transform: booleanAttribute });
 }

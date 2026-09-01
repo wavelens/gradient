@@ -85,29 +85,25 @@
   }
   @if (editingUpstream(); as u) {
     <div class="upstream-form">
-      <div class="form-group">
-        <label for="edit-display-name">Display Name</label>
-        <input grInput id="edit-display-name" [(ngModel)]="editForm.display_name" class="w-full" />
-      </div>
+      <gr-form-field label="Display Name" for="edit-display-name">
+        <input grInput id="edit-display-name" [(ngModel)]="editForm.display_name" />
+      </gr-form-field>
       @if (!u.upstream_cache_id) {
-        <div class="form-group">
-          <label for="edit-url">Substituter URL</label>
-          <input grInput id="edit-url" [(ngModel)]="editForm.url" class="w-full" />
-        </div>
-        <div class="form-group">
-          <label for="edit-pubkey">Public Key</label>
-          <input grInput id="edit-pubkey" [(ngModel)]="editForm.public_key" class="w-full" />
-        </div>
+        <gr-form-field label="Substituter URL" for="edit-url">
+          <input grInput id="edit-url" [(ngModel)]="editForm.url" />
+        </gr-form-field>
+        <gr-form-field label="Public Key" for="edit-pubkey">
+          <input grInput id="edit-pubkey" [(ngModel)]="editForm.public_key" />
+        </gr-form-field>
         <small class="text-secondary">External caches are always Read Only.</small>
       } @else {
-        <div class="form-group">
-          <label for="edit-mode">Mode</label>
+        <gr-form-field label="Mode" for="edit-mode">
           <select id="edit-mode" [(ngModel)]="editForm.mode" class="role-select w-full">
             @for (m of modes; track m.value) {
               <option [value]="m.value">{{ m.label }}</option>
             }
           </select>
-        </div>
+        </gr-form-field>
       }
     </div>
   }
@@ -130,68 +126,56 @@
     </div>
   }
   <div class="upstream-form">
-    <div class="form-group">
-      <label>Type</label>
+    <gr-form-field label="Type">
       <div class="type-toggle">
         <button type="button" class="type-btn" [class.active]="upstreamType === 'internal'" (click)="upstreamType = 'internal'; probeSuggestsProto.set(false)">Internal</button>
         <button type="button" class="type-btn" [class.active]="upstreamType === 'gradient_proto'" (click)="upstreamType = 'gradient_proto'; probeSuggestsProto.set(false)">Gradient Proto</button>
         <button type="button" class="type-btn" [class.active]="upstreamType === 'http'" (click)="upstreamType = 'http'; probeSuggestsProto.set(false)">HTTP</button>
       </div>
-    </div>
+    </gr-form-field>
 
     @if (upstreamType === 'internal') {
-      <div class="form-group">
-        <label for="up-cache-name">Cache Name</label>
-        <input grInput id="up-cache-name" [(ngModel)]="upstreamForm.cache_name" placeholder="my-cache" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-display-name-int">Display Name <span class="text-secondary">(optional)</span></label>
-        <input grInput id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-mode">Mode</label>
+      <gr-form-field label="Cache Name" for="up-cache-name">
+        <input grInput id="up-cache-name" [(ngModel)]="upstreamForm.cache_name" placeholder="my-cache" />
+      </gr-form-field>
+      <gr-form-field label="Display Name" for="up-display-name-int">
+        <span slot="label" class="text-secondary">(optional)</span>
+        <input grInput id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" />
+      </gr-form-field>
+      <gr-form-field label="Mode" for="up-mode" hint="Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.">
         <select id="up-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
           @for (m of modes; track m.value) {
             <option [value]="m.value">{{ m.label }}</option>
           }
         </select>
-        <small class="text-secondary">
-          Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.
-        </small>
-      </div>
+      </gr-form-field>
     } @else if (upstreamType === 'gradient_proto') {
-      <div class="form-group">
-        <label for="up-gp-display-name">Display Name</label>
-        <input grInput id="up-gp-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="My Gradient Cache" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-gp-url">Server URL</label>
-        <input grInput id="up-gp-url" [(ngModel)]="upstreamForm.url" placeholder="https://gradient.example.com" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-gp-remote-cache">Remote Cache Name</label>
-        <input grInput id="up-gp-remote-cache" [(ngModel)]="upstreamForm.remote_cache" placeholder="my-cache" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-gp-api-key">API Key <span class="text-secondary">(optional)</span></label>
-        <input grInput type="password" id="up-gp-api-key" [(ngModel)]="upstreamForm.api_key" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-gp-mode">Mode</label>
+      <gr-form-field label="Display Name" for="up-gp-display-name">
+        <input grInput id="up-gp-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="My Gradient Cache" />
+      </gr-form-field>
+      <gr-form-field label="Server URL" for="up-gp-url">
+        <input grInput id="up-gp-url" [(ngModel)]="upstreamForm.url" placeholder="https://gradient.example.com" />
+      </gr-form-field>
+      <gr-form-field label="Remote Cache Name" for="up-gp-remote-cache">
+        <input grInput id="up-gp-remote-cache" [(ngModel)]="upstreamForm.remote_cache" placeholder="my-cache" />
+      </gr-form-field>
+      <gr-form-field label="API Key" for="up-gp-api-key">
+        <span slot="label" class="text-secondary">(optional)</span>
+        <input grInput type="password" id="up-gp-api-key" [(ngModel)]="upstreamForm.api_key" />
+      </gr-form-field>
+      <gr-form-field label="Mode" for="up-gp-mode">
         <select id="up-gp-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
           @for (m of modes; track m.value) {
             <option [value]="m.value">{{ m.label }}</option>
           }
         </select>
-      </div>
+      </gr-form-field>
     } @else {
-      <div class="form-group">
-        <label for="up-display-name">Display Name</label>
-        <input grInput id="up-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="cache.nixos.org" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="up-url">Substituter URL</label>
-        <input grInput id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" class="w-full" (blur)="probeHttpUrl()" />
+      <gr-form-field label="Display Name" for="up-display-name">
+        <input grInput id="up-display-name" [(ngModel)]="upstreamForm.display_name" placeholder="cache.nixos.org" />
+      </gr-form-field>
+      <gr-form-field label="Substituter URL" for="up-url">
+        <input grInput id="up-url" [(ngModel)]="upstreamForm.url" placeholder="https://cache.nixos.org" (blur)="probeHttpUrl()" />
         @if (probeSuggestsProto()) {
           <div class="dialog-hint">
             <gr-icon name="lightbulb" size="sm" />
@@ -200,11 +184,10 @@
             for native protocol pulling.
           </div>
         }
-      </div>
-      <div class="form-group">
-        <label for="up-pubkey">Public Key</label>
-        <input grInput id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" class="w-full" />
-      </div>
+      </gr-form-field>
+      <gr-form-field label="Public Key" for="up-pubkey">
+        <input grInput id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" />
+      </gr-form-field>
       <small class="text-secondary">Http caches are always Read Only.</small>
   }
   </div>

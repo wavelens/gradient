@@ -81,12 +81,4 @@
   color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-}
-
-.form-group {
-  margin-bottom: $spacing-md;
-  label { display: block; margin-bottom: $spacing-sm; font-size: $font-size-sm; font-weight: 500; }
-  small { display: block; margin-top: $spacing-xs; }
-}
-
-.w-full { width: 100%; }
+}.w-full { width: 100%; }

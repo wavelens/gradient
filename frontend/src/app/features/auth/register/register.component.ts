@@ -20,12 +20,19 @@ import { ConfigService } from '@core/services/config.service';
 import { environment } from '@environments/environment';
 import { switchMap, map } from 'rxjs/operators';
 import { of, timer } from 'rxjs';
-import { ButtonComponent, IconComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  FormFieldComponent,
+  IconComponent,
+  InputDirective,
+  MessageBannerComponent,
+  PasswordInputComponent,
+} from '@shared/ui';
 
 @Component({
   selector: 'app-register',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent, IconComponent],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent, IconComponent, FormFieldComponent, InputDirective, MessageBannerComponent, PasswordInputComponent],
   templateUrl: './register.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './register.component.scss',
@@ -165,6 +172,18 @@ export class RegisterComponent {
 
   get confirmPassword() {
     return this.registerForm.get('confirmPassword');
+  }
+
+  /// The mismatch error lives on the group, so the confirm field has to ask for it.
+  get confirmInvalid(): boolean {
+    const c = this.confirmPassword;
+    if (!c?.touched) return false;
+    return !!c.invalid || !!this.registerForm.errors?.['passwordMismatch'];
+  }
+
+  get confirmError(): string {
+    if (this.confirmPassword?.errors?.['required']) return 'Please confirm your password';
+    return this.registerForm.errors?.['passwordMismatch'] ? 'Passwords do not match' : '';
   }
 
   get oidcRequired() { return this.config.oidcRequired; }

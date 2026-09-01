@@ -68,28 +68,24 @@
     </div>
   }
   <div class="dialog-content">
-    <div class="form-group">
-      <label for="proj-display">Display Name *</label>
+    <gr-form-field label="Display Name *" for="proj-display">
       <input
         grInput
         id="proj-display"
         [(ngModel)]="newTask.display_name"
         placeholder="My Task"
-        class="w-full"
         (ngModelChange)="onTaskDisplayNameChange($event)"
         (keyup.enter)="createTask()"
       />
-    </div>
+    </gr-form-field>
 
-    <div class="form-group">
-      <label for="proj-name">Name *</label>
+    <gr-form-field label="Name *" for="proj-name">
       <div class="name-input-wrapper">
         <input
           grInput
           id="proj-name"
           [(ngModel)]="newTask.name"
           placeholder="task-name"
-          class="w-full"
           (ngModelChange)="onTaskNameChange($event)"
           (input)="onTaskNameUserInput()"
           (keyup.enter)="createTask()"
@@ -111,53 +107,44 @@
       } @else {
         <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
       }
-    </div>
+    </gr-form-field>
 
-    <div class="form-group">
-      <label for="proj-desc">Description</label>
+    <gr-form-field label="Description" for="proj-desc">
       <textarea
         grInput
         id="proj-desc"
         [(ngModel)]="newTask.description"
         placeholder="Describe your task..."
         rows="2"
-        class="w-full"
       ></textarea>
-    </div>
+    </gr-form-field>
 
-    <div class="form-group">
-      <label for="proj-repo">Repository URL *</label>
+    <gr-form-field label="Repository URL *" for="proj-repo" hint="Git repository URL to evaluate">
       <input
         grInput
         id="proj-repo"
         [(ngModel)]="newTask.repository"
         placeholder="https://github.com/user/repo"
-        class="w-full"
         (keyup.enter)="createTask()"
       />
-      <small class="text-secondary">Git repository URL to evaluate</small>
-    </div>
+    </gr-form-field>
 
-    <div class="form-group">
-      <label for="proj-wildcard">
-        Evaluation Wildcard
-        <gr-label-help href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" title="Learn about evaluation wildcards" />
-      </label>
+    <gr-form-field
+      label="Evaluation Wildcard"
+      for="proj-wildcard"
+      [invalid]="wildcardInvalid"
+      error="Each pattern must be non-empty, not start with a period, and contain no spaces."
+      hint="Pattern for selecting which outputs to evaluate (default: packages.x86_64-linux.*)"
+    >
+      <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" title="Learn about evaluation wildcards" />
       <input
         grInput
         id="proj-wildcard"
         [(ngModel)]="newTask.wildcard"
         placeholder="**"
-        class="w-full"
-        [class.input-invalid]="wildcardInvalid"
         (keyup.enter)="createTask()"
       />
-      @if (wildcardInvalid) {
-        <small class="text-danger">Each pattern must be non-empty, not start with a period, and contain no spaces.</small>
-      } @else {
-        <small class="text-secondary">Pattern for selecting which outputs to evaluate (default: packages.x86_64-linux.*)</small>
-      }
-    </div>
+    </gr-form-field>
   </div>
 
   <div grDialogFooter>

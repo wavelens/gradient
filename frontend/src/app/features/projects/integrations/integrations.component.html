@@ -109,20 +109,17 @@
               @if (integration.forge_type === 'github') {
                 <div class="integration-body">
                   @if (integration.account_login) {
-                    <div class="form-group">
-                      <label>Account</label>
+                    <gr-form-field label="Account">
                       <div class="mono-value">@{{ integration.account_login }}</div>
-                    </div>
+                    </gr-form-field>
                   }
-                  <div class="form-group">
-                    <label>Installation ID</label>
+                  <gr-form-field label="Installation ID">
                     <div class="mono-value">{{ integration.installation_id ?? 'N/A' }}</div>
-                  </div>
+                  </gr-form-field>
                 </div>
               } @else if (integration.kind === 'inbound') {
                 <div class="integration-body">
-                  <div class="form-group">
-                    <label>Forge</label>
+                  <gr-form-field label="Forge" hint="This integration can serve webhooks from any supported forge. Pick the one you are configuring.">
                     <div class="forge-selector">
                       @for (opt of inboundForgeOptions; track opt.value) {
                         <button
@@ -135,12 +132,10 @@
                         ></button>
                       }
                     </div>
-                    <small class="text-secondary">This integration can serve webhooks from any supported forge. Pick the one you are configuring.</small>
-                  </div>
-                  <div class="form-group">
-                    <label>Webhook URL</label>
+                  </gr-form-field>
+                  <gr-form-field label="Webhook URL">
                     <div class="copy-row">
-                      <input grInput [value]="inboundUrl(integration)" readonly class="w-full" />
+                      <input grInput [value]="inboundUrl(integration)" readonly />
                       <button
                         grButton
                         [icon]="copiedUrlId() === integration.id ? 'check' : 'content_copy'"
@@ -148,34 +143,30 @@
                         (click)="copyInboundUrl(integration)"
                       ></button>
                     </div>
-                  </div>
-                  <div class="form-group">
-                    <label>Secret</label>
+                  </gr-form-field>
+                  <gr-form-field label="Secret">
                     @if (integration.has_secret) {
                       <span class="status-chip status-ok">Configured</span>
                     } @else {
                       <span class="status-chip status-warn">Not set</span>
                     }
-                  </div>
-                  <div class="form-group">
-                    <label>Events to enable</label>
+                  </gr-form-field>
+                  <gr-form-field label="Events to enable">
                     <small class="text-secondary">Enable {{ requiredWebhookEvents(integration.id) }} on the forge webhook. A push-only webhook never delivers PR CI or the <code>/gradient</code> comment commands.</small>
-                  </div>
+                  </gr-form-field>
                 </div>
               } @else {
                 <div class="integration-body">
-                  <div class="form-group">
-                    <label>Endpoint URL</label>
+                  <gr-form-field label="Endpoint URL">
                     <div class="mono-value">{{ integration.endpoint_url || '(not set - defaults will be used)' }}</div>
-                  </div>
-                  <div class="form-group">
-                    <label>Access Token</label>
+                  </gr-form-field>
+                  <gr-form-field label="Access Token">
                     @if (integration.has_access_token) {
                       <span class="status-chip status-ok">Configured</span>
                     } @else {
                       <span class="status-chip status-warn">Not set</span>
                     }
-                  </div>
+                  </gr-form-field>
                 </div>
               }
             </div>
@@ -198,28 +189,21 @@
       {{ errorMessage() }}
     </div>
   }
-  <div class="form-group">
-    <label for="int-name">
-      Name
-      <gr-label-help href="https://wavelens.github.io/gradient/usage/integration/" title="Learn about forge integrations" />
-    </label>
-    <input grInput id="int-name" [(ngModel)]="formData.name" [class.input-invalid]="nameInvalid" class="w-full" placeholder="e.g. main-gitea" />
-    @if (nameInvalid) {
-      <small class="text-danger">Lowercase letters, digits, and dashes only. Cannot start or end with a dash.</small>
-    } @else {
-      <small class="text-secondary">Used in the webhook URL. Lowercase letters, digits, and dashes.</small>
-  }
-  </div>
-  <div class="form-group">
-    <label for="int-display-name">Display Name</label>
-    <input grInput id="int-display-name" [(ngModel)]="formData.display_name" class="w-full" placeholder="Defaults to the name" />
-    <small class="text-secondary">Human-readable label shown in the integrations list.</small>
-  </div>
-  <div class="form-group">
-    <label for="int-kind">
-      Kind
-      <gr-label-help href="https://wavelens.github.io/gradient/usage/integration/" title="Inbound vs outbound integrations" />
-    </label>
+  <gr-form-field
+    label="Name"
+    for="int-name"
+    [invalid]="nameInvalid"
+    error="Lowercase letters, digits, and dashes only. Cannot start or end with a dash."
+    hint="Used in the webhook URL. Lowercase letters, digits, and dashes."
+  >
+    <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/integration/" title="Learn about forge integrations" />
+    <input grInput id="int-name" [(ngModel)]="formData.name" placeholder="e.g. main-gitea" />
+  </gr-form-field>
+  <gr-form-field label="Display Name" for="int-display-name" hint="Human-readable label shown in the integrations list.">
+    <input grInput id="int-display-name" [(ngModel)]="formData.display_name" placeholder="Defaults to the name" />
+  </gr-form-field>
+  <gr-form-field label="Kind" for="int-kind">
+    <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/integration/" title="Inbound vs outbound integrations" />
     <gr-select
       inputId="int-kind"
       [(ngModel)]="formData.kind"
@@ -227,9 +211,8 @@
       optionLabel="label"
       optionValue="value"
     />
-  </div>
-  <div class="form-group">
-    <label for="int-forge">Forge</label>
+  </gr-form-field>
+  <gr-form-field label="Forge" for="int-forge">
     <gr-select
       inputId="int-forge"
       [(ngModel)]="formData.forge_type"
@@ -237,45 +220,36 @@
       optionLabel="label"
       optionValue="value"
     />
-  </div>
+  </gr-form-field>
 
   @if (formData.forge_type === 'github') {
-    <div class="form-group">
-      <label for="int-installation-id">App Installation ID</label>
-      <input grInput id="int-installation-id" [(ngModel)]="formData.installation_id" class="w-full"
+    <gr-form-field label="App Installation ID" for="int-installation-id" hint="The numeric installation ID from your GitHub App installation.">
+      <input grInput id="int-installation-id" [(ngModel)]="formData.installation_id"
         placeholder="e.g. 12345678" />
-      <small class="text-secondary">The numeric installation ID from your GitHub App installation.</small>
-    </div>
+    </gr-form-field>
   } @else if (formData.kind === 'inbound') {
     <div class="dialog-info">
       <gr-icon name="info" />
       The webhook URL is shown after the integration is created. Enable push, pull/merge-request, comment, and review events on the forge webhook - a push-only webhook never delivers PR CI or <code>/gradient</code> commands.
     </div>
-    <div class="form-group">
-      <label for="int-secret">Webhook Secret</label>
+    <gr-form-field label="Webhook Secret" for="int-secret" hint="Copy this into your forge's webhook secret field. Store it now - it will not be shown again.">
       <div class="copy-row">
-        <input grInput id="int-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to omit verification" />
+        <input grInput id="int-secret" [(ngModel)]="formData.secret" placeholder="Leave blank to omit verification" />
         <button grButton type="button" icon="refresh" severity="secondary" (click)="generateSecret()"></button>
       </div>
-      <small class="text-secondary">Copy this into your forge's webhook secret field. Store it now - it will not be shown again.</small>
-    </div>
-    <div class="form-group">
-      <label for="int-allowed-ips">Allowed source IPs / CIDRs</label>
-      <textarea id="int-allowed-ips" grInput rows="3" class="w-full" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
-      <small class="text-secondary">One CIDR per line. Leave blank to accept webhooks from any source.</small>
-    </div>
+    </gr-form-field>
+    <gr-form-field label="Allowed source IPs / CIDRs" for="int-allowed-ips" hint="One CIDR per line. Leave blank to accept webhooks from any source.">
+      <textarea id="int-allowed-ips" grInput rows="3" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
+    </gr-form-field>
   } @else {
-    <div class="form-group">
-      <label for="int-endpoint">Endpoint URL</label>
-      <input grInput id="int-endpoint" [(ngModel)]="formData.endpoint_url" class="w-full"
+    <gr-form-field label="Endpoint URL" for="int-endpoint" hint="Base URL of your forge instance.">
+      <input grInput id="int-endpoint" [(ngModel)]="formData.endpoint_url"
         placeholder="e.g. https://gitea.example.com" />
-      <small class="text-secondary">Base URL of your forge instance.</small>
-    </div>
-    <div class="form-group">
-      <label for="int-token">Access Token</label>
-      <input grInput id="int-token" type="password" [(ngModel)]="formData.access_token" class="w-full"
+    </gr-form-field>
+    <gr-form-field label="Access Token" for="int-token">
+      <input grInput id="int-token" type="password" [(ngModel)]="formData.access_token"
         placeholder="API token with commit status write permission" />
-    </div>
+    </gr-form-field>
   }
 
   <div grDialogFooter>
@@ -297,16 +271,13 @@
         {{ errorMessage() }}
       </div>
     }
-    <div class="form-group">
-      <label for="edit-name">Name</label>
-      <input grInput id="edit-name" [(ngModel)]="formData.name" class="w-full" />
-    </div>
-    <div class="form-group">
-      <label for="edit-display-name">Display Name</label>
-      <input grInput id="edit-display-name" [(ngModel)]="formData.display_name" class="w-full" />
-    </div>
-    <div class="form-group">
-      <label for="edit-forge">Forge</label>
+    <gr-form-field label="Name" for="edit-name">
+      <input grInput id="edit-name" [(ngModel)]="formData.name" />
+    </gr-form-field>
+    <gr-form-field label="Display Name" for="edit-display-name">
+      <input grInput id="edit-display-name" [(ngModel)]="formData.display_name" />
+    </gr-form-field>
+    <gr-form-field label="Forge" for="edit-forge">
       <gr-select
         inputId="edit-forge"
         [(ngModel)]="formData.forge_type"
@@ -314,37 +285,32 @@
         optionLabel="label"
         optionValue="value"
       />
-    </div>
+    </gr-form-field>
     @if (target.kind === 'inbound') {
-      <div class="form-group">
-        <label for="edit-secret">Webhook Secret</label>
+      <gr-form-field label="Webhook Secret" for="edit-secret">
         <div class="copy-row">
-          <input grInput id="edit-secret" [(ngModel)]="formData.secret" class="w-full" placeholder="Leave blank to keep existing" />
+          <input grInput id="edit-secret" [(ngModel)]="formData.secret" placeholder="Leave blank to keep existing" />
           <button grButton type="button" icon="refresh" severity="secondary" (click)="generateSecret()"></button>
         </div>
         <small class="text-secondary">Currently {{ target.has_secret ? 'configured' : 'not set' }}. Entering a new value replaces it.</small>
         @if (target.has_secret) {
           <button grButton type="button" label="Clear Secret" icon="delete" severity="danger" size="small" class="mt-sm" (click)="clearSecret()" [disabled]="saving()"></button>
         }
-      </div>
-      <div class="form-group">
-        <label for="edit-allowed-ips">Allowed source IPs / CIDRs</label>
-        <textarea id="edit-allowed-ips" grInput rows="3" class="w-full" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
-        <small class="text-secondary">One CIDR per line. Leave blank to accept webhooks from any source.</small>
-      </div>
+      </gr-form-field>
+      <gr-form-field label="Allowed source IPs / CIDRs" for="edit-allowed-ips" hint="One CIDR per line. Leave blank to accept webhooks from any source.">
+        <textarea id="edit-allowed-ips" grInput rows="3" [(ngModel)]="formData.allowed_ips" placeholder="10.0.0.0/8&#10;203.0.113.5"></textarea>
+      </gr-form-field>
     } @else {
-      <div class="form-group">
-        <label for="edit-endpoint">Endpoint URL</label>
-        <input grInput id="edit-endpoint" [(ngModel)]="formData.endpoint_url" class="w-full" />
-      </div>
-      <div class="form-group">
-        <label for="edit-token">Access Token</label>
-        <input grInput id="edit-token" type="password" [(ngModel)]="formData.access_token" class="w-full" placeholder="Leave blank to keep existing" />
+      <gr-form-field label="Endpoint URL" for="edit-endpoint">
+        <input grInput id="edit-endpoint" [(ngModel)]="formData.endpoint_url" />
+      </gr-form-field>
+      <gr-form-field label="Access Token" for="edit-token">
+        <input grInput id="edit-token" type="password" [(ngModel)]="formData.access_token" placeholder="Leave blank to keep existing" />
         <small class="text-secondary">Currently {{ target.has_access_token ? 'configured' : 'not set' }}.</small>
         @if (target.has_access_token) {
           <button grButton type="button" label="Clear Token" icon="delete" severity="danger" size="small" class="mt-sm" (click)="clearAccessToken()" [disabled]="saving()"></button>
         }
-      </div>
+      </gr-form-field>
     }
   }
   <div grDialogFooter>

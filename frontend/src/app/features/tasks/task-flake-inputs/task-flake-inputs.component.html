@@ -121,38 +121,31 @@
     </div>
   }
 
-  <div class="form-group">
-    <label for="fi-input-name">Input Name</label>
+  <gr-form-field label="Input Name" for="fi-input-name">
+    <span slot="hint">Input name from your flake.nix, or a glob like <code>nixpkgs*</code> / <code>*</code> to match many. A literal name wins over a glob.</span>
     <input
       grInput
       id="fi-input-name"
       [(ngModel)]="form.input_name"
-      class="w-full"
       placeholder="nixpkgs or nixpkgs*"
     />
-    <small class="text-secondary">Input name from your flake.nix, or a glob like <code>nixpkgs*</code> / <code>*</code> to match many. A literal name wins over a glob.</small>
-  </div>
+  </gr-form-field>
 
-  <div class="form-group checkbox-group">
-    <gr-checkbox
+  <gr-checkbox
       inputId="fi-keep-url"
       [(ngModel)]="form.keepUrl"
       [binary]="true"
-    />
-    <label for="fi-keep-url">Force update using the URL declared in flake.nix</label>
-  </div>
+    label="Force update using the URL declared in flake.nix"
+  />
 
   @if (!form.keepUrl) {
-    <div class="form-group">
-      <label for="fi-url">URL</label>
+    <gr-form-field label="URL" for="fi-url" hint="Nix flake URL to substitute for this input.">
       <input
         grInput
         id="fi-url"
         [(ngModel)]="form.url"
-        class="w-full"
         placeholder="github:NixOS/nixpkgs/nixos-24.05"
       />
-      <small class="text-secondary">Nix flake URL to substitute for this input.</small>
-    </div>
+    </gr-form-field>
   }
 </ng-template>

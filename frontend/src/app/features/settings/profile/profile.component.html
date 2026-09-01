@@ -37,20 +37,17 @@
         </div>
       }
       <div class="settings-card">
-        <div class="form-group">
-          <label for="username">Username</label>
-          <input grInput id="username" [(ngModel)]="formData.username" class="w-full" [appManagedDisable]="access()" />
-        </div>
+        <gr-form-field label="Username" for="username">
+          <input grInput id="username" [(ngModel)]="formData.username" [appManagedDisable]="access()" />
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="name">Full Name</label>
-          <input grInput id="name" [(ngModel)]="formData.name" class="w-full" [appManagedDisable]="access()" />
-        </div>
+        <gr-form-field label="Full Name" for="name">
+          <input grInput id="name" [(ngModel)]="formData.name" [appManagedDisable]="access()" />
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="email">Email</label>
-          <input grInput id="email" type="email" [(ngModel)]="formData.email" class="w-full" [appManagedDisable]="access()" />
-        </div>
+        <gr-form-field label="Email" for="email">
+          <input grInput id="email" type="email" [(ngModel)]="formData.email" [appManagedDisable]="access()" />
+        </gr-form-field>
 
         <div class="form-actions">
           <button
@@ -117,15 +114,13 @@
     </div>
   }
   @if (isOidc()) {
-    <div class="form-group">
-      <label for="confirm-username">Type your username (<code>{{ formData.username }}</code>) to confirm</label>
-      <input grInput id="confirm-username" [(ngModel)]="deleteUsernameConfirm" class="w-full" />
-    </div>
+    <gr-form-field label="Type your username to confirm" for="confirm-username" [hint]="formData.username">
+      <input grInput id="confirm-username" [(ngModel)]="deleteUsernameConfirm" />
+    </gr-form-field>
   } @else {
-    <div class="form-group">
-      <label for="confirm-password">Confirm with your password</label>
-      <input grInput id="confirm-password" type="password" [(ngModel)]="deletePassword" class="w-full" />
-    </div>
+    <gr-form-field label="Confirm with your password" for="confirm-password">
+      <input grInput id="confirm-password" type="password" [(ngModel)]="deletePassword" />
+    </gr-form-field>
   }
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>

@@ -121,21 +121,6 @@
     font-size: $font-size-xs;
   }
 
-  .status-badge {
-    padding: $spacing-xs $spacing-sm;
-    background-color: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-    border: 1px solid var(--gr-status-danger);
-    border-radius: $border-radius-sm;
-    color: var(--gr-status-danger);
-    font-weight: 500;
-    text-transform: uppercase;
-
-    &.active {
-      background-color: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
-      border-color: var(--gr-status-success);
-      color: var(--gr-status-success);
-    }
-  }
 }
 
 .card-arrow {

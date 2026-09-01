@@ -20,7 +20,16 @@ import {
   UpdateActionRequest,
 } from '@core/models';
 import { ActionEventsComponent } from './action-events.component';
-import { ButtonComponent, CheckboxComponent, DialogComponent, IconComponent, InputDirective, SelectButtonComponent, SelectComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  CheckboxComponent,
+  DialogComponent,
+  FormFieldComponent,
+  IconComponent,
+  InputDirective,
+  SelectButtonComponent,
+  SelectComponent,
+} from '@shared/ui';
 
 type FormMode = 'create' | 'edit';
 
@@ -44,6 +53,7 @@ interface IntegrationOption {
     InputDirective,
     ActionEventsComponent,
     IconComponent,
+    FormFieldComponent,
   ],
   templateUrl: './action-form.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

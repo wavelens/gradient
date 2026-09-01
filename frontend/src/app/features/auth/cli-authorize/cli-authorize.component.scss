@@ -106,14 +106,3 @@
     border: 1px solid var(--gr-status-warning);
   }
 }
-
-.error-message {
-  background-color: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-  border: 1px solid var(--gr-status-danger);
-  border-radius: $border-radius-sm;
-  padding: $spacing-md;
-  margin-bottom: $spacing-lg;
-  display: flex;
-  gap: $spacing-sm;
-  align-items: center;
-}

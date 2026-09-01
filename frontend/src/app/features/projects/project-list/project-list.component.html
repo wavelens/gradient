@@ -94,28 +94,24 @@
     </div>
   }
   <div class="dialog-content">
-    <div class="form-group">
-      <label for="display_name">Display Name *</label>
+    <gr-form-field label="Display Name *" for="display_name">
       <input
         grInput
         id="display_name"
         [(ngModel)]="newProject.display_name"
         placeholder="My Project"
-        class="w-full"
         (ngModelChange)="onProjectDisplayNameChange($event)"
         (keyup.enter)="createProject()"
       />
-    </div>
+    </gr-form-field>
 
-    <div class="form-group">
-      <label for="name">Name *</label>
+    <gr-form-field label="Name *" for="name">
       <div class="name-input-wrapper">
         <input
           grInput
           id="name"
           [(ngModel)]="newProject.name"
           placeholder="project-name"
-          class="w-full"
           (ngModelChange)="onProjectNameChange($event)"
           (input)="onProjectNameUserInput()"
           (keyup.enter)="createProject()"
@@ -135,28 +131,24 @@
       } @else {
         <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
       }
-    </div>
+    </gr-form-field>
 
-    <div class="form-group">
-      <label for="description">Description</label>
+    <gr-form-field label="Description" for="description">
       <textarea
         grInput
         id="description"
         [(ngModel)]="newProject.description"
         placeholder="Describe your project..."
         rows="3"
-        class="w-full"
       ></textarea>
-    </div>
+    </gr-form-field>
 
-    <div class="form-group">
-      <label for="visibility">Visibility</label>
+    <gr-form-field label="Visibility" for="visibility" hint="Public projects are visible to all users">
       <select id="visibility" [(ngModel)]="newProject.public" class="role-select w-full">
         <option [ngValue]="false">Private</option>
         <option [ngValue]="true">Public</option>
       </select>
-      <small class="text-secondary">Public projects are visible to all users</small>
-    </div>
+    </gr-form-field>
   </div>
 
   <div grDialogFooter>

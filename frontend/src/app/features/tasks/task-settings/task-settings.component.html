@@ -26,46 +26,32 @@
     <div class="settings-section">
       <h2>General</h2>
       <div class="settings-card">
-        <div class="form-group">
-          <label for="proj-name">Name</label>
-          <input grInput id="proj-name" [value]="proj.name" disabled class="w-full" />
-          <small class="text-secondary">Task name cannot be changed</small>
-        </div>
+        <gr-form-field label="Name" for="proj-name" hint="Task name cannot be changed">
+          <input grInput id="proj-name" [value]="proj.name" disabled />
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="proj-display">Display Name</label>
-          <input grInput id="proj-display" [(ngModel)]="formData.display_name" class="w-full" [appManagedDisable]="access()" />
-        </div>
+        <gr-form-field label="Display Name" for="proj-display">
+          <input grInput id="proj-display" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" />
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="proj-desc">Description</label>
-          <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" class="w-full" [appManagedDisable]="access()"></textarea>
-        </div>
+        <gr-form-field label="Description" for="proj-desc">
+          <textarea grInput id="proj-desc" [(ngModel)]="formData.description" rows="3" [appManagedDisable]="access()"></textarea>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="proj-repo">Repository URL</label>
-          <input grInput id="proj-repo" [(ngModel)]="formData.repository" class="w-full" [appManagedDisable]="access()" />
-        </div>
+        <gr-form-field label="Repository URL" for="proj-repo">
+          <input grInput id="proj-repo" [(ngModel)]="formData.repository" [appManagedDisable]="access()" />
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="proj-wildcard">
-            Evaluation Wildcard
-            <a href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" target="_blank" rel="noopener noreferrer" class="label-help" title="Learn about evaluation wildcards">
-              <gr-icon name="help" size="sm" />
-            </a>
-          </label>
-          <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" class="w-full" [appManagedDisable]="access()" />
-          <small class="text-secondary">Pattern for selecting which outputs to evaluate</small>
-        </div>
+        <gr-form-field label="Evaluation Wildcard" for="proj-wildcard" hint="Pattern for selecting which outputs to evaluate">
+          <gr-label-help slot="label" href="https://wavelens.github.io/gradient/usage/overview/#evaluation-wildcard" title="Learn about evaluation wildcards" />
+          <input grInput id="proj-wildcard" [(ngModel)]="formData.wildcard" [appManagedDisable]="access()" />
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="proj-keep">Keep Evaluations</label>
-          <input grInput id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" class="w-full" [appManagedDisable]="access()" />
-          <small class="text-secondary">Number of completed evaluations to retain for metrics and history</small>
-        </div>
+        <gr-form-field label="Keep Evaluations" for="proj-keep" hint="Number of completed evaluations to retain for metrics and history">
+          <input grInput id="proj-keep" type="number" min="1" [(ngModel)]="formData.keep_evaluations" [appManagedDisable]="access()" />
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="proj-concurrency">Trigger Concurrency</label>
+        <gr-form-field label="Trigger Concurrency" for="proj-concurrency" hint="Determines how this task handles a new trigger event when an evaluation is already running.">
           <gr-select
             inputId="proj-concurrency"
             [(ngModel)]="formData.concurrency"
@@ -75,19 +61,17 @@
             optionDisabled="disabled"
             [appManagedDisable]="access()"
           />
-          <small class="text-secondary">Determines how this task handles a new trigger event when an evaluation is already running.</small>
-        </div>
+        </gr-form-field>
 
-        <div class="form-group checkbox-group">
+        <gr-form-field hint="When off, build outputs are still cached for Gradient itself but narinfos remain unsigned, keeping the task's paths private to external Nix clients even when the cache is public.">
           <gr-checkbox
             inputId="proj-sign-cache"
             [(ngModel)]="formData.sign_cache"
             [binary]="true"
             [appManagedDisable]="access()"
+            label="Sign cache (allow public access to build outputs)"
           />
-          <label for="proj-sign-cache">Sign cache (allow public access to build outputs)</label>
-          <small class="text-secondary">When off, build outputs are still cached for Gradient itself but narinfos remain unsigned, keeping the task's paths private to external Nix clients even when the cache is public.</small>
-        </div>
+        </gr-form-field>
 
         <div class="form-actions">
           <button
@@ -227,8 +211,7 @@
         Ownership transferred successfully.
       </div>
     }
-    <div class="form-group">
-      <label>Target Project</label>
+    <gr-form-field label="Target Project">
       <gr-autocomplete
         [(ngModel)]="transferProjectName"
         [suggestions]="transferProjectSuggestions()"
@@ -237,7 +220,7 @@
         [forceSelection]="false"
         [disabled]="transferring()"
       />
-    </div>
+    </gr-form-field>
   </div>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showTransferDialog.set(false)" [disabled]="transferring()"></button>

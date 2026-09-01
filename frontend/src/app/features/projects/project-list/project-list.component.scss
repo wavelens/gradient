@@ -164,31 +164,7 @@
   color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-}
-
-.form-group {
-  margin-bottom: $spacing-lg;
-
-  label {
-    display: block;
-    margin-bottom: $spacing-sm;
-    color: var(--gr-text-primary);
-    font-size: $font-size-sm;
-    font-weight: 500;
-  }
-
-  small {
-    display: block;
-    margin-top: $spacing-xs;
-    font-size: $font-size-xs;
-  }
-
-  &:last-child {
-    margin-bottom: 0;
-  }
-}
-
-.w-full { width: 100%; }
+}.w-full { width: 100%; }
 
 .text-danger { color: var(--gr-status-danger); }
 

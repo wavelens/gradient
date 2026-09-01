@@ -12,49 +12,40 @@
     <div class="settings-section">
       <h2>General</h2>
       <div class="settings-card">
-        <div class="form-group">
-          <label for="cache-name">Name</label>
+        <gr-form-field label="Name" for="cache-name" hint="Cache name cannot be changed">
           <input
             grInput
             id="cache-name"
             [value]="c.name"
             disabled
-            class="w-full"
           />
-          <small class="text-secondary">Cache name cannot be changed</small>
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="display-name">Display Name</label>
+        <gr-form-field label="Display Name" for="display-name">
           <input
             grInput
             id="display-name"
             [(ngModel)]="formData.display_name"
-            class="w-full"
             [appManagedDisable]="access()"
           />
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="description">Description</label>
+        <gr-form-field label="Description" for="description">
           <textarea
             grInput
             id="description"
             [(ngModel)]="formData.description"
             rows="3"
-            class="w-full"
             [appManagedDisable]="access()"
           ></textarea>
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="priority">Priority</label>
+        <gr-form-field label="Priority" for="priority">
           <input
             type="number"
             id="priority"
             [(ngModel)]="formData.priority"
             [class.input-invalid]="priorityInvalid"
-            class="w-full"
             min="0"
             max="255"
             [appManagedDisable]="access()"
@@ -64,47 +55,35 @@
           } @else {
             <small class="text-secondary">Higher priority caches are used first (0–255)</small>
           }
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="local-priority">Local Priority</label>
+        <gr-form-field label="Local Priority" for="local-priority" hint="Advertised to clients whose IP matches the server's local-IPs allowlist.
+            Leave empty (or set 0) to always advertise the default priority.">
           <input
             type="number"
             id="local-priority"
             [(ngModel)]="formData.local_priority"
-            class="w-full"
             [appManagedDisable]="access()"
           />
-          <small class="text-secondary">
-            Advertised to clients whose IP matches the server's local-IPs allowlist.
-            Leave empty (or set 0) to always advertise the default priority.
-          </small>
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="max-storage">Max Storage (GB)</label>
+        <gr-form-field label="Max Storage (GB)" for="max-storage" hint="Maximum storage for this cache. Set 0 for unlimited (default); otherwise at least 1 GB.">
           <input
             type="number"
             id="max-storage"
             [(ngModel)]="formData.max_storage_gb"
             [class.input-invalid]="maxStorageInvalid"
-            class="w-full"
             min="0"
             [appManagedDisable]="access()"
           />
-          <small class="text-secondary">
-            Maximum storage for this cache. Set 0 for unlimited (default); otherwise at least 1 GB.
-          </small>
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="visibility">Visibility</label>
+        <gr-form-field label="Visibility" for="visibility" hint="Public caches are visible and readable by all users">
           <select id="visibility" [(ngModel)]="formData.public" class="role-select w-full" [appManagedDisable]="access()">
             <option [ngValue]="false">Private</option>
             <option [ngValue]="true">Public</option>
           </select>
-          <small class="text-secondary">Public caches are visible and readable by all users</small>
-        </div>
+        </gr-form-field>
 
         @if (saveError()) {
           <div class="message-banner error">

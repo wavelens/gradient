@@ -13,10 +13,9 @@
       [subtitle]="c.description || 'No description'"
     >
       <div slot="meta" class="cache-status">
-        <gr-badge [severity]="c.active ? 'success' : 'neutral'">
+        <gr-badge [severity]="c.active ? 'success' : 'danger'">
           {{ c.active ? 'Active' : 'Inactive' }}
         </gr-badge>
-        <gr-badge>Priority {{ c.priority }}</gr-badge>
       </div>
       <div slot="actions">
         <button grButton label="NARs" icon="database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></button>

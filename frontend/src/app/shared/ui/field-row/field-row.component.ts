@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 
 /// Read-only counterpart to gr-form-field: a label with a value the user cannot edit.
 @Component({
@@ -17,5 +17,5 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
 export class FieldRowComponent {
   label = input.required<string>();
   value = input<string>();
-  mono = input<boolean>(false);
+  mono = input(false, { transform: booleanAttribute });
 }

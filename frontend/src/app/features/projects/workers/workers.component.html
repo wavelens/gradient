@@ -202,54 +202,44 @@
       {{ errorMessage() }}
     </div>
   }
-  <div class="form-group">
-    <label for="worker-name">Name</label>
+  <gr-form-field label="Name" for="worker-name" hint="Human-readable label shown in the workers list.">
     <input
       grInput
       id="worker-name"
       [(ngModel)]="newWorkerName"
       placeholder="e.g. Primary Build Server"
-      class="w-full"
       (keyup.enter)="registerWorker()"
     />
-    <small class="text-secondary">Human-readable label shown in the workers list.</small>
-  </div>
-  <div class="form-group">
-    <label for="worker-id">Worker ID</label>
+  </gr-form-field>
+  <gr-form-field label="Worker ID" for="worker-id">
+    <span slot="hint">Must be a UUID v4 - run <code>uuidgen</code> or use the worker's auto-generated ID from <code>/var/lib/gradient-worker/worker-id</code>.</span>
     <input
       grInput
       id="worker-id"
       [(ngModel)]="newWorkerId"
       placeholder="e.g. a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
-      class="w-full"
       (keyup.enter)="registerWorker()"
     />
-    <small class="text-secondary">Must be a UUID v4 - run <code>uuidgen</code> or use the worker's auto-generated ID from <code>/var/lib/gradient-worker/worker-id</code>.</small>
-  </div>
-  <div class="form-group">
-    <label for="worker-url">Worker URL <span class="text-secondary">(optional)</span></label>
+  </gr-form-field>
+  <gr-form-field label="Worker URL" for="worker-url" hint="If set, the server connects outbound to this URL instead of waiting for the worker to connect.">
+    <span slot="label" class="text-secondary">(optional)</span>
     <input
       grInput
       id="worker-url"
       [(ngModel)]="newWorkerUrl"
       placeholder="e.g. wss://worker.example.com/proto"
-      class="w-full"
     />
-    <small class="text-secondary">If set, the server connects outbound to this URL instead of waiting for the worker to connect.</small>
-  </div>
-  <div class="form-group">
-    <label for="worker-token">Token <span class="text-secondary">(optional)</span></label>
+  </gr-form-field>
+  <gr-form-field label="Token" for="worker-token" hint="Pre-generated token. Leave blank to have the server generate one (it will be shown once after registration).">
+    <span slot="label" class="text-secondary">(optional)</span>
     <input
       grInput
       id="worker-token"
       [(ngModel)]="newWorkerToken"
       placeholder="Output of: openssl rand -base64 48"
-      class="w-full"
     />
-    <small class="text-secondary">Pre-generated token. Leave blank to have the server generate one (it will be shown once after registration).</small>
-  </div>
-  <div class="form-group">
-    <label>Server-side capability gates</label>
+  </gr-form-field>
+  <gr-form-field label="Server-side capability gates" hint="Click a tag to toggle. Disabling a capability prevents the server from negotiating it with this worker, even if the worker advertises it.">
     <div class="cap-tag-group">
       <button
         type="button"
@@ -282,8 +272,7 @@
         build
       </button>
     </div>
-    <small class="text-secondary">Click a tag to toggle. Disabling a capability prevents the server from negotiating it with this worker, even if the worker advertises it.</small>
-  </div>
+  </gr-form-field>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showRegisterDialog.set(false)" [disabled]="registering()"></button>
     <button
@@ -331,16 +320,14 @@
       </div>
     }
 
-    <div class="form-group">
-      <label>Peer ID</label>
+    <gr-form-field label="Peer ID">
       <div class="copy-row">
         <code class="copy-value">{{ reg.peer_id }}</code>
       </div>
-    </div>
+    </gr-form-field>
 
     @if (reg.token) {
-      <div class="form-group">
-        <label>Token</label>
+      <gr-form-field label="Token">
         <div class="copy-row">
           <code class="copy-value token-value">{{ reg.token }}</code>
         </div>
@@ -352,13 +339,12 @@
           class="copy-btn"
           (click)="copyToken()"
         ></button>
-      </div>
+      </gr-form-field>
 
-      <div class="form-group">
-        <label>Peers file entry</label>
+      <gr-form-field label="Peers file entry">
+        <span slot="hint">Add this line to <code>/run/secrets/gradient-worker-peers</code> on your worker host, then set <code>peersFile</code> in your NixOS config.</span>
         <pre class="peers-file-example">{{ reg.peer_id }}:{{ reg.token }}</pre>
-        <small class="text-secondary">Add this line to <code>/run/secrets/gradient-worker-peers</code> on your worker host, then set <code>peersFile</code> in your NixOS config.</small>
-      </div>
+      </gr-form-field>
     } @else {
       <p class="text-secondary">Worker registered successfully. The token was pre-supplied and will not be echoed back.</p>
     }
@@ -375,22 +361,17 @@
   width="480px"
 >
   @if (renamingWorker(); as worker) {
-    <div class="form-group">
-      <div class="text-secondary" style="font-size: 0.875rem; margin-bottom: 0.5rem;">{{ worker.worker_id }}</div>
-    </div>
-    <div class="form-group">
-      <label for="rename-name">Name</label>
+    <gr-field-row label="Worker" [value]="worker.worker_id" mono />
+    <gr-form-field label="Name" for="rename-name">
       <input
         grInput
         id="rename-name"
         [(ngModel)]="newName"
         placeholder="e.g. Primary Build Server"
-        class="w-full"
         (keyup.enter)="confirmRename()"
       />
-    </div>
-    <div class="form-group">
-      <label>Server-side capability gates</label>
+    </gr-form-field>
+    <gr-form-field label="Server-side capability gates" hint="Changes take effect on the worker's next reconnect (a re-auth is triggered automatically).">
       <div class="cap-tag-group">
         <button
           type="button"
@@ -423,8 +404,7 @@
           build
         </button>
       </div>
-      <small class="text-secondary">Changes take effect on the worker's next reconnect (a re-auth is triggered automatically).</small>
-    </div>
+    </gr-form-field>
   }
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="cancelRename()" [disabled]="renaming()"></button>

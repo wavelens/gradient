@@ -11,6 +11,7 @@ import { forkJoin } from 'rxjs';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import {
+  BadgeComponent,
   EmptyStateComponent,
   IconComponent,
   LoadingSpinnerComponent,
@@ -28,6 +29,7 @@ import { Project, Cache } from '@core/models';
     EmptyStateComponent,
     IconComponent,
     PageLayoutComponent,
+    BadgeComponent,
   ],
   templateUrl: './dashboard.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

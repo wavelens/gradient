@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, signal, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonComponent, InputDirective } from '@shared/ui';
 
@@ -19,9 +19,9 @@ import { ButtonComponent, InputDirective } from '@shared/ui';
 export class CopyFieldComponent {
   value = input.required<string>();
   id = input<string>();
-  mono = input<boolean>(true);
-  inline = input<boolean>(false);
-  multiline = input<boolean>(false);
+  mono = input(true, { transform: booleanAttribute });
+  inline = input(false, { transform: booleanAttribute });
+  multiline = input(false, { transform: booleanAttribute });
   rows = input<number>(4);
 
   copied = signal(false);

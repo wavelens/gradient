@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ElementRef, effect, inject, input, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, effect, inject, input, computed, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { AbstractControl, NgControl } from '@angular/forms';
 
 type FieldControl = AbstractControl | NgControl | null;
@@ -22,7 +22,7 @@ export class FormFieldComponent {
   label = input<string>();
   for = input<string>();
   hint = input<string>();
-  required = input<boolean>(false);
+  required = input(false, { transform: booleanAttribute });
   control = input<FieldControl>(null);
   invalid = input<boolean | null>(null);
   error = input<string>();

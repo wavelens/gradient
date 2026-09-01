@@ -12,60 +12,51 @@
     <div class="settings-section">
       <h2>General</h2>
       <div class="settings-card">
-        <div class="form-group">
-          <label for="project-name">Name</label>
+        <gr-form-field label="Name" for="project-name" hint="Project name cannot be changed">
           <input
             grInput
             id="project-name"
             [value]="project.name"
             disabled
-            class="w-full"
           />
-          <small class="text-secondary">Project name cannot be changed</small>
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="display-name">Display Name</label>
+        <gr-form-field label="Display Name" for="display-name">
           <input
             grInput
             id="display-name"
             [(ngModel)]="formData.display_name"
-            class="w-full"
             [appManagedDisable]="access()"
           />
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="description">Description</label>
+        <gr-form-field label="Description" for="description">
           <textarea
             grInput
             id="description"
             [(ngModel)]="formData.description"
             rows="3"
-            class="w-full"
             [appManagedDisable]="access()"
           ></textarea>
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="visibility">Visibility</label>
+        <gr-form-field label="Visibility" for="visibility" hint="Public projects are visible and readable by all users">
           <select id="visibility" [(ngModel)]="formData.public" class="role-select" [appManagedDisable]="access()">
             <option [ngValue]="false">Private</option>
             <option [ngValue]="true">Public</option>
           </select>
-          <small class="text-secondary">Public projects are visible and readable by all users</small>
-        </div>
+        </gr-form-field>
 
-        <div class="form-group checkbox-group">
+        <gr-form-field>
+          <span slot="hint">When enabled, the auto-managed <code>build-request</code> task that receives CLI build artefacts is hidden from task listings.</span>
           <gr-checkbox
             inputId="hide-build-requests"
             [(ngModel)]="formData.hide_build_requests"
             [binary]="true"
             [appManagedDisable]="access()"
+            label="Hide Build Requests task"
           />
-          <label for="hide-build-requests">Hide Build Requests task</label>
-          <small class="text-secondary">When enabled, the auto-managed <code>build-request</code> task that receives CLI build artefacts is hidden from task listings.</small>
-        </div>
+        </gr-form-field>
 
         @if (saveError()) {
           <div class="message-banner error">
@@ -146,8 +137,7 @@
         <div class="settings-card">
           <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>
           @if (sshKey()) {
-            <div class="form-group">
-              <label>Public Key</label>
+            <gr-form-field label="Public Key">
               <textarea
                 grInput
                 [value]="sshKey()"
@@ -155,7 +145,7 @@
                 rows="4"
                 class="w-full ssh-key-area"
               ></textarea>
-            </div>
+            </gr-form-field>
             <div class="form-actions">
               <button grButton label="Copy Key" icon="content_copy" severity="secondary" (click)="copySSHKey()"></button>
             </div>

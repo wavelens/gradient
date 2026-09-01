@@ -135,27 +135,23 @@
     </div>
   }
   <div class="dialog-content">
-    <div class="form-group">
-      <label for="cache-display">Display Name *</label>
+    <gr-form-field label="Display Name *" for="cache-display">
       <input
         grInput
         id="cache-display"
         [(ngModel)]="newCache.display_name"
         placeholder="My Cache"
-        class="w-full"
         (ngModelChange)="onCacheDisplayNameChange($event)"
       />
-    </div>
+    </gr-form-field>
 
-    <div class="form-group">
-      <label for="cache-name">Name *</label>
+    <gr-form-field label="Name *" for="cache-name">
       <div class="name-input-wrapper">
         <input
           grInput
           id="cache-name"
           [(ngModel)]="newCache.name"
           placeholder="cache-name"
-          class="w-full"
           (ngModelChange)="onCacheNameChange($event)"
           (input)="onCacheNameUserInput()"
         />
@@ -174,28 +170,24 @@
       } @else {
         <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
       }
-    </div>
+    </gr-form-field>
 
-    <div class="form-group">
-      <label for="cache-desc">Description</label>
+    <gr-form-field label="Description" for="cache-desc">
       <textarea
         grInput
         id="cache-desc"
         [(ngModel)]="newCache.description"
         placeholder="Describe your cache..."
         rows="3"
-        class="w-full"
       ></textarea>
-    </div>
+    </gr-form-field>
 
-    <div class="form-group">
-      <label for="cache-visibility">Visibility</label>
+    <gr-form-field label="Visibility" for="cache-visibility" hint="Public caches are visible and readable by all users">
       <select id="cache-visibility" [(ngModel)]="newCache.public" class="visibility-select w-full">
         <option [ngValue]="false">Private</option>
         <option [ngValue]="true">Public</option>
       </select>
-      <small class="text-secondary">Public caches are visible and readable by all users</small>
-    </div>
+    </gr-form-field>
   </div>
 
   <div grDialogFooter>

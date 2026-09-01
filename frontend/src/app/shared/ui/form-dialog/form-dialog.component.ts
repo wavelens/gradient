@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, input, model, output, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, model, output, ChangeDetectionStrategy, booleanAttribute } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonComponent, DialogComponent } from '@shared/ui';
 
@@ -23,8 +23,8 @@ export class FormDialogComponent {
   cancelLabel = input<string>('Cancel');
   submitIcon = input<string>();
   submitSeverity = input<string>();
-  loading = input<boolean>(false);
-  disabled = input<boolean>(false);
+  loading = input(false, { transform: booleanAttribute });
+  disabled = input(false, { transform: booleanAttribute });
   width = input<string>('420px');
 
   submit = output<void>();

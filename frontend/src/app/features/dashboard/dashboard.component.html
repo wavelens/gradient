@@ -92,10 +92,10 @@
                 <h3>{{ cache.display_name || cache.name }}</h3>
                 <p class="text-secondary">{{ cache.description || 'No description' }}</p>
                 <div class="cache-status">
-                  <span class="status-badge" [class.active]="cache.active">
+                  <gr-badge [severity]="cache.active ? 'success' : 'danger'">
                     {{ cache.active ? 'Active' : 'Inactive' }}
-                  </span>
-                  <span class="text-light">Priority: {{ cache.priority }}</span>
+                  </gr-badge>
+                  <span class="text-secondary">Priority {{ cache.priority }}</span>
                 </div>
               </div>
               <div class="card-arrow">

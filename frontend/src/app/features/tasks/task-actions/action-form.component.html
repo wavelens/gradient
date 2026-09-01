@@ -17,13 +17,11 @@
     </div>
   }
 
-  <div class="form-group">
-    <label for="action-name">Name</label>
-    <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" class="w-full" />
-  </div>
+  <gr-form-field label="Name" for="action-name">
+    <input grInput id="action-name" [ngModel]="name()" (ngModelChange)="name.set($event)" />
+  </gr-form-field>
 
-  <div class="form-group">
-    <label>Type</label>
+  <gr-form-field label="Type">
     <gr-select-button
       [options]="typeOptions()"
       [ngModel]="type()"
@@ -36,48 +34,45 @@
     @if (typeRadioDisabled()) {
       <small class="text-secondary">Action type cannot be changed after creation.</small>
     }
-  </div>
+  </gr-form-field>
 
   @if (type() === 'send_mail') {
-    <div class="form-group">
-      <label for="action-recipients">Recipients</label>
+    <gr-form-field label="Recipients" for="action-recipients" hint="Comma-separated email addresses.">
       <input
         grInput
         id="action-recipients"
         [ngModel]="recipientsRaw()"
         (ngModelChange)="recipientsRaw.set($event)"
         placeholder="alice@example.com, ops@example.com"
-        class="w-full"
       />
-      <small class="text-secondary">Comma-separated email addresses.</small>
-    </div>
-    <div class="form-group">
-      <label for="action-subject">Subject Template (optional)</label>
+    </gr-form-field>
+    <gr-form-field label="Subject Template (optional)" for="action-subject">
       <input
         grInput
         id="action-subject"
         [ngModel]="subjectTemplate()"
         (ngModelChange)="subjectTemplate.set($event)"
         placeholder="[Gradient] {{ '{{event}}' }}"
-        class="w-full"
       />
-    </div>
+    </gr-form-field>
   }
 
   @if (type() === 'send_web_request') {
-    <div class="form-group">
-      <label for="action-url">URL</label>
+    <gr-form-field label="URL" for="action-url">
       <input
         grInput
         id="action-url"
         [ngModel]="url()"
         (ngModelChange)="url.set($event)"
         placeholder="https://example.com/hook"
-        class="w-full"
       />
-    </div>
-    <div class="form-group">
-      <label for="action-token">Token</label>
+    </gr-form-field>
+    <gr-form-field label="Token" for="action-token">
+      <span slot="hint">@if (mode() === 'edit') {
+          Leave blank to keep existing token; enter to replace.
+        } @else {
+          Sent as <code>Authorization: Bearer &lt;token&gt;</code>. Shown once after creation.
+        }</span>
       <div class="token-row">
         <input
           grInput
@@ -85,23 +80,14 @@
           [ngModel]="tokenValue()"
           (ngModelChange)="tokenValue.set($event)"
           [placeholder]="mode() === 'edit' ? 'Leave blank to keep existing token' : ''"
-          class="w-full"
         />
         <button grButton type="button" label="Generate" severity="secondary" (click)="generateToken()"></button>
       </div>
-      <small class="text-secondary">
-        @if (mode() === 'edit') {
-          Leave blank to keep existing token; enter to replace.
-        } @else {
-          Sent as <code>Authorization: Bearer &lt;token&gt;</code>. Shown once after creation.
-        }
-      </small>
-    </div>
+    </gr-form-field>
   }
 
   @if (type() === 'forge_status_report') {
-    <div class="form-group">
-      <label for="action-integration">Outbound Integration</label>
+    <gr-form-field label="Outbound Integration" for="action-integration">
       <gr-select
         inputId="action-integration"
         [ngModel]="integrationId()"
@@ -110,12 +96,11 @@
         optionLabel="label"
         optionValue="value"
       />
-    </div>
+    </gr-form-field>
   }
 
   @if (type() === 'open_pr') {
-    <div class="form-group">
-      <label for="pr-integration">Outbound Integration</label>
+    <gr-form-field label="Outbound Integration" for="pr-integration">
       <gr-select
         inputId="pr-integration"
         [ngModel]="integrationId()"
@@ -124,9 +109,8 @@
         optionLabel="label"
         optionValue="value"
       />
-    </div>
-    <div class="form-group">
-      <label for="pr-generator">Generator</label>
+    </gr-form-field>
+    <gr-form-field label="Generator" for="pr-generator">
       <gr-select
         inputId="pr-generator"
         [ngModel]="prGenerator()"
@@ -135,9 +119,8 @@
         optionLabel="label"
         optionValue="value"
       />
-    </div>
-    <div class="form-group">
-      <label for="pr-granularity">Granularity</label>
+    </gr-form-field>
+    <gr-form-field label="Granularity" for="pr-granularity">
       <gr-select
         inputId="pr-granularity"
         [ngModel]="prGranularity()"
@@ -146,9 +129,8 @@
         optionLabel="label"
         optionValue="value"
       />
-    </div>
-    <div class="form-group">
-      <label for="pr-verify-gate">Verify Gate</label>
+    </gr-form-field>
+    <gr-form-field label="Verify Gate" for="pr-verify-gate">
       <gr-select
         inputId="pr-verify-gate"
         [ngModel]="prVerifyGate()"
@@ -157,54 +139,45 @@
         optionLabel="label"
         optionValue="value"
       />
-    </div>
-    <div class="form-group">
-      <label for="pr-branch-pattern">Branch Pattern</label>
+    </gr-form-field>
+    <gr-form-field label="Branch Pattern" for="pr-branch-pattern">
       <input
         grInput
         id="pr-branch-pattern"
         [ngModel]="prBranchPattern()"
         (ngModelChange)="prBranchPattern.set($event)"
         placeholder="gradient/flake-lock-update"
-        class="w-full"
       />
       <small class="text-secondary">Per Input granularity requires a {{ '{input}' }} placeholder.</small>
-    </div>
-    <div class="form-group">
-      <label for="pr-title-template">Title Template (optional)</label>
+    </gr-form-field>
+    <gr-form-field label="Title Template (optional)" for="pr-title-template">
       <input
         grInput
         id="pr-title-template"
         [ngModel]="prTitleTemplate()"
         (ngModelChange)="prTitleTemplate.set($event)"
-        class="w-full"
       />
-    </div>
-    <div class="form-group">
-      <label for="pr-body-template">Body Template (optional)</label>
+    </gr-form-field>
+    <gr-form-field label="Body Template (optional)" for="pr-body-template">
       <textarea
         grInput
         id="pr-body-template"
         [ngModel]="prBodyTemplate()"
         (ngModelChange)="prBodyTemplate.set($event)"
         rows="3"
-        class="w-full"
       ></textarea>
-    </div>
-    <div class="form-group checkbox-group">
-      <gr-checkbox
+    </gr-form-field>
+    <gr-checkbox
         inputId="pr-update-existing"
         [ngModel]="prUpdateExisting()"
         (ngModelChange)="prUpdateExisting.set($event)"
         [binary]="true"
-      />
-      <label for="pr-update-existing">Update existing PR</label>
-    </div>
+      label="Update existing PR"
+    />
   }
 
   @if (type() !== 'open_pr') {
-    <div class="form-group">
-      <label>Events</label>
+    <gr-form-field label="Events">
       @if (type() === 'forge_status_report') {
         <app-action-events [selected]="displayedEvents()" [disabled]="true" />
         <small class="text-secondary">Events are fixed for forge status reports.</small>
@@ -214,20 +187,16 @@
           (selectedChange)="events.set($event)"
         />
       }
-    </div>
+    </gr-form-field>
   } @else {
-    <div class="form-group">
-      <label>Events</label>
-      <small class="text-secondary">
-        Open PR runs automatically when an input_update evaluation passes its verify gate; it has no event triggers.
-      </small>
-    </div>
+    <gr-form-field label="Events" hint="Open PR runs automatically when an input_update evaluation passes its verify gate; it has no event triggers.">
+
+    </gr-form-field>
   }
 
-  <div class="form-group checkbox-group">
-    <gr-checkbox inputId="action-active" [ngModel]="active()" (ngModelChange)="active.set($event)" [binary]="true" />
-    <label for="action-active">Active</label>
-  </div>
+  <gr-checkbox inputId="action-active" [ngModel]="active()" (ngModelChange)="active.set($event)" [binary]="true"
+    label="Active"
+  />
 
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="onCancel()"></button>

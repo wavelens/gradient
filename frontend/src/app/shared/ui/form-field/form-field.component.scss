@@ -28,6 +28,8 @@
     color: var(--gr-status-danger);
   }
 
+  .hint:empty { display: none; }
+
   .hint,
   .field-error {
     display: block;

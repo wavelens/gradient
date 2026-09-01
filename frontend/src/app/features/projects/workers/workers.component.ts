@@ -15,6 +15,8 @@ import { GradientCapabilities, Worker, WorkerRegistration, AccessState } from '@
 import {
   ButtonComponent,
   DialogComponent,
+  FieldRowComponent,
+  FormFieldComponent,
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
@@ -41,6 +43,8 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
     ManagedDisableDirective,
     IconComponent, MessageBannerComponent,
     PageLayoutComponent,
+    FormFieldComponent,
+    FieldRowComponent,
   ],
   providers: [MessageService],
   templateUrl: './workers.component.html',

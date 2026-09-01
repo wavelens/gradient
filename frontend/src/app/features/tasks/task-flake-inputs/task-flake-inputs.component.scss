@@ -92,27 +92,7 @@
     background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
     color: var(--gr-status-warning);
   }
-}
-
-.form-group {
-  margin-bottom: $spacing-md;
-  label {
-    display: block;
-    margin-bottom: $spacing-sm;
-    font-size: $font-size-sm;
-    font-weight: 500;
-  }
-  small { display: block; margin-top: $spacing-xs; font-size: $font-size-xs; }
-
-  &.checkbox-group {
-    display: flex;
-    align-items: center;
-    gap: $spacing-sm;
-    label { margin: 0; font-weight: normal; }
-  }
-}
-
-.dialog-error {
+}.dialog-error {
   display: flex;
   align-items: center;
   gap: $spacing-sm;

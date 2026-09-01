@@ -13,55 +13,41 @@
     </div>
 
     @if (errorMessage()) {
-      <div class="error-message">
-        <gr-icon name="error" />
-        {{ errorMessage() }}
-      </div>
+      <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
     }
 
     @if (!oidcRequired) {
       <form [formGroup]="loginForm" (ngSubmit)="onSubmit()" class="auth-form">
-        <div class="form-group">
-          <label for="username">Username or Email</label>
+        <gr-form-field
+          label="Username or Email"
+          for="username"
+          [control]="loginForm.get('username')"
+          error="Username or email is required"
+        >
           <input
             type="text"
             id="username"
             formControlName="username"
-            class="form-input"
+            grInput
             placeholder="Enter your username or email"
             autocomplete="username"
           />
-          @if (loginForm.get('username')?.touched && loginForm.get('username')?.errors) {
-            <span class="field-error">Username or email is required</span>
-          }
-        </div>
+        </gr-form-field>
 
-        <div class="form-group">
-          <label for="password">Password</label>
-          <div class="password-wrapper">
-            <input
-              [type]="showPassword() ? 'text' : 'password'"
-              id="password"
-              formControlName="password"
-              class="form-input"
-              placeholder="Enter your password"
-              autocomplete="current-password"
-            />
-            <button type="button" class="eye-btn" (click)="showPassword.set(!showPassword())" tabindex="-1">
-              <gr-icon [name]="showPassword() ? 'visibility_off' : 'visibility'" />
-            </button>
-          </div>
-          @if (loginForm.get('password')?.touched && loginForm.get('password')?.errors) {
-            <span class="field-error">Password is required</span>
-          }
-        </div>
+        <gr-form-field
+          label="Password"
+          for="password"
+          [control]="loginForm.get('password')"
+          error="Password is required"
+        >
+          <gr-password-input
+            inputId="password"
+            formControlName="password"
+            placeholder="Enter your password"
+          />
+        </gr-form-field>
 
-        <div class="form-group-checkbox">
-          <label>
-            <input type="checkbox" formControlName="rememberMe" />
-            <span>Remember me</span>
-          </label>
-        </div>
+        <gr-checkbox inputId="rememberMe" formControlName="rememberMe" label="Remember me" />
 
         <button
           grButton

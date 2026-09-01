@@ -107,8 +107,6 @@
   flex-direction: column;
   gap: $spacing-md;
   padding-top: $spacing-md;
-
-  .form-group { margin-bottom: 0; }
 }
 
 .type-toggle {
@@ -139,18 +137,7 @@
     background: var(--gr-surface-sunken);
     color: var(--gr-text-primary);
   }
-}
-
-.form-group {
-  margin-bottom: $spacing-md;
-
-  label { display: block; margin-bottom: $spacing-sm; font-size: $font-size-sm; font-weight: 500; }
-  small { display: block; margin-top: $spacing-xs; font-size: $font-size-xs; }
-
-  &:last-child { margin-bottom: 0; }
-}
-
-.role-select {
+}.role-select {
   width: 100%;
   padding: $spacing-sm $spacing-md;
   background: var(--gr-surface-sunken);

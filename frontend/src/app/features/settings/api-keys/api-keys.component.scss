@@ -69,15 +69,7 @@
   color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-}
-
-.form-group {
-  margin-top: $spacing-md;
-  margin-bottom: $spacing-md;
-  label { display: block; margin-bottom: $spacing-sm; font-size: $font-size-sm; font-weight: 500; }
-}
-
-.w-full { width: 100%; }
+}.w-full { width: 100%; }
 
 .badge-managed {
   font-size: $font-size-xs;
