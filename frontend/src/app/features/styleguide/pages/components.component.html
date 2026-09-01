@@ -29,7 +29,7 @@
 <button grButton label="Toggle error" severity="secondary" (click)="nameInvalid.set(!nameInvalid())"></button>
 
 <gr-form-field label="Password" for="sg-pw">
-  <gr-password-input id="sg-pw" [control]="password" />
+  <gr-password-input inputId="sg-pw" [(ngModel)]="password" />
 </gr-form-field>
 
 <h2>Selection</h2>

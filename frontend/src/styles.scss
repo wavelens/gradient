@@ -236,7 +236,7 @@ textarea:disabled {
 
 // Projected controls carry the caller's encapsulation, so gr-form-field cannot
 // reach them from its own stylesheet.
-.form-field.has-error :is(.gr-input, .gr-select__trigger, .password-input__field) {
+.form-field.has-error :is(.gr-input, .gr-select__trigger) {
   border-color: var(--gr-status-danger);
 }
 
