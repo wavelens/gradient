@@ -42,14 +42,9 @@ ${block(LIGHT_ROLES, (v) => `var(${v})`)}
   @include dark-roles;
 }
 
+// Dark is the default and does not follow the OS. Light is opt-in via ThemeService.
 :root[data-theme='light'] {
   @include light-roles;
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme='dark']) {
-    @include light-roles;
-  }
 }
 `;
 }

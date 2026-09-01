@@ -10,7 +10,7 @@ export type ThemePreference = 'light' | 'dark' | 'system';
 
 const STORAGE_KEY = 'gradient.theme';
 
-/// The stylesheet already follows the OS preference, so this only has to stamp an explicit override.
+/// Dark is the default. Light and system are opt-in, and the resolved theme is always stamped.
 @Injectable({ providedIn: 'root' })
 export class ThemeService {
   private pref = signal<ThemePreference>(this.restore());
@@ -23,24 +23,22 @@ export class ThemeService {
   });
 
   constructor() {
-    this.stamp(this.pref());
+    this.stamp(this.resolved());
   }
 
   set(pref: ThemePreference): void {
     this.pref.set(pref);
-    this.stamp(pref);
+    this.stamp(this.resolved());
     try {
-      if (pref === 'system') localStorage.removeItem(STORAGE_KEY);
+      if (pref === 'dark') localStorage.removeItem(STORAGE_KEY);
       else localStorage.setItem(STORAGE_KEY, pref);
     } catch {
       // Storage can be denied in private windows; the in-memory preference still applies.
     }
   }
 
-  private stamp(pref: ThemePreference): void {
-    const root = document.documentElement;
-    if (pref === 'system') root.removeAttribute('data-theme');
-    else root.setAttribute('data-theme', pref);
+  private stamp(theme: 'light' | 'dark'): void {
+    document.documentElement.setAttribute('data-theme', theme);
   }
 
   private systemTheme(): 'light' | 'dark' {
@@ -50,9 +48,9 @@ export class ThemeService {
   private restore(): ThemePreference {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      return stored === 'light' || stored === 'dark' ? stored : 'system';
+      return stored === 'light' || stored === 'system' ? stored : 'dark';
     } catch {
-      return 'system';
+      return 'dark';
     }
   }
 }

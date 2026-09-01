@@ -28,19 +28,24 @@ describe('ThemeService', () => {
     TestBed.configureTestingModule({});
   });
 
-  it('defaults to system and stamps no attribute', () => {
+  it('defaults to dark and stamps it', () => {
     const svc = TestBed.inject(ThemeService);
-    expect(svc.preference()).toBe('system');
-    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+    expect(svc.preference()).toBe('dark');
+    expect(svc.resolved()).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
   });
 
-  it('resolves system to dark when the OS does not prefer light', () => {
+  it('stays dark even when the OS prefers light', () => {
+    stubPrefersLight(true);
     expect(TestBed.inject(ThemeService).resolved()).toBe('dark');
   });
 
-  it('resolves system to light when the OS prefers light', () => {
+  it('follows the OS only when system is chosen explicitly', () => {
     stubPrefersLight(true);
-    expect(TestBed.inject(ThemeService).resolved()).toBe('light');
+    const svc = TestBed.inject(ThemeService);
+    svc.set('system');
+    expect(svc.resolved()).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
   });
 
   it('stamps data-theme for an explicit choice', () => {
@@ -57,10 +62,11 @@ describe('ThemeService', () => {
     expect(TestBed.inject(ThemeService).preference()).toBe('light');
   });
 
-  it('clears the attribute when returning to system', () => {
+  it('returns to dark when the choice is cleared', () => {
     const svc = TestBed.inject(ThemeService);
+    svc.set('light');
     svc.set('dark');
-    svc.set('system');
-    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(localStorage.getItem('gradient.theme')).toBeNull();
   });
 });
