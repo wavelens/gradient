@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-notify", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-notify", "gradient-proto", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -35,6 +35,7 @@ gradient-migration    = { path = "gradient-migration" }
 gradient-nix          = { path = "gradient-nix" }
 gradient-notify       = { path = "gradient-notify" }
 gradient-proto        = { path = "gradient-proto" }
+gradient-report       = { path = "gradient-report" }
 gradient-scheduler    = { path = "gradient-scheduler" }
 gradient-score        = { path = "gradient-score" }
 gradient-sources      = { path = "gradient-sources" }
@@ -158,6 +159,7 @@ rustls        = { version = "0.23", default-features = false, features = ["std",
 rustls-native-certs = { version = "0.8", default-features = false }
 subtle        = { version = "2.6", default-features = false }
 tempfile      = { version = "3.27", default-features = false }
+rusqlite      = { version = "0.37", default-features = false, features = ["bundled"] }
 url           = { version = "2.5", default-features = false }
 webpki-roots  = { version = "1.0", default-features = false }
 
