@@ -12,8 +12,10 @@
 //! the redaction path takes rows directly, so what the file ends up containing
 //! is testable without a database.
 
+mod redact;
 mod schema;
 
+pub use redact::Redactor;
 pub use schema::{
     ManifestRow, ReportOptions, SCHEMA_VERSION, open_report, write_manifest, write_meta,
 };
