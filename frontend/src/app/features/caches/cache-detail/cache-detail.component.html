@@ -12,7 +12,7 @@
       [title]="c.display_name"
       [subtitle]="c.description || 'No description'"
     >
-      <div slot="meta" class="cache-status">
+      <div slot="meta">
         <gr-badge [severity]="c.active ? 'success' : 'danger'">
           {{ c.active ? 'Active' : 'Inactive' }}
         </gr-badge>

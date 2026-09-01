@@ -181,19 +181,13 @@
   width="420px"
   (hide)="onTransferDialogHide()"
 >
-  <div class="dialog-content">
+  <div>
     <p>Transfer <strong>{{ task()?.display_name }}</strong> to another project. This action cannot be undone.</p>
     @if (transferError()) {
-      <div class="dialog-error">
-        <gr-icon name="error" />
-        {{ transferError() }}
-      </div>
+      <gr-message-banner type="error">{{ transferError() }}</gr-message-banner>
     }
     @if (transferSuccess()) {
-      <div class="dialog-success">
-        <gr-icon name="check_circle" />
-        Ownership transferred successfully.
-      </div>
+      <gr-message-banner type="success">Ownership transferred successfully.</gr-message-banner>
     }
     <gr-form-field label="Target Project">
       <gr-autocomplete

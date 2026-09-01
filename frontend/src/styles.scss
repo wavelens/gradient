@@ -261,6 +261,15 @@ textarea:disabled {
   max-width: 68ch;
 }
 
+// Projected content carries the caller's encapsulation, so a slotted group of
+// buttons cannot be reached from the primitive's own stylesheet.
+.page-layout__actions > div,
+.empty-state > [slot='action'] {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+}
+
 [grDialogFooter] {
   display: flex;
   align-items: center;

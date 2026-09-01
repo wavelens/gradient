@@ -13,10 +13,7 @@
     </div>
 
     @if (errorMessage()) {
-      <div class="error-message">
-        <gr-icon name="error" />
-        {{ errorMessage() }}
-      </div>
+      <gr-message-banner type="error">{{ errorMessage() }}</gr-message-banner>
     }
 
     @if (loading()) {

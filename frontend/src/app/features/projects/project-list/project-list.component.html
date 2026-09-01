@@ -58,7 +58,7 @@
   @if (publicLoading() && !loading()) {
     <gr-loading-spinner message="Loading public projects..." />
   } @else if (filteredPublicProjects.length > 0) {
-    <div class="section-header discover-header">
+    <div class="discover-header">
       <h2>Discover Public Projects</h2>
     </div>
     <div class="project-grid">
@@ -93,7 +93,7 @@
       {{ createError() }}
     </div>
   }
-  <div class="dialog-content">
+  <div>
     <gr-form-field label="Display Name *" for="display_name">
       <input
         grInput

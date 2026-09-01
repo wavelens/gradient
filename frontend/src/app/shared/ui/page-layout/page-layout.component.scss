@@ -46,13 +46,6 @@
     display: flex;
     align-items: center;
     gap: $spacing-sm;
-
-    // A caller that groups several buttons in one slotted element still gets the row.
-    > div {
-      display: flex;
-      align-items: center;
-      gap: $spacing-sm;
-    }
   }
 
   &__banners {
