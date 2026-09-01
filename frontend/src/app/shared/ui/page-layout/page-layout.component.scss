@@ -17,7 +17,8 @@
     grid-template-areas:
       'crumbs actions'
       'title actions'
-      'subtitle actions';
+      'subtitle actions'
+      'meta actions';
     gap: $spacing-xs $spacing-md;
 
     h1 {
@@ -31,6 +32,12 @@
     grid-area: subtitle;
     color: var(--gr-text-secondary);
     margin: 0;
+  }
+
+  &__meta {
+    grid-area: meta;
+
+    &:empty { display: none; }
   }
 
   &__actions {

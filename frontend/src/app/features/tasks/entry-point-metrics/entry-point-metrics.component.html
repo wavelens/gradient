@@ -4,25 +4,11 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/project', projectName, 'task', taskName]" class="breadcrumb-link">{{ taskDisplayName() || taskName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Entry Point Metrics</span>
-      </div>
-      <h1>{{ evalAttr() }}</h1>
-      <p class="text-secondary">Build history over the last {{ keepEvaluations() }} completed evaluations.</p>
-    </div>
-    @if (latestBuildId()) {
-      <button grButton label="View Closure" icon="account_tree" severity="secondary"
-         [routerLink]="['/project', projectName, 'closure', 'build', latestBuildId()]"></button>
-    }
-  </div>
-
+<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: taskDisplayName() || taskName, link: ['/project', projectName, 'task', taskName] }, { label: 'Entry Point Metrics' }]" [title]="evalAttr()" [subtitle]="'Build history over the last ' + (keepEvaluations()) + ' completed evaluations.'">
+  @if (latestBuildId()) {
+    <button slot="actions" grButton label="View Closure" icon="account_tree" severity="secondary"
+      [routerLink]="['/project', projectName, 'closure', 'build', latestBuildId()]"></button>
+  }
   @if (loading()) {
     <gr-loading-spinner message="Loading metrics..." />
   } @else if (points().length === 0) {
@@ -117,4 +103,4 @@
       </div>
     </div>
   }
-</div>
+</gr-page-layout>

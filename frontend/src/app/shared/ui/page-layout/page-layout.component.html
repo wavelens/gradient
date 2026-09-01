@@ -16,6 +16,9 @@
     @if (subtitle()) {
       <p class="page-layout__subtitle">{{ subtitle() }}</p>
     }
+    <div class="page-layout__meta">
+      <ng-content select="[slot=meta]"></ng-content>
+    </div>
     <div class="page-layout__actions">
       <ng-content select="[slot=actions]"></ng-content>
     </div>

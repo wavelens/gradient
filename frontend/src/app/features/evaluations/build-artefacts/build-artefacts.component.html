@@ -4,17 +4,15 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="page-header">
-  <button class="icon-btn" (click)="goBack()" title="Back">
-    <gr-icon name="arrow_back" />
-  </button>
-  <div class="header-info">
-    <span class="header-title">Build Artefacts</span>
-    <span class="header-id">{{ buildShortId() }}</span>
-  </div>
-</div>
-
-<div class="page">
+<gr-page-layout title="Build Artefacts" [subtitle]="buildShortId()" maxWidth="780px">
+  <button
+    slot="actions"
+    grButton
+    label="Back"
+    icon="arrow_back"
+    severity="secondary"
+    (click)="goBack()"
+  ></button>
 
   @if (loading()) {
     <gr-loading-spinner message="Loading artefacts..." />
@@ -47,4 +45,4 @@
       }
     </div>
   }
-</div>
+</gr-page-layout>

@@ -4,21 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a routerLink="/caches" class="breadcrumb-link">Caches</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ cacheDisplayName || cacheName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">NARs</span>
-      </div>
-      <h1>NARs</h1>
-      <p class="text-secondary">Browse and manage Nix archives stored in this cache.</p>
-    </div>
-  </div>
-
+<gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cacheDisplayName || cacheName, link: ['/caches', cacheName] }, { label: 'NARs' }]" title="NARs" subtitle="Browse and manage Nix archives stored in this cache.">
   @if (stats(); as s) {
     <div class="stat-cards">
       <div class="stat-card">
@@ -138,7 +124,7 @@
       </div>
     </div>
   }
-</div>
+</gr-page-layout>
 
 <app-cache-nars-detail-drawer
   [cacheName]="cacheName"

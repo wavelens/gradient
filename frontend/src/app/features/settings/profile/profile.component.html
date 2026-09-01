@@ -4,12 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <h1>Profile Settings</h1>
-    <p class="text-secondary">Manage your personal information</p>
-  </div>
-
+<gr-page-layout title="Profile Settings" subtitle="Manage your personal information">
   @if (loading()) {
     <gr-loading-spinner message="Loading profile..." />
   } @else {
@@ -106,7 +101,7 @@
       </div>
     </div>
   }
-</div>
+</gr-page-layout>
 
 <!-- Delete Confirmation Dialog -->
 <gr-dialog

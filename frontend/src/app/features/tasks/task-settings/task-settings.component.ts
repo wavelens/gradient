@@ -10,7 +10,17 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { AutoCompleteComponent, ButtonComponent, CheckboxComponent, DialogComponent, IconComponent, InputDirective, LoadingSpinnerComponent, SelectComponent } from '@shared/ui';
+import {
+  AutoCompleteComponent,
+  ButtonComponent,
+  CheckboxComponent,
+  DialogComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+  PageLayoutComponent,
+  SelectComponent,
+} from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ConcurrencyPolicy, Task } from '@core/models';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -33,6 +43,7 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
     WritableDirective,
     ManagedDisableDirective,
     IconComponent,
+    PageLayoutComponent,
   ],
   templateUrl: './task-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -4,12 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <h1>Dashboard</h1>
-    <p class="text-secondary">Welcome back! Here's an overview of your Gradient workspace.</p>
-  </div>
-
+<gr-page-layout title="Dashboard" subtitle="Welcome back! Here's an overview of your Gradient workspace.">
   @if (loading()) {
     <gr-loading-spinner message="Loading dashboard..." />
   } @else {
@@ -118,4 +113,4 @@
       }
     </div>
   }
-</div>
+</gr-page-layout>

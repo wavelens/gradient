@@ -4,20 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/project', projectName, 'settings']" class="breadcrumb-link">Settings</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Members & Roles</span>
-      </div>
-      <h1>Members & Roles</h1>
-    </div>
-  </div>
-
+<gr-page-layout [breadcrumb]="[{ label: projectName, link: ['/project', projectName] }, { label: 'Settings', link: ['/project', projectName, 'settings'] }, { label: 'Members & Roles' }]" title="Members & Roles">
   <!-- Members -->
   <div class="settings-section">
     <div class="section-header">
@@ -76,7 +63,7 @@
           <p class="text-secondary">No members found.</p>
         }
       </div>
-    }
+  }
   </div>
 
   <!-- Roles -->
@@ -145,9 +132,9 @@
           <p class="text-secondary">No roles found.</p>
         }
       </div>
-    }
+  }
   </div>
-</div>
+</gr-page-layout>
 
 <!-- Add Member Dialog -->
 <gr-dialog

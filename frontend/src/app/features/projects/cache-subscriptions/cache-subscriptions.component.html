@@ -4,20 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/project', projectName, 'settings']" class="breadcrumb-link">Settings</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Cache Subscriptions</span>
-      </div>
-      <h1>Cache Subscriptions</h1>
-      <p class="text-secondary">Nix binary caches this project pushes builds to</p>
-    </div>
-    <button
+<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: 'Settings', link: ['/project', projectName, 'settings'] }, { label: 'Cache Subscriptions' }]" title="Cache Subscriptions" subtitle="Nix binary caches this project pushes builds to">
+  <button slot="actions"
       *appWritable="access()"
       grButton
       label="Subscribe to Cache"
@@ -25,8 +13,6 @@
       [appManagedDisable]="access()"
       (click)="openSubscribeDialog()"
     ></button>
-  </div>
-
   @if (loading()) {
     <gr-loading-spinner message="Loading cache subscriptions..." />
   } @else {
@@ -70,7 +56,7 @@
       </div>
     }
   }
-</div>
+</gr-page-layout>
 
 <!-- Subscribe Dialog -->
 <gr-dialog

@@ -4,31 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
-
-.page-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  margin-bottom: $spacing-xxl;
-
-  h1 { font-size: $font-size-xxl; margin: 0 0 $spacing-sm 0; }
-}
-
-.breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-  margin-bottom: $spacing-sm;
-  font-size: $font-size-sm;
-  color: var(--gr-text-secondary);
-
-  .breadcrumb-link { color: var(--gr-text-secondary); text-decoration: none; &:hover { color: var(--gr-text-primary); } }
-  .breadcrumb-separator { color: var(--gr-text-muted); }
-  .breadcrumb-current { color: var(--gr-text-primary); }
-}
-
-.stat-cards {
+@use '../../../styles/variables' as *;.stat-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: $spacing-md;

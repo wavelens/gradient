@@ -4,20 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a routerLink="/settings/profile" class="breadcrumb-link">Settings</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">API Keys</span>
-      </div>
-      <h1>API Keys</h1>
-      <p class="text-secondary">Manage API keys for programmatic access</p>
-    </div>
-    <button grButton label="New API Key" icon="add" (click)="openCreateDialog()"></button>
-  </div>
-
+<gr-page-layout [breadcrumb]="[{ label: 'Settings', link: ['/settings', 'profile'] }, { label: 'API Keys' }]" title="API Keys" subtitle="Manage API keys for programmatic access">
+  <button slot="actions" grButton label="New API Key" icon="add" (click)="openCreateDialog()"></button>
   @if (loading()) {
     <gr-loading-spinner message="Loading API keys..." />
   } @else {
@@ -101,7 +89,7 @@
       </div>
     }
   }
-</div>
+</gr-page-layout>
 
 <!-- Create / Edit Dialog -->
 <gr-dialog

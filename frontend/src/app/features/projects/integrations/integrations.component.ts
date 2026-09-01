@@ -20,7 +20,16 @@ import {
   IntegrationKind,
   Project,
 } from '@core/models';
-import { ButtonComponent, DialogComponent, IconComponent, InputDirective, LabelHelpComponent, LoadingSpinnerComponent, SelectComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  DialogComponent,
+  IconComponent,
+  InputDirective,
+  LabelHelpComponent,
+  LoadingSpinnerComponent,
+  PageLayoutComponent,
+  SelectComponent,
+} from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 
 interface Option<T> {
@@ -44,6 +53,7 @@ interface Option<T> {
     WritableDirective,
     ManagedDisableDirective,
     IconComponent,
+    PageLayoutComponent,
   ],
   templateUrl: './integrations.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

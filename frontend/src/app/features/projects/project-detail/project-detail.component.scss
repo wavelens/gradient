@@ -5,35 +5,6 @@
  */
 
 @use '../../../styles/variables' as *;
-
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: $spacing-xxl;
-
-  h1 {
-    font-size: $font-size-xxl;
-    color: var(--gr-text-primary);
-    margin: 0 0 $spacing-sm 0;
-  }
-
-  p {
-    margin: 0;
-    font-size: $font-size-md;
-  }
-
-  .header-actions {
-    display: flex;
-    gap: $spacing-md;
-    flex-shrink: 0;
-
-    button {
-      white-space: nowrap;
-    }
-  }
-}
-
 .section {
   margin-bottom: $spacing-xxl;
 
@@ -201,7 +172,6 @@
   display: flex;
   align-items: center;
   color: var(--gr-text-secondary);
-
 
   &.available { color: var(--gr-status-success); }
   &.taken { color: var(--gr-status-danger); }

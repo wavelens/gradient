@@ -4,22 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a routerLink="/caches" class="breadcrumb-link">Caches</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ cacheDisplayName || cacheName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/caches', cacheName, 'settings']" class="breadcrumb-link">Settings</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Upstream Caches</span>
-      </div>
-      <h1>Upstream Caches</h1>
-      <p class="text-secondary">External and internal caches this cache pulls through from</p>
-    </div>
-    <button
+<gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cacheDisplayName || cacheName, link: ['/caches', cacheName] }, { label: 'Settings', link: ['/caches', cacheName, 'settings'] }, { label: 'Upstream Caches' }]" title="Upstream Caches" subtitle="External and internal caches this cache pulls through from">
+  <button slot="actions"
       *appWritable="access()"
       grButton
       label="Add Upstream"
@@ -27,8 +13,6 @@
       (click)="openAddDialog()"
       [appManagedDisable]="access()"
     ></button>
-  </div>
-
   @if (loading()) {
     <gr-loading-spinner message="Loading upstream caches..." />
   } @else {
@@ -85,7 +69,7 @@
       </div>
     }
   }
-</div>
+</gr-page-layout>
 
 <!-- Edit Upstream Dialog -->
 <gr-dialog
@@ -222,7 +206,7 @@
         <input grInput id="up-pubkey" [(ngModel)]="upstreamForm.public_key" placeholder="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=" class="w-full" />
       </div>
       <small class="text-secondary">Http caches are always Read Only.</small>
-    }
+  }
   </div>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showAddDialog.set(false)" [disabled]="addingUpstream()"></button>

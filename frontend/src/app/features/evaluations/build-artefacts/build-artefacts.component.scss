@@ -6,61 +6,6 @@
 
 @use '../../../styles/variables' as *;
 
-// ── Page header (matches graph page style) ───────────────────────────────────
-
-.page-header {
-  display: flex;
-  align-items: center;
-  gap: $spacing-md;
-  padding: $spacing-sm $spacing-lg;
-  background: var(--gr-surface-raised);
-  border-bottom: 1px solid var(--gr-border);
-}
-
-.icon-btn {
-  background: none;
-  border: none;
-  color: var(--gr-text-secondary);
-  cursor: pointer;
-  padding: 6px;
-  border-radius: $border-radius-sm;
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  transition: color $transition-fast, background $transition-fast;
-
-  &:hover {
-    color: var(--gr-text-primary);
-    background: var(--gr-surface-hover);
-  }
-}
-
-.header-info {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-}
-
-.header-title {
-  font-size: $font-size-md;
-  font-weight: 600;
-  color: var(--gr-text-primary);
-}
-
-.header-id {
-  font-size: $font-size-xs;
-  font-family: monospace;
-  color: var(--gr-text-muted);
-}
-
-// ── Content ───────────────────────────────────────────────────────────────────
-
-.page {
-  max-width: 780px;
-  margin: 0 auto;
-  padding: $spacing-xl $spacing-lg;
-}
-
 // ── Empty state ───────────────────────────────────────────────────────────────
 
 .empty-state {

@@ -9,12 +9,16 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { AdminService, GithubAppCredentials } from '@core/services/admin.service';
-import { ButtonComponent, InputDirective } from '@shared/ui';
+import {
+  ButtonComponent,
+  InputDirective,
+  PageLayoutComponent,
+} from '@shared/ui';
 
 @Component({
   selector: 'app-admin-github-app',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective],
+  imports: [CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, PageLayoutComponent],
   templateUrl: './github-app.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './github-app.component.scss',

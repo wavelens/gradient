@@ -13,7 +13,19 @@ import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ApiKey } from '@core/models';
 import { PermissionDescriptor } from '@core/models/permission.model';
-import { ButtonComponent, CheckboxComponent, DialogComponent, DividerComponent, IconComponent, InputDirective, LoadingSpinnerComponent, SelectButtonComponent, SelectComponent, TooltipDirective } from '@shared/ui';
+import {
+  ButtonComponent,
+  CheckboxComponent,
+  DialogComponent,
+  DividerComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+  PageLayoutComponent,
+  SelectButtonComponent,
+  SelectComponent,
+  TooltipDirective,
+} from '@shared/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 
@@ -42,6 +54,7 @@ interface SelectOption {
     LoadingSpinnerComponent,
     ManagedDisableDirective,
     IconComponent,
+    PageLayoutComponent,
   ],
   templateUrl: './api-keys.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

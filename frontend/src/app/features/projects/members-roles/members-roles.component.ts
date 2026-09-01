@@ -16,7 +16,16 @@ import {
 } from '@core/services/projects.service';
 import { UserService } from '@core/services/user.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
-import { AutoCompleteComponent, ButtonComponent, CheckboxComponent, DialogComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  AutoCompleteComponent,
+  ButtonComponent,
+  CheckboxComponent,
+  DialogComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+  PageLayoutComponent,
+} from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 
@@ -41,6 +50,7 @@ interface RoleFormState {
     WritableDirective,
     ManagedDisableDirective,
     IconComponent,
+    PageLayoutComponent,
   ],
   templateUrl: './members-roles.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

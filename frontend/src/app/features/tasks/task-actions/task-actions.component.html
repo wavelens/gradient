@@ -4,22 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/project', projectName, 'task', taskName]" class="breadcrumb-link">{{ taskName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/project', projectName, 'task', taskName, 'settings']" class="breadcrumb-link">Settings</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Actions</span>
-      </div>
-      <h1>Actions</h1>
-      <p class="text-secondary">Side effects triggered by evaluation and build events</p>
-    </div>
-    <button
+<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: taskName, link: ['/project', projectName, 'task', taskName] }, { label: 'Settings', link: ['/project', projectName, 'task', taskName, 'settings'] }, { label: 'Actions' }]" title="Actions" subtitle="Side effects triggered by evaluation and build events">
+  <button slot="actions"
       *appWritable="access()"
       grButton
       label="New Action"
@@ -27,8 +13,6 @@
       (click)="startCreate()"
       [appManagedDisable]="access()"
     ></button>
-  </div>
-
   @if (error()) {
     <div class="dialog-error">
       <gr-icon name="error" />
@@ -138,7 +122,7 @@
       </div>
     }
   }
-</div>
+</gr-page-layout>
 
 <app-action-form
   mode="create"

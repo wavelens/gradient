@@ -9,7 +9,15 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { CachesService } from '@core/services/caches.service';
-import { ButtonComponent, DialogComponent, DividerComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  DialogComponent,
+  DividerComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+  PageLayoutComponent,
+} from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { Cache } from '@core/models';
@@ -30,6 +38,7 @@ import { Cache } from '@core/models';
     WritableDirective,
     ManagedDisableDirective,
     IconComponent,
+    PageLayoutComponent,
   ],
   templateUrl: './cache-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

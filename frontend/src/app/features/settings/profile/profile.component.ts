@@ -10,7 +10,15 @@ import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
-import { ButtonComponent, DialogComponent, DividerComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  DialogComponent,
+  DividerComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+  PageLayoutComponent,
+} from '@shared/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 
@@ -28,6 +36,7 @@ import { AccessState } from '@core/models';
     LoadingSpinnerComponent,
     ManagedDisableDirective,
     IconComponent,
+    PageLayoutComponent,
   ],
   templateUrl: './profile.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

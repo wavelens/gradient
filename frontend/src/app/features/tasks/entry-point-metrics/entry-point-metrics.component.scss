@@ -5,48 +5,6 @@
  */
 
 @use '../../../styles/variables' as *;
-
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: $spacing-xl $spacing-lg;
-}
-
-.page-header {
-  margin-bottom: $spacing-xl;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: $spacing-lg;
-
-  .breadcrumb {
-    display: flex;
-    align-items: center;
-    gap: $spacing-xs;
-    font-size: $font-size-sm;
-    color: var(--gr-text-muted);
-    margin-bottom: $spacing-sm;
-
-    .breadcrumb-link {
-      color: var(--gr-text-secondary);
-      text-decoration: none;
-      &:hover { color: var(--gr-text-primary); }
-    }
-
-    .breadcrumb-separator { color: var(--gr-text-muted); }
-    .breadcrumb-current { color: var(--gr-text-primary); }
-  }
-
-  h1 {
-    font-size: $font-size-xl;
-    font-weight: 600;
-    color: var(--gr-text-primary);
-    margin: 0 0 $spacing-xs;
-    font-family: monospace, Arial, sans-serif;
-    word-break: break-all;
-  }
-}
-
 .empty-state {
   display: flex;
   flex-direction: column;

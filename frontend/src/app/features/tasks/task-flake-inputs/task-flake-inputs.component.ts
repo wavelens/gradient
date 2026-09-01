@@ -10,7 +10,17 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { ButtonComponent, CheckboxComponent, DialogComponent, IconComponent, InputDirective, LoadingSpinnerComponent, MessageService, ToastComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  CheckboxComponent,
+  DialogComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+  MessageService,
+  PageLayoutComponent,
+  ToastComponent,
+} from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { FlakeInputOverride, CreateFlakeInputOverrideBody } from '@core/models';
@@ -43,6 +53,7 @@ const DEFAULT_FORM: FlakeInputFormState = {
     WritableDirective,
     ManagedDisableDirective,
     IconComponent,
+    PageLayoutComponent,
   ],
   providers: [MessageService],
   templateUrl: './task-flake-inputs.component.html',

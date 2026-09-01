@@ -4,24 +4,11 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
   @if (loading()) {
     <gr-loading-spinner message="Loading task settings..." />
   } @else if (task(); as proj) {
-    <div class="page-header">
-      <div>
-        <div class="breadcrumb">
-          <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
-          <span class="breadcrumb-separator">/</span>
-          <a [routerLink]="['/project', projectName, 'task', taskName]" class="breadcrumb-link">{{ proj.display_name }}</a>
-          <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-current">Settings</span>
-        </div>
-        <h1>Task Settings</h1>
-      </div>
-      <button grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
-    </div>
-
+    <gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: proj.display_name, link: ['/project', projectName, 'task', taskName] }, { label: 'Settings' }]" title="Task Settings">
+    <button slot="actions" grButton label="Project Settings" icon="apartment" severity="secondary" [routerLink]="['/project', projectName, 'settings']"></button>
     @if (errorMessage()) {
       <div class="message-banner error">
         <gr-icon name="error" />
@@ -216,8 +203,8 @@
         </div>
       </div>
     }
-  }
-</div>
+  </gr-page-layout>
+}
 
 <!-- Transfer Ownership Dialog -->
 <gr-dialog

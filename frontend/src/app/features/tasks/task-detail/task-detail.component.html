@@ -9,9 +9,11 @@
 } @else if (task(); as proj) {
   <div class="pp-head pad">
     <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/project', projectName]">{{ projectDisplayName() || projectName }}</a>
-      </div>
+      <nav class="breadcrumb" aria-label="Breadcrumb">
+        <a class="breadcrumb-link" [routerLink]="['/project', projectName]">{{ projectDisplayName() || projectName }}</a>
+        <span class="breadcrumb-separator" aria-hidden="true">/</span>
+        <span class="breadcrumb-current" aria-current="page">{{ proj.display_name }}</span>
+      </nav>
       <div class="title-row">
         <h1>{{ proj.display_name }}</h1>
       </div>

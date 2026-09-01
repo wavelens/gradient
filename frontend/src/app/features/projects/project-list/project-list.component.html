@@ -4,17 +4,10 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <h1>Projects</h1>
-      <p class="text-secondary">Manage your projects</p>
-    </div>
-    @if (canCreateProject) {
-      <button grButton label="Create Project" icon="add" (click)="openCreateDialog()"></button>
-    }
-  </div>
-
+<gr-page-layout title="Projects" subtitle="Manage your projects">
+  @if (canCreateProject) {
+    <button slot="actions" grButton label="Create Project" icon="add" (click)="openCreateDialog()"></button>
+  }
   @if (loading()) {
     <gr-loading-spinner message="Loading projects..." />
   } @else {
@@ -86,7 +79,7 @@
       }
     </div>
   }
-</div>
+</gr-page-layout>
 
 <!-- Create Project Dialog -->
 <gr-dialog

@@ -25,14 +25,7 @@
   padding: $spacing-sm $spacing-md;
   font-size: $font-size-xs;
   color: var(--gr-text-muted);
-
-  .breadcrumb-link {
-    color: var(--gr-text-secondary);
-    &:hover { color: var(--gr-text-primary); }
-  }
-  .breadcrumb-sep { color: var(--gr-text-muted); }
-  .breadcrumb-cur { color: var(--gr-text-primary); font-weight: 500; }
-}
+  .breadcrumb-sep { color: var(--gr-text-muted); }}
 
 .overview-block {
   padding: $spacing-sm $spacing-md $spacing-md;

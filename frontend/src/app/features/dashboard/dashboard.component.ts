@@ -10,7 +10,12 @@ import { RouterModule } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
-import { EmptyStateComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  EmptyStateComponent,
+  IconComponent,
+  LoadingSpinnerComponent,
+  PageLayoutComponent,
+} from '@shared/ui';
 import { Project, Cache } from '@core/models';
 
 @Component({
@@ -22,6 +27,7 @@ import { Project, Cache } from '@core/models';
     LoadingSpinnerComponent,
     EmptyStateComponent,
     IconComponent,
+    PageLayoutComponent,
   ],
   templateUrl: './dashboard.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

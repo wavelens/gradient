@@ -4,20 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/project', projectName, 'task', taskName]" class="breadcrumb-link">{{ taskName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Triggers</span>
-      </div>
-      <h1>Triggers</h1>
-      <p class="text-secondary">Conditions that automatically start an evaluation</p>
-    </div>
-    <button
+<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: taskName, link: ['/project', projectName, 'task', taskName] }, { label: 'Triggers' }]" title="Triggers" subtitle="Conditions that automatically start an evaluation">
+  <button slot="actions"
       *appWritable="access()"
       grButton
       label="New Trigger"
@@ -25,8 +13,6 @@
       (click)="startCreate()"
       [appManagedDisable]="access()"
     ></button>
-  </div>
-
   @if (loading()) {
     <gr-loading-spinner message="Loading triggers..." />
   } @else {
@@ -107,7 +93,7 @@
       </div>
     }
   }
-</div>
+</gr-page-layout>
 
 <!-- Create Dialog -->
 <gr-dialog
@@ -158,7 +144,7 @@
     />
     @if (isEdit) {
       <small class="text-secondary">Trigger type cannot be changed after creation.</small>
-    }
+  }
   </div>
 
   @if (form.type === 'polling') {

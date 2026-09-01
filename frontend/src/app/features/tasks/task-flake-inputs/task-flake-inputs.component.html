@@ -6,20 +6,8 @@
 
 <gr-toast />
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/project', projectName, 'task', taskName]" class="breadcrumb-link">{{ taskName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Flake Input Overrides</span>
-      </div>
-      <h1>Flake Input Overrides</h1>
-      <p class="text-secondary">Override flake inputs to pin or redirect dependencies for the next evaluation</p>
-    </div>
-    <button
+<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: taskName, link: ['/project', projectName, 'task', taskName] }, { label: 'Flake Input Overrides' }]" title="Flake Input Overrides" subtitle="Override flake inputs to pin or redirect dependencies for the next evaluation">
+  <button slot="actions"
       *appWritable="access()"
       grButton
       label="New Override"
@@ -27,8 +15,6 @@
       (click)="startCreate()"
       [appManagedDisable]="access()"
     ></button>
-  </div>
-
   @if (loading()) {
     <gr-loading-spinner message="Loading overrides..." />
   } @else {
@@ -96,7 +82,7 @@
       </div>
     }
   }
-</div>
+</gr-page-layout>
 
 <!-- Create Dialog -->
 <gr-dialog

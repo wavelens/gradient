@@ -6,20 +6,8 @@
 
 <gr-toast />
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/project', projectName, 'settings']" class="breadcrumb-link">Settings</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Workers</span>
-      </div>
-      <h1>Workers</h1>
-      <p class="text-secondary">Registered build workers for this project</p>
-    </div>
-    <button
+<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: 'Settings', link: ['/project', projectName, 'settings'] }, { label: 'Workers' }]" title="Workers" subtitle="Registered build workers for this project">
+  <button slot="actions"
       *appWritable="access()"
       grButton
       label="Register Worker"
@@ -27,8 +15,6 @@
       (click)="openRegisterDialog()"
       [appManagedDisable]="access()"
     ></button>
-  </div>
-
   @if (hasNoCacheSubscribed()) {
     <gr-message-banner type="warning" data-testid="no-cache-banner">
       <strong>No cache subscribed</strong>
@@ -192,7 +178,7 @@
       </div>
     }
   }
-</div>
+</gr-page-layout>
 
 <!-- Register Worker Dialog -->
 <gr-dialog

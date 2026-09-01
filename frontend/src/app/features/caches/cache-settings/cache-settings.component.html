@@ -4,24 +4,11 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
   @if (loading()) {
     <gr-loading-spinner message="Loading cache settings..." />
   } @else if (cache(); as c) {
-    <div class="page-header">
-      <div>
-        <div class="breadcrumb">
-          <a routerLink="/caches" class="breadcrumb-link">Caches</a>
-          <span class="breadcrumb-separator">/</span>
-          <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ c.display_name }}</a>
-          <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-current">Settings</span>
-        </div>
-        <h1>Cache Settings</h1>
-      </div>
-    </div>
-
-    <!-- General -->
+    <gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: c.display_name, link: ['/caches', cacheName] }, { label: 'Settings' }]" title="Cache Settings">
+        <!-- General -->
     <div class="settings-section">
       <h2>General</h2>
       <div class="settings-card">
@@ -212,8 +199,8 @@
         </div>
       </div>
     }
-  }
-</div>
+  </gr-page-layout>
+}
 
 <!-- Delete Confirmation Dialog -->
 <gr-dialog

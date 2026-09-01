@@ -1,11 +1,10 @@
-<h1>Patterns</h1>
 <p>How the primitives compose into the page shapes the application uses.</p>
 
 <h2>Page shell</h2>
 <p>Container, breadcrumb, title and primary action. Every non-focused page starts here.</p>
 <div class="sg-frame">
   <gr-page-layout title="Integrations" subtitle="Forge webhooks and status reporters" [breadcrumb]="crumbs">
-    <button slot="actions" grButton label="New Integration" icon="add"></button>
+  <button slot="actions" grButton label="New Integration" icon="add"></button>
     <p>Page body goes here.</p>
   </gr-page-layout>
 </div>
@@ -37,7 +36,7 @@
         <h3>{{ card.name }}</h3>
         <gr-badge [severity]="card.severity">{{ card.status }}</gr-badge>
       </div>
-    }
+  }
   </gr-card-grid>
 </div>
 

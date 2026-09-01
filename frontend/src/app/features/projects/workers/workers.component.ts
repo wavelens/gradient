@@ -12,7 +12,17 @@ import { WorkersService } from '@core/services/workers.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { GradientCapabilities, Worker, WorkerRegistration, AccessState } from '@core/models';
-import { ButtonComponent, DialogComponent, IconComponent, InputDirective, LoadingSpinnerComponent, MessageBannerComponent, MessageService, ToastComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  DialogComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+  MessageBannerComponent,
+  MessageService,
+  PageLayoutComponent,
+  ToastComponent,
+} from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 
 @Component({
@@ -29,7 +39,9 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
     LoadingSpinnerComponent,
     WritableDirective,
     ManagedDisableDirective,
-    IconComponent, MessageBannerComponent],
+    IconComponent, MessageBannerComponent,
+    PageLayoutComponent,
+  ],
   providers: [MessageService],
   templateUrl: './workers.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -17,5 +17,9 @@
       }
     </div>
   </aside>
-  <main class="sg-content"><router-outlet /></main>
+  <main class="sg-content">
+    <gr-page-layout [breadcrumb]="crumbs()" [title]="section().title" maxWidth="none">
+      <router-outlet />
+    </gr-page-layout>
+  </main>
 </div>

@@ -14,7 +14,14 @@ import {
   NarStats,
   NarSummary,
 } from '@core/services/caches.service';
-import { ButtonComponent, DialogComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  DialogComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+  PageLayoutComponent,
+} from '@shared/ui';
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';
@@ -36,6 +43,7 @@ type SortOrder = 'asc' | 'desc';
     WritableDirective,
     CacheNarsDetailDrawerComponent,
     IconComponent,
+    PageLayoutComponent,
   ],
   templateUrl: './cache-nars.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

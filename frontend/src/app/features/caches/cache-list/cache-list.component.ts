@@ -13,7 +13,15 @@ import { debounceTime, switchMap } from 'rxjs/operators';
 import { CachesService } from '@core/services/caches.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
-import { ButtonComponent, DialogComponent, EmptyStateComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  DialogComponent,
+  EmptyStateComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+  PageLayoutComponent,
+} from '@shared/ui';
 import { slugify } from '@shared/text';
 import { Cache } from '@core/models';
 
@@ -31,6 +39,7 @@ import { Cache } from '@core/models';
     LoadingSpinnerComponent,
     EmptyStateComponent,
     IconComponent,
+    PageLayoutComponent,
   ],
   templateUrl: './cache-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

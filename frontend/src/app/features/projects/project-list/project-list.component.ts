@@ -13,7 +13,15 @@ import { debounceTime, switchMap } from 'rxjs/operators';
 import { ProjectsService } from '@core/services/projects.service';
 import { AuthService } from '@core/services/auth.service';
 import { ConfigService } from '@core/services/config.service';
-import { ButtonComponent, DialogComponent, EmptyStateComponent, IconComponent, InputDirective, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  ButtonComponent,
+  DialogComponent,
+  EmptyStateComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+  PageLayoutComponent,
+} from '@shared/ui';
 import { slugify } from '@shared/text';
 import { Project } from '@core/models';
 
@@ -31,6 +39,7 @@ import { Project } from '@core/models';
     LoadingSpinnerComponent,
     EmptyStateComponent,
     IconComponent,
+    PageLayoutComponent,
   ],
   templateUrl: './project-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

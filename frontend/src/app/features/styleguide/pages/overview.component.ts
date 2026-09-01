@@ -11,7 +11,6 @@ import { Component, ChangeDetectionStrategy } from '@angular/core';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
-    <h1>Gradient Design System</h1>
     <p>
       Every page composes primitives from <code>&#64;shared/ui</code>. This guide is the only place
       those primitives are demonstrated, and nothing here declares markup a primitive already covers.

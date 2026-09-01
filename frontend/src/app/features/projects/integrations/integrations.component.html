@@ -4,20 +4,8 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a [routerLink]="['/project', projectName]" class="breadcrumb-link">{{ projectDisplayName() || projectName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/project', projectName, 'settings']" class="breadcrumb-link">Settings</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Integrations</span>
-      </div>
-      <h1>Integrations</h1>
-      <p class="text-secondary">Forge webhooks and status reporters for this project</p>
-    </div>
-    <button
+<gr-page-layout [breadcrumb]="[{ label: projectDisplayName() || projectName, link: ['/project', projectName] }, { label: 'Settings', link: ['/project', projectName, 'settings'] }, { label: 'Integrations' }]" title="Integrations" subtitle="Forge webhooks and status reporters for this project">
+  <button slot="actions"
       *appWritable="access()"
       grButton
       label="New Integration"
@@ -25,8 +13,6 @@
       (click)="openCreateDialog()"
       [appManagedDisable]="access()"
     ></button>
-  </div>
-
   @if (loading()) {
     <gr-loading-spinner message="Loading integrations..." />
   } @else {
@@ -198,7 +184,7 @@
       }
     </div>
   }
-</div>
+</gr-page-layout>
 
 <!-- Create Dialog -->
 <gr-dialog
@@ -222,7 +208,7 @@
       <small class="text-danger">Lowercase letters, digits, and dashes only. Cannot start or end with a dash.</small>
     } @else {
       <small class="text-secondary">Used in the webhook URL. Lowercase letters, digits, and dashes.</small>
-    }
+  }
   </div>
   <div class="form-group">
     <label for="int-display-name">Display Name</label>

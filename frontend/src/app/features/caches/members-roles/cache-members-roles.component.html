@@ -4,22 +4,7 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <div class="breadcrumb">
-        <a routerLink="/caches" class="breadcrumb-link">Caches</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/caches', cacheName]" class="breadcrumb-link">{{ cacheName }}</a>
-        <span class="breadcrumb-separator">/</span>
-        <a [routerLink]="['/caches', cacheName, 'settings']" class="breadcrumb-link">Settings</a>
-        <span class="breadcrumb-separator">/</span>
-        <span class="breadcrumb-current">Members & Roles</span>
-      </div>
-      <h1>Members & Roles</h1>
-    </div>
-  </div>
-
+<gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cacheName, link: ['/caches', cacheName] }, { label: 'Settings', link: ['/caches', cacheName, 'settings'] }, { label: 'Members & Roles' }]" title="Members & Roles">
   <!-- Members -->
   <div class="settings-section">
     <div class="section-header">
@@ -78,7 +63,7 @@
           <p class="text-secondary">No members found.</p>
         }
       </div>
-    }
+  }
   </div>
 
   <!-- Roles -->
@@ -147,9 +132,9 @@
           <p class="text-secondary">No roles found.</p>
         }
       </div>
-    }
+  }
   </div>
-</div>
+</gr-page-layout>
 
 <!-- Add Member Dialog -->
 <gr-dialog

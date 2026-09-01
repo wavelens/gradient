@@ -4,38 +4,26 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
   @if (loading()) {
     <gr-loading-spinner message="Loading cache..." />
   } @else if (cache(); as c) {
-    <!-- Cache Header -->
-    <div class="page-header">
-      <div>
-        <div class="breadcrumb">
-          <a routerLink="/caches" class="breadcrumb-link">Caches</a>
-          <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-current">{{ c.display_name }}</span>
-        </div>
-        <h1>{{ c.display_name }}</h1>
-        <p class="text-secondary">{{ c.description || 'No description' }}</p>
-        <div class="cache-status">
-          <span class="status-badge" [class.active]="c.active" [class.inactive]="!c.active">
-            <gr-icon [name]="c.active ? 'check_circle' : 'cancel'" size="sm" />
-            {{ c.active ? 'Active' : 'Inactive' }}
-          </span>
-          <span class="priority-badge">
-            <gr-icon name="sort" size="sm" />
-            Priority: {{ c.priority }}
-          </span>
-        </div>
+    <gr-page-layout
+      [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: c.display_name }]"
+      [title]="c.display_name"
+      [subtitle]="c.description || 'No description'"
+    >
+      <div slot="meta" class="cache-status">
+        <gr-badge [severity]="c.active ? 'success' : 'neutral'">
+          {{ c.active ? 'Active' : 'Inactive' }}
+        </gr-badge>
+        <gr-badge>Priority {{ c.priority }}</gr-badge>
       </div>
-      <div class="header-actions">
+      <div slot="actions">
         <button grButton label="NARs" icon="database" severity="secondary" [routerLink]="['/caches', cacheName, 'nars']"></button>
         @if (c.can_edit) {
           <button grButton label="Settings" icon="settings" severity="secondary" [routerLink]="['/caches', cacheName, 'settings']"></button>
         }
       </div>
-    </div>
 
     <!-- Stats -->
     <div class="section">
@@ -191,6 +179,5 @@ trusted-public-keys = &lt;unavailable&gt;</pre>
         }
       </div>
     </div>
-
+    </gr-page-layout>
   }
-</div>

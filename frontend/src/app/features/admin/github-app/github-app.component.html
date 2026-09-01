@@ -4,11 +4,10 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <h1>GitHub App</h1>
-  <p class="text-secondary">
-    Register a new GitHub App for this Gradient instance using GitHub's manifest flow.
-  </p>
+<gr-page-layout
+  title="GitHub App"
+  subtitle="Register a new GitHub App for this Gradient instance using GitHub's manifest flow."
+>
 
   @if (!showResult()) {
     <div class="setup-panel">
@@ -90,4 +89,4 @@
       </div>
     }
   }
-</div>
+</gr-page-layout>

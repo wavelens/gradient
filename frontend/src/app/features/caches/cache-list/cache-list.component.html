@@ -4,17 +4,10 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <div>
-      <h1>Caches</h1>
-      <p class="text-secondary">Manage your build caches</p>
-    </div>
-    @if (canCreateCache) {
-      <button grButton label="Create Cache" icon="add" (click)="openCreateDialog()"></button>
-    }
-  </div>
-
+<gr-page-layout title="Caches" subtitle="Manage your build caches">
+  @if (canCreateCache) {
+    <button slot="actions" grButton label="Create Cache" icon="add" (click)="openCreateDialog()"></button>
+  }
   @if (loading()) {
     <gr-loading-spinner message="Loading caches..." />
   } @else {
@@ -127,7 +120,7 @@
       }
     </div>
   }
-</div>
+</gr-page-layout>
 
 <!-- Create Cache Dialog -->
 <gr-dialog
