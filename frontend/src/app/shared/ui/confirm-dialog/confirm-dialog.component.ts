@@ -5,6 +5,7 @@
  */
 
 import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
+import { IconComponent } from '../icon/icon.component';
 import { ButtonComponent } from '../button/button.component';
 import { ConfirmationService } from '../confirmation/confirmation.service';
 import { DialogComponent } from '../dialog/dialog.component';
@@ -12,7 +13,7 @@ import { DialogComponent } from '../dialog/dialog.component';
 @Component({
   selector: 'gr-confirm-dialog',
   standalone: true,
-  imports: [ButtonComponent, DialogComponent],
+  imports: [IconComponent, ButtonComponent, DialogComponent],
   template: `
     <gr-dialog
       [visible]="!!pending()"
@@ -22,7 +23,7 @@ import { DialogComponent } from '../dialog/dialog.component';
     >
       <div class="gr-confirm">
         @if (pending()?.icon) {
-          <span class="material-symbols-outlined gr-confirm__icon" aria-hidden="true">{{ pending()?.icon }}</span>
+          <gr-icon [name]="pending()?.icon ?? ''" size="lg" class="gr-confirm__icon" />
         }
         <p class="gr-confirm__message">{{ pending()?.message }}</p>
       </div>
@@ -46,7 +47,7 @@ import { DialogComponent } from '../dialog/dialog.component';
   styles: [
     `
       .gr-confirm { display: flex; align-items: flex-start; gap: 0.75rem; }
-      .gr-confirm__icon { color: #ffc107; font-size: 24px; }
+      .gr-confirm__icon { color: var(--gr-status-warning); }
       .gr-confirm__message { margin: 0; }
     `,
   ],

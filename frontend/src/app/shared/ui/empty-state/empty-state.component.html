@@ -6,7 +6,7 @@
 
 <div class="empty-state">
   <div class="empty-icon">
-    <span class="material-symbols-outlined">{{ icon() }}</span>
+    <gr-icon [name]="icon()" size="xxl" />
   </div>
   <h3 class="empty-title">{{ title() }}</h3>
   @if (message()) {

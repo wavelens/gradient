@@ -5,12 +5,13 @@
  */
 
 import { Component, input, ChangeDetectionStrategy } from '@angular/core';
+import { IconComponent } from '../icon/icon.component';
 import { CommonModule } from '@angular/common';
 
 @Component({
   selector: 'gr-stat-card',
   standalone: true,
-  imports: [CommonModule],
+  imports: [IconComponent, CommonModule],
   templateUrl: './stat-card.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './stat-card.component.scss',

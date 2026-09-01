@@ -5,6 +5,7 @@
  */
 
 import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
+import { IconComponent } from '@shared/ui';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { AuthService } from '@core/services/auth.service';
@@ -13,7 +14,7 @@ import { ConfigService } from '@core/services/config.service';
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [IconComponent, CommonModule, RouterModule],
   templateUrl: './header.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './header.component.scss',

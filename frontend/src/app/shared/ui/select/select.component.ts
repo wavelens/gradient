@@ -5,6 +5,7 @@
  */
 
 import { CdkConnectedOverlay, CdkOverlayOrigin } from '@angular/cdk/overlay';
+import { IconComponent } from '../icon/icon.component';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import {
   Component,
@@ -22,7 +23,7 @@ import {
 @Component({
   selector: 'gr-select',
   standalone: true,
-  imports: [CdkConnectedOverlay, CdkOverlayOrigin],
+  imports: [IconComponent, CdkConnectedOverlay, CdkOverlayOrigin],
   templateUrl: './select.component.html',
   styleUrl: './select.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,

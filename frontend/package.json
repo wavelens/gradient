@@ -24,6 +24,10 @@
     ]
   },
   "private": true,
+  "sideEffects": [
+    "*.css",
+    "*.scss"
+  ],
   "packageManager": "pnpm@10.26.1",
   "dependencies": {
     "@angular/animations": "^22.1.3",

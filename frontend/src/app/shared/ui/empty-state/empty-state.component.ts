@@ -5,13 +5,14 @@
  */
 
 import { Component, booleanAttribute, input, output, ChangeDetectionStrategy } from '@angular/core';
+import { IconComponent } from '../icon/icon.component';
 import { CommonModule } from '@angular/common';
 import { ButtonComponent } from '@shared/ui';
 
 @Component({
   selector: 'gr-empty-state',
   standalone: true,
-  imports: [CommonModule, ButtonComponent],
+  imports: [IconComponent, CommonModule, ButtonComponent],
   templateUrl: './empty-state.component.html',
   styleUrl: './empty-state.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,

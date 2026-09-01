@@ -41,8 +41,8 @@ echarts.use([
   styles: [
     `
       .metric-chart {
-        background: #21262d;
-        border: 1px solid #2d333b;
+        background: var(--gr-surface-raised);
+        border: 1px solid var(--gr-border);
         border-radius: 8px;
         padding: 1rem;
       }
@@ -56,8 +56,8 @@ echarts.use([
         width: 100%;
       }
       h3 {
-        color: #fff;
-        font-size: 0.9rem;
+        color: var(--gr-text-primary);
+        font-size: 0.875rem;
         margin: 0 0 0.5rem;
       }
     `,

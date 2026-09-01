@@ -5,12 +5,13 @@
  */
 
 import { Component, input, ChangeDetectionStrategy } from '@angular/core';
+import { IconComponent } from '../icon/icon.component';
 import { CommonModule } from '@angular/common';
 
 @Component({
   selector: 'gr-label-help',
   standalone: true,
-  imports: [CommonModule],
+  imports: [IconComponent, CommonModule],
   template: `
     <a
       class="label-help"
@@ -20,7 +21,7 @@ import { CommonModule } from '@angular/common';
       [title]="title()"
       [attr.aria-label]="title()"
     >
-      <span class="material-symbols-outlined">help</span>
+      <gr-icon name="help" size="sm" />
     </a>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -9,8 +9,6 @@
   font-size: $font-size-xs;
   font-weight: 500;
 
-  .material-symbols-outlined { font-size: 13px; }
-
   &.status-success   { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: $color-success; }
   &.status-danger    { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent);  color: $color-danger; }
   &.status-secondary { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: $text-secondary; }

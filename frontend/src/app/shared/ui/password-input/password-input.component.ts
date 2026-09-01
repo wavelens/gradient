@@ -5,13 +5,14 @@
  */
 
 import { Component, input, signal, ChangeDetectionStrategy } from '@angular/core';
+import { IconComponent } from '../icon/icon.component';
 import { CommonModule } from '@angular/common';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 
 @Component({
   selector: 'gr-password-input',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [IconComponent, CommonModule, ReactiveFormsModule],
   templateUrl: './password-input.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './password-input.component.scss',

@@ -5,6 +5,7 @@
  */
 
 import { Component, computed, input, ChangeDetectionStrategy } from '@angular/core';
+import { IconComponent } from '../icon/icon.component';
 import { CommonModule } from '@angular/common';
 
 export type MessageBannerType = 'error' | 'success' | 'info' | 'warning';
@@ -19,7 +20,7 @@ const DEFAULT_ICONS: Record<MessageBannerType, string> = {
 @Component({
   selector: 'gr-message-banner',
   standalone: true,
-  imports: [CommonModule],
+  imports: [IconComponent, CommonModule],
   templateUrl: './message-banner.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './message-banner.component.scss',

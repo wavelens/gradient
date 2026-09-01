@@ -5,6 +5,7 @@
  */
 
 import { CdkTrapFocus } from '@angular/cdk/a11y';
+import { IconComponent } from '../icon/icon.component';
 import { ESCAPE } from '@angular/cdk/keycodes';
 import { Overlay, OverlayRef } from '@angular/cdk/overlay';
 import { TemplatePortal } from '@angular/cdk/portal';
@@ -29,7 +30,7 @@ import { TemplateRef } from '@angular/core';
 @Component({
   selector: 'gr-dialog',
   standalone: true,
-  imports: [CdkTrapFocus],
+  imports: [IconComponent, CdkTrapFocus],
   template: `
     <ng-template #panel>
       <div
@@ -45,7 +46,7 @@ import { TemplateRef } from '@angular/core';
           <h2 class="gr-dialog__title">{{ header() }}</h2>
           @if (closable()) {
             <button type="button" class="gr-dialog__close" aria-label="Close" (click)="close()">
-              <span class="material-symbols-outlined" aria-hidden="true">close</span>
+              <gr-icon name="close" />
             </button>
           }
         </div>

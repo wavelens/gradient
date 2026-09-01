@@ -5,11 +5,13 @@
  */
 
 import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
+import { IconComponent } from '@shared/ui';
 import { ConfigService } from '@core/services/config.service';
 
 @Component({
   selector: 'app-footer',
   standalone: true,
+  imports: [IconComponent],
   templateUrl: './footer.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './footer.component.scss',
