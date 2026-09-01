@@ -39,6 +39,25 @@ pub struct S3Args {
         default_value_t = false
     )]
     pub s3_virtual_hosted_style: bool,
+    /// Seconds a single S3 response may stall before the request is failed.
+    /// This is an inactivity timer, reset by every successful read - not a cap
+    /// on the transfer, so a multi-GB NAR streams for as long as it keeps making
+    /// progress. Replaces the object-store default of a flat 30s *total* request
+    /// timeout, which cancelled any download slower than that and then burned
+    /// the whole retry budget re-running a request doomed to be cancelled again.
+    #[arg(long, env = "GRADIENT_S3_READ_TIMEOUT_SECS", default_value_t = 60)]
+    pub s3_read_timeout_secs: u64,
+    /// How many times a failed S3 request is retried.
+    #[arg(long, env = "GRADIENT_S3_MAX_RETRIES", default_value_t = 3)]
+    pub s3_max_retries: usize,
+    /// Total seconds from the first attempt after which no further S3 retry is
+    /// started. Keep it above `(s3_max_retries + 1) * s3_read_timeout_secs` or
+    /// requests that die on the read timeout are never retried - the budget is
+    /// already spent by the time the first attempt fails. Only consulted on the
+    /// error path, so it never interrupts a download that is still progressing.
+    /// Stay under 5 minutes: retries reuse the original credentials and payload.
+    #[arg(long, env = "GRADIENT_S3_RETRY_TIMEOUT_SECS", default_value_t = 250)]
+    pub s3_retry_timeout_secs: u64,
 }
 
 impl Default for S3Args {
@@ -51,6 +70,9 @@ impl Default for S3Args {
             s3_secret_access_key_file: None,
             s3_prefix: String::new(),
             s3_virtual_hosted_style: false,
+            s3_read_timeout_secs: 60,
+            s3_max_retries: 3,
+            s3_retry_timeout_secs: 250,
         }
     }
 }

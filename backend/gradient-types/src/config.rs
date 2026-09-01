@@ -104,6 +104,13 @@ pub struct S3Config {
     /// `false` (default) requests path-style URLs - MinIO/Garage/most
     /// self-hosted backends require this. No effect on AWS direct.
     pub virtual_hosted_style: bool,
+    /// Per-response inactivity timeout; see [`super::cli::S3Args`] for why this
+    /// replaces a total request timeout.
+    pub read_timeout: std::time::Duration,
+    /// Retries for a failed request.
+    pub max_retries: usize,
+    /// Total budget for those retries, counted from the first attempt.
+    pub retry_timeout: std::time::Duration,
 }
 
 impl Cli {
@@ -169,6 +176,9 @@ impl Cli {
             secret_access_key_file: self.s3.s3_secret_access_key_file.clone(),
             prefix: self.s3.s3_prefix.clone(),
             virtual_hosted_style: self.s3.s3_virtual_hosted_style,
+            read_timeout: std::time::Duration::from_secs(self.s3.s3_read_timeout_secs),
+            max_retries: self.s3.s3_max_retries,
+            retry_timeout: std::time::Duration::from_secs(self.s3.s3_retry_timeout_secs),
         })
     }
 

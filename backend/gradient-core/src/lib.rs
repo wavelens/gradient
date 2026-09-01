@@ -148,6 +148,11 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
             secret.as_deref(),
             &s3.prefix,
             s3.virtual_hosted_style,
+            gradient_storage::S3Timeouts {
+                read_timeout: s3.read_timeout,
+                max_retries: s3.max_retries,
+                retry_timeout: s3.retry_timeout,
+            },
         )
         .map_err(|e| InitError::S3Storage(e.to_string()))?;
 

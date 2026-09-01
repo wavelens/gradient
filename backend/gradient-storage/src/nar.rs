@@ -13,6 +13,37 @@ pub use object_store::{MultipartUpload, WriteMultipart};
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt as _};
 
+/// Timeout and retry policy for the S3 client, resolved from configuration.
+#[derive(Clone, Copy, Debug)]
+pub struct S3Timeouts {
+    /// Per-response inactivity timeout. Not a cap on transfer duration.
+    pub read_timeout: std::time::Duration,
+    /// Retries for a failed request.
+    pub max_retries: usize,
+    /// Total retry budget from the first attempt. Must exceed
+    /// `(max_retries + 1) * read_timeout` for a stalled request to be retried
+    /// at all, since a request that dies on the read timeout has already spent
+    /// that long before it fails.
+    pub retry_timeout: std::time::Duration,
+}
+
+impl Default for S3Timeouts {
+    fn default() -> Self {
+        Self {
+            read_timeout: std::time::Duration::from_secs(60),
+            max_retries: 3,
+            retry_timeout: std::time::Duration::from_secs(250),
+        }
+    }
+}
+
+/// How long a multipart part upload may make no progress before the write is
+/// abandoned. The client has no total request timeout (see [`NarStore::s3`]) and
+/// its read timeout only covers *response* bytes, so a peer that stops draining
+/// the request body would otherwise wedge the upload forever - and an upload
+/// holds one of the few per-connection NAR-commit permits while it runs.
+const WRITE_STALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// Unified NAR file storage abstraction over local disk or an S3-compatible backend.
 ///
 /// All NARs are stored pre-compressed (`.nar.zst`). The key path within the store is
@@ -27,6 +58,20 @@ pub struct NarStore {
     /// S3 store - held separately to enable presigned URL generation via the
     /// [`object_store::signer::Signer`] trait.  `None` for local-disk stores.
     s3_signer: Option<Arc<object_store::aws::AmazonS3>>,
+}
+
+/// Await `op`, failing it once [`WRITE_STALL_TIMEOUT`] passes with no progress.
+async fn stall_bounded<T, E>(
+    op: impl std::future::Future<Output = std::result::Result<T, E>>,
+    what: &'static str,
+) -> Result<T>
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    match tokio::time::timeout(WRITE_STALL_TIMEOUT, op).await {
+        Ok(r) => r.context(what),
+        Err(_) => anyhow::bail!("{what} stalled for {}s", WRITE_STALL_TIMEOUT.as_secs()),
+    }
 }
 
 impl NarStore {
@@ -73,13 +118,20 @@ impl NarStore {
         secret_access_key: Option<&str>,
         prefix: &str,
         virtual_hosted_style: bool,
+        timeouts: S3Timeouts,
     ) -> Result<Self> {
         let retry_config = object_store::RetryConfig {
-            max_retries: 3,
-            retry_timeout: std::time::Duration::from_secs(9),
+            max_retries: timeouts.max_retries,
+            retry_timeout: timeouts.retry_timeout,
             ..Default::default()
         };
 
+        // No total request timeout: object_store defaults to 30s, which
+        // cancelled every NAR larger than 30s of transfer and then spent the
+        // retry budget re-running a request certain to be cancelled again -
+        // surfacing as a hard failure ~3m30s in. Progress is policed by the
+        // read timeout instead, an inactivity timer that a healthy transfer
+        // resets on every chunk however long it runs.
         let mut builder = object_store::aws::AmazonS3Builder::new()
             .with_bucket_name(bucket)
             .with_region(region)
@@ -92,7 +144,7 @@ impl NarStore {
                             .expect("static UA is valid"),
                     )
                     .with_timeout_disabled()
-                    .with_read_timeout(std::time::Duration::from_secs(60)),
+                    .with_read_timeout(timeouts.read_timeout),
             );
 
         if let Some(ep) = endpoint {
@@ -346,15 +398,13 @@ impl NarStore {
                 break;
             }
             upload.write(&buf[..n]);
-            upload
-                .wait_for_capacity(MAX_INFLIGHT_PARTS)
-                .await
-                .context("multipart upload backpressure")?;
+            stall_bounded(
+                upload.wait_for_capacity(MAX_INFLIGHT_PARTS),
+                "multipart upload backpressure",
+            )
+            .await?;
         }
-        upload
-            .finish()
-            .await
-            .context("finish multipart NAR upload")?;
+        stall_bounded(upload.finish(), "finish multipart NAR upload").await?;
         Ok(())
     }
 
@@ -787,5 +837,22 @@ mod tests {
         let (size, mut stream) = store.get_stream_from("jkl012", 99).await.unwrap().unwrap();
         assert_eq!(size, 3);
         assert!(stream.next().await.is_none());
+    }
+
+    /// A request that dies on the read timeout has already burned that long, so
+    /// a retry budget below it means the very failures worth retrying never are.
+    #[test]
+    fn retry_budget_outlasts_every_attempt_it_should_cover() {
+        let t = S3Timeouts::default();
+        let attempts = (t.max_retries + 1) as u32;
+        assert!(
+            t.retry_timeout > t.read_timeout * attempts,
+            "retry_timeout {:?} must exceed {attempts} attempts of {:?}",
+            t.retry_timeout,
+            t.read_timeout,
+        );
+        // object_store reuses the initial credentials and payload across
+        // retries, so the budget has to stay under their 5-minute validity.
+        assert!(t.retry_timeout < std::time::Duration::from_secs(300));
     }
 }

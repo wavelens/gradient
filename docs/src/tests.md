@@ -7330,3 +7330,21 @@ rather than as corruption in our own cache.
 - `sniff_recognises_xz_and_bzip2` - the remaining container magics.
 - `sniff_falls_back_to_the_url_when_no_magic_matches` - unknown or too-short
   bytes defer to the URL guess, and to zstd when there is no URL.
+
+## The S3 retry budget outlasts the attempts it covers (#583)
+
+object_store defaults to a flat 30s *total* request timeout, so any NAR slower
+than that was cancelled mid-transfer and the default 10-retry / 180s budget then
+re-ran a request certain to be cancelled again - surfacing as a hard failure
+about 3m30s in. #583 fixed that by dropping the total timeout in favour of a 60s
+read-inactivity timer, but paired it with a 9s retry budget: since
+`RetryContext::exhausted` measures elapsed time from the *first* attempt, any
+request that died on the 60s read timeout had already spent the budget and was
+never retried. The budget is now 250s, and `exhausted` is consulted only on the
+error path, so raising it cannot interrupt a download that is still progressing.
+
+`backend/gradient-storage/src/nar.rs`:
+- `retry_budget_outlasts_every_attempt_it_should_cover` - the shipped
+  `S3Timeouts` defaults satisfy `retry_timeout > (max_retries + 1) *
+  read_timeout` and stay under the 5-minute credential-validity ceiling, so a
+  future tweak to any one of the three cannot silently disable retries again.

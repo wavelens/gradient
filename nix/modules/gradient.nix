@@ -415,6 +415,38 @@ in {
           type = lib.types.bool;
           default = false;
         };
+
+        readTimeoutSecs = lib.mkOption {
+          description = ''
+            Seconds an S3 response may stall before the request is failed. This
+            is an inactivity timer that every received chunk resets, not a cap on
+            transfer duration, so a multi-GB NAR streams for as long as it keeps
+            making progress. Gradient sets no total request timeout: the
+            object-store default of 30s cancelled any download slower than that.
+          '';
+          type = lib.types.int;
+          default = 60;
+        };
+
+        maxRetries = lib.mkOption {
+          description = "How many times a failed S3 request is retried.";
+          type = lib.types.int;
+          default = 3;
+        };
+
+        retryTimeoutSecs = lib.mkOption {
+          description = ''
+            Total seconds from the first attempt after which no further S3 retry
+            is started. Keep it above `(maxRetries + 1) * readTimeoutSecs`, or a
+            request that dies on the read timeout is never retried - the budget
+            is already spent by the time the first attempt fails. Only consulted
+            when a request errors, so it never interrupts a transfer that is
+            still progressing. Stay under 5 minutes: retries reuse the original
+            credentials and request payload.
+          '';
+          type = lib.types.int;
+          default = 250;
+        };
       };
 
       settings = {
@@ -1032,6 +1064,9 @@ in {
         GRADIENT_S3_REGION = cfg.s3.region;
         GRADIENT_S3_PREFIX = cfg.s3.prefix;
         GRADIENT_S3_VIRTUAL_HOSTED_STYLE = lib.boolToString cfg.s3.virtualHostedStyle;
+        GRADIENT_S3_READ_TIMEOUT_SECS = toString cfg.s3.readTimeoutSecs;
+        GRADIENT_S3_MAX_RETRIES = toString cfg.s3.maxRetries;
+        GRADIENT_S3_RETRY_TIMEOUT_SECS = toString cfg.s3.retryTimeoutSecs;
       } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.endpoint != null) {
         GRADIENT_S3_ENDPOINT = cfg.s3.endpoint;
       } // lib.optionalAttrs (cfg.s3.enable && cfg.s3.accessKeyId != null) {
