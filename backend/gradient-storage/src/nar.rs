@@ -78,11 +78,14 @@ impl NarStore {
             .with_bucket_name(bucket)
             .with_region(region)
             .with_client_options(
-                ClientOptions::new().with_user_agent(
-                    gradient_util::http::user_agent()
-                        .parse()
-                        .expect("static UA is valid"),
-                ),
+                ClientOptions::new()
+                    .with_user_agent(
+                        gradient_util::http::user_agent()
+                            .parse()
+                            .expect("static UA is valid"),
+                    )
+                    .with_timeout_disabled()
+                    .with_read_timeout(std::time::Duration::from_secs(60)),
             );
 
         if let Some(ep) = endpoint {
