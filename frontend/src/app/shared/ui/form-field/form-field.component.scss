@@ -13,7 +13,7 @@
   label {
     display: block;
     margin-bottom: $spacing-sm;
-    font-size: $font-size-sm;
+    font-size: $font-size-md;
     font-weight: 500;
     color: $text-primary;
 
@@ -27,6 +27,6 @@
     display: block;
     margin-top: $spacing-xs;
     color: $text-secondary;
-    font-size: $font-size-xs;
+    font-size: $font-size-sm;
   }
 }
