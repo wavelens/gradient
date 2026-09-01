@@ -56,24 +56,6 @@
 
 }
 
-.key-display {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  margin-top: $spacing-md;
-  padding: $spacing-md;
-  background: var(--gr-surface-sunken);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-sm;
-
-  .key-value {
-    flex: 1;
-    font-family: $font-family-mono;
-    font-size: $font-size-sm;
-    word-break: break-all;
-  }
-}
-
 .key-meta {
   display: flex;
   align-items: center;

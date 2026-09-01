@@ -182,14 +182,12 @@
   width="480px"
 >
   @if (projectId()) {
-    <div class="dialog-info">
-      <gr-icon name="vpn_key" />
-      <div>
-        <div class="dialog-info-label">Peer ID (this project)</div>
-        <code class="dialog-info-value">{{ projectId() }}</code>
-        <div class="dialog-info-hint text-secondary">Write this alongside the token into your worker's peers file.</div>
-      </div>
-    </div>
+    <gr-form-field
+      label="Peer ID (this project)"
+      hint="Write this alongside the token into your worker's peers file."
+    >
+      <gr-copy-field [value]="projectId()!" />
+    </gr-form-field>
   }
   @if (errorMessage()) {
     <div class="dialog-error">

@@ -22,23 +22,6 @@
 
 }
 
-.dialog-info {
-  display: flex;
-  align-items: flex-start;
-  gap: $spacing-sm;
-  background: color-mix(in srgb, var(--gr-status-info) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--gr-status-info) 30%, transparent);
-  border-radius: $border-radius-md;
-  padding: $spacing-md;
-  margin-bottom: $spacing-md;
-
-  gr-icon { color: var(--gr-status-info); flex-shrink: 0; }
-
-  .dialog-info-label { font-size: $font-size-xs; font-weight: 600; color: var(--gr-status-info); margin-bottom: $spacing-xs; }
-  .dialog-info-value { display: block; font-family: $font-family-mono; font-size: $font-size-sm; word-break: break-all; }
-  .dialog-info-hint { display: block; font-size: $font-size-xs; margin-top: $spacing-xs; }
-}
-
 .dialog-warning {
   display: flex;
   align-items: flex-start;

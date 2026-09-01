@@ -11,6 +11,8 @@ import { FormsModule } from '@angular/forms';
 import { AdminService, GithubAppCredentials } from '@core/services/admin.service';
 import {
   ButtonComponent,
+  CopyFieldComponent,
+  FormFieldComponent,
   InputDirective,
   PageLayoutComponent,
 } from '@shared/ui';
@@ -18,7 +20,7 @@ import {
 @Component({
   selector: 'app-admin-github-app',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, PageLayoutComponent],
+  imports: [CommonModule, RouterModule, FormsModule, ButtonComponent, InputDirective, PageLayoutComponent, CopyFieldComponent, FormFieldComponent],
   templateUrl: './github-app.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './github-app.component.scss',

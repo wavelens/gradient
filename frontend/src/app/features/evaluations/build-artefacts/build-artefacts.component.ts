@@ -11,6 +11,7 @@ import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import {
   BadgeComponent,
+  ButtonComponent,
   EmptyStateComponent,
   IconComponent,
   LoadingSpinnerComponent,
@@ -21,7 +22,7 @@ import { environment } from '@environments/environment';
 @Component({
   selector: 'app-build-artefacts',
   standalone: true,
-  imports: [RouterModule, LoadingSpinnerComponent, IconComponent, PageLayoutComponent, EmptyStateComponent, BadgeComponent],
+  imports: [RouterModule, LoadingSpinnerComponent, IconComponent, PageLayoutComponent, EmptyStateComponent, BadgeComponent, ButtonComponent],
   templateUrl: './build-artefacts.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './build-artefacts.component.scss',

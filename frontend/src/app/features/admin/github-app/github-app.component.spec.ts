@@ -82,10 +82,14 @@ describe('GithubAppComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
-    const html: string = fixture.nativeElement.textContent;
-    expect(html).toContain('PEM');
-    expect(html).toContain('whsec');
-    expect(html).toContain('cid');
+    // Each credential is a copy field, so the value is the control's, not text.
+    const values = (
+      Array.from(fixture.nativeElement.querySelectorAll('gr-copy-field input, gr-copy-field textarea')) as
+        (HTMLInputElement | HTMLTextAreaElement)[]
+    ).map((el) => el.value);
+    expect(values).toContain('PEM');
+    expect(values).toContain('whsec');
+    expect(values).toContain('cid');
   });
 
   it('shows a friendly error when credentials are no longer available', async () => {

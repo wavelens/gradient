@@ -18,7 +18,7 @@ import { InputDirective } from '../input/input.directive';
   styleUrl: './copy-field.component.scss',
 })
 export class CopyFieldComponent {
-  value = input.required<string>();
+  value = input.required<string | number>();
   id = input<string>();
   mono = input(true, { transform: booleanAttribute });
   inline = input(false, { transform: booleanAttribute });
@@ -29,7 +29,7 @@ export class CopyFieldComponent {
 
   async copy(): Promise<void> {
     try {
-      await navigator.clipboard.writeText(this.value());
+      await navigator.clipboard.writeText(String(this.value()));
       this.copied.set(true);
       setTimeout(() => this.copied.set(false), 1500);
     } catch {

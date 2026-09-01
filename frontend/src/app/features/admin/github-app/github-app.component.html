@@ -44,35 +44,25 @@
         <h2>App created - {{ c.slug }}</h2>
         <p><a [href]="c.html_url" target="_blank" rel="noopener">{{ c.html_url }}</a></p>
 
-        <div class="credential">
-          <div class="label">App ID</div>
-          <code>{{ c.id }}</code>
-          <button grButton type="button" icon="content_copy" (click)="copy(c.id.toString())"></button>
-        </div>
+        <gr-form-field label="App ID">
+          <gr-copy-field [value]="c.id" />
+        </gr-form-field>
 
-        <div class="credential">
-          <div class="label">Webhook secret</div>
-          <code>{{ c.webhook_secret }}</code>
-          <button grButton type="button" icon="content_copy" (click)="copy(c.webhook_secret)"></button>
-        </div>
+        <gr-form-field label="Webhook secret">
+          <gr-copy-field [value]="c.webhook_secret" />
+        </gr-form-field>
 
-        <div class="credential">
-          <div class="label">Private key (PEM)</div>
-          <pre><code>{{ c.pem }}</code></pre>
-          <button grButton type="button" icon="content_copy" (click)="copy(c.pem)"></button>
-        </div>
+        <gr-form-field label="Private key (PEM)">
+          <gr-copy-field [value]="c.pem" multiline [rows]="6" />
+        </gr-form-field>
 
-        <div class="credential">
-          <div class="label">Client ID</div>
-          <code>{{ c.client_id }}</code>
-          <button grButton type="button" icon="content_copy" (click)="copy(c.client_id)"></button>
-        </div>
+        <gr-form-field label="Client ID">
+          <gr-copy-field [value]="c.client_id" />
+        </gr-form-field>
 
-        <div class="credential">
-          <div class="label">Client secret</div>
-          <code>{{ c.client_secret }}</code>
-          <button grButton type="button" icon="content_copy" (click)="copy(c.client_secret)"></button>
-        </div>
+        <gr-form-field label="Client secret">
+          <gr-copy-field [value]="c.client_secret" />
+        </gr-form-field>
 
         <h3>Server configuration</h3>
         <pre><code>services.gradient.githubApp = {{ '{' }}

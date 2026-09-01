@@ -57,37 +57,6 @@
 
   &.error { color: var(--gr-status-danger); }
 }
-
-.table-wrap {
-  flex: 1;
-  overflow-y: auto;
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: $font-size-sm;
-
-    th, td {
-      padding: $spacing-sm $spacing-md;
-      text-align: left;
-      border-bottom: 1px solid color-mix(in srgb, var(--gr-border) 50%, transparent);
-    }
-
-    th {
-      font-size: $font-size-xs;
-      font-weight: 600;
-      color: var(--gr-text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      background: var(--gr-surface-base);
-      position: sticky;
-      top: 0;
-    }
-
-    tbody tr:hover td { background: color-mix(in srgb, var(--gr-white) 2%, transparent); }
-  }
-}
-
 .detail-row td {
   background: var(--gr-surface-sunken);
   padding: $spacing-md $spacing-lg;

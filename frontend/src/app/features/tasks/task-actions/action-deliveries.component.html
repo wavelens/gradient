@@ -18,8 +18,7 @@
     } @else if (deliveries().length === 0) {
       <p class="state-msg">No deliveries yet.</p>
     } @else {
-      <div class="table-wrap">
-        <table>
+      <gr-table>
           <thead>
             <tr>
               <th>Time</th>
@@ -71,12 +70,11 @@
               }
             }
           </tbody>
-        </table>
-      </div>
+      </gr-table>
 
       <footer>
-        <button type="button" [disabled]="offset() === 0" (click)="prevPage()">Previous</button>
-        <button type="button" [disabled]="!hasMore()" (click)="nextPage()">Next</button>
+        <button grButton type="button" label="Previous" severity="secondary" [disabled]="offset() === 0" (click)="prevPage()"></button>
+        <button grButton type="button" label="Next" severity="secondary" [disabled]="!hasMore()" (click)="nextPage()"></button>
       </footer>
     }
   </div>

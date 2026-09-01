@@ -15,24 +15,3 @@
   color: var(--gr-status-danger);
   border-radius: 0.5rem;
 }
-
-.credential {
-  display: grid;
-  grid-template-columns: 9rem 1fr auto;
-  align-items: start;
-  gap: 0.75rem;
-
-  .label {
-    font-weight: 600;
-  }
-
-  pre {
-    margin: 0;
-    overflow: auto;
-    background: var(--gr-surface-raised);
-    color: var(--gr-text-primary);
-    border: 1px solid var(--gr-border-subtle);
-    padding: 0.5rem;
-    border-radius: 0.25rem;
-  }
-}
