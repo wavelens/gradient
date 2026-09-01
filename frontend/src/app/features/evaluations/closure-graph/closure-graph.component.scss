@@ -78,19 +78,6 @@
   .header-controls { display: flex; gap: $spacing-xs; flex-shrink: 0; }
 }
 
-.total-badge {
-  color: var(--gr-text-secondary);
-  font-size: $font-size-sm;
-}
-
-.type-badge {
-  color: var(--gr-text-secondary);
-  font-size: $font-size-sm;
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-sm;
-  padding: 1px 8px;
-}
-
 .icon-btn {
   background: none;
   border: none;

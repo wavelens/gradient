@@ -42,12 +42,16 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: $spacing-lg;
-}.chart-header {
+}
+
+.chart-header {
   display: flex;
   flex-direction: column;
   gap: 2px;
   margin-bottom: $spacing-sm;
-}.chart-sub {
+}
+
+.chart-sub {
   font-size: $font-size-xs;
   color: var(--gr-text-muted);
 }

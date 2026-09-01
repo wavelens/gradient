@@ -37,9 +37,9 @@
                 <div>
                   <div class="trigger-summary">{{ configSummary(trigger) }}</div>
                   <div class="trigger-meta text-secondary">
-                    <span class="status-chip" [class.status-ok]="trigger.active" [class.status-warn]="!trigger.active">
+                    <gr-badge [severity]="trigger.active ? 'success' : 'warning'">
                       {{ trigger.active ? 'Active' : 'Inactive' }}
-                    </span>
+                    </gr-badge>
                     <span>Last fired: {{ relativeTime(trigger.last_fired_at) }}</span>
                     @if (fireSuccessId() === trigger.id) {
                       <span class="fire-success">

@@ -10,6 +10,7 @@ import { EvaluationsService, BuildProduct, isHtmlArtefact } from '@core/services
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
 import {
+  BadgeComponent,
   EmptyStateComponent,
   IconComponent,
   LoadingSpinnerComponent,
@@ -20,7 +21,7 @@ import { environment } from '@environments/environment';
 @Component({
   selector: 'app-build-artefacts',
   standalone: true,
-  imports: [RouterModule, LoadingSpinnerComponent, IconComponent, PageLayoutComponent, EmptyStateComponent],
+  imports: [RouterModule, LoadingSpinnerComponent, IconComponent, PageLayoutComponent, EmptyStateComponent, BadgeComponent],
   templateUrl: './build-artefacts.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './build-artefacts.component.scss',

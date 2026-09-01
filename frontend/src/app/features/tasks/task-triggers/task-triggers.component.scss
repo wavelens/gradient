@@ -50,23 +50,6 @@
   flex-shrink: 0;
 }
 
-.status-chip {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-weight: 500;
-
-  &.status-ok {
-    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: var(--gr-status-success);
-  }
-  &.status-warn {
-    background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: var(--gr-status-warning);
-  }
-}
-
 .fire-success {
   display: inline-flex;
   align-items: center;

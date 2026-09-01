@@ -21,6 +21,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
+  LogoComponent,
   MessageBannerComponent,
 } from '@shared/ui';
 
@@ -34,7 +35,7 @@ interface CliDeviceInfo {
 @Component({
   selector: 'app-cli-authorize',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, IconComponent, FormFieldComponent, InputDirective, MessageBannerComponent],
+  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, IconComponent, FormFieldComponent, InputDirective, MessageBannerComponent, LogoComponent],
   templateUrl: './cli-authorize.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cli-authorize.component.scss',

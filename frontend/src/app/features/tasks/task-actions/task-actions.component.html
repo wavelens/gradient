@@ -45,9 +45,9 @@
                   <div class="action-name">{{ action.name }}</div>
                   <div class="action-meta text-secondary">
                     <gr-badge [severity]="typeSeverity(action.action_type)">{{ typeLabel(action.action_type) }}</gr-badge>
-                    <span class="status-chip" [class.status-ok]="action.active" [class.status-warn]="!action.active">
+                    <gr-badge [severity]="action.active ? 'success' : 'warning'">
                       {{ action.active ? 'Active' : 'Inactive' }}
-                    </span>
+                    </gr-badge>
                     <span>Last fired: {{ relativeTime(action.last_fired_at) }}</span>
                     @if (testSuccessId() === action.id) {
                       <span class="fire-success">
@@ -65,7 +65,7 @@
                   @if (action.events.length > 0) {
                     <div class="events-chips">
                       @for (ev of action.events; track ev) {
-                        <span class="event-chip">{{ ev }}</span>
+                        <gr-badge>{{ ev }}</gr-badge>
                       }
                     </div>
                   }

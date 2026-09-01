@@ -39,31 +39,6 @@
   gap: $spacing-sm;
 }
 
-.eval-status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: $spacing-xs;
-  padding: $spacing-xs $spacing-sm;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  &.status-queued    { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); .dot { background: var(--gr-status-warning); } }
-  &.status-fetching, &.status-evaluating, &.status-evaluatingflake, &.status-evaluatingderivation, &.status-building { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: var(--gr-status-info); .dot { background: var(--gr-status-info); } }
-  &.status-waiting { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); .dot { background: var(--gr-status-warning); } }
-  &.status-completed, &.status-substituted { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); .dot { background: var(--gr-status-success); } }
-  &.status-failed  { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: var(--gr-status-danger); .dot { background: var(--gr-status-danger); } }
-  &.status-aborted, &.status-dependencyfailed { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: var(--gr-text-secondary); .dot { background: var(--gr-text-secondary); } }
-}
-
 .builds-count {
   font-size: $font-size-xs;
   color: var(--gr-text-muted);

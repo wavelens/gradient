@@ -12,7 +12,12 @@ import {
 import { CommonModule, Location } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { EvaluationsService, ClosureGraph } from '@core/services/evaluations.service';
-import { ButtonComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  BadgeComponent,
+  ButtonComponent,
+  IconComponent,
+  LoadingSpinnerComponent,
+} from '@shared/ui';
 import { buildClosureSankey, SankeyNode, SankeyLink } from './closure-aggregate';
 
 const TOP_N = 500;
@@ -28,7 +33,7 @@ type LaidLink = { source: LaidNode; target: LaidNode; width?: number; value: num
 @Component({
   selector: 'app-closure-graph',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, LoadingSpinnerComponent, IconComponent],
+  imports: [CommonModule, ButtonComponent, LoadingSpinnerComponent, IconComponent, BadgeComponent],
   templateUrl: './closure-graph.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './closure-graph.component.scss',

@@ -31,10 +31,7 @@
 
       <div class="overview-block">
         <div class="eval-status-row">
-          <span class="eval-status-badge status-{{ ev.status.toLowerCase() }}">
-            <span class="dot"></span>
-            {{ getStatusLabel(ev.status) }}
-          </span>
+          <gr-eval-status-badge [status]="ev.status" />
           <span class="builds-count">{{ completedBuildsCount() }}/{{ totalBuildsCount() }}</span>
         </div>
       </div>
@@ -50,16 +47,10 @@
       >
         <span class="evaluation-label">Evaluation</span>
         @if (errorMessages().length > 0) {
-          <span class="msg-badge msg-badge--error">
-            <gr-icon name="error" size="sm" />
-            {{ errorMessages().length }}
-          </span>
+          <gr-badge severity="danger">{{ errorMessages().length }}</gr-badge>
         }
         @if (warningMessages().length > 0) {
-          <span class="msg-badge msg-badge--warning">
-            <gr-icon name="warning" size="sm" />
-            {{ warningMessages().length }}
-          </span>
+          <gr-badge severity="warning">{{ warningMessages().length }}</gr-badge>
         }
       </div>
 
@@ -75,6 +66,7 @@
       @if (sidebarSearchOpen()) {
         <div class="sidebar-search">
           <input
+            grInput
             type="text"
             placeholder="Search builds… (Esc to close)"
             [value]="sidebarSearchQuery()"
@@ -153,7 +145,7 @@
       <div class="info-bar">
         <div class="info-bar-left">
           <div class="info-metric">
-            <span class="status-badge status-{{ ev.status.toLowerCase() }}">{{ getStatusLabel(ev.status) }}</span>
+            <gr-eval-status-badge [status]="ev.status" />
           </div>
           <div class="info-metric">
             <span class="metric-label">Duration</span>
@@ -179,7 +171,7 @@
           </div>
           <div class="info-metric">
             <span class="metric-label">Via</span>
-            <span class="status-badge trigger">{{ getTriggerLabel(ev.trigger?.type ?? null) }}</span>
+            <gr-badge>{{ getTriggerLabel(ev.trigger?.type ?? null) }}</gr-badge>
           </div>
           <div class="info-metric">
             <span class="metric-label">Commit</span>
@@ -300,13 +292,14 @@
               @if (logLineCount() > 0) {
                 <span class="log-line-count">{{ logLineCount() }} {{ logLineCount() === 1 ? 'line' : 'lines' }}</span>
               }
-              <span class="status-badge status-{{ statusClass(selectedBuild()?.status) }}">
+              <gr-badge [severity]="statusSeverity(selectedBuild()?.status)">
                 {{ selectedBuild()?.status }}
-              </span>
+              </gr-badge>
             </div>
             @if (chunkedMode() && searchOpen()) {
               <div class="log-search-bar">
                 <input
+                  grInput
                   class="log-search-input"
                   type="text"
                   placeholder="Search log…"

@@ -24,7 +24,7 @@
     <div class="artefacts-list">
       @for (artefact of artefacts(); track artefact.name) {
         <div class="artefact-row">
-          <span class="file-type-badge">{{ fileTypeLabel(artefact) }}</span>
+          <gr-badge>{{ fileTypeLabel(artefact) }}</gr-badge>
           <span class="artefact-name">{{ artefact.name }}</span>
           @if (artefact.size !== undefined) {
             <span class="artefact-size">{{ formatSize(artefact.size) }}</span>

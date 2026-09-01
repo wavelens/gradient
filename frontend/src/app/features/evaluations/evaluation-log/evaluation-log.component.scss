@@ -115,26 +115,6 @@
   padding: 1px 6px;
   border-radius: $border-radius-sm;
 }
-
-// Status badge (used in info bar)
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: $spacing-xs;
-  padding: 2px $spacing-sm;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-weight: 600;
-
-  &.status-queued    { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); }
-  &.status-fetching, &.status-evaluating, &.status-evaluatingflake, &.status-evaluatingderivation, &.status-building { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: var(--gr-status-info); }
-  &.status-waiting { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); }
-  &.status-completed, &.status-substituted { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); }
-  &.status-failed  { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: var(--gr-status-danger); }
-  &.status-aborted, &.status-dependencyfailed { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: var(--gr-text-secondary); }
-  &.trigger { background: color-mix(in srgb, var(--gr-border-subtle) 40%, transparent); border: 1px solid color-mix(in srgb, var(--gr-border-subtle) 80%, transparent); color: var(--gr-text-secondary); font-weight: 500; text-transform: uppercase; }
-}
-
 // ── Error banner ──────────────────────────────────────────────────────────────
 
 .error-text {

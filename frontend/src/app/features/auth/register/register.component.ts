@@ -25,6 +25,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
+  LogoComponent,
   MessageBannerComponent,
   PasswordInputComponent,
 } from '@shared/ui';
@@ -32,7 +33,7 @@ import {
 @Component({
   selector: 'app-register',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent, IconComponent, FormFieldComponent, InputDirective, MessageBannerComponent, PasswordInputComponent],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent, IconComponent, FormFieldComponent, InputDirective, MessageBannerComponent, PasswordInputComponent, LogoComponent],
   templateUrl: './register.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './register.component.scss',

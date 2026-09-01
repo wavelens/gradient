@@ -24,8 +24,8 @@
         <div class="header-info">
           <div class="header-title">
             <span class="header-name">{{ rootName() }}</span>
-            <span class="type-badge">{{ typeLabel() }}</span>
-            <span class="total-badge">{{ totalLabel() }}</span>
+            <gr-badge severity="info">{{ typeLabel() }}</gr-badge>
+            <gr-badge>{{ totalLabel() }}</gr-badge>
           </div>
           <div class="header-meta">
             <span>{{ nodeCount() }} packages in closure</span>

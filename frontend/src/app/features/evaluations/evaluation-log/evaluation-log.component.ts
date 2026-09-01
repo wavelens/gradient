@@ -37,14 +37,22 @@ import { LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
-import { ButtonComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  BadgeComponent,
+  BadgeSeverity,
+  ButtonComponent,
+  EvalStatusBadgeComponent,
+  IconComponent,
+  InputDirective,
+  LoadingSpinnerComponent,
+} from '@shared/ui';
 import { commitLabel, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -252,6 +260,19 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   /// Maps every BuildStatus variant onto the canonical token used by the SCSS
   /// status classes (status-failed, status-completed, …). The three failed
   /// reasons collapse onto `failed` so the red dot/badge renders for all of them.
+  /// The badge severity a build status reads as.
+  statusSeverity(status: string | null | undefined): BadgeSeverity {
+    switch (this.statusClass(status)) {
+      case 'completed':
+      case 'substituted': return 'success';
+      case 'building': return 'info';
+      case 'queued': return 'warning';
+      case 'failed':
+      case 'dependencyfailed': return 'danger';
+      default: return 'neutral';
+    }
+  }
+
   statusClass(status: string | null | undefined): string {
     switch (status) {
       case 'Completed': return 'completed';

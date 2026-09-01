@@ -33,22 +33,7 @@
     background: color-mix(in srgb, var(--gr-white) 6%, transparent);
     border-left-color: var(--gr-status-danger);
   }
-}
-
-.msg-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 6px;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-weight: 600;
-
-  &--error   { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent); color: var(--gr-status-danger); }
-  &--warning { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); }
-}
-
-// ── Messages panel ──────────────────────────────────────────────────────────
+}// ── Messages panel ──────────────────────────────────────────────────────────
 
 .messages-panel {
   flex: 1;

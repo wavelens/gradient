@@ -75,7 +75,7 @@
                 @if (worker.live) {
                   <div class="worker-caps">
                     @for (cap of capLabels; track cap.key) {
-                      <span class="cap-badge" [class.cap-on]="worker.live.capabilities[cap.key]" [class.cap-off]="!worker.live.capabilities[cap.key]">{{ cap.label }}</span>
+                      <gr-badge [severity]="worker.live.capabilities[cap.key] ? 'success' : 'neutral'">{{ cap.label }}</gr-badge>
                     }
                   </div>
                   @if (worker.live.architectures.length > 0) {

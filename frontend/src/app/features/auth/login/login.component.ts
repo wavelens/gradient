@@ -18,6 +18,7 @@ import {
   FormFieldComponent,
   IconComponent,
   InputDirective,
+  LogoComponent,
   MessageBannerComponent,
   PasswordInputComponent,
 } from '@shared/ui';
@@ -25,7 +26,7 @@ import {
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent, IconComponent, FormFieldComponent, InputDirective, MessageBannerComponent, PasswordInputComponent, CheckboxComponent],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent, IconComponent, FormFieldComponent, InputDirective, MessageBannerComponent, PasswordInputComponent, CheckboxComponent, LogoComponent],
   templateUrl: './login.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './login.component.scss',

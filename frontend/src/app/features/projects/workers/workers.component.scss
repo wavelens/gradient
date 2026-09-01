@@ -34,19 +34,7 @@
 .worker-action-btn {
   min-width: 110px;
   justify-content: center;
-}
-
-.cap-badge {
-  padding: 1px $spacing-xs;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-family: $font-family-mono;
-
-  &.cap-on  { background: color-mix(in srgb, var(--gr-status-success) 12%, transparent); color: var(--gr-status-success); }
-  &.cap-off { background: color-mix(in srgb, var(--gr-text-secondary) 8%, transparent); color: var(--gr-text-muted); opacity: 0.5; }
-}
-
-// The row's meta lines: an id, an address and the live capability summary.
+}// The row's meta lines: an id, an address and the live capability summary.
 .worker-id {
   font-family: $font-family-mono;
   font-size: $font-size-sm;
