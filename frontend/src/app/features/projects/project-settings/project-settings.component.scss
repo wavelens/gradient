@@ -4,28 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
-
-.settings-section {
-  margin-bottom: $spacing-xxl;
-
-  h2 {
-    font-size: $font-size-xl;
-    margin: 0 0 $spacing-lg 0;
-  }
-}
-
-.form-actions {
+@use '../../../styles/variables' as *;.form-actions {
   display: flex;
   gap: $spacing-md;
   margin-top: $spacing-lg;
-}
-
-.forge-selector {
-  display: flex;
-  flex-wrap: wrap;
-  gap: $spacing-sm;
-  margin-bottom: $spacing-xs;
 }
 
 .member-row {
@@ -39,10 +21,6 @@
 .ssh-key-area {
   font-family: $font-family-mono;
   font-size: $font-size-xs;
-}
-
-.danger-card {
-  border-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
 }
 
 .dialog-error {

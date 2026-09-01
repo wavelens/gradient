@@ -8,17 +8,6 @@
 
 // ── Sidebar evaluation section ──────────────────────────────────────────────
 
-.sidebar-section-header {
-  padding: $spacing-xs $spacing-md;
-  font-size: $font-size-xs;
-  font-weight: 600;
-  color: var(--gr-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  user-select: none;
-  margin-top: $spacing-xs;
-}
-
 .evaluation-messages-item {
   display: flex;
   align-items: center;

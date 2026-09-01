@@ -4,36 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
-
-.message-banner {
-  display: flex;
-  align-items: center;
-  gap: $spacing-sm;
-  border-radius: $border-radius-md;
-  padding: $spacing-md;
-  margin-bottom: $spacing-lg;
-
-  &.error {
-    background: color-mix(in srgb, var(--gr-status-danger) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
-    color: var(--gr-status-danger);
-  }
-
-  &.success {
-    background: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--gr-status-success) 50%, transparent);
-    color: var(--gr-status-success);
-  }
-
-  &.info {
-    background: color-mix(in srgb, var(--gr-status-info) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--gr-status-info) 50%, transparent);
-    color: var(--gr-status-info);
-  }
-}
-
-.settings-card {
+@use '../../../styles/variables' as *;.settings-card {
   background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
@@ -41,27 +12,9 @@
   max-width: 640px;
 }
 
-.label-help {
-  display: inline-flex;
-  align-items: center;
-  color: var(--gr-text-muted);
-  line-height: 1;
-  &:hover { color: var(--gr-text-primary); }
-}
-
 .form-actions { display: flex; gap: $spacing-md; margin-top: $spacing-lg; }
-
-.danger-card { border-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent); }
 
 .danger-divider {
   border-top: 1px solid color-mix(in srgb, var(--gr-status-danger) 20%, transparent);
   margin: $spacing-lg 0;
-}
-
-.danger-feedback {
-  margin-top: $spacing-sm;
-  font-size: $font-size-sm;
-
-  &--error { color: var(--gr-status-danger); }
-  &--success { color: var(--gr-status-success); }
 }

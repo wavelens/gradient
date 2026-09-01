@@ -25,16 +25,6 @@
   .peer-id-hint { font-size: $font-size-xs; }
 }
 
-.worker-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: $spacing-md $spacing-lg;
-  background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-md;
-}
-
 .worker-meta {
   display: flex;
   align-items: center;

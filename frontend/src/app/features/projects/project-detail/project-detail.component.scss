@@ -108,15 +108,3 @@
   margin-bottom: $spacing-md;
 
 }
-.text-danger { color: var(--gr-status-danger); }
-
-.name-check-icon {
-  position: absolute;
-  right: $spacing-sm;
-  display: flex;
-  align-items: center;
-  color: var(--gr-text-secondary);
-
-  &.available { color: var(--gr-status-success); }
-  &.taken { color: var(--gr-status-danger); }
-}

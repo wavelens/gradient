@@ -58,7 +58,8 @@ function styleguideMarkup(): string {
 }
 
 const SELECTOR = /selector:\s*'([^']+)'/;
-const EXEMPT = new Set(['gr-tooltip-panel', 'gr-confirm-dialog', 'gr-form-dialog']);
+// gr-tooltip-panel is the tooltip's overlay body, not a selector consumers write.
+const EXEMPT = new Set(['gr-tooltip-panel']);
 
 const markup = styleguideMarkup();
 const undemoed: string[] = [];

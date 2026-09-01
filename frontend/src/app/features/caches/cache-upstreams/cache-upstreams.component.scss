@@ -4,25 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: $spacing-xxl;
-  text-align: center;
-  background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-md;
-
-  gr-icon { color: var(--gr-text-secondary); margin-bottom: $spacing-md; }
-  h3 { margin: 0 0 $spacing-sm 0; }
-  p { margin: 0 0 $spacing-lg 0; }
-}
-
-.upstreams-list {
+@use '../../../styles/variables' as *;.upstreams-list {
   display: flex;
   flex-direction: column;
   gap: $spacing-sm;
