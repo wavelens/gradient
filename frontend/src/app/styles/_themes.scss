@@ -22,13 +22,20 @@
   --gr-ink-900: #1f2328;
   --gr-slate-600: #656d76;
   --gr-slate-500: #8c959f;
+  --gr-green-800: #115c26;
+  --gr-green-700: #166c2e;
   --gr-green-600: #1a7f37;
+  --gr-green-550: #23913d;
   --gr-green-500: #28a745;
   --gr-green-400: #22c55e;
+  --gr-red-700: #a40e19;
   --gr-red-600: #cf222e;
+  --gr-red-550: #bd2130;
   --gr-red-500: #dc3545;
   --gr-red-400: #ef4444;
+  --gr-amber-800: #7d5300;
   --gr-amber-700: #9a6700;
+  --gr-amber-550: #e6ac06;
   --gr-amber-500: #ffc107;
   --gr-orange-500: #f97316;
   --gr-cyan-500: #17a2b8;
@@ -38,18 +45,24 @@
 }
 
 @mixin dark-roles {
+  color-scheme: dark;
   --gr-surface-sunken: var(--gr-gray-950);
   --gr-surface-base: var(--gr-gray-900);
   --gr-surface-raised: var(--gr-gray-800);
   --gr-surface-hover: var(--gr-gray-750);
   --gr-surface-active: var(--gr-gray-800);
   --gr-border: var(--gr-gray-700);
+  --gr-accent: var(--gr-green-600);
+  --gr-accent-hover: var(--gr-green-700);
+  --gr-accent-fg: var(--gr-white);
   --gr-text-primary: var(--gr-white);
   --gr-text-secondary: var(--gr-gray-300);
   --gr-text-muted: var(--gr-gray-400);
   --gr-status-success: var(--gr-green-500);
   --gr-status-danger: var(--gr-red-500);
+  --gr-status-danger-hover: var(--gr-red-550);
   --gr-status-warning: var(--gr-amber-500);
+  --gr-status-warning-hover: var(--gr-amber-550);
   --gr-status-info: var(--gr-cyan-500);
   --gr-graph-success: var(--gr-green-400);
   --gr-graph-danger: var(--gr-red-400);
@@ -58,18 +71,24 @@
 }
 
 @mixin light-roles {
+  color-scheme: light;
   --gr-surface-sunken: var(--gr-gray-50);
   --gr-surface-base: var(--gr-white);
   --gr-surface-raised: var(--gr-gray-50);
   --gr-surface-hover: var(--gr-gray-100);
   --gr-surface-active: var(--gr-gray-200);
   --gr-border: var(--gr-gray-200);
+  --gr-accent: var(--gr-green-700);
+  --gr-accent-hover: var(--gr-green-800);
+  --gr-accent-fg: var(--gr-white);
   --gr-text-primary: var(--gr-ink-900);
   --gr-text-secondary: var(--gr-slate-600);
   --gr-text-muted: var(--gr-slate-500);
   --gr-status-success: var(--gr-green-600);
   --gr-status-danger: var(--gr-red-600);
+  --gr-status-danger-hover: var(--gr-red-700);
   --gr-status-warning: var(--gr-amber-700);
+  --gr-status-warning-hover: var(--gr-amber-800);
   --gr-status-info: var(--gr-blue-600);
   --gr-graph-success: var(--gr-green-600);
   --gr-graph-danger: var(--gr-red-600);

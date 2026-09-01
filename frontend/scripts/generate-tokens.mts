@@ -30,10 +30,12 @@ ${block(PALETTE, (v) => v)}
 }
 
 @mixin dark-roles {
+  color-scheme: dark;
 ${block(DARK_ROLES, (v) => `var(${v})`)}
 }
 
 @mixin light-roles {
+  color-scheme: light;
 ${block(LIGHT_ROLES, (v) => `var(${v})`)}
 }
 

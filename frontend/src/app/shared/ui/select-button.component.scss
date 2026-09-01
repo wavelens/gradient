@@ -26,5 +26,5 @@
   &:last-child { border-right: 0; }
   &:hover:not(:disabled) { background: $color-hover; color: $text-primary; }
   &:disabled { cursor: not-allowed; opacity: 0.5; }
-  &--selected { background: $color-info; color: $color-white; }
+  &--selected { background: var(--gr-accent); color: var(--gr-accent-fg); }
 }
