@@ -11,6 +11,7 @@ import { filter, map, startWith } from 'rxjs/operators';
 import { HeaderComponent } from '@shared/components/header/header.component';
 import { FooterComponent } from '@shared/components/footer/footer.component';
 import { AuthService } from '@core/services/auth.service';
+import { ThemeService } from '@core/services/theme.service';
 
 @Component({
   selector: 'app-root',
@@ -22,6 +23,7 @@ import { AuthService } from '@core/services/auth.service';
 export class App {
   authService = inject(AuthService);
   private router = inject(Router);
+  private theme = inject(ThemeService);
 
   private routeData = toSignal(
     this.router.events.pipe(
