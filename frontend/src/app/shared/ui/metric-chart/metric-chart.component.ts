@@ -4,12 +4,31 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, ElementRef, OnDestroy, afterNextRender, booleanAttribute, effect, input, numberAttribute, viewChild, ChangeDetectionStrategy } from '@angular/core';
+import { Component, ElementRef, OnDestroy, afterNextRender, booleanAttribute, effect, inject, input, numberAttribute, viewChild, ChangeDetectionStrategy } from '@angular/core';
 import * as echarts from 'echarts/core';
 import { BarChart, HeatmapChart, LineChart, RadarChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, RadarComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
-import { MetricChartConfig, MetricChartType, MetricSeries, buildMetricChartOption } from './metric-chart.options';
+import { ChartTheme, MetricChartConfig, MetricChartType, MetricSeries, buildMetricChartOption } from './metric-chart.options';
+import { ThemeService } from '@core/services/theme.service';
+
+/// Charts need concrete colours, so the semantic roles are read once per render.
+export function resolveChartTheme(): ChartTheme {
+  const style = getComputedStyle(document.documentElement);
+  const read = (name: string) => style.getPropertyValue(name).trim();
+  return {
+    text: read('--gr-text-secondary'),
+    grid: read('--gr-border'),
+    border: read('--gr-border'),
+    surface: read('--gr-surface-raised'),
+    palette: [
+      read('--gr-graph-running'),
+      read('--gr-graph-danger'),
+      read('--gr-graph-success'),
+      read('--gr-graph-warning'),
+    ],
+  };
+}
 
 echarts.use([
   BarChart,
@@ -79,6 +98,7 @@ export class MetricChartComponent implements OnDestroy {
   private host = viewChild.required<ElementRef<HTMLElement>>('host');
   private chart?: echarts.ECharts;
   private resize?: ResizeObserver;
+  private theme = inject(ThemeService);
 
   constructor() {
     afterNextRender(() => {
@@ -103,6 +123,7 @@ export class MetricChartComponent implements OnDestroy {
   }
 
   private option() {
+    this.theme.resolved();
     return buildMetricChartOption({
       type: this.type(),
       series: this.series(),
@@ -112,6 +133,6 @@ export class MetricChartComponent implements OnDestroy {
       yAxisTitle: this.yAxisTitle(),
       valueFormatter: this.valueFormatter(),
       secondary: this.secondary(),
-    });
+    }, resolveChartTheme());
   }
 }

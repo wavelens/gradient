@@ -23,32 +23,32 @@ export interface MetricChartConfig {
   secondary?: { title?: string; valueFormatter?: (value: number) => string };
 }
 
-export const CHART_THEME = {
-  text: '#abb0b4',
-  grid: '#2d333b',
-  border: '#2d333b',
-  surface: '#21262d',
-} as const;
-
-const DEFAULT_COLORS = ['#17a2b8', '#dc3545', '#28a745', '#fd7e14', '#6f42c1', '#e83e8c'];
+/// Resolved from semantic tokens by the component, so charts follow the active theme.
+export interface ChartTheme {
+  text: string;
+  grid: string;
+  border: string;
+  surface: string;
+  palette: string[];
+}
 
 const isXY = (d: MetricSeries['data']): d is MetricPointXY[] =>
   d.length > 0 && typeof d[0] === 'object' && d[0] !== null;
 
-const axisLabel = { color: CHART_THEME.text, fontSize: 11 };
-const axisLine = { lineStyle: { color: CHART_THEME.border } };
-const splitLine = { lineStyle: { color: CHART_THEME.grid, type: 'dashed' as const } };
+const axisLabel = (t: ChartTheme) => ({ color: t.text, fontSize: 11 });
+const axisLine = (t: ChartTheme) => ({ lineStyle: { color: t.border } });
+const splitLine = (t: ChartTheme) => ({ lineStyle: { color: t.grid, type: 'dashed' as const } });
 
 /// Builds the full ECharts option for `gr-metric-chart`. Kept pure and free of
 /// Angular/DOM so every chart shape is unit-testable without a renderer.
-export function buildMetricChartOption(cfg: MetricChartConfig): EChartsOption {
+export function buildMetricChartOption(cfg: MetricChartConfig, theme: ChartTheme): EChartsOption {
   const format = cfg.valueFormatter ?? ((v: number) => String(v));
   const base: EChartsOption = {
     backgroundColor: 'transparent',
-    color: cfg.colors?.length ? [...cfg.colors] : DEFAULT_COLORS,
+    color: cfg.colors?.length ? [...cfg.colors] : theme.palette,
     legend: {
       show: cfg.series.length > 1,
-      textStyle: { color: CHART_THEME.text },
+      textStyle: { color: theme.text },
       top: 0,
     },
     tooltip: {
@@ -57,20 +57,20 @@ export function buildMetricChartOption(cfg: MetricChartConfig): EChartsOption {
     },
   };
 
-  if (cfg.type === 'radar') return { ...base, ...radarOption(cfg) };
-  if (cfg.type === 'heatmap') return { ...base, ...heatmapOption(cfg, format) };
-  return { ...base, ...cartesianOption(cfg, format) };
+  if (cfg.type === 'radar') return { ...base, ...radarOption(cfg, theme) };
+  if (cfg.type === 'heatmap') return { ...base, ...heatmapOption(cfg, format, theme) };
+  return { ...base, ...cartesianOption(cfg, format, theme) };
 }
 
-function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string): EChartsOption {
-  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: cfg.type === 'bar', axisLabel, axisLine };
+function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, theme: ChartTheme): EChartsOption {
+  const categoryAxis = { type: 'category' as const, data: cfg.categories ?? [], boundaryGap: cfg.type === 'bar', axisLabel: axisLabel(theme), axisLine: axisLine(theme) };
   const valueAxis = (title: string | undefined, fmt: (v: number) => string, opposite = false) => ({
     type: 'value' as const,
     name: title || undefined,
-    nameTextStyle: { color: CHART_THEME.text },
-    axisLabel: { ...axisLabel, formatter: (v: number) => fmt(v) },
-    axisLine,
-    splitLine,
+    nameTextStyle: { color: theme.text },
+    axisLabel: { ...axisLabel(theme), formatter: (v: number) => fmt(v) },
+    axisLine: axisLine(theme),
+    splitLine: splitLine(theme),
     ...(opposite ? { position: 'right' as const } : {}),
   });
 
@@ -113,14 +113,14 @@ function dualAxisTooltip(cfg: MetricChartConfig, left: (v: number) => string, ri
   };
 }
 
-function radarOption(cfg: MetricChartConfig): EChartsOption {
+function radarOption(cfg: MetricChartConfig, theme: ChartTheme): EChartsOption {
   return {
     radar: {
       indicator: (cfg.categories ?? []).map((name) => ({ name })),
-      axisName: { color: CHART_THEME.text, fontSize: 11 },
-      splitLine: { lineStyle: { color: CHART_THEME.grid } },
+      axisName: { color: theme.text, fontSize: 11 },
+      splitLine: { lineStyle: { color: theme.grid } },
       splitArea: { show: false },
-      axisLine: { lineStyle: { color: CHART_THEME.grid } },
+      axisLine: { lineStyle: { color: theme.grid } },
     },
     series: [
       {
@@ -135,7 +135,11 @@ function radarOption(cfg: MetricChartConfig): EChartsOption {
   };
 }
 
-function heatmapOption(cfg: MetricChartConfig, format: (v: number) => string): EChartsOption {
+function heatmapOption(
+  cfg: MetricChartConfig,
+  format: (v: number) => string,
+  theme: ChartTheme,
+): EChartsOption {
   const first = cfg.series[0]?.data ?? [];
   const xs = isXY(first) ? first.map((p) => p.x) : (cfg.categories ?? []);
   const data: [number, number, number][] = [];
@@ -146,8 +150,8 @@ function heatmapOption(cfg: MetricChartConfig, format: (v: number) => string): E
 
   return {
     grid: { left: 8, right: 12, top: 28, bottom: 44, containLabel: true },
-    xAxis: { type: 'category', data: xs, axisLabel, axisLine, splitArea: { show: true } },
-    yAxis: { type: 'category', data: cfg.series.map((s) => s.name), axisLabel, axisLine, splitArea: { show: true } },
+    xAxis: { type: 'category', data: xs, axisLabel: axisLabel(theme), axisLine: axisLine(theme), splitArea: { show: true } },
+    yAxis: { type: 'category', data: cfg.series.map((s) => s.name), axisLabel: axisLabel(theme), axisLine: axisLine(theme), splitArea: { show: true } },
     visualMap: {
       min: 0,
       max: data.reduce((m, [, , v]) => Math.max(m, v), 0),
@@ -155,10 +159,10 @@ function heatmapOption(cfg: MetricChartConfig, format: (v: number) => string): E
       orient: 'horizontal',
       left: 'center',
       bottom: 0,
-      textStyle: { color: CHART_THEME.text },
-      inRange: { color: [CHART_THEME.surface, cfg.colors?.[0] ?? DEFAULT_COLORS[0]] },
+      textStyle: { color: theme.text },
+      inRange: { color: [theme.surface, cfg.colors?.[0] ?? theme.palette[0]] },
       formatter: (v) => format(Number(v)),
     },
-    series: [{ type: 'heatmap', data, progressive: 0, itemStyle: { borderColor: CHART_THEME.grid, borderWidth: 1 } }],
+    series: [{ type: 'heatmap', data, progressive: 0, itemStyle: { borderColor: theme.grid, borderWidth: 1 } }],
   };
 }
