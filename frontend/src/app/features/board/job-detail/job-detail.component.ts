@@ -416,7 +416,8 @@ export class BoardJobDetailComponent implements OnInit {
     this.board.getPendingJobs().subscribe({
       next: (r) => {
         const match = r.jobs.find((p) => p.evaluation_id === id || p.build_id === id);
-        match ? this.pending.set(match) : this.notFound.set(true);
+        if (match) this.pending.set(match);
+        else this.notFound.set(true);
       },
       error: () => this.notFound.set(true),
     });

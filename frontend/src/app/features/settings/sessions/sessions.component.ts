@@ -6,18 +6,35 @@
 
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
 import { UserService } from '@core/services/user.service';
 import { Session } from '@core/models';
-import { ButtonComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
+import {
+  BadgeComponent,
+  ButtonComponent,
+  EmptyStateComponent,
+  LoadingSpinnerComponent,
+  MessageBannerComponent,
+  PageLayoutComponent,
+  RowComponent,
+  RowListComponent,
+} from '@shared/ui';
 
 @Component({
   selector: 'app-sessions',
   standalone: true,
-  imports: [CommonModule, RouterModule, ButtonComponent, LoadingSpinnerComponent, IconComponent],
+  imports: [
+    CommonModule,
+    BadgeComponent,
+    ButtonComponent,
+    EmptyStateComponent,
+    LoadingSpinnerComponent,
+    MessageBannerComponent,
+    PageLayoutComponent,
+    RowComponent,
+    RowListComponent,
+  ],
   templateUrl: './sessions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styleUrl: './sessions.component.scss',
 })
 export class SessionsComponent implements OnInit {
   private userService = inject(UserService);

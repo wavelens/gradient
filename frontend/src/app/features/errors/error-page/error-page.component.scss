@@ -25,13 +25,12 @@
 }
 
 .error-icon {
-  font-size: 64px;
   color: var(--gr-text-secondary);
   margin-bottom: $spacing-lg;
 }
 
 .error-code {
-  font-size: 96px;
+  font-size: $font-size-xxl;
   font-weight: 700;
   line-height: 1;
   color: var(--gr-text-muted);

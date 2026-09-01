@@ -1077,6 +1077,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
     let openSpans = 0;
     // Match any CSI sequence: ESC [ <param bytes> <final byte>
     // Only SGR sequences (final byte 'm') are converted to spans; all others are stripped.
+    // eslint-disable-next-line no-control-regex -- ESC is the sequence introducer
     const result = escaped.replace(/\u001b\[([?0-9;]*)([A-Za-z~])/g, (_, params: string, cmd: string) => {
       if (cmd !== 'm') return '';
       if (EvaluationLogComponent.ANSI_RESETS.has(params)) {

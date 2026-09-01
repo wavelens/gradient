@@ -4,57 +4,41 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-<div class="container">
-  <div class="page-header">
-    <h1>Active Sessions</h1>
-    <p class="text-secondary">Devices currently signed in to your account</p>
-  </div>
+<gr-page-layout title="Active Sessions" subtitle="Devices currently signed in to your account">
+  @if (errorMessage()) {
+    <gr-message-banner slot="banner" type="error">{{ errorMessage() }}</gr-message-banner>
+  }
 
   @if (loading()) {
     <gr-loading-spinner message="Loading sessions..." />
+  } @else if (sessions().length === 0) {
+    <gr-empty-state icon="devices" title="No active sessions"
+      message="Sessions appear here once you sign in on a device." />
   } @else {
-    @if (errorMessage()) {
-      <div class="message-banner error">
-        <gr-icon name="error" />
-        {{ errorMessage() }}
-      </div>
-    }
-
-    <div class="settings-section">
-      @if (sessions().length === 0) {
-        <p class="text-secondary">No active sessions.</p>
-      } @else {
-        <ul class="session-list">
-          @for (s of sessions(); track s.id) {
-            <li class="session-item" [class.current]="s.current">
-              <div class="session-meta">
-                <div class="session-ua">
-                  {{ s.user_agent || 'Unknown device' }}
-                  @if (s.current) {
-                    <span class="badge">This device</span>
-                  }
-                </div>
-                <div class="text-secondary session-details">
-                  IP: {{ s.ip || 'unknown' }} ·
-                  Last used {{ s.last_used_at | date: 'medium' }} ·
-                  Expires {{ s.expires_at | date: 'medium' }}
-                </div>
-              </div>
-              <div class="session-actions">
-                <button
-                  grButton
-                  label="Revoke"
-                  icon="logout"
-                  severity="danger"
-                  [disabled]="s.current || revokingId() === s.id"
-                  [loading]="revokingId() === s.id"
-                  (click)="revoke(s)"
-                ></button>
-              </div>
-            </li>
+    <gr-row-list>
+      @for (s of sessions(); track s.id) {
+        <gr-row icon="computer">
+          {{ s.user_agent || 'Unknown device' }}
+          @if (s.current) {
+            <gr-badge severity="info">This device</gr-badge>
           }
-        </ul>
+          <span slot="meta">
+            IP: {{ s.ip || 'unknown' }} ·
+            Last used {{ s.last_used_at | date: 'medium' }} ·
+            Expires {{ s.expires_at | date: 'medium' }}
+          </span>
+          <button
+            slot="actions"
+            grButton
+            label="Revoke"
+            icon="logout"
+            severity="danger"
+            [disabled]="s.current || revokingId() === s.id"
+            [loading]="revokingId() === s.id"
+            (click)="revoke(s)"
+          ></button>
+        </gr-row>
       }
-    </div>
+    </gr-row-list>
   }
-</div>
+</gr-page-layout>

@@ -11,7 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
-import { AutoCompleteComponent, ButtonComponent, DialogComponent, IconComponent, LoadingSpinnerComponent, TooltipDirective } from '@shared/ui';
+import { AutoCompleteComponent, ButtonComponent, DialogComponent, IconComponent, LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 

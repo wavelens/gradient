@@ -30,16 +30,11 @@
   </div>
 
   @if (hasNoCacheSubscribed()) {
-    <div class="no-cache-banner" data-testid="no-cache-banner" role="alert">
-      <gr-icon name="warning" />
-      <div>
-        <div class="no-cache-title">No cache subscribed</div>
-        <div class="no-cache-body">
-          Workers cannot connect to this project until you subscribe a cache.
-          <a [routerLink]="['/project', projectName, 'caches']">Manage cache subscriptions →</a>
-        </div>
-      </div>
-    </div>
+    <gr-message-banner type="warning" data-testid="no-cache-banner">
+      <strong>No cache subscribed</strong>
+      Workers cannot connect to this project until you subscribe a cache.
+      <a [routerLink]="['/project', projectName, 'caches']">Manage cache subscriptions</a>
+    </gr-message-banner>
   }
 
   @if (projectId()) {

@@ -226,7 +226,6 @@
   align-items: center;
   color: var(--gr-text-secondary);
 
-  i { font-size: 14px; }
 
   &.available { color: var(--gr-status-success); }
   &.taken { color: var(--gr-status-danger); }

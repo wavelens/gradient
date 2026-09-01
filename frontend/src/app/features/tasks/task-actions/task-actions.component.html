@@ -59,7 +59,7 @@
           <div class="action-row">
             <div class="action-header">
               <div class="action-info">
-                <span class="type-icon"><i [class]="typeIcon(action.action_type)"></i></span>
+                <gr-icon [name]="typeIcon(action.action_type)" class="type-icon" />
                 <div>
                   <div class="action-name">{{ action.name }}</div>
                   <div class="action-meta text-secondary">

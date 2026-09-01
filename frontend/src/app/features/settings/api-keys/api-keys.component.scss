@@ -104,7 +104,7 @@
 .w-full { width: 100%; }
 
 .badge-managed {
-  font-size: 10px;
+  font-size: $font-size-xs;
   font-weight: 700;
   letter-spacing: 0.05em;
   padding: 1px 6px;
@@ -142,7 +142,7 @@
 }
 
 .badge-info {
-  font-size: 10px;
+  font-size: $font-size-xs;
   font-weight: 700;
   letter-spacing: 0.05em;
   padding: 1px 6px;
@@ -154,7 +154,7 @@
 }
 
 .badge-project {
-  font-size: 10px;
+  font-size: $font-size-xs;
   font-weight: 600;
   padding: 1px 6px;
   border-radius: $border-radius-sm;

@@ -237,19 +237,19 @@
         } @else if (!selectedBuildId()) {
           @if (ev.status === 'Fetching') {
             <div class="evaluating-hint">
-              <gr-icon name="cloud_download" class="evaluating-icon" />
+              <gr-icon name="cloud_download" class="evaluating-icon" size="xl" />
               <span class="evaluating-title">Fetching</span>
               <span class="evaluating-sub">Prefetching the Nix flake&hellip;</span>
             </div>
           } @else if (ev.status === 'EvaluatingFlake' || ev.status === 'EvaluatingDerivation') {
             <div class="evaluating-hint">
-              <gr-icon name="manage_search" class="evaluating-icon" />
+              <gr-icon name="manage_search" class="evaluating-icon" size="xl" />
               <span class="evaluating-title">Evaluating</span>
               <span class="evaluating-sub">Discovering builds from the Nix flake&hellip;</span>
             </div>
           } @else if (ev.status === 'Waiting') {
             <div class="queued-hint">
-              <gr-icon name="pause_circle" class="queued-icon" />
+              <gr-icon name="pause_circle" class="queued-icon" size="xl" />
               <span class="queued-title">{{ waitingTitle(ev.waiting_reason) }}</span>
               @if (ev.waiting_reason && ev.waiting_reason.kind === 'workers' && ev.waiting_reason.unmet.length > 0) {
                 <span class="queued-sub">{{ formatWaitingReason(ev.waiting_reason) }}</span>
@@ -275,13 +275,13 @@
             </div>
           } @else if (ev.status === 'Queued') {
             <div class="queued-hint">
-              <gr-icon name="hourglass_empty" class="queued-icon" />
+              <gr-icon name="hourglass_empty" class="queued-icon" size="xl" />
               <span class="queued-title">Waiting in Queue</span>
               <span class="queued-sub">The evaluation will start when a slot becomes available&hellip;</span>
             </div>
           } @else {
             <div class="select-build-hint">
-              <gr-icon name="terminal" class="hint-icon" />
+              <gr-icon name="terminal" class="hint-icon" size="xl" />
               <span class="hint-text">Select a build to view its log</span>
             </div>
           }
@@ -289,7 +289,7 @@
           <gr-loading-spinner message="Loading log..." />
         } @else if (selectedBuild()?.status === 'Queued') {
           <div class="queued-hint">
-            <gr-icon name="schedule" class="queued-icon" />
+            <gr-icon name="schedule" class="queued-icon" size="xl" />
             <span class="queued-title">Build Queued</span>
             <span class="queued-sub">This build is waiting to start. Logs will appear once it begins.</span>
           </div>

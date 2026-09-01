@@ -4,44 +4,101 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-.pkg-label { margin: 32px 0 10px; h3 { font-size: 14.5px; } }
-.pkg-list { display: flex; flex-direction: column; gap: 8px; }
+@use '../../../styles/variables' as *;
+
+.pkg-label { margin: $space-section 0 $spacing-sm; h3 { font-size: $font-size-md; } }
+.pkg-list { display: flex; flex-direction: column; gap: $space-pair; }
+
 .pkg {
-  background-color: var(--card);
-  border: 1px solid rgba(255,255,255,.07); border-radius: 9px;
-  border-left: 4px solid var(--rail-c, var(--queued));
-  padding: 10px 14px 10px 13px; position: relative; display: flex; align-items: center; gap: 12px; cursor: pointer;
-  animation: pkg-in .28s ease backwards;
-  &:hover { border-color: rgba(255,255,255,.14); border-left-color: var(--rail-c, var(--queued)); }
-  .si { width: 24px; height: 24px; border-radius: 6px; font-size: 15px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-  .pkg-name { font-weight: 600; font-size: 13.5px; width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .chip-arch { border: 1px solid rgba(255,255,255,.07); border-radius: 9px; padding: 0 8px; font-size: 10.5px; color: #abb0b4; flex-shrink: 0; }
-  .pkg-deps { color: #5d636b; font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+  background-color: var(--gr-surface-control);
+  border: 1px solid var(--gr-border);
+  border-radius: $border-radius-md;
+  border-left: 4px solid var(--rail-c, var(--idle));
+  padding: $spacing-sm $spacing-md;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  cursor: pointer;
+  animation: pkg-in $transition-base ease backwards;
+
+  &:hover { border-color: var(--gr-text-muted); border-left-color: var(--rail-c, var(--idle)); }
+
+  .si { width: 24px; height: 24px; border-radius: $border-radius-sm; justify-content: center; flex-shrink: 0; }
+
+  .pkg-name {
+    font-weight: 600;
+    font-size: $font-size-sm;
+    width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chip-arch {
+    border: 1px solid var(--gr-border);
+    border-radius: $border-radius-sm;
+    padding: 0 $spacing-sm;
+    font-size: $font-size-xs;
+    color: var(--gr-text-secondary);
+    flex-shrink: 0;
+  }
+
+  .pkg-deps { color: var(--gr-text-muted); font-size: $font-size-xs; white-space: nowrap; flex-shrink: 0; }
   .pkg-bar { width: 360px; --segbar-h: 7px; }
-  .pkg-time { color: #818181; font-size: 12px; margin-left: auto; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; .arte { font-size: 15px; } }
-  .kebab { color: #818181; padding-left: 12px; border: none; border-left: 1px solid rgba(255,255,255,.07); background: none; cursor: pointer; }
+
+  .pkg-time {
+    color: var(--gr-text-muted);
+    font-size: $font-size-xs;
+    margin-left: auto;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: $spacing-xs;
+  }
+
+  .kebab {
+    color: var(--gr-text-muted);
+    padding-left: $spacing-sm;
+    border: none;
+    border-left: 1px solid var(--gr-border);
+    background: none;
+    cursor: pointer;
+  }
 }
 
-@keyframes pkg-in { from { opacity: 0; transform: translateY(6px); } }
-
-.si, .s-ico {
-  transition: background .35s ease, color .35s ease;
-  &.ok { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
-  &.err { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
-  &.run { color: var(--running); background: color-mix(in srgb, var(--running) 14%, transparent); }
-  &.warn { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
-  &.muted { color: #818181; background: rgba(255,255,255,.06); }
+@keyframes pkg-in {
+  from { opacity: 0; transform: translateY(6px); }
 }
 
-.eval-card, .pkg {
-  &.ok { --rail-c: var(--success); }
-  &.err { --rail-c: var(--danger); }
-  &.run { --rail-c: var(--running); }
-  &.warn { --rail-c: var(--warning); }
-  &.muted { --rail-c: var(--queued); }
+// One status swatch recipe for both the tab icon and the package row icon.
+.si,
+.s-ico {
+  transition: background $transition-slow, color $transition-slow;
+
+  &.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+  &.err { color: var(--err); background: color-mix(in srgb, var(--err) 14%, transparent); }
+  &.run { color: var(--run); background: color-mix(in srgb, var(--run) 14%, transparent); }
+  &.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  &.muted { color: var(--gr-text-muted); background: var(--gr-surface-hover); }
+}
+
+.eval-card,
+.pkg {
+  &.ok { --rail-c: var(--ok); }
+  &.err { --rail-c: var(--err); }
+  &.run { --rail-c: var(--run); }
+  &.warn { --rail-c: var(--warn); }
+  &.muted { --rail-c: var(--idle); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .eval-card, .eval-card::before, .eval-card::after, .si, .s-ico { transition: none; }
-  .panel-body, .pkg { animation: none; }
+  .eval-card,
+  .eval-card::before,
+  .eval-card::after,
+  .si,
+  .s-ico { transition: none; }
+
+  .panel-body,
+  .pkg { animation: none; }
 }

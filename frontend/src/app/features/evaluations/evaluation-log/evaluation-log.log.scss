@@ -61,7 +61,6 @@
   color: var(--gr-text-secondary);
 
   .queued-icon {
-    font-size: 56px;
     color: var(--gr-status-warning);
     animation: pulse 2s ease-in-out infinite;
   }
@@ -89,9 +88,6 @@
       padding: 2px 0;
     }
 
-    code {
-      font-size: 0.85em;
-    }
   }
 }
 
@@ -105,7 +101,6 @@
   color: var(--gr-text-secondary);
 
   .evaluating-icon {
-    font-size: 56px;
     color: var(--gr-status-info);
     animation: pulse 1.8s ease-in-out infinite;
   }
@@ -137,7 +132,6 @@
   color: var(--gr-text-muted);
 
   .hint-icon {
-    font-size: 40px;
     color: color-mix(in srgb, var(--gr-white) 10%, transparent);
   }
 

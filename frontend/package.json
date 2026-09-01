@@ -11,7 +11,7 @@
     "tokens:check": "node scripts/generate-tokens.mts --check",
     "barrel:check": "node scripts/check-barrel.mts",
     "lint:styles": "stylelint \"src/**/*.scss\" \"src/styles.scss\"",
-    "lint:ts": "eslint src/app/shared src/app/features/styleguide",
+    "lint:ts": "eslint src",
     "verify": "pnpm tokens:check && pnpm barrel:check && pnpm lint:styles && pnpm lint:ts"
   },
   "prettier": {

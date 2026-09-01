@@ -59,7 +59,7 @@ export function windowAround(
   if (totalLines <= 0) return { start: 1, end: 0 };
   const half = Math.floor(windowSize / 2);
   let start = Math.max(1, targetLine - half);
-  let end = Math.min(totalLines, start + windowSize - 1);
+  const end = Math.min(totalLines, start + windowSize - 1);
   start = Math.max(1, end - windowSize + 1);
   return { start, end };
 }
