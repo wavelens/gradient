@@ -18,6 +18,8 @@ export function resolveChartTheme(): ChartTheme {
   const read = (name: string) => style.getPropertyValue(name).trim();
   return {
     text: read('--gr-text-secondary'),
+    textStrong: read('--gr-text-primary'),
+    muted: read('--gr-text-muted'),
     grid: read('--gr-border'),
     border: read('--gr-border'),
     surface: read('--gr-surface-raised'),

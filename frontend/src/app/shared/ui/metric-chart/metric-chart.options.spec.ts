@@ -15,11 +15,35 @@ const two = [
 
 const THEME = {
   text: '#abb0b4',
+  textStrong: '#ffffff',
+  muted: '#8b949e',
   grid: '#2d333b',
   border: '#2d333b',
   surface: '#21262d',
   palette: ['#3b82f6', '#ef4444', '#22c55e', '#f97316'],
 };
+
+describe('chart tooltip', () => {
+  it('is themed rather than left on the ECharts light default', () => {
+    const opt = buildMetricChartOption(
+      { type: 'line', series: [{ name: 'a', data: [1, 2] }], categories: ['x', 'y'] },
+      THEME,
+    ) as Record<string, any>;
+    expect(opt['tooltip'].backgroundColor).toBe(THEME.surface);
+    expect(opt['tooltip'].borderColor).toBe(THEME.border);
+    expect(opt['tooltip'].textStyle.color).toBe(THEME.textStrong);
+  });
+
+  it('themes the legend chrome, not just its labels', () => {
+    const opt = buildMetricChartOption(
+      { type: 'line', series: [{ name: 'a', data: [1] }, { name: 'b', data: [2] }], categories: ['x'] },
+      THEME,
+    ) as Record<string, any>;
+    expect(opt['legend'].textStyle.color).toBe(THEME.text);
+    expect(opt['legend'].inactiveColor).toBe(THEME.muted);
+    expect(opt['legend'].pageIconColor).toBe(THEME.text);
+  });
+});
 
 describe('buildMetricChartOption cartesian types', () => {
   it('renders area as a smooth line series with a gradient fill', () => {

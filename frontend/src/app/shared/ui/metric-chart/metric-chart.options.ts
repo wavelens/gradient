@@ -26,6 +26,8 @@ export interface MetricChartConfig {
 /// Resolved from semantic tokens by the component, so charts follow the active theme.
 export interface ChartTheme {
   text: string;
+  textStrong: string;
+  muted: string;
   grid: string;
   border: string;
   surface: string;
@@ -34,6 +36,19 @@ export interface ChartTheme {
 
 const isXY = (d: MetricSeries['data']): d is MetricPointXY[] =>
   d.length > 0 && typeof d[0] === 'object' && d[0] !== null;
+
+/// ECharts defaults to a white tooltip, so it has to be themed explicitly.
+const tooltipChrome = (t: ChartTheme) => ({
+  backgroundColor: t.surface,
+  borderColor: t.border,
+  borderWidth: 1,
+  textStyle: { color: t.textStrong },
+  axisPointer: {
+    lineStyle: { color: t.border },
+    crossStyle: { color: t.border },
+    label: { backgroundColor: t.surface, borderColor: t.border, color: t.textStrong },
+  },
+});
 
 const axisLabel = (t: ChartTheme) => ({ color: t.text, fontSize: 11 });
 const axisLine = (t: ChartTheme) => ({ lineStyle: { color: t.border } });
@@ -49,9 +64,15 @@ export function buildMetricChartOption(cfg: MetricChartConfig, theme: ChartTheme
     legend: {
       show: cfg.series.length > 1,
       textStyle: { color: theme.text },
+      // Defaults for the dimmed and paging chrome are light-theme greys.
+      inactiveColor: theme.muted,
+      pageTextStyle: { color: theme.text },
+      pageIconColor: theme.text,
+      pageIconInactiveColor: theme.muted,
       top: 0,
     },
     tooltip: {
+      ...tooltipChrome(theme),
       trigger: cfg.type === 'heatmap' || cfg.type === 'radar' ? 'item' : 'axis',
       valueFormatter: (v) => format(Number(v)),
     },
@@ -84,7 +105,7 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
     grid: { left: 8, right: secondary ? 8 : 12, top: 28, bottom: 4, containLabel: true },
     xAxis: cfg.horizontal ? primary : categoryAxis,
     yAxis: cfg.horizontal ? categoryAxis : values,
-    ...(secondary ? { tooltip: dualAxisTooltip(cfg, format, secondaryFormat) } : {}),
+    ...(secondary ? { tooltip: dualAxisTooltip(cfg, format, secondaryFormat, theme) } : {}),
     series: cfg.series.map((s) => ({
       name: s.name,
       type: cfg.type === 'bar' ? ('bar' as const) : ('line' as const),
@@ -98,8 +119,14 @@ function cartesianOption(cfg: MetricChartConfig, format: (v: number) => string, 
   };
 }
 
-function dualAxisTooltip(cfg: MetricChartConfig, left: (v: number) => string, right: (v: number) => string) {
+function dualAxisTooltip(
+  cfg: MetricChartConfig,
+  left: (v: number) => string,
+  right: (v: number) => string,
+  theme: ChartTheme,
+) {
   return {
+    ...tooltipChrome(theme),
     trigger: 'axis' as const,
     // ECharts does not export a usable public type for the axis tooltip payload.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
