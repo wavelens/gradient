@@ -15,7 +15,7 @@ import {
   BoardUpstreamStats,
 } from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { MetricChartComponent } from '@shared/ui';
 
 const GIB = 1024 ** 3;
 
@@ -32,39 +32,39 @@ const GIB = 1024 ** 3;
       <div class="kpi"><span class="label">Requests total</span><span class="value">{{ stats()?.totals?.requests_total ?? 0 }}</span></div>
     </div>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Cache traffic (GiB served per hour)"
       type="area"
       [series]="trafficSeries()"
       [categories]="trafficCats()"
       [colors]="['#17a2b8']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="NAR requests per hour"
       type="line"
       [series]="requestSeries()"
       [categories]="trafficCats()"
       [colors]="['#6f42c1']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Storage growth (GiB added per hour)"
       type="area"
       [series]="storageSeries()"
       [categories]="storageCats()"
       [colors]="['#28a745']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
     <h3 class="upstreams-title">Upstreams</h3>
     @for (u of upstreams()?.upstreams ?? []; track u.upstream_id) {
-      <app-metric-chart
+      <gr-metric-chart
         [title]="upstreamTitle(u)"
         type="line"
         [series]="[{ name: 'latency', data: u.latency.map((p) => p.sum) }]"
         [categories]="u.latency.map((p) => p.bucket_start.slice(11, 16))"
         [colors]="['#fd7e14']"
-      ></app-metric-chart>
+      ></gr-metric-chart>
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -74,7 +74,7 @@ const GIB = 1024 ** 3;
       .kpi { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.25rem; }
       .kpi .label { color: #abb0b4; font-size: 0.8rem; }
       .kpi .value { color: #fff; font-size: 1.4rem; font-weight: 600; }
-      app-metric-chart { display: block; margin-bottom: 1rem; }
+      gr-metric-chart { display: block; margin-bottom: 1rem; }
     `,
     `
       .upstreams-title { color: #fff; margin: 1.5rem 0 0.75rem; }

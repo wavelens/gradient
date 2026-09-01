@@ -6,7 +6,7 @@
 
 <div class="container">
   @if (loading()) {
-    <app-loading-spinner message="Loading project settings..." />
+    <gr-loading-spinner message="Loading project settings..." />
   } @else if (project(); as project) {
     <div class="page-header">
       <div>
@@ -152,7 +152,7 @@
     <div class="settings-section">
       <h2>SSH Key</h2>
       @if (sshLoading()) {
-        <app-loading-spinner message="Loading SSH key..." />
+        <gr-loading-spinner message="Loading SSH key..." />
       } @else {
         <div class="settings-card">
           <p class="text-secondary">This is an OpenSSH public key used to access private Git repositories. Add it as a deploy key on your Git provider (GitHub, GitLab, etc.).</p>

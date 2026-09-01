@@ -11,7 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import {

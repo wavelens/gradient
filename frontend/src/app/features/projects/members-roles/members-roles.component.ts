@@ -16,7 +16,7 @@ import {
 } from '@core/services/projects.service';
 import { UserService } from '@core/services/user.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 import { AutoCompleteComponent, ButtonComponent, CheckboxComponent, DialogComponent, InputDirective } from '@shared/ui';

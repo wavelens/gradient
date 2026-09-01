@@ -11,7 +11,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading profile..." />
+    <gr-loading-spinner message="Loading profile..." />
   } @else {
     @if (errorMessage()) {
       <div class="message-banner error">

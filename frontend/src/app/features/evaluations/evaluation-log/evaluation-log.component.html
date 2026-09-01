@@ -6,7 +6,7 @@
 
 @if (loading()) {
   <div class="full-loading">
-    <app-loading-spinner message="Loading evaluation..." />
+    <gr-loading-spinner message="Loading evaluation..." />
   </div>
 } @else if (!evaluation()) {
   <div class="error-state">
@@ -288,7 +288,7 @@
             </div>
           }
         } @else if (logLoading()) {
-          <app-loading-spinner message="Loading log..." />
+          <gr-loading-spinner message="Loading log..." />
         } @else if (selectedBuild()?.status === 'Queued') {
           <div class="queued-hint">
             <span class="material-symbols-outlined queued-icon">schedule</span>

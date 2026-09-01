@@ -67,7 +67,7 @@
   }
 
   @if (loading()) {
-    <app-loading-spinner message="Loading NARs..." />
+    <gr-loading-spinner message="Loading NARs..." />
   } @else if (rows().length === 0) {
     <div class="empty-state">
       <span class="material-symbols-outlined">inbox</span>

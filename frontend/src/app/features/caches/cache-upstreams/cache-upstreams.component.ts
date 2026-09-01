@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { CachesService, UpstreamCache, CacheSubscriptionMode } from '@core/services/caches.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';

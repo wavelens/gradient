@@ -8,7 +8,7 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { WorkersService, WorkerSamplePoint, WorkerConnectionEntry } from '@core/services/workers.service';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { MetricChartComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-worker-metrics',
@@ -26,11 +26,11 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       </div>
 
       <div class="charts">
-        <app-metric-chart title="CPU usage (%)" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['#17a2b8']"></app-metric-chart>
-        <app-metric-chart title="RAM free (MB)" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['#28a745']"></app-metric-chart>
-        <app-metric-chart title="Network speed (Mbps)" type="line" [series]="netSeries()" [categories]="times()" [colors]="['#6f42c1']"></app-metric-chart>
-        <app-metric-chart title="Disk speed (Mbps)" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['#fd7e14']"></app-metric-chart>
-        <app-metric-chart title="Assigned jobs" type="area" [series]="loadSeries()" [categories]="times()" [colors]="['#e83e8c']"></app-metric-chart>
+        <gr-metric-chart title="CPU usage (%)" type="line" [series]="cpuSeries()" [categories]="times()" [colors]="['#17a2b8']"></gr-metric-chart>
+        <gr-metric-chart title="RAM free (MB)" type="area" [series]="ramSeries()" [categories]="times()" [colors]="['#28a745']"></gr-metric-chart>
+        <gr-metric-chart title="Network speed (Mbps)" type="line" [series]="netSeries()" [categories]="times()" [colors]="['#6f42c1']"></gr-metric-chart>
+        <gr-metric-chart title="Disk speed (Mbps)" type="line" [series]="diskSeries()" [categories]="times()" [colors]="['#fd7e14']"></gr-metric-chart>
+        <gr-metric-chart title="Assigned jobs" type="area" [series]="loadSeries()" [categories]="times()" [colors]="['#e83e8c']"></gr-metric-chart>
       </div>
 
       <h2>Connection history</h2>

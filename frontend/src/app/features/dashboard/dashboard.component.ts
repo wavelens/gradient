@@ -10,8 +10,8 @@ import { RouterModule } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
+import { EmptyStateComponent } from '@shared/ui';
 import { Project, Cache } from '@core/models';
 
 @Component({

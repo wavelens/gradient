@@ -16,7 +16,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading caches..." />
+    <gr-loading-spinner message="Loading caches..." />
   } @else {
     <!-- Active Caches -->
     @if (activeCaches.length > 0) {
@@ -86,7 +86,7 @@
 
     <!-- Empty State -->
     @if (caches().length === 0) {
-      <app-empty-state
+      <gr-empty-state
         icon="storage"
         title="No caches yet"
         [message]="authService.isAuthenticated() ? 'Create your first cache to store build artifacts' : 'No caches have been created yet'"
@@ -98,7 +98,7 @@
 
   <!-- Public Caches -->
   @if (publicLoading() && !loading()) {
-    <app-loading-spinner message="Loading public caches..." />
+    <gr-loading-spinner message="Loading public caches..." />
   } @else if (filteredPublicCaches.length > 0) {
     <div class="discover-header">
       <h2>Discover Public Caches</h2>

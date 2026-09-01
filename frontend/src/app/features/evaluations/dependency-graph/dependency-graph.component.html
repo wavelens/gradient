@@ -7,7 +7,7 @@
 <div class="graph-page">
   @if (loading()) {
     <div class="full-loading">
-      <app-loading-spinner message="Loading dependency graph…" />
+      <gr-loading-spinner message="Loading dependency graph…" />
     </div>
   } @else if (errorMsg()) {
     <div class="error-state">

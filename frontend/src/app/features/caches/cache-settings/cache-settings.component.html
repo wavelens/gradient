@@ -6,7 +6,7 @@
 
 <div class="container">
   @if (loading()) {
-    <app-loading-spinner message="Loading cache settings..." />
+    <gr-loading-spinner message="Loading cache settings..." />
   } @else if (cache(); as c) {
     <div class="page-header">
       <div>

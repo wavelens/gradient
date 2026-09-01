@@ -1,0 +1,21 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+import { Component, input, ChangeDetectionStrategy } from '@angular/core';
+import { CommonModule } from '@angular/common';
+
+@Component({
+  selector: 'gr-loading-spinner',
+  standalone: true,
+  imports: [CommonModule],
+  templateUrl: './loading-spinner.component.html',
+  changeDetection: ChangeDetectionStrategy.Eager,
+  styleUrl: './loading-spinner.component.scss',
+})
+export class LoadingSpinnerComponent {
+  message = input<string>('Loading...');
+  size = input<'small' | 'medium' | 'large'>('medium');
+}

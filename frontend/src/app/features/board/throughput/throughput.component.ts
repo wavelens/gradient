@@ -8,39 +8,39 @@ import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@ang
 import { CommonModule } from '@angular/common';
 import { forkJoin } from 'rxjs';
 import { BoardService, MetricPoint, BoardWorker } from '@core/services/board.service';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { MetricChartComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-board-throughput',
   standalone: true,
   imports: [CommonModule, MetricChartComponent],
   template: `
-    <app-metric-chart
+    <gr-metric-chart
       title="Build pipeline (hourly)"
       type="line"
       [series]="buildSeries()"
       [categories]="buildCategories()"
       [colors]="['#17a2b8', '#28a745', '#dc3545']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Evaluations (hourly)"
       type="line"
       [series]="evalSeries()"
       [categories]="evalCategories()"
       [colors]="['#28a745', '#dc3545']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Active jobs per worker"
       type="bar"
       [series]="workerSeries()"
       [categories]="workerCategories()"
       [colors]="['#fd7e14']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [`app-metric-chart { display: block; margin-bottom: 1rem; }`],
+  styles: [`gr-metric-chart { display: block; margin-bottom: 1rem; }`],
 })
 export class BoardThroughputComponent implements OnInit {
   private board = inject(BoardService);

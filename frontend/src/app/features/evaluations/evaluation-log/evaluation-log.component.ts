@@ -37,7 +37,7 @@ import { LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { commitLabel, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
 import { environment } from '@environments/environment';
 import { ButtonComponent } from '@shared/ui';

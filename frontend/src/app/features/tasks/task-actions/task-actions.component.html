@@ -37,7 +37,7 @@
   }
 
   @if (loading()) {
-    <app-loading-spinner message="Loading actions..." />
+    <gr-loading-spinner message="Loading actions..." />
   } @else {
     @if (actions().length === 0) {
       <div class="empty-state">

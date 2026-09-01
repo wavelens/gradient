@@ -23,7 +23,7 @@ import { Subscription } from 'rxjs';
 import { auditTime } from 'rxjs/operators';
 import { EvaluationsService, BuildGraph } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { ButtonComponent } from '@shared/ui';
 
 const CARD_W = 200;

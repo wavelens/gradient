@@ -8,8 +8,8 @@ import { Component, inject, computed, ChangeDetectionStrategy } from '@angular/c
 import { Router, RouterOutlet, NavigationEnd } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map, startWith } from 'rxjs/operators';
-import { HeaderComponent } from '@shared/components/header/header.component';
-import { FooterComponent } from '@shared/components/footer/footer.component';
+import { HeaderComponent } from '@shared/chrome/header/header.component';
+import { FooterComponent } from '@shared/chrome/footer/footer.component';
 import { AuthService } from '@core/services/auth.service';
 import { ThemeService } from '@core/services/theme.service';
 

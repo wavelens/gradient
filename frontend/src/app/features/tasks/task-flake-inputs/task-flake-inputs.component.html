@@ -30,7 +30,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading overrides..." />
+    <gr-loading-spinner message="Loading overrides..." />
   } @else {
     @if (overrides().length === 0) {
       <div class="empty-state">

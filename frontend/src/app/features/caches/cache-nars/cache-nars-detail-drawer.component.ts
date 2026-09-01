@@ -17,7 +17,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { CachesService, NarDetail, NarSummary } from '@core/services/caches.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { ButtonComponent, DialogComponent } from '@shared/ui';
 
 @Component({

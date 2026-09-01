@@ -20,8 +20,8 @@ import {
   IntegrationKind,
   Project,
 } from '@core/models';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { LabelHelpComponent } from '@shared/components/form';
+import { LoadingSpinnerComponent } from '@shared/ui';
+import { LabelHelpComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ButtonComponent, DialogComponent, InputDirective, SelectComponent } from '@shared/ui';
 

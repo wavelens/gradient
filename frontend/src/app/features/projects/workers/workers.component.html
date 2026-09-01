@@ -61,7 +61,7 @@
   }
 
   @if (loading()) {
-    <app-loading-spinner message="Loading workers..." />
+    <gr-loading-spinner message="Loading workers..." />
   } @else {
     @if (workers().length === 0) {
       <div class="empty-state">

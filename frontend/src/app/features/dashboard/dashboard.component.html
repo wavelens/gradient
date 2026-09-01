@@ -11,7 +11,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading dashboard..." />
+    <gr-loading-spinner message="Loading dashboard..." />
   } @else {
     <!-- Stats Overview -->
     <div class="dashboard-stats">
@@ -69,7 +69,7 @@
           }
         </div>
       } @else {
-        <app-empty-state
+        <gr-empty-state
           icon="corporate_fare"
           title="No projects yet"
           message="Create your first project to get started with Gradient"
@@ -110,7 +110,7 @@
           }
         </div>
       } @else {
-        <app-empty-state
+        <gr-empty-state
           icon="inventory_2"
           title="No caches yet"
           message="Create a cache to store and share your Nix builds"

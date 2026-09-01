@@ -12,7 +12,7 @@ import {
   ExpensiveResource,
   TopProjectBuildTime,
 } from '@core/services/board.service';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { MetricChartComponent } from '@shared/ui';
 
 type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
 
@@ -66,14 +66,14 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
 
     @if (topProjects().length) {
       <h2>Top projects by build time (superuser)</h2>
-      <app-metric-chart
+      <gr-metric-chart
         type="bar"
         [horizontal]="true"
         [height]="320"
         [series]="topProjectSeries()"
         [categories]="topProjectCategories()"
         [colors]="['#fd7e14']"
-      ></app-metric-chart>
+      ></gr-metric-chart>
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -92,7 +92,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
       .mono { font-family: monospace; }
       .muted { color: #818181; }
       h2 { color: #fff; font-size: 1.05rem; margin: 1.5rem 0 0.75rem; }
-      app-metric-chart { display: block; }
+      gr-metric-chart { display: block; }
     `,
   ],
 })

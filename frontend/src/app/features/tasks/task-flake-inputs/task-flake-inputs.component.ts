@@ -10,7 +10,7 @@ import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
 import { FlakeInputOverride, CreateFlakeInputOverrideBody } from '@core/models';

@@ -28,7 +28,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading cache subscriptions..." />
+    <gr-loading-spinner message="Loading cache subscriptions..." />
   } @else {
     @if (caches().length === 0) {
       <div class="empty-state">

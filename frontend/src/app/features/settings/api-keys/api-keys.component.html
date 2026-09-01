@@ -19,7 +19,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading API keys..." />
+    <gr-loading-spinner message="Loading API keys..." />
   } @else {
     @if (keys().length === 0) {
       <div class="empty-state">

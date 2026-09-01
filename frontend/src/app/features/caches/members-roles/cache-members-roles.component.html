@@ -36,7 +36,7 @@
       ></button>
     </div>
     @if (membersLoading()) {
-      <app-loading-spinner message="Loading members..." />
+      <gr-loading-spinner message="Loading members..." />
     } @else {
       <div class="settings-card">
         @if (members().length > 0) {
@@ -97,7 +97,7 @@
       ></button>
     </div>
     @if (rolesLoading()) {
-      <app-loading-spinner message="Loading roles..." />
+      <gr-loading-spinner message="Loading roles..." />
     } @else {
       <div class="settings-card">
         @if (roles().length > 0) {

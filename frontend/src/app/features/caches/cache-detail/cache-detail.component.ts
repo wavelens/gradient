@@ -8,11 +8,11 @@ import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } 
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint, UpstreamCache } from '@core/services/caches.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { LabelHelpComponent } from '@shared/components/form';
+import { LoadingSpinnerComponent } from '@shared/ui';
+import { LabelHelpComponent } from '@shared/ui';
 import { Cache } from '@core/models';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
-import { MetricSeries } from '@shared/components/metric-chart/metric-chart.options';
+import { MetricChartComponent } from '@shared/ui';
+import { MetricSeries } from '@shared/ui';
 import { ButtonComponent } from '@shared/ui';
 
 type Window = 'minutes' | 'hours' | 'days' | 'weeks';

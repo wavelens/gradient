@@ -30,7 +30,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading upstream caches..." />
+    <gr-loading-spinner message="Loading upstream caches..." />
   } @else {
     @if (upstreams().length === 0) {
       <div class="empty-state">

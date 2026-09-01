@@ -13,65 +13,65 @@ import {
   LoadBucket,
   WorkerLoad,
 } from '@core/services/board.service';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { MetricChartComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-board-workers',
   standalone: true,
   imports: [CommonModule, MetricChartComponent],
   template: `
-    <app-metric-chart
+    <gr-metric-chart
       title="Fleet over time (connected vs draining)"
       type="area"
       [series]="fleetSeries()"
       [categories]="fleetCats()"
       [colors]="['#28a745', '#fd7e14']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Capability over time"
       type="line"
       [series]="capOverTime()"
       [categories]="fleetCats()"
       [colors]="['#17a2b8', '#6f42c1', '#e83e8c']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
     <div class="row">
-      <app-metric-chart
+      <gr-metric-chart
         title="Load by capability (busy %)"
         type="radar"
         [height]="300"
         [series]="capLoad().series"
         [categories]="capLoad().cats"
         [colors]="['#17a2b8']"
-      ></app-metric-chart>
-      <app-metric-chart
+      ></gr-metric-chart>
+      <gr-metric-chart
         title="Load by architecture (busy %)"
         type="radar"
         [height]="300"
         [series]="archLoad().series"
         [categories]="archLoad().cats"
         [colors]="['#28a745']"
-      ></app-metric-chart>
+      ></gr-metric-chart>
     </div>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Load by feature (busy %)"
       type="bar"
       [height]="300"
       [series]="featLoad().series"
       [categories]="featLoad().cats"
       [colors]="['#e83e8c']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Slot utilisation per worker (%)"
       type="bar"
       [height]="300"
       [series]="utilSeries()"
       [categories]="workerCats()"
       [colors]="['#6f42c1']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
     <table class="workers">
       <thead>
@@ -97,7 +97,7 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
   changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
-      app-metric-chart { display: block; margin-bottom: 1rem; }
+      gr-metric-chart { display: block; margin-bottom: 1rem; }
       .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; }
       table.workers { width: 100%; border-collapse: collapse; margin-top: 1rem; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
       th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }

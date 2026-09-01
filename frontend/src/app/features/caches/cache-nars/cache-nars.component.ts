@@ -14,7 +14,7 @@ import {
   NarStats,
   NarSummary,
 } from '@core/services/caches.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
 import { CacheNarsDetailDrawerComponent } from './cache-nars-detail-drawer.component';

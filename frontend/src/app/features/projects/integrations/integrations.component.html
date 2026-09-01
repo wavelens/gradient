@@ -28,7 +28,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading integrations..." />
+    <gr-loading-spinner message="Loading integrations..." />
   } @else {
     @if (githubAppAvailable()) {
       <div class="settings-section">

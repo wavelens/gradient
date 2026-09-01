@@ -8,9 +8,9 @@ import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/cor
 import { CommonModule } from '@angular/common';
 import { FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
-import { EmptyStateComponent } from '@shared/components/empty-state/empty-state.component';
-import { StatCardComponent } from '@shared/components/stat-card/stat-card.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
+import { EmptyStateComponent } from '@shared/ui';
+import { StatCardComponent } from '@shared/ui';
 
 import {
   FormFieldComponent,
@@ -20,11 +20,11 @@ import {
   CopyFieldComponent,
   LabelHelpComponent,
   FormFieldsBuilder,
-} from '@shared/components/form';
+} from '@shared/ui';
 import {
   PageLayoutComponent,
   SettingsSectionComponent,
-} from '@shared/components/layout';
+} from '@shared/ui';
 import { ButtonComponent, CheckboxComponent, ConfirmDialogComponent, ConfirmationService, DividerComponent, InputDirective, MenuComponent, MenuItem, MessageService, PopoverComponent, SelectComponent, ToastComponent, TooltipDirective } from '@shared/ui';
 
 interface DemoCounty {

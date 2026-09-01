@@ -6,7 +6,7 @@
 
 <div class="container">
   @if (loading()) {
-    <app-loading-spinner message="Loading cache..." />
+    <gr-loading-spinner message="Loading cache..." />
   } @else if (cache(); as c) {
     <!-- Cache Header -->
     <div class="page-header">
@@ -43,7 +43,7 @@
     <div class="section">
       <h2>Storage</h2>
       @if (statsLoading()) {
-        <app-loading-spinner message="Loading stats..." />
+        <gr-loading-spinner message="Loading stats..." />
       } @else {
         <div class="stat-cards">
           <div class="stat-card">
@@ -68,7 +68,7 @@
               </button>
             }
           </div>
-          <app-metric-chart
+          <gr-metric-chart
             bare
             type="area"
             [height]="220"
@@ -87,7 +87,7 @@
     <div class="section">
       <h2>Traffic</h2>
       @if (statsLoading()) {
-        <app-loading-spinner message="Loading stats..." />
+        <gr-loading-spinner message="Loading stats..." />
       } @else {
         <div class="stat-cards">
           <div class="stat-card">
@@ -108,7 +108,7 @@
               </button>
             }
           </div>
-          <app-metric-chart
+          <gr-metric-chart
             bare
             type="area"
             [height]="220"

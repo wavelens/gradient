@@ -12,7 +12,7 @@ import { WorkersService } from '@core/services/workers.service';
 import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { GradientCapabilities, Worker, WorkerRegistration, AccessState } from '@core/models';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { ButtonComponent, DialogComponent, InputDirective, MessageService, ToastComponent } from '@shared/ui';
 

@@ -5,7 +5,7 @@
 -->
 
 @if (loading()) {
-  <app-loading-spinner message="Loading task..." />
+  <gr-loading-spinner message="Loading task..." />
 } @else if (task(); as proj) {
   <div class="pp-head pad">
     <div>
@@ -90,7 +90,7 @@
                   <div class="title-line">
                     <h2>{{ evalTitle(sel) }}</h2>
                     @if (isRunning(sel.status)) {
-                      <app-eval-status-badge [status]="sel.status" />
+                      <gr-eval-status-badge [status]="sel.status" />
                     }
                   </div>
                   <div class="sub">
@@ -128,7 +128,7 @@
   
           <div class="pkg-label"><h3>Packages</h3></div>
           @if (entryPointsLoading() && entryPoints().length === 0) {
-            <app-loading-spinner message="Loading packages..." />
+            <gr-loading-spinner message="Loading packages..." />
           } @else if (entryPoints().length > 0) {
             <div class="pkg-list">
               @for (ep of entryPoints(); track ep.id) {
@@ -149,7 +149,7 @@
               }
             </div>
           } @else {
-            <app-empty-state flat icon="package_2" title="No packages"
+            <gr-empty-state flat icon="package_2" title="No packages"
               message="This evaluation produced no entry-point builds." />
           }
           <gr-menu #pkgMenu [model]="pkgMenuModel()" />
@@ -158,7 +158,7 @@
     </div>
   } @else {
     <div class="pad">
-      <app-empty-state icon="assessment" title="No evaluations yet"
+      <gr-empty-state icon="assessment" title="No evaluations yet"
         [message]="access().canTrigger ? 'Start your first evaluation to begin building' : 'No evaluations have been run yet'"
         [actionLabel]="access().canTrigger ? 'Start Evaluation' : ''"
         (actionClick)="access().canTrigger && startEvaluation()" />

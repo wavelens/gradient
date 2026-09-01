@@ -1,0 +1,113 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+:host {
+  --gr-btn-bg: var(--gr-accent);
+  --gr-btn-bg-hover: var(--gr-accent-hover);
+  --gr-btn-fg: var(--gr-accent-fg);
+  --gr-btn-accent: var(--gr-accent);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: $spacing-sm;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--gr-btn-bg);
+  border-radius: $border-radius-sm;
+  background: var(--gr-btn-bg);
+  color: var(--gr-btn-fg);
+  font-family: $font-family-base;
+  font-size: $font-size-sm;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color $transition-fast, border-color $transition-fast, color $transition-fast;
+}
+
+:host(:hover:not(:disabled)) {
+  background: var(--gr-btn-bg-hover);
+  border-color: var(--gr-btn-bg-hover);
+}
+
+:host(:focus-visible) {
+  outline: 2px solid var(--gr-btn-accent);
+  outline-offset: 2px;
+}
+
+:host(:disabled),
+:host(.gr-button--loading) {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+:host(.gr-button--secondary) {
+  --gr-btn-bg: var(--gr-surface-raised);
+  --gr-btn-bg-hover: var(--gr-surface-hover);
+  --gr-btn-fg: var(--gr-text-primary);
+  --gr-btn-accent: var(--gr-text-primary);
+  border-color: $color-border;
+}
+
+:host(.gr-button--success) {
+  --gr-btn-bg: var(--gr-accent);
+  --gr-btn-bg-hover: var(--gr-accent-hover);
+  --gr-btn-accent: var(--gr-accent);
+}
+
+:host(.gr-button--warn) {
+  --gr-btn-bg: var(--gr-status-warning);
+  --gr-btn-bg-hover: var(--gr-status-warning-hover);
+  --gr-btn-fg: var(--gr-status-warning-fg);
+  --gr-btn-accent: var(--gr-status-warning);
+}
+
+:host(.gr-button--danger) {
+  --gr-btn-bg: var(--gr-status-danger);
+  --gr-btn-bg-hover: var(--gr-status-danger-hover);
+  --gr-btn-fg: var(--gr-status-danger-fg);
+  --gr-btn-accent: var(--gr-status-danger);
+}
+
+:host(.gr-button--small) {
+  padding: 0.35rem 0.65rem;
+  font-size: $font-size-xs;
+}
+
+:host(.gr-button--icon-only) { padding: 0.45rem; }
+
+:host(.gr-button--text) {
+  background: none;
+  border-color: transparent;
+  color: var(--gr-btn-accent);
+}
+
+:host(.gr-button--text:hover:not(:disabled)) {
+  background: var(--gr-surface-hover);
+  border-color: transparent;
+}
+
+.gr-button__icon {
+  font-family: $font-family-icons;
+  font-size: 1.15em;
+  line-height: 1;
+}
+
+.gr-button__spinner {
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: gr-button-spin 0.7s linear infinite;
+}
+
+@keyframes gr-button-spin {
+  to { transform: rotate(360deg); }
+}

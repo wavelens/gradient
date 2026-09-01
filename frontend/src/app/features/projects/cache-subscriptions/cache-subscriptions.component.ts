@@ -11,7 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 import { AutoCompleteComponent, ButtonComponent, DialogComponent, TooltipDirective } from '@shared/ui';

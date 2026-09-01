@@ -28,7 +28,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading triggers..." />
+    <gr-loading-spinner message="Loading triggers..." />
   } @else {
     @if (triggers().length === 0) {
       <div class="empty-state">

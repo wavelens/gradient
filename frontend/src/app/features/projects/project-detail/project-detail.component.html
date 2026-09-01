@@ -6,7 +6,7 @@
 
 <div class="container">
   @if (loading()) {
-    <app-loading-spinner message="Loading project..." />
+    <gr-loading-spinner message="Loading project..." />
   } @else if (project(); as project) {
     <div class="page-header">
       <div>
@@ -36,7 +36,7 @@
                 <p class="text-secondary">{{ task.description || 'No description' }}</p>
                 <div class="task-meta">
                   @if (task.last_evaluation_status) {
-                    <app-eval-status-badge [status]="task.last_evaluation_status" />
+                    <gr-eval-status-badge [status]="task.last_evaluation_status" />
                   }
                 </div>
               </div>
@@ -51,7 +51,7 @@
 
     <!-- Empty State -->
     @if (tasks().length === 0) {
-      <app-empty-state
+      <gr-empty-state
         icon="folder"
         title="No tasks yet"
         [message]="project.role ? 'Create your first task to start evaluating Nix builds' : 'No tasks have been created yet'"

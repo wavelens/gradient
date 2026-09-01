@@ -9,7 +9,7 @@ import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { BoardService, MetricPoint } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { MetricChartComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-board-overview',
@@ -23,13 +23,13 @@ import { MetricChartComponent } from '@shared/components/metric-chart/metric-cha
       <div class="kpi"><span class="label">Dispatched (live)</span><span class="value">{{ dispatchedCount() }}</span></div>
     </div>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Builds completed per hour (24h)"
       type="area"
       [series]="completedSeries()"
       [categories]="categories()"
       [colors]="['#28a745']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styles: [

@@ -7,39 +7,39 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService, MetricPoint, DurationsHeatmap } from '@core/services/board.service';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { MetricChartComponent } from '@shared/ui';
 
 @Component({
   selector: 'app-board-durations',
   standalone: true,
   imports: [CommonModule, MetricChartComponent],
   template: `
-    <app-metric-chart
+    <gr-metric-chart
       title="Build duration distribution (count by band × hour)"
       type="heatmap"
       [height]="300"
       [series]="heatmapSeries()"
       [colors]="['#17a2b8']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Build duration (s, hourly avg vs max)"
       type="area"
       [series]="buildSeries()"
       [categories]="buildCategories()"
       [colors]="['#17a2b8', '#dc3545']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Wait (s, hourly avg): queue (excl. deps) vs dependency"
       type="area"
       [series]="waitSeries()"
       [categories]="waitCategories()"
       [colors]="['#6f42c1', '#fd7e14']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [`app-metric-chart { display: block; margin-bottom: 1rem; }`],
+  styles: [`gr-metric-chart { display: block; margin-bottom: 1rem; }`],
 })
 export class BoardDurationsComponent implements OnInit {
   private board = inject(BoardService);

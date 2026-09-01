@@ -9,7 +9,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { EvaluationsService, BuildProduct, isHtmlArtefact } from '@core/services/evaluations.service';
 import { AuthService } from '@core/services/auth.service';
 import { ProjectsService } from '@core/services/projects.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { environment } from '@environments/environment';
 
 @Component({

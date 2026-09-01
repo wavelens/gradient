@@ -10,7 +10,7 @@ import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { UserService } from '@core/services/user.service';
 import { AuthService } from '@core/services/auth.service';
-import { LoadingSpinnerComponent } from '@shared/components/loading-spinner/loading-spinner.component';
+import { LoadingSpinnerComponent } from '@shared/ui';
 import { ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
 import { ButtonComponent, DialogComponent, DividerComponent, InputDirective } from '@shared/ui';

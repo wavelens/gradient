@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService, BoardNetworkStats, HttpRouteStat } from '@core/services/board.service';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { MetricChartComponent } from '@shared/ui';
 
 const GIB = 1024 ** 3;
 
@@ -18,29 +18,29 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
   standalone: true,
   imports: [CommonModule, MetricChartComponent],
   template: `
-    <app-metric-chart
+    <gr-metric-chart
       title="NAR egress (GiB served per hour)"
       type="area"
       [series]="egressSeries()"
       [categories]="egressCats()"
       [colors]="['#17a2b8']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Worker network speed (Mbps, latest sample)"
       type="bar"
       [series]="netSeries()"
       [categories]="workerCats()"
       [colors]="['#6f42c1']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Worker disk speed (Mbps, latest sample)"
       type="bar"
       [series]="diskSeries()"
       [categories]="workerCats()"
       [colors]="['#fd7e14']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
     <h2>HTTP routes @if (!stats()?.http?.length) {<span class="muted">(superuser-only)</span>}</h2>
     <table class="http">
@@ -71,7 +71,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
   changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
-      app-metric-chart { display: block; margin-bottom: 1rem; }
+      gr-metric-chart { display: block; margin-bottom: 1rem; }
       h2 { color: #fff; font-size: 1.05rem; margin: 1.5rem 0 0.75rem; }
       table.http { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
       th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }

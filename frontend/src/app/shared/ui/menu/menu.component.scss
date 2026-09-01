@@ -1,0 +1,44 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+.gr-menu {
+  min-width: 11rem;
+  margin: 0;
+  padding: $spacing-xs 0;
+  list-style: none;
+  background: $color-quaternary;
+  border: 1px solid $color-border;
+  border-radius: $border-radius-sm;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+}
+
+.gr-menu__separator {
+  height: 1px;
+  margin: $spacing-xs 0;
+  background: $color-border;
+}
+
+.gr-menu__item {
+  display: flex;
+  align-items: center;
+  gap: $spacing-sm;
+  width: 100%;
+  padding: 0.45rem 0.7rem;
+  background: none;
+  border: 0;
+  color: $text-primary;
+  font-family: $font-family-base;
+  font-size: $font-size-sm;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover:not(:disabled) { background: $color-hover; }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+}
+
+.gr-menu__icon { font-size: 18px; color: $text-secondary; }

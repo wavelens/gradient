@@ -6,7 +6,7 @@
 
 <div class="container">
   @if (loading()) {
-    <app-loading-spinner message="Loading task settings..." />
+    <gr-loading-spinner message="Loading task settings..." />
   } @else if (task(); as proj) {
     <div class="page-header">
       <div>

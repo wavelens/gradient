@@ -16,7 +16,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading projects..." />
+    <gr-loading-spinner message="Loading projects..." />
   } @else {
     @if (projects().length > 0) {
       <div class="project-grid">
@@ -52,7 +52,7 @@
         }
       </div>
     } @else {
-      <app-empty-state
+      <gr-empty-state
         icon="corporate_fare"
         title="No projects yet"
         [message]="authService.isAuthenticated() ? 'Create your first project to get started with Gradient' : 'No projects have been created yet'"
@@ -63,7 +63,7 @@
   }
 
   @if (publicLoading() && !loading()) {
-    <app-loading-spinner message="Loading public projects..." />
+    <gr-loading-spinner message="Loading public projects..." />
   } @else if (filteredPublicProjects.length > 0) {
     <div class="section-header discover-header">
       <h2>Discover Public Projects</h2>

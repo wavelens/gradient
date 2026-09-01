@@ -20,7 +20,7 @@
   </div>
 
   @if (loading()) {
-    <app-loading-spinner message="Loading metrics..." />
+    <gr-loading-spinner message="Loading metrics..." />
   } @else if (metrics().length === 0) {
     <div class="empty-state">
       <span class="material-symbols-outlined">bar_chart</span>
@@ -34,7 +34,7 @@
           <span class="chart-title">Total Build Time</span>
           <span class="chart-sub">Sum of all completed build durations</span>
         </div>
-        <app-metric-chart
+        <gr-metric-chart
           bare
           type="area"
           [height]="200"
@@ -51,7 +51,7 @@
           <span class="chart-title">Evaluation Time</span>
           <span class="chart-sub">Wall-clock time from start to finish</span>
         </div>
-        <app-metric-chart
+        <gr-metric-chart
           bare
           type="area"
           [height]="200"
@@ -68,7 +68,7 @@
           <span class="chart-title">Output Size</span>
           <span class="chart-sub">Entry-point packages only, excluding dependencies</span>
         </div>
-        <app-metric-chart
+        <gr-metric-chart
           bare
           type="area"
           [height]="200"
@@ -84,7 +84,7 @@
           <span class="chart-title">Closure Size</span>
           <span class="chart-sub">All packages including transitive dependencies</span>
         </div>
-        <app-metric-chart
+        <gr-metric-chart
           bare
           type="area"
           [height]="200"
@@ -100,7 +100,7 @@
           <span class="chart-title">Dependencies Count</span>
           <span class="chart-sub">Number of dependency builds (excluding entry points)</span>
         </div>
-        <app-metric-chart
+        <gr-metric-chart
           bare
           type="area"
           [height]="200"

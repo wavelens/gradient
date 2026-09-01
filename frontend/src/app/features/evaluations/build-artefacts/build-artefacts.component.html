@@ -17,7 +17,7 @@
 <div class="page">
 
   @if (loading()) {
-    <app-loading-spinner message="Loading artefacts..." />
+    <gr-loading-spinner message="Loading artefacts..." />
   } @else if (artefacts().length === 0) {
     <div class="empty-state">
       <span class="material-symbols-outlined">inventory_2</span>

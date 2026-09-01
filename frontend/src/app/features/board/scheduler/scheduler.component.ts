@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService, MetricPoint, RuleDescription, ScoringSummary } from '@core/services/board.service';
-import { MetricChartComponent } from '@shared/components/metric-chart/metric-chart.component';
+import { MetricChartComponent } from '@shared/ui';
 import { PopoverComponent } from '@shared/ui';
 
 @Component({
@@ -21,21 +21,21 @@ import { PopoverComponent } from '@shared/ui';
       <div class="kpi"><span class="label">Min / Max</span><span class="value sm">{{ summary()?.score_min | number: '1.1-1' }} / {{ summary()?.score_max | number: '1.1-1' }}</span></div>
     </div>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Wait breakdown (ms, hourly avg): queue (excl. deps) vs dependency"
       type="line"
       [series]="waitSeries()"
       [categories]="waitCategories()"
       [colors]="['#17a2b8', '#fd7e14']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
-    <app-metric-chart
+    <gr-metric-chart
       title="Score distribution (24h)"
       type="bar"
       [series]="histogramSeries()"
       [categories]="histogramCategories()"
       [colors]="['#6f42c1']"
-    ></app-metric-chart>
+    ></gr-metric-chart>
 
     <h2>Per-rule mean contribution</h2>
     <table class="rules">
@@ -74,7 +74,7 @@ import { PopoverComponent } from '@shared/ui';
       .kpi .label { color: #abb0b4; font-size: 0.8rem; }
       .kpi .value { color: #fff; font-size: 1.6rem; font-weight: 600; }
       .kpi .value.sm { font-size: 1.2rem; }
-      app-metric-chart { display: block; margin-bottom: 1rem; }
+      gr-metric-chart { display: block; margin-bottom: 1rem; }
       h2 { color: #fff; font-size: 1.05rem; margin: 1.5rem 0 0.75rem; }
       table.rules { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
       th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
