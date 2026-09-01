@@ -2519,6 +2519,7 @@ dependencies = [
  "gradient-storage",
  "gradient-test-support",
  "gradient-types",
+ "gradient-util",
  "reqwest",
  "sea-orm",
  "serde",
@@ -2837,6 +2838,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wiremock",
  "xz2",
  "zstd",
 ]

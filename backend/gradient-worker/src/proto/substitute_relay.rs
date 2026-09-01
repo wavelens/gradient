@@ -15,7 +15,7 @@ use sha2::{Digest as _, Sha256};
 use tracing::debug;
 
 use crate::proto::compression::{
-    Compression, LEVEL6_WINDOW_BYTES, decompress, detect_compression, parse_nar_hash_to_bytes,
+    Compression, LEVEL6_WINDOW_BYTES, decompress, parse_nar_hash_to_bytes, resolve_compression,
     zstd_window_size,
 };
 use crate::proto::job::JobUpdater;
@@ -61,7 +61,7 @@ pub async fn relay_external_cached_outputs(
         .map(|c| (c.path.clone(), c))
         .collect();
 
-    let http = crate::http::client();
+    let http = crate::http::download_client();
     for (_, path) in &outputs {
         // Already in our cache (push reports it cached): nothing to relay.
         if push.get(path).map(|c| c.cached).unwrap_or(false) {
@@ -84,11 +84,7 @@ pub async fn relay_external_cached_outputs(
             ))
         })?;
 
-        let kind = meta
-            .url
-            .as_deref()
-            .map(detect_compression)
-            .unwrap_or(Compression::Zstd);
+        let kind = resolve_compression(&compressed, meta.url.as_deref());
 
         // Upstream references arrive as full /nix/store paths; NarUploaded wants
         // hash-name tokens.

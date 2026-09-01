@@ -32,9 +32,7 @@ use gradient_types::CachedPathInfo;
 use tracing::{debug, error, warn};
 
 use crate::nix::store::LocalNixStore;
-use crate::proto::compression::{
-    Compression, detect_compression, drv_closure_seeds_from_compressed_nar,
-};
+use crate::proto::compression::{drv_closure_seeds_from_compressed_nar, resolve_compression};
 use crate::proto::job::JobUpdater;
 use crate::proto::nar_daemon_import::import_received_nar;
 
@@ -129,15 +127,25 @@ fn presigned_status_is_retryable(status: u16) -> bool {
     matches!(status, 408 | 429) || status >= 500
 }
 
+/// True when a downloaded body contradicts the `file_size` its metadata
+/// declares. The cache advertised an object it cannot deliver whole, so the
+/// bytes are unusable however the transfer ended - notably a 3xx that outlived
+/// the redirect budget, whose empty body would otherwise read as a successful
+/// zero-byte download. `None` (no declared size) can't contradict anything.
+fn presigned_body_is_short(declared: Option<u64>, received: usize) -> bool {
+    declared.is_some_and(|want| want != received as u64)
+}
+
 /// One presigned download's outcome: the store path, and `Some((bytes, meta))`
-/// when fetched or `None` when the object is a genuine 404/410 miss.
+/// when fetched or `None` when the cache cannot deliver the object.
 type PresignedFetch = (String, Option<(Vec<u8>, CachedPath)>);
 
 /// Download one presigned NAR with bounded retries. `Ok((path, Some((bytes,
-/// cp))))` fetched it; `Ok((path, None))` is a genuine 404/410 miss (the row
-/// claims the NAR but the bucket lost it - the `InputsUnavailable` self-heal
-/// demotes and rebuilds it, #410). Transport errors and retryable statuses are
-/// retried with exponential backoff before surfacing as a transient `Err`.
+/// cp))))` fetched it; `Ok((path, None))` means the cache advertises the path
+/// but cannot serve it - a 404/410, or a body that doesn't match the declared
+/// `file_size` - which the `InputsUnavailable` self-heal demotes and rebuilds
+/// (#410). Transport errors and retryable statuses are retried with exponential
+/// backoff before surfacing as a transient `Err`.
 pub(crate) async fn download_one_presigned(
     http: &reqwest::Client,
     cp: CachedPath,
@@ -161,15 +169,30 @@ pub(crate) async fn download_one_presigned(
                 }
                 if presigned_status_is_retryable(status) {
                     anyhow::anyhow!("HTTP {status} from {url}")
+                } else if !resp.status().is_success() {
+                    // Not 2xx, not a miss, not retryable: a 3xx that outran the
+                    // client's redirect budget, or a terminal 4xx. `bytes()` on
+                    // one yields an empty body that must never pass for a NAR.
+                    return Err(anyhow::anyhow!(
+                        "HTTP {status} from {url} (path {path}) is not a usable NAR response"
+                    ));
                 } else {
-                    let resp = resp
-                        .error_for_status()
-                        .with_context(|| format!("HTTP {url} returned non-2xx"))?;
                     let bytes = resp
                         .bytes()
                         .await
                         .with_context(|| format!("read body of {url}"))?
                         .to_vec();
+                    if presigned_body_is_short(cp.file_size, bytes.len()) {
+                        warn!(
+                            %path,
+                            declared = ?cp.file_size,
+                            received = bytes.len(),
+                            "presigned NAR body does not match the declared file_size; \
+                             treating as a missing input (self-heal demotes it)"
+                        );
+                        return Ok((path, None));
+                    }
+
                     return Ok((path, Some((bytes, cp))));
                 }
             }
@@ -439,7 +462,7 @@ impl<'a> InputPrefetcher<'a> {
             return Ok(vec![]);
         }
 
-        let http = crate::http::client();
+        let http = crate::http::download_client();
 
         // Bound concurrency: firing every download at once opens a TLS
         // connection per path, which is what tips a flaky object store into
@@ -676,11 +699,7 @@ impl<'a> InputPrefetcher<'a> {
                 if !path.ends_with(".drv") {
                     continue;
                 }
-                let compression = meta
-                    .url
-                    .as_deref()
-                    .map(detect_compression)
-                    .unwrap_or(Compression::Zstd);
+                let compression = resolve_compression(bytes, meta.url.as_deref());
                 for seed in
                     drv_closure_seeds_from_compressed_nar(bytes, compression, path, mode).await
                 {
@@ -942,6 +961,110 @@ mod tests {
             .find_map(|s| s.downcast_ref::<CorruptCachedNar>())
             .expect("CorruptCachedNar survives anyhow context wrapping");
         assert_eq!(recovered.0, path);
+    }
+
+    #[test]
+    fn short_body_contradicts_a_declared_file_size() {
+        // The regression: a non-followed 3xx hands back an empty body, which
+        // without this check reads as a successful zero-byte download.
+        assert!(presigned_body_is_short(Some(227840), 0));
+        assert!(presigned_body_is_short(Some(227840), 227839));
+        assert!(!presigned_body_is_short(Some(227840), 227840));
+        // Nothing declared, nothing to contradict.
+        assert!(!presigned_body_is_short(None, 0));
+    }
+
+    /// A cache that answers a NAR GET with a redirect to its object storage
+    /// (attic, Cachix, every S3 gateway) must be followed, not reported as a
+    /// zero-byte success. `redirect_swallowed_as_empty_body_is_not_a_download`
+    /// pins the failure mode this guards against.
+    #[tokio::test]
+    async fn presigned_download_follows_a_redirect_to_object_storage() {
+        use wiremock::matchers::{method, path as path_matcher};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let objects = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_matcher("/blob"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"NAR-BYTES".to_vec()))
+            .mount(&objects)
+            .await;
+
+        let cache = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_matcher("/nar/abc.nar"))
+            .respond_with(
+                ResponseTemplate::new(307).insert_header("location", &*format!("{}/blob", objects.uri())),
+            )
+            .mount(&cache)
+            .await;
+
+        let mut cp = cached("/nix/store/aaaa-redirected", Some(&format!("{}/nar/abc.nar", cache.uri())));
+        cp.file_size = Some(9);
+
+        let http = gradient_util::http::build_download_client().expect("download client");
+        let (path, fetched) = download_one_presigned(&http, cp).await.expect("download");
+        assert_eq!(path, "/nix/store/aaaa-redirected");
+        let (bytes, _) = fetched.expect("redirect followed to the object");
+        assert_eq!(bytes, b"NAR-BYTES");
+    }
+
+    /// The exact production failure: with redirects refused, the 3xx body is
+    /// empty and must surface as an error rather than an empty NAR. Uses the
+    /// API client on purpose - that is what the download path used to reach for.
+    #[tokio::test]
+    async fn redirect_swallowed_as_empty_body_is_not_a_download() {
+        use wiremock::matchers::{method, path as path_matcher};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let cache = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_matcher("/nar/abc.nar"))
+            .respond_with(
+                ResponseTemplate::new(307).insert_header("location", "https://elsewhere.invalid/o"),
+            )
+            .mount(&cache)
+            .await;
+
+        let mut cp = cached("/nix/store/aaaa-redirected", Some(&format!("{}/nar/abc.nar", cache.uri())));
+        cp.file_size = Some(227840);
+
+        let http = gradient_util::http::build_client().expect("api client");
+        let err = download_one_presigned(&http, cp)
+            .await
+            .expect_err("an unfollowed 3xx is not a usable NAR response");
+        assert!(
+            format!("{err:#}").contains("307"),
+            "error must name the status: {err:#}"
+        );
+    }
+
+    /// A cache that serves fewer bytes than its own metadata declares is a
+    /// cache that cannot deliver the path: report it as a miss so the self-heal
+    /// demotes it, rather than letting the truncated body reach the importer
+    /// and be blamed on our own storage as a corrupt NAR.
+    #[tokio::test]
+    async fn truncated_body_is_reported_as_a_miss() {
+        use wiremock::matchers::{method, path as path_matcher};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let cache = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path_matcher("/nar/abc.nar"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"short".to_vec()))
+            .mount(&cache)
+            .await;
+
+        let mut cp = cached("/nix/store/aaaa-truncated", Some(&format!("{}/nar/abc.nar", cache.uri())));
+        cp.file_size = Some(227840);
+
+        let http = gradient_util::http::build_download_client().expect("download client");
+        let (path, fetched) = download_one_presigned(&http, cp).await.expect("download");
+        assert_eq!(path, "/nix/store/aaaa-truncated");
+        assert!(
+            fetched.is_none(),
+            "a body shorter than the declared file_size must be a miss, not bytes"
+        );
     }
 
     #[test]

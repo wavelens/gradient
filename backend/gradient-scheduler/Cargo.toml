@@ -23,6 +23,7 @@ gradient-db = { workspace = true }
 gradient-types = { workspace = true }
 gradient-entity = { workspace = true }
 gradient-score = { workspace = true }
+gradient-util = { workspace = true }
 
 anyhow     = { workspace = true }
 arc-swap   = { workspace = true }

@@ -326,6 +326,17 @@ own nix config). Existing build-once anchors a prior eval left not-yet-succeeded
 are flipped substitutable when an upstream is newly found, so a previously-failed
 fetcher substitutes instead of rebuilding.
 
+Upstream object fetches use a redirect-following HTTP client, separate from the
+client that carries API traffic (forges, OIDC), which refuses redirects so a 3xx
+cannot become an SSRF pivot. Attic, Cachix and every S3 gateway answer a NAR GET
+with a 3xx to their object storage, and an unfollowed one arrives as an ordinary
+response with an empty body. A download is accepted only when its length matches
+the `file_size` the narinfo declared; anything else is an upstream that cannot
+deliver the path, reported as `InputsUnavailable` so the self-heal demotes it and
+rebuilds. Compression is read from the payload's own magic bytes rather than the
+URL extension, because upstreams disagree with themselves - attic serves
+`Compression: zstd` under a `nar/<hash>.nar` URL.
+
 Upstreams are probed in hit-rate-then-latency order (most-likely cache first; never-probed
 upstreams are tried last) so the first hit wins cheaply. The lowest-latency holder's URL is
 persisted on `derivation_output.external_url`. Total outbound probe concurrency is bounded

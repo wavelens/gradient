@@ -409,7 +409,7 @@ async fn extend_with_upstream_results(
     let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
 
     let (found, stats) = gradient_core::upstream::probe_batch(
-        state.http.clone(),
+        gradient_util::http::download_client().clone(),
         endpoints,
         std::sync::Arc::clone(&state.upstream_query),
         uncached_pairs,

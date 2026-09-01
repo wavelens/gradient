@@ -7290,3 +7290,43 @@ the switch. Every CLI integration test now also pins `HOME` alongside
 `cli/connector/tests/workers_api.rs` still constructed `MakeWorkerRequest` with
 the `enable_*` fields dropped in `20ad765c`, so the connector test binary did not
 compile at all and took `cargo test` in the CLI workspace down with it.
+
+## Upstream NAR downloads follow redirects and honour the payload's own format
+
+A build failed `input prefetch failed for …vendor-registry.drv: … NAR size
+mismatch … expected 227840, got 0`, blamed on our own storage as a corrupt
+cached NAR. The path was never in our cache: it was adopted from an upstream
+(`compute_upstream_substitutable` persists `derivation_output.external_url`) and
+downloaded directly by the worker. That upstream, an attic instance, answers a
+NAR GET with `307` + `Location:` to its object storage and an empty body. The
+shared client refused redirects (`redirect::Policy::none()`, correct for the
+forge/OIDC calls it also serves), `error_for_status` only rejects 4xx/5xx, so the
+`307` passed as a success carrying zero bytes. The same narinfo also advertises
+`Compression: zstd` behind a `nar/<hash>.nar` URL, so following the redirect
+alone still mis-read the 48656 zstd bytes as a raw NAR.
+
+Three fixes, one per layer: a redirect-following client for object fetches only,
+compression resolved from the payload's magic bytes, and a body-size check that
+classifies an undeliverable upstream as a miss (self-heal demotes and rebuilds)
+rather than as corruption in our own cache.
+
+`backend/gradient-worker/src/proto/prefetch.rs`:
+- `presigned_download_follows_a_redirect_to_object_storage` - a wiremock cache
+  `307`s to a second server holding the bytes; the download returns them.
+- `redirect_swallowed_as_empty_body_is_not_a_download` - pins the regression:
+  driven with the *API* client (redirects refused), an unfollowed `307` must
+  surface as an error naming the status, never as an empty NAR.
+- `truncated_body_is_reported_as_a_miss` - a body shorter than the declared
+  `file_size` yields `Ok((path, None))`, the `InputsUnavailable` self-heal
+  signal, not bytes.
+- `short_body_contradicts_a_declared_file_size` - the `presigned_body_is_short`
+  predicate, including that an absent `file_size` contradicts nothing.
+
+`backend/gradient-worker/src/proto/compression.rs`:
+- `sniff_wins_over_a_lying_url_extension` - zstd bytes behind a `.nar` URL
+  resolve to `Zstd` and decompress; the attic case exactly.
+- `sniff_recognises_an_uncompressed_nar` - the `nix-archive-1` magic resolves to
+  `None` even when the URL claims `.nar.zst`.
+- `sniff_recognises_xz_and_bzip2` - the remaining container magics.
+- `sniff_falls_back_to_the_url_when_no_magic_matches` - unknown or too-short
+  bytes defer to the URL guess, and to zstd when there is no URL.

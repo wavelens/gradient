@@ -72,8 +72,7 @@ pub async fn upstream_nar(
         .ok_or_else(|| WebError::bad_request("Not an external upstream"))?;
 
     let nar_url = build_upstream_nar_url(&base_url, &path, query.as_deref());
-    let resp = state
-        .http
+    let resp = gradient_util::http::download_client()
         .get(&nar_url)
         .send()
         .await

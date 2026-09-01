@@ -53,6 +53,39 @@ pub(crate) fn detect_compression(url: &str) -> Compression {
     }
 }
 
+/// Serialised `nix-archive-1` token every uncompressed NAR opens with: an
+/// 8-byte little-endian length followed by the string itself.
+const NAR_MAGIC: &[u8] = b"\x0d\x00\x00\x00\x00\x00\x00\x00nix-archive-1";
+
+/// Identify a NAR payload's container from its leading magic bytes, or `None`
+/// when nothing matches (a body too short to classify, or a format we don't
+/// handle).
+pub(crate) fn sniff_compression(bytes: &[u8]) -> Option<Compression> {
+    if bytes.starts_with(&[0x28, 0xB5, 0x2F, 0xFD]) {
+        Some(Compression::Zstd)
+    } else if bytes.starts_with(&[0xFD, b'7', b'z', b'X', b'Z', 0x00]) {
+        Some(Compression::Xz)
+    } else if bytes.starts_with(b"BZh") {
+        Some(Compression::Bzip2)
+    } else if bytes.starts_with(NAR_MAGIC) {
+        Some(Compression::None)
+    } else {
+        None
+    }
+}
+
+/// The format to decompress `bytes` as: what the bytes actually are, falling
+/// back to [`detect_compression`]'s URL guess when they carry no known magic.
+///
+/// The bytes win because caches disagree with their own metadata: attic serves
+/// `Compression: zstd` under a `nar/<hash>.nar` URL, so the extension alone
+/// hands a zstd frame to the daemon as a raw NAR and the import fails on a size
+/// mismatch that looks like cache corruption.
+pub(crate) fn resolve_compression(bytes: &[u8], url: Option<&str>) -> Compression {
+    sniff_compression(bytes)
+        .unwrap_or_else(|| url.map(detect_compression).unwrap_or(Compression::Zstd))
+}
+
 /// Decompress a NAR payload per its compression format. Synchronous; NAR
 /// payloads are bounded by `nar_size` from the path info, so memory
 /// pressure is predictable.
@@ -368,6 +401,70 @@ mod tests {
             detect_compression("https://example/some/opaque"),
             Compression::Zstd
         );
+    }
+
+    /// Regression for the attic upstream that advertises `Compression: zstd`
+    /// behind a `nar/<hash>.nar` URL: the extension says "no compression" while
+    /// the bytes are a zstd frame. Sniffing the magic must win over the guess.
+    #[test]
+    fn sniff_wins_over_a_lying_url_extension() {
+        let payload = b"hello gradient zstd world";
+        let compressed = zstd::stream::encode_all(&payload[..], 6).unwrap();
+        assert_eq!(sniff_compression(&compressed), Some(Compression::Zstd));
+        assert_eq!(
+            resolve_compression(&compressed, Some("https://attic.example/nar/abc.nar")),
+            Compression::Zstd
+        );
+        let out = decompress(
+            &compressed,
+            resolve_compression(&compressed, Some("https://attic.example/nar/abc.nar")),
+        )
+        .unwrap();
+        assert_eq!(out, payload);
+    }
+
+    #[test]
+    fn sniff_recognises_an_uncompressed_nar() {
+        let mut nar = NAR_MAGIC.to_vec();
+        nar.extend_from_slice(&[0u8; 3]);
+        assert_eq!(sniff_compression(&nar), Some(Compression::None));
+        // …even when the URL claims zstd.
+        assert_eq!(
+            resolve_compression(&nar, Some("https://cache.example/nar/abc.nar.zst")),
+            Compression::None
+        );
+    }
+
+    #[test]
+    fn sniff_recognises_xz_and_bzip2() {
+        use std::io::Write;
+        let mut xz = xz2::write::XzEncoder::new(Vec::new(), 6);
+        xz.write_all(b"payload").unwrap();
+        assert_eq!(
+            sniff_compression(&xz.finish().unwrap()),
+            Some(Compression::Xz)
+        );
+
+        let mut bz = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::default());
+        bz.write_all(b"payload").unwrap();
+        assert_eq!(
+            sniff_compression(&bz.finish().unwrap()),
+            Some(Compression::Bzip2)
+        );
+    }
+
+    /// Unrecognised bytes (and a body too short to carry any magic) must fall
+    /// back to the URL guess rather than assert a format.
+    #[test]
+    fn sniff_falls_back_to_the_url_when_no_magic_matches() {
+        assert_eq!(sniff_compression(b"not a known container"), None);
+        assert_eq!(sniff_compression(b""), None);
+        assert_eq!(
+            resolve_compression(b"opaque", Some("https://cache.example/nar/abc.nar.xz")),
+            Compression::Xz
+        );
+        // No URL at all: our own cache only ever produces zstd.
+        assert_eq!(resolve_compression(b"opaque", None), Compression::Zstd);
     }
 
     #[test]

@@ -69,3 +69,4 @@ zstd                  = { workspace = true }
 
 [dev-dependencies]
 gradient-test-support = { workspace = true }
+wiremock              = { workspace = true }

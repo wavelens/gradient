@@ -23,3 +23,10 @@ pub fn client() -> &'static reqwest::Client {
         gradient_util::http::build_client().expect("failed to build worker HTTP client")
     })
 }
+
+/// Shared client for object downloads (upstream NARs, presigned blobs). Follows
+/// redirects, which binary caches use to hand a GET off to their object storage;
+/// [`client`] refuses them and would hand back the empty 3xx body as a download.
+pub fn download_client() -> &'static reqwest::Client {
+    gradient_util::http::download_client()
+}

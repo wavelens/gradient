@@ -165,7 +165,7 @@ async fn fetch_from_upstream(
         .await
         .unwrap_or_default();
 
-    let http_client = &state.http;
+    let http_client = gradient_util::http::download_client();
     for upstream in upstreams {
         let Some(base_url) = upstream.url.as_deref() else {
             continue;

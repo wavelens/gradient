@@ -622,7 +622,7 @@ impl<'a> EvalResultProcessor<'a> {
             endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
 
         let (found, stats) = gradient_core::upstream::probe_batch(
-            self.state.http.clone(),
+            gradient_util::http::download_client().clone(),
             endpoints,
             std::sync::Arc::clone(&self.state.upstream_query),
             to_probe,

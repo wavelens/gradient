@@ -37,7 +37,7 @@ pub async fn log(
     }
 
     let upstreams = upstream_urls(&state, ctx.cache.id).await;
-    match fetch_log_from_upstreams(&state.http, &upstreams, &drv).await {
+    match fetch_log_from_upstreams(gradient_util::http::download_client(), &upstreams, &drv).await {
         Some(body) => log_response(body, "MISS"),
         None => Err(WebError::not_found("Log")),
     }

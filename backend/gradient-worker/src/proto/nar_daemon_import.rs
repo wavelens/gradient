@@ -26,7 +26,7 @@ use tracing::debug;
 
 use crate::nix::store::LocalNixStore;
 use crate::proto::compression::{
-    Compression, build_unkeyed_path_info, decompress, detect_compression, parse_nar_hash_to_bytes,
+    build_unkeyed_path_info, decompress, parse_nar_hash_to_bytes, resolve_compression,
 };
 use crate::proto::prefetch::CorruptCachedNar;
 
@@ -89,17 +89,12 @@ impl<'a> NarImporter<'a> {
     }
 
     async fn import(&self, compressed_nar: Vec<u8>) -> Result<()> {
-        // Compression is inferred from the `URL:` field in the narinfo that
-        // was rewritten into `meta.url`. When the bytes came in via
-        // `NarRequest` (WebSocket, no URL), we default to zstd - that's the
-        // only format our own cache ever produces. Decompress + digest are
-        // multi-MB CPU work, so both run on the blocking pool.
-        let kind = self
-            .meta
-            .url
-            .as_deref()
-            .map(detect_compression)
-            .unwrap_or(Compression::Zstd);
+        // Compression comes from the payload's own magic bytes, falling back to
+        // the `URL:` field the narinfo was rewritten into and finally to zstd -
+        // the only format our own cache produces, and all a `NarRequest` over
+        // the WebSocket carries. Decompress + digest are multi-MB CPU work, so
+        // both run on the blocking pool.
+        let kind = resolve_compression(&compressed_nar, self.meta.url.as_deref());
         let store_path = self.store_path.to_owned();
         let expected_size = self.meta.nar_size;
         let claimed_hash = self.meta.nar_hash.clone();

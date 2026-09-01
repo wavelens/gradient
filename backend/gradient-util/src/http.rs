@@ -10,11 +10,17 @@
 //! reused across the whole process. Constructing one per call leaks
 //! connection pools and produces inconsistent timeout/redirect behaviour, so
 //! all server-side and CLI-side outbound HTTP traffic should go through a
-//! single client built here.
+//! client built here. Two exist, differing only in redirect policy:
+//! [`build_client`] for API calls and [`build_download_client`] for object
+//! fetches.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Redirect hops a binary-cache download follows before giving up.
+const DOWNLOAD_MAX_REDIRECTS: usize = 5;
 
 pub fn user_agent() -> String {
     format!(
@@ -52,13 +58,48 @@ fn rustls_config() -> rustls::ClientConfig {
         .with_no_client_auth()
 }
 
-pub fn build_client() -> reqwest::Result<reqwest::Client> {
+fn client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .timeout(DEFAULT_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
         .user_agent(user_agent())
         .use_preconfigured_tls(rustls_config())
+}
+
+/// Client for API traffic (forges, webhooks, OIDC, upstream narinfo probes).
+/// Redirects are refused: following one on an authenticated call is an SSRF
+/// pivot, so a 3xx must surface as itself.
+pub fn build_client() -> reqwest::Result<reqwest::Client> {
+    client_builder()
+        .redirect(reqwest::redirect::Policy::none())
         .build()
+}
+
+/// Client for fetching binary objects - NARs and cache blobs - from object
+/// stores and third-party binary caches.
+///
+/// Unlike [`build_client`] this follows redirects. Attic, Cachix and every S3
+/// gateway answer a NAR GET with a 3xx to their object storage, and reqwest
+/// reports a non-followed 3xx as an ordinary response carrying an empty body -
+/// indistinguishable from a successful zero-byte download. Object GETs carry no
+/// credentials worth leaking, so the SSRF argument that keeps redirects off the
+/// API client does not apply here.
+pub fn build_download_client() -> reqwest::Result<reqwest::Client> {
+    client_builder()
+        .redirect(reqwest::redirect::Policy::limited(DOWNLOAD_MAX_REDIRECTS))
+        .build()
+}
+
+/// Process-wide [`build_download_client`], built on first use. Every binary-cache
+/// object fetch shares it, so neither the server (which threads its API client
+/// through `ServerState`) nor the worker needs to carry a second client around.
+///
+/// Panics only if the builder cannot construct a client at all, which happens
+/// solely on pathological TLS init failure - the same contract as the API
+/// client's construction at startup.
+pub fn download_client() -> &'static reqwest::Client {
+    static DOWNLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    DOWNLOAD_CLIENT
+        .get_or_init(|| build_download_client().expect("failed to build the download HTTP client"))
 }
 
 #[cfg(test)]
