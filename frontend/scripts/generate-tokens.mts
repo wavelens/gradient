@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { PALETTE, DARK_ROLES, LIGHT_ROLES } from '../src/app/styles/tokens.ts';
+import { PALETTE, SHADOWS, DARK_ROLES, LIGHT_ROLES } from '../src/app/styles/tokens.ts';
 
 const TARGET = join(dirname(fileURLToPath(import.meta.url)), '../src/app/styles/_themes.scss');
 
@@ -27,6 +27,7 @@ function render(): string {
 
 @mixin palette {
 ${block(PALETTE, (v) => v)}
+${block(SHADOWS, (v) => v)}
 }
 
 @mixin dark-roles {

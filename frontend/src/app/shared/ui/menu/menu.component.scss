@@ -14,7 +14,7 @@
   background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--gr-shadow-overlay);
 }
 
 .gr-menu__separator {

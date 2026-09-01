@@ -38,7 +38,7 @@
   border-radius: $border-radius-sm;
   color: var(--gr-text-primary);
   font-size: $font-size-sm;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--gr-shadow-overlay);
 
   &--success { border-left-color: var(--gr-status-success); }
   &--warn { border-left-color: var(--gr-status-warning); }

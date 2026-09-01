@@ -4,6 +4,12 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+export const SHADOWS = {
+  '--gr-shadow-raised': '0 1px 2px rgb(0 0 0 / 0.28)',
+  '--gr-shadow-overlay': '0 8px 20px rgb(0 0 0 / 0.35)',
+  '--gr-shadow-modal': '0 16px 40px rgb(0 0 0 / 0.45)',
+} as const;
+
 export const LINE_HEIGHTS = { tight: 1.25, base: 1.5, relaxed: 1.7 } as const;
 export const CONTROL_HEIGHT_PX = 34;
 
@@ -18,22 +24,22 @@ export const PALETTE: Record<string, string> = {
   '--gr-black': '#000000',
   '--gr-gray-950': '#050708',
   '--gr-gray-900': '#0d1118',
-  '--gr-gray-800': '#21262d',
-  '--gr-gray-750': '#252d33',
-  '--gr-gray-725': '#2b333c',
+  '--gr-gray-800': '#2e3742',
+  '--gr-gray-750': '#3a4552',
+  '--gr-gray-725': '#465262',
   '--gr-gray-700': '#2d333b',
   '--gr-gray-400': '#818181',
-  '--gr-gray-350': '#8b949e',
-  '--gr-gray-300': '#abb0b4',
+  '--gr-gray-350': '#aab3bd',
+  '--gr-gray-300': '#c2c9d1',
   '--gr-gray-200': '#d0d7de',
   '--gr-gray-100': '#eaeef2',
-  '--gr-gray-75': '#f0f3f6',
-  '--gr-gray-60': '#e4e9ee',
-  '--gr-gray-50': '#f6f8fa',
+  '--gr-gray-75': '#dde3ea',
+  '--gr-gray-60': '#d1d9e2',
+  '--gr-gray-50': '#e9edf2',
   '--gr-ink-900': '#1f2328',
-  '--gr-slate-600': '#656d76',
+  '--gr-slate-600': '#525a62',
   '--gr-slate-500': '#8c959f',
-  '--gr-slate-550': '#6a737d',
+  '--gr-slate-550': '#5c646c',
   '--gr-green-800': '#115c26',
   '--gr-green-900': '#0f5323',
   '--gr-green-700': '#166c2e',

@@ -14,5 +14,5 @@
   border-radius: $border-radius-md;
   color: var(--gr-text-primary);
   font-size: $font-size-md;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--gr-shadow-overlay);
 }

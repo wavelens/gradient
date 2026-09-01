@@ -15,7 +15,7 @@
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   color: var(--gr-text-primary);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--gr-shadow-modal);
 }
 
 .gr-dialog__header {
