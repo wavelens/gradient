@@ -44,13 +44,7 @@ import { DialogComponent } from '../dialog/dialog.component';
     </gr-dialog>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      .gr-confirm { display: flex; align-items: flex-start; gap: 0.75rem; }
-      .gr-confirm__icon { color: var(--gr-status-warning); }
-      .gr-confirm__message { margin: 0; }
-    `,
-  ],
+  styleUrl: './confirm-dialog.component.scss',
 })
 export class ConfirmDialogComponent {
   protected confirmations = inject(ConfirmationService);

@@ -67,32 +67,7 @@ import { PopoverComponent } from '@shared/ui';
     </gr-popover>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
-      .kpi { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.25rem; }
-      .kpi .label { color: #abb0b4; font-size: 0.8rem; }
-      .kpi .value { color: #fff; font-size: 1.6rem; font-weight: 600; }
-      .kpi .value.sm { font-size: 1.2rem; }
-      gr-metric-chart { display: block; margin-bottom: 1rem; }
-      h2 { color: #fff; font-size: 1.05rem; margin: 1.5rem 0 0.75rem; }
-      table.rules { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
-      th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
-      th { color: #fff; }
-      .mono { font-family: monospace; }
-      .num { text-align: right; font-variant-numeric: tabular-nums; color: #28a745; }
-      .num.neg { color: #dc3545; }
-      .bar-cell { width: 30%; }
-      .bar { height: 10px; background: #28a745; border-radius: 3px; min-width: 2px; }
-      .bar.neg { background: #dc3545; }
-      .muted { color: #818181; }
-      .help { margin-left: 0.4rem; width: 1.1rem; height: 1.1rem; padding: 0; border-radius: 50%; border: 1px solid #3d444d; background: #2d333b; color: #abb0b4; font-size: 0.7rem; line-height: 1; cursor: pointer; }
-      .help:hover { color: #fff; border-color: #6f42c1; }
-      .rule-help { max-width: 22rem; }
-      .rule-help strong { display: block; font-family: monospace; color: #fff; margin-bottom: 0.35rem; }
-      .rule-help p { margin: 0; color: #abb0b4; font-size: 0.85rem; line-height: 1.4; }
-    `,
-  ],
+  styleUrl: './scheduler.component.scss',
 })
 export class BoardSchedulerComponent implements OnInit {
   private board = inject(BoardService);

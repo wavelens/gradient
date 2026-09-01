@@ -273,59 +273,7 @@ interface RuleRow {
     </gr-dialog>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      :host { display: block; padding: 1.5rem; max-width: 1000px; margin: 0 auto; }
-      .back { color: #abb0b4; text-decoration: none; font-size: 0.85rem; }
-      .head { display: flex; justify-content: space-between; align-items: flex-end; margin: 0.5rem 0 1.5rem; }
-      h1 { color: #fff; font-size: 1.4rem; margin: 0.25rem 0 0; }
-      h2 { color: #fff; font-size: 1.05rem; margin: 1.75rem 0 0.75rem; }
-      .kind { display: inline-block; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #17a2b8; background: #17a2b822; padding: 0.15rem 0.5rem; border-radius: 4px; }
-      .kind.build { color: #fd7e14; background: #fd7e1422; }
-      .total { text-align: right; }
-      .total .value { display: block; color: #fff; font-size: 2rem; font-weight: 600; }
-      .label { color: #818181; font-size: 0.75rem; display: block; }
-      .ids { display: flex; gap: 2rem; flex-wrap: wrap; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 1rem; }
-      .timeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1rem; margin-top: 1rem; }
-      .step { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 0.75rem; color: #abb0b4; font-size: 0.85rem; }
-      .step .hl { color: #17a2b8; font-weight: 600; }
-      .mono { font-family: monospace; color: #d6dade; font-size: 0.85rem; }
-      .reason { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .worker-link { text-decoration: none; cursor: pointer; }
-      .worker-link:hover { color: #17a2b8; }
-      .build-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-      .build-grid .span2 { grid-column: 1 / -1; }
-      .build-grid .out { word-break: break-all; margin-top: 0.25rem; }
-      table.rules { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
-      th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; font-size: 0.85rem; color: #abb0b4; }
-      th { color: #fff; }
-      .num { text-align: right; font-variant-numeric: tabular-nums; color: #28a745; }
-      .num.neg { color: #dc3545; }
-      .bar-cell { width: 40%; }
-      .bar { height: 10px; background: #28a745; border-radius: 3px; min-width: 2px; }
-      .bar.neg { background: #dc3545; }
-      pre { background: #0d1118; padding: 0.75rem; border-radius: 6px; overflow: auto; color: #abb0b4; font-size: 0.8rem; }
-      .muted { color: #818181; }
-      .ctx h3 { color: #fff; font-size: 0.95rem; margin: 1.25rem 0 0.5rem; }
-      table.kv { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
-      table.kv td { padding: 0.4rem 0.75rem; border-bottom: 1px solid #2d333b; font-size: 0.85rem; }
-      table.kv td.label { width: 40%; display: table-cell; }
-      table.kv.counts { margin-top: 1rem; }
-      .drv-list { display: flex; flex-direction: column; gap: 0.5rem; }
-      .drv-row { display: flex; flex-direction: column; gap: 0.15rem; background: #21262d; border: 1px solid #2d333b; border-radius: 6px; padding: 0.5rem 0.75rem; }
-      .drv-row.clickable { cursor: pointer; transition: background 0.1s, border-color 0.1s; }
-      .drv-row.clickable:hover { background: #2d333b; border-color: #444c56; }
-      .drv-row .pname { color: #d6dade; }
-      .drv-row .path { color: #818181; font-size: 0.8rem; word-break: break-all; }
-      tbody tr.clickable { cursor: pointer; transition: background 0.1s; }
-      tbody tr.clickable:hover { background: #2d333b; }
-      .help { margin-left: 0.4rem; width: 1.1rem; height: 1.1rem; padding: 0; border-radius: 50%; border: 1px solid #3d444d; background: #2d333b; color: #abb0b4; font-size: 0.7rem; line-height: 1; cursor: pointer; }
-      .help:hover { color: #fff; border-color: #6f42c1; }
-      .rule-help { max-width: 22rem; }
-      .rule-help strong { display: block; font-family: monospace; color: #fff; margin-bottom: 0.35rem; }
-      .rule-help p { margin: 0; color: #abb0b4; font-size: 0.85rem; line-height: 1.4; }
-    `,
-  ],
+  styleUrl: './job-detail.component.scss',
 })
 export class BoardJobDetailComponent implements OnInit {
   private route = inject(ActivatedRoute);

@@ -1,0 +1,41 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../styles/variables' as *;
+
+.board {
+  padding: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+h1 {
+  color: var(--gr-text-primary);
+  font-size: $font-size-xl;
+  margin: 0 0 1rem;
+}
+.board-nav {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--gr-border);
+}
+.board-nav a {
+  color: var(--gr-text-secondary);
+  padding: 0.5rem 0.75rem;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  border-radius: $border-radius-sm 6px 0 0;
+  transition: color 0.15s, background 0.15s;
+}
+.board-nav a:hover {
+  color: var(--gr-text-primary);
+  background: var(--gr-surface-raised);
+}
+.board-nav a.active {
+  color: var(--gr-text-primary);
+  border-bottom-color: var(--gr-status-info);
+}
+    

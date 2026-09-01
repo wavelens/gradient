@@ -32,41 +32,6 @@ import { RouterModule } from '@angular/router';
     </div>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      .board {
-        padding: 1.5rem;
-        max-width: 1200px;
-        margin: 0 auto;
-      }
-      h1 {
-        color: #fff;
-        font-size: 1.5rem;
-        margin: 0 0 1rem;
-      }
-      .board-nav {
-        display: flex;
-        gap: 0.25rem;
-        margin-bottom: 1.5rem;
-        border-bottom: 1px solid #2d333b;
-      }
-      .board-nav a {
-        color: #abb0b4;
-        padding: 0.5rem 0.75rem;
-        text-decoration: none;
-        border-bottom: 2px solid transparent;
-        border-radius: 6px 6px 0 0;
-        transition: color 0.15s, background 0.15s;
-      }
-      .board-nav a:hover {
-        color: #fff;
-        background: #21262d;
-      }
-      .board-nav a.active {
-        color: #fff;
-        border-bottom-color: #17a2b8;
-      }
-    `,
-  ],
+  styleUrl: './board-layout.component.scss',
 })
 export class BoardLayoutComponent {}

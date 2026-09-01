@@ -40,7 +40,7 @@ import { MetricChartComponent } from '@shared/ui';
     ></gr-metric-chart>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [`gr-metric-chart { display: block; margin-bottom: 1rem; }`],
+  styleUrl: './throughput.component.scss',
 })
 export class BoardThroughputComponent implements OnInit {
   private board = inject(BoardService);

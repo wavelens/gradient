@@ -78,31 +78,7 @@ const MIB = 1024 ** 2;
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
-      .kpi { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.25rem; }
-      .kpi .label, .cell .label { color: #abb0b4; font-size: 0.8rem; }
-      .kpi .value { color: #fff; font-size: 1.6rem; font-weight: 600; }
-      .kpi .value.sm { font-size: 1.05rem; }
-      h2 { color: #fff; font-size: 1.05rem; margin: 1.5rem 0 0.75rem; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; }
-      .cell { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.25rem; color: #d6dade; font-size: 0.95rem; }
-      .cell .bad, .num.bad { color: #dc3545; }
-      table.http { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
-      th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
-      th { color: #fff; }
-      .mono { font-family: monospace; }
-      .num { text-align: right; font-variant-numeric: tabular-nums; }
-      .muted { color: #818181; }
-      .admin-actions { display: flex; align-items: center; gap: 0.75rem; margin: 0 0 1rem; }
-      .btn { background: #2d333b; color: #fff; border: 1px solid #444c56; border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer; text-decoration: none; font-size: 0.85rem; }
-      .btn[disabled], .btn.disabled { opacity: 0.5; pointer-events: none; }
-      .btn.danger { border-color: #b9434f; color: #f0a4ab; }
-      .notice { color: #e3b341; font-size: 0.8rem; }
-      .drain-banner { background: #3d1f24; border: 1px solid #b9434f; color: #f0a4ab; border-radius: 8px; padding: 0.6rem 0.9rem; margin-bottom: 1rem; font-size: 0.9rem; }
-    `,
-  ],
+  styleUrl: './health.component.scss',
 })
 export class BoardHealthComponent implements OnInit {
   private board = inject(BoardService);

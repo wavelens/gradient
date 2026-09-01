@@ -28,21 +28,7 @@ const POSITIONS: Record<TooltipPosition, ConnectedPosition> = {
   standalone: true,
   template: '<div class="gr-tooltip">{{ text }}</div>',
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      .gr-tooltip {
-        max-width: 18rem;
-        padding: 0.35rem 0.55rem;
-        background: var(--gr-surface-raised);
-        border: 1px solid var(--gr-border);
-        border-radius: 5px;
-        box-shadow: var(--gr-shadow-overlay);
-        color: var(--gr-text-primary);
-        font-size: 0.75rem;
-        line-height: 1.3;
-      }
-    `,
-  ],
+  styleUrl: './tooltip-panel.component.scss',
 })
 export class TooltipPanelComponent {
   text = '';

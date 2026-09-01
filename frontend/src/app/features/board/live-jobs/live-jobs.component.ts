@@ -141,26 +141,7 @@ interface DecisionRow {
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      .banner { color: #abb0b4; margin-bottom: 1rem; }
-      .muted { color: #818181; }
-      .filters { display: flex; gap: 1.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
-      .filters label { display: flex; flex-direction: column; gap: 0.25rem; color: #818181; font-size: 0.75rem; }
-      .filters select, .filters input { background: #21262d; color: #fff; border: 1px solid #2d333b; border-radius: 4px; padding: 0.25rem 0.4rem; min-width: 7rem; }
-      table.jobs { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
-      th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
-      th { color: #fff; }
-      tbody tr.clickable { cursor: pointer; }
-      tbody tr.clickable:hover { background: #2d333b; }
-      tbody tr.live { opacity: 0.7; font-style: italic; }
-      tbody tr.negative td { color: #f0883e; }
-      .mono { font-family: monospace; }
-      .view-toggle { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-      .view-toggle button { background: #21262d; color: #abb0b4; border: 1px solid #2d333b; border-radius: 6px; padding: 0.3rem 0.8rem; cursor: pointer; }
-      .view-toggle button.active { background: #2d333b; color: #fff; }
-    `,
-  ],
+  styleUrl: './live-jobs.component.scss',
 })
 export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   private static readonly STATE_KEY = 'board.live-jobs.filters';

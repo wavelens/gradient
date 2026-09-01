@@ -68,18 +68,7 @@ const GIB = 1024 ** 3;
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
-      .kpi { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.25rem; }
-      .kpi .label { color: #abb0b4; font-size: 0.8rem; }
-      .kpi .value { color: #fff; font-size: 1.4rem; font-weight: 600; }
-      gr-metric-chart { display: block; margin-bottom: 1rem; }
-    `,
-    `
-      .upstreams-title { color: #fff; margin: 1.5rem 0 0.75rem; }
-    `,
-  ],
+  styleUrl: './cache.component.scss',
 })
 export class BoardCacheComponent implements OnInit, OnDestroy {
   private board = inject(BoardService);

@@ -95,17 +95,7 @@ import { MetricChartComponent } from '@shared/ui';
     </table>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      gr-metric-chart { display: block; margin-bottom: 1rem; }
-      .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; }
-      table.workers { width: 100%; border-collapse: collapse; margin-top: 1rem; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
-      th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
-      th { color: #fff; }
-      .mono { font-family: monospace; }
-      .muted { color: #818181; }
-    `,
-  ],
+  styleUrl: './workers.component.scss',
 })
 export class BoardWorkersComponent implements OnInit {
   private board = inject(BoardService);

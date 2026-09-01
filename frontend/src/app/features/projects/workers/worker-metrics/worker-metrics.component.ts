@@ -47,24 +47,7 @@ import { MetricChartComponent } from '@shared/ui';
     </div>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      .wm { padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
-      .back { color: #abb0b4; text-decoration: none; font-size: 0.85rem; }
-      h1 { color: #fff; font-size: 1.4rem; margin: 0.5rem 0 1rem; }
-      h2 { color: #fff; font-size: 1.1rem; margin: 1.5rem 0 0.75rem; }
-      .mono { font-family: monospace; color: #abb0b4; font-size: 1rem; }
-      .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
-      .kpi { background: #21262d; border: 1px solid #2d333b; border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.25rem; }
-      .kpi .label { color: #abb0b4; font-size: 0.8rem; }
-      .kpi .value { color: #fff; font-size: 1.6rem; font-weight: 600; }
-      .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 1rem; }
-      table.sessions { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
-      th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
-      th { color: #fff; }
-      .muted { color: #818181; }
-    `,
-  ],
+  styleUrl: './worker-metrics.component.scss',
 })
 export class WorkerMetricsComponent implements OnInit {
   private route = inject(ActivatedRoute);

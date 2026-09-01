@@ -43,24 +43,7 @@ type Tab = 'time' | 'rss' | 'heap' | 'thunks' | 'fncalls' | 'alloc';
     </table>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
-      .tabs button { background: #21262d; color: #abb0b4; border: 1px solid #2d333b; border-radius: 6px; padding: 0.35rem 0.8rem; cursor: pointer; }
-      .tabs button.active { color: #fff; border-color: #17a2b8; }
-      .controls { display: flex; gap: 1.5rem; margin-bottom: 1rem; color: #abb0b4; align-items: center; }
-      .controls label { display: inline-flex; align-items: center; gap: 0.35rem; cursor: pointer; }
-      .help { font-size: 1rem; color: #818181; cursor: help; }
-      select { background: #21262d; color: #fff; border: 1px solid #2d333b; border-radius: 4px; padding: 0.25rem; }
-      .note { color: #818181; font-size: 0.8rem; margin: 0 0 0.75rem; }
-      table.expensive { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
-      th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
-      th { color: #fff; }
-      .mono { font-family: monospace; }
-      .muted { color: #818181; }
-      h2 { color: #fff; font-size: 1.05rem; margin: 1.5rem 0 0.75rem; }
-    `,
-  ],
+  styleUrl: './expensive-evals.component.scss',
 })
 export class BoardExpensiveEvalsComponent implements OnInit {
   private board = inject(BoardService);

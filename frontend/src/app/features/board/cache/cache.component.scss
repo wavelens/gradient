@@ -1,0 +1,13 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.kpi { background: var(--gr-surface-raised); border: 1px solid var(--gr-border); border-radius: $border-radius-md; padding: 1rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.kpi .label { color: var(--gr-text-secondary); font-size: $font-size-xs; }
+.kpi .value { color: var(--gr-text-primary); font-size: $font-size-xl; font-weight: 600; }
+gr-metric-chart { margin-bottom: $spacing-md; }
+.upstreams-title { color: var(--gr-text-primary); margin: 1.5rem 0 0.75rem; }

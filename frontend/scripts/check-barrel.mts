@@ -42,6 +42,7 @@ for (const entry of readdirSync(UI)) {
 // Rule 3: a primitive that is not demonstrated in the styleguide does not exist as far as
 // consumers are concerned, so an undemoed selector is a conformance failure.
 const SG = join(dirname(fileURLToPath(import.meta.url)), '../src/app/features/styleguide');
+const APP = join(dirname(fileURLToPath(import.meta.url)), '../src/app');
 
 function styleguideMarkup(): string {
   const parts: string[] = [];
@@ -86,6 +87,8 @@ function hostDisplayOverrides(): string[] {
         continue;
       }
       if (!entry.endsWith('.scss') && !entry.endsWith('.ts')) continue;
+      // A primitive declaring its own host display lives in its own directory.
+      if (path.includes('/shared/ui/')) continue;
       const text = readFileSync(path, 'utf8');
       const rule = /(^|\n)\s*(gr-[a-z-]+)(?:\s*,\s*gr-[a-z-]+)*\s*\{([^}]*)\}/g;
       for (const [, , selector, body] of text.matchAll(rule)) {
@@ -93,13 +96,38 @@ function hostDisplayOverrides(): string[] {
       }
     }
   };
-  scan(SG);
+  scan(APP);
   return hits;
 }
 
 const overrides = hostDisplayOverrides();
 
-let failed = false;
+// Rule 5: styles declared inline escape stylelint, so a whole feature can drift
+// off the token system unnoticed. Every component points at a stylesheet.
+function inlineStyles(): string[] {
+  const hits: string[] = [];
+  const scan = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const path = join(dir, entry);
+      if (statSync(path).isDirectory()) {
+        scan(path);
+        continue;
+      }
+      if (!entry.endsWith('.ts') || entry.endsWith('.spec.ts')) continue;
+      if (/\n\s*styles:\s*\[/.test(readFileSync(path, 'utf8'))) hits.push(path.split('/src/')[1]);
+    }
+  };
+  scan(APP);
+  return hits;
+}
+
+const inlined = inlineStyles();
+if (inlined.length) {
+  console.error(`Components with inline styles, invisible to stylelint (${inlined.length}):`);
+  inlined.forEach((m) => console.error(`  ${m}`));
+}
+
+let failed = inlined.length > 0;
 if (overrides.length) {
   console.error(`Host display overridden from outside the component (${overrides.length}):`);
   overrides.forEach((m) => console.error(`  ${m}`));

@@ -39,7 +39,7 @@ import { MetricChartComponent } from '@shared/ui';
     ></gr-metric-chart>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [`gr-metric-chart { display: block; margin-bottom: 1rem; }`],
+  styleUrl: './durations.component.scss',
 })
 export class BoardDurationsComponent implements OnInit {
   private board = inject(BoardService);

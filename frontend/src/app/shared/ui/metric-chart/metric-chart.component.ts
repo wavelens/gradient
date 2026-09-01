@@ -60,30 +60,7 @@ echarts.use([
     </div>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      .metric-chart {
-        background: var(--gr-surface-raised);
-        border: 1px solid var(--gr-border);
-        border-radius: 8px;
-        padding: 1rem;
-      }
-      .metric-chart--bare {
-        background: none;
-        border: 0;
-        border-radius: 0;
-        padding: 0;
-      }
-      .metric-chart__plot {
-        width: 100%;
-      }
-      h3 {
-        color: var(--gr-text-primary);
-        font-size: 0.875rem;
-        margin: 0 0 0.5rem;
-      }
-    `,
-  ],
+  styleUrl: './metric-chart.component.scss',
 })
 export class MetricChartComponent implements OnDestroy {
   title = input('');

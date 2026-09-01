@@ -69,21 +69,7 @@ type HttpSortKey = keyof Pick<HttpRouteStat, 'method' | 'route' | 'count' | 'avg
     </table>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
-  styles: [
-    `
-      gr-metric-chart { display: block; margin-bottom: 1rem; }
-      h2 { color: #fff; font-size: 1.05rem; margin: 1.5rem 0 0.75rem; }
-      table.http { width: 100%; border-collapse: collapse; background: #21262d; border: 1px solid #2d333b; border-radius: 8px; overflow: hidden; }
-      th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2d333b; color: #abb0b4; font-size: 0.85rem; }
-      th { color: #fff; }
-      th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
-      th.sortable:hover { color: #17a2b8; }
-      .mono { font-family: monospace; }
-      .num { text-align: right; font-variant-numeric: tabular-nums; }
-      .num.bad { color: #dc3545; }
-      .muted { color: #818181; font-weight: 400; font-size: 0.85rem; }
-    `,
-  ],
+  styleUrl: './network.component.scss',
 })
 export class BoardNetworkComponent implements OnInit {
   private board = inject(BoardService);

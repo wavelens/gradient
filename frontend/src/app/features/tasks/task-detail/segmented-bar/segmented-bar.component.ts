@@ -40,26 +40,7 @@ const ORDER: { key: SegKey; label: string }[] = [
       <span class="tipbox" [style.left.px]="t.x">{{ t.text }}</span>
     }
   `,
-  styles: [`
-    :host { display: inline-block; position: relative; }
-    .segbar { display: flex; height: var(--segbar-h, 9px); width: 100%; border-radius: 5px; overflow: hidden; background: var(--queued, #4b5563); }
-    .seg { display: block; height: 100%; transition: width .5s ease, filter .12s ease; }
-    .seg:hover { filter: brightness(1.25); }
-    .seg-empty { width: 100%; background: rgba(255,255,255,.06); }
-    .seg-completed { background: var(--success, #22c55e); }
-    .seg-failed { background: var(--danger, #ef4444); }
-    .seg-building { background: var(--running, #3b82f6); animation: seg-pulse 1.8s ease-in-out infinite; }
-    .seg-queued { background: var(--queued, #4b5563); }
-    .tipbox {
-      position: absolute; bottom: calc(100% + 7px); transform: translateX(-50%);
-      background: #0a0d12; color: #d6dade; font-size: 11.5px; white-space: nowrap;
-      border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 3px 9px;
-      pointer-events: none; z-index: 20; animation: tip-in .1s ease;
-    }
-    @keyframes tip-in { from { opacity: 0; } }
-    @keyframes seg-pulse { 50% { filter: brightness(1.35); } }
-    @media (prefers-reduced-motion: reduce) { .segbar, .seg { transition: none; animation: none; } }
-  `],
+  styleUrl: './segmented-bar.component.scss',
 })
 export class SegmentedBarComponent {
   counts = input.required<BuildStatusCounts>();
