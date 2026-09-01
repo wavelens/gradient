@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.cache-grid {
+@use '../../../styles/variables' as *;
+
+.cache-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
   gap: $spacing-lg;
@@ -132,22 +134,6 @@
   }
 }
 
-.visibility-select {
-  background: var(--gr-surface-sunken);
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-sm;
-  color: var(--gr-text-primary);
-  font-size: $font-size-md;
-  padding: $spacing-sm $spacing-md;
-  cursor: pointer;
-  width: 100%;
-
-  &:focus {
-    outline: none;
-    border-color: var(--gr-text-secondary);
-  }
-}
-
 .cache-arrow {
   flex-shrink: 0;
   color: var(--gr-text-secondary);
@@ -168,37 +154,8 @@
   margin-bottom: $spacing-md;
 
 }
-input[type="number"] {
-  background: var(--gr-surface-sunken);
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-sm;
-  color: var(--gr-text-primary);
-  font-size: $font-size-md;
-  padding: $spacing-sm $spacing-md;
-  width: 100%;
-  box-sizing: border-box;
 
-  &:focus {
-    outline: none;
-    border-color: var(--gr-text-secondary);
-  }
-
-  &.input-invalid {
-    border-color: var(--gr-status-danger);
-  }
-}
-
-.text-danger { color: var(--gr-status-danger); }
-
-.name-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-
-  input { flex: 1; padding-right: 2rem; }
-}
-
-.name-check-icon {
+.text-danger { color: var(--gr-status-danger); }.name-check-icon {
   position: absolute;
   right: $spacing-sm;
   display: flex;

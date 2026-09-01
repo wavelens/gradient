@@ -92,33 +92,17 @@
       />
     </gr-form-field>
 
-    <gr-form-field label="Name *" for="name">
-      <div class="name-input-wrapper">
-        <input
-          grInput
-          id="name"
-          [(ngModel)]="newProject.name"
-          placeholder="project-name"
-          (ngModelChange)="onProjectNameChange($event)"
-          (input)="onProjectNameUserInput()"
-          (keyup.enter)="createProject()"
-        />
-        @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><gr-icon name="progress_activity" class="gr-spin" size="sm" /></span>
-        } @else if (nameCheckState() === 'available') {
-          <span class="name-check-icon available"><gr-icon name="check" size="sm" /></span>
-        } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
-          <span class="name-check-icon taken"><gr-icon name="close" size="sm" /></span>
-        }
-      </div>
-      @if (nameCheckState() === 'taken') {
-        <small class="text-danger">This name is already taken.</small>
-      } @else if (nameCheckState() === 'invalid') {
-        <small class="text-danger">Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.</small>
-      } @else {
-        <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
-      }
-    </gr-form-field>
+    <gr-name-field
+      required
+      inputId="name"
+      placeholder="project-name"
+      [state]="nameCheckState()"
+      [ngModel]="newProject.name"
+      (ngModelChange)="onProjectNameChange($event)"
+      (input)="onProjectNameUserInput()"
+      (keyup.enter)="createProject()"
+      name="projectName"
+    />
 
     <gr-form-field label="Description" for="description">
       <textarea
@@ -131,10 +115,13 @@
     </gr-form-field>
 
     <gr-form-field label="Visibility" for="visibility" hint="Public projects are visible to all users">
-      <select id="visibility" [(ngModel)]="newProject.public" class="role-select w-full">
-        <option [ngValue]="false">Private</option>
-        <option [ngValue]="true">Public</option>
-      </select>
+      <gr-select
+        inputId="visibility"
+        [options]="visibilityOptions"
+        optionLabel="label"
+        optionValue="value"
+        [(ngModel)]="newProject.public"
+      />
     </gr-form-field>
   </div>
 

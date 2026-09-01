@@ -1,4 +1,7 @@
-<div class="row" [class.is-muted]="muted()">
+<div class="row" [class.is-muted]="muted()" [class.is-link]="!!link()">
+  @if (link(); as destination) {
+    <a class="row-link" [routerLink]="destination" [attr.aria-label]="linkLabel()"></a>
+  }
   <div class="row-info">
     @if (icon()) {
       <gr-icon [name]="icon()!" />
@@ -9,4 +12,7 @@
     </div>
   </div>
   <div class="row-actions"><ng-content select="[slot=actions]"></ng-content></div>
+  @if (link()) {
+    <gr-icon class="row-chevron" name="chevron_right" />
+  }
 </div>

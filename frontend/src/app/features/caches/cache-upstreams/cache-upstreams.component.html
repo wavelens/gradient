@@ -95,11 +95,13 @@
         <small class="text-secondary">External caches are always Read Only.</small>
       } @else {
         <gr-form-field label="Mode" for="edit-mode">
-          <select id="edit-mode" [(ngModel)]="editForm.mode" class="role-select w-full">
-            @for (m of modes; track m.value) {
-              <option [value]="m.value">{{ m.label }}</option>
-            }
-          </select>
+          <gr-select
+            inputId="edit-mode"
+            [options]="modes"
+            optionLabel="label"
+            optionValue="value"
+            [(ngModel)]="editForm.mode"
+          />
         </gr-form-field>
       }
     </div>
@@ -140,11 +142,13 @@
         <input grInput id="up-display-name-int" [(ngModel)]="upstreamForm.display_name" placeholder="Defaults to the cache's display name" />
       </gr-form-field>
       <gr-form-field label="Mode" for="up-mode" hint="Read &amp; Write: pull through and push results upstream. Read Only: pull through only. Write Only: push only.">
-        <select id="up-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
-          @for (m of modes; track m.value) {
-            <option [value]="m.value">{{ m.label }}</option>
-          }
-        </select>
+        <gr-select
+            inputId="up-mode"
+            [options]="modes"
+            optionLabel="label"
+            optionValue="value"
+            [(ngModel)]="upstreamForm.mode"
+          />
       </gr-form-field>
     } @else if (upstreamType === 'gradient_proto') {
       <gr-form-field label="Display Name" for="up-gp-display-name">
@@ -161,11 +165,13 @@
         <input grInput type="password" id="up-gp-api-key" [(ngModel)]="upstreamForm.api_key" />
       </gr-form-field>
       <gr-form-field label="Mode" for="up-gp-mode">
-        <select id="up-gp-mode" [(ngModel)]="upstreamForm.mode" class="role-select w-full">
-          @for (m of modes; track m.value) {
-            <option [value]="m.value">{{ m.label }}</option>
-          }
-        </select>
+        <gr-select
+            inputId="up-gp-mode"
+            [options]="modes"
+            optionLabel="label"
+            optionValue="value"
+            [(ngModel)]="upstreamForm.mode"
+          />
       </gr-form-field>
     } @else {
       <gr-form-field label="Display Name" for="up-display-name">

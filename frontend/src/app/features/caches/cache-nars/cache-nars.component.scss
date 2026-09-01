@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.stat-cards {
+@use '../../../styles/variables' as *;
+
+.stat-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: $spacing-md;
@@ -44,7 +46,9 @@
 .filter-actions {
   display: flex;
   gap: $spacing-sm;
-}.nar-table {
+}
+
+.nar-table {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--gr-border);

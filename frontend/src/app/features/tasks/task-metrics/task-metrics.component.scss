@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.charts-grid {
+@use '../../../styles/variables' as *;
+
+.charts-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: $spacing-lg;

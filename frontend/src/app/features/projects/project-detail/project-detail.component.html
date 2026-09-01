@@ -79,35 +79,17 @@
       />
     </gr-form-field>
 
-    <gr-form-field label="Name *" for="proj-name">
-      <div class="name-input-wrapper">
-        <input
-          grInput
-          id="proj-name"
-          [(ngModel)]="newTask.name"
-          placeholder="task-name"
-          (ngModelChange)="onTaskNameChange($event)"
-          (input)="onTaskNameUserInput()"
-          (keyup.enter)="createTask()"
-        />
-        @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><gr-icon name="progress_activity" class="gr-spin" size="sm" /></span>
-        } @else if (nameCheckState() === 'available') {
-          <span class="name-check-icon available"><gr-icon name="check" size="sm" /></span>
-        } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid' || nameCheckState() === 'reserved') {
-          <span class="name-check-icon taken"><gr-icon name="close" size="sm" /></span>
-        }
-      </div>
-      @if (nameCheckState() === 'taken') {
-        <small class="text-danger">This name is already taken.</small>
-      } @else if (nameCheckState() === 'reserved') {
-        <small class="text-danger">this task name is reserved</small>
-      } @else if (nameCheckState() === 'invalid') {
-        <small class="text-danger">Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.</small>
-      } @else {
-        <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
-      }
-    </gr-form-field>
+    <gr-name-field
+      required
+      inputId="proj-name"
+      placeholder="task-name"
+      [state]="nameCheckState()"
+      [ngModel]="newTask.name"
+      (ngModelChange)="onTaskNameChange($event)"
+      (input)="onTaskNameUserInput()"
+      (keyup.enter)="createTask()"
+      name="taskName"
+    />
 
     <gr-form-field label="Description" for="proj-desc">
       <textarea

@@ -128,32 +128,16 @@
       />
     </gr-form-field>
 
-    <gr-form-field label="Name *" for="cache-name">
-      <div class="name-input-wrapper">
-        <input
-          grInput
-          id="cache-name"
-          [(ngModel)]="newCache.name"
-          placeholder="cache-name"
-          (ngModelChange)="onCacheNameChange($event)"
-          (input)="onCacheNameUserInput()"
-        />
-        @if (nameCheckState() === 'checking') {
-          <span class="name-check-icon"><gr-icon name="progress_activity" class="gr-spin" size="sm" /></span>
-        } @else if (nameCheckState() === 'available') {
-          <span class="name-check-icon available"><gr-icon name="check" size="sm" /></span>
-        } @else if (nameCheckState() === 'taken' || nameCheckState() === 'invalid') {
-          <span class="name-check-icon taken"><gr-icon name="close" size="sm" /></span>
-        }
-      </div>
-      @if (nameCheckState() === 'taken') {
-        <small class="text-danger">This name is already taken.</small>
-      } @else if (nameCheckState() === 'invalid') {
-        <small class="text-danger">Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen.</small>
-      } @else {
-        <small class="text-secondary">Lowercase letters, numbers, and hyphens only</small>
-      }
-    </gr-form-field>
+    <gr-name-field
+      required
+      inputId="cache-name"
+      placeholder="cache-name"
+      [state]="nameCheckState()"
+      [ngModel]="newCache.name"
+      (ngModelChange)="onCacheNameChange($event)"
+      (input)="onCacheNameUserInput()"
+      name="cacheName"
+    />
 
     <gr-form-field label="Description" for="cache-desc">
       <textarea
@@ -166,10 +150,13 @@
     </gr-form-field>
 
     <gr-form-field label="Visibility" for="cache-visibility" hint="Public caches are visible and readable by all users">
-      <select id="cache-visibility" [(ngModel)]="newCache.public" class="visibility-select w-full">
-        <option [ngValue]="false">Private</option>
-        <option [ngValue]="true">Public</option>
-      </select>
+      <gr-select
+        inputId="cache-visibility"
+        [options]="visibilityOptions"
+        optionLabel="label"
+        optionValue="value"
+        [(ngModel)]="newCache.public"
+      />
     </gr-form-field>
   </div>
 

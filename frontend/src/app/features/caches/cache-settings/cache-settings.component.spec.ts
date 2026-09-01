@@ -77,11 +77,12 @@ describe('CacheSettingsComponent - access gating', () => {
     expect(del!.disabled).toBe(true);
   });
 
-  it('always shows Manage Upstreams link, even when state-managed', () => {
+  it('always reaches upstreams and members, even when state-managed', () => {
     const fixture = setup({ managed: true, canEdit: true, canTrigger: true });
-    const link = (Array.from(fixture.nativeElement.querySelectorAll('a')) as HTMLAnchorElement[]).find(
-      (el) => (el.textContent ?? '').toLowerCase().includes('manage upstreams'),
+    const hrefs = (Array.from(fixture.nativeElement.querySelectorAll('a')) as HTMLAnchorElement[]).map(
+      (el) => el.getAttribute('href'),
     );
-    expect(link).toBeDefined();
+    expect(hrefs).toContain('/caches/demo/upstreams');
+    expect(hrefs).toContain('/caches/demo/members-roles');
   });
 });

@@ -21,6 +21,7 @@ import {
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
+  RowListComponent,
   SettingsSectionComponent,
 } from '@shared/ui';
 import { ManagedDisableDirective } from '@shared/access';
@@ -45,6 +46,7 @@ import { AccessState } from '@core/models';
     SettingsSectionComponent,
     MessageBannerComponent,
     RowComponent,
+    RowListComponent,
   ],
   templateUrl: './profile.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

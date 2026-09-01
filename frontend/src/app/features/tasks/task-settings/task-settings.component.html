@@ -79,42 +79,30 @@
     
     </gr-settings-section>
 
-    <!-- Triggers -->
-    <gr-settings-section title="Triggers">
-      <gr-row>
-        <span slot="meta">Triggers control how and when evaluations run for this task - polling intervals, forge push and pull-request events, and cron schedules.</span>
-        <a slot="actions" grButton label="Manage Triggers" icon="schedule" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'triggers']"></a>
-      </gr-row>
-    
-    </gr-settings-section>
-
-    <!-- Actions -->
-    <gr-settings-section title="Actions">
-      <gr-row>
-        <span slot="meta">Actions react to evaluation and build events - send mail, post webhooks, or report status back to your forge.</span>
-        <a slot="actions" grButton label="Manage Actions" icon="bolt" severity="secondary" [routerLink]="['/project', projectName, 'task', taskName, 'actions']"></a>
-      </gr-row>
-    
-    </gr-settings-section>
-
-    <!-- Flake Inputs -->
-    <gr-settings-section title="Flake Inputs">
-      <gr-row>
-        <span slot="meta">Override individual flake inputs with a new git URL, or force an update of an input keeping its original URL. Inputs without an override stay at whatever flake.lock has locked.</span>
-        <a slot="actions" grButton label="Manage Flake Inputs" icon="share" severity="secondary"
-           [routerLink]="['/project', projectName, 'task', taskName, 'flake-inputs']"></a>
-      </gr-row>
-    
+    <gr-settings-section title="More Settings" [card]="false">
+      <gr-row-list>
+        <gr-row icon="schedule" linkLabel="Triggers" [link]="['/project', projectName, 'task', taskName, 'triggers']">
+          Triggers
+          <span slot="meta">Polling intervals, forge push and pull-request events, and cron schedules</span>
+        </gr-row>
+        <gr-row icon="bolt" linkLabel="Actions" [link]="['/project', projectName, 'task', taskName, 'actions']">
+          Actions
+          <span slot="meta">Send mail, post webhooks, or report status back to your forge</span>
+        </gr-row>
+        <gr-row icon="share" linkLabel="Flake inputs" [link]="['/project', projectName, 'task', taskName, 'flake-inputs']">
+          Flake Inputs
+          <span slot="meta">Override an input's git URL, or force an update keeping the original</span>
+        </gr-row>
+      </gr-row-list>
     </gr-settings-section>
 
     <!-- Status -->
     <gr-settings-section title="Status">
-      <div class="status-row">
-        <div>
-          <h3>{{ proj.active ? 'Task is Active' : 'Task is Inactive' }}</h3>
-          <p class="text-secondary">{{ proj.active ? 'The task is currently evaluating and building.' : 'The task is paused and not evaluating.' }}</p>
-        </div>
+      <gr-row>
+        {{ proj.active ? 'Task is Active' : 'Task is Inactive' }}
+        <span slot="meta">{{ proj.active ? 'The task is currently evaluating and building.' : 'The task is paused and not evaluating.' }}</span>
         <button
+          slot="actions"
           *appWritable="access()"
           grButton
           [label]="proj.active ? 'Deactivate' : 'Activate'"
@@ -124,46 +112,38 @@
           [loading]="toggling()"
           [appManagedDisable]="access()"
         ></button>
-      </div>
-    
+      </gr-row>
     </gr-settings-section>
 
     @if (access().canEdit) {
-      <!-- Danger Zone -->
-      <div class="danger-section">
-        <h2>Danger Zone</h2>
-        <div class="settings-card danger-card">
-            <div class="danger-row">
-            <div>
-              <h3>Transfer Ownership</h3>
-              <p class="text-secondary">Transfer this task to another project.</p>
-            </div>
-            <button
+      <gr-settings-section title="Danger Zone" danger>
+        <gr-row>
+          Transfer Ownership
+          <span slot="meta">Transfer this task to another project.</span>
+          <button
+              slot="actions"
               grButton
               label="Transfer Ownership"
               icon="send"
               severity="warn"
               (click)="showTransferDialog.set(true)"
               [appManagedDisable]="access()"
-            ></button>
-          </div>
-          <div class="danger-divider"></div>
-          <div class="danger-row">
-            <div>
-              <h3>Delete Task</h3>
-              <p class="text-secondary">Permanently delete this task and all its evaluations.</p>
-            </div>
-            <button
+          ></button>
+        </gr-row>
+        <gr-row>
+          Delete Task
+          <span slot="meta">Permanently delete this task and all its evaluations.</span>
+          <button
+              slot="actions"
               grButton
               label="Delete Task"
               icon="delete"
               severity="danger"
               (click)="showDeleteDialog.set(true)"
               [appManagedDisable]="access()"
-            ></button>
-          </div>
-        </div>
-      </div>
+          ></button>
+        </gr-row>
+      </gr-settings-section>
     }
   </gr-page-layout>
 }

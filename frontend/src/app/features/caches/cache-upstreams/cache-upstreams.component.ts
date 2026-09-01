@@ -18,6 +18,7 @@ import {
   InputDirective,
   LoadingSpinnerComponent,
   PageLayoutComponent,
+  SelectComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
@@ -40,6 +41,7 @@ import { normalizeProbeUrl, isGradientCacheInfo } from './cache-upstream-probe';
     PageLayoutComponent,
     FormFieldComponent,
     EmptyStateComponent,
+    SelectComponent,
   ],
   templateUrl: './cache-upstreams.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

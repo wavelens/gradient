@@ -1,0 +1,35 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+ *
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
+
+@use '../../../styles/variables' as *;
+
+:host {
+  display: block;
+}
+
+// The status sits inside the field, like the password reveal, so the control
+// still reads as one box.
+.name-field {
+  position: relative;
+}
+
+.name-field__input {
+  padding-right: 2.25rem;
+}
+
+.name-field__status {
+  position: absolute;
+  top: 50%;
+  right: $spacing-sm;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  color: var(--gr-text-muted);
+  pointer-events: none;
+
+  &.is-available { color: var(--gr-status-success); }
+  &.is-unavailable { color: var(--gr-status-danger); }
+}

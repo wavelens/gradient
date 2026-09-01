@@ -6,18 +6,61 @@
 
 @use '../../../styles/variables' as *;
 
+// On its own the row is just a labelled line: no box, no padding of its own.
+// Inside a list it becomes a list item, and only then does it paint.
 .row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: $spacing-md;
-  padding: $spacing-md;
-  background: var(--gr-surface-raised);
 
-  &:hover { background: var(--gr-surface-hover); }
   // A muted row drops emphasis, not legibility: blanket opacity would take the
   // text under the contrast floor.
   &.is-muted .row-name { color: var(--gr-text-secondary); }
+}
+
+:host-context(gr-row-list) .row {
+  padding: $spacing-md;
+  background: var(--gr-surface-raised);
+}
+
+// Hover is an affordance, so only a row that actually goes somewhere gets it.
+.row.is-link:hover { background: var(--gr-surface-hover); }
+
+// A linked row is navigable across its whole area, so the anchor stretches
+// behind it and the actions sit above. The chevron shows where it goes.
+.row.is-link {
+  position: relative;
+  cursor: pointer;
+  padding: $spacing-md;
+  margin: -$spacing-md;
+  border-radius: $border-radius-sm;
+}
+
+:host-context(gr-row-list) .row.is-link {
+  margin: 0;
+  border-radius: 0;
+}
+
+.row-link {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border-radius: 0;
+
+  &:hover { background: transparent; }
+  &:focus-visible { outline-offset: -$focus-ring-width; }
+}
+
+.row.is-link .row-info,
+.row.is-link .row-actions,
+.row.is-link .row-chevron {
+  position: relative;
+}
+
+.row-chevron {
+  flex-shrink: 0;
+  color: var(--gr-text-muted);
 }
 
 :host(:not(:last-child)) .row {

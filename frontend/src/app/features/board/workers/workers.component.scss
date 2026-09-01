@@ -10,5 +10,7 @@ gr-metric-chart { margin-bottom: 1rem; }
 .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; }
 table.workers { width: 100%; border-collapse: collapse; margin-top: 1rem; background: var(--gr-surface-raised); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-md; overflow: hidden; }
 th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--gr-border-subtle); color: var(--gr-text-secondary); font-size: $font-size-sm; }
-th { color: var(--gr-text-primary); }.muted { color: var(--gr-text-muted); }
+th { color: var(--gr-text-primary); }
+
+.muted { color: var(--gr-text-muted); }
     

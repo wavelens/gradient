@@ -39,10 +39,14 @@
       </gr-form-field>
 
       <gr-form-field label="Visibility" for="visibility" hint="Public projects are visible and readable by all users">
-        <select id="visibility" [(ngModel)]="formData.public" class="role-select" [appManagedDisable]="access()">
-          <option [ngValue]="false">Private</option>
-          <option [ngValue]="true">Public</option>
-        </select>
+        <gr-select
+          inputId="visibility"
+          [options]="visibilityOptions"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="formData.public"
+          [appManagedDisable]="access()"
+        />
       </gr-form-field>
 
       <gr-form-field>
@@ -76,36 +80,25 @@
     
     </gr-settings-section>
 
-    <!-- Members & Roles -->
-    <gr-settings-section title="Access">
-      <gr-row>
-        Members & Roles
-        <span slot="meta">Manage who is in this project and what they can do</span>
-        <a slot="actions" grButton label="Manage Members" icon="group" severity="secondary" [routerLink]="['/project', projectName, 'members']"></a>
-      </gr-row>
-    
-    </gr-settings-section>
-
-    <!-- Infrastructure -->
-    <gr-settings-section title="Infrastructure">
-      <gr-row>
-        Workers
-        <span slot="meta">Manage build workers for this project</span>
-        <button slot="actions" grButton label="Manage Workers" icon="settings" severity="secondary" [routerLink]="['/project', projectName, 'workers']"></button>
-      </gr-row>
-      <gr-divider />
-      <gr-row>
-        Cache Subscriptions
-        <span slot="meta">Nix binary caches this project pushes builds to</span>
-        <button slot="actions" grButton label="Manage Caches" icon="database" severity="secondary" [routerLink]="['/project', projectName, 'caches']"></button>
-      </gr-row>
-      <gr-divider />
-      <gr-row>
-        Integrations
-        <span slot="meta">Inbound forge webhooks and outbound status reporters</span>
-        <a slot="actions" grButton label="Manage Integrations" icon="account_tree" severity="secondary" [routerLink]="['/project', projectName, 'integrations']"></a>
-      </gr-row>
-    
+    <gr-settings-section title="More Settings" [card]="false">
+      <gr-row-list>
+        <gr-row icon="group" linkLabel="Members and roles" [link]="['/project', projectName, 'members']">
+          Members &amp; Roles
+          <span slot="meta">Who is in this project and what they can do</span>
+        </gr-row>
+        <gr-row icon="construction" linkLabel="Workers" [link]="['/project', projectName, 'workers']">
+          Workers
+          <span slot="meta">Build workers registered to this project</span>
+        </gr-row>
+        <gr-row icon="database" linkLabel="Cache subscriptions" [link]="['/project', projectName, 'caches']">
+          Cache Subscriptions
+          <span slot="meta">Nix binary caches this project pushes builds to</span>
+        </gr-row>
+        <gr-row icon="account_tree" linkLabel="Integrations" [link]="['/project', projectName, 'integrations']">
+          Integrations
+          <span slot="meta">Inbound forge webhooks and outbound status reporters</span>
+        </gr-row>
+      </gr-row-list>
     </gr-settings-section>
 
     <!-- SSH Key -->
@@ -144,43 +137,37 @@
 
     <!-- Danger Zone -->
     @if (access().canEdit) {
-      <div class="settings-section danger-section">
-        <h2>Danger Zone</h2>
-        <div class="danger-card">
-          @if (sshKey()) {
-            <div class="danger-row">
-              <div>
-                <h3>Regenerate SSH Key</h3>
-                <p class="text-secondary">Generate a new SSH key. The existing key will stop working immediately.</p>
-              </div>
-              <button
-                grButton
-                label="Regenerate Key"
-                icon="refresh"
-                severity="danger"
-                (click)="showRegenerateKeyDialog.set(true)"
-                [disabled]="generatingSSH()"
-                [appManagedDisable]="access()"
-              ></button>
-            </div>
-            <gr-divider />
-          }
-          <div class="danger-row">
-            <div>
-              <h3>Delete Project</h3>
-              <p class="text-secondary">Permanently delete this project and all its tasks.</p>
-            </div>
+      <gr-settings-section title="Danger Zone" danger>
+        @if (sshKey()) {
+          <gr-row>
+            Regenerate SSH Key
+            <span slot="meta">Generate a new SSH key. The existing key will stop working immediately.</span>
             <button
+              slot="actions"
               grButton
-              label="Delete Project"
-              icon="delete"
+              label="Regenerate Key"
+              icon="refresh"
               severity="danger"
-              (click)="showDeleteDialog.set(true)"
+              (click)="showRegenerateKeyDialog.set(true)"
+              [disabled]="generatingSSH()"
               [appManagedDisable]="access()"
             ></button>
-          </div>
-        </div>
-      </div>
+          </gr-row>
+        }
+        <gr-row>
+          Delete Project
+          <span slot="meta">Permanently delete this project and all its tasks.</span>
+          <button
+            slot="actions"
+            grButton
+            label="Delete Project"
+            icon="delete"
+            severity="danger"
+            (click)="showDeleteDialog.set(true)"
+            [appManagedDisable]="access()"
+          ></button>
+        </gr-row>
+      </gr-settings-section>
     }
   </gr-page-layout>
 }

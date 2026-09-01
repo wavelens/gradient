@@ -22,6 +22,8 @@ import {
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
+  RowListComponent,
+  SelectComponent,
   SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
@@ -49,12 +51,19 @@ import { Project, AccessState } from '@core/models';
     SettingsSectionComponent,
     MessageBannerComponent,
     RowComponent,
+    SelectComponent,
+    RowListComponent,
   ],
   templateUrl: './project-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './project-settings.component.scss',
 })
 export class ProjectSettingsComponent implements OnInit {
+  readonly visibilityOptions = [
+    { label: 'Private', value: false },
+    { label: 'Public', value: true },
+  ];
+
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private projectsService = inject(ProjectsService);

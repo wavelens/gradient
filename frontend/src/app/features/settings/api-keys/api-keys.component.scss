@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.empty-state {
+@use '../../../styles/variables' as *;
+
+.empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -72,7 +74,9 @@
   color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-}.key-display {
+}
+
+.key-display {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
@@ -97,7 +101,9 @@
   gap: $spacing-sm;
   font-size: $font-size-xs;
   margin-top: $spacing-xs;
-}.badge-project {
+}
+
+.badge-project {
   font-size: $font-size-xs;
   font-weight: 600;
   padding: 1px 6px;

@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.peer-id-banner {
+@use '../../../styles/variables' as *;
+
+.peer-id-banner {
   display: flex;
   align-items: center;
   gap: $spacing-md;
@@ -21,7 +23,9 @@
   .peer-id-label { font-size: $font-size-sm; font-weight: 600; margin-bottom: $spacing-xs; }
   .peer-id-value { font-family: $font-family-mono; font-size: $font-size-sm; margin-bottom: $spacing-xs; }
   .peer-id-hint { font-size: $font-size-xs; }
-}.worker-row {
+}
+
+.worker-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -29,7 +33,9 @@
   background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
-}.worker-meta {
+}
+
+.worker-meta {
   display: flex;
   align-items: center;
   gap: $spacing-sm;

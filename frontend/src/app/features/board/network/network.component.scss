@@ -12,7 +12,9 @@ table.http { width: 100%; border-collapse: collapse; background: var(--gr-surfac
 th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--gr-border-subtle); color: var(--gr-text-secondary); font-size: $font-size-sm; }
 th { color: var(--gr-text-primary); }
 th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
-th.sortable:hover { color: var(--gr-status-info); }.num { text-align: right; font-variant-numeric: tabular-nums; }
+th.sortable:hover { color: var(--gr-status-info); }
+
+.num { text-align: right; font-variant-numeric: tabular-nums; }
 .num.bad { color: var(--gr-status-danger); }
 .muted { color: var(--gr-text-muted); font-weight: 400; font-size: $font-size-sm; }
     

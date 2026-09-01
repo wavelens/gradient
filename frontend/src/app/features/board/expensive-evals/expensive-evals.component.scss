@@ -16,6 +16,8 @@ select { background: var(--gr-surface-raised); color: var(--gr-text-primary); bo
 .note { color: var(--gr-text-muted); font-size: $font-size-xs; margin: 0 0 0.75rem; }
 table.expensive { width: 100%; border-collapse: collapse; background: var(--gr-surface-raised); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-md; overflow: hidden; }
 th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--gr-border-subtle); color: var(--gr-text-secondary); font-size: $font-size-sm; }
-th { color: var(--gr-text-primary); }.muted { color: var(--gr-text-muted); }
+th { color: var(--gr-text-primary); }
+
+.muted { color: var(--gr-text-muted); }
 h2 { color: var(--gr-text-primary); font-size: $font-size-lg; margin: 1.5rem 0 0.75rem; }
     

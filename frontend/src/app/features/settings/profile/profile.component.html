@@ -49,34 +49,34 @@
     </gr-settings-section>
 
     <!-- Security -->
-    <gr-settings-section title="Security">
-      <gr-row>
-        API Keys
-        <span slot="meta">Manage API keys for programmatic access</span>
-        <button slot="actions" grButton label="Manage API Keys" icon="key" severity="secondary" routerLink="/settings/keys"></button>
-      </gr-row>
-      <gr-divider />
-      <gr-row>
-        Active Sessions
-        <span slot="meta">View and revoke devices currently signed in to your account</span>
-        <button slot="actions" grButton label="Manage Sessions" icon="desktop_windows" severity="secondary" routerLink="/settings/sessions"></button>
-      </gr-row>
-    
+    <gr-settings-section title="Security" [card]="false">
+      <gr-row-list>
+        <gr-row icon="key" linkLabel="API keys" [link]="['/settings', 'keys']">
+          API Keys
+          <span slot="meta">Manage API keys for programmatic access</span>
+        </gr-row>
+        <gr-row icon="desktop_windows" linkLabel="Active sessions" [link]="['/settings', 'sessions']">
+          Active Sessions
+          <span slot="meta">View and revoke devices currently signed in to your account</span>
+        </gr-row>
+      </gr-row-list>
     </gr-settings-section>
 
-    <!-- Danger Zone -->
-    <div class="danger-section">
-      <h2>Danger Zone</h2>
-      <div class="settings-card danger-card">
-        <div class="danger-row">
-          <div>
-            <h3>Delete Account</h3>
-            <p class="text-secondary">Permanently delete your account and all associated data.</p>
-          </div>
-          <button grButton label="Delete Account" icon="delete" severity="danger" (click)="openDeleteDialog()" [appManagedDisable]="access()"></button>
-        </div>
-      </div>
-    </div>
+    <gr-settings-section title="Danger Zone" danger>
+      <gr-row>
+        Delete Account
+        <span slot="meta">Permanently delete your account and all associated data.</span>
+        <button
+          slot="actions"
+          grButton
+          label="Delete Account"
+          icon="delete"
+          severity="danger"
+          (click)="openDeleteDialog()"
+          [appManagedDisable]="access()"
+        ></button>
+      </gr-row>
+    </gr-settings-section>
   }
 </gr-page-layout>
 

@@ -4,24 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.settings-section {
+@use '../../../styles/variables' as *;
+
+.settings-section {
   margin-bottom: $spacing-xxl;
 
   h2 {
     font-size: $font-size-xl;
     margin: 0 0 $spacing-lg 0;
   }
+}
 
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: $spacing-lg;
-    max-width: 720px;
-
-    h2 { margin: 0; }
-  }
-}.role-badge {
+.role-badge {
   display: inline-block;
   padding: 2px 8px;
   font-size: $font-size-xs;
@@ -31,20 +25,6 @@
   color: var(--gr-status-info);
 }
 
-.role-select {
-  width: auto;
-  padding: $spacing-sm;
-  background: var(--gr-surface-sunken);
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-sm;
-  color: var(--gr-text-primary);
-  font-size: $font-size-md;
-
-  &:focus {
-    outline: none;
-    border-color: var(--gr-text-secondary);
-  }
-}
 .permissions-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

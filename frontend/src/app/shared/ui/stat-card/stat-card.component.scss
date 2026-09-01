@@ -38,11 +38,15 @@
 .stat-value {
   font-family: $font-family-mono;
   font-variant-numeric: tabular-nums;
-  font-size: $font-size-xxl;
   font-weight: 700;
   color: var(--gr-text-primary);
-  line-height: 1;
+  line-height: $line-height-tight;
   margin-bottom: $spacing-xs;
+  overflow-wrap: anywhere;
+
+  &.is-xxl { font-size: $font-size-xxl; }
+  &.is-xl { font-size: $font-size-xl; }
+  &.is-lg { font-size: $font-size-lg; }
 }
 
 .stat-label {

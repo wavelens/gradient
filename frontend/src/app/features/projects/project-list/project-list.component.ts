@@ -23,8 +23,10 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  NameFieldComponent,
   NavCardComponent,
   PageLayoutComponent,
+  SelectComponent,
 } from '@shared/ui';
 import { slugify } from '@shared/text';
 import { Project } from '@core/models';
@@ -48,12 +50,19 @@ import { Project } from '@core/models';
     NavCardComponent,
     CardGridComponent,
     BadgeComponent,
+    SelectComponent,
+    NameFieldComponent,
   ],
   templateUrl: './project-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './project-list.component.scss',
 })
 export class ProjectListComponent implements OnInit, OnDestroy {
+  readonly visibilityOptions = [
+    { label: 'Private', value: false },
+    { label: 'Public', value: true },
+  ];
+
   private projectsService = inject(ProjectsService);
   protected authService = inject(AuthService);
   private config = inject(ConfigService);

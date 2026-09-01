@@ -10,6 +10,7 @@ import {
   ButtonComponent, CheckboxComponent, SelectComponent, SelectButtonComponent,
   AutoCompleteComponent, MenuComponent, MenuItem, PopoverComponent, TooltipDirective,
   InputDirective, FormFieldComponent, LabelHelpComponent, DialogComponent, PasswordInputComponent,
+  NameFieldComponent, NameCheckState,
 } from '@shared/ui';
 
 @Component({
@@ -18,7 +19,7 @@ import {
   imports: [
     FormsModule, ButtonComponent, CheckboxComponent, SelectComponent, SelectButtonComponent,
     AutoCompleteComponent, MenuComponent, PopoverComponent, TooltipDirective, InputDirective,
-    FormFieldComponent, LabelHelpComponent, DialogComponent, PasswordInputComponent,
+    FormFieldComponent, LabelHelpComponent, DialogComponent, PasswordInputComponent, NameFieldComponent,
   ],
   templateUrl: './components.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -26,6 +27,8 @@ import {
 })
 export class ComponentsComponent {
   name = signal('');
+  slug = signal('gradient');
+  nameStates: NameCheckState[] = ['idle', 'checking', 'available', 'taken', 'invalid', 'reserved'];
   password = signal('');
   nameInvalid = signal(false);
   accepted = signal(false);

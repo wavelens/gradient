@@ -4,60 +4,61 @@
   SPDX-License-Identifier: AGPL-3.0-only
 -->
 
-  @if (loading()) {
-    <gr-loading-spinner message="Loading cache settings..." />
-  } @else if (cache(); as c) {
-    <gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: c.display_name, link: ['/caches', cacheName] }, { label: 'Settings' }]" title="Cache Settings">
-        <!-- General -->
+@if (loading()) {
+  <gr-loading-spinner message="Loading cache settings..." />
+} @else if (cache(); as c) {
+  <gr-page-layout
+    [breadcrumb]="[
+      { label: 'Caches', link: ['/caches'] },
+      { label: c.display_name, link: ['/caches', cacheName] },
+      { label: 'Settings' }
+    ]"
+    title="Cache Settings"
+  >
     <gr-settings-section title="General">
       <gr-form-field label="Name" for="cache-name" hint="Cache name cannot be changed">
-        <input
-          grInput
-          id="cache-name"
-          [value]="c.name"
-          disabled
-        />
+        <input grInput id="cache-name" [value]="c.name" disabled />
       </gr-form-field>
 
       <gr-form-field label="Display Name" for="display-name">
-        <input
-          grInput
-          id="display-name"
-          [(ngModel)]="formData.display_name"
-          [appManagedDisable]="access()"
-        />
+        <input grInput id="display-name" [(ngModel)]="formData.display_name" [appManagedDisable]="access()" />
       </gr-form-field>
 
       <gr-form-field label="Description" for="description">
         <textarea
           grInput
           id="description"
-          [(ngModel)]="formData.description"
           rows="3"
+          [(ngModel)]="formData.description"
           [appManagedDisable]="access()"
         ></textarea>
       </gr-form-field>
 
-      <gr-form-field label="Priority" for="priority">
+      <gr-form-field
+        label="Priority"
+        for="priority"
+        [invalid]="priorityInvalid"
+        error="Priority must be between 0 and 255"
+        hint="Higher priority caches are used first (0-255)"
+      >
         <input
+          grInput
           type="number"
           id="priority"
-          [(ngModel)]="formData.priority"
-          [class.input-invalid]="priorityInvalid"
           min="0"
           max="255"
+          [(ngModel)]="formData.priority"
           [appManagedDisable]="access()"
         />
-        @if (priorityInvalid) {
-          <small class="text-danger">Priority must be between 0 and 255</small>
-        } @else {
-          <small class="text-secondary">Higher priority caches are used first (0–255)</small>
-        }
       </gr-form-field>
 
-      <gr-form-field label="Local Priority" for="local-priority" hint="Advertised to clients whose IP matches the server's local-IPs allowlist.
-          Leave empty (or set 0) to always advertise the default priority.">
+      <gr-form-field
+        label="Local Priority"
+        for="local-priority"
+        hint="Advertised to clients whose IP matches the server's local-IPs allowlist. Leave empty (or set 0) to always advertise the default priority."
+      >
         <input
+          grInput
           type="number"
           id="local-priority"
           [(ngModel)]="formData.local_priority"
@@ -65,22 +66,36 @@
         />
       </gr-form-field>
 
-      <gr-form-field label="Max Storage (GB)" for="max-storage" hint="Maximum storage for this cache. Set 0 for unlimited (default); otherwise at least 1 GB.">
+      <gr-form-field
+        label="Max Storage (GB)"
+        for="max-storage"
+        [invalid]="maxStorageInvalid"
+        error="Set 0 for unlimited, otherwise at least 1 GB"
+        hint="Maximum storage for this cache. Set 0 for unlimited (default); otherwise at least 1 GB."
+      >
         <input
+          grInput
           type="number"
           id="max-storage"
-          [(ngModel)]="formData.max_storage_gb"
-          [class.input-invalid]="maxStorageInvalid"
           min="0"
+          [(ngModel)]="formData.max_storage_gb"
           [appManagedDisable]="access()"
         />
       </gr-form-field>
 
-      <gr-form-field label="Visibility" for="visibility" hint="Public caches are visible and readable by all users">
-        <select id="visibility" [(ngModel)]="formData.public" class="role-select w-full" [appManagedDisable]="access()">
-          <option [ngValue]="false">Private</option>
-          <option [ngValue]="true">Public</option>
-        </select>
+      <gr-form-field
+        label="Visibility"
+        for="visibility"
+        hint="Public caches are visible and readable by all users"
+      >
+        <gr-select
+          inputId="visibility"
+          [options]="visibilityOptions"
+          optionLabel="label"
+          optionValue="value"
+          [(ngModel)]="formData.public"
+          [appManagedDisable]="access()"
+        />
       </gr-form-field>
 
       @if (saveError()) {
@@ -89,6 +104,7 @@
       @if (saveSuccess()) {
         <gr-message-banner type="success">Changes saved.</gr-message-banner>
       }
+
       <div class="form-actions">
         <button
           *appWritable="access()"
@@ -97,80 +113,70 @@
           icon="check"
           (click)="saveSettings()"
           [loading]="saving()"
-          [disabled]="priorityInvalid"
+          [disabled]="priorityInvalid || maxStorageInvalid"
           [appManagedDisable]="access()"
         ></button>
       </div>
-    
     </gr-settings-section>
 
-    <!-- Upstream Caches -->
-    <gr-settings-section title="Upstream Caches">
-      <gr-row>
-        Upstream Caches
-        <span slot="meta">External and internal caches this cache pulls through from</span>
-        <a slot="actions" grButton label="Manage Upstreams" icon="cloud_download" severity="secondary" [routerLink]="['/caches', cacheName, 'upstreams']"></a>
-      </gr-row>
-    
-    </gr-settings-section>
-
-    <!-- Members & Roles -->
-    <gr-settings-section title="Members & Roles">
-      <gr-row>
-        Members & Roles
-        <span slot="meta">Manage who has access to this cache and what they can do</span>
-        <a slot="actions" grButton label="Manage Members" icon="group" severity="secondary" [routerLink]="['/caches', cacheName, 'members-roles']"></a>
-      </gr-row>
-    
+    <gr-settings-section title="More Settings" [card]="false">
+      <gr-row-list>
+        <gr-row
+          icon="cloud_download"
+          linkLabel="Upstream caches"
+          [link]="['/caches', cacheName, 'upstreams']"
+        >
+          Upstream Caches
+          <span slot="meta">External and internal caches this cache pulls through from</span>
+        </gr-row>
+        <gr-row
+          icon="group"
+          linkLabel="Members and roles"
+          [link]="['/caches', cacheName, 'members-roles']"
+        >
+          Members &amp; Roles
+          <span slot="meta">Who has access to this cache, and what they can do</span>
+        </gr-row>
+      </gr-row-list>
     </gr-settings-section>
 
     @if (access().canEdit) {
-      <!-- Danger Zone -->
-      <div class="settings-section danger-section">
-        <h2>Danger Zone</h2>
-        <div class="danger-card">
-          <div class="danger-row">
-            <div>
-              <h3>{{ c.active ? 'Deactivate Cache' : 'Activate Cache' }}</h3>
-              <p class="text-secondary">{{ c.active ? 'Stop serving this cache to Nix clients.' : 'Start serving this cache to Nix clients.' }}</p>
-            </div>
-            <button
-              grButton
-              [label]="c.active ? 'Deactivate' : 'Activate'"
-              [icon]="c.active ? 'close' : 'check'"
-              [severity]="c.active ? 'danger' : 'success'"
-              (click)="toggleActive()"
-              [loading]="toggling()"
-              [appManagedDisable]="access()"
-            ></button>
-          </div>
-          <gr-divider />
-          <div class="danger-row">
-            <div>
-              <h3>Delete Cache</h3>
-              <p class="text-secondary">Permanently delete this cache and all its stored artifacts.</p>
-            </div>
-            <button
-              grButton
-              label="Delete Cache"
-              icon="delete"
-              severity="danger"
-              (click)="showDeleteDialog.set(true)"
-              [appManagedDisable]="access()"
-            ></button>
-          </div>
-        </div>
-      </div>
+      <gr-settings-section title="Danger Zone" danger>
+        <gr-row>
+          {{ c.active ? 'Deactivate Cache' : 'Activate Cache' }}
+          <span slot="meta">
+            {{ c.active ? 'Stop serving this cache to Nix clients.' : 'Start serving this cache to Nix clients.' }}
+          </span>
+          <button
+            slot="actions"
+            grButton
+            [label]="c.active ? 'Deactivate' : 'Activate'"
+            [icon]="c.active ? 'close' : 'check'"
+            [severity]="c.active ? 'danger' : 'success'"
+            (click)="toggleActive()"
+            [loading]="toggling()"
+            [appManagedDisable]="access()"
+          ></button>
+        </gr-row>
+        <gr-row>
+          Delete Cache
+          <span slot="meta">Permanently delete this cache and all its stored artifacts.</span>
+          <button
+            slot="actions"
+            grButton
+            label="Delete Cache"
+            icon="delete"
+            severity="danger"
+            (click)="showDeleteDialog.set(true)"
+            [appManagedDisable]="access()"
+          ></button>
+        </gr-row>
+      </gr-settings-section>
     }
   </gr-page-layout>
 }
 
-<!-- Delete Confirmation Dialog -->
-<gr-dialog
-  header="Delete Cache"
-  [(visible)]="showDeleteDialog"
-  width="400px"
->
+<gr-dialog header="Delete Cache" [(visible)]="showDeleteDialog" width="400px">
   <p>Are you sure you want to delete <strong>{{ cache()?.display_name }}</strong>? This action cannot be undone.</p>
   <div grDialogFooter>
     <button grButton label="Cancel" severity="secondary" (click)="showDeleteDialog.set(false)" [disabled]="deleting()"></button>

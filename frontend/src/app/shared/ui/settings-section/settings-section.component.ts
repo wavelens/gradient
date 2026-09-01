@@ -19,5 +19,7 @@ export class SettingsSectionComponent {
   title = input<string>();
   description = input<string>();
   card = input(true, { transform: booleanAttribute });
+  /// A destructive group: the heading and the card edge read as danger.
+  danger = input(false, { transform: booleanAttribute });
   maxWidth = input<string>('640px');
 }

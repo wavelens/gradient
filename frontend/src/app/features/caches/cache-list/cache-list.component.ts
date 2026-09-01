@@ -23,8 +23,10 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  NameFieldComponent,
   NavCardComponent,
   PageLayoutComponent,
+  SelectComponent,
 } from '@shared/ui';
 import { slugify } from '@shared/text';
 import { Cache } from '@core/models';
@@ -48,12 +50,19 @@ import { Cache } from '@core/models';
     NavCardComponent,
     CardGridComponent,
     BadgeComponent,
+    SelectComponent,
+    NameFieldComponent,
   ],
   templateUrl: './cache-list.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './cache-list.component.scss',
 })
 export class CacheListComponent implements OnInit, OnDestroy {
+  readonly visibilityOptions = [
+    { label: 'Private', value: false },
+    { label: 'Public', value: true },
+  ];
+
   private cachesService = inject(CachesService);
   protected authService = inject(AuthService);
   private config = inject(ConfigService);

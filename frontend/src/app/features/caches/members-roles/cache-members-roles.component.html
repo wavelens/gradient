@@ -6,9 +6,9 @@
 
 <gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cacheName, link: ['/caches', cacheName] }, { label: 'Settings', link: ['/caches', cacheName, 'settings'] }, { label: 'Members & Roles' }]" title="Members & Roles">
   <!-- Members -->
-  <gr-settings-section title="Members">
-    <div class="section-header">
-      <button
+  <gr-settings-section title="Members" [card]="false">
+    <button
+      slot="actions"
         *appWritable="access()"
         grButton
         label="Add Member"
@@ -18,7 +18,6 @@
         [disabled]="rolesLoading() || roles().length === 0"
         [appManagedDisable]="access()"
       ></button>
-    </div>
     @if (membersLoading()) {
       <gr-loading-spinner message="Loading members..." />
     } @else {
@@ -53,16 +52,16 @@
           }
         </gr-row-list>
       } @else {
-        <p class="text-secondary">No members found.</p>
+        <gr-empty-state icon="group" title="No members"
+          message="Add a member to give someone access." />
       }
   }
-  
   </gr-settings-section>
 
   <!-- Roles -->
-  <gr-settings-section title="Roles">
-    <div class="section-header">
-      <button
+  <gr-settings-section title="Roles" [card]="false">
+    <button
+      slot="actions"
         *appWritable="access()"
         grButton
         label="New Role"
@@ -72,7 +71,6 @@
         [disabled]="rolesLoading() || availablePermissions().length === 0"
         [appManagedDisable]="access()"
       ></button>
-    </div>
     @if (rolesLoading()) {
       <gr-loading-spinner message="Loading roles..." />
     } @else {
@@ -114,10 +112,10 @@
           }
         </gr-row-list>
       } @else {
-        <p class="text-secondary">No roles found.</p>
+        <gr-empty-state icon="shield" title="No roles"
+          message="Create a role to describe what members may do." />
       }
   }
-  
   </gr-settings-section>
 </gr-page-layout>
 
@@ -146,11 +144,13 @@
       />
     </gr-form-field>
     <gr-form-field label="Role" for="member-role">
-      <select id="member-role" [(ngModel)]="newMember.role" class="role-select">
-        @for (role of roles(); track role.id) {
-          <option [value]="role.name">{{ role.name }}</option>
-        }
-      </select>
+      <gr-select
+        inputId="member-role"
+        [options]="roles()"
+        optionLabel="name"
+        optionValue="name"
+        [(ngModel)]="newMember.role"
+      />
     </gr-form-field>
   </div>
   <div grDialogFooter>

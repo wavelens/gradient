@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.token-row {
+@use '../../../styles/variables' as *;
+
+.token-row {
   display: flex;
   gap: $spacing-sm;
   align-items: center;

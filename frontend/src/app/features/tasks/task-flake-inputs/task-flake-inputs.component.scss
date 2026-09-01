@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.empty-state {
+@use '../../../styles/variables' as *;
+
+.empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -70,7 +72,9 @@
   display: flex;
   gap: $spacing-sm;
   flex-shrink: 0;
-}.dialog-error {
+}
+
+.dialog-error {
   display: flex;
   align-items: center;
   gap: $spacing-sm;

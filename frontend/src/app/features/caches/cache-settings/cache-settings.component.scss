@@ -4,76 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.settings-section {
-  margin-bottom: $spacing-xxl;
-
-  h2 {
-    font-size: $font-size-xl;
-    margin: 0 0 $spacing-lg 0;
-  }
-}
+@use '../../../styles/variables' as *;
 
 .form-actions {
   display: flex;
   gap: $spacing-md;
-  margin-top: $spacing-lg;
-}
-.role-select {
-  width: 100%;
-  padding: $spacing-sm $spacing-md;
-  background: var(--gr-surface-sunken);
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-sm;
-  color: var(--gr-text-primary);
-  font-size: $font-size-md;
-  cursor: pointer;
-
-  &:focus {
-    outline: none;
-    border-color: var(--gr-text-secondary);
-  }
-}
-
-input[type="number"] {
-  background: var(--gr-surface-sunken);
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-sm;
-  color: var(--gr-text-primary);
-  font-size: $font-size-md;
-  padding: $spacing-sm $spacing-md;
-  width: 100%;
-  box-sizing: border-box;
-
-  &:focus {
-    outline: none;
-    border-color: var(--gr-text-secondary);
-  }
-
-  &.input-invalid {
-    border-color: var(--gr-status-danger);
-  }
-}
-
-.text-danger {
-  color: var(--gr-status-danger);
-}
-
-.danger-section {
-  h2 { color: var(--gr-status-danger); }
-}
-
-.danger-card {
-  border-color: color-mix(in srgb, var(--gr-status-danger) 50%, transparent);
-}
-
-.danger-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: $spacing-lg;
-
-  h3 { margin: 0 0 $spacing-xs 0; }
-  p { margin: 0; }
-
-  button { flex-shrink: 0; white-space: nowrap; }
 }

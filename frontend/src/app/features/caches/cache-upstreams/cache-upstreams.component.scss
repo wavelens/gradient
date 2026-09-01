@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.empty-state {
+@use '../../../styles/variables' as *;
+
+.empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -139,18 +141,6 @@
   }
 }
 
-.role-select {
-  width: 100%;
-  padding: $spacing-sm $spacing-md;
-  background: var(--gr-surface-sunken);
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-sm;
-  color: var(--gr-text-primary);
-  font-size: $font-size-md;
-  cursor: pointer;
-
-  &:focus { outline: none; border-color: var(--gr-text-secondary); }
-}
 .dialog-error {
   display: flex;
   align-items: center;

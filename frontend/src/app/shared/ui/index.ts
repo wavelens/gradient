@@ -27,6 +27,7 @@ export * from './input/input.directive';
 export * from './label-help/label-help.component';
 export * from './loading-spinner/loading-spinner.component';
 export * from './menu/menu.component';
+export * from './name-field/name-field.component';
 export * from './nav-card/nav-card.component';
 export * from './message-banner/message-banner.component';
 export * from './message/message.service';

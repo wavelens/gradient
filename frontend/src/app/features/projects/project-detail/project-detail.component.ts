@@ -23,6 +23,7 @@ import {
   InputDirective,
   LabelHelpComponent,
   LoadingSpinnerComponent,
+  NameFieldComponent,
   PageLayoutComponent,
 } from '@shared/ui';
 import { slugify } from '@shared/text';
@@ -48,6 +49,7 @@ const RESERVED_TASK_NAMES = ['build-request'];
     IconComponent,
     PageLayoutComponent,
     FormFieldComponent,
+    NameFieldComponent,
   ],
   templateUrl: './project-detail.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -1,10 +1,15 @@
-<section class="settings-section">
+<section class="settings-section" [class.is-danger]="danger()">
   @if (title()) {
     <header class="settings-section__header">
-      <h2>{{ title() }}</h2>
-      @if (description()) {
-        <p class="settings-section__description">{{ description() }}</p>
-      }
+      <div class="settings-section__heading">
+        <h2>{{ title() }}</h2>
+        @if (description()) {
+          <p class="settings-section__description">{{ description() }}</p>
+        }
+      </div>
+      <div class="settings-section__actions">
+        <ng-content select="[slot=actions]"></ng-content>
+      </div>
     </header>
   }
   <div

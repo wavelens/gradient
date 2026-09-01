@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.task-grid {
+@use '../../../styles/variables' as *;
+
+.task-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
   gap: $spacing-lg;
@@ -106,17 +108,7 @@
   margin-bottom: $spacing-md;
 
 }
-.text-danger { color: var(--gr-status-danger); }
-
-.name-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-
-  input { flex: 1; padding-right: 2rem; }
-}
-
-.name-check-icon {
+.text-danger { color: var(--gr-status-danger); }.name-check-icon {
   position: absolute;
   right: $spacing-sm;
   display: flex;

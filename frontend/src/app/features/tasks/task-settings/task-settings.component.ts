@@ -23,6 +23,7 @@ import {
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
+  RowListComponent,
   SelectComponent,
   SettingsSectionComponent,
 } from '@shared/ui';
@@ -54,6 +55,7 @@ import { injectTaskAccess } from '@core/resolvers/inject-access';
     SettingsSectionComponent,
     MessageBannerComponent,
     RowComponent,
+    RowListComponent,
   ],
   templateUrl: './task-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

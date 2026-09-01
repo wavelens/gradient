@@ -31,6 +31,20 @@
   <gr-password-input inputId="sg-pw" [(ngModel)]="password" />
 </gr-form-field>
 
+<h2>Name with availability check</h2>
+<p>A slug field that reports whether the name is free. The caller runs the check and
+   reports its state; every outcome is worded here, once.</p>
+@for (state of nameStates; track state) {
+  <gr-name-field
+    [inputId]="'sg-name-' + state"
+    [label]="'Name (' + state + ')'"
+    placeholder="my-project"
+    [state]="state"
+    [(ngModel)]="slug"
+    [name]="'slug-' + state"
+  />
+}
+
 <h2>Selection</h2>
 <gr-form-field label="Region" for="sg-region">
   <gr-select inputId="sg-region" [options]="regions" optionLabel="label" optionValue="value" [(ngModel)]="region" />

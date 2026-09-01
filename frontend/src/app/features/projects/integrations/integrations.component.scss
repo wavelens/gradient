@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.settings-section {
+@use '../../../styles/variables' as *;
+
+.settings-section {
   margin-bottom: $spacing-xxl;
 
   h2 { font-size: $font-size-xl; margin: 0 0 $spacing-md 0; }
@@ -78,7 +80,9 @@
   margin-top: $spacing-md;
   padding-top: $spacing-md;
   border-top: 1px solid var(--gr-border-subtle);
-}.status-chip {
+}
+
+.status-chip {
   display: inline-block;
   padding: 2px 8px;
   border-radius: $border-radius-sm;

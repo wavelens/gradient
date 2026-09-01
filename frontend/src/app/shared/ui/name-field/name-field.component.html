@@ -1,0 +1,40 @@
+<gr-form-field
+  [label]="label()"
+  [for]="inputId()"
+  [required]="required()"
+  [invalid]="invalid()"
+  [error]="error()"
+  [hint]="hint()"
+>
+  <div class="name-field">
+    <input
+      grInput
+      class="name-field__input"
+      [id]="inputId() || null"
+      [value]="value()"
+      [disabled]="isDisabled()"
+      [placeholder]="placeholder()"
+      (input)="onInput($event)"
+      (blur)="onTouched()"
+    />
+    @switch (state()) {
+      @case ('checking') {
+        <span class="name-field__status">
+          <gr-icon name="progress_activity" class="gr-spin" size="sm" label="Checking availability" />
+        </span>
+      }
+      @case ('available') {
+        <span class="name-field__status is-available">
+          <gr-icon name="check" size="sm" label="Available" />
+        </span>
+      }
+      @default {
+        @if (invalid()) {
+          <span class="name-field__status is-unavailable">
+            <gr-icon name="close" size="sm" label="Unavailable" />
+          </span>
+        }
+      }
+    }
+  </div>
+</gr-form-field>

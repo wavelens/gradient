@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;.project-card {
+@use '../../../styles/variables' as *;
+
+.project-card {
   background-color: var(--gr-surface-raised);
   border: 1px solid var(--gr-border-subtle);
   border-radius: $border-radius-md;
@@ -22,7 +24,9 @@
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
   }
-}.project-content {
+}
+
+.project-content {
   flex: 1;
   min-width: 0;
 
@@ -42,7 +46,9 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-}.activity-badge {
+}
+
+.activity-badge {
   display: inline-flex;
   align-items: center;
   gap: $spacing-xs;
@@ -68,7 +74,9 @@
     color: var(--gr-text-primary);
     margin: 0;
   }
-}.role-select {
+}
+
+.role-select {
   background: var(--gr-surface-sunken);
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;
@@ -95,17 +103,7 @@
   margin-bottom: $spacing-md;
 
 }
-.text-danger { color: var(--gr-status-danger); }
-
-.name-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-
-  input { flex: 1; padding-right: 2rem; }
-}
-
-.name-check-icon {
+.text-danger { color: var(--gr-status-danger); }.name-check-icon {
   position: absolute;
   right: $spacing-sm;
   display: flex;

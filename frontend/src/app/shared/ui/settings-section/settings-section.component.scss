@@ -11,12 +11,29 @@
   margin-bottom: $spacing-xxl;
 
   &__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: $spacing-md;
     margin-bottom: $spacing-lg;
 
     h2 {
       font-size: $font-size-xl;
       margin: 0 0 $spacing-xs 0;
     }
+  }
+
+  &__heading {
+    min-width: 0;
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: $spacing-sm;
+    flex-shrink: 0;
+
+    &:empty { display: none; }
   }
 
   &__description {
@@ -29,7 +46,15 @@
     background: var(--gr-surface-raised);
     border: 1px solid var(--gr-border-subtle);
     border-radius: $border-radius-md;
-  box-shadow: var(--gr-shadow-raised);
+    box-shadow: var(--gr-shadow-raised);
     padding: $spacing-lg;
+  }
+
+  &.is-danger {
+    .settings-section__header h2 { color: var(--gr-status-danger); }
+
+    .settings-section__body--card {
+      border-color: color-mix(in srgb, var(--gr-status-danger) 45%, transparent);
+    }
   }
 }

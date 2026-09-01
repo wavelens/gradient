@@ -20,6 +20,8 @@ import {
   MessageBannerComponent,
   PageLayoutComponent,
   RowComponent,
+  RowListComponent,
+  SelectComponent,
   SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
@@ -47,6 +49,8 @@ import { Cache } from '@core/models';
     SettingsSectionComponent,
     MessageBannerComponent,
     RowComponent,
+    SelectComponent,
+    RowListComponent,
   ],
   templateUrl: './cache-settings.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -70,6 +74,11 @@ export class CacheSettingsComponent implements OnInit {
   saveSuccess = signal(false);
 
   cacheName = '';
+
+  readonly visibilityOptions = [
+    { label: 'Private', value: false },
+    { label: 'Public', value: true },
+  ];
 
   formData = {
     display_name: '',
