@@ -6,7 +6,7 @@
 
 import { Component, booleanAttribute, computed, input, ChangeDetectionStrategy } from '@angular/core';
 
-export type ButtonSeverity = 'primary' | 'secondary' | 'success' | 'info' | 'warn' | 'danger';
+export type ButtonSeverity = 'primary' | 'secondary' | 'success' | 'warn' | 'danger';
 
 /// Attribute component on a native <button>/<a>, so callers keep native
 /// `disabled`, `type` and `routerLink` bindings and nothing here fights them.
@@ -32,8 +32,6 @@ export type ButtonSeverity = 'primary' | 'secondary' | 'success' | 'info' | 'war
     '[class]': 'severityClass()',
     '[class.gr-button--small]': 'size() === "small"',
     '[class.gr-button--text]': 'text()',
-    '[class.gr-button--outlined]': 'outlined()',
-    '[class.gr-button--rounded]': 'rounded()',
     '[class.gr-button--icon-only]': '!label() && !!icon()',
     '[class.gr-button--loading]': 'loading()',
     '[attr.aria-busy]': 'loading() ? "true" : null',
@@ -49,8 +47,6 @@ export class ButtonComponent {
   size = input<'small' | 'normal'>('normal');
   loading = input(false, { transform: booleanAttribute });
   text = input(false, { transform: booleanAttribute });
-  outlined = input(false, { transform: booleanAttribute });
-  rounded = input(false, { transform: booleanAttribute });
 
   protected severityClass = computed(() => `gr-button--${this.severity() || 'primary'}`);
 }

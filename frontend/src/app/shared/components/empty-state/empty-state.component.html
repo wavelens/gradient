@@ -13,8 +13,6 @@
     <p class="empty-message">{{ message() }}</p>
   }
   @if (actionLabel()) {
-    <button class="empty-action" (click)="onActionClick()">
-      {{ actionLabel() }}
-    </button>
+    <button grButton [label]="actionLabel() ?? ''" (click)="onActionClick()"></button>
   }
 </div>

@@ -40,19 +40,3 @@
   color: $text-secondary;
   margin: 0 0 $spacing-lg 0;
 }
-
-.empty-action {
-  background-color: $color-quaternary;
-  border: 1px solid $color-border;
-  color: $text-primary;
-  padding: $spacing-sm $spacing-lg;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-md;
-  cursor: pointer;
-  transition: $transition-fast;
-
-  &:hover {
-    background-color: $color-hover;
-    border-color: $text-secondary;
-  }
-}
