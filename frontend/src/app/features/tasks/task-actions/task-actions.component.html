@@ -44,7 +44,7 @@
                 <div>
                   <div class="action-name">{{ action.name }}</div>
                   <div class="action-meta text-secondary">
-                    <span class="badge" [class]="'badge-' + action.action_type">{{ typeLabel(action.action_type) }}</span>
+                    <gr-badge [severity]="typeSeverity(action.action_type)">{{ typeLabel(action.action_type) }}</gr-badge>
                     <span class="status-chip" [class.status-ok]="action.active" [class.status-warn]="!action.active">
                       {{ action.active ? 'Active' : 'Inactive' }}
                     </span>

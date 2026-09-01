@@ -6,41 +6,7 @@
 
 @use '../../../styles/variables' as *;
 
-// ── Empty state ───────────────────────────────────────────────────────────────
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: $spacing-sm;
-  padding: $spacing-xxl $spacing-lg;
-  text-align: center;
-  color: var(--gr-text-muted);
-
-  gr-icon {
-    opacity: 0.4;
-  }
-
-  p {
-    margin: 0;
-    font-size: $font-size-md;
-    color: var(--gr-text-secondary);
-  }
-
-  .empty-hint {
-    font-size: $font-size-sm;
-
-    code {
-      font-size: $font-size-xs;
-      background: var(--gr-text-secondary);
-      padding: 1px 5px;
-      border-radius: $border-radius-sm;
-    }
-  }
-}
-
-// ── Artefacts list ────────────────────────────────────────────────────────────
+// ── Empty state ───────────────────────────────────────────────────────────────// ── Artefacts list ────────────────────────────────────────────────────────────
 
 .artefacts-list {
   display: flex;
@@ -90,25 +56,6 @@
   color: var(--gr-text-muted);
   flex-shrink: 0;
   white-space: nowrap;
-}
-
-.copy-btn {
-  display: flex;
-  align-items: center;
-  padding: $spacing-xs;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: $border-radius-sm;
-  color: var(--gr-text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: color $transition-fast, border-color $transition-fast, background $transition-fast;
-
-  &:hover {
-    color: var(--gr-text-secondary);
-    border-color: var(--gr-border);
-    background: var(--gr-surface-hover);
-  }
 }
 
 .download-btn {

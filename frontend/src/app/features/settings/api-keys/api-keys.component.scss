@@ -69,20 +69,7 @@
   color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-}.w-full { width: 100%; }
-
-.badge-managed {
-  font-size: $font-size-xs;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  padding: 1px 6px;
-  border-radius: $border-radius-sm;
-  background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
-  color: var(--gr-status-info);
-  text-transform: uppercase;
-}
-
-.key-display {
+}.key-display {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
@@ -107,21 +94,7 @@
   gap: $spacing-sm;
   font-size: $font-size-xs;
   margin-top: $spacing-xs;
-}
-
-.badge-info {
-  font-size: $font-size-xs;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  padding: 1px 6px;
-  border-radius: $border-radius-sm;
-  background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
-  color: var(--gr-status-info);
-  text-transform: uppercase;
-  cursor: help;
-}
-
-.badge-project {
+}.badge-project {
   font-size: $font-size-xs;
   font-weight: 600;
   padding: 1px 6px;

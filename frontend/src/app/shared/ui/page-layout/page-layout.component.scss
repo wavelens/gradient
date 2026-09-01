@@ -64,21 +64,7 @@
   }
 }
 
+// The recipe is global (styles.scss); only its place in the header grid is local.
 .breadcrumb {
   grid-area: crumbs;
-  display: flex;
-  align-items: center;
-  gap: $spacing-xs;
-  margin-bottom: $spacing-sm;
-  font-size: $font-size-sm;
-
-  .breadcrumb-link {
-    color: var(--gr-text-secondary);
-    text-decoration: none;
-
-    &:hover { color: var(--gr-text-primary); }
-  }
-
-  .breadcrumb-separator { color: var(--gr-text-muted); }
-  .breadcrumb-current { color: var(--gr-text-primary); }
 }

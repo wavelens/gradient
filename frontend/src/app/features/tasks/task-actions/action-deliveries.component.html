@@ -37,9 +37,9 @@
                 <td>{{ d.event }}</td>
                 <td>
                   @if (d.success) {
-                    <span class="badge ok">OK</span>
+                    <gr-badge severity="success">OK</gr-badge>
                   } @else {
-                    <span class="badge fail">FAIL</span>
+                    <gr-badge severity="danger">FAIL</gr-badge>
                   }
                 </td>
                 <td>{{ d.response_status ?? '-' }}</td>

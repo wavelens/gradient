@@ -64,10 +64,10 @@
                       <div class="integration-id text-secondary">{{ integration.name }}</div>
                     }
                     <div class="integration-meta text-secondary">
-                      <span class="badge" [class.badge-inbound]="integration.kind === 'inbound'" [class.badge-outbound]="integration.kind === 'outbound'">
+                      <gr-badge [severity]="integration.kind === 'inbound' ? 'info' : 'warning'">
                         {{ integration.kind === 'inbound' ? 'Inbound' : 'Outbound' }}
-                      </span>
-                      <span class="badge badge-forge">{{ forgeLabel(integration.forge_type) }}</span>
+                      </gr-badge>
+                      <gr-badge>{{ forgeLabel(integration.forge_type) }}</gr-badge>
                       <span>Created {{ formatDate(integration.created_at) }}</span>
                     </div>
                   </div>

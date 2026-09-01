@@ -102,18 +102,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
-  .badge {
-    display: inline-block;
-    padding: $spacing-xs $spacing-sm;
-    background-color: var(--gr-surface-sunken);
-    border: 1px solid var(--gr-border);
-    border-radius: $border-radius-sm;
-    font-size: $font-size-xs;
-    color: var(--gr-text-secondary);
-    text-transform: uppercase;
-  }
-
   .cache-status {
     display: flex;
     align-items: center;

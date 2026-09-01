@@ -21,6 +21,7 @@ import {
   Project,
 } from '@core/models';
 import {
+  BadgeComponent,
   ButtonComponent,
   DialogComponent,
   EmptyStateComponent,
@@ -60,6 +61,7 @@ interface Option<T> {
     FormFieldComponent,
     EmptyStateComponent,
     SettingsSectionComponent,
+    BadgeComponent,
   ],
   templateUrl: './integrations.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -23,22 +23,6 @@
   .peer-id-hint { font-size: $font-size-xs; }
 }
 
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: $spacing-xxl;
-  text-align: center;
-  background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-md;
-
-  gr-icon { color: var(--gr-text-secondary); margin-bottom: $spacing-md; }
-  h3 { margin: 0 0 $spacing-sm 0; }
-  p { margin: 0 0 $spacing-lg 0; }
-}
-
 .workers-list {
   display: flex;
   flex-direction: column;
@@ -87,18 +71,4 @@
 
   &.cap-on  { background: color-mix(in srgb, var(--gr-status-success) 12%, transparent); color: var(--gr-status-success); }
   &.cap-off { background: color-mix(in srgb, var(--gr-text-secondary) 8%, transparent); color: var(--gr-text-muted); opacity: 0.5; }
-}
-
-.badge {
-  padding: $spacing-xs $spacing-sm;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-weight: 500;
-
-  &.badge-connected { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); }
-  &.badge-offline { background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent); color: var(--gr-text-secondary); }
-  &.badge-base { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: var(--gr-status-info); }
-  &.badge-managed { background: color-mix(in srgb, var(--gr-status-info) 15%, transparent); color: var(--gr-status-info); }
-  &.badge-draining { background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent); color: var(--gr-status-warning); }
-  &.badge-inactive { background: color-mix(in srgb, var(--gr-status-danger) 12%, transparent); color: var(--gr-status-danger); }
 }

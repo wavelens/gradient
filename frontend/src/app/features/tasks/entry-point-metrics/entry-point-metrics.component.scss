@@ -4,20 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-@use '../../../styles/variables' as *;
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: $spacing-md;
-  padding: $spacing-xl * 2;
-  color: var(--gr-text-muted);
-
-  gr-icon { opacity: 0.4; }
-}
-
-.summary-row {
+@use '../../../styles/variables' as *;.summary-row {
   display: flex;
   gap: $spacing-md;
   margin-bottom: $spacing-lg;

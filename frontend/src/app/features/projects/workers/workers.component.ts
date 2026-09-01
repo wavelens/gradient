@@ -13,6 +13,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import { GradientCapabilities, Worker, WorkerRegistration, AccessState } from '@core/models';
 import {
+  BadgeComponent,
   ButtonComponent,
   DialogComponent,
   EmptyStateComponent,
@@ -47,6 +48,7 @@ import { WritableDirective, ManagedDisableDirective } from '@shared/access';
     FormFieldComponent,
     FieldRowComponent,
     EmptyStateComponent,
+    BadgeComponent,
   ],
   providers: [MessageService],
   templateUrl: './workers.component.html',

@@ -126,9 +126,10 @@
   color: var(--gr-status-danger);
   margin-bottom: $spacing-md;
 
-}.w-full { width: 100%; }
+}
+.text-danger { color: var(--gr-status-danger); }
 
-.text-danger { color: var(--gr-status-danger); }.name-input-wrapper {
+.name-input-wrapper {
   position: relative;
   display: flex;
   align-items: center;

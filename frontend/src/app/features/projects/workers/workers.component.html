@@ -96,20 +96,20 @@
             </div>
             <div class="worker-meta">
               @if (worker.is_base) {
-                <span class="badge badge-base">Base</span>
+                <gr-badge severity="info">Base</gr-badge>
               }
               @if (worker.managed) {
-                <span class="badge badge-managed">Managed</span>
+                <gr-badge severity="info">Managed</gr-badge>
               }
               @if (worker.live?.draining) {
-                <span class="badge badge-draining">Draining</span>
+                <gr-badge severity="warning">Draining</gr-badge>
               }
               @if (!worker.active) {
-                <span class="badge badge-inactive">Inactive</span>
+                <gr-badge severity="danger">Inactive</gr-badge>
               }
-              <span class="badge" [class.badge-connected]="worker.live" [class.badge-offline]="!worker.live">
+              <gr-badge [severity]="worker.live ? 'success' : 'neutral'">
                 {{ worker.live ? 'Connected' : 'Offline' }}
-              </span>
+              </gr-badge>
               <a
                 grButton
                 label="Metrics"

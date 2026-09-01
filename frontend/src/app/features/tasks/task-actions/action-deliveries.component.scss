@@ -105,20 +105,7 @@
   summary { cursor: pointer; font-size: $font-size-sm; color: var(--gr-text-secondary); }
 }
 
-.error { color: var(--gr-status-danger); }
-
-.badge {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-weight: 600;
-
-  &.ok   { background: color-mix(in srgb, var(--gr-status-success) 15%, transparent); color: var(--gr-status-success); }
-  &.fail { background: color-mix(in srgb, var(--gr-status-danger) 15%, transparent);  color: var(--gr-status-danger); }
-}
-
-.toggle-btn {
+.error { color: var(--gr-status-danger); }.toggle-btn {
   background: none;
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-sm;

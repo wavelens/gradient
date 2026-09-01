@@ -58,24 +58,6 @@
 
   &:focus { outline: none; border-color: var(--gr-text-secondary); }
 }
-
-.w-full { width: 100%; }
-
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: $spacing-xxl;
-  text-align: center;
-  background: var(--gr-surface-raised);
-  border: 1px solid var(--gr-border);
-  border-radius: $border-radius-md;
-
-  gr-icon { color: var(--gr-text-secondary); margin-bottom: $spacing-md; }
-  h3 { margin: 0 0 $spacing-sm 0; }
-  p { margin: 0; }
-}
-
 .nar-table {
   display: flex;
   flex-direction: column;

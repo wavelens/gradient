@@ -14,6 +14,7 @@ import { CachesService } from '@core/services/caches.service';
 import { ApiKey } from '@core/models';
 import { PermissionDescriptor } from '@core/models/permission.model';
 import {
+  BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
@@ -59,6 +60,7 @@ interface SelectOption {
     PageLayoutComponent,
     FormFieldComponent,
     EmptyStateComponent,
+    BadgeComponent,
   ],
   templateUrl: './api-keys.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

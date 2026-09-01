@@ -175,7 +175,7 @@ describe('WorkersComponent - base workers', () => {
     });
     await settled(fixture);
 
-    const badge = (Array.from(fixture.nativeElement.querySelectorAll('.badge-base')) as HTMLElement[])
+    const badge = (Array.from(fixture.nativeElement.querySelectorAll('gr-badge')) as HTMLElement[])
       .find((el) => (el.textContent ?? '').trim() === 'Base');
     expect(badge, 'Base badge').toBeTruthy();
 

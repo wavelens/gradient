@@ -12,12 +12,14 @@ import { ActionsService } from '@core/services/actions.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import {
+  BadgeComponent,
   ButtonComponent,
   DialogComponent,
   EmptyStateComponent,
   IconComponent,
   LoadingSpinnerComponent,
   PageLayoutComponent,
+  BadgeSeverity,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -53,6 +55,7 @@ interface IntegrationOption {
     IconComponent,
     PageLayoutComponent,
     EmptyStateComponent,
+    BadgeComponent,
   ],
   templateUrl: './task-actions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -255,6 +258,15 @@ export class TaskActionsComponent implements OnInit {
       case 'send_web_request': return 'Web Request';
       case 'forge_status_report': return 'Forge Status';
       case 'open_pr': return 'Open PR';
+    }
+  }
+
+  typeSeverity(type: ActionType): BadgeSeverity {
+    switch (type) {
+      case 'send_mail': return 'info';
+      case 'send_web_request': return 'success';
+      case 'forge_status_report': return 'warning';
+      case 'open_pr': return 'neutral';
     }
   }
 

@@ -23,23 +23,21 @@
                 <div class="key-name">
                   {{ key.name }}
                   @if (key.managed) {
-                    <span class="badge badge-managed">Managed</span>
+                    <gr-badge severity="info">Managed</gr-badge>
                   }
                   @if (key.revoked_at) {
-                    <span class="badge badge-revoked">Revoked</span>
+                    <gr-badge severity="danger">Revoked</gr-badge>
                   }
                 </div>
                 <div class="key-meta text-secondary">
                   <span
-                    class="badge badge-info"
+                    severity="info"
                     [grTooltip]="permissionTooltip(key)"
                     tooltipPosition="top"
                   >
                     {{ key.permissions.length }} permission{{ key.permissions.length === 1 ? '' : 's' }}
                   </span>
-                  <span class="badge badge-project">
-                    {{ scopeBadge(key) }}
-                  </span>
+                  <gr-badge>{{ scopeBadge(key) }}</gr-badge>
                   <span>
                     Last used: {{ key.last_used_at ? (key.last_used_at | date: 'medium') : 'never' }}
                   </span>

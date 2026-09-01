@@ -100,9 +100,11 @@
   color: var(--gr-btn-accent);
 }
 
+// A text button has no box to tint, so the hover reads on the glyph itself.
 :host(.gr-button--text:hover:not(:disabled)) {
-  background: var(--gr-surface-hover);
+  background: none;
   border-color: transparent;
+  color: var(--gr-text-primary);
 }
 
 .gr-button__icon {

@@ -11,6 +11,7 @@ import { FormsModule } from '@angular/forms';
 import { FlakeInputOverridesService } from '@core/services/flake-input-overrides.service';
 import { ProjectsService } from '@core/services/projects.service';
 import {
+  BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
@@ -58,6 +59,7 @@ const DEFAULT_FORM: FlakeInputFormState = {
     PageLayoutComponent,
     FormFieldComponent,
     EmptyStateComponent,
+    BadgeComponent,
   ],
   providers: [MessageService],
   templateUrl: './task-flake-inputs.component.html',

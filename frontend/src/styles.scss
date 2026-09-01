@@ -71,9 +71,20 @@ a {
   }
 }
 
-// Breadcrumb links align with surrounding non-link items (separator/current
-// spans) - opt out of the global anchor padding/background-block hover but
-// keep a subtle visual indicator so the link still feels interactive.
+// One breadcrumb recipe for both shells: gr-page-layout and the full-bleed
+// evaluation header. Links opt out of the global anchor padding so they align
+// with the separator and current-page spans beside them.
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: $spacing-xs;
+  margin-bottom: $spacing-sm;
+  font-size: $font-size-sm;
+
+  .breadcrumb-separator { color: var(--gr-text-muted); }
+  .breadcrumb-current { color: var(--gr-text-primary); }
+}
+
 .breadcrumb-link,
 .breadcrumb a {
   padding: 0;
@@ -93,6 +104,10 @@ a {
   max-width: 1200px;
   margin: 0 auto;
   padding: $spacing-md;
+}
+
+.w-full {
+  width: 100%;
 }
 
 .text-light {

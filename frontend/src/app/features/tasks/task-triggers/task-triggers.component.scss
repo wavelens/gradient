@@ -64,35 +64,7 @@
   display: flex;
   gap: $spacing-sm;
   flex-shrink: 0;
-}
-
-.badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-weight: 500;
-  white-space: nowrap;
-
-  &.badge-polling {
-    background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
-    color: var(--gr-status-info);
-  }
-  &.badge-reporter_push {
-    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: var(--gr-status-success);
-  }
-  &.badge-reporter_pull_request {
-    background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: var(--gr-status-warning);
-  }
-  &.badge-time {
-    background: color-mix(in srgb, var(--gr-text-secondary) 15%, transparent);
-    color: var(--gr-text-primary);
-  }
-}
-
-.status-chip {
+}.status-chip {
   display: inline-block;
   padding: 2px 8px;
   border-radius: $border-radius-sm;
@@ -116,7 +88,9 @@
   color: var(--gr-status-success);
   font-size: $font-size-sm;
 
-}.dialog-error {
+}
+
+.dialog-error {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
@@ -142,5 +116,3 @@
   font-size: $font-size-sm;
 
 }
-
-.w-full { width: 100%; }

@@ -29,13 +29,17 @@
     border: 1px solid color-mix(in srgb, var(--gr-status-info) 50%, transparent);
     color: var(--gr-status-info);
   }
-}.settings-card {
+}
+
+.settings-card {
   background: var(--gr-surface-raised);
   border: 1px solid var(--gr-border);
   border-radius: $border-radius-md;
   padding: $spacing-lg;
   max-width: 640px;
-}.label-help {
+}
+
+.label-help {
   display: inline-flex;
   align-items: center;
   color: var(--gr-text-muted);
@@ -56,9 +60,6 @@
 
   a, button { flex-shrink: 0; white-space: nowrap; }
 }
-
-.w-full { width: 100%; }
-
 .status-row {
   display: flex;
   align-items: center;

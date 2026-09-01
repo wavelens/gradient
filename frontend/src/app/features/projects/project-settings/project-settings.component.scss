@@ -21,21 +21,17 @@
 
     h2 { margin: 0; }
   }
-}.form-actions {
+}
+
+.form-actions {
   display: flex;
   gap: $spacing-md;
   margin-top: $spacing-lg;
 }
-
-.w-full { width: 100%; }
-
 .copy-row {
   display: flex;
   align-items: stretch;
   gap: $spacing-sm;
-
-  .w-full { flex: 1; min-width: 0; }
-
   button { flex-shrink: 0; }
 }
 

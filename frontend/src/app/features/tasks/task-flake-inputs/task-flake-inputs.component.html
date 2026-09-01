@@ -39,11 +39,11 @@
                   <div class="override-name">{{ override.input_name }}</div>
                   <div class="override-meta text-secondary">
                     @if (isPattern(override)) {
-                      <span class="badge badge-pattern">Pattern</span>
+                      <gr-badge severity="warning">Pattern</gr-badge>
                     }
-                    <span class="badge" [class]="override.url === null ? 'badge-keep' : 'badge-url'">
+                    <gr-badge [severity]="override.url === null ? 'success' : 'info'">
                       {{ modeLabel(override) }}
-                    </span>
+                    </gr-badge>
                     @if (override.url !== null) {
                       <span class="override-url">{{ override.url }}</span>
                     }

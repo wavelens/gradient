@@ -87,31 +87,7 @@
   gap: $spacing-sm;
   flex-shrink: 0;
   flex-wrap: wrap;
-}
-
-.badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: $border-radius-sm;
-  font-size: $font-size-xs;
-  font-weight: 500;
-  white-space: nowrap;
-
-  &.badge-send_mail {
-    background: color-mix(in srgb, var(--gr-status-info) 15%, transparent);
-    color: var(--gr-status-info);
-  }
-  &.badge-send_web_request {
-    background: color-mix(in srgb, var(--gr-status-success) 15%, transparent);
-    color: var(--gr-status-success);
-  }
-  &.badge-forge_status_report {
-    background: color-mix(in srgb, var(--gr-status-warning) 15%, transparent);
-    color: var(--gr-status-warning);
-  }
-}
-
-.status-chip {
+}.status-chip {
   display: inline-block;
   padding: 2px 8px;
   border-radius: $border-radius-sm;

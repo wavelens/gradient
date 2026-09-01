@@ -12,6 +12,7 @@ import { TriggersService } from '@core/services/triggers.service';
 import { IntegrationsService } from '@core/services/integrations.service';
 import { ProjectsService } from '@core/services/projects.service';
 import {
+  BadgeComponent,
   ButtonComponent,
   CheckboxComponent,
   DialogComponent,
@@ -22,6 +23,7 @@ import {
   LoadingSpinnerComponent,
   PageLayoutComponent,
   SelectComponent,
+  BadgeSeverity,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective, AccessService } from '@shared/access';
 import { injectTaskAccess } from '@core/resolvers/inject-access';
@@ -87,6 +89,7 @@ const DEFAULT_FORM: TriggerFormState = {
     PageLayoutComponent,
     FormFieldComponent,
     EmptyStateComponent,
+    BadgeComponent,
   ],
   templateUrl: './task-triggers.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -323,6 +326,15 @@ export class TaskTriggersComponent implements OnInit {
       case 'reporter_push': return 'Push';
       case 'reporter_pull_request': return 'Pull Request';
       case 'time': return 'Cron';
+    }
+  }
+
+  typeSeverity(type: TriggerType): BadgeSeverity {
+    switch (type) {
+      case 'polling': return 'info';
+      case 'reporter_push': return 'success';
+      case 'reporter_pull_request': return 'warning';
+      case 'time': return 'neutral';
     }
   }
 

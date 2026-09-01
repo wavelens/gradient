@@ -11,14 +11,13 @@
     font-size: $font-size-xl;
     margin: 0 0 $spacing-lg 0;
   }
-}.form-actions {
+}
+
+.form-actions {
   display: flex;
   gap: $spacing-md;
   margin-top: $spacing-lg;
 }
-
-.w-full { width: 100%; }
-
 .role-select {
   width: 100%;
   padding: $spacing-sm $spacing-md;

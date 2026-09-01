@@ -137,7 +137,9 @@
     background: var(--gr-surface-sunken);
     color: var(--gr-text-primary);
   }
-}.role-select {
+}
+
+.role-select {
   width: 100%;
   padding: $spacing-sm $spacing-md;
   background: var(--gr-surface-sunken);
@@ -149,9 +151,6 @@
 
   &:focus { outline: none; border-color: var(--gr-text-secondary); }
 }
-
-.w-full { width: 100%; }
-
 .dialog-error {
   display: flex;
   align-items: center;

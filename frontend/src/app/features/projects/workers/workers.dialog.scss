@@ -66,7 +66,9 @@
   margin-bottom: $spacing-lg;
 
   gr-icon { flex-shrink: 0; }
-}.copy-row {
+}
+
+.copy-row {
   display: flex;
   align-items: center;
   gap: $spacing-sm;
@@ -105,9 +107,6 @@
   word-break: break-all;
   white-space: pre-wrap;
 }
-
-.w-full { width: 100%; }
-
 .cap-toggles {
   display: flex;
   gap: $spacing-md;

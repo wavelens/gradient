@@ -33,7 +33,7 @@
           <div class="trigger-row">
             <div class="trigger-header">
               <div class="trigger-info">
-                <span class="badge" [class]="'badge-' + trigger.type">{{ typeLabel(trigger.type) }}</span>
+                <gr-badge [severity]="typeSeverity(trigger.type)">{{ typeLabel(trigger.type) }}</gr-badge>
                 <div>
                   <div class="trigger-summary">{{ configSummary(trigger) }}</div>
                   <div class="trigger-meta text-secondary">

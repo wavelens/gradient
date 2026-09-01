@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+import {
+  BadgeComponent,
+} from '@shared/ui';
 import { Component, inject, input, output, signal, OnInit, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActionsService } from '../../../core/services/actions.service';
@@ -12,7 +15,7 @@ import { ActionDelivery, ActionDeliveryDetail } from '../../../core/models/actio
 @Component({
   selector: 'app-action-deliveries',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, BadgeComponent],
   templateUrl: './action-deliveries.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './action-deliveries.component.scss',

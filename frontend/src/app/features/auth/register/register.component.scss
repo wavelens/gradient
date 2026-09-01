@@ -44,17 +44,17 @@
     font-size: $font-size-md;
   }
 }
-.success-message {
-  background-color: color-mix(in srgb, var(--gr-status-success) 10%, transparent);
-  border: 1px solid var(--gr-status-success);
-  color: var(--gr-status-success);
-}
 
 .auth-form {
   margin-bottom: $spacing-lg;
-}.password-wrapper {
-  position: relative;}
+}
 
+.field-info {
+  display: block;
+  margin-top: $spacing-xs;
+  font-size: $font-size-sm;
+  color: var(--gr-text-secondary);
+}
 .password-requirements {
   margin-top: $spacing-sm;
   padding: $spacing-sm;
@@ -82,12 +82,6 @@
     }
   }
 }
-
-.w-full {
-  width: 100%;
-  justify-content: center;
-}
-
 .auth-blocked {
   display: flex;
   flex-direction: column;

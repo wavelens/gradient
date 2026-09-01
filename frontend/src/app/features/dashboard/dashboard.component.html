@@ -54,7 +54,7 @@
                 <h3>{{ project.display_name || project.name }}</h3>
                 <p class="text-secondary">{{ project.description || 'No description' }}</p>
                 @if (project.role) {
-                  <span class="badge">{{ project.role }}</span>
+                  <gr-badge>{{ project.role }}</gr-badge>
                 }
               </div>
               <div class="card-arrow">

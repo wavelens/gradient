@@ -42,14 +42,11 @@
     margin: 0;
     font-size: $font-size-md;
   }
-}.auth-form {
-  margin-bottom: $spacing-lg;
-}.password-wrapper {
-  position: relative;}.w-full {
-  width: 100%;
-  justify-content: center;
 }
 
+.auth-form {
+  margin-bottom: $spacing-lg;
+}
 .auth-divider {
   text-align: center;
   margin: $spacing-lg 0;
