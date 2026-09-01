@@ -53,11 +53,11 @@
   <gr-select-button [options]="regions" optionLabel="label" optionValue="value" [(ngModel)]="region" />
 </gr-form-field>
 
-<h2>Switcher</h2>
-<p>The segmented control also switches what a panel shows, without a field around it.
-   The selected segment slides on hover and on change, so the switch reads as one control
-   rather than a row of buttons.</p>
-<gr-select-button
+<h2>Panel switcher</h2>
+<p>Switches what a panel below it shows. Separate tabs, one of them current, so it reads
+   as navigation rather than as a field value. Use <code>gr-select-button</code> instead
+   when the choice is an answer the form submits.</p>
+<gr-tab-switch
   ariaLabel="Time window"
   [options]="windows"
   optionLabel="label"

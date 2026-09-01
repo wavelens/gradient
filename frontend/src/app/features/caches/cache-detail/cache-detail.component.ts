@@ -21,7 +21,7 @@ import {
   MetricChartComponent,
   MetricSeries,
   PageLayoutComponent,
-  SelectButtonComponent,
+  TabSwitchComponent,
   SettingsSectionComponent,
   StatCardComponent,
 } from '@shared/ui';
@@ -56,7 +56,7 @@ const CHART_COLORS = {
     FormFieldComponent,
     StatCardComponent,
     CardGridComponent,
-    SelectButtonComponent,
+    TabSwitchComponent,
     FormsModule,
   ],
   templateUrl: './cache-detail.component.html',

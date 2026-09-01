@@ -1,0 +1,15 @@
+<div class="tab-switch" role="tablist" [attr.aria-label]="ariaLabel() || null">
+  @for (option of options(); track $index) {
+    <button
+      type="button"
+      role="tab"
+      class="tab-switch__tab"
+      [class.is-selected]="isSelected(option)"
+      [attr.aria-selected]="isSelected(option)"
+      [disabled]="isDisabled()"
+      (click)="pick(option)"
+    >
+      {{ labelOf(option) }}
+    </button>
+  }
+</div>

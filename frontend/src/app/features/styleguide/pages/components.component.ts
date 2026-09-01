@@ -10,7 +10,7 @@ import {
   ButtonComponent, CheckboxComponent, SelectComponent, SelectButtonComponent,
   AutoCompleteComponent, MenuComponent, MenuItem, PopoverComponent, TooltipDirective,
   InputDirective, FormFieldComponent, LabelHelpComponent, DialogComponent, PasswordInputComponent,
-  NameFieldComponent, NameCheckState,
+  NameFieldComponent, NameCheckState, TabSwitchComponent,
 } from '@shared/ui';
 
 @Component({
@@ -20,6 +20,7 @@ import {
     FormsModule, ButtonComponent, CheckboxComponent, SelectComponent, SelectButtonComponent,
     AutoCompleteComponent, MenuComponent, PopoverComponent, TooltipDirective, InputDirective,
     FormFieldComponent, LabelHelpComponent, DialogComponent, PasswordInputComponent, NameFieldComponent,
+    TabSwitchComponent,
   ],
   templateUrl: './components.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

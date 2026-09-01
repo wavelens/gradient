@@ -6,7 +6,7 @@
 
 <gr-page-layout [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cacheName, link: ['/caches', cacheName] }, { label: 'Settings', link: ['/caches', cacheName, 'settings'] }, { label: 'Members & Roles' }]" title="Members & Roles">
   <!-- Members -->
-  <gr-settings-section title="Members" [card]="false">
+  <gr-settings-section title="Members" [card]="false" maxWidth="none">
     <button
       slot="actions"
         *appWritable="access()"
@@ -59,7 +59,7 @@
   </gr-settings-section>
 
   <!-- Roles -->
-  <gr-settings-section title="Roles" [card]="false">
+  <gr-settings-section title="Roles" [card]="false" maxWidth="none">
     <button
       slot="actions"
         *appWritable="access()"
