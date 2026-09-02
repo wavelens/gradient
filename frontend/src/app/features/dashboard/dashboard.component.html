@@ -9,32 +9,10 @@
     <gr-loading-spinner message="Loading dashboard..." />
   } @else {
     <!-- Stats Overview -->
-    <div class="dashboard-stats">
-      <a routerLink="/projects" class="card">
-        <div class="card-icon">
-          <gr-icon name="corporate_fare" />
-        </div>
-        <div class="card-content">
-          <h3>{{ projects().length }}</h3>
-          <p class="text-secondary">Projects</p>
-        </div>
-        <div class="card-arrow">
-          <gr-icon name="arrow_forward" />
-        </div>
-      </a>
-      <a routerLink="/caches" class="card">
-        <div class="card-icon">
-          <gr-icon name="inventory_2" />
-        </div>
-        <div class="card-content">
-          <h3>{{ caches().length }}</h3>
-          <p class="text-secondary">Caches</p>
-        </div>
-        <div class="card-arrow">
-          <gr-icon name="arrow_forward" />
-        </div>
-      </a>
-    </div>
+    <gr-card-grid class="dashboard-stats" min="250px">
+      <gr-nav-card icon="corporate_fare" title="{{ projects().length }}" description="Projects" [link]="['/projects']" />
+      <gr-nav-card icon="inventory_2" title="{{ caches().length }}" description="Caches" [link]="['/caches']" />
+    </gr-card-grid>
 
     <!-- Recent Projects -->
     <div class="dashboard-section">
@@ -46,21 +24,18 @@
       @if (projects().length > 0) {
         <div class="card-list">
           @for (project of recentProjects; track project.id) {
-            <a [routerLink]="['/project', project.name]" class="card">
-              <div class="card-icon">
-                <gr-icon name="corporate_fare" />
-              </div>
-              <div class="card-content">
-                <h3>{{ project.display_name || project.name }}</h3>
-                <p class="text-secondary">{{ project.description || 'No description' }}</p>
+            <gr-nav-card
+              icon="corporate_fare"
+              [title]="project.display_name || project.name"
+              [description]="project.description || 'No description'"
+              [link]="['/project', project.name]"
+            >
+              <div slot="meta">
                 @if (project.role) {
                   <gr-badge>{{ project.role }}</gr-badge>
                 }
               </div>
-              <div class="card-arrow">
-                <gr-icon name="arrow_forward" />
-              </div>
-            </a>
+            </gr-nav-card>
           }
         </div>
       } @else {
@@ -84,24 +59,19 @@
       @if (caches().length > 0) {
         <div class="card-list">
           @for (cache of recentCaches; track cache.id) {
-            <a [routerLink]="['/caches', cache.name]" class="card">
-              <div class="card-icon">
-                <gr-icon name="inventory_2" />
+            <gr-nav-card
+              icon="inventory_2"
+              [title]="cache.display_name || cache.name"
+              [description]="cache.description || 'No description'"
+              [link]="['/caches', cache.name]"
+            >
+              <div slot="meta">
+                <gr-badge [severity]="cache.active ? 'success' : 'danger'">
+                  {{ cache.active ? 'Active' : 'Inactive' }}
+                </gr-badge>
+                <span>Priority {{ cache.priority }}</span>
               </div>
-              <div class="card-content">
-                <h3>{{ cache.display_name || cache.name }}</h3>
-                <p class="text-secondary">{{ cache.description || 'No description' }}</p>
-                <div class="cache-status">
-                  <gr-badge [severity]="cache.active ? 'success' : 'danger'">
-                    {{ cache.active ? 'Active' : 'Inactive' }}
-                  </gr-badge>
-                  <span class="text-secondary">Priority {{ cache.priority }}</span>
-                </div>
-              </div>
-              <div class="card-arrow">
-                <gr-icon name="arrow_forward" />
-              </div>
-            </a>
+            </gr-nav-card>
           }
         </div>
       } @else {

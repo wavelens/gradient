@@ -7610,3 +7610,19 @@ snapshot.
 - `leaves a derivation whose build the eval no longer has unclickable` - a
   collected evaluation gives `build: null`, and the row stops offering a popup
   that would fail.
+
+## The dashboard was the third copy of the index card
+
+The dashboard drew its own `.card`: the same icon / title / description / meta /
+arrow shape as `gr-nav-card`, at 48px and with a sideways hover, so the landing
+page disagreed with every index page it links to. Both blocks now use the
+primitive: the counts row is a `gr-card-grid` of two nav cards whose title is
+the count, and the recent-project and recent-cache lists stack nav cards. The
+stylesheet keeps only what is genuinely local, the section rhythm.
+
+`frontend/src/app/features/dashboard/dashboard.component.spec.ts`:
+- `navigates from every card, index counts included` - each card carries exactly
+  one anchor over the whole card, pinning the destination of all four.
+- `puts the entity state on the card meta line rather than in its own box` - the
+  role badge and the cache's active/priority pair project into `slot=meta`, and
+  the private `.card` is gone rather than merely unstyled.

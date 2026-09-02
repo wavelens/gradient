@@ -12,9 +12,10 @@ import { ProjectsService } from '@core/services/projects.service';
 import { CachesService } from '@core/services/caches.service';
 import {
   BadgeComponent,
+  CardGridComponent,
   EmptyStateComponent,
-  IconComponent,
   LoadingSpinnerComponent,
+  NavCardComponent,
   PageLayoutComponent,
 } from '@shared/ui';
 import { Project, Cache } from '@core/models';
@@ -27,7 +28,8 @@ import { Project, Cache } from '@core/models';
     RouterModule,
     LoadingSpinnerComponent,
     EmptyStateComponent,
-    IconComponent,
+    CardGridComponent,
+    NavCardComponent,
     PageLayoutComponent,
     BadgeComponent,
   ],
