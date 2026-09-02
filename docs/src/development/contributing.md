@@ -108,6 +108,8 @@ CI (`.github/workflows/rust.yml`) runs fmt, the grep-gate and cargo-deny; clippy
 - Feature-based structure under `frontend/src/app/features/`.
 - `gr-ui` (`src/app/shared/ui/`, built on `@angular/cdk`) for UI components; Apache ECharts (via `<app-metric-chart>`) for every chart; SCSS variables from `src/app/styles/_variables.scss` for colours and spacing.
 - No third-party UI or charting dependency may impose a field-of-use restriction: the bundle ships under AGPL-3.0, so anything beyond MIT / BSD / Apache-2.0 cannot be conveyed downstream.
+- Refreshing `pnpm-lock.yaml` changes the `pnpmDeps` hash in `nix/packages/gradient-frontend.nix`. Set it to `lib.fakeHash`, run `nix build .#gradient-frontend.pnpmDeps`, and take the hash the mismatch reports.
+- `minimumReleaseAge` in `pnpm-workspace.yaml` refuses a package published in the last 24 hours, so a compromised publish is not consumed the day it lands. The Nix build enforces it either way; the setting is in the repo so a local `pnpm update` resolves to the same versions instead of producing a lockfile CI rejects.
 
 ### Nix
 
