@@ -4162,7 +4162,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings"
 version = "0.2347.8"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#14c83355628d8eb91be716cb74368896fcdbbb1b"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#593e0cb6b996003278114d924799a90452197540"
 dependencies = [
  "nix-bindings-sys",
 ]
@@ -4170,7 +4170,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings-sys"
 version = "0.2347.8"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#14c83355628d8eb91be716cb74368896fcdbbb1b"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#593e0cb6b996003278114d924799a90452197540"
 dependencies = [
  "bindgen",
  "cc",
