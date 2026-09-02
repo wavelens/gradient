@@ -154,11 +154,11 @@ interface RuleRow {
           </table>
         }
 
-        @if (j.job_context.derivations?.length) {
+        @if (j.derivations.length) {
           <h3>Derivations</h3>
           <div class="drv-list">
-            @for (d of j.job_context.derivations; track d.drv_path) {
-              <div class="drv-row clickable" (click)="openBuild(d.build_id)">
+            @for (d of j.derivations; track d.derivation_build) {
+              <div class="drv-row" [class.clickable]="!!d.build" (click)="d.build && openBuild(d.build)">
                 <span class="mono pname">{{ d.pname ?? '-' }}</span>
                 <span class="mono path">{{ d.drv_path }}</span>
               </div>

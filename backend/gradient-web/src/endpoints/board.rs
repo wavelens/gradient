@@ -28,6 +28,7 @@ use sea_orm::{
     QuerySelect, Statement,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -244,6 +245,82 @@ pub struct AttemptSummary {
 }
 
 #[derive(Serialize)]
+pub struct JobDerivationView {
+    /// Per-eval build identity: the id `GET /builds/{build}` takes. `None` once
+    /// the evaluation's `build_job` row is gone.
+    pub build: Option<Uuid>,
+    /// Scheduler anchor, handed to the worker as `BuildSpec.build_id`.
+    pub derivation_build: Uuid,
+    pub drv_path: String,
+    pub pname: Option<String>,
+}
+
+/// The derivations the scheduler recorded on the job, keyed by anchor.
+fn snapshot_derivations(
+    job_context: &serde_json::Value,
+) -> Vec<(DerivationBuildId, String, Option<String>)> {
+    job_context
+        .get("derivations")
+        .and_then(|d| d.as_array())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|d| {
+                    Some((
+                        DerivationBuildId::from(d.get("build_id")?.as_str()?.parse::<Uuid>().ok()?),
+                        d.get("drv_path")?.as_str()?.to_string(),
+                        d.get("pname").and_then(|p| p.as_str()).map(str::to_string),
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The scheduler scores and dispatches anchors (`derivation_build`), but the API
+/// navigates builds by their per-eval `build_job` id, so every anchor leaving
+/// this endpoint is resolved against the job's evaluation first.
+async fn resolve_build_jobs<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+    anchors: &[DerivationBuildId],
+) -> HashMap<DerivationBuildId, BuildJobId> {
+    if anchors.is_empty() {
+        return HashMap::new();
+    }
+
+    EBuildJob::find()
+        .filter(CBuildJob::Evaluation.eq(evaluation))
+        .filter(CBuildJob::DerivationBuild.is_in(anchors.to_vec()))
+        .all(db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|j| (j.derivation_build, j.id))
+        .collect()
+}
+
+async fn job_derivations<C: ConnectionTrait>(
+    db: &C,
+    evaluation: EvaluationId,
+    job_context: &serde_json::Value,
+) -> Vec<JobDerivationView> {
+    let entries = snapshot_derivations(job_context);
+    let anchors: Vec<DerivationBuildId> = entries.iter().map(|(a, _, _)| *a).collect();
+    let builds = resolve_build_jobs(db, evaluation, &anchors).await;
+
+    entries
+        .into_iter()
+        .map(|(anchor, drv_path, pname)| JobDerivationView {
+            build: builds.get(&anchor).copied().map(Into::into),
+            derivation_build: anchor.into(),
+            drv_path,
+            pname,
+        })
+        .collect()
+}
+
+#[derive(Serialize)]
 pub struct DispatchedJobDetail {
     pub id: Uuid,
     pub kind: i16,
@@ -254,7 +331,12 @@ pub struct DispatchedJobDetail {
     pub queued_at: String,
     pub dispatched_at: String,
     pub finished_at: Option<String>,
+    /// Per-eval build identity, usable with `GET /builds/{build}`. `None` for
+    /// eval jobs and for builds whose evaluation has been collected.
     pub build_id: Option<Uuid>,
+    /// The scheduler anchor this job was dispatched for.
+    pub derivation_build_id: Option<Uuid>,
+    pub derivations: Vec<JobDerivationView>,
     pub evaluation_id: Uuid,
     pub pname: Option<String>,
     pub score_breakdown: serde_json::Value,
@@ -289,6 +371,16 @@ pub async fn get_dispatched_job(
             .map(|o| o.name)
             .unwrap_or_default();
 
+        let derivations = job_derivations(&state.web_db, c.evaluation_id, &c.job_context).await;
+        let build_id = match c.derivation_build {
+            Some(anchor) => resolve_build_jobs(&state.web_db, c.evaluation_id, &[anchor])
+                .await
+                .get(&anchor)
+                .copied()
+                .map(Into::into),
+            None => None,
+        };
+
         return Ok(ok_json(DispatchedJobDetail {
             id: c.id.into(),
             kind: c.kind,
@@ -299,7 +391,9 @@ pub async fn get_dispatched_job(
             queued_at: c.queued_at.and_utc().to_rfc3339(),
             dispatched_at: c.scored_at.and_utc().to_rfc3339(),
             finished_at: None,
-            build_id: c.derivation_build.map(Into::into),
+            build_id,
+            derivation_build_id: c.derivation_build.map(Into::into),
+            derivations,
             evaluation_id: c.evaluation_id.into(),
             pname: c.pname,
             score_breakdown: c.score_breakdown,
@@ -335,7 +429,15 @@ pub async fn get_dispatched_job(
         .flatten();
 
     let anchor_id: Option<DerivationBuildId> = this_attempt.as_ref().map(|a| a.derivation_build);
-    let build_id: Option<Uuid> = anchor_id.map(Into::into);
+    let build_id: Option<Uuid> = match anchor_id {
+        Some(anchor) => resolve_build_jobs(&state.web_db, j.evaluation_id, &[anchor])
+            .await
+            .get(&anchor)
+            .copied()
+            .map(Into::into),
+        None => None,
+    };
+    let derivations = job_derivations(&state.web_db, j.evaluation_id, &j.job_context).await;
 
     let pname = match anchor_id {
         Some(aid) => {
@@ -388,6 +490,8 @@ pub async fn get_dispatched_job(
         dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
         finished_at: j.finished_at.map(|t| t.and_utc().to_rfc3339()),
         build_id,
+        derivation_build_id: anchor_id.map(Into::into),
+        derivations,
         evaluation_id: j.evaluation_id.into(),
         pname,
         score_breakdown: j.score_breakdown,
@@ -1370,6 +1474,27 @@ mod tests {
                 workers: 0
             }
         );
+    }
+
+    #[test]
+    fn snapshot_derivations_reads_the_scheduler_anchor_ids() {
+        let anchor = DerivationBuildId::now_v7();
+        let ctx = serde_json::json!({
+            "derivations": [
+                { "build_id": anchor.to_string(), "drv_path": "aaa-curl.drv", "pname": "curl" },
+                { "build_id": "not-a-uuid", "drv_path": "bbb-nope.drv", "pname": null },
+            ]
+        });
+
+        assert_eq!(
+            snapshot_derivations(&ctx),
+            vec![(anchor, "aaa-curl.drv".to_string(), Some("curl".to_string()))]
+        );
+    }
+
+    #[test]
+    fn snapshot_derivations_of_an_eval_job_is_empty() {
+        assert!(snapshot_derivations(&serde_json::json!({ "kind": "Eval" })).is_empty());
     }
 
     #[test]

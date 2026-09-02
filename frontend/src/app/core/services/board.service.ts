@@ -125,10 +125,21 @@ export interface InstanceContextView {
   idle_workers: number;
 }
 
+/// One derivation the job builds, carrying both identities: `build` is what
+/// `GET /builds/{build}` takes, `derivation_build` is the scheduler anchor.
+export interface JobDerivationView {
+  build: string | null;
+  derivation_build: string;
+  drv_path: string;
+  pname: string | null;
+}
+
 export interface DispatchedJobDetail extends DispatchedJobSummary {
   project_name: string;
   queued_at: string;
   finished_at: string | null;
+  derivation_build_id: string | null;
+  derivations: JobDerivationView[];
   score_breakdown: { rules: Record<string, number>; total: number };
   worker_context: WorkerContextView;
   job_context: JobContextView;

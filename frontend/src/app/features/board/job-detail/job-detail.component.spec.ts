@@ -25,6 +25,8 @@ const DETAIL: DispatchedJobDetail = {
   pname: null,
   queued_at: '2026-06-08T00:00:00Z',
   finished_at: null,
+  derivation_build_id: 'a1',
+  derivations: [{ build: 'bj1', derivation_build: 'a1', drv_path: '/nix/store/xxx-foo', pname: 'foo' }],
   score_breakdown: { rules: { wait: 3.5, missing: -1.2 }, total: 12.5 },
   worker_context: {
     architectures: ['x86_64-linux'],
@@ -178,6 +180,26 @@ describe('BoardJobDetailComponent - structured context panels', () => {
     expect(drv).toBeTruthy();
     expect(drv.textContent).toContain('foo');
     expect(drv.textContent).toContain('/nix/store/xxx-foo');
+  });
+
+  it('opens the build popup on the per-eval build id, not the scheduler anchor', () => {
+    const ids: string[] = [];
+    TestBed.overrideProvider(EvaluationsService, {
+      useValue: { getBuild: (id: string) => { ids.push(id); return EMPTY; } },
+    });
+    const fixture = setup();
+    const drv = fixture.nativeElement.querySelector('.ctx.job .drv-row') as HTMLElement;
+    drv.click();
+    expect(ids).toEqual(['bj1']);
+  });
+
+  it('leaves a derivation whose build the eval no longer has unclickable', () => {
+    const detail = {
+      ...DETAIL,
+      derivations: [{ build: null, derivation_build: 'a1', drv_path: '/nix/store/xxx-foo', pname: 'foo' }],
+    };
+    const el = setup({ getJob: () => of(detail) }).nativeElement as HTMLElement;
+    expect(el.querySelector('.ctx.job .drv-row.clickable')).toBeNull();
   });
 
   it('links the worker id to the project-scoped worker metrics page', () => {

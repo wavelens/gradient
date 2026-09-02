@@ -7581,3 +7581,32 @@ list itself paints nothing.
   carried a whole-row link *and* an Unsubscribe button, so the destructive
   action sat inside its own navigation target. Navigation is now an explicit
   arrow button beside Unsubscribe, and the row is no longer a link.
+
+## The board's Derivations popup asked for a build that cannot exist
+
+`GET /board/jobs/{id}` reported `build_id` as the scheduler *anchor*
+(`derivation_build`), the global build identity the worker is handed as
+`BuildSpec.build_id`. The API navigates builds by the per-eval `build_job` id,
+so the job detail's derivation popup called `GET /builds/{anchor}`, which can
+never resolve: every click reported "Failed to load build."
+
+The endpoint now resolves anchors against the job's own evaluation
+(`build_job` is UNIQUE on `(evaluation, derivation)` and carries
+`derivation_build`), so `build_id` is the id `/builds/{build}` takes, the anchor
+survives as `derivation_build_id`, and a typed `derivations` array carries both
+identities per entry instead of the UI navigating out of the raw scheduler
+snapshot.
+
+`backend/gradient-web/src/endpoints/board.rs`:
+- `snapshot_derivations_reads_the_scheduler_anchor_ids` - the snapshot is parsed
+  into anchors to resolve, and an unparseable entry is dropped rather than
+  failing the whole detail.
+- `snapshot_derivations_of_an_eval_job_is_empty` - an eval job carries no
+  derivations, so nothing is resolved.
+
+`frontend/src/app/features/board/job-detail/job-detail.component.spec.ts`:
+- `opens the build popup on the per-eval build id, not the scheduler anchor` -
+  the click reaches `getBuild` with the resolved id; this is the regression.
+- `leaves a derivation whose build the eval no longer has unclickable` - a
+  collected evaluation gives `build: null`, and the row stops offering a popup
+  that would fail.

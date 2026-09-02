@@ -10740,7 +10740,20 @@ components:
         queued_at: { type: string, format: date-time }
         dispatched_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time, nullable: true }
-        build_id: { type: string, format: uuid, nullable: true }
+        build_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Per-eval build identity, usable with `GET /builds/{build}`. Null for eval jobs and for builds whose evaluation has been collected.
+        derivation_build_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: The scheduler anchor (`derivation_build`) this job was dispatched for; the id the worker is handed as `BuildSpec.build_id`.
+        derivations:
+          type: array
+          description: The derivations this job builds, each carrying both identities.
+          items: { $ref: '#/components/schemas/JobDerivation' }
         evaluation_id: { type: string, format: uuid }
         pname: { type: string, nullable: true }
         score_breakdown:
@@ -10762,6 +10775,19 @@ components:
         passed_over:
           type: boolean
           description: True when this detail is an in-memory candidate the dispatcher scored but passed over (never persisted); the UI labels it "Passed over".
+
+    JobDerivation:
+      type: object
+      description: One derivation a dispatched job builds, with the scheduler anchor resolved to the build id the API navigates by.
+      properties:
+        build:
+          type: string
+          format: uuid
+          nullable: true
+          description: Per-eval build identity, the id `GET /builds/{build}` takes. Null once the evaluation's build_job row is gone.
+        derivation_build: { type: string, format: uuid }
+        drv_path: { type: string }
+        pname: { type: string, nullable: true }
 
     AttemptSummary:
       type: object
