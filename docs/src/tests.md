@@ -7654,3 +7654,40 @@ SQL still matches the schema. It is opt-in on `GRADIENT_REPORT_TEST_DB` (the
 file's header carries the four commands); without it the test skips. Verified
 both ways: with the old text binding it fails on `42883`, with the fix all
 twenty-one queries run.
+
+## A stalled peer left the worker building jobs it could not report
+
+`gluon` logged this every 30 s while a build ran:
+
+```text
+WARN gradient_proto::session::frame: WS writer queue full beyond send timeout - peer TCP stalled timeout_secs=30 bulk=true
+WARN gradient_worker::executor::build: failed to forward build log chunk; continuing
+WARN gradient_worker::worker::dispatch: heartbeat RequestJob Build send failed
+```
+
+Both lanes were blocked, and the control lane drains first, so the writer task
+itself was stuck in `feed`/`flush`: the socket was accepting nothing. A peer
+that stalls without closing never ends the read half, and `run_dispatch_loop`
+exits only when the reader returns `None`, so the session lived on. Every send
+site treats a failed send as a dead connection and propagates it, except
+`on_heartbeat`, which warned and carried on - and, because the warning came from
+a 30 s timeout inside the send, blocked the loop for 30 s on every tick. The
+worker kept building a job whose result it could no longer report, until the
+kernel eventually gave up on the socket.
+
+`on_heartbeat` is now fallible like every other send site, so a stalled control
+lane ends the session, aborts the orphaned jobs and reconnects with backoff,
+which is what the server's re-queue path already expects.
+
+The stall signal itself is covered by
+`gradient-proto/src/session/frame.rs: send_msg_times_out_when_queue_is_full` - a
+backed-up queue surfaces as `Err` after the timeout rather than hanging. The
+loop's reaction to it is not unit-tested: `DispatchState` owns a `JobExecutor`,
+which owns a `LocalNixStore`, so constructing one in a test needs a real Nix
+store. What keeps the swallow from returning is the signature - `on_heartbeat`
+returns `Result` and the call site is a `?`.
+
+One case stays uncovered by design: a worker at full capacity requests no jobs,
+so its heartbeat sends nothing and cannot detect the stall. It finds out when
+the running job finishes and `on_job_done` fails - which is the moment the
+result would have been lost anyway.

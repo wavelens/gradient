@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use gradient_proto::messages::{
     CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage,
 };
@@ -70,7 +70,7 @@ pub(super) async fn run_dispatch_loop(
             }
 
             _ = heartbeat.tick() => {
-                state.on_heartbeat().await;
+                state.on_heartbeat().await?;
             }
 
             msg = reader.recv() => {
@@ -374,10 +374,17 @@ impl DispatchState {
 
     /// Heartbeat tick: send live host metrics and request more jobs if the
     /// worker has capacity.
-    async fn on_heartbeat(&mut self) {
+    ///
+    /// A failed send here ends the session. The control lane only stays full
+    /// past its timeout when the peer has stopped reading, and a peer that
+    /// stalled without closing never ends the read half, so warning and
+    /// carrying on left the worker building jobs it could no longer report and
+    /// blocked this loop for the timeout on every tick. Every other send site
+    /// already treats a send failure as a dead connection.
+    async fn on_heartbeat(&mut self) -> Result<()> {
         send_live_metrics(&self.writer);
         if self.draining {
-            return;
+            return Ok(());
         }
         let active_eval = self.jobs.active(JobKind::Flake);
         let active_build = self.jobs.active(JobKind::Build);
@@ -392,26 +399,24 @@ impl DispatchState {
             request_build = want_build,
             "heartbeat tick"
         );
-        if want_eval
-            && let Err(e) = self
-                .writer
+        if want_eval {
+            self.writer
                 .send(ClientMessage::RequestJob {
                     kind: JobKind::Flake,
                 })
                 .await
-        {
-            warn!(error = %e, "heartbeat RequestJob Flake send failed");
+                .context("heartbeat RequestJob Flake")?;
         }
-        if want_build
-            && let Err(e) = self
-                .writer
+        if want_build {
+            self.writer
                 .send(ClientMessage::RequestJob {
                     kind: JobKind::Build,
                 })
                 .await
-        {
-            warn!(error = %e, "heartbeat RequestJob Build send failed");
+                .context("heartbeat RequestJob Build")?;
         }
+
+        Ok(())
     }
 
     // ── Job list / scoring ────────────────────────────────────────────────────
