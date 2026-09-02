@@ -3129,10 +3129,13 @@ paths:
         failed-build logs as a SQLite database, for attaching to a bug report.
         Open it with any SQLite client, or with the `gradient-report` inspector.
 
-        Reading the evaluation requires `ViewProject`. `include_instance` also
-        requires `ManageWorkers`, since the fleet and upstream sections describe
-        more than the evaluation that asked for them; it is refused rather than
-        silently dropped, so the report's manifest always matches the request.
+        Requires authentication even for a public project, whose evaluations are
+        otherwise browsable anonymously: a report reads every failed build's log
+        in one request. Reading the evaluation requires `ViewProject`.
+        `include_instance` also requires `ManageWorkers`, since the fleet and
+        upstream sections describe more than the evaluation that asked for them;
+        it is refused rather than silently dropped, so the report's manifest
+        always matches the request.
 
         Anonymisation replaces identifying strings with tokens derived from a
         per-report salt, stable within one file and uncorrelatable across two.

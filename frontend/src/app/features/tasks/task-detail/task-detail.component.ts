@@ -349,11 +349,15 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   pkgMenuModel = signal<MenuItem[]>([]);
 
+  // Report generation is authenticated server-side, so an anonymous visitor
+  // browsing a public task is not offered an action that can only 403.
   panelMenuModel = computed<MenuItem[]>(() => [
     { label: 'Metrics', icon: 'show_chart',
       routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
-    { label: 'Diagnostic report', icon: 'bug_report', disabled: !this.selected(),
-      command: () => this.reportDialogOpen.set(true) },
+    ...(this.authService.isAuthenticated()
+      ? [{ label: 'Diagnostic report', icon: 'bug_report', disabled: !this.selected(),
+           command: () => this.reportDialogOpen.set(true) }]
+      : []),
   ]);
 
   reportDialogOpen = signal(false);

@@ -335,6 +335,12 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             "/evals/{evaluation}/builds",
             post(evals::post_evaluation_builds),
         )
+        // Generating a report reads every failed build's log: authenticated
+        // even on a public project, which anonymous browsing may otherwise read.
+        .route(
+            "/evals/{evaluation}/report",
+            get(evals::get_evaluation_report),
+        )
         .route("/builds/{build}/log", post(builds::post_build_log))
         .route(
             "/builds/{build}/download-token",
@@ -499,10 +505,6 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             get(evals::get_evaluation_builds),
         )
         .route("/evals/{evaluation}/artefacts", get(evals::get_artefacts))
-        .route(
-            "/evals/{evaluation}/report",
-            get(evals::get_evaluation_report),
-        )
         .route("/evals/{evaluation}/closure", get(builds::get_eval_closure))
         .route(
             "/evals/{evaluation}/flake-graph",

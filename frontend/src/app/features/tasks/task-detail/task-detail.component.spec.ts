@@ -103,6 +103,7 @@ function makeTasksService(access: AccessState, overrides: Partial<{
 function setup(
   access: AccessState,
   serviceOverrides: Parameters<typeof makeTasksService>[1] = {},
+  authenticated = true,
 ): { fixture: ComponentFixture<TaskDetailComponent>; tasksService: TasksService } {
   const tasksService = makeTasksService(access, serviceOverrides);
   TestBed.configureTestingModule({
@@ -114,7 +115,7 @@ function setup(
       { provide: ActivatedRoute, useValue: activatedRouteStub(access) },
       { provide: TasksService, useValue: tasksService },
       { provide: ProjectsService, useValue: { getProject: () => of({ display_name: 'Acme' }) } },
-      { provide: AuthService, useValue: { isAuthenticated: () => true } },
+      { provide: AuthService, useValue: { isAuthenticated: () => authenticated } },
     ],
   });
   const fixture = TestBed.createComponent(TaskDetailComponent);
@@ -305,6 +306,14 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('offers the diagnostic report below Metrics', () => {
     const labels = component().panelMenuModel().map(i => i.label);
     expect(labels).toEqual(['Metrics', 'Diagnostic report']);
+  });
+
+  /// Generating a report is an authenticated endpoint, so the entry point is
+  /// gone rather than present and guaranteed to fail.
+  it('hides the diagnostic report from anonymous visitors', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, false);
+    const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
+    expect(labels).toEqual(['Metrics']);
   });
 
   it('opens the dialog from the menu command', () => {

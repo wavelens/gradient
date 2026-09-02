@@ -7514,3 +7514,26 @@ carried no identity at all, so the page could only echo the id from its own URL.
   a deregistered worker still has to render.
 - `walks back through breadcrumbs rather than a lone back arrow` - the trail is
   project / Workers / worker, which the bespoke back link could not express.
+
+## Only a logged-in user can generate a diagnostic report
+
+`GET /evals/{evaluation}/report` sat on the optional-auth router, where
+`EvalAccessContext::load` admits any public project, so an anonymous caller
+could export the evaluation together with every failed build's log. The
+`include_instance` default of `true` costs `ManageWorkers` and hid the hole
+behind a 403 until a caller passed `include_instance=false`. The OpenAPI
+contract already listed the path under the global `bearerAuth`; the route now
+matches it, and the handler takes `Extension<MUser>` so anonymous access is
+unrepresentable rather than merely unrouted.
+
+`backend/gradient-web/tests/reports_require_auth.rs`:
+- `anonymous_cannot_generate_a_report` - the plain request is refused by the
+  auth middleware, before any row is read.
+- `anonymous_cannot_dodge_the_gate_by_dropping_instance_context` - the exact
+  bypass, `include_instance=false`, is refused the same way.
+- `a_bearer_token_is_still_required_when_it_is_unusable` - an undecodable token
+  is 401, not a fallthrough to anonymous access.
+
+`frontend/src/app/features/tasks/task-detail/task-detail.component.spec.ts`:
+- `hides the diagnostic report from anonymous visitors` - the menu entry is
+  absent when logged out, rather than present and guaranteed to 403.

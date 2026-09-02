@@ -6,9 +6,11 @@
 
 //! Export one evaluation as a SQLite file a maintainer can diagnose from.
 //!
-//! Reading the evaluation costs `ViewProject`, the same bar as the UI. Instance
-//! context costs `ManageWorkers` on top, and is refused rather than silently
-//! dropped, so the report's manifest can never disagree with what was asked for.
+//! Building one reads every failed build's log, so it takes a logged-in caller
+//! even where anonymous browsing is allowed. On top of that, reading the
+//! evaluation costs `ViewProject` and instance context costs `ManageWorkers`,
+//! refused rather than silently dropped, so the report's manifest can never
+//! disagree with what was asked for.
 
 use std::sync::Arc;
 
@@ -19,11 +21,12 @@ use axum::{Extension, body::Body};
 use gradient_core::ServerState;
 use gradient_db::permissions::Permission;
 use gradient_report::{ReportContext, ReportOptions, generate_report};
+use gradient_types::MUser;
 use gradient_types::ids::EvaluationId;
 use serde::Deserialize;
 
 use super::EvalAccessContext;
-use crate::authorization::{MaybeApiKey, MaybeUser};
+use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 
 #[derive(Deserialize)]
@@ -55,28 +58,25 @@ pub(crate) fn report_requires_manage_workers(opts: &ReportOptions) -> bool {
 
 pub async fn get_evaluation_report(
     state: State<Arc<ServerState>>,
-    Extension(MaybeUser(maybe_user)): Extension<MaybeUser>,
+    Extension(user): Extension<MUser>,
     Extension(api_key): Extension<MaybeApiKey>,
     Path(evaluation_id): Path<EvaluationId>,
     Query(query): Query<ReportQuery>,
 ) -> WebResult<Response> {
+    let user_id = user.id;
+    let maybe_user = Some(user);
     let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
     let opts = query.options();
 
     if report_requires_manage_workers(&opts) {
-        let allowed = match &maybe_user {
-            Some(user) => {
-                crate::access::has_permission(
-                    &state,
-                    user.id,
-                    ctx.project_id,
-                    Permission::ManageWorkers,
-                    api_key.as_ref(),
-                )
-                .await?
-            }
-            None => false,
-        };
+        let allowed = crate::access::has_permission(
+            &state,
+            user_id,
+            ctx.project_id,
+            Permission::ManageWorkers,
+            api_key.as_ref(),
+        )
+        .await?;
 
         if !allowed {
             return Err(WebError::forbidden(
@@ -147,7 +147,7 @@ mod tests {
 
     /// Instance context exposes the worker fleet and upstream config, so it
     /// costs the permission that already governs worker configuration. An
-    /// eval-scoped report stays available to any viewer.
+    /// eval-scoped report stays available to any signed-in viewer.
     #[test]
     fn only_instance_context_costs_manage_workers() {
         assert!(report_requires_manage_workers(&opts(true)));
