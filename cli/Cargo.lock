@@ -181,9 +181,9 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "aws-lc-rs"
-version = "1.18.0"
+version = "1.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce2b2dcc879c3bae0d371e77c99f2238400ef24ec001394befa67b6e543add9e"
+checksum = "b281d307588d634de920874890732659e2e7672f72b5e10e81badc1a8a83621e"
 dependencies = [
  "aws-lc-sys",
  "zeroize",
@@ -191,9 +191,9 @@ dependencies = [
 
 [[package]]
 name = "aws-lc-sys"
-version = "0.44.0"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f09fae7be8bb3174e05c6afdb34199e6dc0c7c04ba9fa237b1967adfbde27483"
+checksum = "9bff6c3b54fad79a2e60b8102caf565819711497c1f5f092f49508e2f5c31b27"
 dependencies = [
  "cc",
  "cmake",
@@ -1243,7 +1243,7 @@ dependencies = [
 [[package]]
 name = "harmonia-file-core"
 version = "3.2.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "serde",
  "serde_json",
@@ -1253,7 +1253,7 @@ dependencies = [
 [[package]]
 name = "harmonia-file-nar"
 version = "3.2.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "bstr",
  "bytes",
@@ -1277,7 +1277,7 @@ dependencies = [
 [[package]]
 name = "harmonia-protocol"
 version = "3.2.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "async-stream",
  "bstr",
@@ -1311,7 +1311,7 @@ dependencies = [
 [[package]]
 name = "harmonia-protocol-derive"
 version = "3.2.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1321,7 +1321,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-aterm"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "bytes",
  "harmonia-store-content-address",
@@ -1337,7 +1337,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-build-result"
 version = "3.2.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "harmonia-store-derivation",
  "num_enum",
@@ -1348,7 +1348,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-content-address"
 version = "3.2.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "derive_more",
  "harmonia-store-path",
@@ -1360,7 +1360,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-derivation"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "bytes",
  "data-encoding",
@@ -1379,7 +1379,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-path"
 version = "3.2.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "derive_more",
  "harmonia-utils-base-encoding",
@@ -1392,7 +1392,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-path-info"
 version = "3.2.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "harmonia-store-content-address",
  "harmonia-store-path",
@@ -1404,7 +1404,7 @@ dependencies = [
 [[package]]
 name = "harmonia-store-remote"
 version = "3.2.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "async-stream",
  "futures-core",
@@ -1424,7 +1424,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-base-encoding"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "data-encoding",
  "derive_more",
@@ -1434,7 +1434,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-hash"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "blake3",
  "data-encoding",
@@ -1451,7 +1451,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-io"
 version = "0.0.0-alpha.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "bytes",
  "futures-util",
@@ -1465,7 +1465,7 @@ dependencies = [
 [[package]]
 name = "harmonia-utils-signature"
 version = "3.2.0"
-source = "git+https://github.com/nix-community/harmonia.git#4ec14354eb77650607c529364256174e0b731323"
+source = "git+https://github.com/nix-community/harmonia.git#10a2228f94956fb568dfc799a1c918484bf33653"
 dependencies = [
  "data-encoding",
  "ed25519-dalek",
@@ -1507,9 +1507,9 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hermit-abi"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
+checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "hex"
@@ -1551,6 +1551,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-streams-core"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ac884fd4948c7cec1936078deb7a62aca84fea7232372432c8d11923ffa57a"
+dependencies = [
+ "bytes",
+ "futures",
+ "http",
+ "serde",
+ "serde_json",
+ "tokio-util",
+]
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1573,9 +1587,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "1.11.0"
+version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d22053281f852e11534f5198498373cbb59295120a20771d90f7ed1897490a72"
+checksum = "27b501faa50e7a26c3d3560ca625132f4078a17771f4810baf70475ae48cbe43"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -1745,9 +1759,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.14.0"
+version = "2.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
+checksum = "07aa2048142242915a31d35844fb311e0e53fcca590c3a0a40dcf1b841fa09eb"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
@@ -2882,14 +2896,15 @@ dependencies = [
 
 [[package]]
 name = "reqwest-streams"
-version = "0.17.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb5341f43189905b6ad1db3870a443424a5ae39a2ddab38123307ce98d43e7de"
+checksum = "fdbf120e6b680aa074664418b56931c0258a8385d2fac4284587b7db32c0d142"
 dependencies = [
  "async-trait",
  "bytes",
  "cargo-husky",
  "futures",
+ "http-streams-core",
  "reqwest",
  "serde",
  "serde_json",
@@ -3302,9 +3317,9 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "smallvec"
-version = "1.15.2"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
+checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
 
 [[package]]
 name = "socket2"
@@ -3442,7 +3457,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
