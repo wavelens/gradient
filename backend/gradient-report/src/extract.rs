@@ -36,10 +36,17 @@ pub fn write_rows(conn: &Connection, spec: &TableSpec, rows: &[Row]) -> Result<(
         .map(|i| format!("?{i}"))
         .collect::<Vec<_>>()
         .join(", ");
+    // Quoted throughout: `commit` is a reserved word in SQLite, and a column
+    // named `position` is one keyword away from the same problem.
+    let columns = spec
+        .columns
+        .iter()
+        .map(|c| format!("\"{c}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
     let sql = format!(
-        "INSERT INTO {} ({}) VALUES ({placeholders})",
-        spec.name,
-        spec.columns.join(", ")
+        "INSERT INTO \"{}\" ({columns}) VALUES ({placeholders})",
+        spec.name
     );
 
     let mut stmt = conn
@@ -102,25 +109,22 @@ pub async fn export_tables<C: ConnectionTrait>(
         let redacted: Vec<Row> = rows.iter().map(|r| redact_row(spec, redactor, r)).collect();
         write_rows(conn, spec, &redacted)?;
 
-        manifest.push(ManifestRow {
-            table: spec.name.to_owned(),
-            rows_included: redacted.len() as i64,
-            rows_available: redacted.len() as i64,
-            filter: "scoped to the evaluation".to_owned(),
-            redactions: redaction_summary(spec, redactor),
-        });
+        manifest.push(manifest_row(spec, redactor, redacted.len() as i64));
     }
 
     Ok(manifest)
 }
 
-/// A manifest entry for one exported table.
+/// A manifest entry for one exported table. Everything the scope selected is
+/// kept, so `rows_available` matching `rows_included` is the honest reading:
+/// a difference means rows were dropped, and only `build_log` drops any.
 pub fn manifest_row(spec: &TableSpec, redactor: &Redactor, rows: i64) -> ManifestRow {
     ManifestRow {
         table: spec.name.to_owned(),
         rows_included: rows,
         rows_available: rows,
-        filter: "scoped to the evaluation".to_owned(),
+        scope: spec.scope.to_owned(),
+        filter: "none".to_owned(),
         redactions: redaction_summary(spec, redactor),
     }
 }
@@ -194,6 +198,52 @@ mod tests {
             .query_row("SELECT status FROM evaluation", [], |r| r.get(0))
             .expect("status");
         assert_eq!(status, 7);
+    }
+
+    /// `commit` is a reserved word in SQLite: unquoted, the table cannot even be
+    /// created, let alone inserted into.
+    #[test]
+    fn a_table_named_after_a_reserved_word_round_trips() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let conn = open_report(&dir.path().join("r.db")).expect("open");
+        let spec = eval_scope_tables()
+            .iter()
+            .find(|s| s.name == "commit")
+            .expect("commit spec");
+
+        create_table(&conn, spec).expect("ddl");
+        write_rows(
+            &conn,
+            spec,
+            &[vec![
+                Some("01a05a38-3276-7252-bc05-c139d9c8a015".into()),
+                Some("dead".into()),
+                None,
+                Some("Ada".into()),
+                Some("fix the build".into()),
+            ]],
+        )
+        .expect("write");
+
+        let hash: String = conn
+            .query_row("SELECT hash FROM \"commit\"", [], |r| r.get(0))
+            .expect("hash");
+        assert_eq!(hash, "dead");
+    }
+
+    /// The manifest used to claim every table was "scoped to the evaluation",
+    /// including the anchor-scoped ones that carry other evaluations' rows.
+    #[test]
+    fn the_manifest_declares_each_table_s_own_scope() {
+        let anchored = eval_scope_tables()
+            .iter()
+            .find(|s| s.name == "build_attempt")
+            .expect("spec");
+        let row = manifest_row(anchored, &redactor(false, false), 7);
+
+        assert_eq!(row.scope, anchored.scope);
+        assert!(row.scope.contains("other evaluations"), "{}", row.scope);
+        assert_eq!(row.filter, "none", "nothing is dropped from the scope");
     }
 
     #[test]

@@ -51,8 +51,19 @@ extractor, so a table that later gains a secret column cannot start exporting
 it.
 
 The `report_manifest` table records, for every table included, how many rows it
-holds against how many existed and which filter was applied. A report generated
-without logs says so; it never looks like an evaluation that had none.
+holds against how many existed, what its scope selected and which filter was
+applied. A report generated without logs says so; it never looks like an
+evaluation that had none.
+
+Read the `scope` column before drawing conclusions from a count. Only the
+evaluation's own tables are the evaluation's alone: builds hang off
+`derivation_build` anchors that are shared with every other evaluation that
+built the same derivation, so `build_attempt`, `phase_event` and the
+`derivation*` tables carry rows made for other evaluations, and the file will
+show attempts older than the evaluation itself. `worker_registration` and
+`upstream_metric` describe the whole instance; `worker_connection` and
+`worker_sample` cover the workers that ran this evaluation, for as long as it
+ran.
 
 ## Reading one
 
@@ -61,6 +72,13 @@ The file is an ordinary SQLite database, so any client opens it:
 ```sh
 sqlite3 gradient-report-01a05a38-2026-09-01.db \
   "SELECT name, status FROM derivation_build JOIN derivation ON derivation.id = derivation_build.derivation"
+```
+
+`commit` is a reserved word in SQLite, so the revision table needs quoting:
+
+```sh
+sqlite3 gradient-report-01a05a38-2026-09-01.db \
+  'SELECT hash, author_name, message FROM "commit"'
 ```
 
 The inspector adds curated views over the same file. It is called

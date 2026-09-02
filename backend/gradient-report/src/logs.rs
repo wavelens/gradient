@@ -121,6 +121,9 @@ pub fn write_failed_logs(
         table: "build_log".to_owned(),
         rows_included: logs.entries.len() as i64,
         rows_available: logs.attempts_available,
+        scope:
+            "the evaluation's build anchors, so attempts made for other evaluations are included"
+                .to_owned(),
         filter: "failed attempts only".to_owned(),
         redactions: redactor.log_redactions(),
     })

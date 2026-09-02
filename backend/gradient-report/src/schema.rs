@@ -13,7 +13,7 @@ use rusqlite::Connection;
 
 /// Bumped whenever an exported table's shape changes, so an inspector can
 /// refuse a file it does not understand rather than print wrong answers.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {
@@ -27,6 +27,10 @@ pub struct ManifestRow {
     pub table: String,
     pub rows_included: i64,
     pub rows_available: i64,
+    /// What the table's `$1` selected. Not always the evaluation: several tables
+    /// hang off anchors it shares with other evaluations.
+    pub scope: String,
+    /// What was dropped from that scope, or `none`.
     pub filter: String,
     pub redactions: String,
 }
@@ -51,6 +55,7 @@ pub fn open_report(path: &Path) -> Result<Connection> {
             "table" TEXT NOT NULL PRIMARY KEY,
             rows_included INTEGER NOT NULL,
             rows_available INTEGER NOT NULL,
+            scope TEXT NOT NULL,
             filter TEXT NOT NULL,
             redactions TEXT NOT NULL
         );
@@ -81,11 +86,12 @@ pub fn write_meta(conn: &Connection, evaluation: &str, opts: &ReportOptions) -> 
 pub fn write_manifest(conn: &Connection, rows: &[ManifestRow]) -> Result<()> {
     for row in rows {
         conn.execute(
-            "INSERT OR REPLACE INTO report_manifest VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT OR REPLACE INTO report_manifest VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
                 row.table,
                 row.rows_included,
                 row.rows_available,
+                row.scope,
                 row.filter,
                 row.redactions
             ],
@@ -140,6 +146,7 @@ mod tests {
                 table: "build_log".into(),
                 rows_included: 3,
                 rows_available: 8805,
+                scope: "the evaluation's build anchors".into(),
                 filter: "failed attempts only".into(),
                 redactions: "none".into(),
             }],

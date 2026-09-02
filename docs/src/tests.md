@@ -7691,3 +7691,51 @@ One case stays uncovered by design: a worker at full capacity requests no jobs,
 so its heartbeat sends nothing and cannot detect the stall. It finds out when
 the running job finishes and `on_job_done` fails - which is the moment the
 result would have been lost anyway.
+
+## The report described itself wrongly, and lost the parts that explain a build
+
+Auditing a real report turned up five defects in what the file says and carries.
+
+The manifest claimed `scoped to the evaluation` for all twenty tables. Only six
+are: builds hang off `derivation_build` anchors shared with every evaluation
+that built the same derivation, so `build_attempt`, `phase_event` and the
+`derivation*` and `cached_path*` tables carry other evaluations' rows (a Sep 2
+report held attempts from Aug 31), while `worker_registration` and
+`upstream_metric` are instance-wide. `TableSpec` now declares its own `scope`,
+the manifest has a `scope` column beside `filter` (now `none` unless something
+really was dropped), and `SCHEMA_VERSION` is 2.
+
+`phase_event` matched `subject_id IN (SELECT id FROM build_job ...)`, but build
+phase events are recorded against the anchor (`derivation_build_status.rs:123`,
+`abort.rs:153`), so a 327-build report carried six events, all from the
+evaluation itself, and no build timing at all.
+
+`evaluation.commit` is a foreign key and no commit table was exported, so a
+report named the repository but never the revision. The `commit` table now
+ships, hash hex-encoded; its author columns pseudonymise as identities and its
+message takes the free-text treatment build logs get.
+
+`worker_connection` and `worker_sample` were scoped by project, and a
+connection is attributed to whichever project registered the worker first
+(`worker_lifecycle.rs:113`), so a worker shared across projects logged its
+history elsewhere and the section came back empty while two workers were
+running the evaluation's jobs. They now follow the workers that ran it, bounded
+to the evaluation's own window.
+
+`backend/gradient-report/src/tables.rs`:
+- `build_phase_events_hang_off_the_anchor_not_the_build_job` - the join that
+  silently emptied the table.
+- `the_commit_is_exported_and_its_hash_is_readable` - a bytea hash has to be hex
+  to be greppable.
+- `a_commit_message_is_redacted_against_the_minted_pseudonyms` - the message is
+  free text, so a column rule would not have been enough.
+- `worker_history_follows_the_workers_that_ran_the_evaluation` - pins the scope
+  away from `project = $1`.
+- `every_spec_is_scoped_and_internally_consistent` also requires a non-empty
+  `scope`, so a new table cannot join the export undeclared.
+
+`backend/gradient-report/src/extract.rs`:
+- `a_table_named_after_a_reserved_word_round_trips` - `commit` is reserved in
+  SQLite, so the generated DDL and INSERT quote every identifier.
+- `the_manifest_declares_each_table_s_own_scope` - the manifest carries the
+  spec's scope and stops hardcoding one sentence for every table.
