@@ -113,7 +113,7 @@ pub async fn generate_report<C: ConnectionTrait>(
         }
 
         if let Some(logs) = logs {
-            manifest.push(write_failed_logs(&conn, &logs)?);
+            manifest.push(write_failed_logs(&conn, &redactor, &logs)?);
         }
 
         write_manifest(&conn, &manifest)?;

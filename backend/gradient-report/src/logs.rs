@@ -16,6 +16,7 @@ use gradient_storage::LogStorage;
 use rusqlite::Connection;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
+use crate::redact::Redactor;
 use crate::schema::ManifestRow;
 
 /// Attempts that did not succeed: `AttemptOutcome::Failed` is 3 and `Aborted`
@@ -38,10 +39,17 @@ pub fn create_log_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-pub fn insert_log(conn: &Connection, attempt: &str, log: &str) -> Result<()> {
+/// A log is free text carrying whatever the builder printed, so redaction runs
+/// here rather than at the call site: no caller can write one unredacted.
+pub fn insert_log(
+    conn: &Connection,
+    redactor: &Redactor,
+    attempt: &str,
+    log: &str,
+) -> Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO build_log VALUES (?1, ?2)",
-        rusqlite::params![attempt, log],
+        rusqlite::params![attempt, redactor.text(log)],
     )
     .context("insert build_log")?;
     Ok(())
@@ -103,10 +111,14 @@ pub async fn fetch_failed_logs<C: ConnectionTrait>(
     })
 }
 
-pub fn write_failed_logs(conn: &Connection, logs: &FetchedLogs) -> Result<ManifestRow> {
+pub fn write_failed_logs(
+    conn: &Connection,
+    redactor: &Redactor,
+    logs: &FetchedLogs,
+) -> Result<ManifestRow> {
     create_log_table(conn)?;
     for (attempt, text) in &logs.entries {
-        insert_log(conn, attempt, text)?;
+        insert_log(conn, redactor, attempt, text)?;
     }
 
     Ok(ManifestRow {
@@ -114,14 +126,32 @@ pub fn write_failed_logs(conn: &Connection, logs: &FetchedLogs) -> Result<Manife
         rows_included: logs.entries.len() as i64,
         rows_available: logs.attempts_available,
         filter: "failed attempts only".to_owned(),
-        redactions: "none".to_owned(),
+        redactions: redactor.log_redactions(),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schema::open_report;
+    use crate::schema::{ReportOptions, open_report};
+
+    fn redactor(identities: bool, packages: bool) -> Redactor {
+        Redactor::new(ReportOptions {
+            anonymize_identities: identities,
+            anonymize_packages: packages,
+            include_logs: true,
+            include_instance: true,
+        })
+    }
+
+    fn stored_log(conn: &Connection) -> String {
+        conn.query_row(
+            "SELECT log FROM build_log WHERE build_attempt = '0199-attempt'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("log")
+    }
 
     /// Logs are plain text so any SQLite client can read one, which is the
     /// whole reason the report is a real database rather than an archive.
@@ -132,19 +162,41 @@ mod tests {
         create_log_table(&conn).expect("ddl");
         insert_log(
             &conn,
+            &redactor(false, false),
             "0199-attempt",
             "error: builder failed with exit code 1",
         )
         .expect("insert");
 
-        let text: String = conn
-            .query_row(
-                "SELECT log FROM build_log WHERE build_attempt = '0199-attempt'",
-                [],
-                |r| r.get(0),
-            )
-            .expect("log");
-        assert_eq!(text, "error: builder failed with exit code 1");
+        assert_eq!(stored_log(&conn), "error: builder failed with exit code 1");
+    }
+
+    /// Redaction lives inside the insert, so a caller that forgets cannot write
+    /// an unredacted log. The hash half survives, as it does in every column.
+    #[test]
+    fn a_log_is_redacted_on_the_way_in() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let conn = open_report(&dir.path().join("r.db")).expect("open");
+        create_log_table(&conn).expect("ddl");
+        let r = redactor(true, true);
+        r.identity("git@example.invalid:acme/infra.git", "repo");
+
+        insert_log(
+            &conn,
+            &r,
+            "0199-attempt",
+            "error: building /nix/store/2s7ijz3qblblfb903r4spy3pvd7ag35f-clap_complete-4.6.9 \
+             for git@example.invalid:acme/infra.git",
+        )
+        .expect("insert");
+
+        let text = stored_log(&conn);
+        assert!(!text.contains("clap_complete"), "{text}");
+        assert!(!text.contains("acme/infra"), "{text}");
+        assert!(
+            text.contains("2s7ijz3qblblfb903r4spy3pvd7ag35f"),
+            "the hash is what a cache check needs: {text}"
+        );
     }
 
     /// Successful attempts are the filtered-out case, so the query has to say

@@ -13,6 +13,12 @@ use sha2::{Digest as _, Sha256};
 
 use crate::schema::ReportOptions;
 
+const STORE_PREFIX: &str = "/nix/store/";
+
+fn is_store_name_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+' | '?' | '=')
+}
+
 /// Maps identifying strings to tokens. The salt is random per report and never
 /// written to the file, so tokens correlate within one report and not across
 /// two of the same instance.
@@ -81,6 +87,68 @@ impl Redactor {
             Some((hash, name)) => format!("/nix/store/{hash}-{}", self.package(name)),
             None => path.to_owned(),
         }
+    }
+
+    /// Free text names the same things the columns do, so a log is redacted
+    /// against every pseudonym this report has already minted, plus any store
+    /// path it happens to name. Longest original first, so a shorter one that
+    /// is a prefix of another cannot clip it.
+    pub fn text(&self, text: &str) -> String {
+        let mut out = self.redact_store_paths(text);
+        for (original, token) in self.minted() {
+            out = out.replace(&original, &token);
+        }
+
+        out
+    }
+
+    /// What [`Redactor::text`] will actually do, for the manifest to declare.
+    pub fn log_redactions(&self) -> String {
+        match (self.opts.anonymize_identities, self.opts.anonymize_packages) {
+            (false, false) => "none".to_owned(),
+            (_, true) => "known identifiers, store paths".to_owned(),
+            (true, false) => "known identifiers".to_owned(),
+        }
+    }
+
+    /// Every original this report has pseudonymised, paired with its token,
+    /// longest first.
+    fn minted(&self) -> Vec<(String, String)> {
+        let mut pairs: Vec<(String, String)> = {
+            let guard = self.seen.lock().expect("redactor mutex");
+            guard
+                .iter()
+                .filter_map(|(key, token)| {
+                    key.split_once('\u{1f}')
+                        .map(|(_, original)| (original.to_owned(), token.clone()))
+                })
+                .collect()
+        };
+        pairs.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| a.0.cmp(&b.0)));
+        pairs
+    }
+
+    /// A log names store paths no exported column mentions - a builder, a
+    /// transitive dependency - so those are rewritten structurally rather than
+    /// by lookup, keeping the hash exactly as the column policy does.
+    fn redact_store_paths(&self, text: &str) -> String {
+        if !self.opts.anonymize_packages {
+            return text.to_owned();
+        }
+
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(at) = rest.find(STORE_PREFIX) {
+            out.push_str(&rest[..at]);
+            let tail = &rest[at..];
+            let end = tail[STORE_PREFIX.len()..]
+                .find(|c: char| !is_store_name_char(c))
+                .map_or(tail.len(), |i| STORE_PREFIX.len() + i);
+            out.push_str(&self.store_path(&tail[..end]));
+            rest = &tail[end..];
+        }
+        out.push_str(rest);
+        out
     }
 
     /// Space-separated store paths, as `derivation_output.references_list`

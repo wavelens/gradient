@@ -7537,3 +7537,21 @@ unrepresentable rather than merely unrouted.
 `frontend/src/app/features/tasks/task-detail/task-detail.component.spec.ts`:
 - `hides the diagnostic report from anonymous visitors` - the menu entry is
   absent when logged out, rather than present and guaranteed to 403.
+
+## An anonymized report redacts build logs too
+
+`gradient-report/src/guarantee.rs`: `an_anonymized_report_contains_no_original_identifier`
+and `packages_can_be_kept_while_identities_are_hidden` failed on the repository
+URL. Rows were redacted column by column, but `write_failed_logs` passed log
+text straight to `insert_log` and the manifest declared `redactions: none`, so
+every identifier a builder happened to print survived anonymisation. Redaction
+now runs inside `insert_log`, where no caller can skip it: free text is rewritten
+against every pseudonym the report has already minted, longest original first,
+and any `/nix/store` path is rewritten structurally so a log can name one no
+exported column mentions. The hash half survives, as it does in every column.
+
+`backend/gradient-report/src/logs.rs`:
+- `a_log_is_redacted_on_the_way_in` - the package name and repository URL are
+  gone from the stored text while the store hash remains.
+- `log_table_stores_readable_text` - with anonymisation off the text still round
+  trips verbatim, so the above proves redaction rather than mangling.

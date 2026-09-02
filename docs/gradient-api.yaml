@@ -3139,6 +3139,8 @@ paths:
 
         Anonymisation replaces identifying strings with tokens derived from a
         per-report salt, stable within one file and uncorrelatable across two.
+        Build logs are rewritten against those same tokens, plus any store path
+        they name, so a log cannot reintroduce what the columns redacted.
         Nix store hashes are always preserved: they are one-way, and they are
         what makes an upstream cache check possible.
       operationId: getEvaluationReport

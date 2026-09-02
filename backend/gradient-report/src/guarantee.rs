@@ -85,6 +85,7 @@ mod tests {
         create_log_table(conn).expect("log ddl");
         insert_log(
             conn,
+            redactor,
             "0199-attempt",
             &format!("error: while building {STORE_PATH} for {REPO}"),
         )
