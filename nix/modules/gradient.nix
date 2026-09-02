@@ -186,7 +186,10 @@ in {
       databaseUrl = lib.mkOption {
         description = "URL of the database to use";
         type = lib.types.str;
-        default = "postgresql://localhost/gradient?host=/run/postgresql";
+        # Peer auth on the local socket demands the role match the unit's system
+        # user, and sqlx no longer infers one from the process: with no user in
+        # the URL it asks whoami, which answers "anonymous" under systemd.
+        default = "postgresql://gradient@localhost/gradient?host=/run/postgresql";
       };
 
       databaseUrlFile = lib.mkOption {

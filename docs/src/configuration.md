@@ -44,6 +44,7 @@ openssl rand -base64 48 > /run/secrets/gradient-crypt
 | `jwtSecretFile` | - | Path to JWT secret file (required) |
 | `cryptSecretFile` | - | Path to encryption secret file (required) |
 | `metricsTokenFile` | `null` | When set, enables `GET /metrics` (Prometheus exposition). The file's contents must be presented as `Authorization: Bearer <token>` by scrapers. When `null`, the endpoint returns 404. |
+| `databaseUrl` | `postgresql://gradient@localhost/gradient?host=/run/postgresql` | PostgreSQL connection string. The role must be named explicitly: the local socket authenticates by peer, so it has to match the service's system user. |
 | `databaseUrlFile` | auto | Override the PostgreSQL connection string file |
 | `databaseMaxConnections` | `32` | Max connections in the scheduler / worker pool (`GRADIENT_DATABASE_MAX_CONNECTIONS`). Total per process is `databaseMaxConnections + databaseWebMaxConnections + databaseCacheMaxConnections`; raise only if Postgres `max_connections` has headroom. |
 | `databaseMinConnections` | `2` | Min connections kept warm in the scheduler / worker pool (`GRADIENT_DATABASE_MIN_CONNECTIONS`). |
