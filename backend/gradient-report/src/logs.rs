@@ -41,12 +41,7 @@ pub fn create_log_table(conn: &Connection) -> Result<()> {
 
 /// A log is free text carrying whatever the builder printed, so redaction runs
 /// here rather than at the call site: no caller can write one unredacted.
-pub fn insert_log(
-    conn: &Connection,
-    redactor: &Redactor,
-    attempt: &str,
-    log: &str,
-) -> Result<()> {
+pub fn insert_log(conn: &Connection, redactor: &Redactor, attempt: &str, log: &str) -> Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO build_log VALUES (?1, ?2)",
         rusqlite::params![attempt, redactor.text(log)],
