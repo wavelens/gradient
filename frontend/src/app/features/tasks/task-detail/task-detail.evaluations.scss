@@ -220,4 +220,5 @@ h1 { font-size: $font-size-xxl; margin: 0; }
   &.error { color: var(--err); border-color: color-mix(in srgb, var(--err) 32%, transparent); }
 }
 
+.report-note { color: var(--gr-status-danger); font-size: $font-size-sm; margin: $spacing-sm 0 0; }
 .report-options { display: flex; flex-direction: column; gap: $spacing-sm; margin-top: $spacing-md; }
