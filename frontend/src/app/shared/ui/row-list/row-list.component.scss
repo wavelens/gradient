@@ -6,11 +6,10 @@
 
 @use '../../../styles/variables' as *;
 
+// The list itself draws nothing: one outer box around rows that already have
+// their own edges reads as a box in a box, so each row is its own card.
 :host {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--gr-border-subtle);
-  border-radius: $border-radius-md;
-  box-shadow: var(--gr-shadow-raised);
-  overflow: hidden;
+  gap: $spacing-md;
 }

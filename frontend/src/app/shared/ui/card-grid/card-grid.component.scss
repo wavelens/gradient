@@ -8,6 +8,6 @@
 
 :host {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--gr-card-min, 280px), 1fr));
-  gap: $spacing-md;
+  grid-template-columns: repeat(auto-fit, minmax(var(--gr-card-min, 400px), 1fr));
+  gap: $spacing-lg;
 }

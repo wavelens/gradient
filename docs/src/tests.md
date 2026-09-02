@@ -7555,3 +7555,29 @@ exported column mentions. The hash half survives, as it does in every column.
   gone from the stored text while the store hash remains.
 - `log_table_stores_readable_text` - with anonymisation off the text still round
   trips verbatim, so the above proves redaction rather than mangling.
+
+## One list shape, and index cards at one size
+
+The task grid on a project page was a private copy of `gr-nav-card` that had
+drifted larger than the shared one, so the project index and the task index
+never matched. The larger spec won: `gr-nav-card` carries it (56px icon,
+`$font-size-lg` title, lift-on-hover with `--gr-shadow-overlay` instead of a
+hardcoded dark-only shadow) and the project page consumes the primitive, so
+one definition now serves both grids.
+
+`gr-row-list` drew one box around rows that already paint their own surface,
+which read as a box in a box on Workers and Cache Subscriptions, and worse
+inside a `gr-settings-section` card on Integrations. Rows are now separate
+cards on the trigger/action row spec (`$spacing-md $spacing-lg`,
+`--gr-border-subtle`, `$border-radius-md`, `$spacing-md` between them) and the
+list itself paints nothing.
+
+`frontend/src/app/shared/ui/card-grid/card-grid.component.spec.ts`:
+- `defaults the track size` - pins the 400px nav-card column, the width every
+  index page inherits.
+
+`frontend/src/app/features/projects/cache-subscriptions/cache-subscriptions.component.spec.ts`:
+- `opens the cache through its own button rather than the whole row` - the row
+  carried a whole-row link *and* an Unsubscribe button, so the destructive
+  action sat inside its own navigation target. Navigation is now an explicit
+  arrow button beside Unsubscribe, and the row is no longer a link.

@@ -70,3 +70,15 @@ describe('CacheSubscriptionsComponent - access gating', () => {
     expect(btn!.disabled).toBe(true);
   });
 });
+
+describe('CacheSubscriptionsComponent - row actions', () => {
+  it('opens the cache through its own button rather than the whole row', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.querySelector('.row.is-link')).toBeNull();
+    const open = root.querySelector('.row-actions a') as HTMLAnchorElement | null;
+    expect(open?.getAttribute('href')).toBe('/caches/shared');
+    expect(findByText(root, 'unsubscribe')).not.toBeNull();
+  });
+});

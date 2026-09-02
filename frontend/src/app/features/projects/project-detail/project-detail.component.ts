@@ -15,6 +15,7 @@ import { ProjectsService } from '@core/services/projects.service';
 import { TasksService } from '@core/services/tasks.service';
 import {
   ButtonComponent,
+  CardGridComponent,
   DialogComponent,
   EmptyStateComponent,
   EvalStatusBadgeComponent,
@@ -24,6 +25,7 @@ import {
   LabelHelpComponent,
   LoadingSpinnerComponent,
   NameFieldComponent,
+  NavCardComponent,
   PageLayoutComponent,
 } from '@shared/ui';
 import { slugify } from '@shared/text';
@@ -47,6 +49,8 @@ const RESERVED_TASK_NAMES = ['build-request'];
     LabelHelpComponent,
     EvalStatusBadgeComponent,
     IconComponent,
+    CardGridComponent,
+    NavCardComponent,
     PageLayoutComponent,
     FormFieldComponent,
     NameFieldComponent,

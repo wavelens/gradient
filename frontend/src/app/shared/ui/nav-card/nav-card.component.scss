@@ -22,12 +22,14 @@
   box-shadow: var(--gr-shadow-raised);
   color: var(--gr-text-primary);
   text-decoration: none;
-  transition: border-color $transition-fast, background-color $transition-fast;
+  transition: $transition-base;
 
   &:hover {
-    background: var(--gr-surface-hover);
-    border-color: var(--gr-border);
-    border-radius: $border-radius-md;
+    border-color: var(--gr-text-secondary);
+    transform: translateY(-2px);
+    box-shadow: var(--gr-shadow-overlay);
+
+    .nav-card__arrow { transform: translateX(4px); }
   }
 
   // A muted card drops emphasis, not legibility.
@@ -39,11 +41,11 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   border-radius: $border-radius-md;
   background: var(--gr-surface-sunken);
-  color: var(--gr-text-secondary);
+  color: var(--gr-text-primary);
 }
 
 .nav-card__body {
@@ -53,8 +55,11 @@
 
 .nav-card__title {
   margin: 0;
-  font-size: $font-size-md;
+  font-size: $font-size-lg;
   line-height: $line-height-tight;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-card__description {
@@ -69,15 +74,23 @@
 .nav-card__meta {
   display: flex;
   align-items: center;
-  gap: $spacing-sm;
+  gap: $spacing-md;
   margin-top: $spacing-sm;
-  color: var(--gr-text-secondary);
-  font-size: $font-size-sm;
+  color: var(--gr-text-muted);
+  font-size: $font-size-xs;
 
   &:empty { display: none; }
 }
 
 .nav-card__arrow {
   flex-shrink: 0;
-  color: var(--gr-text-muted);
+  color: var(--gr-text-secondary);
+  transition: $transition-base;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-card,
+  .nav-card__arrow { transition: none; }
+
+  .nav-card:hover { transform: none; }
 }

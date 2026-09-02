@@ -35,6 +35,6 @@ describe('gr-card-grid', () => {
     const fixture = TestBed.createComponent(CardGridComponent);
     fixture.detectChanges();
     await fixture.whenStable();
-    expect((fixture.nativeElement as HTMLElement).style.getPropertyValue('--gr-card-min')).toBe('280px');
+    expect((fixture.nativeElement as HTMLElement).style.getPropertyValue('--gr-card-min')).toBe('400px');
   });
 });

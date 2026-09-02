@@ -18,27 +18,22 @@
   @if (tasks().length > 0) {
     <div class="section">
       <h2>Tasks</h2>
-      <div class="task-grid">
+      <gr-card-grid>
         @for (task of tasks(); track task.id) {
-          <a [routerLink]="['/project', projectName, 'task', task.name]" class="task-card">
-            <div class="task-icon">
-              <gr-icon name="folder" size="xl" />
+          <gr-nav-card
+            icon="folder"
+            [title]="task.display_name || task.name"
+            [description]="task.description || 'No description'"
+            [link]="['/project', projectName, 'task', task.name]"
+          >
+            <div slot="meta">
+              @if (task.last_evaluation_status) {
+                <gr-eval-status-badge [status]="task.last_evaluation_status" />
+              }
             </div>
-            <div class="task-content">
-              <h3>{{ task.display_name || task.name }}</h3>
-              <p class="text-secondary">{{ task.description || 'No description' }}</p>
-              <div class="task-meta">
-                @if (task.last_evaluation_status) {
-                  <gr-eval-status-badge [status]="task.last_evaluation_status" />
-                }
-              </div>
-            </div>
-            <div class="task-arrow">
-              <gr-icon name="arrow_forward" />
-            </div>
-          </a>
+          </gr-nav-card>
         }
-      </div>
+      </gr-card-grid>
     </div>
   }
 

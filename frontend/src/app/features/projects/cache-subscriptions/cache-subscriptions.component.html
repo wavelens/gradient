@@ -30,15 +30,25 @@
     } @else {
       <gr-row-list>
         @for (cache of caches(); track cache.id) {
-          <gr-row icon="storage" [link]="['/caches', cache.name]" [linkLabel]="cache.name">
+          <gr-row icon="storage">
             {{ cache.name }}
             <div slot="actions">
+              <a
+                grButton
+                icon="arrow_forward"
+                severity="secondary"
+                size="small"
+                [routerLink]="['/caches', cache.name]"
+                [attr.aria-label]="'Open cache ' + cache.name"
+                grTooltip="Open cache"
+              ></a>
               <button
                 *appWritable="access()"
                 grButton
                 label="Unsubscribe"
                 icon="close"
                 severity="danger"
+                size="small"
                 [loading]="unsubscribingId() === cache.id"
                 [disabled]="unsubscribingId() !== null"
                 [appManagedDisable]="access()"

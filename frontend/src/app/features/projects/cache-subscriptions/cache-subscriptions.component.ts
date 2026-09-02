@@ -22,6 +22,7 @@ import {
   PageLayoutComponent,
   RowComponent,
   RowListComponent,
+  TooltipDirective,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { AccessState } from '@core/models';
@@ -45,6 +46,7 @@ import { AccessState } from '@core/models';
     EmptyStateComponent,
     RowListComponent,
     RowComponent,
+    TooltipDirective,
   ],
   templateUrl: './cache-subscriptions.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,

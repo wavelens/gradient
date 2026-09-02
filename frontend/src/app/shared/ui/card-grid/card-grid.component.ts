@@ -15,5 +15,5 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
   styleUrl: './card-grid.component.scss',
 })
 export class CardGridComponent {
-  min = input<string>('280px');
+  min = input<string>('400px');
 }

@@ -39,7 +39,7 @@
       </gr-settings-section>
     }
 
-    <gr-settings-section title="Configured Integrations" maxWidth="none">
+    <gr-settings-section title="Configured Integrations" [card]="false" maxWidth="none">
       @if (integrations().length === 0) {
         <gr-empty-state icon="hub" title="No integrations" message="Create an inbound integration to receive forge webhooks, or an outbound integration to report build statuses.">
           <button slot="action"
