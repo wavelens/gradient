@@ -14,6 +14,7 @@ use anyhow::{Context as _, Result};
 use gradient_entity::ids::BuildAttemptId;
 use gradient_storage::LogStorage;
 use rusqlite::Connection;
+use sea_orm::prelude::Uuid;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
 use crate::redact::Redactor;
@@ -61,13 +62,13 @@ pub struct FetchedLogs {
 pub async fn fetch_failed_logs<C: ConnectionTrait>(
     db: &C,
     logs: &dyn LogStorage,
-    evaluation: &str,
+    evaluation: Uuid,
 ) -> Result<FetchedLogs> {
     let failed = db
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             FAILED_ATTEMPT_SQL,
-            [sea_orm::Value::from(evaluation)],
+            [sea_orm::Value::Uuid(Some(evaluation))],
         ))
         .await
         .context("query failed attempts")?;
@@ -92,7 +93,7 @@ pub async fn fetch_failed_logs<C: ConnectionTrait>(
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             ALL_ATTEMPT_SQL,
-            [sea_orm::Value::from(evaluation)],
+            [sea_orm::Value::Uuid(Some(evaluation))],
         ))
         .await
         .context("count attempts")?

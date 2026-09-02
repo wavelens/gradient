@@ -21,7 +21,9 @@ mod schema;
 mod tables;
 
 pub use config_snapshot::write_config_snapshot;
-pub use extract::{create_table, export_tables, fetch_rows, manifest_row, redact_row, write_rows};
+pub use extract::{
+    create_table, export_tables, fetch_rows, manifest_row, redact_row, scope_statement, write_rows,
+};
 pub use logs::{FetchedLogs, create_log_table, fetch_failed_logs, insert_log, write_failed_logs};
 pub use redact::Redactor;
 pub use schema::{
@@ -35,6 +37,7 @@ use anyhow::Result;
 use gradient_storage::LogStorage;
 use gradient_types::{EvalArgs, ProtoArgs, S3Config, StorageArgs};
 use sea_orm::ConnectionTrait;
+use sea_orm::prelude::Uuid;
 
 /// Everything the generator needs that is not the database or the options.
 pub struct ReportContext<'a> {
@@ -52,13 +55,14 @@ pub struct ReportContext<'a> {
 /// handler future non-`Send`. Splitting the phases is what the pure `write_rows`
 /// half was for.
 ///
-/// `evaluation` and `project` are strings because every exported query casts to
-/// text; they are the only two scopes the specs take.
+/// `evaluation` and `project` are the only two scopes the specs take, and they
+/// are bound as uuids: Postgres has no `uuid = text` operator, so passing their
+/// text form fails every scoped query rather than matching nothing.
 pub async fn generate_report<C: ConnectionTrait>(
     db: &C,
     ctx: &ReportContext<'_>,
-    evaluation: &str,
-    project: &str,
+    evaluation: Uuid,
+    project: Uuid,
     opts: ReportOptions,
     out: &Path,
 ) -> Result<()> {
@@ -80,7 +84,7 @@ pub async fn generate_report<C: ConnectionTrait>(
     };
 
     let path: PathBuf = out.to_path_buf();
-    let evaluation = evaluation.to_owned();
+    let evaluation = evaluation.to_string();
     let eval_args = ctx.eval_args.clone();
     let proto_args = ctx.proto_args.clone();
     let storage_args = ctx.storage_args.clone();

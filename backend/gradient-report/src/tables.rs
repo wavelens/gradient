@@ -358,7 +358,7 @@ pub fn instance_tables() -> &'static [TableSpec] {
         spec!(
             "worker_connection",
             "CREATE TABLE worker_connection (id TEXT, worker_id TEXT, project TEXT, display_name TEXT, connected_at TEXT, disconnected_at TEXT, capabilities TEXT, reason INTEGER)",
-            "SELECT id::text, worker_id::text, project::text, display_name::text, connected_at::text, disconnected_at::text, capabilities::text, reason::text FROM worker_connection WHERE project = $1::uuid",
+            "SELECT id::text, worker_id::text, project::text, display_name::text, connected_at::text, disconnected_at::text, capabilities::text, reason::text FROM worker_connection WHERE project = $1",
             [
                 "id",
                 "worker_id",
@@ -373,7 +373,7 @@ pub fn instance_tables() -> &'static [TableSpec] {
         spec!(
             "worker_sample",
             "CREATE TABLE worker_sample (id TEXT, worker_id TEXT, project TEXT, at TEXT, cpu_usage_pct REAL, ram_free_mb INTEGER, ram_total_mb INTEGER, disk_speed_mbps REAL, network_speed_mbps REAL, assigned_jobs INTEGER, max_concurrent_builds INTEGER, state INTEGER, capabilities TEXT)",
-            "SELECT id::text, worker_id::text, project::text, at::text, cpu_usage_pct::text, ram_free_mb::text, ram_total_mb::text, disk_speed_mbps::text, network_speed_mbps::text, assigned_jobs::text, max_concurrent_builds::text, state::text, capabilities::text FROM worker_sample WHERE project = $1::uuid AND at > (now() AT TIME ZONE \'UTC\') - interval \'7 days\'",
+            "SELECT id::text, worker_id::text, project::text, at::text, cpu_usage_pct::text, ram_free_mb::text, ram_total_mb::text, disk_speed_mbps::text, network_speed_mbps::text, assigned_jobs::text, max_concurrent_builds::text, state::text, capabilities::text FROM worker_sample WHERE project = $1 AND at > (now() AT TIME ZONE \'UTC\') - interval \'7 days\'",
             [
                 "id",
                 "worker_id",
@@ -393,7 +393,7 @@ pub fn instance_tables() -> &'static [TableSpec] {
         spec!(
             "cache_upstream",
             "CREATE TABLE cache_upstream (id TEXT, cache TEXT, display_name TEXT, mode INTEGER, upstream_cache TEXT, url TEXT, public_key TEXT, kind INTEGER, remote_cache_name TEXT)",
-            "SELECT u.id::text, u.cache::text, u.display_name::text, u.mode::text, u.upstream_cache::text, u.url::text, u.public_key::text, u.kind::text, u.remote_cache_name::text FROM cache_upstream u WHERE u.cache IN (SELECT cache FROM project_cache WHERE project = $1::uuid)",
+            "SELECT u.id::text, u.cache::text, u.display_name::text, u.mode::text, u.upstream_cache::text, u.url::text, u.public_key::text, u.kind::text, u.remote_cache_name::text FROM cache_upstream u WHERE u.cache IN (SELECT cache FROM project_cache WHERE project = $1)",
             [
                 "id",
                 "cache",

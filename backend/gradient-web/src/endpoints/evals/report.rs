@@ -99,8 +99,8 @@ pub async fn get_evaluation_report(
     generate_report(
         &state.web_db,
         &report_ctx,
-        &evaluation_id.to_string(),
-        &ctx.project_id.to_string(),
+        evaluation_id.into_inner(),
+        ctx.project_id.into_inner(),
         opts,
         file.path(),
     )

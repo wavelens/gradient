@@ -10,6 +10,7 @@
 
 use anyhow::{Context as _, Result};
 use rusqlite::Connection;
+use sea_orm::prelude::Uuid;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
 use crate::redact::Redactor;
@@ -52,19 +53,26 @@ pub fn write_rows(conn: &Connection, spec: &TableSpec, rows: &[Row]) -> Result<(
     Ok(())
 }
 
+/// Every spec is scoped by one id. Bound as a uuid rather than its text form:
+/// Postgres has no `uuid = text` operator, so a stringly-typed scope fails the
+/// whole export with `42883` instead of matching nothing.
+pub fn scope_statement(spec: &TableSpec, scope: Uuid) -> Statement {
+    Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        spec.sql,
+        [sea_orm::Value::Uuid(Some(scope))],
+    )
+}
+
 /// Run one spec's query and hand back its rows as text. The only part that
 /// needs a database.
 pub async fn fetch_rows<C: ConnectionTrait>(
     db: &C,
     spec: &TableSpec,
-    scope: &str,
+    scope: Uuid,
 ) -> Result<Vec<Row>> {
     let results = db
-        .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            spec.sql,
-            [sea_orm::Value::from(scope)],
-        ))
+        .query_all_raw(scope_statement(spec, scope))
         .await
         .with_context(|| format!("query rows for {}", spec.name))?;
 
@@ -84,7 +92,7 @@ pub async fn export_tables<C: ConnectionTrait>(
     db: &C,
     conn: &Connection,
     specs: &[TableSpec],
-    scope: &str,
+    scope: Uuid,
     redactor: &Redactor,
 ) -> Result<Vec<ManifestRow>> {
     let mut manifest = Vec::with_capacity(specs.len());
@@ -203,6 +211,27 @@ mod tests {
                 .unwrap_or_default()
                 .contains("supersandro")
         );
+    }
+
+    /// Postgres has no `uuid = text` operator, so binding the scope as its text
+    /// form fails every scoped query with `42883` rather than matching nothing.
+    /// The typed parameter is the fix; this pins it at the wire.
+    #[test]
+    fn the_scope_is_bound_as_a_uuid_not_its_text_form() {
+        let id = Uuid::now_v7();
+        let stmt = scope_statement(spec("evaluation"), id);
+        let values = stmt.values.expect("the scope is bound").0;
+
+        assert_eq!(values, vec![sea_orm::Value::Uuid(Some(id))]);
+    }
+
+    /// Casting the parameter instead would work too, and did for three of the
+    /// specs, which is exactly how the other sixteen went unnoticed.
+    #[test]
+    fn no_spec_carries_a_leftover_scope_cast() {
+        for spec in eval_scope_tables() {
+            assert!(!spec.sql.contains("$1::"), "{}", spec.name);
+        }
     }
 
     #[test]

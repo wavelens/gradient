@@ -7626,3 +7626,31 @@ stylesheet keeps only what is genuinely local, the section rhythm.
 - `puts the entity state on the card meta line rather than in its own box` - the
   role badge and the cache's active/priority pair project into `slot=meta`, and
   the private `.card` is gone rather than merely unstyled.
+
+## The report endpoint could not have worked
+
+`GET /evals/{evaluation}/report` returned 500 for every evaluation. Each export
+spec is scoped as `WHERE evaluation = $1`, and the scope was bound as its text
+form, so Postgres refused the very first query with
+`42883: operator does not exist: uuid = text`. Three of the nineteen specs
+carried a `$1::uuid` cast and would have worked, which is how the other sixteen
+went unnoticed: the whole crate is unit-tested against rusqlite and a
+`MockDatabase`, and a mock replays canned rows without asking Postgres whether
+the SQL parses.
+
+`generate_report` now takes `Uuid` scopes rather than strings and binds
+`Value::Uuid`, so a stringly-typed scope no longer compiles, and the leftover
+casts are gone.
+
+`backend/gradient-report/src/extract.rs`:
+- `the_scope_is_bound_as_a_uuid_not_its_text_form` - pins the bound value at the
+  wire, which is where the failure lived.
+- `no_spec_carries_a_leftover_scope_cast` - the three cast specs are what hid
+  the other sixteen, so a returning cast is a failure.
+
+`backend/gradient-report/tests/export_schema.rs` runs every export query against
+a real migrated Postgres and is the only thing that can tell whether hand-written
+SQL still matches the schema. It is opt-in on `GRADIENT_REPORT_TEST_DB` (the
+file's header carries the four commands); without it the test skips. Verified
+both ways: with the old text binding it fails on `42883`, with the fix all
+twenty-one queries run.
