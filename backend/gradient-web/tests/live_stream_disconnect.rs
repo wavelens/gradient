@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![allow(clippy::disallowed_methods, reason = "test harness server")]
+
 //! A `/live` channel must let go of a client that walked away.
 //!
 //! The stream only ever wrote to its socket, so a closed browser tab was
@@ -52,9 +54,10 @@ async fn live_stream_ends_when_the_client_disconnects() {
     let done: Done = Arc::new(tokio::sync::Notify::new());
     let shutdown = Shutdown::new();
 
-    let app = Router::new()
-        .route("/live", get(live_route))
-        .with_state((tx, Arc::clone(&done), shutdown));
+    let app =
+        Router::new()
+            .route("/live", get(live_route))
+            .with_state((tx, Arc::clone(&done), shutdown));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -81,9 +84,11 @@ async fn live_stream_ends_when_the_server_shuts_down() {
     let done: Done = Arc::new(tokio::sync::Notify::new());
     let shutdown = Shutdown::new();
 
-    let app = Router::new()
-        .route("/live", get(live_route))
-        .with_state((tx, Arc::clone(&done), shutdown.clone()));
+    let app = Router::new().route("/live", get(live_route)).with_state((
+        tx,
+        Arc::clone(&done),
+        shutdown.clone(),
+    ));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![allow(clippy::disallowed_methods, reason = "test harness server")]
+
 //! PKCE regression tests (issue #318): the authorization redirect must carry
 //! `code_challenge` + `code_challenge_method=S256`, and the verifier stored in
 //! the signed `oidc_csrf` cookie must hash to that challenge.

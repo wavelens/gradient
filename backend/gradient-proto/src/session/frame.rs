@@ -25,7 +25,11 @@ use tokio_tungstenite::{
 };
 use tracing::{debug, trace, warn};
 
+use gradient_util::shutdown::Shutdown;
+
 use crate::messages::{ClientMessage, ServerMessage, decode_client_message, decode_server_message};
+
+type WriterTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -269,19 +273,33 @@ impl ProtoSocket {
     /// by a spawned task that owns the WebSocket sink. `send_chunk_timeout`
     /// bounds how long each producer `send` may wait when the queue is full -
     /// exceeding it indicates the peer's TCP receive side is stalled.
-    pub fn split(self, send_chunk_timeout: Duration) -> (ProtoReader, ProtoWriter) {
-        self.split_typed(send_chunk_timeout)
+    pub fn split(
+        self,
+        send_chunk_timeout: Duration,
+        shutdown: &Shutdown,
+    ) -> (ProtoReader, ProtoWriter) {
+        self.split_typed(send_chunk_timeout, |task| {
+            shutdown.spawn(task);
+        })
     }
 
     /// Peer-role counterpart of [`Self::split`]: read `ServerMessage`, write
-    /// `ClientMessage`. Used by the worker after its handshake.
+    /// `ClientMessage`. Used by the worker after its handshake, which owns
+    /// its own runtime and has no shutdown tracker to register against.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "no shutdown tracker on the peer side"
+    )]
     pub fn split_peer(self, send_chunk_timeout: Duration) -> (ServerReader, ClientWriter) {
-        self.split_typed(send_chunk_timeout)
+        self.split_typed(send_chunk_timeout, |task| {
+            tokio::spawn(task);
+        })
     }
 
     fn split_typed<In: WireMessage, Out: WireMessage>(
         self,
         send_chunk_timeout: Duration,
+        spawn: impl FnOnce(WriterTask),
     ) -> (MsgReader<In>, MsgWriter<Out>) {
         let (tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
         let (control_tx, control_rx) = mpsc::channel::<Vec<u8>>(CONTROL_QUEUE_DEPTH);
@@ -295,12 +313,12 @@ impl ProtoSocket {
         let inner = match self {
             Self::Axum(ws) => {
                 let (sink, stream) = (*ws).split();
-                tokio::spawn(axum_writer_task(lanes, sink));
+                spawn(Box::pin(axum_writer_task(lanes, sink)));
                 ReaderInner::Axum(stream)
             }
             Self::Tungstenite(ws) => {
                 let (sink, stream) = (*ws).split();
-                tokio::spawn(tungstenite_writer_task(lanes, sink));
+                spawn(Box::pin(tungstenite_writer_task(lanes, sink)));
                 ReaderInner::Tungstenite(stream)
             }
         };

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![allow(clippy::disallowed_methods, reason = "test harness server")]
+
 //! A pull-through cache must serve build logs it does not hold itself (#547).
 //!
 //! Paths substituted from an upstream have no gradient build behind them, so

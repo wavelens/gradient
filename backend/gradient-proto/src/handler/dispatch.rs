@@ -288,7 +288,7 @@ impl<'a> DispatchContext<'a> {
         network_speed_mbps: Option<f32>,
     ) {
         let rpc = self.rpc();
-        tokio::spawn(async move {
+        self.state.shutdown.spawn(async move {
             rpc.on_worker_metrics(
                 cpu_usage_pct,
                 ram_free_mb,
@@ -307,12 +307,16 @@ impl<'a> DispatchContext<'a> {
         mode: QueryMode,
     ) {
         let rpc = self.rpc();
-        tokio::spawn(async move { rpc.on_cache_query(job_id, query_id, paths, mode).await });
+        self.state
+            .shutdown
+            .spawn(async move { rpc.on_cache_query(job_id, query_id, paths, mode).await });
     }
 
     fn spawn_query_known_derivations(&self, job_id: String, drv_paths: Vec<String>) {
         let rpc = self.rpc();
-        tokio::spawn(async move { rpc.on_query_known_derivations(job_id, drv_paths).await });
+        self.state
+            .shutdown
+            .spawn(async move { rpc.on_query_known_derivations(job_id, drv_paths).await });
     }
 
     // ── Eval cache ────────────────────────────────────────────────────────────
@@ -712,13 +716,14 @@ impl<'a> DispatchContext<'a> {
         // serialise paths[1..]. The shared `nar_serve_semaphore` caps fan-out
         // per connection, and the cloneable `ProtoWriter` interleaves chunks
         // safely on the wire (the worker keys NarPush by store_path).
+        let shutdown = self.state.shutdown.clone();
         for store_path in paths {
             let state = Arc::clone(self.state);
             let writer = self.writer.clone();
             let permit = Arc::clone(self.nar_serve_semaphore);
             let peer_id = self.peer_id.to_owned();
             let job_id = job_id.clone();
-            tokio::spawn(async move {
+            shutdown.spawn(async move {
                 let _guard = match permit.acquire_owned().await {
                     Ok(g) => g,
                     Err(_) => return, // semaphore closed (shutdown)
@@ -746,7 +751,8 @@ impl<'a> DispatchContext<'a> {
         let writer = self.writer.clone();
         let permit = Arc::clone(self.nar_serve_semaphore);
         let peer_id = self.peer_id.to_owned();
-        tokio::spawn(async move {
+        let shutdown = self.state.shutdown.clone();
+        shutdown.spawn(async move {
             let _guard = match permit.acquire_owned().await {
                 Ok(g) => g,
                 Err(_) => return,

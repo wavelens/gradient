@@ -174,7 +174,8 @@ async fn dispatch_event(ctx: &CiContext, task_id: TaskId, event: &str, payload: 
         let ctx = ctx.clone();
         let payload = payload.clone();
         let event = event.to_string();
-        tokio::spawn(async move {
+        let shutdown = ctx.db.shutdown.clone();
+        shutdown.spawn(async move {
             // A mass status-transition wave (promotion, thaw, requeue) fires
             // one event per anchor; unbounded execution exhausted the DB pool
             // and convoyed on the per-action bookkeeping row.

@@ -382,7 +382,8 @@ impl<'a> DispatchContext<'a> {
         let peer_id = self.peer_id.to_owned();
         let semaphore = Arc::clone(self.nar_commit_semaphore);
         let hash = hash.to_owned();
-        tokio::spawn(async move {
+        let shutdown = state.shutdown.clone();
+        shutdown.spawn(async move {
             let Ok(_permit) = semaphore.acquire_owned().await else {
                 return;
             };

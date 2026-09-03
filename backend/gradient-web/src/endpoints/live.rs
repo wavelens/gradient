@@ -158,7 +158,12 @@ pub async fn evaluation_live_ws(
     let shutdown = state.shutdown.clone();
     Ok(ws.on_upgrade(move |socket| async move {
         let _ = shutdown
-            .spawn(live_stream(socket, rx, move |ev| eval_frame(ev, eval_id), cancel))
+            .spawn(live_stream(
+                socket,
+                rx,
+                move |ev| eval_frame(ev, eval_id),
+                cancel,
+            ))
             .await;
     }))
 }
@@ -179,7 +184,12 @@ pub async fn build_live_ws(
     let shutdown = state.shutdown.clone();
     Ok(ws.on_upgrade(move |socket| async move {
         let _ = shutdown
-            .spawn(live_stream(socket, rx, move |ev| eval_frame(ev, eval_id), cancel))
+            .spawn(live_stream(
+                socket,
+                rx,
+                move |ev| eval_frame(ev, eval_id),
+                cancel,
+            ))
             .await;
     }))
 }
