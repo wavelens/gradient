@@ -667,3 +667,50 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
     let counts = scheduler.counts().await;
     assert_eq!(counts.pending + counts.active, 0);
 }
+
+#[tokio::test]
+async fn a_respawned_core_is_rebuilt_from_reattached_sessions() {
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    let (session, mut signals) = port();
+    scheduler
+        .register_worker("w1", eval_worker_caps(), HashSet::new(), Arc::clone(&session))
+        .await
+        .unwrap();
+    scheduler
+        .enqueue_eval_job("j1".into(), eval_job(peer))
+        .await
+        .unwrap();
+    assert_eq!(signals.recv().await, Some(SessionSignal::Offers(1)));
+    let assigned = scheduler
+        .request_job("w1", JobKind::Flake)
+        .await
+        .expect("assigned");
+
+    let old = scheduler
+        .core_changes()
+        .borrow()
+        .clone()
+        .expect("core published");
+    old.stop_and_wait(None, None)
+        .await
+        .expect("stop the old core");
+    scheduler.spawn_core(None).await.expect("respawn");
+    assert_eq!(scheduler.counts().await.active, 0, "a fresh core knows nothing");
+
+    scheduler
+        .reattach_worker(
+            "w1",
+            eval_worker_caps(),
+            HashSet::new(),
+            session,
+            vec![(assigned.job_id.clone(), assigned.pending.clone())],
+        )
+        .await
+        .unwrap();
+
+    let counts = scheduler.counts().await;
+    assert_eq!((counts.workers, counts.active, counts.pending), (1, 1, 0));
+    assert!(scheduler.active_job(&assigned.job_id).await.is_some());
+    assert!(scheduler.is_worker_connected("w1").await);
+}

@@ -46,7 +46,8 @@ pub(super) const DISPATCH_BUDGET: Duration = Duration::from_secs(120);
 const METRICS_BUDGET: Duration = Duration::from_secs(60);
 const CONSISTENCY_BUDGET: Duration = Duration::from_secs(600);
 
-/// Registers every dispatch loop on the process supervision tree.
+/// Registers the scheduler node (core actor plus the three dispatch passes) and
+/// the maintenance passes on the process supervision tree.
 pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     for spec in child_specs(&scheduler) {
         scheduler.state.shutdown.supervise(spec);
@@ -67,22 +68,27 @@ fn core_child_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
 fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
     let metrics = &scheduler.state.config.metrics_args;
     let mut children = vec![
-        core_child_spec(scheduler),
-        periodic(
-            scheduler,
-            "trigger-dispatch",
-            DISPATCH_TICK,
-            DISPATCH_BUDGET,
-            |s| async move { crate::trigger_dispatch::dispatch_once(&s).await },
+        ChildSpec::supervisor(
+            "scheduler",
+            vec![
+                core_child_spec(scheduler),
+                periodic(
+                    scheduler,
+                    "trigger-dispatch",
+                    DISPATCH_TICK,
+                    DISPATCH_BUDGET,
+                    |s| async move { crate::trigger_dispatch::dispatch_once(&s).await },
+                ),
+                periodic(
+                    scheduler,
+                    "eval-dispatch",
+                    DISPATCH_TICK,
+                    DISPATCH_BUDGET,
+                    |s| async move { eval::dispatch_queued_evals(&s).await },
+                ),
+                build::child_spec(scheduler),
+            ],
         ),
-        periodic(
-            scheduler,
-            "eval-dispatch",
-            DISPATCH_TICK,
-            DISPATCH_BUDGET,
-            |s| async move { eval::dispatch_queued_evals(&s).await },
-        ),
-        build::child_spec(scheduler),
         periodic(
             scheduler,
             "worker-sample",
