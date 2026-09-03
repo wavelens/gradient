@@ -34,7 +34,7 @@ pub type SpawnFn = Arc<dyn Fn(ChildCtx) -> SpawnFuture + Send + Sync>;
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 const HEALTHY_RESET: Duration = Duration::from_secs(300);
-const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+const STOP_TIMEOUT: Duration = Duration::from_secs(25);
 
 /// A pass that runs every `period`, cancelled in place past `budget`.
 #[derive(Clone)]
@@ -45,11 +45,19 @@ pub struct PeriodicSpec {
     pub run: PassFn,
 }
 
-/// What the root supervises: a periodic pass, or any actor spawned by a factory.
+/// What the root supervises: a periodic pass, any actor spawned by a factory,
+/// or a nested supervisor with children of its own.
 #[derive(Clone)]
 pub enum ChildSpec {
     Periodic(PeriodicSpec),
-    Custom { name: &'static str, spawn: SpawnFn },
+    Custom {
+        name: &'static str,
+        spawn: SpawnFn,
+    },
+    Supervisor {
+        name: &'static str,
+        children: Vec<ChildSpec>,
+    },
 }
 
 impl ChildSpec {
@@ -66,10 +74,17 @@ impl ChildSpec {
         })
     }
 
+    /// A nested node holding its own children. Its name is not a health row;
+    /// only its leaves are.
+    pub fn supervisor(name: &'static str, children: Vec<ChildSpec>) -> Self {
+        Self::Supervisor { name, children }
+    }
+
     pub fn name(&self) -> &'static str {
         match self {
             Self::Periodic(p) => p.name,
             Self::Custom { name, .. } => name,
+            Self::Supervisor { name, .. } => name,
         }
     }
 }
@@ -267,9 +282,21 @@ async fn spawn_child(
             child.get_cell()
         }
         ChildSpec::Custom { spawn, .. } => spawn(ctx).await?,
+        ChildSpec::Supervisor { children, .. } => {
+            let args = RootArgs {
+                children: children.clone(),
+                health: Arc::clone(&ctx.health),
+                cancel: ctx.cancel.clone(),
+            };
+            let (child, _) = Actor::spawn_linked(None, Root, args, ctx.parent).await?;
+            child.get_cell()
+        }
     };
     state.live.insert(cell.get_id(), spec.name());
-    state.args.health.register(spec.name());
+    if !matches!(spec, ChildSpec::Supervisor { .. }) {
+        state.args.health.register(spec.name());
+    }
+
     info!(loop_name = spec.name(), "supervised loop started");
     Ok(())
 }
@@ -393,7 +420,10 @@ impl Supervisor {
         tracker.spawn(async move {
             token.cancelled().await;
             if let Err(e) = stop
-                .stop_and_wait(Some("shutdown".into()), Some(STOP_TIMEOUT))
+                .stop_and_wait(
+                    Some("shutdown".into()),
+                    Some(STOP_TIMEOUT + Duration::from_secs(5)),
+                )
                 .await
             {
                 warn!(error = %e, "supervision tree did not stop cleanly");
@@ -478,6 +508,37 @@ mod tests {
         let h = health.get("hourly");
         assert!(h.last_ok_at.is_none() && h.restarts == 0, "{h:?}");
         shutdown.cancel_and_drain(Duration::from_secs(2)).await;
+    }
+
+    #[tokio::test]
+    async fn a_nested_supervisor_restarts_its_own_child_and_stops_with_the_tree() {
+        let shutdown = Shutdown::new();
+        let calls = Arc::new(AtomicU32::new(0));
+        shutdown
+            .supervise_now(ChildSpec::supervisor(
+                "node",
+                vec![counting_pass(Arc::clone(&calls), Some(2))],
+            ))
+            .await
+            .expect("supervise");
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let health = shutdown.supervision_health().expect("tree");
+        assert_eq!(
+            health.get("t").restarts,
+            1,
+            "the nested root respawned its child"
+        );
+        let names: Vec<_> = health.snapshot().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, vec!["t"], "the node name is not a health row");
+        assert!(calls.load(Ordering::SeqCst) > 3, "ticking resumed");
+        assert!(shutdown.cancel_and_drain(Duration::from_secs(5)).await);
+        let after = calls.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            after,
+            "no ticks after shutdown"
+        );
     }
 
     #[tokio::test]
