@@ -262,6 +262,7 @@ in {
       ''
       # ── Helpers ───────────────────────────────────────────────────────────
       import json
+      import time
 
       GIT     = "${lib.getExe pkgs.git}"
       CURL    = "${lib.getExe pkgs.curl}"
@@ -572,6 +573,27 @@ in {
       # The exact request from #563: a debuginfo probe against a cache root that
       # has no such cache. Used to be a 400, which crashed the client.
       assert status(f"http://server/cache/debuginfo/{build_id}.debug") == "404"
+
+      # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
+      banner("Phase 11: every supervised loop is running; SIGTERM drains")
+      health = json.loads(api_get(token, "board/health"))["message"]
+      names = sorted(l["name"] for l in health["supervised"])
+      print(names)
+      for want in ["build-dispatch", "eval-dispatch", "trigger-dispatch",
+                   "cache-maintenance", "sign-sweep", "debug-index",
+                   "eval-cache-sweep", "retention", "rollup", "outbound-connect"]:
+          assert want in names, f"{want} missing from supervised loops: {names}"
+      bad = [l for l in health["supervised"] if l["restarts"] or l["pass_timeouts"]]
+      assert not bad, f"restarted or stalled loops: {bad}"
+      assert health["proto_sessions"] >= 1, health
+
+      t0 = time.time()
+      server.succeed("systemctl stop gradient-server.service")
+      stop_secs = time.time() - t0
+      print(f"gradient-server stopped in {stop_secs:.1f}s")
+      assert stop_secs < 40, f"shutdown took {stop_secs:.1f}s; the drain budget is 30s"
+      server.succeed("journalctl -u gradient-server --no-pager | grep -q 'background tasks drained cleanly'")
+      builder.succeed("journalctl -u gradient-worker --no-pager | grep -q 'server is draining'")
 
       banner("Cache test PASSED")
       '';
