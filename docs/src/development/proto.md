@@ -1416,12 +1416,14 @@ sequenceDiagram
     Note left of W: waits before reconnecting
 ```
 
-On SIGTERM the server cancels its shutdown token. Every worker session sends
-`Draining` and closes; the supervision tree stops; tracked tasks (NAR commits,
-action deliveries) finish within the 30 s drain budget. Workers, on
-`Draining`, stop requesting jobs, keep in-flight results, and replay them on
-reconnect; startup recovery re-queues whatever was interrupted, so a restart
-loses no job.
+On SIGTERM the server cancels its shutdown token. The sessions supervisor sends
+`Draining` to every worker session and marks the worker draining, so it is
+offered and assigned nothing more; a session closes as soon as the worker has
+no job in flight, or 20 s after `Draining` at the latest. The rest of the tree
+stops, and tracked tasks (NAR commits, action deliveries) finish within the
+30 s drain budget. Workers, on `Draining`, stop requesting jobs, keep in-flight
+results, and replay them on reconnect; startup recovery re-queues whatever was
+interrupted, so a restart loses no job.
 
 ---
 

@@ -13,8 +13,11 @@ registers its loops as children with `Shutdown::supervise`.
 
 ```text
 root
-├── trigger-dispatch, eval-dispatch      periodic passes (5s)
-├── build-dispatch                       actor: 5s tick plus coalesced kicks
+├── scheduler                            supervisor node
+│   ├── scheduler-core                   actor: WorkerPool + JobTracker behind messages
+│   ├── trigger-dispatch, eval-dispatch  periodic passes (5s)
+│   └── build-dispatch                   actor: 5s tick plus coalesced kicks
+├── sessions                             supervisor: one actor per worker connection
 ├── worker-sample, instance-metrics      periodic passes
 ├── worker-liveness, graph-consistency   periodic passes, absent when disabled
 ├── cache-maintenance, sign-sweep,
@@ -23,15 +26,25 @@ root
 └── outbound-connect                     dials workers with a registered URL
 ```
 
-A child that panics or exits unexpectedly is respawned after an exponential
-backoff (1s doubling to 60s, reset after five healthy minutes); a pass that
-runs past its budget is cancelled in place and ticks again. Restarts, pass
-errors, budget timeouts and the last successful pass are reported per child on
-`/board/health`. Everything that outlives one request but is not a loop (NAR
-commits, CI action deliveries, per-connection writers, sessions) runs as a
-tracked task so shutdown drains it; bare `tokio::spawn` is a clippy error in
-the server crates. Axum serves the HTTP API and the worker WebSocket; the
-scheduler, cache and CI code are libraries the tree drives.
+The scheduler's state (`WorkerPool`, `JobTracker`) is private to one actor;
+`Scheduler` is a facade whose every method is one message with a typed reply,
+so a claim, a release or a peer revocation is atomic and nothing holds a lock
+across a database call. The scheduler pushes to a session only through a
+`SessionPort` signal (`Offers`, `Reauth`, `Abort`, `Drain`); a burst of
+enqueues collapses into one offer per generation. Each worker connection is a
+`SessionActor`: its reader task delivers one inbound frame at a time with a
+call and reads the next only after the reply, so TCP backpressure holds.
+Order-independent RPCs (`CacheQuery`, `QueryKnownDerivations`, `WorkerMetrics`)
+still run as tracked tasks off the session. When the core actor is respawned,
+the sessions supervisor re-registers every live session together with the
+jobs it still runs. A child that panics or exits unexpectedly is respawned
+after an exponential backoff (1s doubling to 60s, reset after five healthy
+minutes); a pass that runs past its budget is cancelled in place and ticks
+again. Restarts, pass errors, budget timeouts and the last successful pass are
+reported per child on `/board/health`. Everything that outlives one request but
+is not a loop runs as a tracked task so shutdown drains it; bare `tokio::spawn`
+is a clippy error in the server crates. Axum serves the HTTP API and the worker
+WebSocket; the scheduler, cache and CI code are libraries the tree drives.
 
 ### Worker
 
