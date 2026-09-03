@@ -26,6 +26,7 @@ const MIB = 1024 ** 2;
         <div class="kpi"><span class="label">Uptime</span><span class="value sm">{{ uptime(h.uptime_seconds) }}</span></div>
         <div class="kpi"><span class="label">Workers</span><span class="value">{{ h.workers_connected }}</span></div>
         <div class="kpi"><span class="label">Jobs pending / active</span><span class="value sm">{{ h.jobs_pending }} / {{ h.jobs_active }}</span></div>
+        <div class="kpi"><span class="label">Sessions</span><span class="value">{{ h.proto_sessions }}</span></div>
       </div>
 
       <h2>Process</h2>
@@ -44,6 +45,25 @@ const MIB = 1024 ** 2;
         <div class="cell"><span class="label">Cache size</span><span>{{ (h.cache_bytes / (1024*1024*1024)) | number: '1.2-2' }} GiB</span></div>
         <div class="cell"><span class="label">Packages</span><span>{{ h.cache_packages }}</span></div>
       </div>
+
+      <h2>Supervision</h2>
+      <table class="http supervision">
+        <thead><tr><th>Loop</th><th>Restarts</th><th>Errors</th><th>Timeouts</th><th>Last ok</th><th>Last error</th></tr></thead>
+        <tbody>
+          @for (l of h.supervised; track l.name) {
+            <tr>
+              <td>{{ l.name }}</td>
+              <td [class.bad]="l.restarts > 0">{{ l.restarts }}</td>
+              <td [class.bad]="l.pass_errors > 0">{{ l.pass_errors }}</td>
+              <td [class.bad]="l.pass_timeouts > 0">{{ l.pass_timeouts }}</td>
+              <td>{{ l.last_ok_seconds_ago !== null ? (l.last_ok_seconds_ago | number: '1.0-0') + ' s ago' : 'never' }}</td>
+              <td [class.bad]="!!l.last_error">{{ l.last_error ?? '' }}</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="6" class="muted">No supervised loops reported.</td></tr>
+          }
+        </tbody>
+      </table>
 
       <h2>Admin</h2>
       <div class="admin-actions">

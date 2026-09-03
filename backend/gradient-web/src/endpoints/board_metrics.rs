@@ -538,6 +538,34 @@ pub async fn get_board_durations_heatmap(
 }
 
 #[derive(Serialize)]
+pub struct SupervisedLoop {
+    pub name: String,
+    pub restarts: u32,
+    pub pass_errors: u64,
+    pub pass_timeouts: u64,
+    pub last_ok_seconds_ago: Option<f64>,
+    pub last_error: Option<String>,
+}
+
+/// Render the supervision tree's raw health rows for the API, expressing
+/// `last_ok_at` as seconds elapsed rather than an opaque `Instant`.
+fn loops_view(
+    rows: Vec<(&'static str, gradient_util::supervision::LoopHealth)>,
+    now: std::time::Instant,
+) -> Vec<SupervisedLoop> {
+    rows.into_iter()
+        .map(|(name, h)| SupervisedLoop {
+            name: name.to_string(),
+            restarts: h.restarts,
+            pass_errors: h.pass_errors,
+            pass_timeouts: h.pass_timeouts,
+            last_ok_seconds_ago: h.last_ok_at.map(|t| now.duration_since(t).as_secs_f64()),
+            last_error: h.last_error,
+        })
+        .collect()
+}
+
+#[derive(Serialize)]
 pub struct BoardHealth {
     pub version: String,
     pub uptime_seconds: f64,
@@ -551,12 +579,15 @@ pub struct BoardHealth {
     pub rollup_lag_seconds: Option<f64>,
     pub latest_rollup_bucket: Option<String>,
     pub draining: bool,
+    pub supervised: Vec<SupervisedLoop>,
+    pub proto_sessions: usize,
 }
 
 pub async fn get_board_health(
     State(state): State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
+    Extension(limiter): Extension<Arc<gradient_proto::ProtoLimiter>>,
 ) -> WebResult<Json<BaseResponse<BoardHealth>>> {
     require_superuser(&user)?;
     let obs = collect(&state, &scheduler).await?;
@@ -590,6 +621,8 @@ pub async fn get_board_health(
         draining: scheduler
             .draining
             .load(std::sync::atomic::Ordering::Relaxed),
+        supervised: loops_view(scheduler.loop_health(), std::time::Instant::now()),
+        proto_sessions: limiter.in_use(),
     }))
 }
 
@@ -605,5 +638,27 @@ mod tests {
         );
         assert_eq!(upstream_host("http://10.0.0.1:5000/"), "10.0.0.1:5000");
         assert_eq!(upstream_host("cache.example.com"), "cache.example.com");
+    }
+
+    #[test]
+    fn loops_view_reports_age_of_last_ok_pass() {
+        use gradient_util::supervision::LoopHealth;
+        let now = std::time::Instant::now();
+        let rows = vec![(
+            "build-dispatch",
+            LoopHealth {
+                restarts: 1,
+                pass_errors: 2,
+                pass_timeouts: 0,
+                last_ok_at: Some(now - std::time::Duration::from_secs(5)),
+                last_error: Some("boom".into()),
+            },
+        )];
+        let view = super::loops_view(rows, now);
+        assert_eq!(view.len(), 1);
+        assert_eq!(view[0].name, "build-dispatch");
+        assert_eq!(view[0].restarts, 1);
+        assert_eq!(view[0].last_ok_seconds_ago, Some(5.0));
+        assert_eq!(view[0].last_error.as_deref(), Some("boom"));
     }
 }

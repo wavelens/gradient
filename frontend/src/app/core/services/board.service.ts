@@ -306,6 +306,15 @@ export interface ProcessStat {
   threads: number;
 }
 
+export interface SupervisedLoop {
+  name: string;
+  restarts: number;
+  pass_errors: number;
+  pass_timeouts: number;
+  last_ok_seconds_ago: number | null;
+  last_error: string | null;
+}
+
 export interface BoardHealth {
   version: string;
   uptime_seconds: number;
@@ -319,6 +328,8 @@ export interface BoardHealth {
   rollup_lag_seconds: number | null;
   latest_rollup_bucket: string | null;
   draining: boolean;
+  supervised: SupervisedLoop[];
+  proto_sessions: number;
 }
 
 export interface DurationsHeatmap {
