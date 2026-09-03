@@ -7757,3 +7757,30 @@ leftover height.
 
 `frontend/src/app/features/tasks/task-detail/task-detail.component.spec.ts`:
 - `grows into the task shell and lets the panel absorb the leftover height`.
+
+## Server loops run under a supervision tree (#588)
+
+`backend/gradient-util/src/supervision.rs`: `a_panicking_pass_is_restarted_and_keeps_ticking`
+(a child that panics is respawned once and its ticks resume),
+`a_pass_past_its_budget_is_cancelled_and_counted` (an over-budget pass is
+cancelled in place, never restarted), `shutdown_stops_the_tree_and_never_restarts`
+(cancel stops every child and the root reports Stopped),
+`supervise_from_a_sync_context_lands_in_the_tree`, `backoff_grows_and_caps`
+(1, 2, 4, ... 60, 60 seconds), and
+`casts_queue_without_bound_and_a_call_waits_behind_them` (the ractor mailbox
+is unbounded and FIFO, which is why sessions call rather than cast).
+
+`backend/gradient-web/tests/live_stream_disconnect.rs`:
+`live_stream_ends_when_the_server_shuts_down` (a quiet live channel with a
+connected client ends on the shutdown token).
+
+`backend/gradient-web/src/endpoints/board_metrics.rs`:
+`loops_view_reports_age_of_last_ok_pass`.
+
+`frontend/src/app/features/board/health/health.component.spec.ts`:
+`lists every supervised loop and flags restarts`.
+
+`nix/tests/gradient/cache/default.nix` Phase 9: `/board/health` lists every
+supervised loop with zero restarts and timeouts, `systemctl stop
+gradient-server` returns within the drain budget, and the worker logs the
+`Draining` message.
