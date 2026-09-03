@@ -6,28 +6,32 @@ Gradient is a multi-crate Rust workspace with two separate binaries: **`gradient
 
 ### Server
 
-The server binary starts three concurrent async tasks:
+The server binary is one process whose long-lived work runs under a
+supervision tree (`gradient_util::supervision`, on ractor). The tree is
+started on first use from the shared `Shutdown` coordinator; every subsystem
+registers its loops as children with `Shutdown::supervise`.
 
 ```text
-┌────────────────────────────────────────┐
-│           gradient binary              │
-│                                        │
-│  ┌──────────────────────────────────┐  │
-│  │             Builder              │  │
-│  │  evaluation queue │ build queue  │  │
-│  └──────────────────────────────────┘  │
-│  ┌───────────┐   ┌──────────────────┐  │
-│  │   Cache   │   │       Web        │  │
-│  │   (Axum)  │   │  (Axum /api/v1)  │  │
-│  └───────────┘   └──────────────────┘  │
-│          ┌───────────────────┐         │
-│          │  Proto Scheduler  │         │
-│          │  (WebSocket /proto│         │
-│          └───────────────────┘         │
-└────────────────────────────────────────┘
-         │                    │
-         └──── PostgreSQL ────┘
+root
+├── trigger-dispatch, eval-dispatch      periodic passes (5s)
+├── build-dispatch                       actor: 5s tick plus coalesced kicks
+├── worker-sample, instance-metrics      periodic passes
+├── worker-liveness, graph-consistency   periodic passes, absent when disabled
+├── cache-maintenance, sign-sweep,
+│   debug-index, eval-cache-sweep        cache sweeps
+├── retention, rollup, otlp-snapshot     metrics pipeline
+└── outbound-connect                     dials workers with a registered URL
 ```
+
+A child that panics or exits unexpectedly is respawned after an exponential
+backoff (1s doubling to 60s, reset after five healthy minutes); a pass that
+runs past its budget is cancelled in place and ticks again. Restarts, pass
+errors, budget timeouts and the last successful pass are reported per child on
+`/board/health`. Everything that outlives one request but is not a loop (NAR
+commits, CI action deliveries, per-connection writers, sessions) runs as a
+tracked task so shutdown drains it; bare `tokio::spawn` is a clippy error in
+the server crates. Axum serves the HTTP API and the worker WebSocket; the
+scheduler, cache and CI code are libraries the tree drives.
 
 ### Worker
 

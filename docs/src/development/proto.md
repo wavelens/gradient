@@ -1416,11 +1416,12 @@ sequenceDiagram
     Note left of W: waits before reconnecting
 ```
 
-On receiving `ServerMessage::Draining`, workers:
-
- 1. Stop sending `RequestJob` - no new work.
- 2. Finish in-flight jobs and send results.
- 3. After the connection closes, wait before reconnecting (e.g. 30s) to give the server time to restart.
+On SIGTERM the server cancels its shutdown token. Every worker session sends
+`Draining` and closes; the supervision tree stops; tracked tasks (NAR commits,
+action deliveries) finish within the 30 s drain budget. Workers, on
+`Draining`, stop requesting jobs, keep in-flight results, and replay them on
+reconnect; startup recovery re-queues whatever was interrupted, so a restart
+loses no job.
 
 ---
 
