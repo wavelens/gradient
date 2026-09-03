@@ -110,6 +110,7 @@ in {
                 admin = {
                   email = "admin@example.com";
                   password_file = "/etc/gradient/secrets/admin_password";
+                  superuser = true;
                 };
               };
 
