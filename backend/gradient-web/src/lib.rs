@@ -674,7 +674,11 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .shutdown
         .supervise(gradient_db::rollup::child_spec(state.db()));
     otlp::start_otlp(Arc::clone(&state), Arc::clone(&scheduler));
-    gradient_proto::outbound::start_outbound_loop(Arc::clone(&scheduler));
+    let sessions = gradient_proto::SessionsHandle::new();
+    state
+        .shutdown
+        .supervise(sessions.child_spec(Arc::clone(&scheduler)));
+    gradient_proto::outbound::start_outbound_loop(Arc::clone(&scheduler), Arc::clone(&sessions));
 
     let proto_limiter = Arc::new(ProtoLimiter::new(state.config.proto.max_proto_connections));
 
@@ -688,7 +692,8 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .nest("/api/v1", api)
         .merge(proto_router().route_layer(GovernorLayer::new(rl_per_ms(200, 150)?)))
         .layer(axum::Extension(Arc::clone(&scheduler)))
-        .layer(axum::Extension(Arc::clone(&proto_limiter)));
+        .layer(axum::Extension(Arc::clone(&proto_limiter)))
+        .layer(axum::Extension(Arc::clone(&sessions)));
 
     // Metrics endpoint - root-mounted, only when an operator-configured
     // bearer token is present. Uses the same rate-limit tier as
@@ -751,7 +756,8 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         ))
         .route_layer(GovernorLayer::new(nar_cache_limit()?))
         .layer(axum::Extension(cache_per_ip))
-        .layer(axum::Extension(Arc::clone(&proto_limiter)));
+        .layer(axum::Extension(Arc::clone(&proto_limiter)))
+        .layer(axum::Extension(Arc::clone(&sessions)));
 
     app = app
         .merge(cache_routes)

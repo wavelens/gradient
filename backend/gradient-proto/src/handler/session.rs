@@ -4,17 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Protocol session state machine: Opening → Authenticated → Registered → run.
+//! Protocol handshake: Opening to Authenticated, then attach to a session actor.
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::AtomicI64;
-use std::time::Duration;
 
 use gradient_core::ServerState;
 use gradient_types::ids::ProjectId;
-use tokio::sync::Semaphore;
-use tracing::{debug, error, info, instrument, warn};
+use tokio::task::JoinHandle;
+use tracing::{debug, info, instrument, warn};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -23,24 +21,15 @@ use crate::messages::{GradientCapabilities, ServerMessage};
 use crate::session::handshake as handshake_fsm;
 use crate::traits::{AuthOutcome, PeerAuthority};
 use gradient_scheduler::Scheduler;
-use gradient_scheduler::actor::SessionSignal;
 
 use super::auth::{
     BaseWorkerChallenge, aggregate_enabled_caps, expand_base_authorized,
     filter_project_peers_without_cache, has_any_registrations, lookup_base_worker_challenge,
     lookup_registered_peers, negotiate_capabilities, validate_tokens,
 };
-use super::dispatch::DispatchContext;
-use super::eval_cache::EvalCacheReceiveStore;
-use super::nar_transfer::NarReceiveStore;
-use super::socket::{
-    HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg,
-    send_server_msg,
-};
-
-/// Detached `NarUploaded` commits running concurrently per connection; each
-/// pins one whole staged NAR in memory while writing it to `nar_storage`.
-const NAR_COMMIT_CONCURRENCY: usize = 2;
+use super::session_actor::SessionArgs;
+use super::sessions::SessionsHandle;
+use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, ProtoWriter, send_server_msg};
 
 // ── Session state markers ─────────────────────────────────────────────────────
 
@@ -50,12 +39,6 @@ pub(super) struct Authenticated {
     pub peer_id: String,
     pub negotiated: GradientCapabilities,
     pub authorized_peers: Vec<String>,
-}
-
-pub(super) struct Registered {
-    pub peer_id: String,
-    pub signals: tokio::sync::mpsc::UnboundedReceiver<SessionSignal>,
-    pub last_seen: Arc<AtomicI64>,
 }
 
 // ── Protocol session ──────────────────────────────────────────────────────────
@@ -212,168 +195,62 @@ impl PeerAuthority for ServerAuthority {
     }
 }
 
-// ── Authenticated → Registered ────────────────────────────────────────────────
+// ── Authenticated: attach ─────────────────────────────────────────────────────
 
 impl ProtoSession<Authenticated> {
-    pub async fn register(mut self) -> Option<ProtoSession<Registered>> {
-        let Authenticated {
-            peer_id,
-            negotiated,
-            authorized_peers,
-            ..
-        } = self.session_state;
+    /// Hand the connection to the sessions supervisor. The join handle ends
+    /// when the session does, so the upgrade task holds its permit until then.
+    pub async fn attach(self, sessions: &SessionsHandle) -> Option<JoinHandle<()>> {
+        let ProtoSession {
+            mut socket,
+            state,
+            scheduler,
+            session_state:
+                Authenticated {
+                    peer_id,
+                    negotiated,
+                    authorized_peers,
+                },
+        } = self;
 
-        if self.scheduler.is_worker_connected(&peer_id).await {
+        if scheduler.is_worker_connected(&peer_id).await {
             warn!(%peer_id, "duplicate connection rejected (worker already connected)");
-            self.socket
+            socket
                 .send_reject(496, "worker already connected".into())
                 .await;
             return None;
         }
 
-        let authorized_peer_uuids: HashSet<ProjectId> = authorized_peers
+        let authorized_peers: HashSet<ProjectId> = authorized_peers
             .iter()
             .filter_map(|s| s.parse().ok())
             .collect();
-
-        let (port, signals) = tokio::sync::mpsc::unbounded_channel();
-        let registered = match self
-            .scheduler
-            .register_worker(&peer_id, negotiated, authorized_peer_uuids, Arc::new(port))
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                warn!(%peer_id, error = %e, "registration failed; scheduler unavailable");
-                self.socket
-                    .send_reject(503, "scheduler unavailable".into())
-                    .await;
-                return None;
-            }
-        };
-
-        Some(ProtoSession {
-            socket: self.socket,
-            state: self.state,
-            scheduler: self.scheduler,
-            session_state: Registered {
-                peer_id,
-                signals,
-                last_seen: registered.last_seen,
-            },
-        })
-    }
-}
-
-// ── Registered: dispatch loop ─────────────────────────────────────────────────
-
-impl ProtoSession<Registered> {
-    pub async fn run(self) {
-        let ProtoSession {
-            socket,
+        let args = SessionArgs {
+            peer_id: peer_id.clone(),
             state,
             scheduler,
-            session_state:
-                Registered {
-                    peer_id,
-                    mut signals,
-                    last_seen,
-                },
-        } = self;
+            socket,
+            capabilities: negotiated,
+            authorized_peers,
+        };
 
-        let proto_cfg = &state.config.proto;
-        let send_chunk_timeout = Duration::from_secs(proto_cfg.nar_send_chunk_timeout_secs);
-        let (mut reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
-
-        let partial_root =
-            std::path::PathBuf::from(format!("{}/nar-partial", state.config.storage.base_path));
-        let partial_ttl = Duration::from_secs(proto_cfg.nar_partial_ttl_secs);
-        let max_partial_bytes = proto_cfg.max_nar_buffer_bytes as u64;
-        let mut nar = NarReceiveStore::new(partial_root, &peer_id, partial_ttl, max_partial_bytes)
-            .unwrap_or_else(|e| {
-                error!(%peer_id, error = %e, "failed to init NAR partial dir; falling back to temp");
-                NarReceiveStore::new(
-                    std::env::temp_dir().join("gradient-nar-partial"),
-                    &peer_id,
-                    partial_ttl,
-                    max_partial_bytes,
-                )
-                .expect("temp partial dir must be creatable")
-            });
-        let nar_serve_semaphore = Arc::new(Semaphore::new(proto_cfg.max_concurrent_nar_serves));
-        let nar_commit_semaphore = Arc::new(Semaphore::new(NAR_COMMIT_CONCURRENCY));
-        let mut eval_cache = EvalCacheReceiveStore::new(max_partial_bytes);
-        let cancel = state.shutdown.token();
-        let mut offers_seen = 0u64;
-        let mut active = std::collections::HashMap::new();
-
-        loop {
-            let msg = tokio::select! {
-                _ = cancel.cancelled() => {
-                    info!(%peer_id, "server shutting down; sending Draining and closing");
-                    let _ = send_server_msg(&writer, &ServerMessage::Draining).await;
-                    break;
-                }
-                msg = recv_client_msg(&mut reader) => match msg {
-                    Some(m) => m,
-                    None => break,
-                },
-                signal = signals.recv() => match signal {
-                    Some(SessionSignal::Offers(generation)) => {
-                        if generation > offers_seen
-                            && !on_offers(&writer, &scheduler, &peer_id, &mut offers_seen).await
-                        {
-                            break;
-                        }
-                        continue;
-                    }
-                    Some(SessionSignal::Reauth) => {
-                        if !on_reauth_notify(&writer, &state, &peer_id).await { break; }
-                        continue;
-                    }
-                    Some(SessionSignal::Abort { job_id, reason }) => {
-                        info!(%peer_id, %job_id, %reason, "sending AbortJob to worker");
-                        if send_server_msg(&writer, &ServerMessage::AbortJob { job_id, reason })
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                        continue;
-                    }
-                    Some(SessionSignal::Drain) | None => break,
-                },
-            };
-
-            // Reaching here means a real inbound frame (the other select arms
-            // all `continue`), so the worker is alive: refresh its deadline.
-            last_seen.store(
-                gradient_types::now().and_utc().timestamp_millis(),
-                std::sync::atomic::Ordering::Relaxed,
-            );
-
-            let mut ctx = DispatchContext {
-                writer: &writer,
-                state: &state,
-                scheduler: &scheduler,
-                peer_id: &peer_id,
-                nar_serve_semaphore: &nar_serve_semaphore,
-                nar_commit_semaphore: &nar_commit_semaphore,
-                active: &mut active,
-            };
-            if !ctx.dispatch(msg, &mut nar, &mut eval_cache).await {
-                break;
+        match sessions.attach(args).await {
+            Ok((_, join)) => Some(join),
+            Err(error) => {
+                warn!(%peer_id, %error, "session could not be attached");
+                None
             }
         }
-
-        scheduler.unregister_worker(&peer_id).await;
-        info!(%peer_id, "WebSocket connection closed");
     }
 }
 
-// ── Select arm helpers ────────────────────────────────────────────────────────
+// ── Server-initiated reauth ───────────────────────────────────────────────────
 
-async fn on_reauth_notify(writer: &ProtoWriter, state: &ServerState, peer_id: &str) -> bool {
+pub(super) async fn on_reauth_notify(
+    writer: &ProtoWriter,
+    state: &ServerState,
+    peer_id: &str,
+) -> bool {
     debug!(%peer_id, "server-initiated reauth");
     let base = lookup_base_worker_challenge(state, peer_id).await;
     let registered_peers = match &base {
@@ -403,34 +280,6 @@ async fn on_reauth_notify(writer: &ProtoWriter, state: &ServerState, peer_id: &s
     .is_ok()
 }
 
-async fn on_offers(
-    writer: &ProtoWriter,
-    scheduler: &Scheduler,
-    peer_id: &str,
-    offers_seen: &mut u64,
-) -> bool {
-    let offer = scheduler.get_new_job_candidates(peer_id).await;
-    *offers_seen = offer.generation;
-    if offer.candidates.is_empty() {
-        return true;
-    }
-    debug!(%peer_id, count = offer.candidates.len(), "pushing job offer (delta)");
-    for chunk in offer.candidates.chunks(JOB_OFFER_CHUNK_SIZE) {
-        if send_server_msg(
-            writer,
-            &ServerMessage::JobOffer {
-                candidates: chunk.to_vec(),
-            },
-        )
-        .await
-        .is_err()
-        {
-            return false;
-        }
-    }
-    true
-}
-
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[instrument(skip_all)]
@@ -438,6 +287,7 @@ pub(crate) async fn handle_socket(
     socket: ProtoSocket,
     state: Arc<ServerState>,
     scheduler: Arc<Scheduler>,
+    sessions: Arc<SessionsHandle>,
     server_initiated: bool,
 ) {
     info!(server_initiated, "WebSocket connection opened");
@@ -454,10 +304,9 @@ pub(crate) async fn handle_socket(
                 return;
             }
         };
-    let Some(session) = session.register().await else {
-        return;
-    };
-    session.run().await;
+    if let Some(join) = session.attach(&sessions).await {
+        let _ = join.await;
+    }
 }
 
 // ── Auth decision (pure) ──────────────────────────────────────────────────────

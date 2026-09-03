@@ -43,7 +43,7 @@ pub mod traits;
 #[cfg(test)]
 mod tests;
 
-pub use handler::{ProtoLimiter, proto_router};
+pub use handler::{ProtoLimiter, SessionsHandle, proto_router};
 pub use messages::{ClientMessage, PROTO_VERSION, ServerMessage};
 
 pub use gradient_scheduler::Scheduler;

@@ -14,6 +14,8 @@ mod limiter;
 mod nar;
 mod nar_transfer;
 mod session;
+mod session_actor;
+mod sessions;
 mod socket;
 
 use std::sync::Arc;
@@ -31,6 +33,7 @@ pub use crate::session::frame::MAX_PROTO_MESSAGE_SIZE;
 pub use cache_session::handle_cache_socket;
 pub use limiter::{PerIpLimiter, ProtoLimiter};
 pub(crate) use session::handle_socket;
+pub use sessions::SessionsHandle;
 pub(crate) use socket::ProtoSocket;
 
 #[cfg(test)]
@@ -51,6 +54,7 @@ async fn ws_upgrade(
     State(state): State<Arc<ServerState>>,
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Extension(limiter): Extension<Arc<ProtoLimiter>>,
+    Extension(sessions): Extension<Arc<SessionsHandle>>,
 ) -> Response {
     let Some(permit) = limiter.try_acquire() else {
         tracing::warn!(
@@ -77,6 +81,7 @@ async fn ws_upgrade(
                         socket::ProtoSocket::Axum(Box::new(sock)),
                         state,
                         scheduler,
+                        sessions,
                         false,
                     )
                     .await;
