@@ -2226,7 +2226,6 @@ dependencies = [
  "mockall",
  "ring",
  "sea-orm",
- "sentry",
  "serde",
  "serde_json",
  "tempfile",

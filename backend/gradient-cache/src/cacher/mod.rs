@@ -22,7 +22,7 @@ pub(crate) mod test_support;
 
 pub use self::debug_index::index_pending_debug_info;
 pub use self::deep_gc::{DeepGcReport, run_deep_gc};
-pub use self::eval_cache_sweep::{eval_cache_sweep_loop, evict_eval_cache};
+pub use self::eval_cache_sweep::evict_eval_cache;
 
 pub use self::cleanup::{
     CleanupReport, cleanup_expired_upload_sessions, cleanup_old_evaluations,
@@ -33,21 +33,22 @@ pub use self::sign_sweep::sign_missing_signatures;
 
 use futures::future::BoxFuture;
 use gradient_core::ServerState;
+use gradient_util::supervision::ChildSpec;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::time;
+use std::time::Duration;
 use tracing::{error, info};
 
-/// One periodic background pass: a name (for logs), a tick interval, and the
-/// async fn to run. Registered in [`sweeps`] and driven by [`run_sweep`].
+/// One periodic pass: a name (logs and health), a tick interval, the budget
+/// past which a pass is cancelled, and the async fn to run.
 struct Sweep {
     name: &'static str,
     interval_secs: u64,
+    budget_secs: u64,
     run: Box<dyn Fn(Arc<ServerState>) -> BoxFuture<'static, anyhow::Result<()>> + Send + Sync>,
 }
 
 impl Sweep {
-    fn new<F, Fut>(name: &'static str, interval_secs: u64, run: F) -> Self
+    fn new<F, Fut>(name: &'static str, interval_secs: u64, budget_secs: u64, run: F) -> Self
     where
         F: Fn(Arc<ServerState>) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = anyhow::Result<()>> + Send + 'static,
@@ -55,82 +56,63 @@ impl Sweep {
         Sweep {
             name,
             interval_secs,
+            budget_secs,
             run: Box::new(move |state| Box::pin(run(state))),
         }
     }
 }
 
 /// The registered sweeps. "cache-maintenance" bundles the 9 order-sensitive
-/// GC/reconcile steps that used to live in the monolithic `cache_loop`
-/// (orphan-files, eval GC, derivation GC, NAR TTL, demote-unbacked,
-/// unpark-storage-full, build-request blobs, upload sessions, partial-store
-/// GC); "sign-sweep" is the signature backfill and "debug-index" the build-id
-/// backfill. Each runs on its own interval and its own spawned loop.
+/// GC/reconcile steps; "sign-sweep" is the signature backfill, "debug-index"
+/// the build-id backfill, "eval-cache-sweep" the eval-cache eviction.
 fn sweeps(state: &ServerState) -> Vec<Sweep> {
+    let storage = &state.config.storage;
     vec![
         Sweep::new(
             "cache-maintenance",
-            state.config.storage.cache_maintenance_interval_secs.max(1),
-            |state| Box::pin(run_cache_maintenance(state)),
+            storage.cache_maintenance_interval_secs.max(1),
+            1800,
+            run_cache_maintenance,
         ),
         Sweep::new(
             "sign-sweep",
-            state.config.storage.sign_sweep_interval_secs.max(1),
-            |state| Box::pin(sign_missing_signatures(state)),
+            storage.sign_sweep_interval_secs.max(1),
+            300,
+            sign_missing_signatures,
         ),
         Sweep::new(
             "debug-index",
-            state.config.storage.debug_index_interval_secs.max(1),
-            |state| Box::pin(index_pending_debug_info(state)),
+            storage.debug_index_interval_secs.max(1),
+            600,
+            index_pending_debug_info,
+        ),
+        Sweep::new(
+            "eval-cache-sweep",
+            storage.eval_cache_sweep_interval_secs.max(1),
+            600,
+            evict_eval_cache,
         ),
     ]
 }
 
-/// Drives one [`Sweep`] on its own interval until shutdown. Errors from a
-/// single run are logged and never abort the loop.
-async fn run_sweep(state: Arc<ServerState>, sweep: Sweep) {
-    let _guard = if state.config.registration.report_errors {
-        Some(sentry::init(
-            gradient_types::cli::effective_sentry_dsn(&state.config.registration).to_string(),
-        ))
-    } else {
-        None
-    };
-
-    let mut interval = time::interval(Duration::from_secs(sweep.interval_secs));
-    let cancel = state.shutdown.token();
-
-    loop {
-        tokio::select! {
-            _ = cancel.cancelled() => {
-                info!(sweep = sweep.name, "sweep loop shutting down");
-                return;
-            }
-            _ = interval.tick() => {}
-        }
-
-        let started = Instant::now();
-        match (sweep.run)(Arc::clone(&state)).await {
-            Ok(()) => info!(
-                sweep = sweep.name,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                "sweep completed"
-            ),
-            Err(e) => error!(
-                sweep = sweep.name,
-                elapsed_ms = started.elapsed().as_millis() as u64,
-                error = ?e,
-                "sweep failed"
-            ),
-        }
-    }
-}
-
-/// Spawns every registered sweep as its own long-lived task.
-pub fn spawn_sweeps(state: &Arc<ServerState>) {
-    for sweep in sweeps(state) {
-        state.shutdown.spawn(run_sweep(Arc::clone(state), sweep));
-    }
+/// Every registered sweep as a supervised periodic child.
+pub fn child_specs(state: &Arc<ServerState>) -> Vec<ChildSpec> {
+    sweeps(state)
+        .into_iter()
+        .map(|sweep| {
+            let state = Arc::clone(state);
+            let run = sweep.run;
+            ChildSpec::periodic(
+                sweep.name,
+                Duration::from_secs(sweep.interval_secs),
+                Duration::from_secs(sweep.budget_secs),
+                move || {
+                    let fut = run(Arc::clone(&state));
+                    async move { fut.await.map_err(Into::into) }
+                },
+            )
+        })
+        .collect()
 }
 
 /// The 9 order-sensitive cache-maintenance steps, run sequentially every
