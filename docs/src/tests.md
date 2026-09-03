@@ -7786,3 +7786,26 @@ connected client ends on the shutdown token).
 supervised loop with zero restarts and timeouts, `systemctl stop
 gradient-server` returns within the drain budget, and the worker logs the
 `Draining` message.
+
+## Scheduler actor and session actors (#595)
+
+`backend/gradient-scheduler/src/scheduler_tests.rs`:
+`enqueue_signals_offers_with_a_rising_generation` (each enqueue signals
+`Offers(n)` and a delta fetch answers with that generation),
+`abort_evaluation_signals_the_worker_running_its_job`,
+`a_respawned_core_is_rebuilt_from_reattached_sessions` (stop the core, spawn a
+new one, re-register the session with its active job: counts and the active
+job are back), plus the existing scheduler tests moved onto the message API.
+
+`backend/gradient-scheduler/src/worker_pool.rs`:
+`test_request_reauth_notifies_connected_worker` and
+`send_abort_reaches_the_session_and_reports_unknown_workers` assert the
+`SessionSignal` a pool pushes through a `SessionPort`.
+
+`backend/gradient-util/src/supervision.rs`:
+`a_nested_supervisor_restarts_its_own_child_and_stops_with_the_tree`.
+
+`backend/gradient-proto/src/handler/session_actor.rs`:
+`drain_sends_draining_and_closes_an_idle_session` (a real WebSocket pair; the
+`Drain` signal produces one `Draining` frame, then the socket closes and the
+worker is unregistered).
