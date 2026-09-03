@@ -357,3 +357,17 @@ describe('filenameFromDisposition', () => {
     expect(filenameFromDisposition('attachment', 'fallback.db')).toBe('fallback.db');
   });
 });
+
+describe('TaskDetailComponent - vertical fill', () => {
+  it('grows into the task shell and lets the panel absorb the leftover height', () => {
+    const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const host = getComputedStyle(fixture.nativeElement as HTMLElement);
+    expect(host.display).toBe('flex');
+    expect(host.flexDirection).toBe('column');
+    expect(host.flexGrow).toBe('1');
+
+    const panel = (fixture.nativeElement as HTMLElement).querySelector('.panel');
+    expect(panel).not.toBeNull();
+    expect(getComputedStyle(panel!).flexGrow).toBe('1');
+  });
+});

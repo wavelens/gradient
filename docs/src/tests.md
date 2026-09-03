@@ -7739,3 +7739,21 @@ to the evaluation's own window.
   SQLite, so the generated DDL and INSERT quote every identifier.
 - `the_manifest_declares_each_table_s_own_scope` - the manifest carries the
   spec's scope and stops hardcoding one sentence for every table.
+
+## Frontend - the task page fills the viewport
+
+The task page draws its evaluation panel as a full-bleed raised surface, and it
+stopped at the panel's content: below it the page base showed through down to
+the footer. `app-root` stretches the routed component so the footer sits at the
+bottom, but `app-task-layout` sat between the two as a block container, so the
+height it received never reached the page inside it.
+
+The shell is now a flex column (its `display: contents` wrapper div is gone,
+since the host does that job), the page grows into it, and the panel takes the
+leftover height.
+
+`frontend/src/app/features/tasks/task-layout/task-layout.component.spec.ts`:
+- `is a column shell so the routed page inherits the height app-root hands it`.
+
+`frontend/src/app/features/tasks/task-detail/task-detail.component.spec.ts`:
+- `grows into the task shell and lets the panel absorb the leftover height`.

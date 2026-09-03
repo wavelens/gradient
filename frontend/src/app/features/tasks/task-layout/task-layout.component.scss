@@ -1,3 +1,6 @@
-.task-layout {
-  display: contents;
+// A column shell: app-root sizes it to the space left between header and footer,
+// and the routed page grows into that height instead of stopping at its content.
+:host {
+  display: flex;
+  flex-direction: column;
 }

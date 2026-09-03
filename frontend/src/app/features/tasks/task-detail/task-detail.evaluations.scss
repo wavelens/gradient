@@ -14,7 +14,9 @@
   --warn: var(--gr-status-warning);
   --run: var(--gr-status-info);
   --idle: var(--gr-border-subtle);
-  display: block;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   background: var(--gr-surface-base);
 }
 
@@ -147,6 +149,9 @@ h1 { font-size: $font-size-xxl; margin: 0; }
 }
 
 .panel {
+  // The raised surface is the page floor: it takes the height left under the
+  // tab strip so it meets the footer instead of ending at its content.
+  flex-grow: 1;
   background: var(--gr-surface-raised);
   border-top: 1px solid var(--gr-border-subtle);
   margin-top: -3px;
