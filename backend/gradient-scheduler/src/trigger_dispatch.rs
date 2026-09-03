@@ -88,7 +88,6 @@ pub(crate) fn cron_due(
 }
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger, trigger::maybe_trigger_input_update};
 use gradient_core::ServerState;
@@ -100,23 +99,6 @@ use sea_orm::{ActiveModelTrait as _, ColumnTrait, Condition, EntityTrait, QueryF
 use tracing::{debug, error, info, warn};
 
 use super::Scheduler;
-
-/// Spawned by `dispatch::start_dispatch_loops`; ticks every 5 s and processes
-/// every active polling/time trigger via `dispatch_once`.
-pub async fn trigger_dispatch_loop(scheduler: Arc<Scheduler>) {
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
-    let cancel = scheduler.state.shutdown.token();
-    info!("trigger dispatch loop started");
-    loop {
-        tokio::select! {
-            _ = cancel.cancelled() => { info!("trigger dispatch loop shutting down"); return; }
-            _ = interval.tick() => {}
-        }
-        if let Err(e) = dispatch_once(&scheduler).await {
-            error!(error = %e, "trigger dispatch error");
-        }
-    }
-}
 
 /// One pass through all active polling+time triggers. Public for tests.
 pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {

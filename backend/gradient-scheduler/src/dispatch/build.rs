@@ -7,7 +7,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 
 use crate::dispatch_mode::{BuildDispatchMode, arch_available, decide_dispatch_mode};
 use gradient_core::ServerState;
@@ -17,13 +16,15 @@ use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-use tracing::{debug, error, info};
+use gradient_util::supervision::{ChildCtx, ChildSpec, run_pass};
+use ractor::{Actor, ActorProcessingErr, ActorRef};
+use tracing::{debug, error};
 
 use crate::Scheduler;
 use crate::jobs::PendingBuildJob;
 use gradient_types::proto::{BuildJob, BuildSpec, CacheInfo, DerivationOutput, RequiredPath};
 
-use super::DISPATCH_TICK_SECS;
+use super::{DISPATCH_BUDGET, DISPATCH_TICK};
 
 /// Full-backstop (Global) reconcile cadence, in dispatch ticks: 6 x 5s = 30s.
 const GLOBAL_RECONCILE_TICKS: u64 = 6;
@@ -32,71 +33,155 @@ const GLOBAL_RECONCILE_TICKS: u64 = 6;
 /// tens of seconds on a large cache): 720 x 5s = 1h.
 const DEEP_RECONCILE_TICKS: u64 = 720;
 
-pub(super) async fn build_dispatch_loop(scheduler: Arc<Scheduler>) {
-    let mut interval = tokio::time::interval(Duration::from_secs(DISPATCH_TICK_SECS));
-    let cancel = scheduler.state.shutdown.token();
-    let mut tick_count: u64 = 0;
-    info!("build dispatch loop started");
-    loop {
-        let timer_tick = tokio::select! {
-            _ = cancel.cancelled() => {
-                info!("build dispatch loop shutting down");
-                return;
-            }
-            _ = interval.tick() => true,
-            _ = scheduler.dispatch_kick.notified() => false,
+/// One dispatch pass. A timer tick also advances the rescore clock and runs
+/// the reconcile scope for `tick_count`; a kick runs only the dispatch half.
+pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool, tick_count: u64) {
+    // rescore_count is an anti-starvation timeout measured in dispatch
+    // intervals, so only the timer advances it - reactive kicks (which can
+    // fire many times per interval) just run an extra dispatch pass.
+    if timer_tick {
+        scheduler.job_tracker.write().await.bump_rescore_counts();
+
+        // Every timer tick runs promotion (Tick); the anchor-side flag
+        // fixpoints, unbacked-output demote, and failure sweep (Global) run
+        // every GLOBAL_RECONCILE_TICKS, and the cached_path-side fixpoint
+        // (Deep) hourly - their full-table scans saturated Postgres when
+        // re-run every 5s on a large graph. Active evals keep their flags
+        // fresh via reactive completion propagation and per-flush Eval passes.
+        let scope = if tick_count.is_multiple_of(DEEP_RECONCILE_TICKS) {
+            gradient_db::ReconcileScope::Deep
+        } else if tick_count.is_multiple_of(GLOBAL_RECONCILE_TICKS) {
+            gradient_db::ReconcileScope::Global
+        } else {
+            gradient_db::ReconcileScope::Tick
         };
-        // rescore_count is an anti-starvation timeout measured in dispatch
-        // intervals, so only the timer advances it - reactive kicks (which can
-        // fire many times per interval) just run an extra dispatch pass.
+        gradient_db::reconcile_build_graph(&scheduler.state.db(), scope).await;
+    }
+
+    if let Err(e) = requeue_transient_failures(scheduler).await {
+        error!(error = %e, "requeue_transient_failures error");
+    }
+    if let Err(e) = dispatch_ready_builds(scheduler).await {
+        error!(error = %e, "build dispatch error");
+    }
+    // After dispatching, reconcile each in-flight evaluation's
+    // Building/Waiting state so the UI reflects "no worker can pick this
+    // up" (or recovers when a worker comes back online). Cheap when
+    // there are no in-flight evals.
+    if let Err(e) = scheduler.reconcile_waiting_state().await {
+        error!(error = %e, "reconcile_waiting_state in dispatch loop failed");
+    }
+    // A `.drv` our cache lost has no producer; the only recovery is a fresh
+    // evaluation of the same commit. Runs after the waiting-state reconcile
+    // has settled `graph_stuck`.
+    if let Err(e) = crate::waiting_state::recover_drv_stuck_evals(&scheduler.state).await {
+        error!(error = %e, "recover_drv_stuck_evals in dispatch loop failed");
+    }
+
+    // Re-offer still-pending jobs to all sessions each pass. A build
+    // re-queued after a failed/rejected dispatch had its sent-flag cleared,
+    // so this re-offers it (workers score it a second time) - including to a
+    // worker that just freed capacity via the kick. Sessions ignore an empty
+    // delta, so this is cheap when nothing changed.
+    if scheduler.job_tracker.read().await.has_pending() {
+        scheduler.job_notify.send_modify(|g| *g = g.wrapping_add(1));
+    }
+}
+
+pub(crate) enum BuildMsg {
+    Tick,
+    Kick,
+}
+
+/// The build dispatcher as a supervised actor: a timer tick every
+/// `DISPATCH_TICK`, plus edge-triggered kicks coalesced by generation so a
+/// burst of kicks queued during one pass is serviced by a single extra pass.
+pub(crate) struct BuildDispatch;
+
+pub(crate) struct BuildDispatchState {
+    scheduler: Arc<Scheduler>,
+    ctx: ChildCtx,
+    tick_count: u64,
+    kicks_seen: u64,
+}
+
+impl Actor for BuildDispatch {
+    type Msg = BuildMsg;
+    type State = BuildDispatchState;
+    type Arguments = (Arc<Scheduler>, ChildCtx);
+
+    async fn pre_start(
+        &self,
+        myself: ActorRef<Self::Msg>,
+        (scheduler, ctx): Self::Arguments,
+    ) -> Result<Self::State, ActorProcessingErr> {
+        myself.send_after(DISPATCH_TICK, || BuildMsg::Tick);
+        Ok(BuildDispatchState {
+            scheduler,
+            ctx,
+            tick_count: 0,
+            kicks_seen: 0,
+        })
+    }
+
+    async fn handle(
+        &self,
+        myself: ActorRef<Self::Msg>,
+        msg: Self::Msg,
+        state: &mut Self::State,
+    ) -> Result<(), ActorProcessingErr> {
+        let timer_tick = matches!(msg, BuildMsg::Tick);
+        let kick_gen = state.scheduler.kick_gen.load(Ordering::Relaxed);
+        if !timer_tick && kick_gen == state.kicks_seen {
+            return Ok(());
+        }
         if timer_tick {
-            scheduler.job_tracker.write().await.bump_rescore_counts();
-
-            // Every timer tick runs promotion (Tick); the anchor-side flag
-            // fixpoints, unbacked-output demote, and failure sweep (Global) run
-            // every GLOBAL_RECONCILE_TICKS, and the cached_path-side fixpoint
-            // (Deep) hourly - their full-table scans saturated Postgres when
-            // re-run every 5s on a large graph. Active evals keep their flags
-            // fresh via reactive completion propagation and per-flush Eval passes.
-            tick_count = tick_count.wrapping_add(1);
-            let scope = if tick_count.is_multiple_of(DEEP_RECONCILE_TICKS) {
-                gradient_db::ReconcileScope::Deep
-            } else if tick_count.is_multiple_of(GLOBAL_RECONCILE_TICKS) {
-                gradient_db::ReconcileScope::Global
-            } else {
-                gradient_db::ReconcileScope::Tick
-            };
-            gradient_db::reconcile_build_graph(&scheduler.state.db(), scope).await;
+            state.tick_count = state.tick_count.wrapping_add(1);
         }
 
-        if let Err(e) = requeue_transient_failures(&scheduler).await {
-            error!(error = %e, "requeue_transient_failures error");
-        }
-        if let Err(e) = dispatch_ready_builds(&scheduler).await {
-            error!(error = %e, "build dispatch error");
-        }
-        // After dispatching, reconcile each in-flight evaluation's
-        // Building/Waiting state so the UI reflects "no worker can pick this
-        // up" (or recovers when a worker comes back online). Cheap when
-        // there are no in-flight evals.
-        if let Err(e) = scheduler.reconcile_waiting_state().await {
-            error!(error = %e, "reconcile_waiting_state in dispatch loop failed");
-        }
-        // A `.drv` our cache lost has no producer; the only recovery is a fresh
-        // evaluation of the same commit. Runs after the waiting-state reconcile
-        // has settled `graph_stuck`.
-        if let Err(e) = crate::waiting_state::recover_drv_stuck_evals(&scheduler.state).await {
-            error!(error = %e, "recover_drv_stuck_evals in dispatch loop failed");
-        }
+        let scheduler = Arc::clone(&state.scheduler);
+        let tick_count = state.tick_count;
+        let alive = run_pass(
+            "build-dispatch",
+            DISPATCH_BUDGET,
+            &state.ctx.cancel,
+            &state.ctx.health,
+            Box::pin(async move {
+                build_dispatch_pass(&scheduler, timer_tick, tick_count).await;
+                Ok(())
+            }),
+        )
+        .await;
+        state.kicks_seen = kick_gen;
 
-        // Re-offer still-pending jobs to all sessions each pass. A build
-        // re-queued after a failed/rejected dispatch had its sent-flag cleared,
-        // so this re-offers it (workers score it a second time) - including to a
-        // worker that just freed capacity via the kick. Sessions ignore an empty
-        // delta, so this is cheap when nothing changed.
-        if scheduler.job_tracker.read().await.has_pending() {
-            scheduler.job_notify.send_modify(|g| *g = g.wrapping_add(1));
+        if !alive {
+            myself.stop(Some("shutdown".into()));
+        } else if timer_tick {
+            myself.send_after(DISPATCH_TICK, || BuildMsg::Tick);
         }
+        Ok(())
+    }
+}
+
+/// The build dispatcher as a supervised child. The factory re-publishes the
+/// actor ref on every (re)spawn so `kick_dispatch` always reaches the live one.
+pub(super) fn child_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
+    let scheduler = Arc::clone(scheduler);
+    ChildSpec::Custom {
+        name: "build-dispatch",
+        spawn: Arc::new(move |ctx: ChildCtx| {
+            let scheduler = Arc::clone(&scheduler);
+            Box::pin(async move {
+                let parent = ctx.parent.clone();
+                let (actor, _) =
+                    Actor::spawn_linked(None, BuildDispatch, (Arc::clone(&scheduler), ctx), parent)
+                        .await?;
+                scheduler
+                    .build_dispatch
+                    .store(Some(Arc::new(actor.clone())));
+                Ok(actor.get_cell())
+            })
+        }),
     }
 }
 

@@ -38,7 +38,7 @@ mod worker_lifecycle;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 
 use gradient_core::ServerState;
 use gradient_types::*;
@@ -75,11 +75,14 @@ pub struct Scheduler {
     /// (not `Notify`) so a bump fired while a session is busy is still observed
     /// on its next loop iteration instead of being a lost edge-triggered wakeup.
     pub(crate) job_notify: Arc<tokio::sync::watch::Sender<u64>>,
-    /// Kicks `build_dispatch_loop` to run a dispatch pass immediately instead of
-    /// waiting for its 5s tick, so a serial dependency chain advances at
-    /// completion speed rather than one level per interval. `notify_one` keeps a
-    /// single permit, so a kick fired mid-pass is still serviced next iteration.
-    pub(crate) dispatch_kick: Arc<tokio::sync::Notify>,
+    /// The live build-dispatch actor, re-published by its factory on every
+    /// (re)spawn, so `kick_dispatch` always reaches the current instance.
+    pub(crate) build_dispatch: Arc<arc_swap::ArcSwapOption<ractor::ActorRef<dispatch::BuildMsg>>>,
+    /// Edge-trigger generation for `kick_dispatch`: the dispatcher services a
+    /// burst of kicks with one pass by comparing against the generation it saw.
+    pub(crate) kick_gen: Arc<AtomicU64>,
+    /// The supervision tree owning every dispatch loop; set by `start`.
+    pub(crate) supervisor: Arc<std::sync::OnceLock<gradient_util::supervision::Supervisor>>,
     /// Per-evaluation accumulator of discovered dependency edges, flushed when
     /// the eval stream completes. Promotion itself is graph-driven (see
     /// `gradient_db::promotion`), not tied to this map.
@@ -120,7 +123,9 @@ impl Scheduler {
             worker_pool: Arc::new(RwLock::new(WorkerPool::new())),
             job_tracker: Arc::new(RwLock::new(JobTracker::new())),
             job_notify: Arc::new(tokio::sync::watch::channel(0u64).0),
-            dispatch_kick: Arc::new(tokio::sync::Notify::new()),
+            build_dispatch: Arc::new(arc_swap::ArcSwapOption::empty()),
+            kick_gen: Arc::new(AtomicU64::new(0)),
+            supervisor: Arc::new(std::sync::OnceLock::new()),
             eval_edges: Arc::new(RwLock::new(HashMap::new())),
             policy,
             instance: Arc::new(arc_swap::ArcSwap::from_pointee(
@@ -156,6 +161,14 @@ impl Scheduler {
     /// Call once after creating the scheduler, before serving requests.
     pub fn start(self: &Arc<Self>) {
         dispatch::start_dispatch_loops(Arc::clone(self));
+    }
+
+    /// Per-loop supervision health (restarts, pass errors, timeouts, last ok).
+    pub fn loop_health(&self) -> Vec<(&'static str, gradient_util::supervision::LoopHealth)> {
+        self.supervisor
+            .get()
+            .map(|s| s.health().snapshot())
+            .unwrap_or_default()
     }
 
     /// Snapshot of in-memory scheduler counts used by the metrics endpoint.
