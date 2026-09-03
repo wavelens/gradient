@@ -98,7 +98,7 @@ pub async fn handle_cache_socket(
     }
 
     let send_chunk_timeout = Duration::from_secs(state.config.proto.nar_send_chunk_timeout_secs);
-    let (mut reader, writer) = socket.split(send_chunk_timeout);
+    let (mut reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
     let max_serves = state.config.proto.max_concurrent_nar_serves;
     let nar_serve_semaphore = Arc::new(Semaphore::new(max_serves));
     let idle = Duration::from_secs(CACHE_SESSION_IDLE_TIMEOUT_SECS);
@@ -177,7 +177,8 @@ pub async fn handle_cache_socket(
                     let state = Arc::clone(&state);
                     let writer = writer.clone();
                     let job_id = job_id.clone();
-                    tokio::spawn(async move {
+                    let shutdown = state.shutdown.clone();
+                    shutdown.spawn(async move {
                         let _permit = permit;
                         if let Err(e) = super::nar_transfer::serve_nar_request(
                             &state,

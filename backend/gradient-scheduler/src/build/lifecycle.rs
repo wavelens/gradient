@@ -315,7 +315,8 @@ pub async fn handle_build_job_completed(
 
     if was_external_cached {
         let state = Arc::clone(state);
-        tokio::spawn(async move {
+        let shutdown = state.shutdown.clone();
+        shutdown.spawn(async move {
             let drv_path = match EDerivation::find_by_id(derivation_id)
                 .one(&state.worker_db)
                 .await

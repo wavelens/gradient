@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "the worker owns its own runtime and shutdown"
+)]
+
 mod config;
 mod connection;
 mod connection_state;

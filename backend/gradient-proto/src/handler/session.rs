@@ -274,7 +274,7 @@ impl ProtoSession<Registered> {
 
         let proto_cfg = &state.config.proto;
         let send_chunk_timeout = Duration::from_secs(proto_cfg.nar_send_chunk_timeout_secs);
-        let (mut reader, writer) = socket.split(send_chunk_timeout);
+        let (mut reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
 
         let partial_root =
             std::path::PathBuf::from(format!("{}/nar-partial", state.config.storage.base_path));
