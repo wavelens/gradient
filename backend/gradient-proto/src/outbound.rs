@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gradient_util::supervision::ChildSpec;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
 use tokio_tungstenite::connect_async_with_config;
@@ -27,26 +28,24 @@ use gradient_entity::worker_registration::{Column, Entity as EWorkerRegistration
 use crate::handler::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket, handle_socket};
 use gradient_scheduler::Scheduler;
 
-/// Spawn the outbound connection loop on the shared shutdown tracker so it
-/// drains cleanly on SIGTERM.
+/// The outbound connection pass as a supervised child; each connection it
+/// opens is a tracked task of its own.
 pub fn start_outbound_loop(scheduler: Arc<Scheduler>) {
-    let shutdown = scheduler.state.shutdown.clone();
-    let cancel = shutdown.token();
-    shutdown.spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(15));
-        let connecting: Arc<Mutex<HashSet<String>>> = Arc::default();
-        info!("outbound worker connection loop started");
-        loop {
-            tokio::select! {
-                _ = cancel.cancelled() => {
-                    info!("outbound worker connection loop shutting down");
-                    return;
-                }
-                _ = interval.tick() => {}
+    let connecting: Arc<Mutex<HashSet<String>>> = Arc::default();
+    let pass_scheduler = Arc::clone(&scheduler);
+    scheduler.state.shutdown.supervise(ChildSpec::periodic(
+        "outbound-connect",
+        Duration::from_secs(15),
+        Duration::from_secs(60),
+        move || {
+            let scheduler = Arc::clone(&pass_scheduler);
+            let connecting = Arc::clone(&connecting);
+            async move {
+                connect_to_registered_workers(&scheduler, &connecting).await;
+                Ok(())
             }
-            connect_to_registered_workers(&scheduler, &connecting).await;
-        }
-    });
+        },
+    ));
 }
 
 async fn connect_to_registered_workers(

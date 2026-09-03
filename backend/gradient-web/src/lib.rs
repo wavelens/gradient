@@ -667,8 +667,12 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
 
     let scheduler = Arc::new(Scheduler::new(Arc::clone(&state)));
     scheduler.start();
-    gradient_db::retention::start_retention_loop(state.db());
-    gradient_db::rollup::start_rollup_loop(state.db());
+    state
+        .shutdown
+        .supervise(gradient_db::retention::child_spec(state.db()));
+    state
+        .shutdown
+        .supervise(gradient_db::rollup::child_spec(state.db()));
     otlp::start_otlp(Arc::clone(&state), Arc::clone(&scheduler));
     gradient_proto::outbound::start_outbound_loop(Arc::clone(&scheduler));
 
@@ -887,7 +891,8 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
 
 /// Install a SIGINT/SIGTERM handler that triggers graceful shutdown.
 fn install_signal_handler(shutdown: gradient_util::shutdown::Shutdown) {
-    tokio::spawn(async move {
+    let trigger = shutdown.clone();
+    shutdown.spawn(async move {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{SignalKind, signal};
@@ -908,6 +913,6 @@ fn install_signal_handler(shutdown: gradient_util::shutdown::Shutdown) {
             let _ = tokio::signal::ctrl_c().await;
             tracing::info!("received Ctrl-C, shutting down");
         }
-        shutdown.cancel();
+        trigger.cancel();
     });
 }

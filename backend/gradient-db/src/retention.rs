@@ -14,6 +14,7 @@
 use std::time::Duration;
 
 use gradient_entity::metric_rollup::RollupGranularity;
+use gradient_util::supervision::ChildSpec;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tracing::{debug, warn};
 
@@ -21,17 +22,20 @@ use super::DbContext;
 
 const RETENTION_INTERVAL_SECS: u64 = 3600;
 
-pub fn start_retention_loop(ctx: DbContext) {
-    let shutdown = ctx.shutdown.clone();
-    shutdown.spawn(async move { retention_loop(ctx).await });
-}
-
-async fn retention_loop(ctx: DbContext) {
-    let mut interval = tokio::time::interval(Duration::from_secs(RETENTION_INTERVAL_SECS));
-    loop {
-        interval.tick().await;
-        run_retention(&ctx).await;
-    }
+/// The hourly pruning pass as a supervised child.
+pub fn child_spec(ctx: DbContext) -> ChildSpec {
+    ChildSpec::periodic(
+        "retention",
+        Duration::from_secs(RETENTION_INTERVAL_SECS),
+        Duration::from_secs(600),
+        move || {
+            let ctx = ctx.clone();
+            async move {
+                run_retention(&ctx).await;
+                Ok(())
+            }
+        },
+    )
 }
 
 async fn run_retention(ctx: &DbContext) {
