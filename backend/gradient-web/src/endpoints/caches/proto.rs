@@ -70,14 +70,19 @@ pub async fn cache_proto(
         .max_message_size(gradient_proto::handler::MAX_PROTO_MESSAGE_SIZE)
         .max_frame_size(gradient_proto::handler::MAX_PROTO_MESSAGE_SIZE);
 
+    let shutdown = state.shutdown.clone();
     Ok(upgrade.on_upgrade(move |sock| async move {
-        let _global_permit = global_permit;
-        let _ip_permit = ip_permit;
-        gradient_proto::handler::handle_cache_socket(
-            gradient_proto::server::accept_axum(sock),
-            state,
-            cache_id,
-        )
-        .await;
+        let _ = shutdown
+            .spawn(async move {
+                let _global_permit = global_permit;
+                let _ip_permit = ip_permit;
+                gradient_proto::handler::handle_cache_socket(
+                    gradient_proto::server::accept_axum(sock),
+                    state,
+                    cache_id,
+                )
+                .await;
+            })
+            .await;
     }))
 }

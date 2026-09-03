@@ -66,16 +66,21 @@ async fn ws_upgrade(
             .into_response();
     };
 
+    let shutdown = state.shutdown.clone();
     ws.max_message_size(MAX_PROTO_MESSAGE_SIZE)
         .max_frame_size(MAX_PROTO_MESSAGE_SIZE)
         .on_upgrade(move |sock| async move {
-            let _permit = permit;
-            session::handle_socket(
-                socket::ProtoSocket::Axum(Box::new(sock)),
-                state,
-                scheduler,
-                false,
-            )
-            .await;
+            let _ = shutdown
+                .spawn(async move {
+                    let _permit = permit;
+                    session::handle_socket(
+                        socket::ProtoSocket::Axum(Box::new(sock)),
+                        state,
+                        scheduler,
+                        false,
+                    )
+                    .await;
+                })
+                .await;
         })
 }

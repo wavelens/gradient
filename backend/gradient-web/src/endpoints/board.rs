@@ -23,6 +23,7 @@ use gradient_entity::{build_attempt, flake_output_node};
 use gradient_scheduler::{BoardEvent, Scheduler};
 use gradient_types::ids::DispatchedJobId;
 use gradient_types::*;
+use gradient_util::shutdown::CancellationToken;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, QueryOrder,
     QuerySelect, Statement,
@@ -1119,7 +1120,13 @@ pub async fn board_live_ws(
         pending,
         active,
     };
-    ws.on_upgrade(move |socket| board_live_loop(socket, rx, scope, initial))
+    let cancel = state.shutdown.token();
+    let shutdown = state.shutdown.clone();
+    ws.on_upgrade(move |socket| async move {
+        let _ = shutdown
+            .spawn(board_live_loop(socket, rx, scope, initial, cancel))
+            .await;
+    })
 }
 
 async fn board_live_loop(
@@ -1127,6 +1134,7 @@ async fn board_live_loop(
     mut rx: tokio::sync::broadcast::Receiver<BoardEvent>,
     scope: MetricsScope,
     initial: BoardEvent,
+    cancel: CancellationToken,
 ) {
     // Send a queue-depth snapshot immediately so freshly-opened boards show
     // live counts without waiting for the next periodic broadcast.
@@ -1137,7 +1145,11 @@ async fn board_live_loop(
     }
 
     loop {
-        match rx.recv().await {
+        let event = tokio::select! {
+            _ = cancel.cancelled() => break,
+            event = rx.recv() => event,
+        };
+        match event {
             Ok(ev) => {
                 if let Some(text) = mask_event(&ev, &scope)
                     && socket.send(Message::Text(text.into())).await.is_err()

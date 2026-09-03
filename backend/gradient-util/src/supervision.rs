@@ -17,7 +17,10 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ractor::{Actor, ActorCell, ActorId, ActorProcessingErr, ActorRef, RpcReplyPort, SpawnErr, SupervisionEvent};
+use ractor::{
+    Actor, ActorCell, ActorId, ActorProcessingErr, ActorRef, RpcReplyPort, SpawnErr,
+    SupervisionEvent,
+};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
@@ -383,7 +386,10 @@ impl Supervisor {
         let stop = root.clone();
         tracker.spawn(async move {
             token.cancelled().await;
-            if let Err(e) = stop.stop_and_wait(Some("shutdown".into()), Some(STOP_TIMEOUT)).await {
+            if let Err(e) = stop
+                .stop_and_wait(Some("shutdown".into()), Some(STOP_TIMEOUT))
+                .await
+            {
                 warn!(error = %e, "supervision tree did not stop cleanly");
             }
         });
@@ -501,7 +507,11 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert!(calls.load(Ordering::SeqCst) > 0, "the loop ticked");
         assert_eq!(
-            shutdown.supervision_health().expect("tree").snapshot().len(),
+            shutdown
+                .supervision_health()
+                .expect("tree")
+                .snapshot()
+                .len(),
             1
         );
         shutdown.cancel_and_drain(Duration::from_secs(2)).await;

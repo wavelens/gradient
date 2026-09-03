@@ -22,6 +22,7 @@ use axum::extract::ws::WebSocketUpgrade;
 use axum::response::Response;
 use axum::routing::get;
 use gradient_types::BoardEvent;
+use gradient_util::shutdown::Shutdown;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 
@@ -29,13 +30,18 @@ use tokio::sync::broadcast;
 type Done = Arc<tokio::sync::Notify>;
 
 async fn live_route(
-    State((tx, done)): State<(broadcast::Sender<BoardEvent>, Done)>,
+    State((tx, done, shutdown)): State<(broadcast::Sender<BoardEvent>, Done, Shutdown)>,
     ws: WebSocketUpgrade,
 ) -> Response {
     let rx = tx.subscribe();
     ws.on_upgrade(move |socket| async move {
-        gradient_web::endpoints::live::live_stream(socket, rx, |ev| serde_json::to_string(ev).ok())
-            .await;
+        gradient_web::endpoints::live::live_stream(
+            socket,
+            rx,
+            |ev| serde_json::to_string(ev).ok(),
+            shutdown.token(),
+        )
+        .await;
         done.notify_one();
     })
 }
@@ -44,10 +50,11 @@ async fn live_route(
 async fn live_stream_ends_when_the_client_disconnects() {
     let (tx, _rx) = broadcast::channel(16);
     let done: Done = Arc::new(tokio::sync::Notify::new());
+    let shutdown = Shutdown::new();
 
     let app = Router::new()
         .route("/live", get(live_route))
-        .with_state((tx, Arc::clone(&done)));
+        .with_state((tx, Arc::clone(&done), shutdown));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -66,4 +73,32 @@ async fn live_stream_ends_when_the_client_disconnects() {
     tokio::time::timeout(Duration::from_secs(5), done.notified())
         .await
         .expect("stream task must end when the client disconnects");
+}
+
+#[tokio::test]
+async fn live_stream_ends_when_the_server_shuts_down() {
+    let (tx, _rx) = broadcast::channel(16);
+    let done: Done = Arc::new(tokio::sync::Notify::new());
+    let shutdown = Shutdown::new();
+
+    let app = Router::new()
+        .route("/live", get(live_route))
+        .with_state((tx, Arc::clone(&done), shutdown.clone()));
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    let (_client, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/live"))
+        .await
+        .expect("client connects");
+
+    // The client stays and the channel stays quiet; only shutdown ends the stream.
+    shutdown.cancel();
+
+    tokio::time::timeout(Duration::from_secs(5), done.notified())
+        .await
+        .expect("stream task must end on shutdown");
 }
