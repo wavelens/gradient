@@ -24,8 +24,8 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_util::supervision::{ChildSpec, Supervisor};
-use tracing::{error, info};
+use gradient_util::supervision::ChildSpec;
+use tracing::info;
 
 use super::Scheduler;
 
@@ -46,19 +46,11 @@ pub(super) const DISPATCH_BUDGET: Duration = Duration::from_secs(120);
 const METRICS_BUDGET: Duration = Duration::from_secs(60);
 const CONSISTENCY_BUDGET: Duration = Duration::from_secs(600);
 
-/// Starts every dispatch loop under one supervision tree tied to shutdown.
+/// Registers every dispatch loop on the process supervision tree.
 pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
-    let shutdown = scheduler.state.shutdown.clone();
-    shutdown.spawn(async move {
-        let children = child_specs(&scheduler);
-        match Supervisor::start(&scheduler.state.shutdown, children).await {
-            Ok(sup) => {
-                info!("dispatch supervision tree started");
-                let _ = scheduler.supervisor.set(sup);
-            }
-            Err(e) => error!(error = %e, "failed to start the dispatch supervision tree"),
-        }
-    });
+    for spec in child_specs(&scheduler) {
+        scheduler.state.shutdown.supervise(spec);
+    }
 }
 
 fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
