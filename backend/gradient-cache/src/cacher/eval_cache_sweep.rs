@@ -16,7 +16,7 @@ use gradient_core::ServerState;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Rows are `(id, size_bytes, updated_at)`. Returns the ids to evict: every row
 /// older than `max_age`, plus - oldest-`updated_at` first - enough additional
@@ -122,36 +122,6 @@ pub async fn evict_eval_cache(state: Arc<ServerState>) -> anyhow::Result<()> {
     }
 
     Ok(())
-}
-
-/// Periodic eval-cache eviction sweep; interval from
-/// `storage.eval_cache_sweep_interval_secs`.
-pub async fn eval_cache_sweep_loop(state: Arc<ServerState>) {
-    let _guard = if state.config.registration.report_errors {
-        Some(sentry::init(
-            gradient_types::cli::effective_sentry_dsn(&state.config.registration).to_string(),
-        ))
-    } else {
-        None
-    };
-
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(
-        state.config.storage.eval_cache_sweep_interval_secs.max(1),
-    ));
-    let cancel = state.shutdown.token();
-    loop {
-        tokio::select! {
-            _ = cancel.cancelled() => {
-                debug!("eval-cache sweep loop shutting down");
-                return;
-            }
-            _ = interval.tick() => {}
-        }
-
-        if let Err(e) = evict_eval_cache(Arc::clone(&state)).await {
-            error!(error = ?e, "eval-cache sweep failed");
-        }
-    }
 }
 
 #[cfg(test)]
