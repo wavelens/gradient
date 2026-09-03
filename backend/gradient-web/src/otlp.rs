@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
+use gradient_util::supervision::ChildSpec;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry_otlp::WithExportConfig as _;
 use tracing::{error, info};
@@ -84,22 +85,29 @@ pub fn start_otlp(state: Arc<ServerState>, scheduler: Arc<Scheduler>) {
 
     let shutdown = state.shutdown.clone();
     let refresh = Arc::clone(&snap);
-    shutdown.spawn(async move {
-        let mut tick = tokio::time::interval(interval);
-        loop {
-            tick.tick().await;
-            if let Ok(obs) = crate::endpoints::metrics::collect(&state, &scheduler).await
-                && let Ok(mut s) = refresh.lock()
-            {
-                s.workers = obs.workers_connected;
-                s.pending = obs.jobs_pending;
-                s.active = obs.jobs_active;
-                s.cache_bytes = obs.cache_bytes;
-                s.cache_nar_bytes = obs.cache_nar_bytes;
-                s.cache_packages = obs.cache_packages;
+    shutdown.supervise(ChildSpec::periodic(
+        "otlp-snapshot",
+        interval,
+        Duration::from_secs(60),
+        move || {
+            let state = Arc::clone(&state);
+            let scheduler = Arc::clone(&scheduler);
+            let refresh = Arc::clone(&refresh);
+            async move {
+                if let Ok(obs) = crate::endpoints::metrics::collect(&state, &scheduler).await
+                    && let Ok(mut s) = refresh.lock()
+                {
+                    s.workers = obs.workers_connected;
+                    s.pending = obs.jobs_pending;
+                    s.active = obs.jobs_active;
+                    s.cache_bytes = obs.cache_bytes;
+                    s.cache_nar_bytes = obs.cache_nar_bytes;
+                    s.cache_packages = obs.cache_packages;
+                }
+                Ok(())
             }
-        }
-    });
+        },
+    ));
 
     // The provider must outlive the process so the periodic reader keeps exporting.
     Box::leak(Box::new(provider));

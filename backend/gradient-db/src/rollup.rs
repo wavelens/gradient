@@ -15,6 +15,7 @@
 use std::time::Duration;
 
 use gradient_entity::metric_rollup::RollupGranularity;
+use gradient_util::supervision::ChildSpec;
 use sea_orm::ConnectionTrait;
 use tracing::{debug, warn};
 
@@ -226,18 +227,21 @@ fn upstream_misses_sql() -> String {
     )
 }
 
-pub fn start_rollup_loop(ctx: DbContext) {
-    let shutdown = ctx.shutdown.clone();
-    shutdown.spawn(async move { rollup_loop(ctx).await });
-}
-
-async fn rollup_loop(ctx: DbContext) {
+/// The rollup aggregation pass as a supervised child.
+pub fn child_spec(ctx: DbContext) -> ChildSpec {
     let secs = ctx.config.metrics_args.metrics_rollup_interval_secs.max(1);
-    let mut interval = tokio::time::interval(Duration::from_secs(secs));
-    loop {
-        interval.tick().await;
-        run_rollup(&ctx).await;
-    }
+    ChildSpec::periodic(
+        "rollup",
+        Duration::from_secs(secs),
+        Duration::from_secs(300),
+        move || {
+            let ctx = ctx.clone();
+            async move {
+                run_rollup(&ctx).await;
+                Ok(())
+            }
+        },
+    )
 }
 
 async fn run_rollup(ctx: &DbContext) {
