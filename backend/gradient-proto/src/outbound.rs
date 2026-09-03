@@ -25,12 +25,12 @@ use tracing::{debug, error, info, warn};
 
 use gradient_entity::worker_registration::{Column, Entity as EWorkerRegistration};
 
-use crate::handler::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket, handle_socket};
+use crate::handler::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket, SessionsHandle, handle_socket};
 use gradient_scheduler::Scheduler;
 
 /// The outbound connection pass as a supervised child; each connection it
 /// opens is a tracked task of its own.
-pub fn start_outbound_loop(scheduler: Arc<Scheduler>) {
+pub fn start_outbound_loop(scheduler: Arc<Scheduler>, sessions: Arc<SessionsHandle>) {
     let connecting: Arc<Mutex<HashSet<String>>> = Arc::default();
     let pass_scheduler = Arc::clone(&scheduler);
     scheduler.state.shutdown.supervise(ChildSpec::periodic(
@@ -39,9 +39,10 @@ pub fn start_outbound_loop(scheduler: Arc<Scheduler>) {
         Duration::from_secs(60),
         move || {
             let scheduler = Arc::clone(&pass_scheduler);
+            let sessions = Arc::clone(&sessions);
             let connecting = Arc::clone(&connecting);
             async move {
-                connect_to_registered_workers(&scheduler, &connecting).await;
+                connect_to_registered_workers(&scheduler, &sessions, &connecting).await;
                 Ok(())
             }
         },
@@ -50,6 +51,7 @@ pub fn start_outbound_loop(scheduler: Arc<Scheduler>) {
 
 async fn connect_to_registered_workers(
     scheduler: &Arc<Scheduler>,
+    sessions: &Arc<SessionsHandle>,
     connecting: &Arc<Mutex<HashSet<String>>>,
 ) {
     let state = &scheduler.state;
@@ -94,6 +96,7 @@ async fn connect_to_registered_workers(
         let url = url.to_owned();
         let worker_id = reg.worker_id.clone();
         let scheduler = Arc::clone(scheduler);
+        let sessions = Arc::clone(sessions);
         let connecting = Arc::clone(connecting);
         let shutdown = scheduler.state.shutdown.clone();
 
@@ -117,6 +120,7 @@ async fn connect_to_registered_workers(
                         socket,
                         Arc::clone(&scheduler.state),
                         Arc::clone(&scheduler),
+                        Arc::clone(&sessions),
                         true,
                     )
                     .await;

@@ -26,11 +26,13 @@ gradient-scheduler = { workspace = true }
 gradient-entity = { workspace = true }
 
 anyhow            = { workspace = true }
+arc-swap          = { workspace = true }
 async-trait       = { workspace = true }
 chrono            = { workspace = true }
 futures           = { workspace = true }
 hex               = { workspace = true }
 password-auth     = { workspace = true }
+ractor            = { workspace = true }
 reqwest           = { workspace = true }
 rkyv              = { workspace = true }
 sea-orm           = { workspace = true }
@@ -47,4 +49,5 @@ axum = { workspace = true, features = ["ws", "http1", "tokio"] }
 [dev-dependencies]
 serde_json   = { workspace = true }
 tempfile     = { workspace = true }
+tokio        = { workspace = true, features = ["macros", "sync", "net", "rt-multi-thread"] }
 gradient-test-support = { workspace = true }

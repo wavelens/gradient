@@ -39,7 +39,8 @@ fn make_server(limiter: Arc<ProtoLimiter>) -> TestServer {
     let app = proto_router()
         .with_state(Arc::clone(&state))
         .layer(Extension(scheduler))
-        .layer(Extension(limiter));
+        .layer(Extension(limiter))
+        .layer(Extension(gradient_proto::SessionsHandle::new()));
     // Real HTTP transport: in-memory transport rejects WS-shaped requests with
     // 426 inside the `WebSocketUpgrade` extractor before the handler body
     // runs, which would mask the limiter behaviour we're testing.
