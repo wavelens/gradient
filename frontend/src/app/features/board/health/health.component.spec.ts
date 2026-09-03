@@ -31,6 +31,11 @@ const HEALTH: BoardHealth = {
   rollup_lag_seconds: 0,
   latest_rollup_bucket: null,
   draining: false,
+  supervised: [
+    { name: 'build-dispatch', restarts: 1, pass_errors: 0, pass_timeouts: 0, last_ok_seconds_ago: 4, last_error: 'boom' },
+    { name: 'retention', restarts: 0, pass_errors: 0, pass_timeouts: 0, last_ok_seconds_ago: null, last_error: null },
+  ],
+  proto_sessions: 2,
 };
 
 const TASK: AdminTask = {
@@ -131,5 +136,15 @@ describe('BoardHealthComponent', () => {
       button.click();
       expect(setDraining).toHaveBeenCalledWith(true);
     });
+  });
+
+  it('lists every supervised loop and flags restarts', () => {
+    const fixture = setup(() => of(true));
+    const rows = fixture.nativeElement.querySelectorAll('table.supervision tbody tr');
+    expect(rows.length).toBe(2);
+    expect(rows[0].textContent).toContain('build-dispatch');
+    expect(rows[0].querySelector('td.bad')?.textContent?.trim()).toBe('1');
+    expect(rows[1].textContent).toContain('never');
+    TestBed.resetTestingModule();
   });
 });

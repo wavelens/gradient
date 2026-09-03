@@ -6839,6 +6839,24 @@ paths:
       responses:
         '200':
           description: System health
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: object
+                        properties:
+                          supervised:
+                            type: array
+                            description: One row per loop in the process supervision tree.
+                            items:
+                              $ref: '#/components/schemas/SupervisedLoop'
+                          proto_sessions:
+                            type: integer
+                            description: Worker protocol sessions currently open.
         '403':
           description: Superuser required
 
@@ -10842,6 +10860,17 @@ components:
         pname: { type: string, nullable: true }
         score: { type: number }
         won: { type: boolean, description: Whether this candidate won the decision and was dispatched. }
+
+    SupervisedLoop:
+      type: object
+      required: [name, restarts, pass_errors, pass_timeouts]
+      properties:
+        name: { type: string }
+        restarts: { type: integer, description: Times the loop was respawned after a panic or unexpected exit. }
+        pass_errors: { type: integer, description: Passes that returned an error. }
+        pass_timeouts: { type: integer, description: Passes cancelled for exceeding their budget. }
+        last_ok_seconds_ago: { type: number, nullable: true }
+        last_error: { type: string, nullable: true }
 
     DispatchDecision:
       type: object
