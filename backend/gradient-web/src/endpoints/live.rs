@@ -17,6 +17,7 @@ use axum::extract::{Path, State};
 use axum::response::Response;
 use gradient_core::ServerState;
 use gradient_types::*;
+use gradient_util::shutdown::CancellationToken;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -31,8 +32,12 @@ use super::evals::EvalAccessContext;
 /// The inbound half is polled purely to notice the client leaving: a loop that
 /// only writes learns of a closed tab at the next event that fails to send, so
 /// a quiet channel would hold its task and socket open indefinitely.
-pub async fn live_stream<F>(socket: WebSocket, mut rx: BoardEventRx, mut select: F)
-where
+pub async fn live_stream<F>(
+    socket: WebSocket,
+    mut rx: BoardEventRx,
+    mut select: F,
+    cancel: CancellationToken,
+) where
     F: FnMut(&BoardEvent) -> Option<String> + Send + 'static,
 {
     use futures::{SinkExt, StreamExt};
@@ -40,6 +45,7 @@ where
     let (mut sink, mut stream) = socket.split();
     loop {
         tokio::select! {
+            _ = cancel.cancelled() => break,
             incoming = stream.next() => match incoming {
                 // Close frame, transport error, or the peer simply went away.
                 None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
@@ -99,8 +105,17 @@ pub async fn task_live_ws(
         .unwrap_or_default();
 
     let rx = state.board_events.subscribe();
-    Ok(ws.on_upgrade(move |socket| {
-        live_stream(socket, rx, move |ev| task_frame(ev, task_id, &mut known))
+    let cancel = state.shutdown.token();
+    let shutdown = state.shutdown.clone();
+    Ok(ws.on_upgrade(move |socket| async move {
+        let _ = shutdown
+            .spawn(live_stream(
+                socket,
+                rx,
+                move |ev| task_frame(ev, task_id, &mut known),
+                cancel,
+            ))
+            .await;
     }))
 }
 
@@ -139,7 +154,13 @@ pub async fn evaluation_live_ws(
     let ctx = EvalAccessContext::load(&state, evaluation_id, &maybe_user, api_key.as_ref()).await?;
     let eval_id = ctx.evaluation.id.into_inner();
     let rx = state.board_events.subscribe();
-    Ok(ws.on_upgrade(move |socket| live_stream(socket, rx, move |ev| eval_frame(ev, eval_id))))
+    let cancel = state.shutdown.token();
+    let shutdown = state.shutdown.clone();
+    Ok(ws.on_upgrade(move |socket| async move {
+        let _ = shutdown
+            .spawn(live_stream(socket, rx, move |ev| eval_frame(ev, eval_id), cancel))
+            .await;
+    }))
 }
 
 /// `GET /builds/{build}/live` - build status changes for the build's evaluation,
@@ -154,7 +175,13 @@ pub async fn build_live_ws(
     let ctx = BuildAccessContext::load(&state, build_id, &maybe_user, api_key.as_ref()).await?;
     let eval_id = ctx.build_job.evaluation.into_inner();
     let rx = state.board_events.subscribe();
-    Ok(ws.on_upgrade(move |socket| live_stream(socket, rx, move |ev| eval_frame(ev, eval_id))))
+    let cancel = state.shutdown.token();
+    let shutdown = state.shutdown.clone();
+    Ok(ws.on_upgrade(move |socket| async move {
+        let _ = shutdown
+            .spawn(live_stream(socket, rx, move |ev| eval_frame(ev, eval_id), cancel))
+            .await;
+    }))
 }
 
 fn eval_frame(ev: &BoardEvent, eval_id: Uuid) -> Option<String> {
@@ -177,11 +204,20 @@ pub async fn cache_live_ws(
     ws: WebSocketUpgrade,
 ) -> Response {
     let rx = state.board_events.subscribe();
-    ws.on_upgrade(move |socket| {
-        live_stream(socket, rx, |ev| match ev {
-            BoardEvent::CacheChanged => frame(ev),
-            _ => None,
-        })
+    let cancel = state.shutdown.token();
+    let shutdown = state.shutdown.clone();
+    ws.on_upgrade(move |socket| async move {
+        let _ = shutdown
+            .spawn(live_stream(
+                socket,
+                rx,
+                |ev| match ev {
+                    BoardEvent::CacheChanged => frame(ev),
+                    _ => None,
+                },
+                cancel,
+            ))
+            .await;
     })
 }
 

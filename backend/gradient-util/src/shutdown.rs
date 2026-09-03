@@ -27,11 +27,14 @@ use std::time::Duration;
 
 use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 use tracing::{Instrument, error, info, warn};
 
 use crate::supervision::{ChildSpec, Supervisor, SupervisorHealth};
+
+/// Re-exported so callers observing shutdown do not need `tokio-util` as a
+/// direct dependency.
+pub use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug)]
 pub struct Shutdown {

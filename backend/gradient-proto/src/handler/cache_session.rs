@@ -102,25 +102,31 @@ pub async fn handle_cache_socket(
     let max_serves = state.config.proto.max_concurrent_nar_serves;
     let nar_serve_semaphore = Arc::new(Semaphore::new(max_serves));
     let idle = Duration::from_secs(CACHE_SESSION_IDLE_TIMEOUT_SECS);
+    let cancel = state.shutdown.token();
 
     loop {
         // Only enforce the idle timeout while no NAR transfer is in flight, so
         // a client that batches its NarRequests and then quietly receives a
         // large download is not disconnected mid-transfer.
-        let msg = if nar_serve_semaphore.available_permits() == max_serves {
-            match tokio::time::timeout(idle, recv_client_msg(&mut reader)).await {
-                Ok(Some(m)) => m,
-                Ok(None) => break,
-                Err(_) => {
-                    debug!(%cache_id, "cache websocket idle timeout; closing");
-                    break;
+        let next = async {
+            if nar_serve_semaphore.available_permits() == max_serves {
+                match tokio::time::timeout(idle, recv_client_msg(&mut reader)).await {
+                    Ok(m) => m,
+                    Err(_) => {
+                        debug!(%cache_id, "cache websocket idle timeout; closing");
+                        None
+                    }
                 }
+            } else {
+                recv_client_msg(&mut reader).await
             }
-        } else {
-            match recv_client_msg(&mut reader).await {
+        };
+        let msg = tokio::select! {
+            _ = cancel.cancelled() => break,
+            m = next => match m {
                 Some(m) => m,
                 None => break,
-            }
+            },
         };
 
         if let Some(reason) = reject_reason(&msg) {

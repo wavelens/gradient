@@ -299,9 +299,15 @@ impl ProtoSession<Registered> {
         // inbound frame so the liveness watchdog can spot a worker that died
         // without a clean TCP close.
         let last_seen = scheduler.worker_last_seen(&peer_id).await;
+        let cancel = state.shutdown.token();
 
         loop {
             let msg = tokio::select! {
+                _ = cancel.cancelled() => {
+                    info!(%peer_id, "server shutting down; sending Draining and closing");
+                    let _ = send_server_msg(&writer, &ServerMessage::Draining).await;
+                    break;
+                }
                 msg = recv_client_msg(&mut reader) => match msg {
                     Some(m) => m,
                     None => break,
