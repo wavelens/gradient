@@ -124,22 +124,19 @@ async fn job_notify_bump_is_not_lost_when_not_awaiting() {
     );
 }
 
-/// Reactive dispatch (#359): a kick fired while the dispatch loop is mid-pass
-/// (not awaiting) is retained - `notify_one` stores one permit - and serviced on
-/// the loop's next iteration, so a serial dependency chain advances at
-/// completion speed instead of one level per 5s tick.
+/// Reactive dispatch (#359): a kick advances the edge-trigger generation even
+/// when no dispatcher is running yet, so the actor services it on its next
+/// pass instead of losing the wakeup.
 #[tokio::test]
 async fn dispatch_kick_is_retained_when_not_awaiting() {
+    use std::sync::atomic::Ordering;
     let scheduler = test_scheduler();
+    let before = scheduler.kick_gen.load(Ordering::Relaxed);
     scheduler.kick_dispatch();
-    let woke = tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        scheduler.dispatch_kick.notified(),
-    )
-    .await;
-    assert!(
-        woke.is_ok(),
-        "kick fired while not awaiting must still wake the dispatch loop"
+    assert_eq!(
+        scheduler.kick_gen.load(Ordering::Relaxed),
+        before + 1,
+        "a kick must advance the generation the dispatcher compares against"
     );
 }
 
@@ -154,13 +151,11 @@ async fn capability_update_kicks_dispatch_instead_of_reconciling_inline() {
     scheduler
         .update_worker_capabilities("peer-x", vec![], vec![], 4, 8, 16_000, 100)
         .await;
-    let woke = tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        scheduler.dispatch_kick.notified(),
-    )
-    .await;
-    assert!(
-        woke.is_ok(),
+    assert_eq!(
+        scheduler
+            .kick_gen
+            .load(std::sync::atomic::Ordering::Relaxed),
+        1,
         "capability update must kick the dispatch loop, not reconcile inline"
     );
 }

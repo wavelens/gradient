@@ -7,7 +7,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 
 use gradient_core::ServerState;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -16,31 +15,11 @@ use gradient_types::wildcard::Wildcard;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 use crate::Scheduler;
 use crate::jobs::PendingEvalJob;
 use gradient_types::proto::{FlakeJob, FlakeStep, RequiredPath};
-
-use super::DISPATCH_TICK_SECS;
-
-pub(super) async fn eval_dispatch_loop(scheduler: Arc<Scheduler>) {
-    let mut interval = tokio::time::interval(Duration::from_secs(DISPATCH_TICK_SECS));
-    let cancel = scheduler.state.shutdown.token();
-    info!("eval dispatch loop started");
-    loop {
-        tokio::select! {
-            _ = cancel.cancelled() => {
-                info!("eval dispatch loop shutting down");
-                return;
-            }
-            _ = interval.tick() => {}
-        }
-        if let Err(e) = dispatch_queued_evals(&scheduler).await {
-            error!(error = %e, "eval dispatch error");
-        }
-    }
-}
 
 pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Result<()> {
     if scheduler.draining.load(Ordering::Relaxed) {

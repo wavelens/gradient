@@ -20,6 +20,7 @@ workspace = true
 [dependencies]
 base64              = { workspace = true }
 hex                 = { workspace = true }
+ractor              = { workspace = true }
 reqwest             = { workspace = true }
 rustls              = { workspace = true }
 rustls-native-certs = { workspace = true }
