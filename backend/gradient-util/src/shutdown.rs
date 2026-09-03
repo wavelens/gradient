@@ -13,8 +13,8 @@
 //!
 //! # Rules
 //!
-//! - Anything outliving a single request goes through `Shutdown::spawn`,
-//!   never bare `tokio::spawn`.
+//! - A loop goes through `Shutdown::supervise`; a task that outlives one
+//!   request goes through `Shutdown::spawn`; never bare `tokio::spawn`.
 //! - Loops that sleep (`interval.tick`, `sleep`) must `select!` on
 //!   `cancelled()` so SIGTERM doesn't have to wait a full poll cycle.
 //! - Per-connection / per-job tasks derive a child token via
@@ -22,17 +22,22 @@
 //!   transitively.
 
 use std::future::Future;
+use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::{Instrument, info, warn};
+use tracing::{Instrument, error, info, warn};
+
+use crate::supervision::{ChildSpec, Supervisor, SupervisorHealth};
 
 #[derive(Clone, Debug)]
 pub struct Shutdown {
     token: CancellationToken,
     tracker: TaskTracker,
+    tree: Arc<OnceCell<Supervisor>>,
 }
 
 impl Default for Shutdown {
@@ -46,6 +51,7 @@ impl Shutdown {
         Self {
             token: CancellationToken::new(),
             tracker: TaskTracker::new(),
+            tree: Arc::new(OnceCell::new()),
         }
     }
 
@@ -85,6 +91,43 @@ impl Shutdown {
         F::Output: Send + 'static,
     {
         self.tracker.spawn(future.in_current_span())
+    }
+
+    /// The process supervision tree, started on first use.
+    pub async fn supervisor(&self) -> Result<&Supervisor, String> {
+        self.tree
+            .get_or_try_init(|| async {
+                Supervisor::start(self.token.clone(), self.tracker.clone())
+                    .await
+                    .map_err(|e| e.to_string())
+            })
+            .await
+    }
+
+    /// The tree, if one has been started.
+    pub fn tree(&self) -> Option<&Supervisor> {
+        self.tree.get()
+    }
+
+    pub fn supervision_health(&self) -> Option<Arc<SupervisorHealth>> {
+        self.tree.get().map(Supervisor::health)
+    }
+
+    /// Add `spec` to the tree and wait until its first instance runs.
+    pub async fn supervise_now(&self, spec: ChildSpec) -> Result<(), String> {
+        self.supervisor().await?.add(spec).await
+    }
+
+    /// Add `spec` from a sync context. A loop that cannot start is logged and
+    /// stays absent from the health registry, which is how it is noticed.
+    pub fn supervise(&self, spec: ChildSpec) {
+        let this = self.clone();
+        let name = spec.name();
+        self.spawn(async move {
+            if let Err(error) = this.supervise_now(spec).await {
+                error!(loop_name = name, %error, "failed to start supervised loop");
+            }
+        });
     }
 
     /// Trigger shutdown. Idempotent.

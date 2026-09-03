@@ -17,11 +17,10 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ractor::{Actor, ActorCell, ActorId, ActorProcessingErr, ActorRef, SpawnErr, SupervisionEvent};
+use ractor::{Actor, ActorCell, ActorId, ActorProcessingErr, ActorRef, RpcReplyPort, SpawnErr, SupervisionEvent};
 use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing::{info, warn};
-
-use crate::shutdown::Shutdown;
 
 pub type PassError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type PassFuture = Pin<Box<dyn Future<Output = Result<(), PassError>> + Send>>;
@@ -64,7 +63,7 @@ impl ChildSpec {
         })
     }
 
-    fn name(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             Self::Periodic(p) => p.name,
             Self::Custom { name, .. } => name,
@@ -201,6 +200,7 @@ impl Actor for Periodic {
 pub struct Root;
 
 pub enum RootMsg {
+    Add(ChildSpec, RpcReplyPort<Result<(), String>>),
     Respawn(&'static str),
 }
 
@@ -289,14 +289,27 @@ impl Actor for Root {
     async fn handle(
         &self,
         myself: ActorRef<Self::Msg>,
-        RootMsg::Respawn(name): Self::Msg,
+        msg: Self::Msg,
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
-        if state.args.cancel.is_cancelled() {
-            return Ok(());
-        }
-        if let Some(spec) = state.spec(name) {
-            spawn_child(&myself, &spec, state).await?;
+        match msg {
+            RootMsg::Add(spec, reply) => {
+                let result = spawn_child(&myself, &spec, state)
+                    .await
+                    .map_err(|e| e.to_string());
+                if result.is_ok() {
+                    state.args.children.push(spec);
+                }
+                let _ = reply.send(result);
+            }
+            RootMsg::Respawn(name) => {
+                if state.args.cancel.is_cancelled() {
+                    return Ok(());
+                }
+                if let Some(spec) = state.spec(name) {
+                    spawn_child(&myself, &spec, state).await?;
+                }
+            }
         }
         Ok(())
     }
@@ -350,42 +363,54 @@ pub struct Supervisor {
     health: Arc<SupervisorHealth>,
 }
 
+impl std::fmt::Debug for Supervisor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Supervisor").finish_non_exhaustive()
+    }
+}
+
 impl Supervisor {
-    /// Spawn the root with `children` and tie its lifetime to `shutdown`.
-    pub async fn start(shutdown: &Shutdown, children: Vec<ChildSpec>) -> Result<Self, SpawnErr> {
+    /// Spawn an empty root that stops when `token` is cancelled. The stop task
+    /// is tracked so a drain waits for the tree.
+    pub async fn start(token: CancellationToken, tracker: TaskTracker) -> Result<Self, SpawnErr> {
         let health = Arc::new(SupervisorHealth::default());
         let args = RootArgs {
-            children,
+            children: Vec::new(),
             health: Arc::clone(&health),
-            cancel: shutdown.token(),
+            cancel: token.clone(),
         };
         let (root, _) = Actor::spawn(None, Root, args).await?;
-        let cancel = shutdown.token();
         let stop = root.clone();
-        shutdown.spawn(async move {
-            cancel.cancelled().await;
-            if let Err(e) = stop
-                .stop_and_wait(Some("shutdown".into()), Some(STOP_TIMEOUT))
-                .await
-            {
+        tracker.spawn(async move {
+            token.cancelled().await;
+            if let Err(e) = stop.stop_and_wait(Some("shutdown".into()), Some(STOP_TIMEOUT)).await {
                 warn!(error = %e, "supervision tree did not stop cleanly");
             }
         });
         Ok(Self { root, health })
     }
 
+    /// Add a child and wait until its first instance is running.
+    pub async fn add(&self, spec: ChildSpec) -> Result<(), String> {
+        match ractor::call!(self.root, RootMsg::Add, spec) {
+            Ok(result) => result,
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
     pub fn health(&self) -> Arc<SupervisorHealth> {
         Arc::clone(&self.health)
     }
 
-    pub fn root(&self) -> ActorCell {
-        self.root.get_cell()
+    pub fn root_status(&self) -> ractor::ActorStatus {
+        self.root.get_cell().get_status()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shutdown::Shutdown;
     use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
     fn counting_pass(calls: Arc<AtomicU32>, panic_on: Option<u32>) -> ChildSpec {
@@ -410,11 +435,12 @@ mod tests {
     async fn a_panicking_pass_is_restarted_and_keeps_ticking() {
         let shutdown = Shutdown::new();
         let calls = Arc::new(AtomicU32::new(0));
-        let sup = Supervisor::start(&shutdown, vec![counting_pass(Arc::clone(&calls), Some(2))])
+        shutdown
+            .supervise_now(counting_pass(Arc::clone(&calls), Some(2)))
             .await
-            .expect("spawn");
+            .expect("supervise");
         tokio::time::sleep(Duration::from_millis(1500)).await;
-        let h = sup.health().get("t");
+        let h = shutdown.supervision_health().expect("tree").get("t");
         assert_eq!(h.restarts, 1, "one restart after the panic: {h:?}");
         assert!(
             calls.load(Ordering::SeqCst) > 3,
@@ -436,11 +462,9 @@ mod tests {
                 Ok(())
             },
         );
-        let sup = Supervisor::start(&shutdown, vec![spec])
-            .await
-            .expect("spawn");
+        shutdown.supervise_now(spec).await.expect("supervise");
         tokio::time::sleep(Duration::from_millis(200)).await;
-        let h = sup.health().get("slow");
+        let h = shutdown.supervision_health().expect("tree").get("slow");
         assert!(h.pass_timeouts >= 2, "{h:?}");
         assert_eq!(h.restarts, 0);
         shutdown.cancel_and_drain(Duration::from_secs(2)).await;
@@ -450,9 +474,10 @@ mod tests {
     async fn shutdown_stops_the_tree_and_never_restarts() {
         let shutdown = Shutdown::new();
         let calls = Arc::new(AtomicU32::new(0));
-        let sup = Supervisor::start(&shutdown, vec![counting_pass(Arc::clone(&calls), None)])
+        shutdown
+            .supervise_now(counting_pass(Arc::clone(&calls), None))
             .await
-            .expect("spawn");
+            .expect("supervise");
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(shutdown.cancel_and_drain(Duration::from_secs(2)).await);
         let after = calls.load(Ordering::SeqCst);
@@ -462,7 +487,24 @@ mod tests {
             after,
             "no ticks after shutdown"
         );
-        assert_eq!(sup.root().get_status(), ractor::ActorStatus::Stopped);
+        assert_eq!(
+            shutdown.tree().expect("tree").root_status(),
+            ractor::ActorStatus::Stopped
+        );
+    }
+
+    #[tokio::test]
+    async fn supervise_from_a_sync_context_lands_in_the_tree() {
+        let shutdown = Shutdown::new();
+        let calls = Arc::new(AtomicU32::new(0));
+        shutdown.supervise(counting_pass(Arc::clone(&calls), None));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(calls.load(Ordering::SeqCst) > 0, "the loop ticked");
+        assert_eq!(
+            shutdown.supervision_health().expect("tree").snapshot().len(),
+            1
+        );
+        shutdown.cancel_and_drain(Duration::from_secs(2)).await;
     }
 
     struct Slow;

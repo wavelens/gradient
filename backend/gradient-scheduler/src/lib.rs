@@ -81,8 +81,6 @@ pub struct Scheduler {
     /// Edge-trigger generation for `kick_dispatch`: the dispatcher services a
     /// burst of kicks with one pass by comparing against the generation it saw.
     pub(crate) kick_gen: Arc<AtomicU64>,
-    /// The supervision tree owning every dispatch loop; set by `start`.
-    pub(crate) supervisor: Arc<std::sync::OnceLock<gradient_util::supervision::Supervisor>>,
     /// Per-evaluation accumulator of discovered dependency edges, flushed when
     /// the eval stream completes. Promotion itself is graph-driven (see
     /// `gradient_db::promotion`), not tied to this map.
@@ -125,7 +123,6 @@ impl Scheduler {
             job_notify: Arc::new(tokio::sync::watch::channel(0u64).0),
             build_dispatch: Arc::new(arc_swap::ArcSwapOption::empty()),
             kick_gen: Arc::new(AtomicU64::new(0)),
-            supervisor: Arc::new(std::sync::OnceLock::new()),
             eval_edges: Arc::new(RwLock::new(HashMap::new())),
             policy,
             instance: Arc::new(arc_swap::ArcSwap::from_pointee(
@@ -165,9 +162,10 @@ impl Scheduler {
 
     /// Per-loop supervision health (restarts, pass errors, timeouts, last ok).
     pub fn loop_health(&self) -> Vec<(&'static str, gradient_util::supervision::LoopHealth)> {
-        self.supervisor
-            .get()
-            .map(|s| s.health().snapshot())
+        self.state
+            .shutdown
+            .supervision_health()
+            .map(|h| h.snapshot())
             .unwrap_or_default()
     }
 
