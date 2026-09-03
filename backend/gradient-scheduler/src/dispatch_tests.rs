@@ -82,9 +82,11 @@ fn make_task(id: TaskId, project_id: ProjectId) -> gradient_entity::task::Model 
     }
 }
 
-fn make_scheduler(db: sea_orm::DatabaseConnection) -> Arc<Scheduler> {
+async fn make_scheduler(db: sea_orm::DatabaseConnection) -> Arc<Scheduler> {
     let state = gradient_test_support::prelude::test_state(db);
-    Arc::new(Scheduler::new(state))
+    let scheduler = Arc::new(Scheduler::new(state));
+    scheduler.spawn_core(None).await.expect("core actor");
+    scheduler
 }
 
 // ── Group F: dispatch_queued_evals ───────────────────────────────────────────
@@ -110,7 +112,7 @@ async fn dispatch_queued_eval_enqueues_job() {
         .append_query_results([vec![make_task(task_id, project_id)]])
         .into_connection();
 
-    let scheduler = make_scheduler(db);
+    let scheduler = make_scheduler(db).await;
     dispatch::dispatch_queued_evals(&scheduler)
         .await
         .expect("dispatch failed");
@@ -149,7 +151,7 @@ async fn dispatch_queued_eval_skips_already_enqueued() {
         // No bulk loads - the tracker snapshot filters out every eval
         .into_connection();
 
-    let scheduler = make_scheduler(db);
+    let scheduler = make_scheduler(db).await;
     dispatch::dispatch_queued_evals(&scheduler)
         .await
         .expect("first dispatch failed");
@@ -184,7 +186,7 @@ async fn dispatch_queued_eval_skips_missing_commit() {
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .into_connection();
 
-    let scheduler = make_scheduler(db);
+    let scheduler = make_scheduler(db).await;
     dispatch::dispatch_queued_evals(&scheduler)
         .await
         .expect("dispatch failed");
@@ -215,7 +217,7 @@ async fn dispatch_queued_eval_without_task_is_skipped() {
         // No task query - no eval carries a task id
         .into_connection();
 
-    let scheduler = make_scheduler(db);
+    let scheduler = make_scheduler(db).await;
     dispatch::dispatch_queued_evals(&scheduler)
         .await
         .expect("dispatch failed");
@@ -255,7 +257,7 @@ async fn dispatch_once_no_triggers_is_noop() {
         .append_query_results([Vec::<gradient_entity::task_trigger::Model>::new()])
         .into_connection();
 
-    let scheduler = make_scheduler(db);
+    let scheduler = make_scheduler(db).await;
     let result = trigger_dispatch::dispatch_once(&scheduler).await;
     assert!(
         result.is_ok(),
@@ -291,7 +293,7 @@ async fn dispatch_once_skips_trigger_within_interval() {
         // No further queries expected (trigger not due)
         .into_connection();
 
-    let scheduler = make_scheduler(db);
+    let scheduler = make_scheduler(db).await;
     trigger_dispatch::dispatch_once(&scheduler)
         .await
         .expect("dispatch_once should not fail");

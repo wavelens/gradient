@@ -22,26 +22,19 @@ impl Scheduler {
         let text = String::from_utf8_lossy(&data);
         let text = text.as_ref();
 
-        let build_id_str = {
-            let tracker = self.job_tracker.read().await;
-            match tracker.active_job(job_id) {
-                Some(PendingJob::Build(j)) => j
-                    .job
-                    .builds
-                    .get(task_index as usize)
-                    .map(|t| t.build_id.clone()),
-                Some(PendingJob::Eval(_)) => {
-                    debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: job is an eval, not a build");
-                    return Ok(());
-                }
-                None => {
-                    // Common shortly after a build finishes: a few in-flight
-                    // log lines from the worker arrive after the job has
-                    // already been removed from the active tracker. Not an
-                    // error - just lost output, log at debug.
-                    debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: no active job (likely race with completion)");
-                    return Ok(());
-                }
+        let build_id_str = match self.active_job(job_id).await {
+            Some(PendingJob::Build(j)) => j
+                .job
+                .builds
+                .get(task_index as usize)
+                .map(|t| t.build_id.clone()),
+            Some(PendingJob::Eval(_)) => {
+                debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: job is an eval, not a build");
+                return Ok(());
+            }
+            None => {
+                debug!(%job_id, task_index, bytes = bytes_len, "log chunk dropped: no active job (likely race with completion)");
+                return Ok(());
             }
         };
 

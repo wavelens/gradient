@@ -32,12 +32,12 @@ pub(super) async fn push_pending_candidates(
     scheduler: &Scheduler,
     peer_id: &str,
 ) {
-    let candidates = scheduler.get_new_job_candidates(peer_id).await;
-    if candidates.is_empty() {
+    let offer = scheduler.get_new_job_candidates(peer_id).await;
+    if offer.candidates.is_empty() {
         return;
     }
-    debug!(%peer_id, count = candidates.len(), "pushing job offer (delta) after message processing");
-    for chunk in candidates.chunks(JOB_OFFER_CHUNK_SIZE) {
+    debug!(%peer_id, count = offer.candidates.len(), "pushing job offer (delta) after message processing");
+    for chunk in offer.candidates.chunks(JOB_OFFER_CHUNK_SIZE) {
         let _ = send_server_msg(
             writer,
             &ServerMessage::JobOffer {

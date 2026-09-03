@@ -23,10 +23,10 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
 use gradient_types::ids::ProjectId;
-use tokio::sync::{Notify, mpsc};
 
 use gradient_types::proto::GradientCapabilities;
 
+use crate::actor::SessionPort;
 use crate::peer_auth::PeerAuth;
 
 // ── Sealing trait ─────────────────────────────────────────────────────────────
@@ -60,7 +60,6 @@ impl WorkerMarker for Draining {}
 /// All fields that are relevant regardless of the worker's lifecycle state.
 ///
 /// Accessed via [`TypedWorker<S>`]'s `Deref` / `DerefMut` impls.
-#[derive(Debug)]
 pub struct WorkerShared {
     pub capabilities: GradientCapabilities,
     pub architectures: Vec<String>,
@@ -81,16 +80,25 @@ pub struct WorkerShared {
     pub peer_auth: PeerAuth,
     /// Job IDs already sent to this worker as candidates (for delta `JobOffer`).
     pub sent_candidates: HashSet<String>,
-    /// Signalled by the API when registrations change and the worker should
-    /// re-authenticate without disconnecting.
-    pub reauth_notify: Arc<Notify>,
-    /// Channel for sending abort messages to the handler for this worker.
-    pub abort_tx: mpsc::UnboundedSender<(String, String)>,
+    /// The session this worker is connected through; the scheduler's only way
+    /// to push to it.
+    pub session: Arc<dyn SessionPort>,
     /// Wall-clock epoch-millis of the last message received from this worker.
     /// Bumped lock-free by the session loop on every inbound frame and read by
     /// the liveness watchdog to detect a worker that died without a clean TCP
     /// close. Shared so the session loop holds a handle without the pool lock.
     pub last_seen: Arc<AtomicI64>,
+}
+
+impl std::fmt::Debug for WorkerShared {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkerShared")
+            .field("capabilities", &self.capabilities)
+            .field("architectures", &self.architectures)
+            .field("assigned_jobs", &self.assigned_jobs)
+            .field("peer_auth", &self.peer_auth)
+            .finish_non_exhaustive()
+    }
 }
 
 // ── TypedWorker<S> ────────────────────────────────────────────────────────────
@@ -123,8 +131,7 @@ impl TypedWorker<Active> {
     pub fn new(
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<ProjectId>,
-        reauth_notify: Arc<Notify>,
-        abort_tx: mpsc::UnboundedSender<(String, String)>,
+        session: Arc<dyn SessionPort>,
     ) -> Self {
         Self {
             shared: WorkerShared {
@@ -142,8 +149,7 @@ impl TypedWorker<Active> {
                 assigned_jobs: HashSet::new(),
                 peer_auth: PeerAuth::from_peers(authorized_peers),
                 sent_candidates: HashSet::new(),
-                reauth_notify,
-                abort_tx,
+                session,
                 last_seen: Arc::new(AtomicI64::new(
                     gradient_types::now().and_utc().timestamp_millis(),
                 )),

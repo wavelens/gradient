@@ -16,6 +16,7 @@
 //! - [`waiting_state`] - reconciles evaluation status against the worker pool
 //! - [`buildability`] - whether the connected pool can build a pending anchor
 
+pub mod actor;
 pub mod build;
 pub mod buildability;
 pub mod dispatch;
@@ -42,10 +43,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 
 use gradient_core::ServerState;
 use gradient_types::*;
+use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
 use tokio::sync::RwLock;
 
-use jobs::JobTracker;
-use worker_pool::WorkerPool;
+use actor::{CALL_TIMEOUT, CoreActor, CoreArgs, Counts, SchedulerMsg};
 
 /// Per-evaluation accumulator of discovered `(drv_path, dependencies)` pairs.
 /// Fully-resolvable pairs flush to `derivation_dependency` edges after each
@@ -68,13 +69,9 @@ mod scheduler_tests;
 pub struct Scheduler {
     /// Shared application state (DB, CLI config, etc.).
     pub state: Arc<ServerState>,
-    pub(crate) worker_pool: Arc<RwLock<WorkerPool>>,
-    pub(crate) job_tracker: Arc<RwLock<JobTracker>>,
-    /// Bumped when new jobs are enqueued so handler dispatch loops can push
-    /// `JobOffer` messages to connected workers. A `watch` generation counter
-    /// (not `Notify`) so a bump fired while a session is busy is still observed
-    /// on its next loop iteration instead of being a lost edge-triggered wakeup.
-    pub(crate) job_notify: Arc<tokio::sync::watch::Sender<u64>>,
+    /// The live state actor, republished on every (re)spawn; callers wait on
+    /// the watch so a restart looks like latency, not an error.
+    core: Arc<tokio::sync::watch::Sender<Option<ActorRef<SchedulerMsg>>>>,
     /// The live build-dispatch actor, re-published by its factory on every
     /// (re)spawn, so `kick_dispatch` always reaches the current instance.
     pub(crate) build_dispatch: Arc<arc_swap::ArcSwapOption<ractor::ActorRef<dispatch::BuildMsg>>>,
@@ -118,9 +115,7 @@ impl Scheduler {
         let policy = gradient_score::policy_by_name(&state.config.eval.scheduler_scoring_policy);
         Self {
             state,
-            worker_pool: Arc::new(RwLock::new(WorkerPool::new())),
-            job_tracker: Arc::new(RwLock::new(JobTracker::new())),
-            job_notify: Arc::new(tokio::sync::watch::channel(0u64).0),
+            core: Arc::new(tokio::sync::watch::channel(None).0),
             build_dispatch: Arc::new(arc_swap::ArcSwapOption::empty()),
             kick_gen: Arc::new(AtomicU64::new(0)),
             eval_edges: Arc::new(RwLock::new(HashMap::new())),
@@ -135,21 +130,68 @@ impl Scheduler {
         }
     }
 
-    /// Drop the eval job and any associated build jobs from the in-memory
-    /// tracker. Workers that have already been assigned will finish or time out
-    /// normally; the DB-side abort (via `gradient_ci::abort_evaluation`) is the
-    /// caller's responsibility.
+    /// Spawn the state actor, linked to `parent` when supervised, and publish it.
+    pub async fn spawn_core(
+        &self,
+        parent: Option<ActorCell>,
+    ) -> Result<ActorRef<SchedulerMsg>, SpawnErr> {
+        let args = CoreArgs {
+            policy: Arc::clone(&self.policy),
+        };
+        let (actor, _) = match parent {
+            Some(parent) => Actor::spawn_linked(None, CoreActor, args, parent).await?,
+            None => Actor::spawn(None, CoreActor, args).await?,
+        };
+        self.core.send_replace(Some(actor.clone()));
+        Ok(actor)
+    }
+
+    /// Observe core (re)publications; the sessions supervisor re-registers on each.
+    pub fn core_changes(&self) -> tokio::sync::watch::Receiver<Option<ActorRef<SchedulerMsg>>> {
+        self.core.subscribe()
+    }
+
+    async fn core(&self) -> anyhow::Result<ActorRef<SchedulerMsg>> {
+        let mut rx = self.core.subscribe();
+        let live = tokio::time::timeout(CALL_TIMEOUT, rx.wait_for(|c| c.is_some()))
+            .await
+            .map_err(|_| anyhow::anyhow!("scheduler core unavailable"))?
+            .map_err(|_| anyhow::anyhow!("scheduler core closed"))?;
+        Ok(live.clone().expect("wait_for guarantees Some"))
+    }
+
+    pub(crate) async fn call<T: Send + 'static>(
+        &self,
+        msg: impl FnOnce(RpcReplyPort<T>) -> SchedulerMsg,
+    ) -> anyhow::Result<T> {
+        use ractor::rpc::CallResult;
+        match self.core().await?.call(msg, Some(CALL_TIMEOUT)).await {
+            Ok(CallResult::Success(v)) => Ok(v),
+            Ok(CallResult::Timeout) => Err(anyhow::anyhow!("scheduler call timed out")),
+            Ok(CallResult::SenderError) => Err(anyhow::anyhow!("scheduler core dropped the reply")),
+            Err(e) => Err(anyhow::anyhow!("scheduler core unreachable: {e}")),
+        }
+    }
+
+    pub(crate) async fn cast(&self, msg: SchedulerMsg) -> anyhow::Result<()> {
+        self.core()
+            .await?
+            .send_message(msg)
+            .map_err(|e| anyhow::anyhow!("scheduler core unreachable: {e}"))
+    }
+
+    /// Drop the eval job and its build jobs from the tracker. Workers already
+    /// assigned finish or time out; the DB-side abort is the caller's job.
     pub async fn cancel_evaluation_jobs(
         &self,
         eval_id: EvaluationId,
         anchor_ids: &[DerivationBuildId],
     ) {
-        let mut tracker = self.job_tracker.write().await;
-        tracker.remove_job(&format!("eval:{eval_id}"));
-        for id in anchor_ids {
-            tracker.remove_job(&format!("build:{id}"));
+        let mut job_ids = vec![format!("eval:{eval_id}")];
+        job_ids.extend(anchor_ids.iter().map(|id| format!("build:{id}")));
+        if let Err(e) = self.call(|reply| SchedulerMsg::RemoveJobs { job_ids, reply }).await {
+            tracing::warn!(error = %e, %eval_id, "cancel_evaluation_jobs did not reach the scheduler");
         }
-
         self.eval_edges.write().await.remove(&eval_id);
     }
 
@@ -169,31 +211,69 @@ impl Scheduler {
             .unwrap_or_default()
     }
 
-    /// Snapshot of in-memory scheduler counts used by the metrics endpoint.
-    /// Returns `(workers_connected, jobs_pending, jobs_active)`.
+    pub async fn counts(&self) -> Counts {
+        self.call(|reply| SchedulerMsg::Counts { reply })
+            .await
+            .unwrap_or_default()
+    }
+
+    /// `(workers_connected, jobs_pending, jobs_active)` for the metrics endpoint.
     pub async fn metrics_snapshot(&self) -> (usize, usize, usize) {
-        let workers = self.worker_pool.read().await.worker_count();
-        let tracker = self.job_tracker.read().await;
-        (workers, tracker.pending_count(), tracker.active_count())
+        let c = self.counts().await;
+        (c.workers, c.pending, c.active)
     }
 
     pub async fn pending_jobs_snapshot(&self) -> Vec<jobs::PendingJobInfo> {
-        self.job_tracker.read().await.pending_snapshot()
+        self.call(|reply| SchedulerMsg::PendingSnapshot { reply })
+            .await
+            .unwrap_or_default()
     }
 
     /// Per-dimension classification of in-flight jobs for the worker-load radar.
     pub async fn board_active_jobs(&self) -> Vec<jobs::BoardActiveJob> {
-        self.job_tracker.read().await.board_active_jobs()
+        self.call(|reply| SchedulerMsg::BoardActiveJobs { reply })
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn recent_decisions(&self) -> Vec<jobs::DispatchDecision> {
-        self.job_tracker.read().await.recent_decisions()
+        self.call(|reply| SchedulerMsg::RecentDecisions { reply })
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn candidate_detail(
         &self,
         id: gradient_types::ids::DispatchedJobId,
     ) -> Option<jobs::CandidateDetail> {
-        self.job_tracker.read().await.candidate_detail(id)
+        self.call(|reply| SchedulerMsg::CandidateDetail { id, reply })
+            .await
+            .ok()
+            .flatten()
+    }
+
+    pub async fn active_job(&self, job_id: &str) -> Option<jobs::PendingJob> {
+        let job_id = job_id.to_owned();
+        self.call(|reply| SchedulerMsg::ActiveJob { job_id, reply })
+            .await
+            .ok()
+            .flatten()
+    }
+
+    pub async fn pending_job(&self, job_id: &str) -> Option<jobs::PendingJob> {
+        let job_id = job_id.to_owned();
+        self.call(|reply| SchedulerMsg::PendingJob { job_id, reply })
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// The subset of `job_ids` the tracker knows nothing about (neither pending
+    /// nor active). On a core outage every id counts as tracked, so a dispatch
+    /// pass enqueues nothing rather than duplicating work.
+    pub async fn untracked(&self, job_ids: Vec<String>) -> Vec<String> {
+        self.call(|reply| SchedulerMsg::Untracked { job_ids, reply })
+            .await
+            .unwrap_or_default()
     }
 }

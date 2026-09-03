@@ -11,45 +11,41 @@ use tracing::info;
 use gradient_types::*;
 
 use crate::Scheduler;
+use crate::actor::SchedulerMsg;
 
 impl Scheduler {
     // ── Abort ─────────────────────────────────────────────────────────────────
 
-    /// Abort an evaluation: update DB status and send `AbortJob` to any
-    /// worker currently executing a job belonging to this evaluation.
+    /// Abort an evaluation: DB status first, then every worker running one of
+    /// its jobs gets `AbortJob` and its pending jobs are dropped.
     pub async fn abort_evaluation(&self, evaluation: MEvaluation) {
         let evaluation_id = evaluation.id;
-
-        // Update DB (builds → Aborted, eval → Aborted).
         gradient_db::abort_evaluation(&self.state.db(), evaluation).await;
-
-        // Find active jobs for this evaluation and abort them.
-        let tracker = self.job_tracker.read().await;
-        let pool = self.worker_pool.read().await;
-
-        let to_abort: Vec<(String, String)> = tracker
-            .active_jobs()
-            .filter_map(|(job_id, worker_id, job)| {
-                if job.evaluation_id() == evaluation_id {
-                    Some((worker_id.to_owned(), job_id.to_owned()))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        for (worker_id, job_id) in to_abort {
-            if pool.send_abort(&worker_id, job_id.clone(), "evaluation aborted".to_owned()) {
-                info!(%worker_id, %job_id, %evaluation_id, "sent AbortJob to worker");
-            }
+        for (worker_id, job_id) in self.abort_evaluation_jobs(evaluation_id).await {
+            info!(%worker_id, %job_id, %evaluation_id, "sent AbortJob to worker");
         }
+    }
 
-        // Also remove any pending (unassigned) jobs for this evaluation.
-        drop(pool);
-        drop(tracker);
-        self.job_tracker
-            .write()
-            .await
-            .remove_pending_for_evaluation(evaluation_id);
+    /// The in-memory half of an abort: `(worker, job)` pairs that were told to stop.
+    pub async fn abort_evaluation_jobs(&self, evaluation_id: EvaluationId) -> Vec<(String, String)> {
+        self.call(|reply| SchedulerMsg::AbortEvaluation {
+            evaluation_id,
+            reply,
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    /// Tell one worker to stop one job; `false` when it is not connected.
+    pub async fn abort_job(&self, worker_id: &str, job_id: String, reason: String) -> bool {
+        let worker = worker_id.to_owned();
+        self.call(|reply| SchedulerMsg::AbortJob {
+            worker,
+            job_id,
+            reason,
+            reply,
+        })
+        .await
+        .unwrap_or(false)
     }
 }

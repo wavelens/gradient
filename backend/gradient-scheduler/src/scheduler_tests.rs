@@ -15,16 +15,40 @@ use gradient_types::ids::*;
 use gradient_types::proto::{CandidateScore, FlakeJob, FlakeStep, GradientCapabilities, JobKind};
 
 use super::Scheduler;
+use super::actor::{SessionPort, SessionSignal, WorkerCapabilities};
 use super::jobs::{PendingBuildJob, PendingEvalJob};
+use tokio::sync::mpsc;
 
-/// Create a scheduler backed by a mock DB that returns empty results.
-fn test_scheduler() -> Arc<Scheduler> {
+/// A scheduler with its state actor running, backed by a mock DB that returns
+/// empty results.
+async fn test_scheduler() -> Arc<Scheduler> {
     use gradient_test_support::prelude::*;
     use sea_orm::{DatabaseBackend, MockDatabase};
 
     let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
     let state = test_state(db);
-    Arc::new(Scheduler::new(state))
+    let scheduler = Arc::new(Scheduler::new(state));
+    scheduler.spawn_core(None).await.expect("core actor");
+    scheduler
+}
+
+fn port() -> (Arc<dyn SessionPort>, mpsc::UnboundedReceiver<SessionSignal>) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    (Arc::new(tx), rx)
+}
+
+async fn register(
+    scheduler: &Scheduler,
+    worker: &str,
+    caps: GradientCapabilities,
+    peers: HashSet<ProjectId>,
+) -> mpsc::UnboundedReceiver<SessionSignal> {
+    let (session, signals) = port();
+    scheduler
+        .register_worker(worker, caps, peers, session)
+        .await
+        .expect("register");
+    signals
 }
 
 fn eval_job(peer: ProjectId) -> PendingEvalJob {
@@ -66,61 +90,56 @@ fn eval_worker_caps() -> GradientCapabilities {
 
 #[tokio::test]
 async fn test_enqueue_and_get_candidates() {
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     let peer = ProjectId::now_v7();
 
-    scheduler
-        .register_worker("w1", eval_worker_caps(), HashSet::new())
-        .await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
 
     scheduler
         .enqueue_eval_job("j1".into(), eval_job(peer))
-        .await;
+        .await
+        .unwrap();
     scheduler
         .enqueue_eval_job("j2".into(), eval_job(peer))
-        .await;
+        .await
+        .unwrap();
 
     // Open mode (empty authorized peers) → see all jobs.
     let candidates = scheduler.get_job_candidates("w1").await;
     assert_eq!(candidates.len(), 2);
 }
 
-/// Regression (#359): an enqueue that happens while a session is NOT parked on
-/// the notification must still be observed on its next check. The `watch`
-/// generation is level-triggered, unlike the old `Notify::notify_waiters()`
-/// which dropped any wakeup fired while no task was awaiting - starving deep
-/// build chains of `JobOffer`s under load.
+/// Regression (#359): an enqueue must signal every active session, and the
+/// generation it carries lets a session that missed the signal (busy on
+/// something else) still fetch the delta on its next check instead of losing
+/// the wakeup.
 #[tokio::test]
-async fn job_notify_bump_is_not_lost_when_not_awaiting() {
-    let scheduler = test_scheduler();
+async fn enqueue_signals_offers_with_a_rising_generation() {
+    let scheduler = test_scheduler().await;
     let peer = ProjectId::now_v7();
-
-    let mut rx = scheduler.job_notify();
-    assert!(
-        !rx.has_changed().unwrap(),
-        "fresh receiver starts un-bumped"
-    );
+    let mut signals = register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
 
     scheduler
         .enqueue_eval_job("j1".into(), eval_job(peer))
-        .await;
-    assert!(
-        rx.has_changed().unwrap(),
-        "missed-while-busy enqueue must still be observed"
-    );
-
-    rx.changed().await.unwrap();
-    assert!(
-        !rx.has_changed().unwrap(),
-        "consuming the change resets the flag"
-    );
-
+        .await
+        .unwrap();
     scheduler
         .enqueue_eval_job("j2".into(), eval_job(peer))
-        .await;
+        .await
+        .unwrap();
+
+    assert_eq!(signals.recv().await, Some(SessionSignal::Offers(1)));
+    assert_eq!(signals.recv().await, Some(SessionSignal::Offers(2)));
+    let offer = scheduler.get_new_job_candidates("w1").await;
+    assert_eq!(offer.candidates.len(), 2);
+    assert_eq!(offer.generation, 2, "the offer carries the generation it answers");
     assert!(
-        rx.has_changed().unwrap(),
-        "a later enqueue re-arms the receiver"
+        scheduler
+            .get_new_job_candidates("w1")
+            .await
+            .candidates
+            .is_empty(),
+        "a second fetch is a delta and finds nothing new"
     );
 }
 
@@ -130,7 +149,7 @@ async fn job_notify_bump_is_not_lost_when_not_awaiting() {
 #[tokio::test]
 async fn dispatch_kick_is_retained_when_not_awaiting() {
     use std::sync::atomic::Ordering;
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     let before = scheduler.kick_gen.load(Ordering::Relaxed);
     scheduler.kick_dispatch();
     assert_eq!(
@@ -147,9 +166,19 @@ async fn dispatch_kick_is_retained_when_not_awaiting() {
 /// that loop.
 #[tokio::test]
 async fn capability_update_kicks_dispatch_instead_of_reconciling_inline() {
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     scheduler
-        .update_worker_capabilities("peer-x", vec![], vec![], 4, 8, 16_000, 100)
+        .update_worker_capabilities(
+            "peer-x",
+            WorkerCapabilities {
+                architectures: vec![],
+                system_features: vec![],
+                max_concurrent_builds: 4,
+                cpu_count: 8,
+                ram_total_mb: 16_000,
+                cpu_core_score: 100,
+            },
+        )
         .await;
     assert_eq!(
         scheduler
@@ -162,20 +191,20 @@ async fn capability_update_kicks_dispatch_instead_of_reconciling_inline() {
 
 #[tokio::test]
 async fn test_candidates_filtered_by_authorized_peers() {
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     let peer_a = ProjectId::now_v7();
     let peer_b = ProjectId::now_v7();
 
-    scheduler
-        .register_worker("w1", eval_worker_caps(), HashSet::from([peer_a]))
-        .await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::from([peer_a])).await;
 
     scheduler
         .enqueue_eval_job("ja".into(), eval_job(peer_a))
-        .await;
+        .await
+        .unwrap();
     scheduler
         .enqueue_eval_job("jb".into(), eval_job(peer_b))
-        .await;
+        .await
+        .unwrap();
 
     let candidates = scheduler.get_job_candidates("w1").await;
     assert_eq!(candidates.len(), 1);
@@ -184,16 +213,15 @@ async fn test_candidates_filtered_by_authorized_peers() {
 
 #[tokio::test]
 async fn test_score_assignment_flow() {
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     let peer = ProjectId::now_v7();
 
-    scheduler
-        .register_worker("w1", eval_worker_caps(), HashSet::new())
-        .await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
 
     scheduler
         .enqueue_eval_job("j1".into(), eval_job(peer))
-        .await;
+        .await
+        .unwrap();
 
     // Worker scores the job, then explicitly requests one.
     scheduler
@@ -215,16 +243,15 @@ async fn test_score_assignment_flow() {
 
 #[tokio::test]
 async fn test_job_rejected_requeues() {
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     let peer = ProjectId::now_v7();
 
-    scheduler
-        .register_worker("w1", eval_worker_caps(), HashSet::new())
-        .await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
 
     scheduler
         .enqueue_eval_job("j1".into(), eval_job(peer))
-        .await;
+        .await
+        .unwrap();
 
     // Assign via RequestJob.
     scheduler.request_job("w1", JobKind::Flake).await;
@@ -237,19 +264,19 @@ async fn test_job_rejected_requeues() {
 
 #[tokio::test]
 async fn test_worker_disconnect_requeues_jobs() {
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     let peer = ProjectId::now_v7();
 
-    scheduler
-        .register_worker("w1", eval_worker_caps(), HashSet::new())
-        .await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
 
     scheduler
         .enqueue_eval_job("j1".into(), eval_job(peer))
-        .await;
+        .await
+        .unwrap();
     scheduler
         .enqueue_eval_job("j2".into(), eval_job(peer))
-        .await;
+        .await
+        .unwrap();
 
     // Assign both via RequestJob.
     scheduler.request_job("w1", JobKind::Flake).await;
@@ -263,30 +290,28 @@ async fn test_worker_disconnect_requeues_jobs() {
     assert_eq!(scheduler.worker_count().await, 0);
 
     // Another worker can pick them up.
-    scheduler
-        .register_worker("w2", eval_worker_caps(), HashSet::new())
-        .await;
+    register(&scheduler, "w2", eval_worker_caps(), HashSet::new()).await;
     let candidates = scheduler.get_job_candidates("w2").await;
     assert_eq!(candidates.len(), 2);
 }
 
 #[tokio::test]
 async fn test_update_authorized_peers_expands_access() {
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     let peer_a = ProjectId::now_v7();
     let peer_b = ProjectId::now_v7();
 
     // Worker starts authorized for peer_a only.
-    scheduler
-        .register_worker("w1", eval_worker_caps(), HashSet::from([peer_a]))
-        .await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::from([peer_a])).await;
 
     scheduler
         .enqueue_eval_job("ja".into(), eval_job(peer_a))
-        .await;
+        .await
+        .unwrap();
     scheduler
         .enqueue_eval_job("jb".into(), eval_job(peer_b))
-        .await;
+        .await
+        .unwrap();
 
     assert_eq!(scheduler.get_job_candidates("w1").await.len(), 1);
 
@@ -300,16 +325,15 @@ async fn test_update_authorized_peers_expands_access() {
 
 #[tokio::test]
 async fn test_draining_worker_still_has_assigned_jobs() {
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     let peer = ProjectId::now_v7();
 
-    scheduler
-        .register_worker("w1", eval_worker_caps(), HashSet::new())
-        .await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
 
     scheduler
         .enqueue_eval_job("j1".into(), eval_job(peer))
-        .await;
+        .await
+        .unwrap();
 
     scheduler.request_job("w1", JobKind::Flake).await;
     scheduler.mark_worker_draining("w1").await;
@@ -323,33 +347,57 @@ async fn test_draining_worker_still_has_assigned_jobs() {
 
 #[tokio::test]
 async fn test_request_reauth_signals_connected_worker() {
-    let scheduler = test_scheduler();
-
-    let (notify, _abort_rx) = scheduler
-        .register_worker("w1", eval_worker_caps(), HashSet::new())
-        .await;
+    let scheduler = test_scheduler().await;
+    let mut signals = register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
 
     scheduler.request_reauth("w1").await;
 
-    // The notify should fire immediately - the dispatch loop would use this
-    // to send an AuthChallenge to the worker.
-    tokio::time::timeout(std::time::Duration::from_millis(50), notify.notified())
-        .await
-        .expect("reauth notify should fire immediately");
+    assert_eq!(signals.recv().await, Some(SessionSignal::Reauth));
 }
 
 #[tokio::test]
 async fn test_request_reauth_noop_for_disconnected_worker() {
-    let scheduler = test_scheduler();
-    // Should not panic when the worker is not connected.
+    let scheduler = test_scheduler().await;
     scheduler.request_reauth("nonexistent").await;
+}
+
+#[tokio::test]
+async fn abort_evaluation_signals_the_worker_running_its_job() {
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    let mut signals = register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
+    let job = eval_job(peer);
+    let eval_id = job.evaluation_id;
+    scheduler
+        .enqueue_eval_job("j1".into(), job)
+        .await
+        .unwrap();
+    assert_eq!(signals.recv().await, Some(SessionSignal::Offers(1)));
+    let assigned = scheduler
+        .request_job("w1", JobKind::Flake)
+        .await
+        .expect("assigned");
+    assert_eq!(assigned.job_id, "j1");
+    assert_eq!(assigned.pending.evaluation_id(), eval_id);
+
+    let aborted = scheduler.abort_evaluation_jobs(eval_id).await;
+
+    assert_eq!(aborted, vec![("w1".to_string(), "j1".to_string())]);
+    assert_eq!(
+        signals.recv().await,
+        Some(SessionSignal::Abort {
+            job_id: "j1".into(),
+            reason: "evaluation aborted".into()
+        })
+    );
+    assert_eq!(scheduler.counts().await.active, 1, "the worker still runs it until it reports");
 }
 
 #[tokio::test]
 async fn record_eval_message_drops_when_job_unknown() {
     // No active job → silently accepted, no DB insert attempted (MockDatabase
     // would panic on an unexpected exec; absence of panic proves no insert).
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     let r = scheduler
         .record_eval_message(
             "ghost-job",
@@ -380,6 +428,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
         .into_connection();
     let state = test_state(db);
     let scheduler = Arc::new(Scheduler::new(state));
+    scheduler.spawn_core(None).await.expect("core actor");
 
     scheduler
         .enqueue_build_job(
@@ -414,12 +463,11 @@ async fn record_eval_message_inserts_for_active_build_job() {
                 substitute: false,
             },
         )
-        .await;
+        .await
+        .unwrap();
     // Move to assigned so active_job() finds it. A zero-missing score clears the
     // negative-total dispatch gate.
-    scheduler
-        .register_worker("w1", eval_worker_caps(), HashSet::new())
-        .await;
+    register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
     scheduler
         .record_scores(
             "w1",
@@ -472,24 +520,28 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
         .append_query_results([vec![archived_eval]])
         .into_connection();
     let scheduler = Arc::new(Scheduler::new(test_state(db)));
+    scheduler.spawn_core(None).await.expect("core actor");
 
     let mut fetch_job = eval_job(peer);
     fetch_job.evaluation_id = eval_id;
     fetch_job.job.steps = vec![FlakeStep::FetchFlake];
     let job_id = format!("eval:{eval_id}");
 
-    scheduler.enqueue_eval_job(job_id.clone(), fetch_job).await;
     scheduler
-        .register_worker(
-            "w1",
-            GradientCapabilities {
-                eval: true,
-                fetch: true,
-                ..GradientCapabilities::default()
-            },
-            HashSet::new(),
-        )
-        .await;
+        .enqueue_eval_job(job_id.clone(), fetch_job)
+        .await
+        .unwrap();
+    register(
+        &scheduler,
+        "w1",
+        GradientCapabilities {
+            eval: true,
+            fetch: true,
+            ..GradientCapabilities::default()
+        },
+        HashSet::new(),
+    )
+    .await;
     scheduler.request_job("w1", JobKind::Flake).await;
 
     scheduler
@@ -503,9 +555,9 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     // inspect the pending tracker rather than dispatching, since under the new
     // negative-total gate a fetch-capable worker is reserved off cached-eval
     // work by ReserveFetchWorkersRule when spare capacity is unknown.)
-    let tracker = scheduler.job_tracker.read().await;
-    let follow = match tracker
+    let follow = match scheduler
         .pending_job(&job_id)
+        .await
         .expect("follow-up must be pending")
     {
         crate::jobs::PendingJob::Eval(e) => e,
@@ -523,7 +575,7 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
 async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
     use gradient_types::proto::{BuildJob, BuildSpec};
 
-    let scheduler = test_scheduler();
+    let scheduler = test_scheduler().await;
     let peer = ProjectId::now_v7();
     let eval_id = EvaluationId::now_v7();
     let build_id_a = DerivationBuildId::now_v7();
@@ -556,7 +608,8 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                 history: Default::default(),
             },
         )
-        .await;
+        .await
+        .unwrap();
 
     for (build_id, job_id) in [
         (build_id_a, format!("build:{build_id_a}")),
@@ -595,7 +648,8 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
                     substitute: false,
                 },
             )
-            .await;
+            .await
+            .unwrap();
     }
 
     assert_eq!(scheduler.pending_job_count().await, 3);
@@ -604,9 +658,12 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
         .cancel_evaluation_jobs(eval_id, &[build_id_a, build_id_b])
         .await;
 
-    let tracker = scheduler.job_tracker.read().await;
-    assert!(!tracker.contains_job(&format!("eval:{eval_id}")));
-    assert!(!tracker.contains_job(&format!("build:{build_id_a}")));
-    assert!(!tracker.contains_job(&format!("build:{build_id_b}")));
-    assert_eq!(tracker.pending_count() + tracker.active_count(), 0);
+    let ids = vec![
+        format!("eval:{eval_id}"),
+        format!("build:{build_id_a}"),
+        format!("build:{build_id_b}"),
+    ];
+    assert_eq!(scheduler.untracked(ids.clone()).await, ids);
+    let counts = scheduler.counts().await;
+    assert_eq!(counts.pending + counts.active, 0);
 }

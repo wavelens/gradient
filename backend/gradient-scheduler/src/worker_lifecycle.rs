@@ -20,7 +20,11 @@ use gradient_types::ids::ProjectId;
 use gradient_types::proto::GradientCapabilities;
 
 use crate::Scheduler;
+use crate::actor::{
+    Registered, Registration, SchedulerMsg, SessionPort, WorkerCapabilities, WorkerMetrics,
+};
 use crate::build;
+use crate::jobs::PendingJob;
 
 /// Insert a `worker_sample` time-series row for a connected worker. Best-effort;
 /// skipped when the worker's owning project is unknown. Called from the heartbeat loop.
@@ -58,57 +62,73 @@ pub(crate) async fn record_worker_sample(
 
 impl Scheduler {
     pub async fn is_worker_connected(&self, worker_id: &str) -> bool {
-        self.worker_pool.read().await.is_connected(worker_id)
-    }
-
-    /// Clone a connected worker's `last_seen` handle so the session loop can
-    /// stamp it lock-free on every inbound frame.
-    pub async fn worker_last_seen(
-        &self,
-        worker_id: &str,
-    ) -> Option<std::sync::Arc<std::sync::atomic::AtomicI64>> {
-        self.worker_pool.read().await.last_seen_handle(worker_id)
+        let worker = worker_id.to_owned();
+        self.call(|reply| SchedulerMsg::IsConnected { worker, reply })
+            .await
+            .unwrap_or(false)
     }
 
     /// Connected peers silent longer than `timeout_ms` as of `now_ms`.
     pub async fn stale_workers(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
-        self.worker_pool
-            .read()
-            .await
-            .stale_worker_ids(now_ms, timeout_ms)
+        self.call(|reply| SchedulerMsg::StaleWorkers {
+            now_ms,
+            timeout_ms,
+            reply,
+        })
+        .await
+        .unwrap_or_default()
     }
 
     pub async fn worker_authorized_for_project(&self, worker_id: &str, project: ProjectId) -> bool {
-        self.worker_pool
-            .read()
-            .await
-            .peer_auth_for(worker_id)
-            .map(|a| a.contains(&project))
-            .unwrap_or(false)
+        let worker = worker_id.to_owned();
+        self.call(|reply| SchedulerMsg::AuthorizedFor {
+            worker,
+            project,
+            reply,
+        })
+        .await
+        .unwrap_or(false)
     }
 
+    /// Register a new connection and open its `worker_connection` row.
     pub async fn register_worker(
         &self,
         worker_id: &str,
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<ProjectId>,
-    ) -> (
-        Arc<tokio::sync::Notify>,
-        tokio::sync::mpsc::UnboundedReceiver<(String, String)>,
-    ) {
+        session: Arc<dyn SessionPort>,
+    ) -> Result<Registered> {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
-        let (notify, abort_rx) = self.worker_pool.write().await.register(
-            worker_id.to_owned(),
-            capabilities,
-            authorized_peers,
-        );
-        info!(%worker_id, "worker registered");
+        let registered = self
+            .reattach_worker(worker_id, capabilities, authorized_peers, session, Vec::new())
+            .await?;
         self.record_worker_connection(worker_id, caps_json).await;
-        (notify, abort_rx)
+        Ok(registered)
     }
 
-    /// Resolve the worker's owning project from `worker_registration`, cache it on
-    /// the pool for sample attribution, and open a `worker_connection` row.
+    /// Register without touching the DB: the session is already connected and
+    /// the scheduler's state was rebuilt, so only the in-memory view is missing.
+    pub async fn reattach_worker(
+        &self,
+        worker_id: &str,
+        capabilities: GradientCapabilities,
+        authorized_peers: HashSet<ProjectId>,
+        session: Arc<dyn SessionPort>,
+        active: Vec<(String, PendingJob)>,
+    ) -> Result<Registered> {
+        let registration = Registration {
+            worker: worker_id.to_owned(),
+            capabilities,
+            authorized_peers,
+            session,
+            active,
+        };
+        self.call(|reply| SchedulerMsg::Register(registration, reply))
+            .await
+    }
+
+    /// Resolve the worker's owning project from `worker_registration`, record it
+    /// for sample attribution, and open a `worker_connection` row.
     async fn record_worker_connection(&self, worker_id: &str, capabilities: serde_json::Value) {
         let reg = gradient_entity::worker_registration::Entity::find()
             .filter(gradient_entity::worker_registration::Column::WorkerId.eq(worker_id))
@@ -118,10 +138,12 @@ impl Scheduler {
         let Ok(Some(reg)) = reg else {
             return;
         };
-        self.worker_pool
-            .write()
-            .await
-            .set_worker_project(worker_id, reg.peer_id);
+        let _ = self
+            .cast(SchedulerMsg::SetWorkerProject {
+                worker: worker_id.to_owned(),
+                project: reg.peer_id,
+            })
+            .await;
         let conn = gradient_entity::worker_connection::Model {
             id: gradient_entity::ids::WorkerConnectionId::now_v7(),
             worker_id: worker_id.to_string(),
@@ -170,15 +192,19 @@ impl Scheduler {
         worker_id: &str,
         authorized_peers: HashSet<ProjectId>,
     ) {
-        self.worker_pool
-            .write()
-            .await
-            .update_authorized_peers(worker_id, authorized_peers);
+        let worker = worker_id.to_owned();
+        let _ = self
+            .call(|reply| SchedulerMsg::UpdatePeers {
+                worker,
+                peers: authorized_peers,
+                reply,
+            })
+            .await;
         debug!(%worker_id, "authorized peers updated");
     }
 
-    /// Abort all active jobs on `worker_id` that belong to any of `revoked_peers`.
-    /// Jobs are moved back to pending so they can be re-assigned to another worker.
+    /// Abort the worker's active jobs that belong to `revoked_peers`; they go
+    /// back to pending and every other session is offered them.
     pub async fn abort_project_jobs_on_worker(
         &self,
         worker_id: &str,
@@ -187,123 +213,73 @@ impl Scheduler {
         if revoked_peers.is_empty() {
             return;
         }
-        let job_ids = self
-            .job_tracker
-            .write()
+        let worker = worker_id.to_owned();
+        let revoked = revoked_peers.clone();
+        let aborted = self
+            .call(|reply| SchedulerMsg::RevokePeers {
+                worker,
+                revoked,
+                reply,
+            })
             .await
-            .drain_peer_jobs_on_worker(worker_id, revoked_peers);
-        if job_ids.is_empty() {
-            return;
+            .unwrap_or(0);
+        if aborted > 0 {
+            info!(%worker_id, aborted, "aborted jobs for revoked project(s) on worker");
         }
-        let pool = self.worker_pool.read().await;
-        for job_id in &job_ids {
-            pool.send_abort(
-                worker_id,
-                job_id.clone(),
-                "project deactivated worker".to_owned(),
-            );
-        }
-        info!(
-            %worker_id,
-            aborted = job_ids.len(),
-            "aborted jobs for revoked project(s) on worker"
-        );
-        // Notify other workers that these jobs are available again.
-        self.job_notify.send_modify(|g| *g = g.wrapping_add(1));
     }
 
-    /// Signal a connected worker that its registrations have changed,
-    /// triggering a server-initiated re-authentication.
     pub async fn request_reauth(&self, worker_id: &str) {
-        self.worker_pool.read().await.request_reauth(worker_id);
+        let _ = self
+            .cast(SchedulerMsg::Reauth {
+                worker: worker_id.to_owned(),
+            })
+            .await;
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "mirrors the WorkerCapabilities wire fields; refactor tracked in #503"
-    )]
-    pub async fn update_worker_capabilities(
-        &self,
-        worker_id: &str,
-        architectures: Vec<String>,
-        system_features: Vec<String>,
-        max_concurrent_builds: u32,
-        cpu_count: u32,
-        ram_total_mb: u64,
-        cpu_core_score: u32,
-    ) {
-        self.worker_pool.write().await.update_capabilities(
-            worker_id,
-            architectures,
-            system_features,
-            max_concurrent_builds,
-            cpu_count,
-            ram_total_mb,
-            cpu_core_score,
-        );
+    pub async fn update_worker_capabilities(&self, worker_id: &str, caps: WorkerCapabilities) {
+        let worker = worker_id.to_owned();
+        let _ = self
+            .call(|reply| SchedulerMsg::UpdateCapabilities {
+                worker,
+                caps,
+                reply,
+            })
+            .await;
         debug!(%worker_id, "worker capabilities updated");
-        // Capabilities just changed - a build that was previously "no worker can
-        // do this" might now be servable, or vice-versa. Kick the dispatch loop
-        // to re-evaluate every in-flight eval's Waiting/Building gate off this
-        // connection's read loop. Reconciling inline here (a DB-heavy pass) blocked
-        // the loop from reading the same worker's next `CacheQuery`, which then
-        // timed out after 75s.
         self.kick_dispatch();
     }
 
-    pub async fn update_worker_metrics(
-        &self,
-        worker_id: &str,
-        cpu_usage_pct: f32,
-        ram_free_mb: u64,
-        disk_speed_mbps: Option<f32>,
-        network_speed_mbps: Option<f32>,
-    ) {
-        self.worker_pool.write().await.update_metrics(
-            worker_id,
-            cpu_usage_pct,
-            ram_free_mb,
-            disk_speed_mbps,
-            network_speed_mbps,
-        );
-        debug!(%worker_id, cpu_usage_pct, ram_free_mb, "worker metrics updated");
+    pub async fn update_worker_metrics(&self, worker_id: &str, metrics: WorkerMetrics) {
+        let worker = worker_id.to_owned();
+        let _ = self
+            .call(|reply| SchedulerMsg::UpdateMetrics {
+                worker,
+                metrics,
+                reply,
+            })
+            .await;
     }
 
     pub async fn unregister_worker(&self, worker_id: &str) {
         self.close_worker_connection(worker_id).await;
-        let orphaned = self.worker_pool.write().await.unregister(worker_id);
+        let worker = worker_id.to_owned();
         let requeued = self
-            .job_tracker
-            .write()
+            .call(|reply| SchedulerMsg::Unregister { worker, reply })
             .await
-            .worker_disconnected(worker_id);
-        let total = orphaned.len() + requeued.len();
-        if total > 0 {
-            info!(%worker_id, orphaned_jobs = total, "worker disconnected; jobs re-queued");
-        }
-
-        // The in-memory requeue above leaves the DB rows in a non-terminal
-        // status (`Building` / mid-eval) that the dispatcher never re-selects;
-        // reset them so the orphaned work actually retries.
+            .unwrap_or_default();
         build::requeue_orphaned_jobs(&self.state, &requeued).await;
-
         let _ = self
             .state
             .board_events
             .send(crate::BoardEvent::WorkerDisconnected {
                 worker_id: worker_id.to_owned(),
             });
-        // A worker leaving may strand evaluations whose remaining builds only it
-        // could service; kick the dispatch loop to re-evaluate off the read loop.
         self.kick_dispatch();
     }
 
-    /// Snapshot every connected worker's `(architectures, system_features)`
-    /// plus the counts of those advertising the `eval` and `fetch`
-    /// capabilities, then reconcile each in-flight evaluation's status. See
-    /// [`build::reconcile_waiting_state`].
+    /// Reconcile each in-flight evaluation's status against the connected pool.
     pub async fn reconcile_waiting_state(&self) -> Result<()> {
-        let workers = self.worker_pool.read().await.all_workers();
+        let workers = self.board_workers().await;
         let eval_capable = workers.iter().filter(|w| w.capabilities.eval).count();
         let fetch_capable = workers.iter().filter(|w| w.capabilities.fetch).count();
         let caps: Vec<(Vec<String>, Vec<String>)> = workers
@@ -315,14 +291,18 @@ impl Scheduler {
             .await
     }
 
-    /// Snapshot of every connected worker for the Job Board (includes the
-    /// internal sampling fields; the API layer masks them per caller scope).
+    /// Every connected worker, including the sampling fields the API masks.
     pub async fn board_workers(&self) -> Vec<crate::WorkerInfo> {
-        self.worker_pool.read().await.all_workers()
+        self.call(|reply| SchedulerMsg::Workers { reply })
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn mark_worker_draining(&self, worker_id: &str) {
-        self.worker_pool.write().await.mark_draining(worker_id);
+        let worker = worker_id.to_owned();
+        let _ = self
+            .call(|reply| SchedulerMsg::MarkDraining { worker, reply })
+            .await;
         info!(%worker_id, "worker marked draining");
     }
 }

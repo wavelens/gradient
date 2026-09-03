@@ -260,9 +260,13 @@ pub struct Assignment {
     /// Scoring/context snapshot for the winning job, persisted best-effort by
     /// the caller into `dispatched_job`. `None` outside the scored path.
     pub dispatch_record: Option<DispatchRecord>,
+    /// The tracker's own record of the job, kept by the session so it can
+    /// re-register the job after a scheduler restart.
+    pub pending: PendingJob,
 }
 
 /// Owned snapshot of a dispatch decision for the `dispatched_job` table.
+#[derive(Clone)]
 pub struct DispatchRecord {
     pub kind: DispatchedJobKind,
     pub derivation_build: Option<DerivationBuildId>,
@@ -843,10 +847,20 @@ impl JobTracker {
             job: job.clone().into_job(),
             project_id: job.project_id(),
             dispatch_record: None,
+            pending: job.clone(),
         };
         self.active
             .insert(job_id.to_owned(), (worker_id.to_owned(), job));
         Some(assignment)
+    }
+
+    /// Re-attach a job a session still runs after the tracker was rebuilt.
+    pub fn restore_active(&mut self, worker_id: &str, job_id: String, job: PendingJob) {
+        if self.active.contains_key(&job_id) {
+            return;
+        }
+        self.pending.remove(&job_id);
+        self.active.insert(job_id, (worker_id.to_owned(), job));
     }
 
     pub fn release_to_pending(&mut self, job_id: &str) {

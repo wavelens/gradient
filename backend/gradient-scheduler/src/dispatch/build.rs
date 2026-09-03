@@ -18,9 +18,10 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use gradient_util::supervision::{ChildCtx, ChildSpec, run_pass};
 use ractor::{Actor, ActorProcessingErr, ActorRef};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::Scheduler;
+use crate::actor::SchedulerMsg;
 use crate::jobs::PendingBuildJob;
 use gradient_types::proto::{BuildJob, BuildSpec, CacheInfo, DerivationOutput, RequiredPath};
 
@@ -40,7 +41,9 @@ pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool,
     // intervals, so only the timer advances it - reactive kicks (which can
     // fire many times per interval) just run an extra dispatch pass.
     if timer_tick {
-        scheduler.job_tracker.write().await.bump_rescore_counts();
+        let _ = scheduler
+            .call(|reply| SchedulerMsg::BumpRescore { reply })
+            .await;
 
         // Every timer tick runs promotion (Tick); the anchor-side flag
         // fixpoints, unbacked-output demote, and failure sweep (Global) run
@@ -83,9 +86,7 @@ pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool,
     // so this re-offers it (workers score it a second time) - including to a
     // worker that just freed capacity via the kick. Sessions ignore an empty
     // delta, so this is cheap when nothing changed.
-    if scheduler.job_tracker.read().await.has_pending() {
-        scheduler.job_notify.send_modify(|g| *g = g.wrapping_add(1));
-    }
+    let _ = scheduler.cast(SchedulerMsg::ReOffer).await;
 }
 
 pub(crate) enum BuildMsg {
@@ -800,15 +801,13 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
         return Ok(());
     }
 
-    // Filter out anchors already in the in-memory tracker - one lock acquisition
-    // for the whole pass instead of per-anchor.
-    let new_anchors: Vec<MDerivationBuild> = {
-        let tracker = scheduler.job_tracker.read().await;
-        anchors
-            .into_iter()
-            .filter(|a| !tracker.contains_job(&format!("build:{}", a.id)))
-            .collect()
-    };
+    // Filter out anchors already in the in-memory tracker.
+    let ids: Vec<String> = anchors.iter().map(|a| format!("build:{}", a.id)).collect();
+    let untracked: HashSet<String> = scheduler.untracked(ids).await.into_iter().collect();
+    let new_anchors: Vec<MDerivationBuild> = anchors
+        .into_iter()
+        .filter(|a| untracked.contains(&format!("build:{}", a.id)))
+        .collect();
     if new_anchors.is_empty() {
         return Ok(());
     }
@@ -833,10 +832,8 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
     }
 
     let connected_architectures: HashSet<String> = scheduler
-        .worker_pool
-        .read()
+        .board_workers()
         .await
-        .all_workers()
         .into_iter()
         .flat_map(|w| w.architectures)
         .collect();
@@ -853,7 +850,10 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
     for anchor in new_anchors {
         match maps.classify_dispatch(&anchor) {
             DispatchOutcome::Dispatch(job_id, pending) => {
-                scheduler.enqueue_build_job(job_id, *pending).await;
+                if let Err(e) = scheduler.enqueue_build_job(job_id, *pending).await {
+                    warn!(error = %e, "enqueue_build_job failed");
+                    continue;
+                }
                 enqueued += 1;
             }
             DispatchOutcome::Defer(reason) => {

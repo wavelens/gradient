@@ -70,13 +70,12 @@ pub(super) async fn worker_liveness_pass(scheduler: Arc<Scheduler>) -> anyhow::R
 /// Recompute the windowed [`gradient_score::InstanceContext`] snapshot consumed
 /// by resource-aware scoring and publish it lock-free.
 pub(super) async fn instance_metrics_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
-    let (active_builds, pending_builds) = scheduler.job_tracker.read().await.instance_counts();
-    let (total_workers, idle_workers) = scheduler.worker_pool.read().await.worker_counts();
+    let c = scheduler.counts().await;
     let counts = crate::instance::InstanceCounts {
-        active_builds,
-        pending_builds,
-        total_workers,
-        idle_workers,
+        active_builds: c.active_builds,
+        pending_builds: c.pending_builds,
+        total_workers: c.workers as u32,
+        idle_workers: c.idle_workers as u32,
     };
     let ctx = crate::instance::compute_instance_context(
         &scheduler.state.worker_db,
@@ -96,7 +95,7 @@ pub(super) async fn instance_metrics_pass(scheduler: Arc<Scheduler>) -> anyhow::
 /// Snapshot every connected worker's live metrics into `worker_sample` for the
 /// Job Board's worker statistics.
 pub(super) async fn worker_sample_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
-    let workers = scheduler.worker_pool.read().await.all_workers();
+    let workers = scheduler.board_workers().await;
     for info in &workers {
         crate::worker_lifecycle::record_worker_sample(&scheduler.state.worker_db, info).await;
     }

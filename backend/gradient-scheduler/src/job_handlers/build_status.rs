@@ -15,6 +15,7 @@ use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput};
 use gradient_types::*;
 
 use crate::Scheduler;
+use crate::actor::SchedulerMsg;
 use crate::jobs::PendingJob;
 use crate::{build, eval};
 
@@ -39,11 +40,8 @@ impl Scheduler {
                 // to stop instead of letting it build to completion.
                 if anchor.status == BuildStatus::Aborted {
                     let job_id = format!("build:{derivation_build}");
-                    self.worker_pool.read().await.send_abort(
-                        worker_id,
-                        job_id,
-                        "evaluation aborted".to_owned(),
-                    );
+                    self.abort_job(worker_id, job_id, "evaluation aborted".to_owned())
+                        .await;
                     info!(%derivation_build, %worker_id, "aborting build that started after its evaluation was aborted");
                     return;
                 }
@@ -74,15 +72,12 @@ impl Scheduler {
             .parse()
             .map_err(|_| anyhow::anyhow!("invalid derivation_build: {}", build_id_str))?;
 
-        let job = {
-            let tracker = self.job_tracker.read().await;
-            match tracker.active_job(job_id) {
-                Some(PendingJob::Build(j)) => j.clone(),
-                Some(_) => anyhow::bail!("job {} is not a build job", job_id),
-                None => {
-                    warn!(%job_id, "build output for unknown job - ignoring");
-                    return Ok(());
-                }
+        let job = match self.active_job(job_id).await {
+            Some(PendingJob::Build(j)) => j,
+            Some(_) => anyhow::bail!("job {} is not a build job", job_id),
+            None => {
+                warn!(%job_id, "build output for unknown job - ignoring");
+                return Ok(());
             }
         };
         build::handle_build_output(
@@ -99,13 +94,16 @@ impl Scheduler {
     // ── Job completion ────────────────────────────────────────────────────────
 
     pub async fn handle_job_completed(&self, worker_id: &str, job_id: &str) -> Result<()> {
-        let worker_idle = self
-            .worker_pool
-            .write()
-            .await
-            .release_job(worker_id, job_id);
-        let job = self.job_tracker.write().await.remove_active(job_id);
-        match job {
+        let worker = worker_id.to_owned();
+        let released = self
+            .call(|reply| SchedulerMsg::Release {
+                worker,
+                job_id: job_id.to_owned(),
+                reply,
+            })
+            .await?;
+        let worker_idle = released.worker_idle;
+        match released.job {
             Some(PendingJob::Eval(j)) => {
                 // Split mode: a fetch-only job just archived the source. Enqueue
                 // the cached eval follow-up instead of finalizing - eval has not run.
@@ -119,8 +117,12 @@ impl Scheduler {
                     return match store_path {
                         Some(path) => {
                             let follow_id = format!("eval:{}", j.evaluation_id);
-                            self.enqueue_eval_job(follow_id, j.cached_followup(path))
-                                .await;
+                            if let Err(e) = self
+                                .enqueue_eval_job(follow_id, j.cached_followup(path))
+                                .await
+                            {
+                                warn!(error = %e, evaluation_id = %j.evaluation_id, "enqueue_eval_job failed for cached follow-up");
+                            }
                             info!(evaluation_id = %j.evaluation_id, "fetch complete; enqueued cached eval follow-up");
                             Ok(())
                         }
@@ -183,12 +185,15 @@ impl Scheduler {
         kind: BuildFailureKind,
         missing_paths: &[String],
     ) -> Result<()> {
-        self.worker_pool
-            .write()
-            .await
-            .release_job(worker_id, job_id);
-        let job = self.job_tracker.write().await.remove_active(job_id);
-        match job {
+        let worker = worker_id.to_owned();
+        let released = self
+            .call(|reply| SchedulerMsg::Release {
+                worker,
+                job_id: job_id.to_owned(),
+                reply,
+            })
+            .await?;
+        match released.job {
             Some(PendingJob::Eval(j)) => {
                 self.eval_edges.write().await.remove(&j.evaluation_id);
                 let r = eval::handle_eval_job_failed(
