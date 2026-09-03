@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 
 use gradient_core::ServerState;
@@ -22,6 +23,7 @@ use crate::messages::{GradientCapabilities, ServerMessage};
 use crate::session::handshake as handshake_fsm;
 use crate::traits::{AuthOutcome, PeerAuthority};
 use gradient_scheduler::Scheduler;
+use gradient_scheduler::actor::SessionSignal;
 
 use super::auth::{
     BaseWorkerChallenge, aggregate_enabled_caps, expand_base_authorized,
@@ -52,9 +54,8 @@ pub(super) struct Authenticated {
 
 pub(super) struct Registered {
     pub peer_id: String,
-    pub reauth_notify: Arc<tokio::sync::Notify>,
-    pub abort_rx: tokio::sync::mpsc::UnboundedReceiver<(String, String)>,
-    pub job_notify: tokio::sync::watch::Receiver<u64>,
+    pub signals: tokio::sync::mpsc::UnboundedReceiver<SessionSignal>,
+    pub last_seen: Arc<AtomicI64>,
 }
 
 // ── Protocol session ──────────────────────────────────────────────────────────
@@ -235,11 +236,21 @@ impl ProtoSession<Authenticated> {
             .filter_map(|s| s.parse().ok())
             .collect();
 
-        let (reauth_notify, abort_rx) = self
+        let (port, signals) = tokio::sync::mpsc::unbounded_channel();
+        let registered = match self
             .scheduler
-            .register_worker(&peer_id, negotiated, authorized_peer_uuids)
-            .await;
-        let job_notify = self.scheduler.job_notify();
+            .register_worker(&peer_id, negotiated, authorized_peer_uuids, Arc::new(port))
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(%peer_id, error = %e, "registration failed; scheduler unavailable");
+                self.socket
+                    .send_reject(503, "scheduler unavailable".into())
+                    .await;
+                return None;
+            }
+        };
 
         Some(ProtoSession {
             socket: self.socket,
@@ -247,9 +258,8 @@ impl ProtoSession<Authenticated> {
             scheduler: self.scheduler,
             session_state: Registered {
                 peer_id,
-                reauth_notify,
-                abort_rx,
-                job_notify,
+                signals,
+                last_seen: registered.last_seen,
             },
         })
     }
@@ -266,9 +276,8 @@ impl ProtoSession<Registered> {
             session_state:
                 Registered {
                     peer_id,
-                    reauth_notify,
-                    mut abort_rx,
-                    mut job_notify,
+                    mut signals,
+                    last_seen,
                 },
         } = self;
 
@@ -294,12 +303,9 @@ impl ProtoSession<Registered> {
         let nar_serve_semaphore = Arc::new(Semaphore::new(proto_cfg.max_concurrent_nar_serves));
         let nar_commit_semaphore = Arc::new(Semaphore::new(NAR_COMMIT_CONCURRENCY));
         let mut eval_cache = EvalCacheReceiveStore::new(max_partial_bytes);
-
-        // Lock-free handle into the worker's `last_seen`, stamped on every
-        // inbound frame so the liveness watchdog can spot a worker that died
-        // without a clean TCP close.
-        let last_seen = scheduler.worker_last_seen(&peer_id).await;
         let cancel = state.shutdown.token();
+        let mut offers_seen = 0u64;
+        let mut active = std::collections::HashMap::new();
 
         loop {
             let msg = tokio::select! {
@@ -312,41 +318,39 @@ impl ProtoSession<Registered> {
                     Some(m) => m,
                     None => break,
                 },
-                _ = reauth_notify.notified() => {
-                    if !on_reauth_notify(&writer, &state, &peer_id).await { break; }
-                    continue;
-                }
-                res = job_notify.changed() => {
-                    if res.is_err() { break; }
-                    if !on_job_notify(&writer, &scheduler, &peer_id).await { break; }
-                    continue;
-                }
-                abort_msg = abort_rx.recv() => match abort_msg {
-                    Some((job_id, reason)) => {
-                        info!(%peer_id, %job_id, %reason, "sending AbortJob to worker");
-                        if send_server_msg(
-                            &writer,
-                            &ServerMessage::AbortJob { job_id, reason },
-                        )
-                        .await
-                        .is_err()
+                signal = signals.recv() => match signal {
+                    Some(SessionSignal::Offers(generation)) => {
+                        if generation > offers_seen
+                            && !on_offers(&writer, &scheduler, &peer_id, &mut offers_seen).await
                         {
                             break;
                         }
                         continue;
                     }
-                    None => break,
+                    Some(SessionSignal::Reauth) => {
+                        if !on_reauth_notify(&writer, &state, &peer_id).await { break; }
+                        continue;
+                    }
+                    Some(SessionSignal::Abort { job_id, reason }) => {
+                        info!(%peer_id, %job_id, %reason, "sending AbortJob to worker");
+                        if send_server_msg(&writer, &ServerMessage::AbortJob { job_id, reason })
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+                    Some(SessionSignal::Drain) | None => break,
                 },
             };
 
             // Reaching here means a real inbound frame (the other select arms
             // all `continue`), so the worker is alive: refresh its deadline.
-            if let Some(ls) = &last_seen {
-                ls.store(
-                    gradient_types::now().and_utc().timestamp_millis(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-            }
+            last_seen.store(
+                gradient_types::now().and_utc().timestamp_millis(),
+                std::sync::atomic::Ordering::Relaxed,
+            );
 
             let mut ctx = DispatchContext {
                 writer: &writer,
@@ -355,6 +359,7 @@ impl ProtoSession<Registered> {
                 peer_id: &peer_id,
                 nar_serve_semaphore: &nar_serve_semaphore,
                 nar_commit_semaphore: &nar_commit_semaphore,
+                active: &mut active,
             };
             if !ctx.dispatch(msg, &mut nar, &mut eval_cache).await {
                 break;
@@ -398,13 +403,19 @@ async fn on_reauth_notify(writer: &ProtoWriter, state: &ServerState, peer_id: &s
     .is_ok()
 }
 
-async fn on_job_notify(writer: &ProtoWriter, scheduler: &Scheduler, peer_id: &str) -> bool {
-    let candidates = scheduler.get_new_job_candidates(peer_id).await;
-    if candidates.is_empty() {
+async fn on_offers(
+    writer: &ProtoWriter,
+    scheduler: &Scheduler,
+    peer_id: &str,
+    offers_seen: &mut u64,
+) -> bool {
+    let offer = scheduler.get_new_job_candidates(peer_id).await;
+    *offers_seen = offer.generation;
+    if offer.candidates.is_empty() {
         return true;
     }
-    debug!(%peer_id, count = candidates.len(), "pushing job offer (delta)");
-    for chunk in candidates.chunks(JOB_OFFER_CHUNK_SIZE) {
+    debug!(%peer_id, count = offer.candidates.len(), "pushing job offer (delta)");
+    for chunk in offer.candidates.chunks(JOB_OFFER_CHUNK_SIZE) {
         if send_server_msg(
             writer,
             &ServerMessage::JobOffer {

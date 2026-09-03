@@ -26,13 +26,10 @@ impl Scheduler {
         job_id: &str,
         new_status: gradient_entity::evaluation::EvaluationStatus,
     ) {
-        let evaluation_id = {
-            let tracker = self.job_tracker.read().await;
-            let Some(j) = tracker.active_eval_job(job_id) else {
-                return;
-            };
-            j.evaluation_id
+        let Some(PendingJob::Eval(j)) = self.active_job(job_id).await else {
+            return;
         };
+        let evaluation_id = j.evaluation_id;
         match EEvaluation::find_by_id(evaluation_id)
             .one(&self.state.worker_db)
             .await
@@ -54,13 +51,10 @@ impl Scheduler {
         use sea_orm::Set;
 
         let Some(path) = flake_source else { return };
-        let evaluation_id = {
-            let tracker = self.job_tracker.read().await;
-            let Some(j) = tracker.active_eval_job(job_id) else {
-                return;
-            };
-            j.evaluation_id
+        let Some(PendingJob::Eval(j)) = self.active_job(job_id).await else {
+            return;
         };
+        let evaluation_id = j.evaluation_id;
         let am = gradient_entity::evaluation::ActiveModel {
             id: Set(evaluation_id),
             flake_source: Set(Some(path)),
@@ -84,13 +78,10 @@ impl Scheduler {
             ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
         };
 
-        let evaluation_id = {
-            let tracker = self.job_tracker.read().await;
-            let Some(j) = tracker.active_eval_job(job_id) else {
-                return;
-            };
-            j.evaluation_id
+        let Some(PendingJob::Eval(j)) = self.active_job(job_id).await else {
+            return;
         };
+        let evaluation_id = j.evaluation_id;
 
         let bumped_json = serde_json::json!(
             bumped
@@ -133,13 +124,10 @@ impl Scheduler {
     pub async fn persist_input_update_expansion(&self, job_id: &str, matched: Vec<String>) {
         use sea_orm::{ColumnTrait, QueryFilter};
 
-        let evaluation_id = {
-            let tracker = self.job_tracker.read().await;
-            let Some(j) = tracker.active_eval_job(job_id) else {
-                return;
-            };
-            j.evaluation_id
+        let Some(PendingJob::Eval(j)) = self.active_job(job_id).await else {
+            return;
         };
+        let evaluation_id = j.evaluation_id;
         let db = &self.state.worker_db;
 
         let eval = match EEvaluation::find_by_id(evaluation_id).one(db).await {
@@ -194,15 +182,12 @@ impl Scheduler {
         warnings: Vec<String>,
         errors: Vec<String>,
     ) -> Result<()> {
-        let job = {
-            let tracker = self.job_tracker.read().await;
-            match tracker.active_job(job_id) {
-                Some(PendingJob::Eval(j)) => j.clone(),
-                Some(_) => anyhow::bail!("job {} is not an eval job", job_id),
-                None => {
-                    warn!(%job_id, "eval result for unknown job - ignoring");
-                    return Ok(());
-                }
+        let job = match self.active_job(job_id).await {
+            Some(PendingJob::Eval(j)) => j,
+            Some(_) => anyhow::bail!("job {} is not an eval job", job_id),
+            None => {
+                warn!(%job_id, "eval result for unknown job - ignoring");
+                return Ok(());
             }
         };
 
@@ -260,15 +245,9 @@ impl Scheduler {
         source: String,
         message: String,
     ) -> Result<()> {
-        let evaluation_id = {
-            let tracker = self.job_tracker.read().await;
-            match tracker.active_job(job_id) {
-                Some(j) => j.evaluation_id(),
-                None => {
-                    debug!(%job_id, "EvalMessage dropped: no active job");
-                    return Ok(());
-                }
-            }
+        let Some(evaluation_id) = self.active_job(job_id).await.map(|j| j.evaluation_id()) else {
+            debug!(%job_id, "EvalMessage dropped: no active job");
+            return Ok(());
         };
 
         let entity_level = match level {

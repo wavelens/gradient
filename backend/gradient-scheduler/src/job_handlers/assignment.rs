@@ -6,160 +6,127 @@
 
 //! Scoring and job assignment (`RequestJob`).
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use sea_orm::EntityTrait;
 use sea_orm::{ColumnTrait, IntoActiveModel, QueryFilter};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use gradient_core::ServerState;
 use gradient_types::proto::{CandidateScore, JobKind};
 use gradient_types::*;
 
 use crate::Scheduler;
+use crate::actor::{AssignOutcome, SchedulerMsg};
 use crate::dispatch;
-use crate::jobs::{Assignment, DispatchRecord, WorkerCaps};
+use crate::jobs::{Assignment, DispatchRecord};
 
 impl Scheduler {
     // ── Scoring / assignment ──────────────────────────────────────────────────
 
-    /// Try to directly assign a job of `kind` to `worker_id` without scoring.
-    ///
-    /// Called when the worker sends `RequestJob { kind }` to signal it has a
-    /// free slot.  Returns `Some(Assignment)` if a matching pending job was
-    /// found and claimed; `None` if no such job exists yet.
+    /// Claim the best pending job of `kind` for the worker. When the tracker
+    /// has nothing for a build request, refresh from the DB once and retry.
     pub async fn request_job(&self, worker_id: &str, kind: JobKind) -> Option<Assignment> {
-        // ── Server-side capacity guard ──────────────────────────────────────
-        {
-            let pool = self.worker_pool.read().await;
-            if !pool.has_capacity(worker_id, &kind) {
-                debug!(%worker_id, ?kind, "RequestJob ignored - worker at capacity");
-                return None;
+        let instance = self.instance.load_full();
+        match self.try_assign(worker_id, &kind, &instance).await {
+            AssignOutcome::Assigned(a) => {
+                info!(%worker_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob");
+                return Some(a);
             }
+            AssignOutcome::AtCapacity => return None,
+            AssignOutcome::Nothing => {}
         }
 
-        let (authorized, caps) = self.worker_auth_and_caps(worker_id).await;
-
-        // ── First try: pick from what's already in the tracker ──────────────
-        if let Some(a) = self
-            .try_assign(worker_id, authorized.as_ref(), caps.as_ref(), &kind)
-            .await
-        {
-            info!(%worker_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob");
-            return Some(a);
-        }
-
-        // ── Tracker empty: on-demand DB refresh ─────────────────────────────
-        // On-demand dispatch: query the DB immediately when a worker asks for
-        // work and the tracker has nothing, instead of waiting for the next
-        // build_dispatch_loop tick. Complements - does not replace - that
-        // periodic 5s loop, which also runs dispatch_ready_builds.
         if matches!(kind, JobKind::Build) {
             if let Err(e) = dispatch::dispatch_ready_builds(self).await {
                 warn!(error = %e, "on-demand dispatch_ready_builds failed");
             }
-            // Kick the dispatch loop to reconcile Waiting/Building state off the
-            // read loop, rather than blocking this worker's next message on it.
             self.kick_dispatch();
         }
 
-        // ── Second try after refresh ────────────────────────────────────────
-        if let Some(a) = self
-            .try_assign(worker_id, authorized.as_ref(), caps.as_ref(), &kind)
-            .await
-        {
-            info!(%worker_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob (after DB refresh)");
-            return Some(a);
+        match self.try_assign(worker_id, &kind, &instance).await {
+            AssignOutcome::Assigned(a) => {
+                info!(%worker_id, job_id = %a.job_id, ?kind, "job assigned via RequestJob (after DB refresh)");
+                Some(a)
+            }
+            _ => None,
         }
-
-        None
     }
 
-    /// Record candidate scores from a worker. Does NOT assign - the worker
-    /// explicitly signals capacity via `RequestJob`. Scores are used later
-    /// by `request_job` to pick the best candidate.
     pub async fn record_scores(&self, worker_id: &str, scores: Vec<CandidateScore>) {
-        self.job_tracker
-            .write()
-            .await
-            .record_scores(worker_id, scores);
+        let worker = worker_id.to_owned();
+        let _ = self
+            .call(|reply| SchedulerMsg::RecordScores {
+                worker,
+                scores,
+                reply,
+            })
+            .await;
     }
 
     pub async fn job_rejected(&self, worker_id: &str, job_id: &str) {
-        self.worker_pool
-            .write()
-            .await
-            .release_job(worker_id, job_id);
-        self.job_tracker.write().await.release_to_pending(job_id);
-        // Clear the sent-candidate flag so the job shows up in the next delta push.
-        self.worker_pool.write().await.remove_sent_candidate(job_id);
-        info!(%worker_id, %job_id, "job rejected; re-queued");
+        let worker = worker_id.to_owned();
+        let job_id = job_id.to_owned();
+        let _ = self
+            .call(|reply| SchedulerMsg::Rejected {
+                worker,
+                job_id,
+                reply,
+            })
+            .await;
     }
 
-    /// Return the project UUID that owns the active job, if found.
     pub async fn project_for_job(&self, job_id: &str) -> Option<ProjectId> {
-        self.job_tracker
-            .read()
-            .await
-            .active_job(job_id)
-            .map(|j| j.project_id())
+        self.active_job(job_id).await.map(|j| j.project_id())
     }
 
-    /// Fetch the peer auth filter and capabilities for a worker from the pool.
-    pub(super) async fn worker_auth_and_caps(
-        &self,
-        worker_id: &str,
-    ) -> (Option<HashSet<ProjectId>>, Option<WorkerCaps>) {
-        let pool = self.worker_pool.read().await;
-        let authorized = pool
-            .peer_auth_for(worker_id)
-            .and_then(|a| a.as_filter())
-            .cloned();
-        (authorized, pool.worker_caps(worker_id))
-    }
-
-    /// Atomically take the best matching job from the tracker and record the
-    /// assignment on the worker pool. Returns `None` if no suitable job exists.
+    /// One atomic claim in the actor; the board event and the `dispatched_job`
+    /// row follow outside it so DB latency never blocks the mailbox.
     async fn try_assign(
         &self,
         worker_id: &str,
-        authorized: Option<&HashSet<ProjectId>>,
-        caps: Option<&WorkerCaps>,
         kind: &JobKind,
-    ) -> Option<Assignment> {
-        let policy = Arc::clone(&self.policy);
-        let instance = self.instance.load_full();
-        let mut assignment = self
-            .job_tracker
-            .write()
+        instance: &Arc<gradient_score::InstanceContext>,
+    ) -> AssignOutcome {
+        let worker = worker_id.to_owned();
+        let kind = kind.clone();
+        let instance = Arc::clone(instance);
+        let outcome = match self
+            .call(|reply| SchedulerMsg::Assign {
+                worker,
+                kind,
+                instance,
+                reply,
+            })
             .await
-            .take_best_of_kind(worker_id, authorized, caps, kind, &*policy, &instance);
-        if let Some(a) = assignment.as_mut() {
-            self.worker_pool
-                .write()
-                .await
-                .assign_job(worker_id, &a.job_id);
-            if let Some(record) = a.dispatch_record.take() {
-                let _ = self
-                    .state
-                    .board_events
-                    .send(crate::BoardEvent::JobDispatched {
-                        project: record.project.into(),
-                        worker_id: worker_id.to_owned(),
-                        kind: i16::from(record.kind),
-                        score: record.score,
-                        build_id: record.derivation_build.map(Into::into),
-                        evaluation_id: record.evaluation_id.into(),
-                    });
-                let state = Arc::clone(&self.state);
-                let worker = worker_id.to_owned();
-                self.state.shutdown.spawn(async move {
-                    persist_dispatched_job(&state, &worker, record).await;
-                });
+        {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                warn!(error = %e, %worker_id, "RequestJob did not reach the scheduler");
+                return AssignOutcome::Nothing;
             }
+        };
+        if let AssignOutcome::Assigned(a) = &outcome
+            && let Some(record) = a.dispatch_record.clone()
+        {
+            let _ = self
+                .state
+                .board_events
+                .send(crate::BoardEvent::JobDispatched {
+                    project: record.project.into(),
+                    worker_id: worker_id.to_owned(),
+                    kind: i16::from(record.kind),
+                    score: record.score,
+                    build_id: record.derivation_build.map(Into::into),
+                    evaluation_id: record.evaluation_id.into(),
+                });
+            let state = Arc::clone(&self.state);
+            let worker = worker_id.to_owned();
+            self.state.shutdown.spawn(async move {
+                persist_dispatched_job(&state, &worker, record).await;
+            });
         }
-        assignment
+        outcome
     }
 }
 

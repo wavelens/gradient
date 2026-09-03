@@ -15,11 +15,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use tokio::sync::{Notify, mpsc};
-
 use gradient_types::ids::ProjectId;
 use gradient_types::proto::{GradientCapabilities, JobKind};
 
+use crate::actor::{SessionPort, SessionSignal};
 use crate::peer_auth::PeerAuth;
 use crate::worker_state::{Active, Draining, TypedWorker};
 
@@ -88,18 +87,16 @@ impl WorkerPool {
         self.workers.contains_key(id)
     }
 
+    /// Register a connection, carrying the prior connection's reported sizing
+    /// forward so a reconnect without a fresh `WorkerCapabilities` still builds.
+    /// Returns the `last_seen` handle the session stamps on every inbound frame.
     pub fn register(
         &mut self,
         id: String,
         capabilities: GradientCapabilities,
         authorized_peers: HashSet<ProjectId>,
-    ) -> (Arc<Notify>, mpsc::UnboundedReceiver<(String, String)>) {
-        // Carry the prior connection's reported capabilities into the new slot.
-        // Architectures/features/sizing arrive once per session via a separate
-        // `WorkerCapabilities` message, but a reconnect or server-initiated
-        // re-auth re-registers the worker without it re-sending them - so without
-        // this the slot resets to empty architectures and `can_build` rejects
-        // every real-arch job, stranding the worker idle while builds queue.
+        session: Arc<dyn SessionPort>,
+    ) -> Arc<AtomicI64> {
         let prior = self.workers.get(&id).map(|slot| {
             let s = slot.shared();
             (
@@ -111,14 +108,8 @@ impl WorkerPool {
                 s.cpu_core_score,
             )
         });
-        let notify = Arc::new(Notify::new());
-        let (abort_tx, abort_rx) = mpsc::unbounded_channel();
-        let worker = TypedWorker::<Active>::new(
-            capabilities,
-            authorized_peers,
-            Arc::clone(&notify),
-            abort_tx,
-        );
+        let worker = TypedWorker::<Active>::new(capabilities, authorized_peers, session);
+        let last_seen = Arc::clone(&worker.last_seen);
         self.workers.insert(id.clone(), WorkerSlot::Active(worker));
         if let Some((
             architectures,
@@ -138,7 +129,7 @@ impl WorkerPool {
             s.ram_total_mb = ram_total_mb;
             s.cpu_core_score = cpu_core_score;
         }
-        (notify, abort_rx)
+        last_seen
     }
 
     /// Record the owning project for a connected worker.
@@ -146,21 +137,31 @@ impl WorkerPool {
         self.worker_projects.insert(id.to_owned(), project);
     }
 
-    /// Signal a connected worker that its registrations have changed and it
-    /// should re-authenticate.  No-op if the worker is not connected.
     pub fn request_reauth(&self, worker_id: &str) {
         if let Some(slot) = self.workers.get(worker_id) {
-            slot.shared().reauth_notify.notify_one();
+            slot.shared().session.signal(SessionSignal::Reauth);
         }
     }
 
-    /// Send an abort message to a connected worker's handler.
-    /// Returns `true` if the message was sent (worker connected), `false` otherwise.
+    /// Push an abort to the worker's session; `false` when it is not connected.
     pub fn send_abort(&self, worker_id: &str, job_id: String, reason: String) -> bool {
-        if let Some(slot) = self.workers.get(worker_id) {
-            slot.shared().abort_tx.send((job_id, reason)).is_ok()
-        } else {
-            false
+        match self.workers.get(worker_id) {
+            Some(slot) => {
+                slot.shared()
+                    .session
+                    .signal(SessionSignal::Abort { job_id, reason });
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Push `signal` to every active (not draining) worker's session.
+    pub fn signal_active(&self, signal: SessionSignal) {
+        for slot in self.workers.values() {
+            if let WorkerSlot::Active(w) = slot {
+                w.session.signal(signal.clone());
+            }
         }
     }
 
@@ -396,14 +397,6 @@ impl WorkerPool {
             .collect()
     }
 
-    /// Clone the `last_seen` handle for a connected worker so the session loop
-    /// can stamp it lock-free on each inbound frame. `None` if not connected.
-    pub fn last_seen_handle(&self, id: &str) -> Option<Arc<AtomicI64>> {
-        self.workers
-            .get(id)
-            .map(|slot| Arc::clone(&slot.shared().last_seen))
-    }
-
     /// Peers whose last inbound frame is older than `timeout_ms` relative to
     /// `now_ms` - i.e. silent past the heartbeat deadline, so presumed dead.
     pub fn stale_worker_ids(&self, now_ms: i64, timeout_ms: i64) -> Vec<String> {
@@ -455,10 +448,17 @@ pub struct WorkerInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::actor::{SessionPort, SessionSignal};
     use crate::peer_auth::PeerAuth;
+    use tokio::sync::mpsc;
 
     fn caps() -> GradientCapabilities {
         GradientCapabilities::default()
+    }
+
+    fn port() -> (Arc<dyn SessionPort>, mpsc::UnboundedReceiver<SessionSignal>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (Arc::new(tx), rx)
     }
 
     fn caps_ef(eval: bool, fetch: bool) -> GradientCapabilities {
@@ -472,13 +472,13 @@ mod tests {
     #[test]
     fn idle_eval_only_worker_detected() {
         let mut pool = WorkerPool::new();
-        pool.register("f1".into(), caps_ef(true, true), HashSet::new());
+        pool.register("f1".into(), caps_ef(true, true), HashSet::new(), port().0);
         assert!(
             !pool.has_idle_eval_only_worker(),
             "only a fetch worker present"
         );
 
-        pool.register("e1".into(), caps_ef(true, false), HashSet::new());
+        pool.register("e1".into(), caps_ef(true, false), HashSet::new(), port().0);
         assert!(
             pool.has_idle_eval_only_worker(),
             "idle eval-only worker present"
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn draining_eval_only_worker_does_not_count() {
         let mut pool = WorkerPool::new();
-        pool.register("e1".into(), caps_ef(true, false), HashSet::new());
+        pool.register("e1".into(), caps_ef(true, false), HashSet::new(), port().0);
         pool.mark_draining("e1");
         assert!(
             !pool.has_idle_eval_only_worker(),
@@ -506,7 +506,7 @@ mod tests {
     fn test_register_and_is_connected() {
         let mut pool = WorkerPool::new();
         assert!(!pool.is_connected("w1"));
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
         assert!(pool.is_connected("w1"));
         assert_eq!(pool.worker_count(), 1);
     }
@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn test_unregister_returns_assigned_jobs() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.assign_job("w1", "j1");
         pool.assign_job("w1", "j2");
 
@@ -534,7 +534,7 @@ mod tests {
     #[test]
     fn test_update_capabilities() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.update_capabilities(
             "w1",
             vec!["x86_64-linux".into()],
@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn reregister_preserves_reported_capabilities() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.update_capabilities(
             "w1",
             vec!["x86_64-linux".into()],
@@ -573,7 +573,7 @@ mod tests {
 
         // A reconnect/re-auth re-registers without the worker re-sending caps;
         // architectures and sizing must survive so the worker stays matchable.
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
 
         let workers = pool.all_workers();
         assert_eq!(workers[0].architectures, vec!["x86_64-linux"]);
@@ -587,7 +587,7 @@ mod tests {
     #[test]
     fn test_update_metrics_updates_view() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.update_capabilities("w1", vec![], vec![], 1, 4, 8192, 1000);
 
         // Before any heartbeat the dynamic fields are absent, not zero.
@@ -621,6 +621,7 @@ mod tests {
                 ..Default::default()
             },
             HashSet::new(),
+            port().0,
         );
         pool.update_capabilities(
             "w1",
@@ -646,7 +647,7 @@ mod tests {
     #[test]
     fn test_mark_draining() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
 
         let info = &pool.all_workers()[0];
         assert!(!info.draining);
@@ -659,7 +660,7 @@ mod tests {
     #[test]
     fn test_draining_worker_has_no_capacity() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.update_capabilities("w1", vec![], vec![], 10, 0, 0, 0);
 
         // Active worker has capacity.
@@ -678,7 +679,7 @@ mod tests {
         let peer_a = ProjectId::now_v7();
         let peer_b = ProjectId::now_v7();
 
-        pool.register("w1".into(), caps(), HashSet::from([peer_a, peer_b]));
+        pool.register("w1".into(), caps(), HashSet::from([peer_a, peer_b]), port().0);
         let auth = pool.peer_auth_for("w1").unwrap();
         assert!(auth.contains(&peer_a));
         assert!(auth.contains(&peer_b));
@@ -693,7 +694,7 @@ mod tests {
         let peer_a = ProjectId::now_v7();
         let peer_b = ProjectId::now_v7();
 
-        pool.register("w1".into(), caps(), HashSet::from([peer_a]));
+        pool.register("w1".into(), caps(), HashSet::from([peer_a]), port().0);
         assert!(matches!(
             pool.peer_auth_for("w1").unwrap(),
             PeerAuth::Restricted(_)
@@ -710,7 +711,7 @@ mod tests {
     #[test]
     fn test_open_mode_on_empty_peers() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
         assert!(matches!(pool.peer_auth_for("w1").unwrap(), PeerAuth::Open));
     }
 
@@ -719,7 +720,7 @@ mod tests {
         // A build re-queued after a failed/rejected dispatch must lose its
         // sent flag so the next delta push re-offers it (workers re-score it).
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.mark_candidates_sent("w1", &["build:a".to_string(), "build:b".to_string()]);
         assert!(pool.sent_candidates_for("w1").unwrap().contains("build:a"));
 
@@ -734,7 +735,7 @@ mod tests {
         // Worker at exactly max_concurrent_builds must reject new builds.
         // Guards against `<` → `<=` off-by-one in `has_build_capacity`.
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
         pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec![], 2, 0, 0, 0);
 
         assert!(pool.has_capacity("w1", &JobKind::Build), "0/2 has capacity");
@@ -752,7 +753,7 @@ mod tests {
     #[test]
     fn test_assign_and_release_job() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
 
         pool.assign_job("w1", "j1");
         assert_eq!(pool.all_workers()[0].assigned_job_count, 1);
@@ -772,8 +773,8 @@ mod tests {
     #[test]
     fn test_all_workers_info() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
-        pool.register("w2".into(), caps(), HashSet::new());
+        pool.register("w1".into(), caps(), HashSet::new(), port().0);
+        pool.register("w2".into(), caps(), HashSet::new(), port().0);
         pool.update_capabilities("w1", vec!["x86_64-linux".into()], vec![], 2, 0, 0, 0);
         pool.assign_job("w1", "j1");
         pool.mark_draining("w2");
@@ -797,9 +798,9 @@ mod tests {
         let project_b = ProjectId::now_v7();
 
         // Restricted: worker authorized for project_a only.
-        pool.register("w1".into(), caps(), HashSet::from([project_a]));
+        pool.register("w1".into(), caps(), HashSet::from([project_a]), port().0);
         // Open: no registrations.
-        pool.register("w2".into(), caps(), HashSet::new());
+        pool.register("w2".into(), caps(), HashSet::new(), port().0);
 
         let mut workers = pool.all_workers();
         workers.sort_by(|a, b| a.id.cmp(&b.id));
@@ -820,19 +821,29 @@ mod tests {
     #[test]
     fn test_request_reauth_notifies_connected_worker() {
         let mut pool = WorkerPool::new();
-        let (notify, _abort_rx) = pool.register("w1".into(), caps(), HashSet::new());
+        let (session, mut signals) = port();
+        pool.register("w1".into(), caps(), HashSet::new(), session);
 
         pool.request_reauth("w1");
 
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap();
-        rt.block_on(async {
-            tokio::time::timeout(std::time::Duration::from_millis(50), notify.notified())
-                .await
-                .expect("reauth notify should fire immediately");
-        });
+        assert_eq!(signals.try_recv(), Ok(SessionSignal::Reauth));
+    }
+
+    #[test]
+    fn send_abort_reaches_the_session_and_reports_unknown_workers() {
+        let mut pool = WorkerPool::new();
+        let (session, mut signals) = port();
+        pool.register("w1".into(), caps(), HashSet::new(), session);
+
+        assert!(pool.send_abort("w1", "j1".into(), "why".into()));
+        assert!(!pool.send_abort("nope", "j1".into(), "why".into()));
+        assert_eq!(
+            signals.try_recv(),
+            Ok(SessionSignal::Abort {
+                job_id: "j1".into(),
+                reason: "why".into()
+            })
+        );
     }
 
     #[test]
@@ -842,18 +853,9 @@ mod tests {
     }
 
     #[test]
-    fn last_seen_handle_none_for_unknown_worker() {
-        let pool = WorkerPool::new();
-        assert!(pool.last_seen_handle("nope").is_none());
-    }
-
-    #[test]
     fn stale_worker_ids_flags_only_silent_workers() {
         let mut pool = WorkerPool::new();
-        pool.register("w1".into(), caps(), HashSet::new());
-        let handle = pool
-            .last_seen_handle("w1")
-            .expect("registered worker exposes a last_seen handle");
+        let handle = pool.register("w1".into(), caps(), HashSet::new(), port().0);
 
         let now_ms = 1_000_000_000_000i64;
         let timeout_ms = 30_000i64;
@@ -875,7 +877,7 @@ mod tests {
 
         // A freshly registered worker is stamped with `now`, so it is never
         // immediately stale against the real clock.
-        pool.register("w2".into(), caps(), HashSet::new());
+        pool.register("w2".into(), caps(), HashSet::new(), port().0);
         let real_now = gradient_types::now().and_utc().timestamp_millis();
         assert!(
             !pool

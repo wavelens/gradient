@@ -24,7 +24,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gradient_util::supervision::ChildSpec;
+use gradient_util::supervision::{ChildCtx, ChildSpec};
 use tracing::info;
 
 use super::Scheduler;
@@ -53,9 +53,21 @@ pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
     }
 }
 
+fn core_child_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
+    let scheduler = Arc::clone(scheduler);
+    ChildSpec::Custom {
+        name: "scheduler-core",
+        spawn: Arc::new(move |ctx: ChildCtx| {
+            let scheduler = Arc::clone(&scheduler);
+            Box::pin(async move { Ok(scheduler.spawn_core(Some(ctx.parent)).await?.get_cell()) })
+        }),
+    }
+}
+
 fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
     let metrics = &scheduler.state.config.metrics_args;
     let mut children = vec![
+        core_child_spec(scheduler),
         periodic(
             scheduler,
             "trigger-dispatch",

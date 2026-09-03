@@ -21,6 +21,8 @@ use crate::messages::{
     ServerMessage,
 };
 use gradient_scheduler::Scheduler;
+use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
+use gradient_scheduler::jobs::PendingJob;
 
 use super::auth::{
     expand_base_authorized, lookup_base_worker_challenge, lookup_registered_peers, validate_tokens,
@@ -50,6 +52,9 @@ pub(super) struct DispatchContext<'a> {
     /// Bounds the detached `NarUploaded` commits per connection - each pins a
     /// whole staged NAR in memory while writing it to `nar_storage`.
     pub nar_commit_semaphore: &'a Arc<Semaphore>,
+    /// Jobs this session currently runs, kept so a core restart can re-register
+    /// them without a DB round-trip.
+    pub active: &'a mut HashMap<String, PendingJob>,
 }
 
 impl<'a> DispatchContext<'a> {
@@ -458,12 +463,14 @@ impl<'a> DispatchContext<'a> {
         self.scheduler
             .update_worker_capabilities(
                 self.peer_id,
-                architectures,
-                system_features,
-                max_concurrent_builds,
-                cpu_count,
-                ram_total_mb,
-                cpu_core_score,
+                WorkerCapabilities {
+                    architectures,
+                    system_features,
+                    max_concurrent_builds,
+                    cpu_count,
+                    ram_total_mb,
+                    cpu_core_score,
+                },
             )
             .await;
     }
@@ -522,6 +529,8 @@ impl<'a> DispatchContext<'a> {
     async fn on_request_job(&mut self, kind: JobKind) -> bool {
         debug!(peer_id = %self.peer_id, ?kind, "RequestJob");
         if let Some(assignment) = self.scheduler.request_job(self.peer_id, kind).await {
+            self.active
+                .insert(assignment.job_id.clone(), assignment.pending.clone());
             send_credentials_for_job(
                 self.writer,
                 self.state,
@@ -566,6 +575,7 @@ impl<'a> DispatchContext<'a> {
             info!(peer_id = %self.peer_id, %job_id, "job accepted");
         } else {
             info!(peer_id = %self.peer_id, %job_id, ?reason, "job rejected by worker");
+            self.active.remove(&job_id);
             self.scheduler.job_rejected(self.peer_id, &job_id).await;
         }
     }
@@ -664,6 +674,7 @@ impl<'a> DispatchContext<'a> {
 
     async fn on_job_completed(&mut self, job_id: String) {
         info!(peer_id = %self.peer_id, %job_id, "job completed");
+        self.active.remove(&job_id);
         if let Err(e) = self
             .scheduler
             .handle_job_completed(self.peer_id, &job_id)
@@ -682,6 +693,7 @@ impl<'a> DispatchContext<'a> {
         missing_paths: Vec<String>,
     ) {
         warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, "job failed");
+        self.active.remove(&job_id);
         if let Err(e) = self
             .scheduler
             .handle_job_failed(self.peer_id, &job_id, &error, kind, &missing_paths)
@@ -956,10 +968,12 @@ impl RpcContext {
         self.scheduler
             .update_worker_metrics(
                 &self.peer_id,
-                cpu_usage_pct,
-                ram_free_mb,
-                disk_speed_mbps,
-                network_speed_mbps,
+                WorkerMetrics {
+                    cpu_usage_pct,
+                    ram_free_mb,
+                    disk_speed_mbps,
+                    network_speed_mbps,
+                },
             )
             .await;
     }

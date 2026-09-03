@@ -20,15 +20,9 @@ impl Scheduler {
         job_id: &str,
         report: EvalStatsReport,
     ) -> anyhow::Result<()> {
-        let evaluation_id = {
-            let tracker = self.job_tracker.read().await;
-            match tracker.active_job(job_id) {
-                Some(j) => j.evaluation_id(),
-                None => {
-                    debug!(%job_id, "EvalStats dropped: no active job");
-                    return Ok(());
-                }
-            }
+        let Some(evaluation_id) = self.active_job(job_id).await.map(|j| j.evaluation_id()) else {
+            debug!(%job_id, "EvalStats dropped: no active job");
+            return Ok(());
         };
 
         for cost in report.per_entry_point {

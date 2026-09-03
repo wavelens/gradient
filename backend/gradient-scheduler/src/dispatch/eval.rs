@@ -33,25 +33,19 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
         .all(&state.worker_db)
         .await?;
 
-    // One tracker snapshot instead of a read lock per eval; `add_pending` is
-    // idempotent under the write lock, so the snapshot race is harmless.
-    let evals: Vec<MEvaluation> = {
-        let tracker = scheduler.job_tracker.read().await;
-        evals
-            .into_iter()
-            .filter(|e| !tracker.contains_job(&format!("eval:{}", e.id)))
-            .collect()
-    };
+    // One untracked check instead of a lock per eval.
+    let ids: Vec<String> = evals.iter().map(|e| format!("eval:{}", e.id)).collect();
+    let untracked: HashSet<String> = scheduler.untracked(ids).await.into_iter().collect();
+    let evals: Vec<MEvaluation> = evals
+        .into_iter()
+        .filter(|e| untracked.contains(&format!("eval:{}", e.id)))
+        .collect();
     if evals.is_empty() {
         return Ok(());
     }
 
     let maps = EvalDispatchMaps::load(state, &evals).await?;
-    let split_fetch = scheduler
-        .worker_pool
-        .read()
-        .await
-        .has_idle_eval_only_worker();
+    let split_fetch = scheduler.has_idle_eval_only_worker().await;
     let eval_history = scheduler.eval_history.load();
 
     for eval in evals {
@@ -125,7 +119,10 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
             history,
         };
 
-        scheduler.enqueue_eval_job(job_id.clone(), pending).await;
+        if let Err(e) = scheduler.enqueue_eval_job(job_id.clone(), pending).await {
+            error!(error = %e, %job_id, "enqueue_eval_job failed");
+            continue;
+        }
         debug!(evaluation_id = %eval.id, %job_id, split_fetch, "eval job enqueued");
     }
 
