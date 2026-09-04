@@ -262,6 +262,10 @@ async fn run_rollup(ctx: &DbContext) {
         warn!(metric = "builds.duration_ms", error = %e, "rollup build-duration failed");
     }
 
+    if let Err(e) = db.execute_unprepared(&phase_duration_sql()).await {
+        warn!(metric = "phase.*.ms", error = %e, "rollup phase-duration failed");
+    }
+
     for m in eval_counts() {
         if let Err(e) = db.execute_unprepared(&eval_count_sql(&m)).await {
             warn!(metric = m.name, error = %e, "rollup eval-count failed");
@@ -386,6 +390,38 @@ fn build_duration_attempt_sql() -> String {
         ms = ms,
         window = MINUTE_WINDOW,
         completed = crate::status_sql::build(gradient_entity::build::BuildStatus::Completed),
+    )
+}
+
+/// `phase.<kind>.<phase>.ms`: one series per job kind and phase, so the board
+/// can compare where eval and build time actually goes. The phase name array is
+/// indexed by `phase + 1` because Postgres arrays are 1-based; it must stay in
+/// the order of `JobPhase::as_str`.
+fn phase_duration_sql() -> String {
+    let ms = "(p.end_ms - p.start_ms)::double precision";
+    format!(
+        "INSERT INTO metric_rollup \
+         (id, metric, granularity, bucket_start, scope, scope_hash, count, sum, min, max, sum_sq, histogram) \
+         SELECT uuidv7(), \
+                'phase.' || CASE dj.kind WHEN 0 THEN 'eval' ELSE 'build' END || '.' || \
+                  (ARRAY['fetch','push_inputs','eval_flake','eval_derivations','eval_cache_pull', \
+                         'eval_cache_push','known_derivations_wait','drv_closure_push','prefetch', \
+                         'substitute_relay','build','compress','nar_push','cache_query_wait'])[p.phase + 1] || '.ms', \
+                {minute}, date_trunc('minute', p.created_at), \
+                jsonb_build_object('project', dj.project::text), \
+                hashtextextended(dj.project::text, 0), \
+                count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
+         FROM dispatched_job_phase p \
+         JOIN dispatched_job dj ON dj.id = p.dispatched_job \
+         WHERE p.created_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+           AND p.phase BETWEEN 0 AND 13 \
+         GROUP BY date_trunc('minute', p.created_at), dj.project, dj.kind, p.phase \
+         ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
+         DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
+                       min = EXCLUDED.min, max = EXCLUDED.max, sum_sq = EXCLUDED.sum_sq",
+        minute = i16::from(RollupGranularity::Minute),
+        window = MINUTE_WINDOW,
+        ms = ms,
     )
 }
 
