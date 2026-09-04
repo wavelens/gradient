@@ -21,22 +21,18 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::{Path, State};
 use gradient_core::ServerState;
+use gradient_proto::ingest::{NarCommit, SignTargets};
 use gradient_storage::source_nar::{SourceNar, materialise_source_nar};
 use gradient_types::ConcurrencyPolicy;
 use gradient_types::ids::{
-    CachedPathId, CachedPathSignatureId, CommitId, EvaluationFlakeInputOverrideId, EvaluationId,
-    TaskId, UploadSessionId,
+    CommitId, EvaluationFlakeInputOverrideId, EvaluationId, TaskId, UploadSessionId,
 };
 use gradient_types::{
-    ACachedPathSignature, AEvaluationFlakeInputOverride, AUploadSession, BaseResponse, CCachedPath,
-    CCachedPathSignature, CProjectCache, CTask, ECache, ECachedPath, ECachedPathSignature,
-    EEvaluationFlakeInputOverride, EProjectCache, ETask, EUploadSession, MCachedPath,
-    MCachedPathSignature, MCommit, MEvaluation, MEvaluationFlakeInputOverride, MTask, MUser,
-    NULL_TIME, now,
+    AEvaluationFlakeInputOverride, AUploadSession, BaseResponse, CProjectCache, CTask, ECache,
+    EEvaluationFlakeInputOverride, EProjectCache, ETask, EUploadSession, MCommit, MEvaluation,
+    MEvaluationFlakeInputOverride, MTask, MUser, NULL_TIME, now,
 };
-use gradient_util::nix_hash::normalize_nar_hash;
 use sea_orm::ActiveValue::Set;
-use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DbErr, EntityTrait, IntoActiveModel,
     QueryFilter, RuntimeErr, TransactionTrait, sqlx,
@@ -213,11 +209,23 @@ pub(super) async fn finalize_build_request(
         .await
         .map_err(|e| WebError::internal(format!("Failed to store source NAR: {}", e)))?;
 
+    state
+        .graph
+        .commit_nar(NarCommit {
+            store_path: format!("{}-source", nar.store_hash),
+            file_hash: nar.file_hash_sri.clone(),
+            file_size: nar.file_size as i64,
+            nar_size: nar.nar_size as i64,
+            nar_hash: nar.nar_hash_sri.clone(),
+            references: Vec::new(),
+            deriver: None,
+            ca: None,
+            targets: SignTargets::ProjectCaches(project),
+        })
+        .await
+        .map_err(|e| WebError::internal(format!("failed to record source NAR: {e}")))?;
+
     let tx = state.web_db.inner().begin().await?;
-
-    let cached_path = ensure_cached_path(&tx, nar).await?;
-    queue_signature_placeholders(&tx, &cached_path, &project).await?;
-
     let response = queue_build_request(
         &tx,
         state,
@@ -385,87 +393,6 @@ async fn materialise_staging(
             .await
             .map_err(|e| WebError::internal(format!("Failed to write {}: {}", entry.path, e)))?;
     }
-    Ok(())
-}
-
-async fn ensure_cached_path<C: ConnectionTrait>(
-    tx: &C,
-    nar: &SourceNar,
-) -> WebResult<gradient_entity::cached_path::Model> {
-    if let Some(existing) = ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(nar.store_hash.clone()))
-        .one(tx)
-        .await?
-    {
-        return Ok(existing);
-    }
-
-    let nar_hash = normalize_nar_hash(&nar.nar_hash_sri);
-    let file_hash = normalize_nar_hash(&nar.file_hash_sri);
-    let row = MCachedPath {
-        id: CachedPathId::now_v7(),
-        hash: nar.store_hash.clone(),
-        package: "source".to_string(),
-        file_hash: Some(file_hash),
-        file_size: Some(nar.file_size as i64),
-        nar_size: Some(nar.nar_size as i64),
-        nar_hash: Some(nar_hash),
-        created_at: now(),
-        ..Default::default()
-    }
-    .into_active_model();
-
-    match row.insert(tx).await {
-        Ok(model) => Ok(model),
-        Err(err) if is_unique_violation(&err) => ECachedPath::find()
-            .filter(CCachedPath::Hash.eq(nar.store_hash.clone()))
-            .one(tx)
-            .await?
-            .ok_or_else(|| WebError::internal("cached_path row missing after race")),
-        Err(err) => Err(err.into()),
-    }
-}
-
-async fn queue_signature_placeholders<C: ConnectionTrait>(
-    tx: &C,
-    cached_path: &gradient_entity::cached_path::Model,
-    project: &gradient_types::ids::ProjectId,
-) -> WebResult<()> {
-    let project_caches = EProjectCache::find()
-        .filter(CProjectCache::Project.eq(*project))
-        .all(tx)
-        .await?;
-    if project_caches.is_empty() {
-        return Ok(());
-    }
-
-    let now_ts = now();
-    let rows: Vec<ACachedPathSignature> = project_caches
-        .into_iter()
-        .map(|oc| {
-            MCachedPathSignature {
-                id: CachedPathSignatureId::now_v7(),
-                cached_path: cached_path.id,
-                cache: oc.cache,
-                created_at: now_ts,
-                ..Default::default()
-            }
-            .into_active_model()
-        })
-        .collect();
-
-    let _ = ECachedPathSignature::insert_many(rows)
-        .on_conflict(
-            OnConflict::columns([
-                CCachedPathSignature::CachedPath,
-                CCachedPathSignature::Cache,
-            ])
-            .do_nothing()
-            .to_owned(),
-        )
-        .try_insert()
-        .exec(tx)
-        .await?;
     Ok(())
 }
 

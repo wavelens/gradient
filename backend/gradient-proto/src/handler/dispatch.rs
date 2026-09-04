@@ -48,9 +48,6 @@ pub(super) struct DispatchContext<'a> {
     /// Bounds the number of NAR-serving tasks running concurrently per
     /// connection. Cloned into each spawned `serve_nar_request` task.
     pub nar_serve_semaphore: &'a Arc<Semaphore>,
-    /// Bounds the detached `NarUploaded` commits per connection - each pins a
-    /// whole staged NAR in memory while writing it to `nar_storage`.
-    pub nar_commit_semaphore: &'a Arc<Semaphore>,
     /// Jobs this session currently runs, kept so a core restart can re-register
     /// them without a DB round-trip.
     pub active: &'a mut HashMap<String, PendingJob>,

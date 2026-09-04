@@ -12,6 +12,7 @@ pub mod messages;
 
 mod ingest;
 mod known;
+mod nar;
 mod transition;
 
 use std::sync::Arc;
@@ -108,6 +109,12 @@ impl Graph {
     pub async fn known_derivations(&self, drv_hashes: Vec<String>) -> anyhow::Result<Vec<String>> {
         self.call(|reply| GraphMsg::KnownDerivations { drv_hashes, reply })
             .await
+    }
+
+    /// Record a NAR already in storage: the `cached_path` row, its references,
+    /// signature placeholders and the outputs it backs, in one transaction.
+    pub async fn commit_nar(&self, commit: NarCommit) -> anyhow::Result<NarCommitted> {
+        self.call(|reply| GraphMsg::CommitNar(commit, reply)).await
     }
 
     pub async fn transition(&self, transition: Transition) -> anyhow::Result<TransitionReport> {

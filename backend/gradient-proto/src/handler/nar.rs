@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::ingest::{IngestInput, SignTargets, ingest_metadata_only};
 use chrono::Timelike;
 use gradient_core::ServerState;
+use gradient_graph::{NarCommit, SignTargets};
 use gradient_types::ids::{CacheId, ProjectId};
 use gradient_types::*;
-use sea_orm::sea_query::Expr;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, Statement, Value,
 };
-use tracing::debug;
 
 pub(super) struct NarUploadRecord<'a> {
     pub file_hash: &'a str,
@@ -102,56 +100,31 @@ pub(super) async fn mark_nar_stored(
         Some(project_id) => SignTargets::ProjectCaches(project_id),
         None => SignTargets::None,
     };
-
-    let input = IngestInput {
-        store_path,
-        file_hash: record.file_hash,
-        file_size: record.file_size,
-        nar_size: record.nar_size,
-        nar_hash: record.nar_hash,
-        references: record.references,
-        deriver: record.deriver,
-        ca: record.ca,
-    };
-
-    let cached_path_id = ingest_metadata_only(&state.worker_db, input, targets)
-        .await?
-        .cached_path;
-
-    crate::ingest::spawn_debug_index(state, cached_path_id, store_path);
-
-    let marked = EDerivationOutput::update_many()
-        .col_expr(CDerivationOutput::IsCached, Expr::value(true))
-        .col_expr(CDerivationOutput::CachedPath, Expr::value(cached_path_id))
-        .filter(CDerivationOutput::Hash.eq(hash))
-        .exec(&state.worker_db)
-        .await?
-        .rows_affected;
-    if marked > 0 {
-        debug!(
-            store_path,
-            file_size = record.file_size,
-            count = marked,
-            "derivation_outputs marked cached after NarPush"
-        );
-    }
-
-    debug!(
-        store_path,
-        "cached_path metadata recorded after NarUploaded"
-    );
+    let committed = state
+        .graph
+        .commit_nar(NarCommit {
+            store_path: store_path.to_owned(),
+            file_hash: record.file_hash.to_owned(),
+            file_size: record.file_size,
+            nar_size: record.nar_size,
+            nar_hash: record.nar_hash.to_owned(),
+            references: record.references.to_vec(),
+            deriver: record.deriver.map(str::to_owned),
+            ca: record.ca.map(str::to_owned),
+            targets,
+        })
+        .await?;
 
     // Sign this specific path in place so its narinfo is servable immediately,
     // rather than waking a whole-table sweep. Placeholder rows only exist when a
-    // cache took it (ProjectCaches); the periodic sweep stays the backfill for
-    // subscription placeholders and anything left NULL.
+    // cache took it (ProjectCaches); the periodic sweep stays the backfill.
     if project_id.is_some() {
         crate::signing::sign_cached_path(
             &state.worker_db,
             &state.config.secrets.crypt_secret_file,
             &state.config.server.serve_url,
             crate::signing::SignRequest {
-                cached_path: cached_path_id,
+                cached_path: committed.cached_path,
                 store_path,
                 nar_hash: record.nar_hash,
                 nar_size: record.nar_size,
@@ -160,5 +133,6 @@ pub(super) async fn mark_nar_stored(
         )
         .await;
     }
+
     Ok(())
 }
