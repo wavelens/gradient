@@ -13,6 +13,8 @@ registers its loops as children with `Shutdown::supervise`.
 
 ```text
 root
+├── graph                                actor: sole writer of the dependency graph
+│                                        and the cache index; stopped last
 ├── scheduler                            supervisor node
 │   ├── scheduler-core                   actor: WorkerPool + JobTracker behind messages
 │   ├── trigger-dispatch, eval-dispatch  periodic passes (5s)
@@ -37,7 +39,25 @@ call and reads the next only after the reply, so TCP backpressure holds.
 Order-independent RPCs (`CacheQuery`, `QueryKnownDerivations`, `WorkerMetrics`)
 still run as tracked tasks off the session. When the core actor is respawned,
 the sessions supervisor re-registers every live session together with the
-jobs it still runs. A child that panics or exits unexpectedly is respawned
+jobs it still runs.
+
+The graph actor (`gradient-graph`) is the only code that writes `derivation`,
+`derivation_build`, `derivation_dependency`, `derivation_output`,
+`derivation_input_source`, `build_job`, `build_attempt`, `cached_path` and
+`cached_path_reference`. Sessions, the scheduler, the web handlers and the
+cache sweeps reach it through `state.graph`: an evaluation batch, a NAR commit,
+an anchor transition, a requeue or a demotion is one message and one
+transaction, so two workers walking overlapping graphs can no longer race each
+other on a derivation row or on an edge. Batches queued at the same moment are
+written in one transaction with a savepoint each, and a worker's
+known-derivations query is answered only after the batches queued before it, so
+it never prunes a subtree whose edges are still unwritten. Reads that need no
+ordering (`CacheQuery`, board and API queries) stay on the pools. Effects that
+leave the process (forge reports, notifications) are still spawned after the
+write; #597 moves them into an outbox. Startup recovery, the maintenance
+deletions (`Gc`, #597) and the debug indexer's flag stay outside the actor.
+
+A child that panics or exits unexpectedly is respawned
 after an exponential backoff (1s doubling to 60s, reset after five healthy
 minutes); a pass that runs past its budget is cancelled in place and ticks
 again. Restarts, pass errors, budget timeouts and the last successful pass are
@@ -56,16 +76,33 @@ The server does not require access to a Nix daemon. All store interaction (eval,
 
 ## Crates
 
+Every crate is `backend/gradient-<name>`; the workspace root is the
+`gradient-server` binary.
+
 ```text
-backend/
-├── core/         Shared state, config, DB pool, utility functions
-├── entity/       SeaORM entity definitions (one module per table)
-├── migration/    SeaORM migrator
-├── builder/      Evaluation queue and build status tracking
-├── cache/        Nix binary cache server
-├── web/          Axum HTTP API
-├── proto/        Proto protocol handler and scheduler
-└── worker/       gradient-worker binary (fetch, eval, build, sign)
+core           AppState, config, bootstrap, upstream probe
+db             every query and the graph reconciler, over the pools
+entity         SeaORM entities, one module per table
+migration      SeaORM migrator
+graph          the graph actor: every write to the graph and the cache index
+scheduler      worker pool, job tracker, dispatch loops
+proto          worker protocol: sessions, NAR transfer, dispatch
+web            Axum HTTP API and the binary cache endpoints
+cache          cache sweeps: maintenance, signing, debug index, retention
+ci             evaluation triggers, forge checks, declarative apply
+forge          per-forge reporters, webhook parsing, signature checks
+state          declarative state DTOs and apply
+storage        NAR and log storage (local FS or S3)
+worker         gradient-worker binary (fetch, eval, build, sign)
+eval           standalone flake evaluator used by the worker
+nix, sources   nix bindings and store-path/source helpers
+exec, util     process execution, shutdown, supervision, HTTP clients
+score          scoring policies for job assignment
+notify         email and notification senders
+report         evaluation snapshots for support reports
+flake-lock     native `flake.lock` model and updater
+types          shared ids, wire types, runtime config
+test-support   shared test fixtures for the workspace
 ```
 
 ### `core`
