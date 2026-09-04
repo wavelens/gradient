@@ -29,20 +29,17 @@ pub async fn build_status_counts_by_evaluation<C: ConnectionTrait>(
     eval_ids: &[EvaluationId],
 ) -> Result<HashMap<EvaluationId, HashMap<BuildStatus, i64>>, DbErr> {
     let rows = fetch_in_chunks(eval_ids, |chunk| async move {
-        let ids = chunk
-            .iter()
-            .map(|id| format!("'{id}'"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!(
+        let ids: Vec<Uuid> = chunk.iter().map(|id| id.into_inner()).collect();
+        EvalStatusCountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Postgres,
             "SELECT bj.evaluation AS evaluation, db.status AS status, COUNT(*) AS cnt \
              FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build \
-             WHERE bj.evaluation IN ({ids}) \
-             GROUP BY bj.evaluation, db.status"
-        );
-        EvalStatusCountRow::find_by_statement(Statement::from_string(DbBackend::Postgres, sql))
-            .all(db)
-            .await
+             WHERE bj.evaluation = ANY($1) \
+             GROUP BY bj.evaluation, db.status",
+            [ids.into()],
+        ))
+        .all(db)
+        .await
     })
     .await?;
 
@@ -72,19 +69,16 @@ pub async fn evaluation_message_counts<C: ConnectionTrait>(
     eval_ids: &[EvaluationId],
 ) -> Result<HashMap<EvaluationId, HashMap<MessageLevel, i64>>, DbErr> {
     let rows = fetch_in_chunks(eval_ids, |chunk| async move {
-        let ids = chunk
-            .iter()
-            .map(|id| format!("'{id}'"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!(
+        let ids: Vec<Uuid> = chunk.iter().map(|id| id.into_inner()).collect();
+        EvalLevelCountRow::find_by_statement(Statement::from_sql_and_values(
+            DbBackend::Postgres,
             "SELECT evaluation, level, COUNT(*) AS cnt \
-             FROM evaluation_message WHERE evaluation IN ({ids}) \
-             GROUP BY evaluation, level"
-        );
-        EvalLevelCountRow::find_by_statement(Statement::from_string(DbBackend::Postgres, sql))
-            .all(db)
-            .await
+             FROM evaluation_message WHERE evaluation = ANY($1) \
+             GROUP BY evaluation, level",
+            [ids.into()],
+        ))
+        .all(db)
+        .await
     })
     .await?;
 
@@ -175,34 +169,32 @@ pub async fn entry_point_dep_counts<C: ConnectionTrait>(
         return Ok(HashMap::new());
     }
 
-    let values = seeds
+    let (eps, drvs): (Vec<Uuid>, Vec<Uuid>) = seeds
         .iter()
-        .map(|(ep, drv)| format!("('{ep}'::uuid,'{drv}'::uuid)"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let eval = evaluation.into_inner();
-    let sql = format!(
-        "WITH RECURSIVE seeds(ep, root_drv) AS (VALUES {values}), \
+        .map(|(ep, drv)| (ep.into_inner(), *drv))
+        .unzip();
+    let rows = DepCountRow::find_by_statement(Statement::from_sql_and_values(
+        DbBackend::Postgres,
+        "WITH RECURSIVE seeds(ep, root_drv) AS (SELECT * FROM unnest($1::uuid[], $2::uuid[])), \
          closure(ep, drv) AS ( \
             SELECT ep, root_drv FROM seeds \
             UNION \
-            SELECT c.ep, dd.dependency \
-            FROM closure c \
-            JOIN derivation_dependency dd ON dd.derivation = c.drv \
-            JOIN build_job bj ON bj.derivation = dd.dependency AND bj.evaluation = '{eval}' \
+            SELECT c.ep, s.next FROM closure c, LATERAL ( \
+              SELECT dd.dependency AS next FROM derivation_dependency dd \
+              JOIN build_job bj ON bj.derivation = dd.dependency AND bj.evaluation = $3 \
+              WHERE dd.derivation = c.drv OFFSET 0) s \
          ) \
          SELECT c.ep AS entry_point, b.status AS status, COUNT(*) AS cnt \
          FROM closure c \
          JOIN seeds s ON s.ep = c.ep \
-         JOIN build_job bj ON bj.derivation = c.drv AND bj.evaluation = '{eval}' \
+         JOIN build_job bj ON bj.derivation = c.drv AND bj.evaluation = $3 \
          JOIN derivation_build b ON b.id = bj.derivation_build \
          WHERE c.drv <> s.root_drv \
-         GROUP BY c.ep, b.status"
-    );
-
-    let rows = DepCountRow::find_by_statement(Statement::from_string(DbBackend::Postgres, sql))
-        .all(db)
-        .await?;
+         GROUP BY c.ep, b.status",
+        [eps.into(), drvs.into(), evaluation.into_inner().into()],
+    ))
+    .all(db)
+    .await?;
 
     let mut out: HashMap<EntryPointId, HashMap<BuildStatus, i64>> = HashMap::new();
     for r in rows {

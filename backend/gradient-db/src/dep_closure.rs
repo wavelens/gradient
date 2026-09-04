@@ -118,12 +118,10 @@ pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
         if count > 0 {
             healed += 1;
         }
-        db.execute_raw(Statement::from_string(
+        db.execute_raw(Statement::from_sql_and_values(
             DbBackend::Postgres,
-            format!(
-                "UPDATE derivation SET dep_closure_count = {count} WHERE id = '{}'",
-                root.id.into_inner()
-            ),
+            "UPDATE derivation SET dep_closure_count = $1 WHERE id = $2",
+            [count.into(), root.id.into_inner().into()],
         ))
         .await?;
     }
@@ -141,25 +139,23 @@ pub async fn init_entry_point_dep_counts<C: ConnectionTrait>(
     evaluation: EvaluationId,
 ) -> Result<(), DbErr> {
     let eval = evaluation.into_inner();
-    db.execute_raw(Statement::from_string(
+    db.execute_raw(Statement::from_sql_and_values(
         DbBackend::Postgres,
-        format!(
-            "DELETE FROM entry_point_dep_count \
-             WHERE entry_point IN (SELECT id FROM entry_point WHERE evaluation = '{eval}')"
-        ),
+        "DELETE FROM entry_point_dep_count \
+         WHERE entry_point IN (SELECT id FROM entry_point WHERE evaluation = $1)",
+        [eval.into()],
     ))
     .await?;
-    db.execute_raw(Statement::from_string(
+    db.execute_raw(Statement::from_sql_and_values(
         DbBackend::Postgres,
-        format!(
-            "INSERT INTO entry_point_dep_count (id, entry_point, status, count) \
-             SELECT uuidv7(), ep.id, b.status, COUNT(*) \
-             FROM entry_point ep \
-             JOIN derivation_closure dc ON dc.root_derivation = ep.derivation \
-             JOIN derivation_build b ON b.derivation = dc.dep_derivation \
-             WHERE ep.evaluation = '{eval}' \
-             GROUP BY ep.id, b.status"
-        ),
+        "INSERT INTO entry_point_dep_count (id, entry_point, status, count) \
+         SELECT uuidv7(), ep.id, b.status, COUNT(*) \
+         FROM entry_point ep \
+         JOIN derivation_closure dc ON dc.root_derivation = ep.derivation \
+         JOIN derivation_build b ON b.derivation = dc.dep_derivation \
+         WHERE ep.evaluation = $1 \
+         GROUP BY ep.id, b.status",
+        [eval.into()],
     ))
     .await?;
     Ok(())
