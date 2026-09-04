@@ -7763,7 +7763,9 @@ leftover height.
 `backend/gradient-util/src/supervision.rs`: `a_panicking_pass_is_restarted_and_keeps_ticking`
 (a child that panics is respawned once and its ticks resume),
 `a_pass_past_its_budget_is_cancelled_and_counted` (an over-budget pass is
-cancelled in place, never restarted), `shutdown_stops_the_tree_and_never_restarts`
+cancelled in place, never restarted), `a_child_is_listed_in_health_before_its_first_pass`
+(a child has a health row from spawn, so hourly sweeps show up before they
+ever tick), `shutdown_stops_the_tree_and_never_restarts`
 (cancel stops every child and the root reports Stopped),
 `supervise_from_a_sync_context_lands_in_the_tree`, `backoff_grows_and_caps`
 (1, 2, 4, ... 60, 60 seconds), and
@@ -7780,7 +7782,7 @@ connected client ends on the shutdown token).
 `frontend/src/app/features/board/health/health.component.spec.ts`:
 `lists every supervised loop and flags restarts`.
 
-`nix/tests/gradient/cache/default.nix` Phase 9: `/board/health` lists every
+`nix/tests/gradient/cache/default.nix` Phase 11: `/board/health` lists every
 supervised loop with zero restarts and timeouts, `systemctl stop
 gradient-server` returns within the drain budget, and the worker logs the
 `Draining` message.
