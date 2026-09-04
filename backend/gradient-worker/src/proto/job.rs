@@ -18,12 +18,13 @@ use async_trait::async_trait;
 use gradient_proto::messages::{
     BuildMetrics, BuildOutput, CACHE_QUERY_MAX_PATHS, CACHE_QUERY_TIMEOUT, CachedPath,
     ClientMessage, DiscoveredDerivation, EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel,
-    EvalStatsReport, JobUpdateKind, QueryMode,
+    EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
 };
 use tokio::sync::oneshot;
 use tracing::debug;
 
 use crate::connection::ProtoWriter;
+use crate::executor::timeline::{JobTimeline, PhaseGuard};
 use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::nar_recv::NarReceiver;
@@ -120,9 +121,16 @@ pub struct JobUpdater {
     /// Local store, set for jobs that push NARs (eval closure, build outputs).
     /// `None` in proto round-trip unit tests that never touch the store.
     pub(crate) store: Option<Arc<LocalNixStore>>,
+    /// The job's phase timeline. Shared with the dispatch loop so the terminal
+    /// message can carry it after the job task is gone.
+    pub(crate) timeline: Arc<JobTimeline>,
 }
 
 impl JobUpdater {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "arg-heavy; refactor tracked in #503"
+    )]
     pub fn new(
         job_id: String,
         writer: ProtoWriter,
@@ -131,6 +139,7 @@ impl JobUpdater {
         nar_recv: NarReceiver,
         eval_cache_recv: EvalCacheReceiver,
         store: Option<Arc<LocalNixStore>>,
+        timeline: Arc<JobTimeline>,
     ) -> Self {
         Self {
             job_id,
@@ -140,12 +149,19 @@ impl JobUpdater {
             nar_recv,
             eval_cache_recv,
             store,
+            timeline,
         }
+    }
+
+    /// Open a phase span on this job's timeline; it closes when the guard drops.
+    pub fn phase(&self, phase: JobPhase) -> PhaseGuard {
+        self.timeline.enter(phase)
     }
 
     /// Pull `fingerprint`'s shared eval-cache blob, if the server has one.
     /// Best-effort: returns `Ok(None)` on miss; `Err` only on transport failure.
     pub async fn pull_eval_cache(&self, fingerprint: &str) -> Result<Option<Vec<u8>>> {
+        let mut guard = self.phase(JobPhase::EvalCachePull);
         let mut pending = self.eval_cache_recv.register_pull(&self.job_id);
         self.writer
             .send(ClientMessage::EvalCachePull {
@@ -168,10 +184,12 @@ impl JobUpdater {
                     .await
                     .with_context(|| format!("read eval-cache body of {url}"))?
                     .to_vec();
+                guard.record(0, bytes.len() as u64);
                 Ok(Some(bytes))
             }
             EvalCachePullOutcome::Inline { total_bytes, .. } => {
                 let bytes = pending.await_inline(total_bytes).await?;
+                guard.record(0, bytes.len() as u64);
                 Ok(Some(bytes))
             }
         }
@@ -180,6 +198,8 @@ impl JobUpdater {
     /// Push the local eval-cache blob for `fingerprint`. Best-effort.
     pub async fn push_eval_cache(&self, fingerprint: &str, bytes: Vec<u8>) -> Result<()> {
         let size_bytes = bytes.len() as u64;
+        let mut guard = self.phase(JobPhase::EvalCachePush);
+        guard.record(0, size_bytes);
         let mut pending = self.eval_cache_recv.register_push(&self.job_id);
         self.writer
             .send(ClientMessage::EvalCachePush {
@@ -246,6 +266,8 @@ impl JobUpdater {
         paths: Vec<String>,
         mode: QueryMode,
     ) -> Result<Vec<CachedPath>> {
+        let mut guard = self.phase(JobPhase::CacheQueryWait);
+        guard.record(paths.len() as u32, 0);
         cache_query_with_timeout(&self.job_id, &self.writer, &self.cache_waiters, paths, mode).await
     }
 
@@ -548,6 +570,8 @@ impl JobReporter for JobUpdater {
     }
 
     async fn query_known_derivations(&mut self, drv_paths: Vec<String>) -> Result<Vec<String>> {
+        let mut guard = self.phase(JobPhase::KnownDerivationsWait);
+        guard.record(drv_paths.len() as u32, 0);
         known_derivations_with_timeout(
             &self.job_id,
             &self.writer,
@@ -706,6 +730,7 @@ mod tests {
             nar_recv,
             eval_cache_recv,
             None,
+            JobTimeline::new(),
         );
         (updater, reader)
     }

@@ -17,6 +17,7 @@ pub mod eval;
 pub(crate) mod failure;
 pub mod fetch;
 pub mod log_limit;
+pub mod timeline;
 
 use std::sync::Arc;
 
@@ -25,7 +26,7 @@ use gradient_proto::messages::{BuildJob, FlakeJob, FlakeStep};
 use tokio::sync::watch;
 use tracing::instrument;
 
-use gradient_proto::messages::QueryMode;
+use gradient_proto::messages::{JobPhase, QueryMode};
 use gradient_types::CachedPathInfo;
 
 use crate::nix::gcroots::{GcRootHandle, GcRootKeeper};
@@ -100,6 +101,7 @@ pub(crate) async fn push_drv_closure(
         return Ok(());
     }
 
+    let mut guard = updater.phase(JobPhase::DrvClosurePush);
     let mut closure = store.collect_runtime_closure(drv_paths).await;
 
     // The daemon's reference walk drops a `.drv`'s `inputSrcs`, so discover them
@@ -126,6 +128,7 @@ pub(crate) async fn push_drv_closure(
     );
 
     let paths: Vec<String> = closure.into_iter().collect();
+    guard.record(paths.len() as u32, 0);
     let cache_entries = query_fetched_paths(updater, paths).await;
     for cp in &cache_entries {
         upload_one_nar(updater, cp, store).await?;
@@ -186,6 +189,8 @@ pub(crate) async fn upload_one_nar(
             Ok(())
         }
         CachedPathInfo::Uncached { path, upload_url } => {
+            let mut guard = updater.phase(JobPhase::NarPush);
+            guard.record(1, 0);
             nar::upload_nar(
                 &updater.job_id,
                 path,
@@ -281,6 +286,7 @@ impl JobExecutor {
         for step in &job.steps {
             match step {
                 FlakeStep::FetchFlake => {
+                    let _fetch = updater.phase(JobPhase::Fetch);
                     // A Cached build source lives only in the gradient cache;
                     // substitute it locally so `nix flake archive path:<store_path>`
                     // can read it before archiving its inputs with credentials.
@@ -300,8 +306,12 @@ impl JobExecutor {
 
                     let cache_entries =
                         query_fetched_paths(updater, outcome.archived_paths.clone()).await;
-                    for cp in &cache_entries {
-                        upload_one_nar(updater, cp, &self.store).await?;
+                    {
+                        let mut push = updater.phase(JobPhase::PushInputs);
+                        push.record(cache_entries.len() as u32, 0);
+                        for cp in &cache_entries {
+                            upload_one_nar(updater, cp, &self.store).await?;
+                        }
                     }
 
                     updater
@@ -309,7 +319,10 @@ impl JobExecutor {
                         .await?;
                     local_flake_path = Some(outcome.local_flake_path);
                 }
-                FlakeStep::EvaluateFlake => eval::evaluate_flake(&job, updater).await?,
+                FlakeStep::EvaluateFlake => {
+                    let _g = updater.phase(JobPhase::EvalFlake);
+                    eval::evaluate_flake(&job, updater).await?
+                }
                 FlakeStep::EvaluateDerivations => {
                     // A `Cached` source was archived to a *different* worker's
                     // store and pushed to the cache; substitute it locally
@@ -327,6 +340,7 @@ impl JobExecutor {
                     // `report_eval_result` - so #392's mid-eval build dispatch
                     // never races the source upload. The server keys cached_path
                     // by hash, so NAR/row ordering is irrelevant.
+                    let _g = updater.phase(JobPhase::EvalDerivations);
                     eval::evaluate_derivations(
                         &self.evaluator,
                         &job,
@@ -379,6 +393,7 @@ impl JobExecutor {
                 // is mirrored by each member's own anchor). There is no local-build
                 // fallback (this worker may be the wrong arch); on a miss fail with
                 // `SubstituteUnavailable` and let the scheduler re-dispatch/escalate.
+                let _relay = updater.phase(JobPhase::SubstituteRelay);
                 let outputs = crate::proto::substitute_relay::relay_external_cached_outputs(
                     build_task, updater,
                 )
@@ -421,9 +436,14 @@ impl JobExecutor {
             // in the store. Other prefetch errors (CacheQuery transport,
             // individual NAR downloads) are logged inside `prefetch_inputs`
             // and don't reach here as `Err`.
-            crate::proto::prefetch::prefetch_inputs(&self.store, build_task, updater)
-                .await
-                .map_err(|e| failure::classify_prefetch_error(&build_task.build_id, e))?;
+            {
+                let _g = updater.phase(JobPhase::Prefetch);
+                crate::proto::prefetch::prefetch_inputs(&self.store, build_task, updater)
+                    .await
+                    .map_err(|e| failure::classify_prefetch_error(&build_task.build_id, e))?;
+            }
+
+            let _build = updater.phase(JobPhase::Build);
             let outputs = build::build_derivation(
                 &self.store,
                 build_task,
@@ -450,9 +470,13 @@ impl JobExecutor {
         // between paths so an `AbortJob` from the server (e.g. session NAR
         // buffer exceeded) terminates the upload loop and surfaces as a
         // `JobFailed`.
-        compress::compress_and_push_paths(&self.store, &all_output_paths, updater, &mut abort)
-            .await
-            .map_err(failure::BuildError::transient)?;
+        {
+            let mut compress = updater.phase(JobPhase::Compress);
+            compress.record(all_output_paths.len() as u32, 0);
+            compress::compress_and_push_paths(&self.store, &all_output_paths, updater, &mut abort)
+                .await
+                .map_err(failure::BuildError::transient)?;
+        }
 
         // Release every indirect GC root for this job; symlinks are removed
         // and the daemon's next GC walk is free to delete unreachable paths.
