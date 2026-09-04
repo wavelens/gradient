@@ -19,6 +19,7 @@ import {
 } from '@core/services/board.service';
 import { EvaluationsService, BuildWithOutputs } from '@core/services/evaluations.service';
 import { ButtonComponent, DialogComponent, PopoverComponent } from '@shared/ui';
+import { JobTimelineComponent } from './job-timeline.component';
 
 interface RuleRow {
   name: string;
@@ -31,7 +32,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, PopoverComponent],
+  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, PopoverComponent, JobTimelineComponent],
   template: `
     <a routerLink="/board/live" class="back">← Live Jobs</a>
 
@@ -57,10 +58,17 @@ interface RuleRow {
 
       <section class="timeline">
         <div class="step"><span class="label">Queued</span><span>{{ j.queued_at | date: 'medium' }}</span></div>
+        <div class="step"><span class="label">Ready</span><span>{{ j.ready_at ? (j.ready_at | date: 'medium') : '-' }}</span></div>
         <div class="step"><span class="label">Wait</span><span class="hl">{{ waitLabel() }}</span></div>
         <div class="step"><span class="label">{{ j.passed_over ? 'Scored' : 'Dispatched' }}</span><span>{{ j.dispatched_at | date: 'medium' }}</span></div>
+        <div class="step"><span class="label">Finished</span><span>{{ j.finished_at ? (j.finished_at | date: 'medium') : '-' }}</span></div>
         <div class="step"><span class="label">Current State</span><span class="hl">{{ currentState() }}</span></div>
       </section>
+
+      @if (!j.passed_over) {
+        <h2>Worker timeline</h2>
+        <gr-job-timeline [phases]="j.phases" />
+      }
 
       <h2>Score breakdown</h2>
       <table class="rules">

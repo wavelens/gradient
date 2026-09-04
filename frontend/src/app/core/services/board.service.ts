@@ -134,10 +134,23 @@ export interface JobDerivationView {
   pname: string | null;
 }
 
+export interface JobPhase {
+  seq: number;
+  parent_seq: number | null;
+  phase: string;
+  start_ms: number;
+  end_ms: number;
+  paths: number;
+  bytes: number;
+}
+
 export interface DispatchedJobDetail extends DispatchedJobSummary {
   project_name: string;
   queued_at: string;
   finished_at: string | null;
+  ready_at: string | null;
+  outcome: 'completed' | 'failed' | null;
+  phases: JobPhase[];
   derivation_build_id: string | null;
   derivations: JobDerivationView[];
   score_breakdown: { rules: Record<string, number>; total: number };
