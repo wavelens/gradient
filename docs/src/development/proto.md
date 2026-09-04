@@ -597,6 +597,7 @@ The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`
 | `Normal` | Eval: mark derivations as substituted | Only cached paths (`cached: true`), no URLs, no metadata |
 | `Pull` | Build: fetch required store paths | **All** queried paths. Cached paths carry full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and a presigned S3 GET URL (or `url: None` for local - use `NarRequest`). Uncached paths carry `path` + `cached: false` only, signaling "the server has nothing to offer for this path" - neither in the local cache nor in any configured upstream. Lets the worker hard-fail before importing a dependent with an unsatisfiable reference. |
 | `Push` | Fetch: upload new inputs | **All** queried paths. Cached paths carry only `path` + `cached: true`. Uncached paths carry `path`, `cached: false`, and `url` - a presigned S3 PUT URL on S3-backed stores (`None` on local; worker falls back to `NarPush`). No other metadata, no upstream lookup. |
+| `PullClosure` | Build: fetch a required path and everything it references | `Pull`, widened with the serveable members of each queried path's runtime-reference closure. The server walks `cached_path_reference` itself, so one round trip answers for a whole closure instead of one hop per round trip. A bonus member is only ever included when the cache can serve it, so an uncached entry still means "a path you asked for is missing". The widened list stays under `CACHE_QUERY_MAX_PATHS`, so the reply still fits one frame; anything that does not fit is simply left for the caller's next query. |
 
 ```rust
 // Worker → Server
@@ -607,9 +608,10 @@ CacheQuery {
 }
 
 enum QueryMode {
-    Normal,   // return only cached paths - no URLs, no metadata
-    Pull,     // return cached paths with full import metadata + presigned GET URL
-    Push,     // return all paths with path + cached; uncached also gets presigned PUT URL (S3)
+    Normal,       // return only cached paths - no URLs, no metadata
+    Pull,         // return cached paths with full import metadata + presigned GET URL
+    Push,         // return all paths with path + cached; uncached also gets presigned PUT URL (S3)
+    PullClosure,  // Pull, widened with each path's serveable reference closure
 }
 
 // Server → Worker
@@ -941,7 +943,7 @@ enum ClientMessage {
     },
 }
 
-enum QueryMode { Normal, Pull, Push }  // default: Normal
+enum QueryMode { Normal, Pull, Push, PullClosure }  // default: Normal
 enum EvalMessageLevel { Error, Warning, Notice }
 ```
 
@@ -1490,7 +1492,7 @@ interrupted, so a restart loses no job.
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `8`) is incremented on breaking wire changes.
+ - `PROTO_VERSION` (currently `10`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`; the check lives once, in
    `session::handshake::on_init_connection`, and every session flavor (worker,
    cache-scoped, outbound) goes through it.

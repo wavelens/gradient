@@ -7984,3 +7984,45 @@ directions (a symmetric `EXCEPT` in each direction, which is the only check that
 the rewrite preserved meaning), that `EXPLAIN` shows a `Nested Loop` and no
 `Merge Join`, and that the maintained `entry_point_dep_count` histogram agrees
 with a recompute from the materialised closure.
+
+## Closure-aware cache queries and attempt outcomes
+
+A prefetching worker used to learn a reference closure one hop at a time: query,
+download, read the references that came back, query again. Each hop is a full
+server round trip, and the measured cost of a `CacheQuery` is dominated by
+per-query latency rather than by how many paths it carries, so a ten-deep
+reference chain cost ten round trips no matter how few bytes it moved.
+`QueryMode::PullClosure` moves the expansion to the server, which already holds
+`cached_path_reference` and the fenced walk over it.
+
+**`gradient-proto/src/handler/cache.rs`** carries the one test that matters for
+safety. A worker treats any uncached entry in a `CacheQuery` reply as a required
+input it cannot get, and fails the build on it. Widening a reply with closure
+members the caller never asked about therefore has to guarantee that a bonus
+entry is never uncached, or an unrelated missing path anywhere in a closure would
+fail a build that did not need it.
+`a_widened_reply_never_reports_an_unasked_path_as_missing` pins exactly that: an
+uncached seed survives the filter, an uncached bonus entry does not.
+`closure_expansion_stays_within_the_single_frame_path_cap` pins the other half,
+that the widened path list still respects `CACHE_QUERY_MAX_PATHS` at every seed
+count, since that cap is what keeps a reply inside `SAFE_INFLIGHT_MESSAGE_SIZE`
+and out of the bidirectional write deadlock.
+
+**`gradient-db/src/runtime_closure.rs`** checks the expansion query itself.
+`closure_expansion_skips_the_query_when_there_is_nothing_to_ask` relies on an
+unseeded `MockDatabase` erroring on any query, so an empty seed set or a zero
+budget reaching SQL fails the test rather than passing quietly.
+`closure_expansion_walks_fenced_and_dedupes_on_hash_alone` asserts the generated
+CTE keys on `hash` alone and keeps its `OFFSET 0` fence: adding anything that
+varies per visit to the dedup key, a depth counter above all, lets a diamond
+re-enter the frontier and the walk never terminates.
+
+**`gradient-graph/src/policy.rs`** covers the attempt-outcome fix.
+`AttemptOutcome::Built` and `Substituted` existed in the enum but nothing ever
+wrote them: the success path set the anchor's status and left the attempt at
+`Running`, and `recover_interrupted_work` then rewrote every lingering `Running`
+row to `Aborted` on the next restart. A healthy instance therefore reported
+roughly half its attempts aborted, and anything reading attempt outcomes read
+noise. `terminal_outcome_records_success_and_never_stays_running` asserts both
+mappings and, more importantly, that neither `Running` nor `Aborted` can come
+back from the success path.
