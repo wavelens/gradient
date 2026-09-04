@@ -246,6 +246,44 @@ pub struct AttemptSummary {
 }
 
 #[derive(Serialize)]
+pub struct JobPhaseView {
+    pub seq: i32,
+    /// The enclosing span's `seq`, or `null` for a top-level phase.
+    pub parent_seq: Option<i32>,
+    pub phase: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub paths: i32,
+    pub bytes: i64,
+}
+
+/// The worker's phase spans in report order. Empty for a job that predates the
+/// timeline, or whose worker never reported one.
+async fn job_phases<C: ConnectionTrait>(db: &C, job: DispatchedJobId) -> Vec<JobPhaseView> {
+    use gradient_entity::dispatched_job_phase::{Column as CPhase, Entity as EPhase};
+
+    EPhase::find()
+        .filter(CPhase::DispatchedJob.eq(job))
+        .order_by_asc(CPhase::Seq)
+        .all(db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| JobPhaseView {
+            seq: p.seq,
+            parent_seq: p.parent_seq,
+            phase: gradient_types::proto::JobPhase::from_i16(p.phase)
+                .map(|k| k.as_str().to_string())
+                .unwrap_or_else(|| format!("unknown_{}", p.phase)),
+            start_ms: p.start_ms,
+            end_ms: p.end_ms,
+            paths: p.paths,
+            bytes: p.bytes,
+        })
+        .collect()
+}
+
+#[derive(Serialize)]
 pub struct JobDerivationView {
     /// Per-eval build identity: the id `GET /builds/{build}` takes. `None` once
     /// the evaluation's `build_job` row is gone.
@@ -332,6 +370,11 @@ pub struct DispatchedJobDetail {
     pub queued_at: String,
     pub dispatched_at: String,
     pub finished_at: Option<String>,
+    pub ready_at: Option<String>,
+    /// `completed` or `failed`; `null` while the job is still running.
+    pub outcome: Option<String>,
+    /// Worker phase spans in report order, nested via `parent_seq`.
+    pub phases: Vec<JobPhaseView>,
     /// Per-eval build identity, usable with `GET /builds/{build}`. `None` for
     /// eval jobs and for builds whose evaluation has been collected.
     pub build_id: Option<Uuid>,
@@ -357,6 +400,8 @@ pub async fn get_dispatched_job(
     Extension(scheduler): Extension<Arc<Scheduler>>,
     Path(id): Path<Uuid>,
 ) -> WebResult<Json<BaseResponse<DispatchedJobDetail>>> {
+    use gradient_entity::dispatched_job::DispatchedJobOutcome;
+
     let scope = MetricsScope::resolve(&state.web_db, &maybe_user).await?;
 
     // In-memory candidates (rejected and winning alike) carry an ephemeral id;
@@ -392,6 +437,9 @@ pub async fn get_dispatched_job(
             queued_at: c.queued_at.and_utc().to_rfc3339(),
             dispatched_at: c.scored_at.and_utc().to_rfc3339(),
             finished_at: None,
+            ready_at: None,
+            outcome: None,
+            phases: Vec::new(),
             build_id,
             derivation_build_id: c.derivation_build.map(Into::into),
             derivations,
@@ -439,6 +487,7 @@ pub async fn get_dispatched_job(
         None => None,
     };
     let derivations = job_derivations(&state.web_db, j.evaluation_id, &j.job_context).await;
+    let phases = job_phases(&state.web_db, j.id).await;
 
     let pname = match anchor_id {
         Some(aid) => {
@@ -490,6 +539,12 @@ pub async fn get_dispatched_job(
         queued_at: j.queued_at.and_utc().to_rfc3339(),
         dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
         finished_at: j.finished_at.map(|t| t.and_utc().to_rfc3339()),
+        ready_at: j.ready_at.map(|t| t.and_utc().to_rfc3339()),
+        outcome: j.outcome.map(|o| match o {
+            DispatchedJobOutcome::Completed => "completed".to_string(),
+            DispatchedJobOutcome::Failed => "failed".to_string(),
+        }),
+        phases,
         build_id,
         derivation_build_id: anchor_id.map(Into::into),
         derivations,

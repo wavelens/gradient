@@ -10758,6 +10758,20 @@ components:
         queued_at: { type: string, format: date-time }
         dispatched_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time, nullable: true }
+        ready_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the scheduler considered the job dispatchable, as opposed to merely queued.
+        outcome:
+          type: string
+          nullable: true
+          enum: [completed, failed]
+          description: How the job ended. Null while it is still running, and for a job whose worker disconnected without reporting.
+        phases:
+          type: array
+          description: The worker's phase timeline in report order, nested via parent_seq. Empty for a job that predates the timeline or never reported one.
+          items: { $ref: '#/components/schemas/JobPhase' }
         build_id:
           type: string
           format: uuid
@@ -10793,6 +10807,44 @@ components:
         passed_over:
           type: boolean
           description: True when this detail is an in-memory candidate the dispatcher scored but passed over (never persisted); the UI labels it "Passed over".
+
+    JobPhase:
+      type: object
+      description: One phase of a job's life on the worker. Offsets are milliseconds from the moment the worker accepted the job, never from the enclosing span.
+      properties:
+        seq:
+          type: integer
+          description: Position in the worker's report; unique within the job.
+        parent_seq:
+          type: integer
+          nullable: true
+          description: The enclosing span's seq, or null for a top-level phase.
+        phase:
+          type: string
+          enum:
+            - fetch
+            - push_inputs
+            - eval_flake
+            - eval_derivations
+            - eval_cache_pull
+            - eval_cache_push
+            - known_derivations_wait
+            - drv_closure_push
+            - prefetch
+            - substitute_relay
+            - build
+            - compress
+            - nar_push
+            - cache_query_wait
+        start_ms: { type: integer, format: int64 }
+        end_ms: { type: integer, format: int64 }
+        paths:
+          type: integer
+          description: Store paths the phase moved; 0 when the phase is not path-shaped.
+        bytes:
+          type: integer
+          format: int64
+          description: Bytes the phase moved; 0 when it moves none or does not count them.
 
     JobDerivation:
       type: object
