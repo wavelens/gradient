@@ -14,6 +14,7 @@
 //! - [`build_status`] - build status transitions, job completion/failure
 //! - [`logs`] - log streaming
 //! - [`abort`] - evaluation abort
+//! - [`timeline`] - worker phase spans and the job's finish mark
 
 mod abort;
 mod assignment;
@@ -21,3 +22,4 @@ mod build_status;
 mod eval_status;
 mod logs;
 mod queue;
+mod timeline;

@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gradient_core::ServerState;
+use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_exec::strip_nix_store_prefix;
 use gradient_types::ids::ProjectId;
 use tokio::sync::Semaphore;
@@ -672,8 +673,17 @@ impl<'a> DispatchContext<'a> {
 
     async fn on_job_completed(&mut self, job_id: String, spans: Vec<JobPhaseSpan>) {
         info!(peer_id = %self.peer_id, %job_id, phases = spans.len(), "job completed");
-        let _ = spans;
         self.active.remove(&job_id);
+        // Before `handle_job_completed`, which drops the job from the
+        // scheduler's active map that resolves it to an evaluation.
+        self.scheduler
+            .record_job_timeline(
+                self.peer_id,
+                &job_id,
+                DispatchedJobOutcome::Completed,
+                spans,
+            )
+            .await;
         if let Err(e) = self
             .scheduler
             .handle_job_completed(self.peer_id, &job_id)
@@ -693,8 +703,10 @@ impl<'a> DispatchContext<'a> {
         spans: Vec<JobPhaseSpan>,
     ) {
         warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
-        let _ = spans;
         self.active.remove(&job_id);
+        self.scheduler
+            .record_job_timeline(self.peer_id, &job_id, DispatchedJobOutcome::Failed, spans)
+            .await;
         if let Err(e) = self
             .scheduler
             .handle_job_failed(self.peer_id, &job_id, &error, kind, &missing_paths)
