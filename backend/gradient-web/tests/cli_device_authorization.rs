@@ -11,6 +11,11 @@
 //! pin down the state machine (pending → authorized/denied/expired) and the
 //! "device_code is single-use" guarantee.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_core::ServerState;

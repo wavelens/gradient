@@ -20,6 +20,11 @@
 //!   5. SELECT task (by project + name)
 //!   6. SELECT project_user membership (permission check)
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_entity::{ids::*, integration, project_user, task, task_trigger};
 use gradient_test_support::fixtures::{project, project_id, task_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};

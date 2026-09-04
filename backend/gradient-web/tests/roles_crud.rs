@@ -16,6 +16,11 @@
 //! `append_exec_results` with `rows_affected: 1`, otherwise SeaORM treats the
 //! insert as a no-op and short-circuits.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_db::permissions::{Permission, admin_mask, view_mask, write_mask};
 use gradient_entity::{ids::*, project_user, role};
 use gradient_test_support::fixtures::{project, project_id, user, user_id};

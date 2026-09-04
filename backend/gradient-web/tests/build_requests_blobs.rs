@@ -9,6 +9,11 @@
 //! mismatch, foreign hash, already-dispatched, expired) and the happy
 //! path where one blob lands in storage and shrinks `session.missing`.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum::http::StatusCode;
 use axum_test::multipart::{MultipartForm, Part};
 use chrono::{Duration, Utc};

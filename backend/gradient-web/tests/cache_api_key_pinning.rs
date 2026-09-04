@@ -12,6 +12,11 @@
 //!   3. SELECT api  (re-select after save)
 //!   4. SELECT user
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_db::permissions::{cache_admin_mask, cache_view_mask};
 use gradient_entity::{api, cache, cache_role, cache_user, ids::*};
 use gradient_test_support::fixtures::{test_date, user, user_id};

@@ -17,6 +17,11 @@
 //! and compare it to `write_nar`, the reference encoder, so a large file's bytes
 //! must survive the route the dumper picks for it.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use bytes::Bytes;
 use futures::StreamExt as _;
 use harmonia_file_nar::NarByteStream;

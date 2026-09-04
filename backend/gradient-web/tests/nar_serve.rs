@@ -10,6 +10,11 @@
 //! carry an accurate `Content-Length` (the streamed body has no implicit
 //! length, so the handler sets it from the storage object size).
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum::extract::connect_info::MockConnectInfo;
 use axum_test::TestServer;
 use gradient_core::ServerState;

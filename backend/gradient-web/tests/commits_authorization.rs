@@ -25,6 +25,11 @@
 //!   Then membership probe (only when no project is public AND caller is authenticated):
 //!     8. SELECT project_user
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_core::ServerState;

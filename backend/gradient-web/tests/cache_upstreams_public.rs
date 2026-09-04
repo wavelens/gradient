@@ -9,6 +9,11 @@
 //! trusted-public-key needed to consume pull-through paths, while a private
 //! cache stays hidden. Regression for #527.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_entity::cache_upstream::CacheUpstreamKind;
 use gradient_entity::project_cache::CacheSubscriptionMode;
 use gradient_entity::{cache, cache_upstream, ids::*};

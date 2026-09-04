@@ -10,6 +10,11 @@
 //! against a mock DB. The source NAR's cache-index row is the graph actor's
 //! write, so it is not in this transaction.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
 use gradient_db::permissions::PermissionMask;

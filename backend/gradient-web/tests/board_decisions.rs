@@ -12,6 +12,11 @@
 //! on every request - the Live Jobs "incl. rejected" table then swallowed the
 //! error and stayed empty (#419).
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_test_support::fixtures::user;
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;

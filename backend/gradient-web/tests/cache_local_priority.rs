@@ -7,6 +7,11 @@
 //! Integration tests for the local-priority override in
 //! `GET /cache/{cache}/nix-cache-info`.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum::extract::connect_info::MockConnectInfo;
 use axum_test::TestServer;
 use gradient_core::ServerState;

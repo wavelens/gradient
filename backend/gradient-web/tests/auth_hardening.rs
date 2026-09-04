@@ -10,6 +10,11 @@
 //! `axum_test::TestServer` against a `MockDatabase` so they exercise the
 //! same handlers the real server runs without needing Postgres.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_core::ServerState;

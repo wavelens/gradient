@@ -15,6 +15,11 @@
 //! Uses manual Tokio runtimes because `#[tokio::test]` expands to
 //! `::gradient_core::…` which clashes with the local `core` crate name.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum_test::TestServer;
 use gradient_ci::actions::encrypt_secret_with_file as encrypt_webhook_secret;
 use gradient_core::ServerState;

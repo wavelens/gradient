@@ -16,6 +16,11 @@
 //! mocked reads before the handler's own: session by jti, session update, user,
 //! project by name, task by project and name.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::{commit, evaluation, ids::*, project, task};
 use gradient_test_support::fixtures::{commit_id, project_id, task_id, test_date, user, user_id};

@@ -10,6 +10,11 @@
 //! hashes, duplicates) and the happy-path response shape - `session` is a
 //! UUID and `missing` is the subset of hex hashes the project doesn't have yet.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum::http::StatusCode;
 use gradient_db::permissions::PermissionMask;
 use gradient_entity::ids::*;

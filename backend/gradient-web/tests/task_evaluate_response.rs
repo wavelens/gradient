@@ -14,6 +14,11 @@
 //! `restart_failed` is the path exercised here because the normal path resolves
 //! the branch head over git first; both return the same thing.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_entity::{entry_point, evaluation, ids::*, project, project_user, role, task};
 use gradient_test_support::fixtures::{commit_id, project_id, task_id, test_date, user, user_id};

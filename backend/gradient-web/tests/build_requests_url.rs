@@ -14,6 +14,11 @@
 //! Query sequence: session, session update, user (authorize), project by name,
 //! membership, role (TriggerEvaluation), then the queueing transaction.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_db::permissions::PermissionMask;
 use gradient_entity::{ids::*, project, project_user, role, task};
 use gradient_test_support::fixtures::{project_id, task_id, test_date, user, user_id};
