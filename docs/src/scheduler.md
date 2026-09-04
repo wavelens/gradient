@@ -23,6 +23,51 @@ it, and the others observe the result the moment the anchor reaches a
 terminal-success status. There is no leader/follower row and no `via` link;
 sharing is implicit in the global derivation graph.
 
+#### The graph actor
+
+Every write to the anchors, edges, outputs, input sources, build jobs,
+attempts and the cache index (`cached_path`, `cached_path_reference`) is a
+message to one actor, `graph`, under the root of the supervision tree. One
+message is one transaction:
+
+| message | what it writes |
+|---|---|
+| `Ingest` | one worker batch: derivations, outputs, input sources, upstream hits, anchors, build jobs, features, messages, entry points, and the edges that resolve so far |
+| `KnownDerivations` | nothing; a read answered after every batch queued before it |
+| `CommitNar` | the `cached_path` row, its references, signature placeholders and the outputs it backs |
+| `Transition` | an anchor or evaluation state change: build started, output, completed, failed, dispatched, orphaned, ready, a reconcile scope, an abort |
+| `Requeue` | transient retries whose backoff elapsed |
+| `Demote` | a missing or invalidated NAR, a cache dropping its claim, the unbacked-output sweep |
+
+Consecutive batches from different evaluations that are queued at the same
+time are written in one transaction with a savepoint per batch, up to 5000
+derivations, so one bad batch fails only its caller. A caller blocks until its
+reply (ten minutes), which is the backpressure that stops a worker's reader
+instead of dropping its batch; the actor's own work is bounded at 120 s per
+transaction, past which it rolls back and the caller sees an error.
+
+The facts a batch needs from outside the graph are established by the
+scheduler before the message is sent: which derivations are already whole in
+the cache and which an upstream serves (the narinfo probe). They are keyed by
+drv path and output hash; ids are assigned inside the transaction.
+
+Merging graphs from concurrent workers. Two evaluations of overlapping graphs
+converge on one `derivation` row per hash because the existence check and the
+insert are one serialized transaction; edges are content-addressed and
+conflict-ignored, so two walks of a node record the same set; an evaluation
+whose batch fails is marked `Failed` rather than left with a hole, because the
+wire carries no acknowledgement a worker could retry on; and a batch for an
+evaluation that is not streaming (terminal, `Building`, parked) is dropped, so a
+worker that died mid-walk cannot merge late batches into the re-dispatched walk
+once it has completed. Still open for #590: the per-evaluation rewrite of the
+global `substitutable` flag, the per-batch thaw of failed anchors, stub rows for
+named dependencies so no edge stays unresolvable, and a dispatch id that tells
+two walks of one evaluation apart while both stream.
+
+On a restart nothing is rebuilt: a message being processed fails to its caller
+and the per-evaluation edge accumulator starts empty (its pending pairs are
+re-derived by the completion flush from the rows already written).
+
 #### Promotion
 
 An anchor becomes `Queued` (buildable) the moment all of its dependency
@@ -91,6 +136,10 @@ permanent dead zone that strands the eval in `Building`. The sweep walks
 reachable non-terminal anchor `DependencyFailed` in one statement.
 
 #### The graph reconciler and transition effects
+
+Every scope below runs inside the graph actor (`Transition::Reconcile`), on the
+dispatch tick, at evaluation completion and on an unstick, so a reconcile never
+interleaves with an ingest.
 
 All of the self-heal sweeps above run through one orchestrator,
 `gradient_db::reconcile_build_graph(ctx, scope)`, which owns the canonical step
@@ -378,7 +427,11 @@ The cache holds a binary-cache invariant: *if an output is in our cache, its
 entire runtime closure is too*. A build (and a substitution, which fetches the
 output's closure locally first) pushes the **full runtime closure** of its
 outputs, not just the output paths; already-cached members are skipped, so only
-paths the cache is actually missing upload.
+paths the cache is actually missing upload. Each upload's bytes are written to
+storage by a tracked task per NAR, and its metadata is committed by the graph
+actor's `CommitNar` message; the per-connection commit semaphore that used to
+serialise two commits per session is gone, because the actor already serialises
+every write to the index.
 
 The dispatch gate does not merely *trust* this - it **enforces** it. A build's
 build-time dependency edges (`derivation_dependency`) do not include a dep's

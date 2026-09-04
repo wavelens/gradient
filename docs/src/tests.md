@@ -7809,3 +7809,46 @@ job are back), plus the existing scheduler tests moved onto the message API.
 `drain_sends_draining_and_closes_an_idle_session` (a real WebSocket pair; the
 `Drain` signal produces one `Draining` frame, then the socket closes and the
 worker is unregistered).
+
+## One graph actor owns the graph and the cache index (#596)
+
+`backend/gradient-db/src/pool.rs`:
+`a_transactional_handle_runs_inside_the_transaction_and_detaches_to_the_pool`
+(a `WorkerDb` bound to a transaction logs its statements in that transaction
+and `detached()` is the pool again) and
+`begin_on_a_transactional_handle_is_a_savepoint`.
+
+`backend/gradient-util/src/supervision.rs`:
+`a_stop_last_child_is_stopped_after_its_siblings`.
+
+`backend/gradient-graph/src/actor.rs`:
+`queued_batches_share_one_transaction_and_a_query_after_them_sees_them` (two
+batches and a known-derivations query sent before the actor runs: one
+transaction holds both batches and the read comes after it),
+`a_batch_without_its_evaluation_fails_only_its_caller` (savepoint per batch),
+`a_transaction_past_its_budget_is_rolled_back`, and
+`a_respawned_actor_answers_the_call_that_waited_for_it`.
+
+`backend/gradient-graph/src/ingest.rs`, `src/known.rs`, `src/policy.rs`,
+`src/self_heal.rs`: the accumulator, prune-decision, retry-policy and
+store-path tests moved from `gradient-scheduler` and `gradient-proto`, now
+runnable locally (`cargo test -p gradient-graph`).
+
+`backend/gradient-graph/src/nar.rs`:
+`project_target_enqueues_signature_placeholder`,
+`ingest_records_content_address`, `none_target_enqueues_no_signature` (moved
+from `gradient-proto`) and `a_committed_path_backs_every_output_with_its_hash`.
+
+`backend/gradient-graph/src/demote.rs`: `an_unknown_path_reports_no_cached_path`.
+
+`backend/gradient-ci/src/abort.rs`: the hard-abort tests are gone with the
+per-row anchor abort; the shared-anchor rule now runs through
+`gradient_db::abort_eval_anchors` inside the actor's `AbortEvaluationAnchors`
+transition.
+
+`nix/tests/gradient/cache/default.nix` Phase 5c: a second task evaluates the
+same commit on a second worker while the first streams; both evaluations
+complete, record the same build set, no derivation hash has two rows, no anchor
+of either evaluation lacks its edges, and the server log has no pool timeout
+and no dropped graph call. Phase 11 now expects `graph` among the supervised
+loops.

@@ -15,6 +15,51 @@
     inherit pkgs;
     skipDirectories = false;
   };
+
+  builderNode = workerId: { config, pkgs, lib, ... }: {
+    imports = [ ../../../modules/gradient-worker.nix ];
+
+    # Ship hello's full build closure (`.drv` files, sources, and every
+    # transitive output directory) into the worker VM's nix store, so
+    # every derivation the worker walks is already substituted.  Without
+    # this the worker would try to fetch tarballs from the internet -
+    # which the test VM cannot reach - and every build would fail.
+    virtualisation.additionalPaths = [ testStore ];
+
+    nix.settings = {
+      trusted-users = [
+        "root"
+        "@wheel"
+      ];
+
+      max-jobs = lib.mkForce 8;
+    };
+
+    # Pre-seed a deterministic worker UUID so the server state config
+    # can register it before the worker boots.
+    systemd.tmpfiles.rules = [
+      "d /var/lib/gradient-worker 0755 gradient-worker gradient-worker"
+      "f /var/lib/gradient-worker/worker-id 0644 gradient-worker gradient-worker - ${workerId}"
+    ];
+
+    environment.etc."gradient/secrets/worker_peers" = {
+      mode = "0600";
+      user = "gradient-worker";
+      group = "gradient-worker";
+      text = "*:C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
+    };
+
+    services.gradient.worker = {
+      enable = true;
+      serverUrl = "ws://server/proto";
+      peersFile = "/etc/gradient/secrets/worker_peers";
+      settings.buildMetrics = true;
+      capabilities = {
+        eval  = true;
+        build = true;
+      };
+    };
+  };
 in {
   value = pkgs.testers.runNixOSTest ({ pkgs, lib, ... }: {
     name = "gradient-cache";
@@ -133,6 +178,18 @@ in {
                     }
                   ];
                 };
+
+                task2 = {
+                  project = "project";
+                  repository = "git://server/test";
+                  created_by = "admin";
+                  triggers = [
+                    {
+                      type = "polling";
+                      config = { interval_secs = 10; };
+                    }
+                  ];
+                };
               };
 
               caches = {
@@ -147,6 +204,13 @@ in {
               workers = {
                 builder = {
                   worker_id = "a0000000-0000-0000-0000-000000000001";
+                  projects = [ "project" ];
+                  token_file = "/etc/gradient/secrets/worker_token";
+                  created_by = "admin";
+                };
+
+                builder2 = {
+                  worker_id = "a0000000-0000-0000-0000-000000000002";
                   projects = [ "project" ];
                   token_file = "/etc/gradient/secrets/worker_token";
                   created_by = "admin";
@@ -199,50 +263,8 @@ in {
         ];
       };
 
-      builder = { config, pkgs, lib, ... }: {
-        imports = [ ../../../modules/gradient-worker.nix ];
-
-        # Ship hello's full build closure (`.drv` files, sources, and every
-        # transitive output directory) into the worker VM's nix store, so
-        # every derivation the worker walks is already substituted.  Without
-        # this the worker would try to fetch tarballs from the internet -
-        # which the test VM cannot reach - and every build would fail.
-        virtualisation.additionalPaths = [ testStore ];
-
-        nix.settings = {
-          trusted-users = [
-            "root"
-            "@wheel"
-          ];
-
-          max-jobs = lib.mkForce 8;
-        };
-
-        # Pre-seed a deterministic worker UUID so the server state config
-        # can register it before the worker boots.
-        systemd.tmpfiles.rules = [
-          "d /var/lib/gradient-worker 0755 gradient-worker gradient-worker"
-          "f /var/lib/gradient-worker/worker-id 0644 gradient-worker gradient-worker - a0000000-0000-0000-0000-000000000001"
-        ];
-
-        environment.etc."gradient/secrets/worker_peers" = {
-          mode = "0600";
-          user = "gradient-worker";
-          group = "gradient-worker";
-          text = "*:C9ve6tvVONhtbRzFks56HQlYQotlRmXel/5NFLk/HjbSFGc+IZjCGfxegW2NKpY5";
-        };
-
-        services.gradient.worker = {
-          enable = true;
-          serverUrl = "ws://server/proto";
-          peersFile = "/etc/gradient/secrets/worker_peers";
-          settings.buildMetrics = true;
-          capabilities = {
-            eval  = true;
-            build = true;
-          };
-        };
-      };
+      builder  = builderNode "a0000000-0000-0000-0000-000000000001";
+      builder2 = builderNode "a0000000-0000-0000-0000-000000000002";
 
       client = { config, pkgs, lib, ... }: {
         environment.variables.TEST_PKGS = [ self.inputs.nixpkgs ];
@@ -254,9 +276,10 @@ in {
     };
 
     interactive.nodes = {
-      server  = import ../../modules/debug-host.nix;
-      builder = import ../../modules/debug-host.nix;
-      client  = import ../../modules/debug-host.nix;
+      server   = import ../../modules/debug-host.nix;
+      builder  = import ../../modules/debug-host.nix;
+      builder2 = import ../../modules/debug-host.nix;
+      client   = import ../../modules/debug-host.nix;
     };
 
     testScript = { nodes, ... }:
@@ -299,6 +322,7 @@ in {
       server.wait_for_unit("gradient-server.service")
       server.sleep(5)
       builder.wait_for_unit("gradient-worker.service")
+      builder2.wait_for_unit("gradient-worker.service")
 
       # On a fresh DB the server applies its full migration set before binding
       # :3000, so the worker (capped exponential reconnect backoff) can take well
@@ -308,7 +332,11 @@ in {
           "journalctl -u gradient-worker --no-pager | grep -q 'handshake successful'",
           timeout=180,
       )
-      banner("Worker authenticated via state-managed registration")
+      builder2.wait_until_succeeds(
+          "journalctl -u gradient-worker --no-pager | grep -q 'handshake successful'",
+          timeout=180,
+      )
+      banner("Both workers authenticated via state-managed registration")
 
       # ── Phase 2: seed the test git repository ─────────────────────────────
       banner("Phase 2: prepare test repository")
@@ -449,6 +477,63 @@ in {
           f"(4096 = empty SQLite header).\n{sizes}"
       )
 
+
+      # ── Phase 5c: two workers merged one graph, and nothing raced ─────────
+      # `task2` polls the same repository, so its evaluation of the same commit
+      # ran on the second worker while the first was still streaming batches.
+      # Every write went through the graph actor: one derivation row per hash,
+      # identical build sets, no anchor left without its edges, and no pool
+      # exhaustion or dropped call in the server log.
+      banner("Phase 5c: a concurrent evaluation of the same commit merged cleanly")
+      eval2_id = ""
+      for attempt in range(1, 61):
+          eval2_id = server.succeed(
+              f'{CURL} -sf -H "Authorization: Bearer {token}" '
+              f'{API}/tasks/project/task2 | {JQ} -rj ".message.last_evaluation // empty"'
+          ).strip()
+          if eval2_id:
+              status2 = server.succeed(
+                  f'{CURL} -sf -H "Authorization: Bearer {token}" '
+                  f'{API}/evals/{eval2_id} | {JQ} -rj ".message.status"'
+              ).strip()
+              if status2 == "Completed":
+                  break
+              if status2 == "Failed":
+                  j = server.succeed("journalctl -u gradient-server --no-pager --since='-600s' -n 300")
+                  raise Exception(f"second evaluation failed:\n{j[-3000:]}")
+          server.sleep(10)
+      else:
+          raise Exception("second evaluation did not complete after 600 s")
+      assert eval2_id != eval_id, "task2 must have its own evaluation"
+
+      def sql(query):
+          server.succeed(f"cat > /tmp/q.sql <<'EOF'\n{query}\nEOF")
+          return server.succeed("su postgres -c 'psql -d gradient -At -f /tmp/q.sql'").strip()
+
+      builds1 = int(sql(f"SELECT count(*) FROM build_job WHERE evaluation = '{eval_id}';"))
+      builds2 = int(sql(f"SELECT count(*) FROM build_job WHERE evaluation = '{eval2_id}';"))
+      print(f"build jobs: eval1={builds1} eval2={builds2}")
+      assert builds1 > 0 and builds1 == builds2, "both evaluations record the same number of builds"
+      only_in_one = int(sql(
+          f"SELECT count(*) FROM ("
+          f"  SELECT derivation FROM build_job WHERE evaluation = '{eval_id}'"
+          f"  EXCEPT SELECT derivation FROM build_job WHERE evaluation = '{eval2_id}'"
+          f") x;"
+      ))
+      assert only_in_one == 0, f"{only_in_one} derivations are in the first evaluation only"
+      duplicates = int(sql("SELECT count(*) - count(DISTINCT hash) FROM derivation;"))
+      assert duplicates == 0, f"{duplicates} duplicate derivation rows"
+      gaps = int(sql(
+          f"SELECT count(*) FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build "
+          f"WHERE bj.evaluation IN ('{eval_id}', '{eval2_id}') "
+          f"AND (db.edges_unresolved OR NOT db.edges_complete);"
+      ))
+      assert gaps == 0, f"{gaps} anchors of the two evaluations lack their edges"
+      j = server.succeed("journalctl -u gradient-server --no-pager")
+      for needle in ("pool timed out", "graph call timed out", "graph actor unreachable",
+                     "ingest transaction failed", "dropped as stale"):
+          assert needle not in j, f"server log contains {needle!r}"
+
       # ── Phase 6: extract hello's `.drv` from the eval's build list ────────
       # We hit `/evals/{id}/builds` directly with the eval_id already pinned
       # by Phase 5; screen-scraping `gradient task show` is too brittle
@@ -580,7 +665,7 @@ in {
       health = json.loads(api_get(token, "board/health"))["message"]
       names = sorted(l["name"] for l in health["supervised"])
       print(names)
-      for want in ["build-dispatch", "eval-dispatch", "trigger-dispatch",
+      for want in ["graph", "build-dispatch", "eval-dispatch", "trigger-dispatch",
                    "cache-maintenance", "sign-sweep", "debug-index",
                    "eval-cache-sweep", "retention", "rollup", "outbound-connect"]:
           assert want in names, f"{want} missing from supervised loops: {names}"
