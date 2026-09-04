@@ -534,6 +534,81 @@ in {
                      "ingest transaction failed", "dropped as stale"):
           assert needle not in j, f"server log contains {needle!r}"
 
+      # ── Phase 5b: the graph walks stay fenced and agree with the old shape ─
+      # The recursive walks are generated in `graph_sql.rs` as a LATERAL probe
+      # behind an `OFFSET 0` fence. Without the fence Postgres believes the
+      # working table is ten times the seed and merge-joins the whole edge
+      # table once per iteration, which cost 5.3 s on a 44k-node production
+      # closure against 1.0 s fenced. Nothing in the Rust type system notices
+      # if the fence is dropped, so assert the plan here.
+      banner("Phase 5b: graph walk shape, plans and closure counters")
+
+      have_reverse_index = int(sql(
+          "SELECT count(*) FROM pg_indexes "
+          "WHERE indexname = 'idx-derivation_dependency-reverse-pair';"
+      ))
+      assert have_reverse_index == 1, "the reverse walk lost its covering index"
+      have_referrer_index = int(sql(
+          "SELECT count(*) FROM pg_indexes "
+          "WHERE indexname = 'idx-cached_path_reference-referrer-hash';"
+      ))
+      assert have_referrer_index == 1, "the reference walk lost its covering index"
+      leftover_keys = int(sql(
+          "SELECT count(*) FROM information_schema.columns "
+          "WHERE column_name = 'id' AND table_name IN "
+          "('derivation_dependency', 'derivation_closure', 'cached_path_reference');"
+      ))
+      assert leftover_keys == 0, f"{leftover_keys} junction tables kept a surrogate key"
+
+      # The fenced walk and the plain join must select the same node set. This is
+      # the only place the rewrite is checked against a real graph.
+      for direction, fenced_step, plain_step in [
+          ("dependencies",
+           "SELECT e.dependency AS next FROM derivation_dependency e WHERE e.derivation = c.derivation",
+           "SELECT e.dependency FROM derivation_dependency e JOIN plain c ON e.derivation = c.derivation"),
+          ("dependents",
+           "SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation",
+           "SELECT e.derivation FROM derivation_dependency e JOIN plain c ON e.dependency = c.derivation"),
+      ]:
+          seed = f"SELECT bj.derivation FROM build_job bj WHERE bj.evaluation = '{eval_id}'"
+          disagree = int(sql(
+              f"WITH RECURSIVE fenced(derivation) AS ({seed} UNION "
+              f"  SELECT s.next FROM fenced c, LATERAL ({fenced_step} OFFSET 0) s), "
+              f"plain(derivation) AS ({seed} UNION {plain_step}) "
+              f"SELECT (SELECT count(*) FROM (SELECT derivation FROM fenced "
+              f"        EXCEPT SELECT derivation FROM plain) a) "
+              f"     + (SELECT count(*) FROM (SELECT derivation FROM plain "
+              f"        EXCEPT SELECT derivation FROM fenced) b);"
+          ))
+          assert disagree == 0, f"the fenced {direction} walk disagrees on {disagree} nodes"
+
+          # A lateral correlation can only be executed as a nested loop, so the
+          # fence holding is exactly "no merge join survived in the plan".
+          plan = sql(
+              f"EXPLAIN WITH RECURSIVE fenced(derivation) AS ({seed} UNION "
+              f"  SELECT s.next FROM fenced c, LATERAL ({fenced_step} OFFSET 0) s) "
+              f"SELECT count(*) FROM fenced;"
+          )
+          assert "Nested Loop" in plan, f"the {direction} walk lost its nested loop:\n{plan}"
+          assert "Merge Join" not in plan, f"the {direction} walk merge-joins again:\n{plan}"
+
+      # The maintained histogram is what the task page reads; recomputing it from
+      # the materialised closure must give the same totals.
+      drift = int(sql(
+          f"WITH stored AS ("
+          f"  SELECT ep.id, coalesce(sum(c.count), 0) AS total FROM entry_point ep "
+          f"  LEFT JOIN entry_point_dep_count c ON c.entry_point = ep.id "
+          f"  WHERE ep.evaluation = '{eval_id}' GROUP BY ep.id), "
+          f"live AS ("
+          f"  SELECT ep.id, count(*) AS total FROM entry_point ep "
+          f"  JOIN derivation_closure dc ON dc.root_derivation = ep.derivation "
+          f"  JOIN derivation_build b ON b.derivation = dc.dep_derivation "
+          f"  WHERE ep.evaluation = '{eval_id}' GROUP BY ep.id) "
+          f"SELECT count(*) FROM live l JOIN stored s ON s.id = l.id "
+          f"WHERE l.total <> s.total;"
+      ))
+      assert drift == 0, f"{drift} entry points disagree with their materialised closure"
+
       # ── Phase 6: extract hello's `.drv` from the eval's build list ────────
       # We hit `/evals/{id}/builds` directly with the eval_id already pinned
       # by Phase 5; screen-scraping `gradient task show` is too brittle
