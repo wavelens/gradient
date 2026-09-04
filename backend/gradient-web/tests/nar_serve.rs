@@ -134,7 +134,7 @@ fn nar_serve_streams_stored_blob_byte_for_byte() {
             forge: gradient_forge::ForgeRegistry::with_builtin(),
             upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
             reactor: Arc::new(gradient_db::NoReactor),
-            graph: gradient_core::Graph::new(),
+            graph: gradient_core::Graph::stub(),
         });
 
         let peer: SocketAddr = "127.0.0.1:0".parse().unwrap();

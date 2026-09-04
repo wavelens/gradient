@@ -7841,6 +7841,13 @@ from `gradient-proto`) and `a_committed_path_backs_every_output_with_its_hash`.
 
 `backend/gradient-graph/src/demote.rs`: `an_unknown_path_reports_no_cached_path`.
 
+The web and cache harnesses build their `ServerState` with `Graph::stub()`
+(`gradient-graph`'s `stub` feature): a handle that answers every call itself,
+reaching no actor and no database. Endpoint tests state what the endpoint does
+with the graph's answer; the graph's own SQL is covered by `gradient-graph`'s
+tests and the VM test. Without it a graph call in a handler waits out
+`CALL_TIMEOUT` and the endpoint returns 500.
+
 `backend/gradient-ci/src/abort.rs`: the hard-abort tests are gone with the
 per-row anchor abort; the shared-anchor rule now runs through
 `gradient_db::abort_eval_anchors` inside the actor's `AbortEvaluationAnchors`

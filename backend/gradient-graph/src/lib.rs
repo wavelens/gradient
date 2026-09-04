@@ -35,6 +35,8 @@ pub use policy::retry_backoff_elapsed;
 /// watch so a restart looks like latency.
 pub struct Graph {
     actor: watch::Sender<Option<ActorRef<GraphMsg>>>,
+    #[cfg(feature = "stub")]
+    stub: bool,
 }
 
 impl std::fmt::Debug for Graph {
@@ -47,6 +49,18 @@ impl Graph {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             actor: watch::channel(None).0,
+            #[cfg(feature = "stub")]
+            stub: false,
+        })
+    }
+
+    /// A handle that answers every call itself, reaching no actor and no
+    /// database. For harnesses whose subject is a caller of the graph.
+    #[cfg(feature = "stub")]
+    pub fn stub() -> Arc<Self> {
+        Arc::new(Self {
+            actor: watch::channel(None).0,
+            stub: true,
         })
     }
 
@@ -106,12 +120,20 @@ impl Graph {
     }
 
     pub async fn ingest(&self, batch: IngestBatch) -> anyhow::Result<IngestReport> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(IngestReport::default());
+        }
         self.call(|reply| GraphMsg::Ingest(batch, reply)).await
     }
 
     /// Store paths of `drv_hashes` the worker may prune, answered after every
     /// write queued before this call.
     pub async fn known_derivations(&self, drv_hashes: Vec<String>) -> anyhow::Result<Vec<String>> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(Vec::new());
+        }
         self.call(|reply| GraphMsg::KnownDerivations { drv_hashes, reply })
             .await
     }
@@ -119,21 +141,41 @@ impl Graph {
     /// Record a NAR already in storage: the `cached_path` row, its references,
     /// signature placeholders and the outputs it backs, in one transaction.
     pub async fn commit_nar(&self, commit: NarCommit) -> anyhow::Result<NarCommitted> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(NarCommitted {
+                cached_path: gradient_types::ids::CachedPathId::now_v7(),
+                created: true,
+                outputs_marked: 0,
+            });
+        }
         self.call(|reply| GraphMsg::CommitNar(commit, reply)).await
     }
 
     pub async fn transition(&self, transition: Transition) -> anyhow::Result<TransitionReport> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(TransitionReport::default());
+        }
         self.call(|reply| GraphMsg::Transition(transition, reply))
             .await
     }
 
     /// Move anchors back to `Queued`; returns how many moved.
     pub async fn requeue(&self, scope: RequeueScope) -> anyhow::Result<u64> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(0);
+        }
         self.call(|reply| GraphMsg::Requeue(scope, reply)).await
     }
 
     /// Drop a path's claim on the cache index, or a whole sweep of them.
     pub async fn demote(&self, demotion: Demotion) -> anyhow::Result<DemoteReport> {
+        #[cfg(feature = "stub")]
+        if self.stub {
+            return Ok(DemoteReport::default());
+        }
         self.call(|reply| GraphMsg::Demote(demotion, reply)).await
     }
 }
