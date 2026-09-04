@@ -74,20 +74,6 @@ fn task_row(id: TaskId) -> gradient_entity::task::Model {
     }
 }
 
-fn cached_path_row(hash: &str) -> gradient_entity::cached_path::Model {
-    gradient_entity::cached_path::Model {
-        id: CachedPathId::now_v7(),
-        hash: hash.into(),
-        package: "source".into(),
-        file_hash: Some(format!("sha256:{}", hash)),
-        file_size: Some(0),
-        nar_size: Some(0),
-        nar_hash: Some(format!("sha256:{}", hash)),
-        created_at: Utc::now().naive_utc(),
-        ..Default::default()
-    }
-}
-
 fn commit_row() -> gradient_entity::commit::Model {
     gradient_entity::commit::Model {
         id: CommitId::now_v7(),
@@ -135,21 +121,11 @@ fn source_upload_creates_queued_eval() {
         let task_model = task_row(task_id);
         let commit_model = commit_row();
         let eval_model = eval_row(task_id, commit_model.id);
-        let cp_row = cached_path_row("00000000000000000000000000000000");
 
         let db = with_project_access(with_auth(
             MockDatabase::new(DatabaseBackend::Postgres),
             session_id,
         ))
-        // ensure_cached_path → SELECT (None) then INSERT
-        .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-        .append_query_results([vec![cp_row]])
-        .append_exec_results([MockExecResult {
-            last_insert_id: 0,
-            rows_affected: 1,
-        }])
-        // queue_signature_placeholders → project caches (empty)
-        .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
         // ensure_build_request_task → SELECT (None) then INSERT
         .append_query_results([Vec::<gradient_entity::task::Model>::new()])
         .append_query_results([vec![task_model.clone()]])
