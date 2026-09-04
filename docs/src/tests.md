@@ -7859,3 +7859,15 @@ complete, record the same build set, no derivation hash has two rows, no anchor
 of either evaluation lacks its edges, and the server log has no pool timeout
 and no dropped graph call. Phase 11 now expects `graph` among the supervised
 loops.
+
+## The no-unwrap policy is enforced by clippy (#585)
+
+`backend/gradient-util/src/sync.rs`:
+`a_poisoned_lock_still_hands_out_the_value` and
+`into_inner_survives_a_poisoned_lock` (a helper thread panics holding the lock;
+the guarded value is still readable afterwards, so one panic cannot cascade
+into a panic at every later `lock()`), plus `the_guard_writes_through`.
+
+The policy itself has no test: `clippy::unwrap_used = "deny"` in
+`backend/Cargo.toml` is the assertion, and `nix build
+.#checks.x86_64-linux.clippy` is where it runs.
