@@ -100,7 +100,13 @@ impl Scheduler {
     ) -> Result<Registered> {
         let caps_json = serde_json::to_value(&capabilities).unwrap_or(serde_json::Value::Null);
         let registered = self
-            .reattach_worker(worker_id, capabilities, authorized_peers, session, Vec::new())
+            .reattach_worker(
+                worker_id,
+                capabilities,
+                authorized_peers,
+                session,
+                Vec::new(),
+            )
             .await?;
         self.record_worker_connection(worker_id, caps_json).await;
         Ok(registered)

@@ -132,7 +132,10 @@ async fn enqueue_signals_offers_with_a_rising_generation() {
     assert_eq!(signals.recv().await, Some(SessionSignal::Offers(2)));
     let offer = scheduler.get_new_job_candidates("w1").await;
     assert_eq!(offer.candidates.len(), 2);
-    assert_eq!(offer.generation, 2, "the offer carries the generation it answers");
+    assert_eq!(
+        offer.generation, 2,
+        "the offer carries the generation it answers"
+    );
     assert!(
         scheduler
             .get_new_job_candidates("w1")
@@ -195,7 +198,13 @@ async fn test_candidates_filtered_by_authorized_peers() {
     let peer_a = ProjectId::now_v7();
     let peer_b = ProjectId::now_v7();
 
-    register(&scheduler, "w1", eval_worker_caps(), HashSet::from([peer_a])).await;
+    register(
+        &scheduler,
+        "w1",
+        eval_worker_caps(),
+        HashSet::from([peer_a]),
+    )
+    .await;
 
     scheduler
         .enqueue_eval_job("ja".into(), eval_job(peer_a))
@@ -302,7 +311,13 @@ async fn test_update_authorized_peers_expands_access() {
     let peer_b = ProjectId::now_v7();
 
     // Worker starts authorized for peer_a only.
-    register(&scheduler, "w1", eval_worker_caps(), HashSet::from([peer_a])).await;
+    register(
+        &scheduler,
+        "w1",
+        eval_worker_caps(),
+        HashSet::from([peer_a]),
+    )
+    .await;
 
     scheduler
         .enqueue_eval_job("ja".into(), eval_job(peer_a))
@@ -368,10 +383,7 @@ async fn abort_evaluation_signals_the_worker_running_its_job() {
     let mut signals = register(&scheduler, "w1", eval_worker_caps(), HashSet::new()).await;
     let job = eval_job(peer);
     let eval_id = job.evaluation_id;
-    scheduler
-        .enqueue_eval_job("j1".into(), job)
-        .await
-        .unwrap();
+    scheduler.enqueue_eval_job("j1".into(), job).await.unwrap();
     assert_eq!(signals.recv().await, Some(SessionSignal::Offers(1)));
     let assigned = scheduler
         .request_job("w1", JobKind::Flake)
@@ -390,7 +402,11 @@ async fn abort_evaluation_signals_the_worker_running_its_job() {
             reason: "evaluation aborted".into()
         })
     );
-    assert_eq!(scheduler.counts().await.active, 1, "the worker still runs it until it reports");
+    assert_eq!(
+        scheduler.counts().await.active,
+        1,
+        "the worker still runs it until it reports"
+    );
 }
 
 #[tokio::test]
@@ -674,7 +690,12 @@ async fn a_respawned_core_is_rebuilt_from_reattached_sessions() {
     let peer = ProjectId::now_v7();
     let (session, mut signals) = port();
     scheduler
-        .register_worker("w1", eval_worker_caps(), HashSet::new(), Arc::clone(&session))
+        .register_worker(
+            "w1",
+            eval_worker_caps(),
+            HashSet::new(),
+            Arc::clone(&session),
+        )
         .await
         .unwrap();
     scheduler
@@ -696,7 +717,11 @@ async fn a_respawned_core_is_rebuilt_from_reattached_sessions() {
         .await
         .expect("stop the old core");
     scheduler.spawn_core(None).await.expect("respawn");
-    assert_eq!(scheduler.counts().await.active, 0, "a fresh core knows nothing");
+    assert_eq!(
+        scheduler.counts().await.active,
+        0,
+        "a fresh core knows nothing"
+    );
 
     scheduler
         .reattach_worker(

@@ -114,43 +114,141 @@ pub struct Counts {
 )]
 pub enum SchedulerMsg {
     Register(Registration, RpcReplyPort<Registered>),
-    SetWorkerProject { worker: String, project: ProjectId },
-    Unregister { worker: String, reply: RpcReplyPort<Vec<PendingJob>> },
-    IsConnected { worker: String, reply: RpcReplyPort<bool> },
-    AuthorizedFor { worker: String, project: ProjectId, reply: RpcReplyPort<bool> },
-    UpdatePeers { worker: String, peers: HashSet<ProjectId>, reply: RpcReplyPort<()> },
-    RevokePeers { worker: String, revoked: HashSet<ProjectId>, reply: RpcReplyPort<usize> },
-    Reauth { worker: String },
-    UpdateCapabilities { worker: String, caps: WorkerCapabilities, reply: RpcReplyPort<()> },
-    UpdateMetrics { worker: String, metrics: WorkerMetrics, reply: RpcReplyPort<()> },
-    MarkDraining { worker: String, reply: RpcReplyPort<()> },
-    Enqueue { job_id: String, job: PendingJob, reply: RpcReplyPort<()> },
-    Candidates { worker: String, only_new: bool, reply: RpcReplyPort<Offer> },
+    SetWorkerProject {
+        worker: String,
+        project: ProjectId,
+    },
+    Unregister {
+        worker: String,
+        reply: RpcReplyPort<Vec<PendingJob>>,
+    },
+    IsConnected {
+        worker: String,
+        reply: RpcReplyPort<bool>,
+    },
+    AuthorizedFor {
+        worker: String,
+        project: ProjectId,
+        reply: RpcReplyPort<bool>,
+    },
+    UpdatePeers {
+        worker: String,
+        peers: HashSet<ProjectId>,
+        reply: RpcReplyPort<()>,
+    },
+    RevokePeers {
+        worker: String,
+        revoked: HashSet<ProjectId>,
+        reply: RpcReplyPort<usize>,
+    },
+    Reauth {
+        worker: String,
+    },
+    UpdateCapabilities {
+        worker: String,
+        caps: WorkerCapabilities,
+        reply: RpcReplyPort<()>,
+    },
+    UpdateMetrics {
+        worker: String,
+        metrics: WorkerMetrics,
+        reply: RpcReplyPort<()>,
+    },
+    MarkDraining {
+        worker: String,
+        reply: RpcReplyPort<()>,
+    },
+    Enqueue {
+        job_id: String,
+        job: PendingJob,
+        reply: RpcReplyPort<()>,
+    },
+    Candidates {
+        worker: String,
+        only_new: bool,
+        reply: RpcReplyPort<Offer>,
+    },
     Assign {
         worker: String,
         kind: JobKind,
         instance: Arc<InstanceContext>,
         reply: RpcReplyPort<AssignOutcome>,
     },
-    RecordScores { worker: String, scores: Vec<CandidateScore>, reply: RpcReplyPort<()> },
-    Rejected { worker: String, job_id: String, reply: RpcReplyPort<()> },
-    Release { worker: String, job_id: String, reply: RpcReplyPort<Released> },
-    AbortJob { worker: String, job_id: String, reason: String, reply: RpcReplyPort<bool> },
-    AbortEvaluation { evaluation_id: EvaluationId, reply: RpcReplyPort<Vec<(String, String)>> },
-    RemoveJobs { job_ids: Vec<String>, reply: RpcReplyPort<()> },
-    ActiveJob { job_id: String, reply: RpcReplyPort<Option<PendingJob>> },
-    PendingJob { job_id: String, reply: RpcReplyPort<Option<PendingJob>> },
-    Untracked { job_ids: Vec<String>, reply: RpcReplyPort<Vec<String>> },
-    HasIdleEvalOnlyWorker { reply: RpcReplyPort<bool> },
-    Workers { reply: RpcReplyPort<Vec<WorkerInfo>> },
-    WorkerCaps { worker: String, reply: RpcReplyPort<Option<GradientCapabilities>> },
-    StaleWorkers { now_ms: i64, timeout_ms: i64, reply: RpcReplyPort<Vec<String>> },
-    Counts { reply: RpcReplyPort<Counts> },
-    PendingSnapshot { reply: RpcReplyPort<Vec<PendingJobInfo>> },
-    BoardActiveJobs { reply: RpcReplyPort<Vec<BoardActiveJob>> },
-    RecentDecisions { reply: RpcReplyPort<Vec<DispatchDecision>> },
-    CandidateDetail { id: DispatchedJobId, reply: RpcReplyPort<Option<CandidateDetail>> },
-    BumpRescore { reply: RpcReplyPort<()> },
+    RecordScores {
+        worker: String,
+        scores: Vec<CandidateScore>,
+        reply: RpcReplyPort<()>,
+    },
+    Rejected {
+        worker: String,
+        job_id: String,
+        reply: RpcReplyPort<()>,
+    },
+    Release {
+        worker: String,
+        job_id: String,
+        reply: RpcReplyPort<Released>,
+    },
+    AbortJob {
+        worker: String,
+        job_id: String,
+        reason: String,
+        reply: RpcReplyPort<bool>,
+    },
+    AbortEvaluation {
+        evaluation_id: EvaluationId,
+        reply: RpcReplyPort<Vec<(String, String)>>,
+    },
+    RemoveJobs {
+        job_ids: Vec<String>,
+        reply: RpcReplyPort<()>,
+    },
+    ActiveJob {
+        job_id: String,
+        reply: RpcReplyPort<Option<PendingJob>>,
+    },
+    PendingJob {
+        job_id: String,
+        reply: RpcReplyPort<Option<PendingJob>>,
+    },
+    Untracked {
+        job_ids: Vec<String>,
+        reply: RpcReplyPort<Vec<String>>,
+    },
+    HasIdleEvalOnlyWorker {
+        reply: RpcReplyPort<bool>,
+    },
+    Workers {
+        reply: RpcReplyPort<Vec<WorkerInfo>>,
+    },
+    WorkerCaps {
+        worker: String,
+        reply: RpcReplyPort<Option<GradientCapabilities>>,
+    },
+    StaleWorkers {
+        now_ms: i64,
+        timeout_ms: i64,
+        reply: RpcReplyPort<Vec<String>>,
+    },
+    Counts {
+        reply: RpcReplyPort<Counts>,
+    },
+    PendingSnapshot {
+        reply: RpcReplyPort<Vec<PendingJobInfo>>,
+    },
+    BoardActiveJobs {
+        reply: RpcReplyPort<Vec<BoardActiveJob>>,
+    },
+    RecentDecisions {
+        reply: RpcReplyPort<Vec<DispatchDecision>>,
+    },
+    CandidateDetail {
+        id: DispatchedJobId,
+        reply: RpcReplyPort<Option<CandidateDetail>>,
+    },
+    BumpRescore {
+        reply: RpcReplyPort<()>,
+    },
     ReOffer,
 }
 
@@ -196,7 +294,12 @@ impl SchedulerCore {
         }
     }
 
-    fn assign(&mut self, worker: &str, kind: &JobKind, instance: &InstanceContext) -> AssignOutcome {
+    fn assign(
+        &mut self,
+        worker: &str,
+        kind: &JobKind,
+        instance: &InstanceContext,
+    ) -> AssignOutcome {
         if !self.pool.has_capacity(worker, kind) {
             debug!(%worker, ?kind, "RequestJob ignored - worker at capacity");
             return AssignOutcome::AtCapacity;
@@ -255,7 +358,8 @@ impl Actor for CoreActor {
                     reg.session,
                 );
                 for (job_id, job) in reg.active {
-                    core.tracker.restore_active(&reg.worker, job_id.clone(), job);
+                    core.tracker
+                        .restore_active(&reg.worker, job_id.clone(), job);
                     core.pool.assign_job(&reg.worker, &job_id);
                 }
                 info!(worker = %reg.worker, "worker registered");
@@ -276,7 +380,11 @@ impl Actor for CoreActor {
             SchedulerMsg::IsConnected { worker, reply } => {
                 let _ = reply.send(core.pool.is_connected(&worker));
             }
-            SchedulerMsg::AuthorizedFor { worker, project, reply } => {
+            SchedulerMsg::AuthorizedFor {
+                worker,
+                project,
+                reply,
+            } => {
                 let ok = core
                     .pool
                     .peer_auth_for(&worker)
@@ -284,11 +392,19 @@ impl Actor for CoreActor {
                     .unwrap_or(false);
                 let _ = reply.send(ok);
             }
-            SchedulerMsg::UpdatePeers { worker, peers, reply } => {
+            SchedulerMsg::UpdatePeers {
+                worker,
+                peers,
+                reply,
+            } => {
                 core.pool.update_authorized_peers(&worker, peers);
                 let _ = reply.send(());
             }
-            SchedulerMsg::RevokePeers { worker, revoked, reply } => {
+            SchedulerMsg::RevokePeers {
+                worker,
+                revoked,
+                reply,
+            } => {
                 let job_ids = core.tracker.drain_peer_jobs_on_worker(&worker, &revoked);
                 for job_id in &job_ids {
                     core.pool.send_abort(
@@ -303,7 +419,11 @@ impl Actor for CoreActor {
                 let _ = reply.send(job_ids.len());
             }
             SchedulerMsg::Reauth { worker } => core.pool.request_reauth(&worker),
-            SchedulerMsg::UpdateCapabilities { worker, caps, reply } => {
+            SchedulerMsg::UpdateCapabilities {
+                worker,
+                caps,
+                reply,
+            } => {
                 core.pool.update_capabilities(
                     &worker,
                     caps.architectures,
@@ -315,7 +435,11 @@ impl Actor for CoreActor {
                 );
                 let _ = reply.send(());
             }
-            SchedulerMsg::UpdateMetrics { worker, metrics, reply } => {
+            SchedulerMsg::UpdateMetrics {
+                worker,
+                metrics,
+                reply,
+            } => {
                 core.pool.update_metrics(
                     &worker,
                     metrics.cpu_usage_pct,
@@ -338,32 +462,61 @@ impl Actor for CoreActor {
                 core.bump_offers();
                 let _ = reply.send(());
             }
-            SchedulerMsg::Candidates { worker, only_new, reply } => {
+            SchedulerMsg::Candidates {
+                worker,
+                only_new,
+                reply,
+            } => {
                 let _ = reply.send(core.candidates(&worker, only_new));
             }
-            SchedulerMsg::Assign { worker, kind, instance, reply } => {
+            SchedulerMsg::Assign {
+                worker,
+                kind,
+                instance,
+                reply,
+            } => {
                 let _ = reply.send(core.assign(&worker, &kind, &instance));
             }
-            SchedulerMsg::RecordScores { worker, scores, reply } => {
+            SchedulerMsg::RecordScores {
+                worker,
+                scores,
+                reply,
+            } => {
                 core.tracker.record_scores(&worker, scores);
                 let _ = reply.send(());
             }
-            SchedulerMsg::Rejected { worker, job_id, reply } => {
+            SchedulerMsg::Rejected {
+                worker,
+                job_id,
+                reply,
+            } => {
                 core.pool.release_job(&worker, &job_id);
                 core.tracker.release_to_pending(&job_id);
                 core.pool.remove_sent_candidate(&job_id);
                 info!(%worker, %job_id, "job rejected; re-queued");
                 let _ = reply.send(());
             }
-            SchedulerMsg::Release { worker, job_id, reply } => {
+            SchedulerMsg::Release {
+                worker,
+                job_id,
+                reply,
+            } => {
                 let worker_idle = core.pool.release_job(&worker, &job_id);
                 let job = core.tracker.remove_active(&job_id);
                 let _ = reply.send(Released { job, worker_idle });
             }
-            SchedulerMsg::AbortJob { worker, job_id, reason, reply } => {
+            SchedulerMsg::AbortJob {
+                worker,
+                job_id,
+                reason,
+                reply,
+            } => {
                 let _ = reply.send(core.pool.send_abort(&worker, job_id, reason));
             }
-            SchedulerMsg::AbortEvaluation { evaluation_id, reply } => {
+            SchedulerMsg::AbortEvaluation {
+                evaluation_id,
+                reply,
+            } => {
                 let to_abort: Vec<(String, String)> = core
                     .tracker
                     .active_jobs()
@@ -405,7 +558,11 @@ impl Actor for CoreActor {
             SchedulerMsg::WorkerCaps { worker, reply } => {
                 let _ = reply.send(core.pool.gradient_caps_for(&worker));
             }
-            SchedulerMsg::StaleWorkers { now_ms, timeout_ms, reply } => {
+            SchedulerMsg::StaleWorkers {
+                now_ms,
+                timeout_ms,
+                reply,
+            } => {
                 let _ = reply.send(core.pool.stale_worker_ids(now_ms, timeout_ms));
             }
             SchedulerMsg::Counts { reply } => {

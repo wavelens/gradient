@@ -679,7 +679,12 @@ mod tests {
         let peer_a = ProjectId::now_v7();
         let peer_b = ProjectId::now_v7();
 
-        pool.register("w1".into(), caps(), HashSet::from([peer_a, peer_b]), port().0);
+        pool.register(
+            "w1".into(),
+            caps(),
+            HashSet::from([peer_a, peer_b]),
+            port().0,
+        );
         let auth = pool.peer_auth_for("w1").unwrap();
         assert!(auth.contains(&peer_a));
         assert!(auth.contains(&peer_b));

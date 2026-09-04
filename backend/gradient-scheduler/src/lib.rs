@@ -189,7 +189,10 @@ impl Scheduler {
     ) {
         let mut job_ids = vec![format!("eval:{eval_id}")];
         job_ids.extend(anchor_ids.iter().map(|id| format!("build:{id}")));
-        if let Err(e) = self.call(|reply| SchedulerMsg::RemoveJobs { job_ids, reply }).await {
+        if let Err(e) = self
+            .call(|reply| SchedulerMsg::RemoveJobs { job_ids, reply })
+            .await
+        {
             tracing::warn!(error = %e, %eval_id, "cancel_evaluation_jobs did not reach the scheduler");
         }
         self.eval_edges.write().await.remove(&eval_id);
