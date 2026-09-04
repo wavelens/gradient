@@ -7957,6 +7957,14 @@ itself. The old layer-ordering and cycle-termination tests are gone, because
 termination is now Postgres's `UNION` rather than a Rust visited set; keeping
 them would have been testing `MockDatabase`.
 
+**`gradient-report/src/tables.rs`** follows the schema: `derivation_dependency`
+and `cached_path_reference` no longer export an `id`, and `SCHEMA_VERSION` goes
+to 4 so an inspector refuses an older file rather than reading a column that
+moved. The existing `every_spec_is_scoped_and_internally_consistent` is what
+catches a DDL and column list drifting apart; without the version bump the
+report would simply have failed at extraction time, since the query still named
+a dropped column.
+
 **The cache VM test** (`nix/tests/gradient/cache/default.nix`, Phase 5b) is the
 only place the plan itself can be checked. Against the real graph it asserts that
 both covering indexes exist and no junction table kept a surrogate key, that the
