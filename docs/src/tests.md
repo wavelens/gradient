@@ -7944,6 +7944,17 @@ last assertion is not a style rule. `UNION` is what deduplicates the frontier on
 each iteration, and on a diamond-shaped graph dropping it makes the walk
 exponential in depth.
 
+**`gradient-db/src/promotion.rs`** is where the mirrored-SQL tests earned their
+keep. Two recursive walks there were written by hand rather than generated (the
+`DependencyFailed` cascade when scoped to one evaluation, and the requeue
+closure with its `deterministic_blocked` subset), so they kept the plain join
+after the rest of the codebase moved. The stale assertion is what surfaced them.
+They now come from `bounded_dependency_closure_cte_body`, which puts the
+"restricted to this evaluation's closure" predicate inside the lateral probe so
+it prunes at the index lookup rather than after the join. The scoped cascade
+still has to mention the closure bound at least three times: the seed, the walk,
+and the UPDATE.
+
 **`gradient-db/src/cache_storage.rs`** keeps its existing ordering assertion:
 Postgres accepts exactly one self-reference and only in the last arm of a `UNION`
 chain, so the `.drv` seed must stay ahead of the reference walk. Rewriting the
