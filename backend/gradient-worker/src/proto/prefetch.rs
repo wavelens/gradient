@@ -394,11 +394,11 @@ impl<'a> InputPrefetcher<'a> {
     ) -> Result<(Vec<CachedPath>, Vec<CachedPath>)> {
         let cached_entries = self
             .updater
-            .query_cache(missing.clone(), QueryMode::Pull)
+            .query_cache(missing.clone(), QueryMode::PullClosure)
             .await
             .with_context(|| {
                 format!(
-                    "CacheQuery Pull for {} missing inputs of {}",
+                    "CacheQuery PullClosure for {} missing inputs of {}",
                     missing.len(),
                     self.drv_path
                 )
@@ -670,6 +670,14 @@ impl<'a> InputPrefetcher<'a> {
             }
 
             let (by_url, by_request) = self.query_and_split(to_query).await?;
+            // The server answers for closure members we never asked about, so
+            // bank them before the next round rather than querying them again.
+            queried.extend(
+                by_url
+                    .iter()
+                    .chain(by_request.iter())
+                    .map(|cp| cp.path.clone()),
+            );
             let mut batch = self.fetch_by_request(by_request).await?;
             batch.extend(self.download_by_url(by_url).await?);
 

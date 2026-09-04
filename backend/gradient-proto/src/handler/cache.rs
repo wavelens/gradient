@@ -250,7 +250,7 @@ async fn build_cached_entry(
     }
 
     let (url, nar_hash, file_hash, references, signatures, deriver, ca) = match mode {
-        QueryMode::Pull => {
+        QueryMode::Pull | QueryMode::PullClosure => {
             let url = match state.nar_storage.presigned_get_url(hash, expire).await {
                 Ok(u) => u,
                 Err(e) => {
@@ -489,11 +489,52 @@ async fn extend_with_gradient_proto_results(
     }
 }
 
+/// Keep every seed's answer whatever it says, and every bonus entry the cache
+/// can actually serve. A caller reads an uncached entry as "a path I asked for
+/// is missing" and fails the build on it, so an unserveable path it never asked
+/// about must never reach it.
+fn drop_unserveable_bonus(
+    seeds: &[String],
+    mut entries: Vec<gradient_types::proto::CachedPath>,
+) -> Vec<gradient_types::proto::CachedPath> {
+    let seeds: std::collections::HashSet<&str> = seeds.iter().map(String::as_str).collect();
+    entries.retain(|cp| cp.cached || seeds.contains(cp.path.as_str()));
+    entries
+}
+
+/// `paths` plus the serveable members of their runtime-reference closure, held
+/// under the per-reply path cap so the widened reply still fits one frame. With
+/// no room left the seeds come back unchanged and the caller keeps walking.
+async fn expand_pull_closure(state: &ServerState, paths: &[String]) -> Result<Vec<String>, DbErr> {
+    let budget = crate::messages::CACHE_QUERY_MAX_PATHS.saturating_sub(paths.len());
+    if budget == 0 {
+        return Ok(paths.to_vec());
+    }
+
+    let hashes: Vec<String> = paths
+        .iter()
+        .filter_map(|p| {
+            let base = p.strip_prefix("/nix/store/").unwrap_or(p);
+            let hash = base.split('-').next()?;
+            (hash.len() == 32).then(|| hash.to_string())
+        })
+        .collect();
+
+    let mut widened = paths.to_vec();
+    widened.extend(
+        gradient_db::runtime_closure_cached_paths(&state.cache_db, &hashes, budget as u64).await?,
+    );
+
+    Ok(widened)
+}
+
 /// Check which store paths are available - in the local Gradient cache or upstream.
 ///
 /// Behaviour depends on `mode`:
 /// - `Normal` - return only locally-cached paths; probe upstream for misses.
 /// - `Pull`   - same as Normal but cached paths include a presigned S3 GET URL.
+/// - `PullClosure` - `Pull`, widened with the serveable members of each queried
+///   path's reference closure so one round trip answers for a whole closure.
 /// - `Push`   - return **all** queried paths with `cached` set; skip upstream.
 ///   Uncached paths include a presigned S3 PUT URL when S3-backed.
 async fn query(
@@ -503,6 +544,16 @@ async fn query(
     mode: gradient_types::proto::QueryMode,
 ) -> Result<Vec<gradient_types::proto::CachedPath>, DbErr> {
     use gradient_types::proto::QueryMode;
+
+    // Widen the answer with everything else the caller needs from the same
+    // closure, then drop any bonus entry the cache cannot serve - so an uncached
+    // entry still means "the path you asked for is missing", which callers treat
+    // as fatal.
+    if matches!(mode, QueryMode::PullClosure) {
+        let widened = expand_pull_closure(state, paths).await?;
+        let out = Box::pin(query(state, project_id, &widened, QueryMode::Pull)).await?;
+        return Ok(drop_unserveable_bonus(paths, out));
+    }
 
     let hash_path_pairs: Vec<(&str, &str)> = paths
         .iter()
@@ -826,6 +877,65 @@ mod tests {
             query(&state, None, &paths, QueryMode::Pull).await.is_err(),
             "DB error must propagate as Err, not a confident uncached result"
         );
+    }
+
+    fn entry(path: &str, cached: bool) -> gradient_types::proto::CachedPath {
+        gradient_types::proto::CachedPath {
+            path: path.to_owned(),
+            cached,
+            file_size: None,
+            nar_size: None,
+            url: None,
+            nar_hash: None,
+            file_hash: None,
+            references: None,
+            signatures: None,
+            deriver: None,
+            ca: None,
+        }
+    }
+
+    /// The whole safety property of `PullClosure`: widening the answer must not
+    /// invent a missing input. A worker fails the build on any uncached entry,
+    /// so only a seed may come back uncached.
+    #[test]
+    fn a_widened_reply_never_reports_an_unasked_path_as_missing() {
+        let seeds = vec!["/nix/store/seed-a".to_string()];
+        let kept = drop_unserveable_bonus(
+            &seeds,
+            vec![
+                entry("/nix/store/seed-a", false),
+                entry("/nix/store/bonus-served", true),
+                entry("/nix/store/bonus-unserveable", false),
+            ],
+        );
+
+        let paths: Vec<&str> = kept.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["/nix/store/seed-a", "/nix/store/bonus-served"],
+            "an uncached bonus entry must be dropped, an uncached seed kept"
+        );
+    }
+
+    /// The widened path list is what bounds the reply, so it may never exceed
+    /// the same cap a plain query is chunked to.
+    #[test]
+    fn closure_expansion_stays_within_the_single_frame_path_cap() {
+        use crate::messages::CACHE_QUERY_MAX_PATHS;
+        for seeds in [
+            0usize,
+            1,
+            CACHE_QUERY_MAX_PATHS - 1,
+            CACHE_QUERY_MAX_PATHS,
+            CACHE_QUERY_MAX_PATHS + 1,
+        ] {
+            let budget = CACHE_QUERY_MAX_PATHS.saturating_sub(seeds);
+            assert!(
+                seeds.min(CACHE_QUERY_MAX_PATHS) + budget <= CACHE_QUERY_MAX_PATHS,
+                "seeds {seeds} plus budget {budget} overruns the cap"
+            );
+        }
     }
 
     #[tokio::test]
