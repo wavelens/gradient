@@ -499,18 +499,19 @@ fn cached_path_eval_scope_fragments(
     match scope {
         None => (String::new(), String::new()),
         Some(_) => (
-            "WITH RECURSIVE eval_paths(hash) AS ( \
-                 SELECT DISTINCT o.hash FROM derivation_output o \
-                 JOIN build_job bj ON bj.derivation = o.derivation \
-                 WHERE bj.evaluation = $1 \
-               UNION \
-                 SELECT DISTINCT d.hash FROM derivation d \
-                 JOIN build_job bj ON bj.derivation = d.id \
-                 WHERE bj.evaluation = $1 \
-               UNION \
-                 SELECT r.reference_hash FROM cached_path_reference r \
-                 JOIN eval_paths ep ON r.referrer = ep.hash) "
-                .to_string(),
+            format!(
+                "{} ",
+                crate::graph_sql::reference_closure_cte(
+                    "eval_paths",
+                    "SELECT DISTINCT o.hash FROM derivation_output o \
+                     JOIN build_job bj ON bj.derivation = o.derivation \
+                     WHERE bj.evaluation = $1 \
+                   UNION \
+                     SELECT DISTINCT d.hash FROM derivation d \
+                     JOIN build_job bj ON bj.derivation = d.id \
+                     WHERE bj.evaluation = $1",
+                )
+            ),
             " AND cp.hash IN (SELECT hash FROM eval_paths)".to_string(),
         ),
     }
@@ -1008,7 +1009,9 @@ mod tests {
                 "seeded from the eval's build_job outputs: {stmt}"
             );
             assert!(
-                stmt.contains("SELECT r.reference_hash FROM cached_path_reference r"),
+                stmt.contains(
+                    "SELECT r.reference_hash AS next FROM cached_path_reference r WHERE r.referrer = c.hash"
+                ),
                 "walks the NAR reference closure so leaves converge first: {stmt}"
             );
             assert!(
@@ -1047,7 +1050,7 @@ mod tests {
             // rejected at runtime, which no type or compile check would catch.
             let drv_seed = sql.find("FROM derivation d").expect("drv seed present");
             let walk = sql
-                .find("FROM cached_path_reference r JOIN eval_paths")
+                .find("FROM eval_paths c")
                 .expect("recursive walk present");
             assert!(
                 drv_seed < walk,
