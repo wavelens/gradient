@@ -365,10 +365,11 @@ mod tests {
             "e.derivation IN (SELECT derivation FROM closure)",
         ));
 
+        let probe = "WHERE e.dependency = c.derivation \
+                     AND e.derivation IN (SELECT derivation FROM closure) OFFSET 0) s";
+
         assert!(
-            cte.contains(
-                "WHERE e.dependency = c.derivation                  AND e.derivation IN (SELECT derivation FROM closure) OFFSET 0) s"
-            ),
+            cte.contains(probe),
             "the bound belongs inside the fenced probe: {cte}"
         );
     }
