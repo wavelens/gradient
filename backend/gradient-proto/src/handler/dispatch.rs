@@ -16,8 +16,8 @@ use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
 use crate::messages::{
-    CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind, JobUpdateKind, QueryMode,
-    ServerMessage,
+    CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind, JobPhaseSpan, JobUpdateKind,
+    QueryMode, ServerMessage,
 };
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
@@ -131,8 +131,8 @@ impl<'a> DispatchContext<'a> {
                 self.on_job_update(job_id, update).await;
                 true
             }
-            ClientMessage::JobCompleted { job_id } => {
-                self.on_job_completed(job_id).await;
+            ClientMessage::JobCompleted { job_id, spans } => {
+                self.on_job_completed(job_id, spans).await;
                 true
             }
             ClientMessage::JobFailed {
@@ -140,8 +140,10 @@ impl<'a> DispatchContext<'a> {
                 error,
                 kind,
                 missing_paths,
+                spans,
             } => {
-                self.on_job_failed(job_id, error, kind, missing_paths).await;
+                self.on_job_failed(job_id, error, kind, missing_paths, spans)
+                    .await;
                 true
             }
             ClientMessage::Draining => {
@@ -668,8 +670,9 @@ impl<'a> DispatchContext<'a> {
 
     // ── Job terminal states ───────────────────────────────────────────────────
 
-    async fn on_job_completed(&mut self, job_id: String) {
-        info!(peer_id = %self.peer_id, %job_id, "job completed");
+    async fn on_job_completed(&mut self, job_id: String, spans: Vec<JobPhaseSpan>) {
+        info!(peer_id = %self.peer_id, %job_id, phases = spans.len(), "job completed");
+        let _ = spans;
         self.active.remove(&job_id);
         if let Err(e) = self
             .scheduler
@@ -687,8 +690,10 @@ impl<'a> DispatchContext<'a> {
         error: String,
         kind: gradient_types::proto::BuildFailureKind,
         missing_paths: Vec<String>,
+        spans: Vec<JobPhaseSpan>,
     ) {
-        warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, "job failed");
+        warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
+        let _ = spans;
         self.active.remove(&job_id);
         if let Err(e) = self
             .scheduler

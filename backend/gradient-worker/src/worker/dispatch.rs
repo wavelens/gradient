@@ -342,7 +342,10 @@ impl DispatchState {
             Ok(()) => {
                 info!(%job_id, "job completed");
                 self.writer
-                    .send(ClientMessage::JobCompleted { job_id })
+                    .send(ClientMessage::JobCompleted {
+                        job_id,
+                        spans: vec![],
+                    })
                     .await?;
             }
             Err(e) => {
@@ -355,6 +358,7 @@ impl DispatchState {
                         error: error_chain,
                         kind,
                         missing_paths,
+                        spans: vec![],
                     })
                     .await?;
             }

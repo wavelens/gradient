@@ -246,6 +246,7 @@ mod tests {
                 error: "x".into(),
                 kind: crate::messages::BuildFailureKind::Permanent,
                 missing_paths: vec![],
+                spans: vec![],
             })
             .is_some()
         );
