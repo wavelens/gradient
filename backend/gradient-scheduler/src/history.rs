@@ -119,7 +119,7 @@ fn percentile_or_max(values: &mut [i64], p: f64) -> i64 {
     }
     values.sort_unstable();
     if values.len() < 20 {
-        return *values.last().unwrap();
+        return values[values.len() - 1];
     }
     let idx = ((values.len() as f64 - 1.0) * p).round() as usize;
     values[idx]

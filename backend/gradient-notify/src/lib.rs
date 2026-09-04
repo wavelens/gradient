@@ -193,13 +193,16 @@ impl EmailSender for EmailService {
         subject: &str,
         body: &str,
     ) -> Result<MailDeliveryResult> {
-        if !self.enabled || self.transport.is_none() {
+        if !self.enabled {
             bail!("SMTP is not configured on this server");
         }
         if to.is_empty() {
             bail!("send_action_mail: no recipients");
         }
-        let transport = self.transport.as_ref().unwrap();
+        let transport = self
+            .transport
+            .as_ref()
+            .context("SMTP is not configured on this server")?;
         let from = format!("{} <{}>", self.from_name, self.from_address);
         let mut builder = Message::builder()
             .from(from.parse().context("invalid from address")?)

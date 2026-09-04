@@ -45,12 +45,17 @@ fn user_resource(u: &UserModel) -> UserResource {
 }
 
 fn scim_json(status: StatusCode, body: impl serde::Serialize) -> Response {
-    (
-        status,
-        [(axum::http::header::CONTENT_TYPE, SCIM_CONTENT_TYPE)],
-        Json(serde_json::to_value(body).unwrap()),
-    )
-        .into_response()
+    match serde_json::to_value(body) {
+        Ok(value) => (
+            status,
+            [(axum::http::header::CONTENT_TYPE, SCIM_CONTENT_TYPE)],
+            Json(value),
+        )
+            .into_response(),
+        Err(e) => {
+            ScimError::internal(format!("failed to serialise SCIM response: {e}")).into_response()
+        }
+    }
 }
 
 #[derive(Deserialize)]

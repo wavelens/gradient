@@ -89,7 +89,7 @@ pub async fn authorize(
         };
         let mut parts = val.split_whitespace();
         let (bearer, token) = (parts.next(), parts.next());
-        if bearer != Some("Bearer") || token.is_none() {
+        let Some(token) = token.filter(|_| bearer == Some("Bearer")) else {
             audit_deny(
                 &state,
                 None,
@@ -100,8 +100,8 @@ pub async fn authorize(
             )
             .await;
             return Err(WebError::forbidden("Invalid Authorization header"));
-        }
-        token.unwrap().to_string()
+        };
+        token.to_string()
     } else if let Some(t) = token_from_cookie(&req) {
         t
     } else {

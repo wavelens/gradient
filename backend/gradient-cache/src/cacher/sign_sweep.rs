@@ -19,6 +19,7 @@ use gradient_core::ServerState;
 use gradient_sources::CacheSigner;
 use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
+use gradient_util::sync::Mutex;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QuerySelect, Set,
 };
@@ -202,8 +203,8 @@ pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<
 const FULL_BACKFILL_SECS: u64 = 3600;
 
 fn full_backfill_due() -> bool {
-    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
-    let mut last = LAST.lock().unwrap();
+    static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    let mut last = LAST.lock();
     match *last {
         // Arm on first call instead of running: a restart must not pay the
         // full scan immediately (frontier passes cover the steady state).

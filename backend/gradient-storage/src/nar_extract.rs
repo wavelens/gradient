@@ -111,8 +111,7 @@ where
             NarEvent::EndDirectory => {
                 let leaving = collector.as_ref().is_some_and(|c| stack.len() == c.depth);
                 stack.pop();
-                if leaving {
-                    let c = collector.take().unwrap();
+                if leaving && let Some(c) = collector.take() {
                     return Ok(Extracted::Directory {
                         tar_zst: c.finish()?,
                     });
@@ -147,9 +146,10 @@ where
                     let cap = std::cmp::min(size, NAR_EXTRACT_MAX_PREALLOC as u64) as usize;
                     let mut buf = Vec::with_capacity(cap);
                     reader.read_to_end(&mut buf).await?;
-                    let c = collector.as_mut().unwrap();
-                    let path = c.entry_path(&stack, Some(name.as_ref()));
-                    c.append_file(&path, &buf, executable)?;
+                    if let Some(c) = collector.as_mut() {
+                        let path = c.entry_path(&stack, Some(name.as_ref()));
+                        c.append_file(&path, &buf, executable)?;
+                    }
                 } else {
                     tokio::io::copy(&mut reader, &mut tokio::io::sink()).await?;
                 }
