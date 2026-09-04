@@ -13,37 +13,60 @@
 //! over that set is the closure size used by the build-closure endpoint and by
 //! the scheduler's scoring context.
 
-use sea_orm::{ColumnTrait, ConnectionTrait, DbErr, EntityTrait, QueryFilter};
+use crate::graph_sql::{ClosureDirection, dependency_closure_cte};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, FromQueryResult,
+    QueryFilter, Statement,
+};
 use std::collections::{HashMap, HashSet};
 
 use gradient_types::*;
 
-/// BFS over forward `derivation_dependency` edges from `roots`; returns every
-/// reachable derivation id (roots included).
+#[derive(FromQueryResult)]
+struct DerivationRow {
+    derivation: uuid::Uuid,
+}
+
+#[derive(FromQueryResult)]
+struct EdgeRow {
+    derivation: uuid::Uuid,
+    dependency: uuid::Uuid,
+}
+
+/// The `WITH RECURSIVE closure(derivation)` prelude seeded from a bound
+/// `uuid[]` of roots. One statement replaces a level-at-a-time BFS that cost a
+/// round trip per level (18 to 21 on production graphs).
+fn roots_closure_cte() -> String {
+    dependency_closure_cte(
+        "closure",
+        "SELECT unnest($1::uuid[])",
+        ClosureDirection::Dependencies,
+    )
+}
+
+/// Forward `derivation_dependency` closure of `roots`; returns every reachable
+/// derivation id (roots included).
 pub async fn transitive_closure_reachable<C: ConnectionTrait>(
     db: &C,
     roots: &[DerivationId],
 ) -> Result<HashSet<DerivationId>, DbErr> {
-    let mut visited: HashSet<DerivationId> = roots.iter().copied().collect();
-    let mut frontier: Vec<DerivationId> = roots.to_vec();
-
-    while !frontier.is_empty() {
-        let edges = crate::fetch_in_chunks(&frontier, |chunk| async move {
-            EDerivationDependency::find()
-                .filter(CDerivationDependency::Derivation.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await?;
-        frontier.clear();
-        for edge in edges {
-            if visited.insert(edge.dependency) {
-                frontier.push(edge.dependency);
-            }
-        }
+    if roots.is_empty() {
+        return Ok(HashSet::new());
     }
 
-    Ok(visited)
+    let ids: Vec<uuid::Uuid> = roots.iter().map(|d| d.into_inner()).collect();
+    Ok(
+        DerivationRow::find_by_statement(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            format!("{} SELECT derivation FROM closure", roots_closure_cte()),
+            [ids.into()],
+        ))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|r| DerivationId::new(r.derivation))
+        .collect(),
+    )
 }
 
 /// Map each derivation id to its coalesced output NAR size
@@ -107,12 +130,12 @@ pub async fn transitive_closure_size<C: ConnectionTrait>(
     Ok(by_drv.values().sum())
 }
 
-/// Closure size for many roots at once. Loads the dependency graph and output
-/// sizes for the combined reachable set in a handful of batched queries, then
-/// sums each root's closure in memory (diamonds deduped via a per-root visited
-/// set). This is `O(depth)` DB round-trips for the whole batch instead of one
-/// full DB walk per root, which matters when a dispatch round backfills many
-/// derivations that share most of their closure.
+/// Closure size for many roots at once. One recursive statement returns every
+/// edge inside the combined closure and a second returns the output sizes, then
+/// each root's closure is summed in memory (diamonds deduped via a per-root
+/// visited set). Two round trips for the whole batch instead of one full DB walk
+/// per root, which matters when a dispatch round backfills many derivations that
+/// share most of their closure.
 pub async fn transitive_closure_sizes<C: ConnectionTrait>(
     db: &C,
     roots: &[DerivationId],
@@ -121,27 +144,29 @@ pub async fn transitive_closure_sizes<C: ConnectionTrait>(
         return Ok(HashMap::new());
     }
 
+    let ids: Vec<uuid::Uuid> = roots.iter().map(|d| d.into_inner()).collect();
+    let edges = EdgeRow::find_by_statement(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        format!(
+            "{} SELECT e.derivation, e.dependency FROM derivation_dependency e \
+             JOIN closure c ON e.derivation = c.derivation",
+            roots_closure_cte()
+        ),
+        [ids.into()],
+    ))
+    .all(db)
+    .await?;
+
     let mut adjacency: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();
     let mut reachable: HashSet<DerivationId> = roots.iter().copied().collect();
-    let mut frontier: Vec<DerivationId> = roots.to_vec();
-    while !frontier.is_empty() {
-        let edges = crate::fetch_in_chunks(&frontier, |chunk| async move {
-            EDerivationDependency::find()
-                .filter(CDerivationDependency::Derivation.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await?;
-        frontier.clear();
-        for edge in edges {
-            adjacency
-                .entry(edge.derivation)
-                .or_default()
-                .push(edge.dependency);
-            if reachable.insert(edge.dependency) {
-                frontier.push(edge.dependency);
-            }
-        }
+    for edge in edges {
+        let (from, to) = (
+            DerivationId::new(edge.derivation),
+            DerivationId::new(edge.dependency),
+        );
+        adjacency.entry(from).or_default().push(to);
+        reachable.insert(from);
+        reachable.insert(to);
     }
 
     let sizes = output_sizes_by_drv(db, &reachable.iter().copied().collect::<Vec<_>>()).await?;
@@ -200,15 +225,19 @@ mod tests {
         }
     }
 
+    // The closure walk projects one `derivation` column; the mock only has to
+    // carry that, so the edge model stands in with both ends set to the node.
+    fn node(derivation: DerivationId) -> derivation_dependency::Model {
+        dep(derivation, derivation)
+    }
+
     #[tokio::test]
     async fn sums_closure_output_sizes() {
         let root = DerivationId::now_v7();
         let child = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // reachable: wave 1 (root) -> edge root->child
-            .append_query_results([vec![dep(root, child)]])
-            // wave 2 (child) -> no further edges
-            .append_query_results([Vec::<derivation_dependency::Model>::new()])
+            // the whole closure walk is now one statement
+            .append_query_results([vec![node(root), node(child)]])
             // output_sizes_by_drv: outputs for [root, child]
             .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
             .into_connection();
@@ -232,9 +261,8 @@ mod tests {
         let b = DerivationId::now_v7();
         let c = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![dep(root, a), dep(root, b)]])
-            .append_query_results([vec![dep(a, c), dep(b, c)]])
-            .append_query_results([Vec::<derivation_dependency::Model>::new()])
+            // one statement returns every edge inside the closure
+            .append_query_results([vec![dep(root, a), dep(root, b), dep(a, c), dep(b, c)]])
             .append_query_results([vec![
                 out(root, "r", Some(10)),
                 out(a, "a", Some(20)),
