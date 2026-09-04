@@ -27,7 +27,10 @@ impl Scheduler {
     }
 
     /// The in-memory half of an abort: `(worker, job)` pairs that were told to stop.
-    pub async fn abort_evaluation_jobs(&self, evaluation_id: EvaluationId) -> Vec<(String, String)> {
+    pub async fn abort_evaluation_jobs(
+        &self,
+        evaluation_id: EvaluationId,
+    ) -> Vec<(String, String)> {
         self.call(|reply| SchedulerMsg::AbortEvaluation {
             evaluation_id,
             reply,

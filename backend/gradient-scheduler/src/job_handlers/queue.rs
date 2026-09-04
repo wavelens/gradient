@@ -13,7 +13,11 @@ use crate::worker_pool::WorkerInfo;
 use gradient_types::proto::{GradientCapabilities, JobCandidate};
 
 impl Scheduler {
-    pub async fn enqueue_eval_job(&self, job_id: String, job: PendingEvalJob) -> anyhow::Result<()> {
+    pub async fn enqueue_eval_job(
+        &self,
+        job_id: String,
+        job: PendingEvalJob,
+    ) -> anyhow::Result<()> {
         self.call(|reply| SchedulerMsg::Enqueue {
             job_id,
             job: PendingJob::Eval(job),
