@@ -36,7 +36,6 @@ use crate::session::frame::ProtoReader;
 
 /// How long a draining session waits for its in-flight jobs before closing.
 pub const SESSION_DRAIN_BUDGET: Duration = Duration::from_secs(20);
-const NAR_COMMIT_CONCURRENCY: usize = 2;
 
 pub enum SessionMsg {
     Frame(ClientMessage, RpcReplyPort<bool>),
@@ -74,7 +73,6 @@ pub struct SessionState {
     nar: NarReceiveStore,
     eval_cache: EvalCacheReceiveStore,
     nar_serve_semaphore: Arc<Semaphore>,
-    nar_commit_semaphore: Arc<Semaphore>,
     last_seen: Arc<AtomicI64>,
     offers_seen: u64,
     active: HashMap<String, PendingJob>,
@@ -153,7 +151,6 @@ impl Actor for SessionActor {
             nar,
             eval_cache: EvalCacheReceiveStore::new(max_partial_bytes),
             nar_serve_semaphore: Arc::new(Semaphore::new(max_serves)),
-            nar_commit_semaphore: Arc::new(Semaphore::new(NAR_COMMIT_CONCURRENCY)),
             last_seen: registered.last_seen,
             offers_seen: 0,
             active: HashMap::new(),
@@ -181,7 +178,6 @@ impl Actor for SessionActor {
                         scheduler: &st.scheduler,
                         peer_id: &st.peer_id,
                         nar_serve_semaphore: &st.nar_serve_semaphore,
-                        nar_commit_semaphore: &st.nar_commit_semaphore,
                         active: &mut st.active,
                     };
 

@@ -5,16 +5,15 @@
  */
 
 use gradient_entity::StorePath;
+use gradient_graph::Graph;
 use gradient_storage::nar::NarStore;
-use gradient_types::ids::{CacheId, CachedPathId, CachedPathSignatureId, ProjectId};
 use gradient_types::*;
 use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
-use sea_orm::sea_query::OnConflict;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
-};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use tokio::io::AsyncRead;
 use tracing::{debug, warn};
+
+pub use gradient_graph::{NarCommit, NarCommitted, SignTargets};
 
 /// NAR metadata required to record a cached path. Hashes are normalized on write.
 pub struct IngestInput<'a> {
@@ -31,18 +30,20 @@ pub struct IngestInput<'a> {
     pub ca: Option<&'a str>,
 }
 
-pub enum SignTargets {
-    ProjectCaches(ProjectId),
-    Cache(CacheId),
-    /// Record the path but enqueue no signatures (no resolvable project).
-    None,
-}
-
-/// Outcome of an ingest.
-pub struct IngestOutcome {
-    pub cached_path: CachedPathId,
-    /// True when the `cached_path` row was created by this call.
-    pub created: bool,
+impl IngestInput<'_> {
+    pub fn to_commit(&self, targets: SignTargets) -> NarCommit {
+        NarCommit {
+            store_path: self.store_path.to_owned(),
+            file_hash: self.file_hash.to_owned(),
+            file_size: self.file_size,
+            nar_size: self.nar_size,
+            nar_hash: self.nar_hash.to_owned(),
+            references: self.references.to_vec(),
+            deriver: self.deriver.map(str::to_owned),
+            ca: self.ca.map(str::to_owned),
+            targets,
+        }
+    }
 }
 
 fn parse_store_path(store_path: &str) -> anyhow::Result<StorePath> {
@@ -57,14 +58,15 @@ fn parse_store_path(store_path: &str) -> anyhow::Result<StorePath> {
 pub async fn ingest_nar<C: ConnectionTrait>(
     db: &C,
     nar_storage: &NarStore,
+    graph: &Graph,
     nar_bytes: Vec<u8>,
     input: IngestInput<'_>,
     targets: SignTargets,
-) -> anyhow::Result<IngestOutcome> {
+) -> anyhow::Result<NarCommitted> {
     let sp = parse_store_path(input.store_path)?;
     // NAR written first; DB failure leaves an unreferenced blob - GC reclaims it.
     put_nar_idempotent(db, nar_storage, sp.hash(), input.file_hash, nar_bytes).await?;
-    upsert_and_sign(db, sp.hash(), sp.name(), input, targets).await
+    graph.commit_nar(input.to_commit(targets)).await
 }
 
 /// Streaming counterpart to [`ingest_nar`]: takes an `AsyncRead` over the
@@ -73,17 +75,18 @@ pub async fn ingest_nar<C: ConnectionTrait>(
 pub async fn ingest_nar_reader<C, R>(
     db: &C,
     nar_storage: &NarStore,
+    graph: &Graph,
     reader: R,
     input: IngestInput<'_>,
     targets: SignTargets,
-) -> anyhow::Result<IngestOutcome>
+) -> anyhow::Result<NarCommitted>
 where
     C: ConnectionTrait,
     R: AsyncRead + Unpin + Send,
 {
     let sp = parse_store_path(input.store_path)?;
     put_nar_idempotent_reader(db, nar_storage, sp.hash(), input.file_hash, reader).await?;
-    upsert_and_sign(db, sp.hash(), sp.name(), input, targets).await
+    graph.commit_nar(input.to_commit(targets)).await
 }
 
 /// Store `nar_bytes` for store-path `hash`, skipping the object-store write when
@@ -170,198 +173,11 @@ async fn nar_write_needed<C: ConnectionTrait>(
     Ok(true)
 }
 
-pub async fn ingest_metadata_only<C: ConnectionTrait>(
-    db: &C,
-    input: IngestInput<'_>,
-    targets: SignTargets,
-) -> anyhow::Result<IngestOutcome> {
-    let sp = parse_store_path(input.store_path)?;
-    upsert_and_sign(db, sp.hash(), sp.name(), input, targets).await
-}
-
-/// Record a path's hash-name references in the normalized `cached_path_reference`
-/// relation: `reference_hash` indexes referrer lookups, and `position` preserves
-/// the worker's order (nix store-path order) so the narinfo `References:` line and
-/// signature fingerprint reconstruct verbatim. Content-addressed, so re-ingest is
-/// a no-op.
-async fn sync_reference_index<C: ConnectionTrait>(
-    db: &C,
-    hash: &str,
-    references: &[String],
-) -> Result<(), sea_orm::DbErr> {
-    db.execute_raw(sea_orm::Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Postgres,
-        r#"
-        INSERT INTO cached_path_reference (id, referrer, reference, reference_hash, position)
-        SELECT uuidv7(), $1, t.tok, split_part(t.tok, '-', 1), t.ord
-        FROM unnest($2::text[]) WITH ORDINALITY AS t(tok, ord)
-        WHERE t.tok <> ''
-        ON CONFLICT (referrer, reference) DO NOTHING
-        "#,
-        [hash.into(), references.to_vec().into()],
-    ))
-    .await?;
-
-    Ok(())
-}
-
-async fn upsert_and_sign<C: ConnectionTrait>(
-    db: &C,
-    hash: &str,
-    package: &str,
-    input: IngestInput<'_>,
-    targets: SignTargets,
-) -> anyhow::Result<IngestOutcome> {
-    let ts = now();
-
-    let (cached_path_id, created) = match ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(hash))
-        .one(db)
-        .await?
-    {
-        Some(row) => {
-            let id = row.id;
-            let file_hash = normalize_nar_hash(input.file_hash);
-            // Different bytes under the same store path: the recorded build-id
-            // members no longer describe the NAR, so re-open it to the indexer.
-            let rescan_debug_info = row.file_hash.as_deref() != Some(file_hash.as_str());
-            let mut active = row.into_active_model();
-            active.file_size = Set(Some(input.file_size));
-            active.file_hash = Set(Some(file_hash));
-            if rescan_debug_info {
-                active.debug_info_indexed = Set(false);
-            }
-            active.nar_size = Set(Some(input.nar_size));
-            active.nar_hash = Set(Some(normalize_nar_hash(input.nar_hash)));
-            if input.deriver.is_some() {
-                active.deriver = Set(input.deriver.map(str::to_owned));
-            }
-            if input.ca.is_some() {
-                active.ca = Set(input.ca.map(str::to_owned));
-            }
-            active.update(db).await?;
-            (id, false)
-        }
-        None => {
-            let am = MCachedPath {
-                id: CachedPathId::now_v7(),
-                hash: hash.to_owned(),
-                package: package.to_owned(),
-                file_hash: Some(normalize_nar_hash(input.file_hash)),
-                file_size: Some(input.file_size),
-                nar_size: Some(input.nar_size),
-                nar_hash: Some(normalize_nar_hash(input.nar_hash)),
-                deriver: input.deriver.map(str::to_owned),
-                ca: input.ca.map(str::to_owned),
-                created_at: ts,
-                ..Default::default()
-            }
-            .into_active_model();
-
-            match am.insert(db).await {
-                Ok(row) => (row.id, true),
-                Err(e) => {
-                    warn!(store_path = input.store_path, error = %e, "insert cached_path failed (possible race)");
-                    match ECachedPath::find()
-                        .filter(CCachedPath::Hash.eq(hash))
-                        .one(db)
-                        .await?
-                    {
-                        Some(row) => (row.id, false),
-                        None => return Err(e.into()),
-                    }
-                }
-            }
-        }
-    };
-
-    if !input.references.is_empty() {
-        sync_reference_index(db, hash, input.references).await?;
-    }
-
-    let cache_ids: Vec<CacheId> = match targets {
-        SignTargets::None => vec![],
-        SignTargets::Cache(id) => vec![id],
-        SignTargets::ProjectCaches(project) => EProjectCache::find()
-            .filter(CProjectCache::Project.eq(project))
-            .all(db)
-            .await?
-            .into_iter()
-            .map(|oc| oc.cache)
-            .collect(),
-    };
-
-    if !cache_ids.is_empty() {
-        let rows: Vec<ACachedPathSignature> = cache_ids
-            .into_iter()
-            .map(|cid| {
-                MCachedPathSignature {
-                    id: CachedPathSignatureId::now_v7(),
-                    cached_path: cached_path_id,
-                    cache: cid,
-                    created_at: ts,
-                    ..Default::default()
-                }
-                .into_active_model()
-            })
-            .collect();
-
-        let result = ECachedPathSignature::insert_many(rows)
-            .on_conflict(
-                OnConflict::columns([
-                    CCachedPathSignature::CachedPath,
-                    CCachedPathSignature::Cache,
-                ])
-                .do_nothing()
-                .to_owned(),
-            )
-            .try_insert()
-            .exec(db)
-            .await;
-        if let Err(e) = result {
-            warn!(store_path = input.store_path, error = %e, "insert cached_path_signature failed");
-        }
-    }
-
-    Ok(IngestOutcome {
-        cached_path: cached_path_id,
-        created,
-    })
-}
-
-/// Walk a freshly stored `separateDebugInfo` NAR for its `lib/debug/.build-id`
-/// members so `debuginfo/{build_id}` answers as soon as the upload lands.
-/// Detached: the walk decompresses the whole NAR and must not hold up the commit
-/// path. Non-`-debug` paths are skipped outright, and the backfill sweep covers
-/// whatever a crash or a storage hiccup drops here.
-pub fn spawn_debug_index(
-    state: &gradient_core::ServerState,
-    cached_path: CachedPathId,
-    store_path: &str,
-) {
-    let Ok(sp) = StorePath::parse(store_path) else {
-        return;
-    };
-    if !gradient_db::carries_debug_info(sp.name()) {
-        return;
-    }
-
-    let db = state.worker_db.clone();
-    let nar_storage = state.nar_storage.clone();
-    let hash = sp.hash().to_owned();
-    state.shutdown.spawn(async move {
-        match gradient_db::index_cached_path(&db, &nar_storage, cached_path, &hash).await {
-            Ok(0) => {}
-            Ok(count) => debug!(%hash, count, "indexed debug-info build ids"),
-            Err(e) => warn!(%hash, error = %e, "failed to index debug info"),
-        }
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use gradient_types::ids::{CacheId, CachedPathId};
+    use sea_orm::{DatabaseBackend, MockDatabase};
     use uuid::Uuid;
 
     fn temp_store() -> NarStore {
@@ -404,6 +220,7 @@ mod tests {
         let err = ingest_nar(
             &db,
             &store,
+            &Graph::new(),
             vec![1],
             input("not-a-store-path"),
             SignTargets::Cache(cache_id()),
@@ -412,31 +229,19 @@ mod tests {
         assert!(err.is_err());
     }
 
+    /// The blob half of an ingest: no `cached_path` row records the path, so the
+    /// bytes are written to storage before the commit is handed to the actor.
     #[tokio::test]
     async fn create_path_writes_blob_and_reports_created() {
-        let sp = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";
         let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // `put_nar_idempotent` looks up the path first; no row ⇒ write.
             .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            .append_query_results([vec![returned_cached_path(hash)]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
             .into_connection();
         let store = temp_store();
-        let out = ingest_nar(
-            &db,
-            &store,
-            vec![1, 2, 3, 4, 5],
-            input(sp),
-            SignTargets::Cache(cache_id()),
-        )
-        .await
-        .expect("ingest");
-        assert!(out.created);
+        let wrote = put_nar_idempotent(&db, &store, hash, "sha256:abc", vec![1, 2, 3, 4, 5])
+            .await
+            .expect("put");
+        assert!(wrote);
         let blob = store.get(hash).await.expect("get").expect("present");
         assert_eq!(blob, vec![1, 2, 3, 4, 5]);
     }
@@ -569,96 +374,5 @@ mod tests {
             .unwrap();
         assert!(!wrote, "must skip when an identical NAR is already stored");
         assert_eq!(store.get(IDEM_HASH).await.unwrap().unwrap(), b"OLD");
-    }
-
-    const SP: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";
-
-    fn project() -> ProjectId {
-        ProjectId::new(Uuid::parse_str("20000000-0000-0000-0000-000000000003").unwrap())
-    }
-
-    fn project_cache_row() -> gradient_entity::project_cache::Model {
-        gradient_entity::project_cache::Model {
-            project: project(),
-            cache: cache_id(),
-            ..Default::default()
-        }
-    }
-
-    fn log_has_signature_insert(db: sea_orm::DatabaseConnection) -> bool {
-        db.into_transaction_log()
-            .iter()
-            .any(|t| format!("{t:?}").contains("cached_path_signature"))
-    }
-
-    /// A resolved project enqueues a `cached_path_signature` placeholder for every
-    /// subscribed cache. Regression guard: the detached NAR commit must resolve
-    /// the project on the read loop *before* the job is evicted from the tracker -
-    /// otherwise `SignTargets` collapses to `None`, no placeholder is written,
-    /// the sign sweep has nothing to sign, and the narinfo 404s forever.
-    #[tokio::test]
-    async fn project_target_enqueues_signature_placeholder() {
-        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            .append_query_results([vec![returned_cached_path(hash)]])
-            .append_query_results([vec![project_cache_row()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .into_connection();
-
-        ingest_metadata_only(&db, input(SP), SignTargets::ProjectCaches(project()))
-            .await
-            .expect("ingest");
-
-        assert!(
-            log_has_signature_insert(db),
-            "ProjectCaches target must insert a cached_path_signature placeholder"
-        );
-    }
-
-    #[tokio::test]
-    async fn ingest_records_content_address() {
-        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let ca = "text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944";
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            .append_query_results([vec![returned_cached_path(hash)]])
-            .into_connection();
-
-        let mut inp = input(SP);
-        inp.ca = Some(ca);
-        ingest_metadata_only(&db, inp, SignTargets::None)
-            .await
-            .expect("ingest");
-
-        let logged = db
-            .into_transaction_log()
-            .iter()
-            .any(|t| format!("{t:?}").contains(ca));
-        assert!(logged, "the content address must be written to cached_path");
-    }
-
-    /// No resolvable project (the exact state the pre-fix race produced) records the
-    /// path but enqueues no signature - so the endpoint can distinguish "not yet
-    /// signed" from "will never be signed".
-    #[tokio::test]
-    async fn none_target_enqueues_no_signature() {
-        let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            .append_query_results([vec![returned_cached_path(hash)]])
-            .into_connection();
-
-        ingest_metadata_only(&db, input(SP), SignTargets::None)
-            .await
-            .expect("ingest");
-
-        assert!(
-            !log_has_signature_insert(db),
-            "None target must not touch cached_path_signature"
-        );
     }
 }

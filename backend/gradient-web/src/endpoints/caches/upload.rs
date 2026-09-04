@@ -139,6 +139,7 @@ pub async fn nars_upload(
     let outcome = ingest_nar_reader(
         &state.web_db,
         &state.nar_storage,
+        &state.graph,
         nar_reader,
         IngestInput {
             store_path: &narinfo.store_path,
@@ -157,7 +158,6 @@ pub async fn nars_upload(
     let _ = upload_store.discard(&stage_key).await;
 
     sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
-    gradient_proto::ingest::spawn_debug_index(&state, outcome.cached_path, &narinfo.store_path);
 
     audit_record(
         &state.web_db,
@@ -378,6 +378,7 @@ pub async fn nar_finalize(
     let outcome = ingest_nar_reader(
         &state.web_db,
         &state.nar_storage,
+        &state.graph,
         nar_reader,
         IngestInput {
             store_path: &narinfo.store_path,
@@ -396,7 +397,6 @@ pub async fn nar_finalize(
     let _ = store.discard(&key).await;
 
     sign_uploaded_path(&state, &narinfo, outcome.cached_path).await;
-    gradient_proto::ingest::spawn_debug_index(&state, outcome.cached_path, &narinfo.store_path);
 
     audit_record(
         &state.web_db,

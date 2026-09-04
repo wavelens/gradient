@@ -380,13 +380,9 @@ impl<'a> DispatchContext<'a> {
         let state = Arc::clone(self.state);
         let scheduler = Arc::clone(self.scheduler);
         let peer_id = self.peer_id.to_owned();
-        let semaphore = Arc::clone(self.nar_commit_semaphore);
         let hash = hash.to_owned();
         let shutdown = state.shutdown.clone();
         shutdown.spawn(async move {
-            let Ok(_permit) = semaphore.acquire_owned().await else {
-                return;
-            };
             commit_uploaded_nar(CommitUploadedNar {
                 writer,
                 state,

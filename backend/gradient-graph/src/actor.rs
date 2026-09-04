@@ -22,8 +22,10 @@ use sea_orm::TransactionTrait;
 use tracing::{info, warn};
 
 use crate::ingest::{self, EvalEdgeAccumulator};
-use crate::messages::{IngestBatch, IngestReport, Transition, TransitionReport};
-use crate::{known, transition};
+use crate::messages::{
+    IngestBatch, IngestReport, NarCommit, NarCommitted, Transition, TransitionReport,
+};
+use crate::{known, nar, transition};
 
 /// How long a caller waits for the actor to exist after a restart.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -45,6 +47,7 @@ pub enum GraphMsg {
         drv_hashes: Vec<String>,
         reply: Reply<Vec<String>>,
     },
+    CommitNar(NarCommit, Reply<NarCommitted>),
     Transition(Transition, Reply<TransitionReport>),
     Flush,
 }
@@ -126,6 +129,19 @@ impl Actor for GraphActor {
                 let result = known::prunable(&st.ctx.worker_db, drv_hashes)
                     .await
                     .map_err(Into::into);
+                st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
+                let _ = reply.send(result);
+            }
+            GraphMsg::CommitNar(commit, reply) => {
+                flush(st).await;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
+                    nar::commit(&scoped.worker_db, &commit).await
+                })
+                .await;
+                if let Ok(committed) = &result {
+                    nar::after_commit(&st.ctx, committed, &commit.store_path);
+                }
+
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
                 let _ = reply.send(result);
             }
