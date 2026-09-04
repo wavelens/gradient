@@ -843,7 +843,7 @@ path). `backend/gradient-worker/src/executor/failure.rs`:
 takes - the `BuildError` raised inside the daemon log drain, and the bare
 `JobAborted` raised at a NAR-push checkpoint or an eval wave boundary, which
 previously fell through `wire_failure`'s unclassified-`Permanent` branch.
-`backend/gradient-scheduler/src/build/lifecycle.rs`:
+`backend/gradient-graph/src/policy.rs`:
 `abort_is_not_a_deterministic_build_failure` pins the anchor to
 `FailureOutcome::Aborted` at any attempt count with `AttemptOutcome::Aborted` and
 no reason, and `only_a_real_builder_exit_records_builder_nonzero` pins that
@@ -1120,7 +1120,7 @@ A `cached_path` whose stored object bytes don't match its recorded `nar_hash` (o
 
 ## InputsUnavailable retries in-eval instead of failing permanently
 
-A build that failed `InputsUnavailable` was marked `FailedPermanent`, so its retry was deferred to a *new* evaluation. Because the `derivation_build` anchor is global/build-once, that permanent verdict leaked onto sibling evaluations: eval `019f1747` inherited a victorialogs anchor that eval `019f15a5` had failed at `06:59:20` (its input `initrd-linux` was momentarily uncached - a dispatch race), even though the input was re-cached 14s later, so `019f1747` hung in `Building` with the build never retried. The fix routes `InputsUnavailable` through the existing transient-retry gate: `decide_failure_outcome` now treats it like `Transient` (retry to the attempt budget), the self-heal resets the missing input's producer to `Created`, and the build is marked `FailedTransient`; the backoff re-queue plus `dispatch_ready_builds`' dependency re-check hold it in `Queued` until the input is rebuilt, then it dispatches and succeeds in-eval. The self-heal circuit breaker still forces `Permanent` once `inputs_unavailable_max_loops` trips (unrecoverable input). `backend/gradient-scheduler/src/build.rs`: `inputs_unavailable_retries_like_transient_then_permanent` asserts the gate returns `Retry` while the budget remains and `Permanent` when spent; `inputs_unavailable_circuit_opens_after_max_loops` (unchanged) covers the breaker. The in-eval re-queue + gate-hold sequence is exercised by E2E CI.
+A build that failed `InputsUnavailable` was marked `FailedPermanent`, so its retry was deferred to a *new* evaluation. Because the `derivation_build` anchor is global/build-once, that permanent verdict leaked onto sibling evaluations: eval `019f1747` inherited a victorialogs anchor that eval `019f15a5` had failed at `06:59:20` (its input `initrd-linux` was momentarily uncached - a dispatch race), even though the input was re-cached 14s later, so `019f1747` hung in `Building` with the build never retried. The fix routes `InputsUnavailable` through the existing transient-retry gate: `decide_failure_outcome` now treats it like `Transient` (retry to the attempt budget), the self-heal resets the missing input's producer to `Created`, and the build is marked `FailedTransient`; the backoff re-queue plus `dispatch_ready_builds`' dependency re-check hold it in `Queued` until the input is rebuilt, then it dispatches and succeeds in-eval. The self-heal circuit breaker still forces `Permanent` once `inputs_unavailable_max_loops` trips (unrecoverable input). `backend/gradient-graph/src/policy.rs`: `inputs_unavailable_retries_like_transient_then_permanent` asserts the gate returns `Retry` while the budget remains and `Permanent` when spent; `inputs_unavailable_circuit_opens_after_max_loops` (unchanged) covers the breaker. The in-eval re-queue + gate-hold sequence is exercised by E2E CI.
 
 ## Dependency-failure dead zone reconciled proactively
 
@@ -1907,18 +1907,18 @@ Backend (`cargo test -p gradient-worker -p gradient-scheduler --tests`):
   `MissingInputs` error renders the human message (count + first path) and
   survives `anyhow` boxing, so the executor can `downcast_ref` it and forward
   the exact paths to the server.
-- `build::retry_tests::inputs_unavailable_is_terminal_no_retry` -
+- `policy::tests::inputs_unavailable_is_terminal_no_retry` -
   `decide_failure_outcome(InputsUnavailable, ..)` is always `Permanent`: the
   build fails this evaluation rather than burning the retry budget against an
   input that will not appear until its producer is rebuilt.
-- `build::retry_tests::inputs_unavailable_circuit_opens_after_max_loops` -
+- `policy::tests::inputs_unavailable_circuit_opens_after_max_loops` -
   `inputs_unavailable_circuit_open(prior, max_loops)` self-heals for the first
   `max_loops` failures and opens afterward, so an unrecoverable input stops
   churning the cache and fails fast instead of looping forever.
-- `build::retry_tests::truncate_failure_message_bounds_long_input_on_char_boundary` -
+- `policy::tests::truncate_failure_message_bounds_long_input_on_char_boundary` -
   the worker error persisted on `build_attempt.failure_message` is capped on a
   UTF-8 char boundary (full text still lands in the build log).
-- `build::retry_tests::store_path_hash_extracts_32_char_hash` - the helper that
+- `self_heal::tests::store_path_hash_extracts_32_char_hash` - the helper that
   maps a missing `/nix/store/<hash>-<name>` path to the `derivation_output`
   hash used to purge its cache artifact.
 - `proto::nar_import::tests::presigned_404_410_are_missing_inputs_other_statuses_retry` -
@@ -5236,9 +5236,9 @@ Run with: `cargo test -p core --lib state_machine::build`
   a worker that finds the outputs already valid can finalize the build as
   `Substituted` rather than `Completed` (issue #303).
 
-### Retry decision and backoff - `scheduler/src/build.rs`
+### Retry decision and backoff - `gradient-graph/src/policy.rs`
 
-Run with: `cargo test -p scheduler --lib build::retry_tests`
+Run with: `cargo test -p gradient-graph --lib policy::tests`
 
 - `permanent_is_terminal_regardless_of_attempt` - `FailedPermanent` is
   never retried regardless of the current attempt count.
