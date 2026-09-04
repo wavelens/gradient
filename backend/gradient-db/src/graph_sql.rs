@@ -353,6 +353,26 @@ mod tests {
         }
     }
 
+    /// A bounded walk must apply its restriction inside the lateral probe and
+    /// ahead of the fence, so the frontier is pruned at the index lookup rather
+    /// than after the join, and the `OFFSET 0` still terminates the subquery.
+    #[test]
+    fn a_bounded_walk_restricts_inside_the_probe() {
+        let cte = norm(&bounded_dependency_closure_cte_body(
+            "dependents",
+            "SELECT $1::uuid",
+            ClosureDirection::Dependents,
+            "e.derivation IN (SELECT derivation FROM closure)",
+        ));
+
+        assert!(
+            cte.contains(
+                "WHERE e.dependency = c.derivation                  AND e.derivation IN (SELECT derivation FROM closure) OFFSET 0) s"
+            ),
+            "the bound belongs inside the fenced probe: {cte}"
+        );
+    }
+
     /// The reference closure walks NAR references (what a client must fetch),
     /// not build inputs, so it keys on `cached_path_reference` and carries a
     /// `hash` column rather than a `derivation` one.
