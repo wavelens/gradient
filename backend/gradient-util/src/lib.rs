@@ -10,4 +10,5 @@ pub mod http_validation;
 pub mod hydra;
 pub mod nix_hash;
 pub mod shutdown;
+pub mod sync;
 pub mod supervision;
