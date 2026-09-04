@@ -1,6 +1,6 @@
 [workspace]
-members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
-default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-migration", "gradient-nix", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+members      = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-graph", "gradient-migration", "gradient-nix", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
+default-members = [".", "gradient-cache", "gradient-ci", "gradient-core", "gradient-db", "gradient-entity", "gradient-eval", "gradient-exec", "gradient-flake-lock", "gradient-forge", "gradient-graph", "gradient-migration", "gradient-nix", "gradient-notify", "gradient-proto", "gradient-report", "gradient-scheduler", "gradient-score", "gradient-sources", "gradient-state", "gradient-storage", "gradient-test-support", "gradient-types", "gradient-util", "gradient-web", "gradient-worker"]
 resolver     = "2"
 
 [workspace.package]
@@ -31,6 +31,7 @@ gradient-entity       = { path = "gradient-entity" }
 gradient-exec         = { path = "gradient-exec" }
 gradient-flake-lock   = { path = "gradient-flake-lock" }
 gradient-forge        = { path = "gradient-forge" }
+gradient-graph        = { path = "gradient-graph" }
 gradient-migration    = { path = "gradient-migration" }
 gradient-nix          = { path = "gradient-nix" }
 gradient-notify       = { path = "gradient-notify" }

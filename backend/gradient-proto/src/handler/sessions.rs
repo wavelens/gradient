@@ -49,6 +49,7 @@ impl SessionsHandle {
     pub fn child_spec(self: &Arc<Self>, scheduler: Arc<Scheduler>) -> ChildSpec {
         let handle = Arc::clone(self);
         ChildSpec::Custom {
+            stop_last: false,
             name: "sessions",
             spawn: Arc::new(move |ctx: ChildCtx| {
                 let handle = Arc::clone(&handle);

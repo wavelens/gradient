@@ -11,6 +11,7 @@ use sea_orm::EntityTrait;
 use tracing::{debug, warn};
 
 use gradient_exec::strip_nix_store_prefix;
+use gradient_graph::IngestBatch;
 use gradient_types::proto::DiscoveredDerivation;
 use gradient_types::*;
 
@@ -191,14 +192,10 @@ impl Scheduler {
             }
         };
 
-        // Canonicalise every store path to its bare `<hash>-<name>` form
-        // before it reaches the DB. `derivation.derivation_path` mirrors the
-        // narinfo `References:` convention used by `cached_path`: the
-        // `/nix/store/` prefix is added back only at the worker / API
-        // boundary. Worker batches may arrive prefixed (eval), unprefixed
-        // (mixed legacy), or both, so we strip uniformly here and keep one
-        // canonical form for every downstream key (insert dedup, deferred
-        // dep edges, build dispatch lookup).
+        // Canonicalise every store path to its bare `<hash>-<name>` form before
+        // it reaches the graph actor: `derivation.derivation_path` mirrors the
+        // narinfo `References:` convention used by `cached_path`, and the
+        // `/nix/store/` prefix is added back only at the worker / API boundary.
         for d in &mut derivations {
             d.drv_path = strip_nix_store_prefix(&d.drv_path);
             for dep in &mut d.dependencies {
@@ -206,27 +203,26 @@ impl Scheduler {
             }
         }
 
-        // Accumulate this batch's dependency edges. Whatever is fully
-        // resolvable after the batch persists is flushed immediately below so
-        // builds dispatch mid-stream; the remainder is settled by
-        // `flush_deferred_deps` at stream completion.
-        {
-            let mut acc = self.eval_edges.write().await;
-            acc.entry(job.evaluation_id)
-                .or_default()
-                .add_batch(&derivations);
-        }
-
-        eval::handle_eval_result(&self.state, &job, derivations, warnings, errors).await?;
-
-        {
-            let mut acc = self.eval_edges.write().await;
-            if let Some(entry) = acc.get_mut(&job.evaluation_id)
-                && let Err(e) = eval::flush_ready_edges(&self.state, job.evaluation_id, entry).await
-            {
-                warn!(error = %e, evaluation_id = %job.evaluation_id, "incremental edge flush failed; deferring to completion flush");
-            }
-        }
+        let Some(evaluation) = EEvaluation::find_by_id(job.evaluation_id)
+            .one(&self.state.worker_db)
+            .await?
+        else {
+            anyhow::bail!("evaluation {} not found", job.evaluation_id);
+        };
+        let facts = eval::assess_substitutability(&self.state, &evaluation, &derivations).await;
+        self.state
+            .graph
+            .ingest(IngestBatch {
+                evaluation: job.evaluation_id,
+                task: job.task_id,
+                derivations,
+                warnings,
+                errors,
+                truly_substituted: facts.truly_substituted,
+                upstream_substitutable: facts.upstream_substitutable,
+                upstream_hits: facts.upstream_hits,
+            })
+            .await?;
 
         Ok(())
     }

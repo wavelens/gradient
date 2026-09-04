@@ -20,7 +20,16 @@ impl Scheduler {
     /// its jobs gets `AbortJob` and its pending jobs are dropped.
     pub async fn abort_evaluation(&self, evaluation: MEvaluation) {
         let evaluation_id = evaluation.id;
-        gradient_db::abort_evaluation(&self.state.db(), evaluation).await;
+        if let Err(e) = self
+            .state
+            .graph
+            .transition(gradient_graph::Transition::AbortEvaluation {
+                evaluation: evaluation_id,
+            })
+            .await
+        {
+            tracing::warn!(error = %e, %evaluation_id, "abort did not reach the graph actor");
+        }
         for (worker_id, job_id) in self.abort_evaluation_jobs(evaluation_id).await {
             info!(%worker_id, %job_id, %evaluation_id, "sent AbortJob to worker");
         }

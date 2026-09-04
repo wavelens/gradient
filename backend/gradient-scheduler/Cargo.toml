@@ -18,6 +18,7 @@ workspace = true
 gradient-core = { workspace = true }
 gradient-ci = { workspace = true }
 gradient-exec = { workspace = true }
+gradient-graph = { workspace = true }
 gradient-sources = { workspace = true }
 gradient-db = { workspace = true }
 gradient-types = { workspace = true }

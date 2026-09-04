@@ -24,6 +24,7 @@ gradient-util = { workspace = true }
 gradient-types = { workspace = true }
 gradient-scheduler = { workspace = true }
 gradient-entity = { workspace = true }
+gradient-graph = { workspace = true }
 
 anyhow            = { workspace = true }
 arc-swap          = { workspace = true }

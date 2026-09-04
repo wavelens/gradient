@@ -1051,13 +1051,13 @@ Under a large eval the shared scheduler/cache DB pool exhausted (`Connection poo
 
 ## edges_complete must not be set over a dropped edge
 
-`flush_deferred_deps` resolves each reported `(source, [dependency])` edge to recorded derivations; a dependency the eval never persisted (interrupted/overlapping eval) was silently dropped, but `mark_edges_complete_for_eval` still marked the source `edges_complete` via its "is a build_job" branch - so a build_job that *declared* a dependency but recorded zero edges was dispatched as dependency-free and failed `InputsUnavailable` on an input the server had no record of. A new `derivation_build.edges_unresolved` flag (migration `m20260627_000000`) records "this anchor's declared edge set is incomplete"; `flush_deferred_deps` sets it for sources with an unresolvable dep and clears it once they all resolve, and `mark_edges_complete_for_eval` refuses to promote a flagged anchor. `backend/gradient-scheduler/src/eval.rs`: `deferred_edges_flag_sources_with_unrecorded_deps` asserts the pure `resolve_deferred_edges` flags a source with an unrecorded dependency (and excludes it from the resolved set) while a fully-resolved source is the opposite. The `mark_edges_complete_for_eval` SQL guard (`AND NOT db.edges_unresolved`) is covered by E2E CI (MockDatabase can't run the recursive CTE).
+`flush_deferred_deps` resolves each reported `(source, [dependency])` edge to recorded derivations; a dependency the eval never persisted (interrupted/overlapping eval) was silently dropped, but `mark_edges_complete_for_eval` still marked the source `edges_complete` via its "is a build_job" branch - so a build_job that *declared* a dependency but recorded zero edges was dispatched as dependency-free and failed `InputsUnavailable` on an input the server had no record of. A new `derivation_build.edges_unresolved` flag (migration `m20260627_000000`) records "this anchor's declared edge set is incomplete"; `flush_deferred_deps` sets it for sources with an unresolvable dep and clears it once they all resolve, and `mark_edges_complete_for_eval` refuses to promote a flagged anchor. `backend/gradient-graph/src/ingest.rs`: `deferred_edges_flag_sources_with_unrecorded_deps` asserts the pure `resolve_deferred_edges` flags a source with an unrecorded dependency (and excludes it from the resolved set) while a fully-resolved source is the opposite. The `mark_edges_complete_for_eval` SQL guard (`AND NOT db.edges_unresolved`) is covered by E2E CI (MockDatabase can't run the recursive CTE).
 
-The hold was designed to clear "once a later eval records the dep", but a later eval never did: the stranded anchors are substitutable (outputs on an upstream), so every subsequent eval *pruned* them via `prunable_known_derivations` instead of re-walking, and the dropped edge was never rediscovered - a permanent dead zone (observed on `019f1fde`: `python3.13-pystray`/`pypresence`/`jellyfin-apiclient-python` stuck since the dep was GC'd from another eval's closure, blocking their dependent `jellyfin-mpv-shim` and freezing the eval in `Building`). `on_query_known_derivations` now excludes any candidate whose anchor is `edges_unresolved` from the prunable set, forcing the re-walk that rediscovers the edge and clears the flag. `backend/gradient-proto/src/handler/dispatch.rs`: `edges_unresolved_anchor_is_never_prunable` asserts an anchor with all outputs on an upstream is still not pruned when its id is in the unresolved set, while `prunes_only_outputs_on_a_real_upstream` (empty unresolved set) keeps the upstream-prune behaviour.
+The hold was designed to clear "once a later eval records the dep", but a later eval never did: the stranded anchors are substitutable (outputs on an upstream), so every subsequent eval *pruned* them via `prunable_known_derivations` instead of re-walking, and the dropped edge was never rediscovered - a permanent dead zone (observed on `019f1fde`: `python3.13-pystray`/`pypresence`/`jellyfin-apiclient-python` stuck since the dep was GC'd from another eval's closure, blocking their dependent `jellyfin-mpv-shim` and freezing the eval in `Building`). `on_query_known_derivations` now excludes any candidate whose anchor is `edges_unresolved` from the prunable set, forcing the re-walk that rediscovers the edge and clears the flag. `backend/gradient-graph/src/known.rs`: `edges_unresolved_anchor_is_never_prunable` asserts an anchor with all outputs on an upstream is still not pruned when its id is in the unresolved set, while `prunes_only_outputs_on_a_real_upstream` (empty unresolved set) keeps the upstream-prune behaviour.
 
 ## Edges flush incrementally so builds dispatch mid-stream
 
-Dependency edges used to flush in one pass at eval completion, so every anchor first discovered by the eval sat `Created + edges_complete=false` until the whole walk finished - on large graphs the build fleet idled for minutes while ready leaves and already-satisfied subgraphs waited on the stream. `EvalEdgeAccumulator` + `flush_ready_edges` (`backend/gradient-scheduler/src/eval.rs`) now run after each persisted batch: pairs whose source and every declared dep have derivation rows get their edges inserted and the source marked `edges_complete` (and `edges_unresolved` cleared - the full declared set was just recorded); the batch's zero-dep leaves are marked directly. The 5s dispatch tick's canonical pipeline then promotes and dispatches them while the eval continues. Safety is unchanged: a pair with an unrecorded dep stays pending (mid-stream that means "not streamed yet", never `edges_unresolved` - only the completion-time `flush_deferred_deps` may flag that), a failed edge insert pushes the pairs back for the completion flush, and dispatch still gates on `drv_closure_cached` + cached input sources so nothing dispatches before its inputs are importable. `incremental_edge_flush_tests`: `partition_holds_pairs_with_unknown_paths` (unknown source or dep is never ready), `add_batch_unmarks_missing_and_splits_leaves` (a DB-miss memo is cleared when the dep's own batch arrives, leaves split from pairs, `into_pending` hands only unresolved pairs to the completion flush).
+Dependency edges used to flush in one pass at eval completion, so every anchor first discovered by the eval sat `Created + edges_complete=false` until the whole walk finished - on large graphs the build fleet idled for minutes while ready leaves and already-satisfied subgraphs waited on the stream. `EvalEdgeAccumulator` + `flush_ready_edges` (`backend/gradient-graph/src/ingest.rs`) now run after each persisted batch: pairs whose source and every declared dep have derivation rows get their edges inserted and the source marked `edges_complete` (and `edges_unresolved` cleared - the full declared set was just recorded); the batch's zero-dep leaves are marked directly. The 5s dispatch tick's canonical pipeline then promotes and dispatches them while the eval continues. Safety is unchanged: a pair with an unrecorded dep stays pending (mid-stream that means "not streamed yet", never `edges_unresolved` - only the completion-time `flush_deferred_deps` may flag that), a failed edge insert pushes the pairs back for the completion flush, and dispatch still gates on `drv_closure_cached` + cached input sources so nothing dispatches before its inputs are importable. `ingest::tests`: `partition_holds_pairs_with_unknown_paths` (unknown source or dep is never ready), `add_batch_unmarks_missing_and_splits_leaves` (a DB-miss memo is cleared when the dep's own batch arrives, leaves split from pairs, `into_pending` hands only unresolved pairs to the completion flush).
 
 ## Dispatch gates on the input-`.drv` closure being cached
 
@@ -1707,13 +1707,13 @@ Backend (`cargo test -p gradient-scheduler --lib worker_pool`):
 
 ## Upstream substitutability (eval-time lookup)
 
-Backend (`cargo test -p gradient-scheduler --lib upstream_substitutable_tests`):
-- `substitutable_only_when_all_outputs_available` - `derivations_all_outputs_available`
-  marks a derivation substitutable only when *every* one of its outputs is cached
-  somewhere (gradient cache or an upstream); a derivation with any output missing
-  is built. This is the all-or-nothing rule behind `compute_upstream_substitutable`.
-- `no_outputs_is_not_substitutable` - a derivation with no recorded outputs is
-  never substitutable.
+The all-or-nothing rule now lives in
+`backend/gradient-scheduler/src/eval.rs::assess_substitutability`, which runs on
+the pool outside the graph actor: a derivation is `truly_substituted` only when
+every output is fully cached with a complete closure, and `upstream_substitutable`
+only when every output resolves on a project upstream. Both arms need a live
+upstream and a real cache to mean anything, so they are covered end to end by the
+`cache` VM test rather than by MockDatabase unit tests.
 
 The full probe (`compute_upstream_substitutable`: project-scoped `.narinfo` lookup,
 persisting `derivation_output.external_url` + metadata, and `query()` serving the
@@ -1722,7 +1722,7 @@ no real-Postgres/HTTP unit harness for it.
 
 ## Eval BFS pruning honours substitutable and locally-complete closures
 
-Backend (`cargo test -p gradient-proto --lib prunable_known_derivations_tests`):
+Backend (`cargo test -p gradient-graph --lib known::tests`):
 - `prunes_only_outputs_on_a_real_upstream` - the `QueryKnownDerivations` handler
   may prune a derivation's subtree when **every** output is on a real upstream
   cache (`external_url`). An upstream binary cache serves a *complete closure*, so
@@ -5730,7 +5730,7 @@ evaluation pages stayed frozen until the eval phase finished.
   `/tasks/{project}/{task}/live` channels (and learnt into the task
   channel's known-eval set), while a progress ping for another evaluation /
   task is dropped.
-- `backend/gradient-scheduler/src/eval.rs::handle_eval_result` emits
+- `backend/gradient-graph/src/ingest.rs::after_commit` emits
   `BoardEvent::EvaluationProgress` after each batch of builds/entry-points is
   persisted, so the silent insert phase no longer leaves the UI frozen.
 

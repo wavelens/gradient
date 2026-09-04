@@ -2293,6 +2293,7 @@ dependencies = [
  "gradient-entity",
  "gradient-exec",
  "gradient-forge",
+ "gradient-graph",
  "gradient-migration",
  "gradient-nix",
  "gradient-notify",
@@ -2461,6 +2462,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "gradient-graph"
+version = "1.3.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "gradient-db",
+ "gradient-entity",
+ "gradient-storage",
+ "gradient-types",
+ "gradient-util",
+ "ractor",
+ "sea-orm",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "gradient-migration"
 version = "1.3.0"
 dependencies = [
@@ -2513,6 +2535,7 @@ dependencies = [
  "gradient-db",
  "gradient-entity",
  "gradient-exec",
+ "gradient-graph",
  "gradient-scheduler",
  "gradient-sources",
  "gradient-storage",
@@ -2569,6 +2592,7 @@ dependencies = [
  "gradient-db",
  "gradient-entity",
  "gradient-exec",
+ "gradient-graph",
  "gradient-score",
  "gradient-sources",
  "gradient-storage",
@@ -2762,6 +2786,7 @@ name = "gradient-util"
 version = "1.3.0"
 dependencies = [
  "base64 0.23.1",
+ "futures",
  "hex",
  "ractor",
  "reqwest",

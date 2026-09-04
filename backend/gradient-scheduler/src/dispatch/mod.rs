@@ -57,6 +57,7 @@ pub fn start_dispatch_loops(scheduler: Arc<Scheduler>) {
 fn core_child_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
     let scheduler = Arc::clone(scheduler);
     ChildSpec::Custom {
+        stop_last: false,
         name: "scheduler-core",
         spawn: Arc::new(move |ctx: ChildCtx| {
             let scheduler = Arc::clone(&scheduler);

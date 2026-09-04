@@ -37,23 +37,14 @@ mod job_handlers;
 pub(crate) mod trigger_dispatch;
 mod worker_lifecycle;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 
 use gradient_core::ServerState;
 use gradient_types::*;
 use ractor::{Actor, ActorCell, ActorRef, RpcReplyPort, SpawnErr};
-use tokio::sync::RwLock;
 
 use actor::{CALL_TIMEOUT, CoreActor, CoreArgs, Counts, SchedulerMsg};
-
-/// Per-evaluation accumulator of discovered `(drv_path, dependencies)` pairs.
-/// Fully-resolvable pairs flush to `derivation_dependency` edges after each
-/// batch (`eval::flush_ready_edges`, so builds dispatch mid-stream); the
-/// remainder flushes at stream completion. Entries drop when the eval
-/// completes, fails, or is aborted.
-type EvalEdgesMap = Arc<RwLock<HashMap<EvaluationId, eval::EvalEdgeAccumulator>>>;
 
 pub use gradient_types::BoardEvent;
 pub use jobs::{BoardActiveJob, DecisionCandidate, DispatchDecision, PendingJobInfo};
@@ -78,10 +69,6 @@ pub struct Scheduler {
     /// Edge-trigger generation for `kick_dispatch`: the dispatcher services a
     /// burst of kicks with one pass by comparing against the generation it saw.
     pub(crate) kick_gen: Arc<AtomicU64>,
-    /// Per-evaluation accumulator of discovered dependency edges, flushed when
-    /// the eval stream completes. Promotion itself is graph-driven (see
-    /// `gradient_db::promotion`), not tied to this map.
-    pub(crate) eval_edges: EvalEdgesMap,
     /// Scoring policy used when selecting which pending job to assign to a
     /// requesting worker.  Shared via `Arc` so it can be read lock-free.
     pub(crate) policy: Arc<dyn gradient_score::ScoringPolicy>,
@@ -118,7 +105,6 @@ impl Scheduler {
             core: Arc::new(tokio::sync::watch::channel(None).0),
             build_dispatch: Arc::new(arc_swap::ArcSwapOption::empty()),
             kick_gen: Arc::new(AtomicU64::new(0)),
-            eval_edges: Arc::new(RwLock::new(HashMap::new())),
             policy,
             instance: Arc::new(arc_swap::ArcSwap::from_pointee(
                 gradient_score::InstanceContext::default(),
@@ -195,7 +181,6 @@ impl Scheduler {
         {
             tracing::warn!(error = %e, %eval_id, "cancel_evaluation_jobs did not reach the scheduler");
         }
-        self.eval_edges.write().await.remove(&eval_id);
     }
 
     /// Spawn background task polling, eval dispatch, and build dispatch loops.

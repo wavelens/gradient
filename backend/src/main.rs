@@ -110,6 +110,12 @@ async fn run() -> std::io::Result<()> {
         None
     };
 
+    state
+        .shutdown
+        .supervise_now(state.graph.child_spec(state.db()))
+        .await
+        .map_err(std::io::Error::other)?;
+
     info!("Starting cache service");
     gradient_cache::start_cache(Arc::clone(&state)).await?;
 

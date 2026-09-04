@@ -72,6 +72,7 @@ fn state_with_metrics(enabled: bool, db: DatabaseConnection) -> Arc<ServerState>
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        graph: gradient_core::Graph::new(),
     })
 }
 

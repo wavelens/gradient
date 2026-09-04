@@ -21,9 +21,9 @@ use tracing::error;
 /// Abort an evaluation's in-flight builds. Anchors are global, so this only
 /// aborts the anchors this evaluation needs that no other live evaluation also
 /// needs; anchors still wanted elsewhere keep running for those evaluations.
-pub async fn abort_evaluation(ctx: &DbContext, evaluation: MEvaluation) {
+pub async fn abort_evaluation(ctx: &DbContext, evaluation: MEvaluation) -> Vec<DerivationBuildId> {
     if EvalStateMachine::is_terminal(&evaluation.status) {
-        return;
+        return Vec::new();
     }
 
     // Park the evaluation first: the dispatcher skips Waiting evaluations, so
@@ -31,11 +31,16 @@ pub async fn abort_evaluation(ctx: &DbContext, evaluation: MEvaluation) {
     // transition to Aborted below carries the user-facing side effects.
     gate_evaluation_aborting(ctx, evaluation.id).await;
 
-    if let Err(e) = abort_eval_anchors(ctx, &evaluation).await {
-        error!(error = %e, evaluation_id = %evaluation.id, "Failed to abort evaluation anchors");
-    }
+    let aborted = match abort_eval_anchors(ctx, &evaluation).await {
+        Ok(aborted) => aborted,
+        Err(e) => {
+            error!(error = %e, evaluation_id = %evaluation.id, "Failed to abort evaluation anchors");
+            Vec::new()
+        }
+    };
 
     update_evaluation_status(ctx, evaluation, EvaluationStatus::Aborted).await;
+    aborted
 }
 
 /// Park the evaluation as `Waiting` with the `Aborting` reason via a direct
@@ -65,7 +70,7 @@ async fn gate_evaluation_aborting(ctx: &DbContext, evaluation_id: EvaluationId) 
 async fn abort_eval_anchors(
     ctx: &DbContext,
     evaluation: &MEvaluation,
-) -> Result<(), sea_orm::DbErr> {
+) -> Result<Vec<DerivationBuildId>, sea_orm::DbErr> {
     let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
         .select_only()
         .column(CBuildJob::DerivationBuild)
@@ -74,7 +79,7 @@ async fn abort_eval_anchors(
         .all(&ctx.worker_db)
         .await?;
     if anchor_ids.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let active = fetch_in_chunks(&anchor_ids, |chunk| async move {
@@ -90,7 +95,7 @@ async fn abort_eval_anchors(
     })
     .await?;
     if active.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let active_ids: Vec<DerivationBuildId> = active.iter().map(|a| a.id).collect();
@@ -99,7 +104,7 @@ async fn abort_eval_anchors(
     let to_abort: Vec<&MDerivationBuild> =
         active.iter().filter(|a| !shared.contains(&a.id)).collect();
     if to_abort.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let abort_ids: Vec<DerivationBuildId> = to_abort.iter().map(|a| a.id).collect();
@@ -166,7 +171,7 @@ async fn abort_eval_anchors(
             evaluation_id: evaluation.id.into_inner(),
         });
 
-    Ok(())
+    Ok(abort_ids)
 }
 
 /// Of `anchor_ids`, those a non-terminal evaluation other than `this_eval` still

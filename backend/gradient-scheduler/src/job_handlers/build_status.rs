@@ -9,15 +9,16 @@
 use anyhow::Result;
 use gradient_entity::build::BuildStatus;
 use sea_orm::EntityTrait;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
+use gradient_graph::Transition;
 use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput};
 use gradient_types::*;
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
+use crate::build;
 use crate::jobs::PendingJob;
-use crate::{build, eval};
 
 impl Scheduler {
     pub async fn handle_build_status_update(&self, build_id_str: &str, worker_id: &str) {
@@ -128,34 +129,32 @@ impl Scheduler {
                         }
                         None => {
                             warn!(evaluation_id = %j.evaluation_id, "fetch-only job reported no flake_source; failing eval");
-                            eval::handle_eval_job_failed(
-                                &self.state,
-                                j.evaluation_id,
-                                "fetch completed but no flake source was archived",
-                                BuildFailureKind::Permanent,
-                                &[],
-                            )
-                            .await
+                            self.state
+                                .graph
+                                .transition(Transition::EvalFailed {
+                                    evaluation: j.evaluation_id,
+                                    error: "fetch completed but no flake source was archived"
+                                        .into(),
+                                    kind: BuildFailureKind::Permanent,
+                                    missing_paths: Vec::new(),
+                                })
+                                .await
+                                .map(|_| ())
                         }
                     };
                 }
 
                 // The stream is done, so every endpoint derivation now has a
-                // row: flush the dependency edges still pending after the
-                // incremental per-batch flushes so the graph is complete for
-                // promotion + dispatch.
-                let edges = self
-                    .eval_edges
-                    .write()
+                // row: the actor settles the still-pending dependency edges and
+                // reconciles the closure before the eval moves to Building.
+                let r = self
+                    .state
+                    .graph
+                    .transition(Transition::EvalStreamCompleted {
+                        evaluation: j.evaluation_id,
+                    })
                     .await
-                    .remove(&j.evaluation_id)
-                    .unwrap_or_default()
-                    .into_pending();
-                if let Err(e) = eval::flush_deferred_deps(&self.state, j.evaluation_id, edges).await
-                {
-                    error!(error = %e, evaluation_id = %j.evaluation_id, "flush_deferred_deps failed");
-                }
-                let r = eval::handle_eval_job_completed(&self.state, j.evaluation_id).await;
+                    .map(|_| ());
                 if worker_idle {
                     self.kick_dispatch();
                 }
@@ -195,15 +194,17 @@ impl Scheduler {
             .await?;
         match released.job {
             Some(PendingJob::Eval(j)) => {
-                self.eval_edges.write().await.remove(&j.evaluation_id);
-                let r = eval::handle_eval_job_failed(
-                    &self.state,
-                    j.evaluation_id,
-                    error,
-                    kind,
-                    missing_paths,
-                )
-                .await;
+                let r = self
+                    .state
+                    .graph
+                    .transition(Transition::EvalFailed {
+                        evaluation: j.evaluation_id,
+                        error: error.to_owned(),
+                        kind,
+                        missing_paths: missing_paths.to_vec(),
+                    })
+                    .await
+                    .map(|_| ());
                 // A corrupt-eval-cache heal re-queues the eval; kick dispatch so
                 // it re-runs promptly instead of waiting for the next tick.
                 self.kick_dispatch();
