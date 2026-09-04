@@ -7,6 +7,7 @@
 pub mod state_root;
 pub mod upstream;
 
+pub use gradient_graph::Graph;
 pub use state_root::{AppState, ServerState};
 
 use gradient_db::{CacheDb, WebDb, WorkerDb, connect_cache_db, connect_db, connect_web_db};
@@ -215,5 +216,6 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         scim_group_roles,
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor,
+        graph: Graph::new(),
     }))
 }

@@ -19,6 +19,7 @@ use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
 use gradient_db::{CacheDb, DbContext, StatusReactor, WebDb, WorkerDb};
 use gradient_forge::ForgeRegistry;
+use gradient_graph::Graph;
 use gradient_notify::EmailSender;
 use gradient_state::{OidcGroupRoles, PendingProjectMemberships, ScimGroupRoles};
 use gradient_storage::{LogStorage, NarStore, StorageCtx};
@@ -75,6 +76,9 @@ pub struct AppState {
     /// into forge events and PR-comment reactions. Tests and worker-side flows
     /// use [`gradient_db::NoReactor`].
     pub reactor: Arc<dyn StatusReactor>,
+    /// The graph actor's handle: every write to the dependency graph and the
+    /// cache index goes through it.
+    pub graph: Arc<Graph>,
 }
 
 /// Kept as an alias so handler signatures and `Arc<ServerState>` call sites in

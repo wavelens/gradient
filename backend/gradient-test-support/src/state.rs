@@ -49,6 +49,7 @@ pub fn test_state(db: DatabaseConnection) -> Arc<ServerState> {
         scim_group_roles: Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        graph: gradient_core::Graph::new(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
 }
@@ -80,6 +81,7 @@ pub fn test_state_cache(db: DatabaseConnection) -> Arc<ServerState> {
         scim_group_roles: Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        graph: gradient_core::Graph::new(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
 }
@@ -112,6 +114,7 @@ pub fn test_state_with_log_storage(
         scim_group_roles: Arc::new(Default::default()),
         board_events: tokio::sync::broadcast::channel(256).0,
         reactor: std::sync::Arc::new(gradient_db::NoReactor),
+        graph: gradient_core::Graph::new(),
         upstream_query: std::sync::Arc::new(tokio::sync::Semaphore::new(32)),
     })
 }

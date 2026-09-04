@@ -11,7 +11,7 @@
 //! pass exceeds its budget is cancelled in place and ticks again. Shutdown stops
 //! the whole tree through the shared [`Shutdown`] token.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -50,9 +50,12 @@ pub struct PeriodicSpec {
 #[derive(Clone)]
 pub enum ChildSpec {
     Periodic(PeriodicSpec),
+    /// `stop_last` children are stopped after every sibling, so late callers
+    /// still find them.
     Custom {
         name: &'static str,
         spawn: SpawnFn,
+        stop_last: bool,
     },
     Supervisor {
         name: &'static str,
@@ -236,6 +239,7 @@ pub struct RootArgs {
 pub struct RootState {
     args: RootArgs,
     live: HashMap<ActorId, &'static str>,
+    stop_last: HashSet<ActorId>,
     failures: HashMap<&'static str, (u32, Instant)>,
 }
 
@@ -293,6 +297,15 @@ async fn spawn_child(
         }
     };
     state.live.insert(cell.get_id(), spec.name());
+    if matches!(
+        spec,
+        ChildSpec::Custom {
+            stop_last: true,
+            ..
+        }
+    ) {
+        state.stop_last.insert(cell.get_id());
+    }
     if !matches!(spec, ChildSpec::Supervisor { .. }) {
         state.args.health.register(spec.name());
     }
@@ -314,6 +327,7 @@ impl Actor for Root {
         let mut state = RootState {
             args,
             live: HashMap::new(),
+            stop_last: HashSet::new(),
             failures: HashMap::new(),
         };
         for spec in state.args.children.clone() {
@@ -382,14 +396,26 @@ impl Actor for Root {
     async fn post_stop(
         &self,
         myself: ActorRef<Self::Msg>,
-        _state: &mut Self::State,
+        state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
-        myself
+        let (last, first): (Vec<ActorCell>, Vec<ActorCell>) = myself
             .get_cell()
-            .stop_children_and_wait(Some("shutdown".into()), Some(STOP_TIMEOUT))
-            .await;
+            .get_children()
+            .into_iter()
+            .partition(|c| state.stop_last.contains(&c.get_id()));
+        stop_wave(first).await;
+        stop_wave(last).await;
         Ok(())
     }
+}
+
+async fn stop_wave(cells: Vec<ActorCell>) {
+    futures::future::join_all(cells.into_iter().map(|cell| async move {
+        let _ = cell
+            .stop_and_wait(Some("shutdown".into()), Some(STOP_TIMEOUT))
+            .await;
+    }))
+    .await;
 }
 
 /// Handle to a running tree: the root and its health registry.
@@ -672,6 +698,59 @@ mod tests {
         actor.stop(None);
     }
 
+    struct Recorder(&'static str, Arc<Mutex<Vec<&'static str>>>);
+
+    impl Actor for Recorder {
+        type Msg = ();
+        type State = ();
+        type Arguments = ();
+
+        async fn pre_start(&self, _: ActorRef<()>, _: ()) -> Result<(), ActorProcessingErr> {
+            Ok(())
+        }
+
+        async fn post_stop(&self, _: ActorRef<()>, _: &mut ()) -> Result<(), ActorProcessingErr> {
+            self.1.lock().unwrap().push(self.0);
+            Ok(())
+        }
+    }
+
+    fn recorder_spec(
+        name: &'static str,
+        stop_last: bool,
+        log: &Arc<Mutex<Vec<&'static str>>>,
+    ) -> ChildSpec {
+        let log = Arc::clone(log);
+        ChildSpec::Custom {
+            name,
+            stop_last,
+            spawn: Arc::new(move |ctx: ChildCtx| {
+                let log = Arc::clone(&log);
+                Box::pin(async move {
+                    let (actor, _) =
+                        Actor::spawn_linked(None, Recorder(name, log), (), ctx.parent).await?;
+                    Ok(actor.get_cell())
+                })
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stop_last_child_is_stopped_after_its_siblings() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let shutdown = Shutdown::new();
+        shutdown
+            .supervise_now(recorder_spec("last", true, &log))
+            .await
+            .unwrap();
+        shutdown
+            .supervise_now(recorder_spec("first", false, &log))
+            .await
+            .unwrap();
+        shutdown.cancel_and_drain(Duration::from_secs(5)).await;
+        assert_eq!(*log.lock().unwrap(), vec!["first", "last"]);
+    }
+
     #[tokio::test]
     async fn backoff_grows_and_caps() {
         let cancel = CancellationToken::new();
@@ -682,6 +761,7 @@ mod tests {
                 cancel,
             },
             live: HashMap::new(),
+            stop_last: HashSet::new(),
             failures: HashMap::new(),
         };
         let delays: Vec<u64> = (0..8).map(|_| st.backoff("x").as_secs()).collect();

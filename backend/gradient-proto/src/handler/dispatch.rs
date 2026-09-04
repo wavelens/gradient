@@ -11,8 +11,7 @@ use std::sync::Arc;
 
 use gradient_core::ServerState;
 use gradient_exec::strip_nix_store_prefix;
-use gradient_types::ids::{DerivationId, ProjectId};
-use gradient_types::*;
+use gradient_types::ids::ProjectId;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
@@ -846,7 +845,7 @@ impl RpcContext {
     async fn on_query_known_derivations(&self, job_id: String, drv_paths: Vec<String>) {
         debug!(peer_id = %self.peer_id, %job_id, count = drv_paths.len(), "QueryKnownDerivations");
         // Our own cache is output-only, so only `external_url` upstreams (which
-        // serve a complete closure) gate pruning - see `prunable_known_derivations`.
+        // serve a complete closure) gate pruning - see `gradient_graph::known`.
         let hashes: Vec<String> = drv_paths
             .iter()
             .map(|p| strip_nix_store_prefix(p))
@@ -859,11 +858,7 @@ impl RpcContext {
             .into_iter()
             .collect();
         let known = match self.scheduler.project_for_job(&job_id).await {
-            // A degraded DB read must prune NOTHING (the worker re-walks, which
-            // is always safe), never masquerade as "no rows": an empty
-            // `edges_unresolved` set from a failed query would re-prune an
-            // anchor whose dropped edge only a re-walk can restore.
-            Some(_) => match self.load_prunable(hashes).await {
+            Some(_) => match self.state.graph.known_derivations(hashes).await {
                 Ok(known) => known,
                 Err(e) => {
                     warn!(peer_id = %self.peer_id, %job_id, error = %e, "QueryKnownDerivations degraded; pruning nothing");
@@ -887,76 +882,6 @@ impl RpcContext {
         }
     }
 
-    /// The prunable-derivations lookup, on the isolated cache-query pool so an
-    /// eval's prefetch storm cannot exhaust the scheduler pool through this
-    /// probe. Any error propagates - the caller prunes nothing.
-    async fn load_prunable(&self, hashes: Vec<String>) -> Result<Vec<String>, sea_orm::DbErr> {
-        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-
-        let db = &self.state.cache_db;
-        let candidates = EDerivation::find()
-            .filter(CDerivation::Hash.is_in(hashes))
-            .all(db)
-            .await?;
-        if candidates.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let drv_ids: Vec<DerivationId> = candidates.iter().map(|d| d.id).collect();
-        let outputs = EDerivationOutput::find()
-            .filter(CDerivationOutput::Derivation.is_in(drv_ids.clone()))
-            .all(db)
-            .await?;
-
-        let anchors = EDerivationBuild::find()
-            .filter(CDerivationBuild::Derivation.is_in(drv_ids))
-            .all(db)
-            .await?;
-        // Anchors carrying a dropped dependency edge (`edges_unresolved`)
-        // must be re-walked, not pruned, so the eval rediscovers the edge
-        // and clears the flag - otherwise they stay stranded off promotion.
-        let unresolved: HashSet<DerivationId> = anchors
-            .iter()
-            .filter(|b| b.edges_unresolved)
-            .map(|b| b.derivation)
-            .collect();
-        // Local-prune arm precondition: the anchor already succeeded and its
-        // subtree's edges are durably recorded, so skipping the walk loses
-        // nothing the graph needs.
-        let complete_anchors: HashSet<DerivationId> = anchors
-            .iter()
-            .filter(|b| b.edges_complete && b.status.is_terminal_success())
-            .map(|b| b.derivation)
-            .collect();
-
-        let out_hashes: Vec<String> = outputs
-            .iter()
-            .map(|o| o.hash.clone())
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-        let closure_cached: HashSet<String> = ECachedPath::find()
-            .filter(CCachedPath::Hash.is_in(out_hashes))
-            .all(db)
-            .await?
-            .into_iter()
-            .filter(|cp| cp.is_fully_cached() && cp.closure_complete)
-            .map(|cp| cp.hash)
-            .collect();
-
-        let candidates: Vec<(DerivationId, String)> = candidates
-            .into_iter()
-            .map(|d| (d.id, d.store_path()))
-            .collect();
-        Ok(prunable_known_derivations(
-            candidates,
-            &outputs,
-            &unresolved,
-            &complete_anchors,
-            &closure_cached,
-        ))
-    }
-
     async fn on_worker_metrics(
         &self,
         cpu_usage_pct: f32,
@@ -976,203 +901,5 @@ impl RpcContext {
                 },
             )
             .await;
-    }
-}
-
-/// Decide which `(derivation_id, store_path)` candidates the eval BFS may prune.
-///
-/// A derivation is safe to prune (skip subtree traversal) when a dependent can
-/// fetch everything it needs without the subtree ever being re-walked. Two arms:
-///
-/// Upstream arm: every output is available on a real upstream cache
-/// (`external_url`). An upstream binary cache serves a *complete closure*, so a
-/// build worker can fetch the pruned subtree's outputs on demand.
-///
-/// Local arm: the anchor is terminal-success with `edges_complete` (the eval
-/// that produced it durably recorded its subtree's graph) AND every output has
-/// a fully-cached `cached_path` with `closure_complete` - the output's full
-/// runtime closure is in our cache, so dependents fetch from us. Bare
-/// `is_cached`/`cached_path` presence is NOT enough (our cache is populated
-/// output-only; pruning on it stranded never-pushed closure members like
-/// `unit-*.service` -> `X-Restart-Triggers-*` as permanent `InputsUnavailable`
-/// dead-ends); `cached_path.closure_complete` is the reconciled ground truth
-/// that closed that hole. If GC later evicts a member, the demote paths clear
-/// the flag and the next eval re-walks.
-///
-/// Without the local arm every built (non-upstream) node - the whole
-/// config-specific tree - was re-walked on every evaluation.
-fn prunable_known_derivations(
-    candidates: Vec<(DerivationId, String)>,
-    outputs: &[MDerivationOutput],
-    unresolved: &HashSet<DerivationId>,
-    complete_anchors: &HashSet<DerivationId>,
-    closure_cached: &HashSet<String>,
-) -> Vec<String> {
-    let mut counts: HashMap<DerivationId, (usize, usize, usize)> = HashMap::new();
-    for o in outputs {
-        let entry = counts.entry(o.derivation).or_insert((0, 0, 0));
-        entry.0 += 1;
-        if o.external_url.is_none() {
-            entry.1 += 1;
-        }
-        if !closure_cached.contains(&o.hash) {
-            entry.2 += 1;
-        }
-    }
-
-    // A stale `edges_unresolved` anchor must be re-walked, never pruned: pruning
-    // skips the walk that would rediscover its dropped dependency edge (e.g. a dep
-    // GC'd out from under it) and clear the flag, leaving it and its dependents
-    // stranded off promotion forever.
-    candidates
-        .into_iter()
-        .filter(|(id, _)| {
-            let (total, off_upstream, off_local) = counts.get(id).copied().unwrap_or((0, 0, 0));
-            let upstream_ok = off_upstream == 0;
-            let local_ok = off_local == 0 && complete_anchors.contains(id);
-            total > 0 && !unresolved.contains(id) && (upstream_ok || local_ok)
-        })
-        .map(|(_, store_path)| store_path)
-        .collect()
-}
-
-#[cfg(test)]
-mod prunable_known_derivations_tests {
-    use super::prunable_known_derivations;
-    use gradient_types::MDerivationOutput;
-    use gradient_types::ids::{DerivationId, DerivationOutputId};
-    use std::collections::HashSet;
-
-    fn output(drv: DerivationId, hash: &str) -> MDerivationOutput {
-        MDerivationOutput {
-            id: DerivationOutputId::now_v7(),
-            derivation: drv,
-            hash: hash.to_string(),
-            ..Default::default()
-        }
-    }
-
-    fn prune(
-        candidates: Vec<(DerivationId, String)>,
-        outputs: &[MDerivationOutput],
-        unresolved: &HashSet<DerivationId>,
-        complete_anchors: &HashSet<DerivationId>,
-        closure_cached: &HashSet<String>,
-    ) -> Vec<String> {
-        prunable_known_derivations(
-            candidates,
-            outputs,
-            unresolved,
-            complete_anchors,
-            closure_cached,
-        )
-    }
-
-    #[test]
-    fn prunes_only_outputs_on_a_real_upstream() {
-        // `external_url` (a real upstream that serves a complete closure) is safe
-        // to prune; bare `is_cached` in our own output-only cache is not, because
-        // a config-specific node's subtree may never have been pushed.
-        let local = DerivationId::now_v7(); // is_cached in our cache, NOT upstream
-        let upstream = DerivationId::now_v7(); // every output on an upstream
-        let partial = DerivationId::now_v7(); // one output upstream, one not
-        let output_less = DerivationId::now_v7(); // recorded drv, no outputs
-        let unknown = DerivationId::now_v7(); // no rows at all
-
-        let mut o_local = output(local, "aaa");
-        o_local.is_cached = true;
-        let mut o_upstream = output(upstream, "bbb");
-        o_upstream.external_url = Some("https://cache.example/bbb.narinfo".to_string());
-        let mut o_partial_a = output(partial, "ddd");
-        o_partial_a.external_url = Some("https://cache.example/ddd.narinfo".to_string());
-        let mut o_partial_b = output(partial, "eee");
-        o_partial_b.is_cached = true; // in our cache, but not upstream
-
-        let outputs = vec![o_local, o_upstream, o_partial_a, o_partial_b];
-
-        let candidates = vec![
-            (local, "/nix/store/aaa-local".to_string()),
-            (upstream, "/nix/store/bbb-upstream".to_string()),
-            (partial, "/nix/store/ddd-partial".to_string()),
-            (output_less, "/nix/store/fff-output-less".to_string()),
-            (unknown, "/nix/store/ggg-unknown".to_string()),
-        ];
-
-        let prunable = prune(
-            candidates,
-            &outputs,
-            &HashSet::new(),
-            &HashSet::new(),
-            &HashSet::new(),
-        );
-        assert_eq!(prunable, vec!["/nix/store/bbb-upstream".to_string()]);
-    }
-
-    /// The local arm: a terminal-success anchor with recorded edges whose every
-    /// output is fully cached with `cached_path.closure_complete` prunes even
-    /// off-upstream - without it the whole built (config-specific) tree was
-    /// re-walked on every evaluation. Both preconditions are load-bearing: a
-    /// closure-complete output without the recorded-graph anchor, or a complete
-    /// anchor with one output lacking closure_complete, must keep walking.
-    #[test]
-    fn locally_closure_complete_anchor_prunes() {
-        let complete = DerivationId::now_v7(); // anchor complete + output closure-cached
-        let no_anchor = DerivationId::now_v7(); // output closure-cached, no complete anchor
-        let half_cached = DerivationId::now_v7(); // anchor complete, one output not closure-cached
-
-        let outputs = vec![
-            output(complete, "aaa"),
-            output(no_anchor, "bbb"),
-            output(half_cached, "ccc"),
-            output(half_cached, "ddd"),
-        ];
-        let candidates = vec![
-            (complete, "/nix/store/aaa-complete".to_string()),
-            (no_anchor, "/nix/store/bbb-no-anchor".to_string()),
-            (half_cached, "/nix/store/ccc-half".to_string()),
-        ];
-        let complete_anchors = HashSet::from([complete, half_cached]);
-        let closure_cached: HashSet<String> = ["aaa", "bbb", "ccc"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-
-        let prunable = prune(
-            candidates,
-            &outputs,
-            &HashSet::new(),
-            &complete_anchors,
-            &closure_cached,
-        );
-        assert_eq!(prunable, vec!["/nix/store/aaa-complete".to_string()]);
-    }
-
-    /// A derivation flagged `edges_unresolved` (a build-dep edge a prior eval could
-    /// not record - e.g. the dep was GC'd out from under a shared closure) must NOT
-    /// be pruned even when every output is on an upstream or closure-complete
-    /// locally: pruning skips the re-walk that rediscovers the dropped edge and
-    /// clears the flag, so the anchor and its dependents stay stranded off
-    /// promotion forever.
-    #[test]
-    fn edges_unresolved_anchor_is_never_prunable() {
-        let upstream = DerivationId::now_v7();
-        let mut o = output(upstream, "bbb");
-        o.external_url = Some("https://cache.example/bbb.narinfo".to_string());
-        let candidates = vec![(upstream, "/nix/store/bbb-upstream".to_string())];
-        let unresolved = HashSet::from([upstream]);
-        let complete_anchors = HashSet::from([upstream]);
-        let closure_cached: HashSet<String> = HashSet::from(["bbb".to_string()]);
-
-        assert!(
-            prune(
-                candidates,
-                &[o],
-                &unresolved,
-                &complete_anchors,
-                &closure_cached
-            )
-            .is_empty(),
-            "an edges_unresolved anchor must be re-walked, not pruned"
-        );
     }
 }

@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+# SPDX-License-Identifier: AGPL-3.0-only
+[package]
+name = "gradient-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "gradient_graph"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+gradient-db      = { workspace = true }
+gradient-entity  = { workspace = true }
+gradient-storage = { workspace = true }
+gradient-types   = { workspace = true }
+gradient-util    = { workspace = true }
+
+anyhow     = { workspace = true }
+chrono     = { workspace = true }
+ractor     = { workspace = true }
+sea-orm    = { workspace = true }
+serde_json = { workspace = true }
+tokio      = { workspace = true, features = ["macros", "sync", "time"] }
+tracing    = { workspace = true }
+uuid       = { workspace = true }
+
+[dev-dependencies]
+clap     = { workspace = true }
+tempfile = { workspace = true }
+tokio    = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }

@@ -4,1532 +4,188 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Handles `EvalResult` messages from workers.
+//! What the graph actor cannot establish itself about an eval batch: which
+//! derivations our cache already holds whole, and which an upstream serves.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
 use gradient_core::ServerState;
-use gradient_db::{
-    record_evaluation_message, update_evaluation_status, update_evaluation_status_with_error,
-};
-use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::EvaluationStatus;
-use gradient_entity::evaluation_message::MessageLevel;
-use gradient_exec::strip_nix_store_prefix;
-use gradient_sources::{get_hash_from_path, parse_drv_hash_name};
+use gradient_entity::StorePath;
+use gradient_graph::UpstreamHit;
+use gradient_types::proto::DiscoveredDerivation;
 use gradient_types::*;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-};
-use tracing::{debug, error, info, warn};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use tracing::{error, warn};
 
-use super::jobs::PendingEvalJob;
-use gradient_types::proto::{BuildFailureKind, DiscoveredDerivation};
+const UPSTREAM_WINDOW_MINUTES: i64 = 60;
 
-const BATCH_SIZE: usize = 1000;
-
-// ── Derivation batch preparation ──────────────────────────────────────────────
-
-/// New derivation rows and their outputs, ready for bulk DB insert.
-struct DerivationInsertBatch {
-    /// Mapping from drv_path → assigned UUID for all derivations (new + pre-existing).
-    drv_path_to_id: HashMap<String, DerivationId>,
-    new_derivations: Vec<ADerivation>,
-    new_outputs: Vec<ADerivationOutput>,
+#[derive(Debug, Default)]
+pub struct SubstitutionFacts {
+    pub truly_substituted: HashSet<String>,
+    pub upstream_substitutable: HashSet<String>,
+    pub upstream_hits: HashMap<String, UpstreamHit>,
 }
 
-impl DerivationInsertBatch {
-    /// Build insert rows for derivations not yet in `existing`.
-    fn prepare(derivations: &[DiscoveredDerivation], existing: &[MDerivation]) -> Self {
-        let mut drv_path_to_id: HashMap<String, DerivationId> =
-            existing.iter().map(|d| (d.drv_path(), d.id)).collect();
-
-        let now = gradient_types::now();
-        let mut new_derivations: Vec<ADerivation> = Vec::new();
-        let mut new_outputs: Vec<ADerivationOutput> = Vec::new();
-
-        for d in derivations {
-            if drv_path_to_id.contains_key(&d.drv_path) {
-                continue;
-            }
-            let id = DerivationId::now_v7();
-            drv_path_to_id.insert(d.drv_path.clone(), id);
-            let (drv_hash, drv_name) = parse_drv_hash_name(&d.drv_path)
-                .unwrap_or_else(|_| ("unknown".to_owned(), d.drv_path.clone()));
-            new_derivations.push(
-                MDerivation {
-                    id,
-                    hash: drv_hash,
-                    name: drv_name,
-                    architecture: d.architecture.clone(),
-                    pname: d.pname.clone(),
-                    prefer_local_build: d.prefer_local_build,
-                    is_fixed_output: d.is_fixed_output,
-                    allow_substitutes: d.allow_substitutes,
-                    created_at: now,
-                    ..Default::default()
-                }
-                .into_active_model(),
-            );
-            for output in &d.outputs {
-                let (hash, package) =
-                    get_hash_from_path(output.path.clone()).unwrap_or_else(|_| {
-                        (
-                            gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH.to_owned(),
-                            output.name.clone(),
-                        )
-                    });
-                new_outputs.push(
-                    MDerivationOutput {
-                        id: DerivationOutputId::now_v7(),
-                        derivation: id,
-                        name: output.name.clone(),
-                        hash,
-                        package,
-                        created_at: now,
-                        ..Default::default()
-                    }
-                    .into_active_model(),
-                );
-            }
-        }
-
-        Self {
-            drv_path_to_id,
-            new_derivations,
-            new_outputs,
-        }
-    }
-
-    /// Insert new derivations and outputs into the DB.
-    ///
-    /// Returns the `drv_path_to_id` map for downstream use.
-    async fn insert(
-        self,
-        state: &Arc<ServerState>,
-        evaluation: &MEvaluation,
-    ) -> Result<HashMap<String, DerivationId>> {
-        if !self.new_derivations.is_empty() {
-            for chunk in self.new_derivations.chunks(BATCH_SIZE) {
-                if let Err(e) = EDerivation::insert_many(chunk.to_vec())
-                    .exec(&state.worker_db)
-                    .await
-                {
-                    error!(error = %e, "failed to insert derivations");
-                    update_evaluation_status_with_error(
-                        &state.db(),
-                        evaluation.clone(),
-                        EvaluationStatus::Failed,
-                        format!("failed to insert derivations: {}", e),
-                        Some("db-insert".to_string()),
-                    )
-                    .await;
-                    return Err(e.into());
-                }
-            }
-        }
-        if !self.new_outputs.is_empty() {
-            for chunk in self.new_outputs.chunks(BATCH_SIZE) {
-                if let Err(e) = EDerivationOutput::insert_many(chunk.to_vec())
-                    .exec(&state.worker_db)
-                    .await
-                {
-                    error!(error = %e, "failed to insert derivation outputs");
-                }
-            }
-        }
-        Ok(self.drv_path_to_id)
-    }
-}
-
-// ── EvalResultProcessor ───────────────────────────────────────────────────────
-
-/// Processes a single batch of derivations discovered during evaluation.
-///
-/// Holds the context shared by every step: server state and evaluation
-/// identity. Created once in [`handle_eval_result`] and passed through each
-/// pipeline stage.
-struct EvalResultProcessor<'a> {
-    state: &'a Arc<ServerState>,
-    evaluation_id: EvaluationId,
-    evaluation: MEvaluation,
-}
-
-impl<'a> EvalResultProcessor<'a> {
-    fn new(
-        state: &'a Arc<ServerState>,
-        evaluation_id: EvaluationId,
-        evaluation: MEvaluation,
-    ) -> Self {
-        Self {
-            state,
-            evaluation_id,
-            evaluation,
-        }
-    }
-
-    /// Load derivations that already exist in the DB so we don't re-insert them.
-    ///
-    /// Filters by `hash` only (Nix store hashes are content-addressed, so
-    /// `(project, hash)` is unique in practice) to keep the IN clause
-    /// bounded by the number of distinct hashes rather than full drv paths.
-    async fn load_existing_derivations(
-        &self,
-        derivations: &[DiscoveredDerivation],
-    ) -> Result<Vec<MDerivation>> {
-        let hashes: Vec<String> = derivations
-            .iter()
-            .filter_map(|d| parse_drv_hash_name(&d.drv_path).ok().map(|(h, _)| h))
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
-        if hashes.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let db = &self.state.worker_db;
-        gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
-            EDerivation::find()
-                .filter(CDerivation::Hash.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        .context("query existing derivations")
-    }
-
-    /// Persist each derivation's `inputSrcs` - build-time source paths (e.g.
-    /// `builtins.toFile` configs) that have no producing derivation. Idempotent
-    /// on `(derivation, hash)` so a re-seen derivation backfills its sources
-    /// without duplicating. The readiness gate requires every source cached
-    /// before a non-substitutable build dispatches, so a source the eval has not
-    /// pushed yet holds the build instead of letting it dispatch input-blind and
-    /// fail `InputsUnavailable`.
-    async fn persist_input_sources(
-        &self,
-        derivations: &[DiscoveredDerivation],
-        drv_path_to_id: &HashMap<String, DerivationId>,
-    ) {
-        let now = gradient_types::now();
-        let mut rows: Vec<ADerivationInputSource> = Vec::new();
-        let mut seen: std::collections::HashSet<(DerivationId, String)> =
-            std::collections::HashSet::new();
-        for d in derivations {
-            let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
-                continue;
-            };
-
-            for src in &d.input_sources {
-                let (Ok((hash, _)), Ok(store_path)) = (
-                    get_hash_from_path(src.clone()),
-                    gradient_entity::store_path::StorePath::parse(src),
-                ) else {
-                    continue;
-                };
-
-                if !seen.insert((drv_id, hash.clone())) {
-                    continue;
-                }
-
-                rows.push(
-                    MDerivationInputSource {
-                        id: DerivationInputSourceId::now_v7(),
-                        derivation: drv_id,
-                        hash,
-                        store_path,
-                        created_at: now,
-                    }
-                    .into_active_model(),
-                );
-            }
-        }
-
-        for chunk in rows.chunks(BATCH_SIZE) {
-            let res = EDerivationInputSource::insert_many(chunk.to_vec())
-                .on_conflict(
-                    sea_orm::sea_query::OnConflict::columns([
-                        CDerivationInputSource::Derivation,
-                        CDerivationInputSource::Hash,
-                    ])
-                    .do_nothing()
-                    .to_owned(),
-                )
-                .exec(&self.state.worker_db)
-                .await;
-            if let Err(e) = res
-                && !matches!(e, sea_orm::DbErr::RecordNotInserted)
-            {
-                error!(error = %e, "failed to insert derivation input sources");
-            }
-        }
-    }
-
-    /// Upsert the global `derivation_build` anchor for each discovered
-    /// derivation. Build-once: `ON CONFLICT (derivation) DO NOTHING` leaves any
-    /// existing anchor (from a prior eval) untouched, so a derivation builds at
-    /// most once across all evaluations. No per-eval build rows, no `via`.
-    async fn resolve_anchors(
-        &self,
-        derivations: &[DiscoveredDerivation],
-        drv_path_to_id: &HashMap<String, DerivationId>,
-    ) -> Result<()> {
-        let now = gradient_types::now();
-
-        let all_drv_ids: Vec<DerivationId> = derivations
-            .iter()
-            .filter_map(|d| drv_path_to_id.get(&d.drv_path).copied())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
-
-        let truly_substituted = self.compute_truly_substituted(&all_drv_ids).await?;
-        let not_substituted: Vec<DerivationId> = all_drv_ids
-            .iter()
-            .copied()
-            .filter(|id| !truly_substituted.contains(id))
-            .collect();
-        let upstream_substitutable = self
-            .compute_upstream_substitutable(&not_substituted)
-            .await
-            .unwrap_or_else(|e| {
-                error!(error = %e, "upstream substitutability probe failed");
-                std::collections::HashSet::new()
-            });
-
-        let mut anchors: Vec<ADerivationBuild> = Vec::new();
-        let mut seen: std::collections::HashSet<DerivationId> = std::collections::HashSet::new();
-        for d in derivations {
-            let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
-                continue;
-            };
-            if !seen.insert(drv_id) {
-                continue;
-            }
-
-            let is_truly_substituted = truly_substituted.contains(&drv_id);
-            let (status, substitutable) = if is_truly_substituted {
-                (BuildStatus::Substituted, false)
-            } else if upstream_substitutable.contains(&drv_id) {
-                (BuildStatus::Created, true)
-            } else {
-                (BuildStatus::Created, d.substituted)
-            };
-
-            anchors.push(
-                MDerivationBuild {
-                    id: DerivationBuildId::now_v7(),
-                    derivation: drv_id,
-                    status,
-                    substitutable,
-                    substituted: matches!(status, BuildStatus::Substituted),
-                    // truly-substituted means every output is already closure-complete
-                    // in our cache (`compute_truly_substituted` checks it), so this
-                    // anchor satisfies the dispatch gate for its dependents immediately.
-                    closure_complete: is_truly_substituted,
-                    timeout_secs: d.timeout_secs.map(|v| v as i64),
-                    max_silent_secs: d.max_silent_secs.map(|v| v as i64),
-                    created_at: now,
-                    updated_at: now,
-                    ..Default::default()
-                }
-                .into_active_model(),
-            );
-        }
-
-        for chunk in anchors.chunks(BATCH_SIZE) {
-            let res = EDerivationBuild::insert_many(chunk.to_vec())
-                .on_conflict(
-                    sea_orm::sea_query::OnConflict::column(CDerivationBuild::Derivation)
-                        .do_nothing()
-                        .to_owned(),
-                )
-                .exec(&self.state.worker_db)
-                .await;
-            if let Err(e) = res
-                && !matches!(e, sea_orm::DbErr::RecordNotInserted)
-            {
-                error!(error = %e, "failed to upsert derivation_build anchors");
-                update_evaluation_status_with_error(
-                    &self.state.db(),
-                    self.evaluation.clone(),
-                    EvaluationStatus::Failed,
-                    format!("failed to upsert anchors: {}", e),
-                    Some("db-insert".to_string()),
-                )
-                .await;
-                return Err(e.into());
-            }
-        }
-
-        // Per-eval build_job rows: one per (evaluation, derivation), linking the
-        // eval to the shared anchor. These are the per-eval "builds" the UI and
-        // CI reactor see; the anchor holds the actual build state.
-        let db = &self.state.worker_db;
-        let anchor_by_drv: HashMap<DerivationId, DerivationBuildId> =
-            gradient_db::fetch_in_chunks(&all_drv_ids, |chunk| async move {
-                EDerivationBuild::find()
-                    .filter(CDerivationBuild::Derivation.is_in(chunk))
-                    .all(db)
-                    .await
-            })
-            .await?
-            .into_iter()
-            .map(|a| (a.derivation, a.id))
-            .collect();
-
-        let mut jobs: Vec<ABuildJob> = Vec::new();
-        for &drv_id in &all_drv_ids {
-            if let Some(&anchor_id) = anchor_by_drv.get(&drv_id) {
-                jobs.push(
-                    MBuildJob {
-                        id: gradient_types::ids::BuildJobId::now_v7(),
-                        evaluation: self.evaluation_id,
-                        derivation: drv_id,
-                        derivation_build: anchor_id,
-                        score: 0.0,
-                        score_breakdown: serde_json::json!({}),
-                        created_at: now,
-                    }
-                    .into_active_model(),
-                );
-            }
-        }
-
-        for chunk in jobs.chunks(BATCH_SIZE) {
-            let res = EBuildJob::insert_many(chunk.to_vec())
-                .on_conflict(
-                    sea_orm::sea_query::OnConflict::columns([
-                        CBuildJob::Evaluation,
-                        CBuildJob::Derivation,
-                    ])
-                    .do_nothing()
-                    .to_owned(),
-                )
-                .exec(&self.state.worker_db)
-                .await;
-            if let Err(e) = res
-                && !matches!(e, sea_orm::DbErr::RecordNotInserted)
-            {
-                error!(error = %e, "failed to upsert build_job rows");
-            }
-        }
-
-        // A new evaluation retries anchors a previous eval left terminal-failed:
-        // the global anchor's failure is not this eval's verdict (caches/network
-        // may have changed). promote_ready then re-queues the reset Created rows.
-        if let Err(e) = gradient_db::requeue_failed_anchors(db, &all_drv_ids).await {
-            error!(error = %e, "failed to re-queue failed anchors for new eval");
-        }
-
-        // `ON CONFLICT DO NOTHING` leaves existing build-once anchors untouched,
-        // so flip not-yet-succeeded ones to substitutable when an upstream now
-        // offers the output: a previously-built/failed derivation substitutes
-        // instead of rebuilding (its fetcher origin may have rotted).
-        if !upstream_substitutable.is_empty() {
-            let ids: Vec<DerivationId> = upstream_substitutable.iter().copied().collect();
-            if let Err(e) = gradient_db::for_each_chunk(&ids, |chunk| async move {
-                EDerivationBuild::update_many()
-                    .col_expr(
-                        CDerivationBuild::Substitutable,
-                        sea_orm::sea_query::Expr::value(true),
-                    )
-                    .filter(CDerivationBuild::Derivation.is_in(chunk))
-                    .filter(CDerivationBuild::Status.is_not_in([
-                        i32::from(BuildStatus::Completed),
-                        i32::from(BuildStatus::Substituted),
-                    ]))
-                    .exec(db)
-                    .await
-            })
-            .await
-            {
-                error!(error = %e, "failed to flag existing anchors substitutable from upstream");
-            }
-        }
-
-        // Conversely, clear the flag on not-yet-succeeded anchors no upstream
-        // offers this eval. A stale `substitutable=true` (from an earlier eval, or
-        // the old is_cached-based detection) would otherwise let the anchor bypass
-        // the dependency gate and dispatch a substitute that escalates into a build
-        // whose closure was never produced - the activate/etc/unit-bird loop.
-        let not_upstream: Vec<DerivationId> = all_drv_ids
-            .iter()
-            .copied()
-            .filter(|d| !upstream_substitutable.contains(d))
-            .collect();
-        if !not_upstream.is_empty()
-            && let Err(e) = gradient_db::for_each_chunk(&not_upstream, |chunk| async move {
-                EDerivationBuild::update_many()
-                    .col_expr(
-                        CDerivationBuild::Substitutable,
-                        sea_orm::sea_query::Expr::value(false),
-                    )
-                    .filter(CDerivationBuild::Derivation.is_in(chunk))
-                    .filter(CDerivationBuild::Substitutable.eq(true))
-                    .filter(CDerivationBuild::Status.is_not_in([
-                        i32::from(BuildStatus::Completed),
-                        i32::from(BuildStatus::Substituted),
-                    ]))
-                    .exec(db)
-                    .await
-            })
-            .await
-        {
-            error!(error = %e, "failed to clear stale substitutable flags");
-        }
-
-        // Promotion is deferred to stream completion (`handle_eval_job_completed`),
-        // after `flush_deferred_deps` writes the dependency edges. Promoting here
-        // would run before any edge exists and queue every anchor regardless of
-        // its (not-yet-recorded) dependencies.
-
-        Ok(())
-    }
-
-    /// Return the subset of `drv_ids` whose every `derivation_output` row's
-    /// hash matches a `cached_path` with `file_hash IS NOT NULL`. These are
-    /// the drvs the server can confidently mark `Substituted` - anything
-    /// else must be built (or substituted later when the bytes show up).
-    ///
-    /// Matching is by hash rather than the explicit
-    /// `derivation_output.cached_path` link because that link is set lazily
-    /// by `mark_nar_stored` on upload. A new drv whose output hash is
-    /// already in `cached_path` (shared FOD source, re-evaluated build
-    /// before its first upload, manual cache push) would otherwise be
-    /// misclassified as "needs to build" and rerun pointlessly. The
-    /// worker-facing `CacheQuery` handler already merges by hash for the
-    /// same reason; this brings the eval-time decision in line.
-    async fn compute_truly_substituted(
-        &self,
-        drv_ids: &[DerivationId],
-    ) -> Result<std::collections::HashSet<DerivationId>> {
-        if drv_ids.is_empty() {
-            return Ok(std::collections::HashSet::new());
-        }
-
-        let db = &self.state.worker_db;
-        let outputs = gradient_db::fetch_in_chunks(drv_ids, |chunk| async move {
-            EDerivationOutput::find()
-                .filter(CDerivationOutput::Derivation.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        .context("compute_truly_substituted: load derivation_output")?;
-
-        if outputs.is_empty() {
-            return Ok(std::collections::HashSet::new());
-        }
-
-        let hashes: Vec<String> = outputs
-            .iter()
-            .map(|o| o.hash.clone())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
-
-        let fully_cached_hashes: std::collections::HashSet<String> =
-            gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
-                ECachedPath::find()
-                    .filter(CCachedPath::Hash.is_in(chunk))
-                    .all(db)
-                    .await
-            })
-            .await
-            .context("compute_truly_substituted: load cached_path")?
-            .into_iter()
-            .filter(|cp| cp.is_fully_cached() && cp.closure_complete)
-            .map(|cp| cp.hash)
-            .collect();
-
-        let mut outputs_by_drv: HashMap<DerivationId, Vec<&MDerivationOutput>> = HashMap::new();
-        for o in &outputs {
-            outputs_by_drv.entry(o.derivation).or_default().push(o);
-        }
-
-        let mut substituted = std::collections::HashSet::new();
-        for (drv_id, outs) in outputs_by_drv {
-            let all_present =
-                !outs.is_empty() && outs.iter().all(|o| fully_cached_hashes.contains(&o.hash));
-            if all_present {
-                substituted.insert(drv_id);
-            }
-        }
-        Ok(substituted)
-    }
-
-    /// Project-scoped upstream substitutability probe. For derivations not already in
-    /// the gradient cache, look up each output's `.narinfo` on the project's
-    /// configured upstream caches and persist hits onto `derivation_output`
-    /// (`external_url` + narinfo metadata) so the lookup runs once and the worker
-    /// downloads directly from that URL. Returns the derivations whose *every*
-    /// output is cached somewhere (gradient cache or an upstream) and may
-    /// therefore be substituted instead of built.
-    async fn compute_upstream_substitutable(
-        &self,
-        drv_ids: &[DerivationId],
-    ) -> Result<std::collections::HashSet<DerivationId>> {
-        use std::collections::{HashMap, HashSet};
-
-        if drv_ids.is_empty() {
-            return Ok(HashSet::new());
-        }
-
-        let db = &self.state.worker_db;
-        let Some(project_id) =
-            crate::dispatch::project_id_for_eval(self.state, &self.evaluation).await
-        else {
-            return Ok(HashSet::new());
-        };
-        const UPSTREAM_WINDOW_MINUTES: i64 = 60;
-        let endpoints =
-            gradient_db::upstream_endpoints_for_project(db, project_id, UPSTREAM_WINDOW_MINUTES)
-                .await
-                .unwrap_or_default();
-        if endpoints.is_empty() {
-            return Ok(HashSet::new());
-        }
-
-        let outputs = gradient_db::fetch_in_chunks(drv_ids, |chunk| async move {
-            EDerivationOutput::find()
-                .filter(CDerivationOutput::Derivation.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        .context("compute_upstream_substitutable: load derivation_output")?;
-        if outputs.is_empty() {
-            return Ok(HashSet::new());
-        }
-
-        // Outputs not yet available anywhere need a narinfo probe (deduped by hash).
-        let to_probe: Vec<(String, String)> = outputs
-            .iter()
-            .filter(|o| !o.is_cached_anywhere())
-            .map(|o| {
-                (
-                    o.hash.clone(),
-                    format!("/nix/store/{}-{}", o.hash, o.package),
-                )
-            })
-            .collect::<HashMap<_, _>>()
-            .into_iter()
-            .collect();
-
-        let id_to_url: HashMap<_, String> =
-            endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
-
-        let (found, stats) = gradient_core::upstream::probe_batch(
-            gradient_util::http::download_client().clone(),
-            endpoints,
-            std::sync::Arc::clone(&self.state.upstream_query),
-            to_probe,
-        )
-        .await;
-
-        // Same URL under different upstream ids folds into one metric series (#417).
-        let mut by_url: HashMap<String, gradient_db::UpstreamAccum> = HashMap::new();
-        for (id, accum) in &stats {
-            if let Some(url) = id_to_url.get(id) {
-                by_url.entry(url.clone()).or_default().merge(accum);
-            }
-        }
-
-        let bucket = {
-            use chrono::Timelike as _;
-            let now = gradient_types::now();
-            now.with_second(0)
-                .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
-                .unwrap_or(now)
-        };
-        if let Err(e) = gradient_db::upsert_upstream_metrics(db, bucket, &by_url).await {
-            warn!(error = %e, "failed to flush upstream metrics");
-        }
-
-        // Persist each hit onto every derivation_output row sharing that hash.
-        for o in outputs.iter().filter(|o| !o.is_cached_anywhere()) {
-            let Some(cp) = found.get(&o.hash) else {
-                continue;
-            };
-            let mut am = o.clone().into_active_model();
-            am.external_url = Set(cp.url.clone());
-            am.nar_hash = Set(cp.nar_hash.clone());
-            am.file_hash = Set(cp.file_hash.clone());
-            am.file_size = Set(cp.file_size.map(|v| v as i64));
-            am.references = Set(cp.references.as_ref().map(|r| r.join(" ")));
-            am.deriver = Set(cp.deriver.clone());
-            if o.nar_size.is_none() {
-                am.nar_size = Set(cp.nar_size.map(|v| v as i64));
-            }
-            if o.ca.is_none() {
-                am.ca = Set(cp.ca.clone());
-            }
-            if let Err(e) = am.update(db).await {
-                error!(hash = %o.hash, error = %e, "failed to persist upstream availability");
-            }
-        }
-
-        // A derivation is substitutable iff every output is available on an
-        // upstream cache (which serves the whole closure). Internal cache presence
-        // (`is_cached`) does NOT count here: an output sitting in our store but
-        // whose runtime closure is incomplete (a dep failed/was purged) would
-        // otherwise be flagged substitutable, then fail substitution and escalate
-        // into a build whose inputs were never produced - the activate/unit-bird
-        // InputsUnavailable loop. The genuinely-whole internal case is handled
-        // earlier by `is_truly_substituted` (gated on `closure_complete` → resign).
-        let available: HashSet<String> = outputs
-            .iter()
-            .filter(|o| o.external_url.is_some())
-            .map(|o| o.hash.clone())
-            .chain(found.keys().cloned())
-            .collect();
-
-        Ok(derivations_all_outputs_available(&outputs, &available))
-    }
-
-    /// Record per-derivation system-feature requirements in the DB.
-    async fn add_system_features(
-        &self,
-        derivations: &[DiscoveredDerivation],
-        drv_path_to_id: &HashMap<String, DerivationId>,
-    ) {
-        for d in derivations {
-            if d.required_features.is_empty() {
-                continue;
-            }
-            let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) else {
-                continue;
-            };
-            if let Err(e) = gradient_db::add_features(
-                &self.state.db(),
-                d.required_features.clone(),
-                gradient_entity::feature::FeatureKind::Feature,
-                Some(drv_id),
-            )
-            .await
-            {
-                error!(error = %e, %drv_id, "failed to add system features");
-            }
-        }
-    }
-
-    /// Persist Nix evaluation warnings and errors as evaluation messages.
-    async fn record_eval_messages(&self, warnings: &[String], errors: &[String]) {
-        for warning in warnings {
-            record_evaluation_message(
-                &self.state.db(),
-                self.evaluation_id,
-                MessageLevel::Warning,
-                warning.clone(),
-                Some("nix-eval".to_string()),
-            )
-            .await;
-        }
-        for error in errors {
-            record_evaluation_message(
-                &self.state.db(),
-                self.evaluation_id,
-                MessageLevel::Error,
-                error.clone(),
-                Some("nix-eval".to_string()),
-            )
-            .await;
-        }
-    }
-
-    /// Insert task entry points and schedule per-task evaluation GC.
-    /// Returns the entry-point derivation ids recorded in this batch, so the
-    /// caller can announce their current anchor status to the forge.
-    async fn process_entry_points(
-        &self,
-        task_id: TaskId,
-        derivations: &[DiscoveredDerivation],
-        drv_path_to_id: &HashMap<String, DerivationId>,
-    ) -> Vec<DerivationId> {
-        let now = gradient_types::now();
-
-        let mut active_entry_points: Vec<AEntryPoint> = Vec::new();
-        let mut entry_point_drvs: Vec<DerivationId> = Vec::new();
-
-        for d in derivations {
-            if d.attr.is_empty() {
-                continue;
-            }
-            if let Some(&drv_id) = drv_path_to_id.get(&d.drv_path) {
-                entry_point_drvs.push(drv_id);
-                active_entry_points.push(
-                    MEntryPoint {
-                        id: EntryPointId::now_v7(),
-                        task: task_id,
-                        evaluation: self.evaluation_id,
-                        derivation: drv_id,
-                        eval: d.attr.clone(),
-                        created_at: now,
-                        ..Default::default()
-                    }
-                    .into_active_model(),
-                );
-            }
-        }
-
-        if !active_entry_points.is_empty() {
-            for chunk in active_entry_points.chunks(BATCH_SIZE) {
-                if let Err(e) = EEntryPoint::insert_many(chunk.to_vec())
-                    .exec(&self.state.worker_db)
-                    .await
-                {
-                    error!(error = %e, "failed to insert entry points");
-                }
-            }
-        }
-
-        // GC: remove old evaluations beyond keep_evaluations for this task.
-        if let Ok(Some(task)) = ETask::find_by_id(task_id).one(&self.state.worker_db).await {
-            let gc_state = Arc::clone(self.state);
-            let gc_keep = task.keep_evaluations as usize;
-            self.state.shutdown.spawn(async move {
-                if let Err(e) =
-                    gradient_db::gc_task_evaluations(&gc_state.db(), task_id, gc_keep).await
-                {
-                    error!(error = %e, %task_id, "GC: per-task evaluation GC failed");
-                }
-            });
-        }
-
-        entry_point_drvs
-    }
-}
-
-// ── Public handlers ───────────────────────────────────────────────────────────
-
-pub async fn handle_eval_result(
+/// The substitution facts the graph actor cannot establish itself: which
+/// derivations are already whole in our cache, which an upstream serves, and
+/// the narinfo hits to persist. Reads run on the pool; the probe is network.
+pub async fn assess_substitutability(
     state: &Arc<ServerState>,
-    job: &PendingEvalJob,
-    mut derivations: Vec<DiscoveredDerivation>,
-    warnings: Vec<String>,
-    errors: Vec<String>,
-) -> Result<()> {
-    // `derivation.derivation_path` stores the bare `<hash>-<name>` form
-    // (narinfo `References:` convention). Callers may pass either form;
-    // normalise once here so every downstream key (existing-rows map,
-    // insert path, build-row lookup, deferred deps) is in canonical form.
-    for d in &mut derivations {
-        d.drv_path = strip_nix_store_prefix(&d.drv_path);
-        for dep in &mut d.dependencies {
-            *dep = strip_nix_store_prefix(dep);
+    evaluation: &MEvaluation,
+    derivations: &[DiscoveredDerivation],
+) -> SubstitutionFacts {
+    let mut facts = SubstitutionFacts::default();
+    let outputs_by_drv: HashMap<&str, Vec<String>> = derivations
+        .iter()
+        .map(|d| {
+            let hashes = d
+                .outputs
+                .iter()
+                .filter_map(|o| StorePath::parse(&o.path).ok())
+                .map(|sp| sp.hash().to_owned())
+                .collect();
+            (d.drv_path.as_str(), hashes)
+        })
+        .collect();
+    let all_hashes: Vec<String> = outputs_by_drv
+        .values()
+        .flatten()
+        .cloned()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    if all_hashes.is_empty() {
+        return facts;
+    }
+
+    let db = &state.worker_db;
+
+    // Whole in our own cache: every output present with a complete closure, so
+    // the anchor can be resigned instead of rebuilt.
+    let fully_cached: HashSet<String> =
+        gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
+            ECachedPath::find()
+                .filter(CCachedPath::Hash.is_in(chunk))
+                .all(db)
+                .await
+        })
+        .await
+        .unwrap_or_else(|e| {
+            error!(error = %e, "substitutability: cached_path lookup failed");
+            Vec::new()
+        })
+        .into_iter()
+        .filter(|cp| cp.is_fully_cached() && cp.closure_complete)
+        .map(|cp| cp.hash)
+        .collect();
+    for (drv, hashes) in &outputs_by_drv {
+        if !hashes.is_empty() && hashes.iter().all(|h| fully_cached.contains(h)) {
+            facts.truly_substituted.insert((*drv).to_owned());
         }
     }
 
-    let evaluation_id = job.evaluation_id;
-
-    let current = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.worker_db)
-        .await
-        .context("fetch evaluation")?;
-
-    let evaluation = match current {
-        Some(e) if e.status == EvaluationStatus::Aborted => {
-            info!(%evaluation_id, "evaluation aborted; discarding worker result");
-            return Ok(());
-        }
-        Some(e) => e,
-        None => anyhow::bail!("evaluation {} not found", evaluation_id),
+    let Some(project_id) = crate::dispatch::project_id_for_eval(state, evaluation).await else {
+        return facts;
     };
-
-    info!(
-        %evaluation_id,
-        derivation_count = derivations.len(),
-        warning_count = warnings.len(),
-        error_count = errors.len(),
-        "processing eval result from worker",
-    );
-
-    let proc = EvalResultProcessor::new(state, evaluation_id, evaluation);
-
-    let existing = proc.load_existing_derivations(&derivations).await?;
-    let batch = DerivationInsertBatch::prepare(&derivations, &existing);
-    let drv_path_to_id = batch.insert(state, &proc.evaluation).await?;
-
-    proc.persist_input_sources(&derivations, &drv_path_to_id)
-        .await;
-
-    // Dependency edges are NOT created here. The BFS walks roots→leaves, so
-    // batch N may contain derivation A whose dep B lands in batch N+1. Edges are
-    // accumulated per eval and flushed by `flush_deferred_deps` once the stream
-    // completes (`handle_eval_job_completed`), when every endpoint has a row.
-
-    proc.resolve_anchors(&derivations, &drv_path_to_id).await?;
-
-    proc.add_system_features(&derivations, &drv_path_to_id)
-        .await;
-
-    proc.record_eval_messages(&warnings, &errors).await;
-
-    // Errors are stored as evaluation_message rows and will cause
-    // check_evaluation_done to mark the evaluation as Failed once all
-    // queued builds finish (or immediately if there are no builds at all).
-    // Do NOT mark Failed here: a later batch or a previous batch may have
-    // queued builds that should still run.
-
-    if let Some(task_id) = job.task_id {
-        let entry_point_drvs = proc
-            .process_entry_points(task_id, &derivations, &drv_path_to_id)
-            .await;
-
-        // Forge checks appear the moment each entry point evaluates, including
-        // already-cached anchors that never transition in this eval.
-        gradient_db::announce_entry_point_statuses(&state.db(), evaluation_id, &entry_point_drvs)
-            .await;
+    let endpoints =
+        gradient_db::upstream_endpoints_for_project(db, project_id, UPSTREAM_WINDOW_MINUTES)
+            .await
+            .unwrap_or_default();
+    if endpoints.is_empty() {
+        return facts;
     }
 
-    // Builds and entry-points are inserted directly (no status transition), so
-    // the live channels would otherwise stay silent for the whole evaluation
-    // phase. Ping subscribers so the task/eval pages refetch and grow their
-    // build totals as each batch lands.
-    let _ = state.board_events.send(BoardEvent::EvaluationProgress {
-        task: job.task_id.map(|p| p.into_inner()),
-        evaluation_id: evaluation_id.into_inner(),
+    let known_outputs = gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
+        EDerivationOutput::find()
+            .filter(CDerivationOutput::Hash.is_in(chunk))
+            .all(db)
+            .await
+    })
+    .await
+    .unwrap_or_else(|e| {
+        error!(error = %e, "substitutability: derivation_output lookup failed");
+        Vec::new()
     });
+    let mut available: HashSet<String> = known_outputs
+        .iter()
+        .filter(|o| o.external_url.is_some())
+        .map(|o| o.hash.clone())
+        .collect();
+    let cached_anywhere: HashSet<String> = known_outputs
+        .iter()
+        .filter(|o| o.is_cached_anywhere())
+        .map(|o| o.hash.clone())
+        .collect();
+    let to_probe: Vec<(String, String)> = derivations
+        .iter()
+        .filter(|d| !facts.truly_substituted.contains(&d.drv_path))
+        .flat_map(|d| d.outputs.iter())
+        .filter_map(|o| StorePath::parse(&o.path).ok())
+        .filter(|sp| !cached_anywhere.contains(sp.hash()))
+        .map(|sp| (sp.hash().to_owned(), sp.full()))
+        .collect::<HashMap<_, _>>()
+        .into_iter()
+        .collect();
 
-    debug!(
-        %evaluation_id,
-        new_derivations = derivations.len(),
-        "eval batch persisted; awaiting more batches"
-    );
-    Ok(())
-}
-
-pub async fn handle_eval_job_completed(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-) -> Result<()> {
-    // The build graph is now complete: materialise each entry point's closure
-    // and seed the per-entry-point dependency counts (#383).
-    if let Err(e) = gradient_db::seed_entry_point_dep_counts(&state.worker_db, evaluation_id).await
-    {
-        error!(error = %e, %evaluation_id, "seed_entry_point_dep_counts failed (non-fatal)");
-    }
-
-    // The dependency graph is now complete (edges flushed): run the canonical
-    // healing pipeline scoped to this eval - mark its anchors edges_complete,
-    // heal cache trust across its closure, reconcile the gate flags, and
-    // promote the ready frontier (see `gradient_db::reconcile`).
-    gradient_db::reconcile_build_graph(
-        &state.db(),
-        gradient_db::ReconcileScope::Eval(evaluation_id),
+    let id_to_url: HashMap<_, String> = endpoints.iter().map(|e| (e.id, e.url.clone())).collect();
+    let (found, stats) = gradient_core::upstream::probe_batch(
+        gradient_util::http::download_client().clone(),
+        endpoints,
+        Arc::clone(&state.upstream_query),
+        to_probe,
     )
     .await;
 
-    // Promotion is graph-driven (gradient_db::promotion), independent of eval
-    // completion, so finishing the stream just advances the eval to Building.
-    if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.worker_db)
-        .await?
-        && matches!(
-            eval.status,
-            EvaluationStatus::EvaluatingFlake | EvaluationStatus::EvaluatingDerivation
-        )
-    {
-        info!(%evaluation_id, "eval job complete; promoting evaluation to Building");
-        update_evaluation_status(&state.db(), eval, EvaluationStatus::Building).await;
-    }
-
-    // If every build was already terminal (e.g. all Substituted), close the
-    // evaluation out via the shared decision function.
-    gradient_db::check_evaluation_done(&state.db(), evaluation_id).await?;
-    Ok(())
-}
-
-/// Resolve `(drv_path, Vec<dep_drv_path>)` pairs to `(derivation_uuid,
-/// dep_uuid)` edges and insert them (conflict-do-nothing). Called once at
-/// `handle_eval_job_completed` with the evaluation's accumulated edges, when
-/// every endpoint derivation has a row.
-/// Per-evaluation accumulator of discovered dependency edges, resolved
-/// incrementally as batches stream in. A `(src, deps)` pair leaves `pending`
-/// the moment its full edge set is recorded (see [`flush_ready_edges`]); the
-/// remainder is settled by [`flush_deferred_deps`] at stream completion, which
-/// alone may flag `edges_unresolved` - mid-stream, an unknown dep may simply
-/// not have streamed yet.
-#[derive(Default)]
-pub struct EvalEdgeAccumulator {
-    /// Canonical drv_path to recorded derivation id, learned from DB lookups.
-    known: HashMap<String, DerivationId>,
-    /// Paths already queried and absent; re-queried only after their own batch
-    /// arrives (`add_batch` unmarks them), so an absent dep costs one lookup.
-    missing: std::collections::HashSet<String>,
-    /// Pairs whose edge set is not yet fully recorded.
-    pending: EdgePairs,
-    /// This stream's zero-dep drv_paths, trivially `edges_complete` once their
-    /// anchor row exists.
-    leaves: Vec<String>,
-}
-
-impl EvalEdgeAccumulator {
-    pub fn add_batch(&mut self, derivations: &[DiscoveredDerivation]) {
-        for d in derivations {
-            self.missing.remove(&d.drv_path);
-            if d.dependencies.is_empty() {
-                self.leaves.push(d.drv_path.clone());
-            } else {
-                self.pending
-                    .push((d.drv_path.clone(), d.dependencies.clone()));
-            }
+    // Same URL under different upstream ids folds into one metric series (#417).
+    let mut by_url: HashMap<String, gradient_db::UpstreamAccum> = HashMap::new();
+    for (id, accum) in &stats {
+        if let Some(url) = id_to_url.get(id) {
+            by_url.entry(url.clone()).or_default().merge(accum);
         }
     }
 
-    pub fn into_pending(self) -> EdgePairs {
-        self.pending
-    }
-}
-
-/// Record every dependency edge resolvable right now and mark the fully
-/// resolved sources (plus the stream's zero-dep leaves) `edges_complete`, so
-/// the dispatch tick's promotion pipeline can queue and dispatch them while
-/// the eval stream is still running instead of waiting for the completion
-/// flush. Runs after each persisted batch; safety is unchanged - promotion
-/// still requires the full readiness gate and dispatch additionally gates on
-/// `drv_closure_cached` / cached input sources, so nothing dispatches before
-/// its inputs are importable.
-pub async fn flush_ready_edges(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-    acc: &mut EvalEdgeAccumulator,
-) -> Result<()> {
-    let mut lookup: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for (src, deps) in &acc.pending {
-        for p in std::iter::once(src).chain(deps.iter()) {
-            if !acc.known.contains_key(p) && !acc.missing.contains(p) {
-                lookup.insert(p.clone());
-            }
-        }
-    }
-    for p in &acc.leaves {
-        if !acc.known.contains_key(p) && !acc.missing.contains(p) {
-            lookup.insert(p.clone());
-        }
+    let bucket = {
+        use chrono::Timelike as _;
+        let now = gradient_types::now();
+        now.with_second(0)
+            .and_then(|t: chrono::NaiveDateTime| t.with_nanosecond(0))
+            .unwrap_or(now)
+    };
+    if let Err(e) = gradient_db::upsert_upstream_metrics(db, bucket, &by_url).await {
+        warn!(error = %e, "failed to flush upstream metrics");
     }
 
-    if !lookup.is_empty() {
-        let hashes: Vec<String> = lookup
-            .iter()
-            .filter_map(|p| parse_drv_hash_name(p).ok().map(|(h, _)| h))
-            .collect();
-        let db = &state.worker_db;
-        let found: HashMap<String, DerivationId> =
-            gradient_db::fetch_in_chunks(&hashes, |chunk| async move {
-                EDerivation::find()
-                    .filter(CDerivation::Hash.is_in(chunk))
-                    .all(db)
-                    .await
-            })
-            .await
-            .context("flush_ready_edges: query derivations")?
-            .into_iter()
-            .map(|d| (d.drv_path(), d.id))
-            .collect();
-        for p in lookup {
-            match found.get(&p) {
-                Some(&id) => {
-                    acc.known.insert(p, id);
-                }
-                None => {
-                    acc.missing.insert(p);
-                }
-            }
-        }
+    for (hash, cp) in found {
+        available.insert(hash.clone());
+        facts.upstream_hits.insert(
+            hash,
+            UpstreamHit {
+                url: cp.url.clone(),
+                nar_hash: cp.nar_hash.clone(),
+                file_hash: cp.file_hash.clone(),
+                file_size: cp.file_size.map(|v| v as i64),
+                nar_size: cp.nar_size.map(|v| v as i64),
+                references: cp.references.as_ref().map(|r| r.join(" ")),
+                deriver: cp.deriver.clone(),
+                ca: cp.ca.clone(),
+            },
+        );
     }
 
-    let (ready, still_pending) =
-        partition_ready_edges(std::mem::take(&mut acc.pending), &acc.known);
-    acc.pending = still_pending;
-    let mut complete: Vec<DerivationId> = ready.iter().map(|(src, _)| acc.known[src]).collect();
-    let mut leaves_left = Vec::new();
-    for p in acc.leaves.drain(..) {
-        match acc.known.get(&p) {
-            Some(&id) => complete.push(id),
-            None => leaves_left.push(p),
-        }
-    }
-    acc.leaves = leaves_left;
-    if ready.is_empty() && complete.is_empty() {
-        return Ok(());
-    }
-
-    let known = &acc.known;
-    let edges: Vec<ADerivationDependency> = ready
-        .iter()
-        .flat_map(|(src, deps)| {
-            let src_id = known[src];
-            deps.iter().map(move |dep| {
-                MDerivationDependency {
-                    id: DerivationDependencyId::now_v7(),
-                    derivation: src_id,
-                    dependency: known[dep],
-                }
-                .into_active_model()
-            })
-        })
-        .collect();
-    for chunk in edges.chunks(BATCH_SIZE) {
-        if let Err(e) = EDerivationDependency::insert_many(chunk.to_vec())
-            .on_conflict(
-                sea_orm::sea_query::OnConflict::columns([
-                    CDerivationDependency::Derivation,
-                    CDerivationDependency::Dependency,
-                ])
-                .do_nothing()
-                .to_owned(),
-            )
-            .try_insert()
-            .exec(&state.worker_db)
-            .await
-        {
-            // Put the pairs back so the completion flush retries them.
-            error!(error = %e, "flush_ready_edges: failed to insert edges; deferring to completion flush");
-            acc.pending.extend(ready);
-            return Ok(());
-        }
-    }
-
-    let db = &state.worker_db;
-    if let Err(e) = gradient_db::for_each_chunk(&complete, |chunk| async move {
-        EDerivationBuild::update_many()
-            .col_expr(
-                CDerivationBuild::EdgesComplete,
-                sea_orm::sea_query::Expr::value(true),
-            )
-            .col_expr(
-                CDerivationBuild::EdgesUnresolved,
-                sea_orm::sea_query::Expr::value(false),
-            )
-            .filter(CDerivationBuild::Derivation.is_in(chunk))
-            .exec(db)
-            .await
-    })
-    .await
-    {
-        error!(error = %e, "flush_ready_edges: failed to mark edges_complete");
-    }
-
-    debug!(
-        %evaluation_id,
-        inserted = edges.len(),
-        edges_complete = complete.len(),
-        pending = acc.pending.len(),
-        "flushed ready dependency edges mid-stream"
-    );
-    Ok(())
-}
-
-/// Discovered `(drv_path, dependency drv_paths)` pairs awaiting edge insertion.
-pub type EdgePairs = Vec<(String, Vec<String>)>;
-
-/// Split pending pairs into the fully resolvable (source and every dep known)
-/// and the remainder. Pairs stay as string pairs so a failed insert can push
-/// them back for the completion flush.
-fn partition_ready_edges(
-    pending: EdgePairs,
-    known: &HashMap<String, DerivationId>,
-) -> (EdgePairs, EdgePairs) {
-    pending.into_iter().partition(|(src, deps)| {
-        known.contains_key(src) && deps.iter().all(|d| known.contains_key(d))
-    })
-}
-
-pub async fn flush_deferred_deps(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-    deferred: Vec<(String, Vec<String>)>,
-) -> Result<()> {
-    if deferred.is_empty() {
-        return Ok(());
-    }
-
-    // Collect every unique drv_path mentioned (both as source and as dep), and
-    // derive the unique hash set we'll filter the DB on. Hashes are
-    // content-addressed (32-char nix32) so filtering by hash alone is enough to
-    // pin a row down in the global derivation graph.
-    let mut all_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for (src, deps) in &deferred {
-        all_paths.insert(src.clone());
-        for d in deps {
-            all_paths.insert(d.clone());
-        }
-    }
-    let all_hashes: Vec<String> = all_paths
-        .iter()
-        .filter_map(|p| parse_drv_hash_name(p).ok().map(|(h, _)| h))
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    let db = &state.worker_db;
-    let drv_path_to_id: std::collections::HashMap<String, DerivationId> =
-        gradient_db::fetch_in_chunks(&all_hashes, |chunk| async move {
-            EDerivation::find()
-                .filter(CDerivation::Hash.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await
-        .context("flush_deferred_deps: query derivations")?
-        .into_iter()
-        .map(|d| (d.drv_path(), d.id))
-        .collect();
-
-    let (edge_pairs, resolved_sources, unresolved_sources) =
-        resolve_deferred_edges(&deferred, &drv_path_to_id);
-
-    let edges: Vec<ADerivationDependency> = edge_pairs
-        .iter()
-        .map(|(src, dep)| {
-            MDerivationDependency {
-                id: DerivationDependencyId::now_v7(),
-                derivation: *src,
-                dependency: *dep,
-            }
-            .into_active_model()
-        })
-        .collect();
-
-    if !edges.is_empty() {
-        for chunk in edges.chunks(BATCH_SIZE) {
-            if let Err(e) = EDerivationDependency::insert_many(chunk.to_vec())
-                .on_conflict(
-                    sea_orm::sea_query::OnConflict::columns([
-                        CDerivationDependency::Derivation,
-                        CDerivationDependency::Dependency,
-                    ])
-                    .do_nothing()
-                    .to_owned(),
-                )
-                .try_insert()
-                .exec(&state.worker_db)
-                .await
-            {
-                error!(error = %e, "flush_deferred_deps: failed to insert edges");
-            }
-        }
-    }
-
-    // Persist per-source resolution so `mark_edges_complete_for_eval` refuses to
-    // promote an anchor whose declared edge set is incomplete (a dependency this
-    // eval never recorded), and clears the flag once a later eval resolves them.
-    set_edges_unresolved(&state.worker_db, &unresolved_sources, true).await;
-    set_edges_unresolved(&state.worker_db, &resolved_sources, false).await;
-
-    info!(
-        %evaluation_id,
-        inserted = edges.len(),
-        unresolved = unresolved_sources.len(),
-        "flushed deferred dependency edges"
-    );
-    Ok(())
-}
-
-/// Resolve deferred `(src, [dep])` drv-path pairs against the recorded
-/// derivations. Returns the resolvable edges, the sources whose every dep
-/// resolved, and the sources with at least one unresolved dep (a dependency the
-/// eval never recorded - its edge is dropped, so the source must be held off
-/// promotion rather than dispatched as dependency-free).
-fn resolve_deferred_edges(
-    deferred: &[(String, Vec<String>)],
-    drv_path_to_id: &HashMap<String, DerivationId>,
-) -> (
-    Vec<(DerivationId, DerivationId)>,
-    std::collections::HashSet<DerivationId>,
-    std::collections::HashSet<DerivationId>,
-) {
-    let mut edges = Vec::new();
-    let mut all_sources = std::collections::HashSet::new();
-    let mut unresolved = std::collections::HashSet::new();
-    for (src, deps) in deferred {
-        let Some(&src_id) = drv_path_to_id.get(src) else {
+    // A derivation is upstream-substitutable only when every one of its outputs
+    // is served, and internal cache presence deliberately does not count: an
+    // output whose runtime closure is incomplete would otherwise be flagged,
+    // fail substitution, and escalate into a build whose inputs were never
+    // produced. The genuinely-whole internal case is `truly_substituted` above.
+    for (drv, hashes) in &outputs_by_drv {
+        if facts.truly_substituted.contains(*drv) {
             continue;
-        };
-        all_sources.insert(src_id);
-        for dep in deps {
-            match drv_path_to_id.get(dep) {
-                Some(&dep_id) => edges.push((src_id, dep_id)),
-                None => {
-                    unresolved.insert(src_id);
-                }
-            }
+        }
+        if !hashes.is_empty() && hashes.iter().all(|h| available.contains(h)) {
+            facts.upstream_substitutable.insert((*drv).to_owned());
         }
     }
 
-    let resolved = all_sources.difference(&unresolved).copied().collect();
-    (edges, resolved, unresolved)
-}
-
-async fn set_edges_unresolved(
-    db: &gradient_db::WorkerDb,
-    ids: &std::collections::HashSet<DerivationId>,
-    value: bool,
-) {
-    if ids.is_empty() {
-        return;
-    }
-
-    let ids: Vec<DerivationId> = ids.iter().copied().collect();
-    if let Err(e) = gradient_db::for_each_chunk(&ids, |chunk| async move {
-        EDerivationBuild::update_many()
-            .col_expr(
-                CDerivationBuild::EdgesUnresolved,
-                sea_orm::sea_query::Expr::value(value),
-            )
-            .filter(CDerivationBuild::Derivation.is_in(chunk))
-            .exec(db)
-            .await
-    })
-    .await
-    {
-        error!(error = %e, "flush_deferred_deps: failed to update edges_unresolved");
-    }
-}
-
-pub async fn handle_eval_job_failed(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-    error: &str,
-    kind: BuildFailureKind,
-    missing_paths: &[String],
-) -> Result<()> {
-    // Corrupt shared eval-cache: the worker already dropped its local copy, so
-    // purge the poisoned shared blob and re-queue the eval to re-evaluate
-    // cache-less. If it heals (blob existed), skip the terminal-Failed path.
-    if kind == BuildFailureKind::CorruptEvalCache
-        && let Some(fingerprint) = missing_paths.first()
-        && heal_corrupt_eval_cache(state, evaluation_id, fingerprint).await?
-    {
-        return Ok(());
-    }
-
-    if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.worker_db)
-        .await?
-        && !matches!(
-            eval.status,
-            EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
-        )
-    {
-        // The API writes `Aborted` before `AbortJob` goes out, so the guard above
-        // normally catches this. If that write was lost, settle the evaluation
-        // where the abort meant to put it rather than reporting a failure the
-        // user did not cause.
-        if kind == BuildFailureKind::Aborted {
-            update_evaluation_status(&state.db(), eval, EvaluationStatus::Aborted).await;
-            return Ok(());
-        }
-
-        update_evaluation_status_with_error(
-            &state.db(),
-            eval,
-            EvaluationStatus::Failed,
-            error.to_owned(),
-            Some("worker".to_string()),
-        )
-        .await;
-    }
-    Ok(())
-}
-
-/// Purge a corrupt shared eval-cache blob and re-queue the evaluation. Returns
-/// `true` when it re-queued. The blob's own existence is the circuit breaker:
-/// the first corrupt failure finds the row and purges+re-queues it; once purged,
-/// a recurring corruption (the freshly-generated cache is itself unreadable, i.e.
-/// a broken worker/disk) has no shared blob to blame, so this returns `false` and
-/// the caller fails the eval for real instead of looping.
-async fn heal_corrupt_eval_cache(
-    state: &Arc<ServerState>,
-    evaluation_id: EvaluationId,
-    fingerprint: &str,
-) -> Result<bool> {
-    let purged = EEvalCacheStore::delete_many()
-        .filter(CEvalCacheStore::Fingerprint.eq(fingerprint))
-        .exec(&state.worker_db)
-        .await?
-        .rows_affected;
-    if purged == 0 {
-        warn!(%evaluation_id, %fingerprint, "corrupt eval-cache recurred with no shared blob to purge; failing eval");
-        return Ok(false);
-    }
-    if let Err(e) = state.nar_storage.delete_eval_cache(fingerprint).await {
-        warn!(%fingerprint, error = %e, "failed to delete corrupt eval-cache object");
-    }
-    if let Some(eval) = EEvaluation::find_by_id(evaluation_id)
-        .one(&state.worker_db)
-        .await?
-        && !matches!(
-            eval.status,
-            EvaluationStatus::Completed | EvaluationStatus::Failed | EvaluationStatus::Aborted
-        )
-    {
-        update_evaluation_status(&state.db(), eval, EvaluationStatus::Queued).await;
-    }
-    info!(%evaluation_id, %fingerprint, "purged corrupt eval-cache blob; re-queued eval for fresh evaluation");
-    Ok(true)
-}
-
-/// Derivations whose *every* output hash is in `available` (cached in the
-/// gradient cache or resolved at a project upstream). All-or-nothing: a derivation
-/// is substitutable only when none of its outputs would still have to be built.
-fn derivations_all_outputs_available(
-    outputs: &[MDerivationOutput],
-    available: &std::collections::HashSet<String>,
-) -> std::collections::HashSet<DerivationId> {
-    let mut by_drv: HashMap<DerivationId, Vec<&MDerivationOutput>> = HashMap::new();
-    for o in outputs {
-        by_drv.entry(o.derivation).or_default().push(o);
-    }
-
-    by_drv
-        .into_iter()
-        .filter(|(_, outs)| !outs.is_empty() && outs.iter().all(|o| available.contains(&o.hash)))
-        .map(|(drv_id, _)| drv_id)
-        .collect()
-}
-
-#[cfg(test)]
-mod upstream_substitutable_tests {
-    use super::*;
-    use std::collections::HashSet;
-
-    /// A source with an unrecorded dependency is flagged unresolved (so it's held
-    /// off promotion) and excluded from the resolved set; a fully-resolved source
-    /// is the opposite. This is what keeps a 0-edge build_job whose edge was
-    /// dropped from being marked `edges_complete` and dispatched dependency-free.
-    #[test]
-    fn deferred_edges_flag_sources_with_unrecorded_deps() {
-        let src = DerivationId::now_v7();
-        let dep = DerivationId::now_v7();
-        let mut map = HashMap::new();
-        map.insert("src.drv".to_string(), src);
-        map.insert("dep.drv".to_string(), dep);
-
-        let deferred = vec![(
-            "src.drv".to_string(),
-            vec!["dep.drv".to_string(), "missing.drv".to_string()],
-        )];
-        let (edges, resolved, unresolved) = resolve_deferred_edges(&deferred, &map);
-        assert_eq!(edges, vec![(src, dep)]);
-        assert!(unresolved.contains(&src), "unrecorded dep flags the source");
-        assert!(!resolved.contains(&src), "and excludes it from resolved");
-
-        let ok = vec![("src.drv".to_string(), vec!["dep.drv".to_string()])];
-        let (_, resolved, unresolved) = resolve_deferred_edges(&ok, &map);
-        assert!(resolved.contains(&src));
-        assert!(unresolved.is_empty());
-    }
-
-    fn output(drv: DerivationId, hash: &str) -> MDerivationOutput {
-        MDerivationOutput {
-            derivation: drv,
-            hash: hash.to_string(),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn substitutable_only_when_all_outputs_available() {
-        let a = DerivationId::now_v7();
-        let b = DerivationId::now_v7();
-        let outputs = vec![
-            output(a, "h1"),
-            output(a, "h2"),
-            output(b, "h3"),
-            output(b, "h4"),
-        ];
-        let available: HashSet<String> = ["h1", "h2", "h3"].iter().map(|s| s.to_string()).collect();
-
-        let got = derivations_all_outputs_available(&outputs, &available);
-        assert!(got.contains(&a), "all of a's outputs are available");
-        assert!(
-            !got.contains(&b),
-            "b has an output (h4) not cached anywhere"
-        );
-    }
-
-    #[test]
-    fn no_outputs_is_not_substitutable() {
-        assert!(derivations_all_outputs_available(&[], &HashSet::new()).is_empty());
-    }
-}
-
-#[cfg(test)]
-mod incremental_edge_flush_tests {
-    use super::*;
-
-    fn drv(path: &str, deps: &[&str]) -> DiscoveredDerivation {
-        DiscoveredDerivation {
-            attr: String::new(),
-            drv_path: path.to_owned(),
-            outputs: vec![],
-            dependencies: deps.iter().map(|d| (*d).to_owned()).collect(),
-            input_sources: vec![],
-            architecture: "x86_64-linux".to_owned(),
-            required_features: vec![],
-            timeout_secs: None,
-            max_silent_secs: None,
-            prefer_local_build: false,
-            is_fixed_output: false,
-            allow_substitutes: true,
-            pname: None,
-            substituted: false,
-        }
-    }
-
-    /// A pair is only ready when its source AND every dep have recorded rows;
-    /// anything else stays pending for a later batch or the completion flush.
-    /// Mid-stream, an unknown dep must never be treated as unresolvable - it
-    /// may simply not have streamed yet.
-    #[test]
-    fn partition_holds_pairs_with_unknown_paths() {
-        let id_a = DerivationId::now_v7();
-        let id_b = DerivationId::now_v7();
-        let known: HashMap<String, DerivationId> =
-            [("a.drv".to_owned(), id_a), ("b.drv".to_owned(), id_b)].into();
-
-        let pending = vec![
-            ("a.drv".to_owned(), vec!["b.drv".to_owned()]),
-            (
-                "a.drv".to_owned(),
-                vec!["b.drv".to_owned(), "later.drv".to_owned()],
-            ),
-            ("unknown-src.drv".to_owned(), vec!["b.drv".to_owned()]),
-        ];
-        let (ready, still) = partition_ready_edges(pending, &known);
-        assert_eq!(ready, vec![("a.drv".to_owned(), vec!["b.drv".to_owned()])]);
-        assert_eq!(
-            still.len(),
-            2,
-            "unknown src or dep stays pending: {still:?}"
-        );
-    }
-
-    /// A dep first queried-and-missing must become resolvable once its own
-    /// batch arrives: `add_batch` unmarks it so the next flush re-queries.
-    #[test]
-    fn add_batch_unmarks_missing_and_splits_leaves() {
-        let mut acc = EvalEdgeAccumulator::default();
-        acc.missing.insert("leaf.drv".to_owned());
-
-        acc.add_batch(&[drv("leaf.drv", &[]), drv("root.drv", &["leaf.drv"])]);
-
-        assert!(
-            !acc.missing.contains("leaf.drv"),
-            "batch arrival must clear the DB-miss memo"
-        );
-        assert_eq!(acc.leaves, vec!["leaf.drv".to_owned()]);
-        assert_eq!(
-            acc.pending,
-            vec![("root.drv".to_owned(), vec!["leaf.drv".to_owned()])]
-        );
-        assert_eq!(
-            acc.into_pending(),
-            vec![("root.drv".to_owned(), vec!["leaf.drv".to_owned()])]
-        );
-    }
+    facts
 }

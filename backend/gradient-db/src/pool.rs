@@ -94,7 +94,8 @@ impl WorkerDb {
         }
     }
 
-    #[cfg(test)]
+    /// The statements a mock pool recorded. Every other handle on the pool must
+    /// be dropped first, so a test proves nothing outlived the work it asserts on.
     pub fn into_transaction_log(self) -> Vec<sea_orm::Transaction> {
         match self.0 {
             WorkerConn::Pool(pool) => Arc::try_unwrap(pool)

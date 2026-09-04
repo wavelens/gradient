@@ -169,6 +169,7 @@ impl Actor for BuildDispatch {
 pub(super) fn child_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
     let scheduler = Arc::clone(scheduler);
     ChildSpec::Custom {
+        stop_last: false,
         name: "build-dispatch",
         spawn: Arc::new(move |ctx: ChildCtx| {
             let scheduler = Arc::clone(&scheduler);
