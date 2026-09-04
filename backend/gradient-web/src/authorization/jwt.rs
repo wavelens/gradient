@@ -254,13 +254,7 @@ pub fn generate_api_key() -> String {
 pub fn hash_api_key(raw: &str) -> String {
     let mut h = Sha256::new();
     h.update(raw.as_bytes());
-    let bytes = h.finalize();
-    let mut out = String::with_capacity(64);
-    for b in bytes {
-        use std::fmt::Write as _;
-        write!(&mut out, "{:02x}", b).unwrap();
-    }
-    out
+    hex::encode(h.finalize())
 }
 
 #[cfg(test)]

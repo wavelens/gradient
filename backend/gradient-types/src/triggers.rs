@@ -112,7 +112,8 @@ impl TriggerConfig {
 
     /// Serialise to the JSON shape stored in the DB (without the `"type"` tag).
     pub fn to_db_json(&self) -> serde_json::Value {
-        let mut v = serde_json::to_value(self).unwrap();
+        let mut v = serde_json::to_value(self)
+            .expect("a TriggerConfig is a derived enum of strings and numbers");
         if let serde_json::Value::Object(ref mut m) = v {
             m.remove("type");
         }
