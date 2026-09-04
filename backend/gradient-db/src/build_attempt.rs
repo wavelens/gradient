@@ -177,9 +177,10 @@ pub async fn stamp_attempt_started<C: ConnectionTrait>(
     Ok(())
 }
 
-/// Record a terminal failure on the anchor's latest attempt: set `outcome` +
-/// `reason` + `failure_message`, stamping `build_finished_at` if not already set.
-pub async fn fail_latest_attempt<C: ConnectionTrait>(
+/// Record a terminal `outcome` on the anchor's latest attempt, stamping
+/// `build_finished_at` if not already set. Every attempt must reach one of these:
+/// a row left at `Running` is swept to `Aborted` by `recover_interrupted_work`.
+pub async fn finish_latest_attempt<C: ConnectionTrait>(
     db: &C,
     derivation_build: DerivationBuildId,
     outcome: AttemptOutcome,
@@ -199,6 +200,27 @@ pub async fn fail_latest_attempt<C: ConnectionTrait>(
     }
 
     Ok(())
+}
+
+/// Record a terminal failure on the anchor's latest attempt.
+pub async fn fail_latest_attempt<C: ConnectionTrait>(
+    db: &C,
+    derivation_build: DerivationBuildId,
+    outcome: AttemptOutcome,
+    reason: Option<AttemptFailureReason>,
+    failure_message: Option<String>,
+) -> Result<(), DbErr> {
+    finish_latest_attempt(db, derivation_build, outcome, reason, failure_message).await
+}
+
+/// Record a terminal success (`Built` / `Substituted`) on the anchor's latest
+/// attempt, clearing any reason left by a superseded failure.
+pub async fn succeed_latest_attempt<C: ConnectionTrait>(
+    db: &C,
+    derivation_build: DerivationBuildId,
+    outcome: AttemptOutcome,
+) -> Result<(), DbErr> {
+    finish_latest_attempt(db, derivation_build, outcome, None, None).await
 }
 
 /// Count `InputsUnavailable` attempts recorded against an anchor across its whole

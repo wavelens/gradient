@@ -65,6 +65,18 @@ pub(crate) fn terminal_success_status(outputs_already_valid: bool) -> BuildStatu
     }
 }
 
+/// Terminal `build_attempt.outcome` for a job that completed, mirroring
+/// [`terminal_success_status`]. Without this the success path leaves the attempt
+/// at `Running`, and `recover_interrupted_work` later rewrites every such row to
+/// `Aborted` - so a healthy instance reports roughly half its attempts aborted.
+pub(crate) fn terminal_success_outcome(outputs_already_valid: bool) -> AttemptOutcome {
+    if outputs_already_valid {
+        AttemptOutcome::Substituted
+    } else {
+        AttemptOutcome::Built
+    }
+}
+
 /// Best-effort mapping from the worker's failure classification to a stored
 /// `build_attempt.reason`. `Transient` has no single cause, so it stays `None`;
 /// an abort is not a failure of the derivation and carries no reason at all.
@@ -138,8 +150,8 @@ pub(crate) fn truncate_failure_message(error: &str) -> String {
 mod tests {
     use super::{
         FailureOutcome, attempt_outcome, attempt_reason, decide_failure_outcome,
-        inputs_unavailable_circuit_open, retry_backoff_elapsed, terminal_success_status,
-        truncate_failure_message,
+        inputs_unavailable_circuit_open, retry_backoff_elapsed, terminal_success_outcome,
+        terminal_success_status, truncate_failure_message,
     };
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
@@ -333,5 +345,23 @@ mod tests {
     fn terminal_status_is_substituted_only_when_outputs_were_already_valid() {
         assert_eq!(terminal_success_status(true), BuildStatus::Substituted);
         assert_eq!(terminal_success_status(false), BuildStatus::Completed);
+    }
+
+    /// Success must be recorded on the attempt, never left at `Running`: the
+    /// recovery sweep turns a lingering `Running` row into `Aborted`.
+    #[test]
+    fn terminal_outcome_records_success_and_never_stays_running() {
+        assert_eq!(terminal_success_outcome(true), AttemptOutcome::Substituted);
+        assert_eq!(terminal_success_outcome(false), AttemptOutcome::Built);
+        for already_valid in [true, false] {
+            assert_ne!(
+                terminal_success_outcome(already_valid),
+                AttemptOutcome::Running
+            );
+            assert_ne!(
+                terminal_success_outcome(already_valid),
+                AttemptOutcome::Aborted
+            );
+        }
     }
 }

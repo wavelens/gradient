@@ -10,8 +10,8 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result};
 use gradient_db::{
-    DbContext, cascade_dependency_failed, fail_latest_attempt, update_derivation_build_status,
-    update_evaluation_status, update_evaluation_status_with_error,
+    DbContext, cascade_dependency_failed, fail_latest_attempt, succeed_latest_attempt,
+    update_derivation_build_status, update_evaluation_status, update_evaluation_status_with_error,
 };
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
@@ -404,6 +404,15 @@ async fn build_completed(
     // The output NARs are pushed by the time `JobCompleted` arrives, so the
     // anchor may now become dispatch-ready.
     let terminal = policy::terminal_success_status(anchor.substituted);
+    if let Err(e) = succeed_latest_attempt(
+        &ctx.worker_db,
+        derivation_build,
+        policy::terminal_success_outcome(anchor.substituted),
+    )
+    .await
+    {
+        warn!(%derivation_build, error = %e, "failed to record attempt success");
+    }
     update_derivation_build_status(ctx, anchor, terminal).await;
     check_referencing_evals_done(ctx, derivation_id).await?;
 
