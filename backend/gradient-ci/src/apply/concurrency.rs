@@ -11,11 +11,11 @@ use sea_orm::ConnectionTrait;
 
 /// Outcome of applying the task's [`ConcurrencyPolicy`] to the in-flight
 /// evaluation: whether the new run is allowed to be concurrent, plus any
-/// evaluation/builds the policy aborted to make room.
+/// evaluation the policy aborted to make room.
 pub(super) struct ConcurrencyDecision {
     pub concurrent_flag: bool,
     pub aborted_evaluation: Option<EvaluationId>,
-    pub aborted_anchors: Vec<DerivationBuildId>,
+    pub hard_abort: bool,
 }
 
 /// Applies the task's concurrency policy against `in_flight`. Returns `None`
@@ -30,14 +30,14 @@ pub(super) async fn resolve_concurrency<C: ConnectionTrait>(
     let concurrency = task.concurrency;
 
     let mut aborted_evaluation: Option<EvaluationId> = None;
-    let mut aborted_anchors: Vec<DerivationBuildId> = Vec::new();
+    let mut hard_abort = false;
     let concurrent_flag = matches!(concurrency, ConcurrencyPolicy::All);
 
     if !concurrent_flag && let Some(running) = in_flight {
         match concurrency {
             ConcurrencyPolicy::Skip => return Ok(None),
             ConcurrencyPolicy::HardAbort => {
-                aborted_anchors = abort_evaluation(db, running.id, AbortKind::Hard).await?;
+                hard_abort = abort_evaluation(db, running.id, AbortKind::Hard).await?;
                 aborted_evaluation = Some(running.id);
             }
             ConcurrencyPolicy::SoftAbort => {
@@ -52,6 +52,6 @@ pub(super) async fn resolve_concurrency<C: ConnectionTrait>(
     Ok(Some(ConcurrencyDecision {
         concurrent_flag,
         aborted_evaluation,
-        aborted_anchors,
+        hard_abort,
     }))
 }

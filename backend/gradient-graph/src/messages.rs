@@ -8,10 +8,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+use gradient_db::ReconcileScope;
+use gradient_types::MCachedPath;
 use gradient_types::ids::{
-    CacheId, CachedPathId, DerivationBuildId, DerivationId, EvaluationId, ProjectId, TaskId,
+    CacheId, CachedPathId, DerivationBuildId, DerivationId, DispatchedJobId, EvaluationId,
+    ProjectId, TaskId,
 };
-use gradient_types::proto::{BuildFailureKind, DiscoveredDerivation};
+use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput, DiscoveredDerivation};
 
 /// One worker batch of discovered derivations plus the substitution facts the
 /// scheduler established outside the actor (cache reads and the upstream probe).
@@ -90,7 +93,9 @@ pub struct NarCommitted {
 pub enum Transition {
     /// The worker sent `JobCompleted` for an evaluation: settle the deferred
     /// edges, reconcile the evaluation's closure and move it to `Building`.
-    EvalStreamCompleted { evaluation: EvaluationId },
+    EvalStreamCompleted {
+        evaluation: EvaluationId,
+    },
     EvalFailed {
         evaluation: EvaluationId,
         error: String,
@@ -98,10 +103,96 @@ pub enum Transition {
         missing_paths: Vec<String>,
     },
     /// Mark the evaluation aborted and abort every anchor only it still needs.
-    AbortEvaluation { evaluation: EvaluationId },
+    AbortEvaluation {
+        evaluation: EvaluationId,
+    },
+    /// The worker reported `Building`; `already_aborted` in the report means
+    /// the worker must be told to stop instead.
+    BuildStarted {
+        anchor: DerivationBuildId,
+    },
+    BuildOutput {
+        anchor: DerivationBuildId,
+        outputs: Vec<BuildOutput>,
+        metrics: Option<BuildMetrics>,
+        substituted: bool,
+    },
+    BuildCompleted {
+        anchor: DerivationBuildId,
+    },
+    BuildFailed {
+        anchor: DerivationBuildId,
+        error: String,
+        /// The worker's reason with nix's repeated log tail already stripped.
+        log_banner: String,
+        kind: BuildFailureKind,
+        missing_paths: Vec<String>,
+    },
+    /// A job left the scheduler for a worker: the `build_job`, the open
+    /// `build_attempt` and the anchor's `dispatched_at`.
+    Dispatched {
+        evaluation: EvaluationId,
+        anchor: DerivationBuildId,
+        dispatched_job: DispatchedJobId,
+        substitute: bool,
+        build_context: serde_json::Value,
+    },
+    /// Builds a disconnected worker was running go back to `Queued`.
+    OrphanedBuilds {
+        anchors: Vec<DerivationBuildId>,
+    },
+    /// Anchors a dispatch pass just enqueued, plus closure sizes it computed.
+    Ready {
+        anchors: Vec<DerivationBuildId>,
+        closure_sizes: Vec<(DerivationId, i64)>,
+    },
+    Reconcile {
+        scope: ReconcileScope,
+    },
+    /// Abort the anchors only this evaluation needs; the evaluation row is
+    /// already terminal (the trigger path marks it).
+    AbortEvaluationAnchors {
+        evaluation: EvaluationId,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TransitionReport {
     pub aborted_anchors: Vec<DerivationBuildId>,
+    pub already_aborted: bool,
+    pub substitute_log: Option<SubstituteLog>,
+}
+
+/// A completed substitutable anchor whose upstream log the scheduler fetches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubstituteLog {
+    pub anchor: DerivationBuildId,
+    pub derivation: DerivationId,
+    pub drv_path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequeueScope {
+    /// `FailedTransient` anchors whose backoff elapsed go back to `Queued`.
+    TransientRetries,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Demotion {
+    /// A NAR the index lists is not in storage.
+    MissingNar { hash: String },
+    /// Operator invalidation: demote, clear the gates, revoke closure claims.
+    Path { hash: String },
+    /// One cache drops its claim; the path is demoted when it was the last.
+    CacheClaim { cache: CacheId, hash: String },
+    /// Maintenance: producers trusted by the dispatch gate whose output is gone.
+    UnbackedTrustedOutputs,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DemoteReport {
+    pub producers: Vec<DerivationId>,
+    pub demoted: u64,
+    pub cached_path: Option<MCachedPath>,
+    pub others_remain: bool,
 }

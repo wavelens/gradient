@@ -7,11 +7,8 @@
 //! Self-heal for `BuildFailureKind::InputsUnavailable`: purge stale cache
 //! artifacts for reported-missing inputs and re-queue their producers.
 
-use std::sync::Arc;
-
 use anyhow::Result;
-
-use gradient_core::ServerState;
+use gradient_db::DbContext;
 use gradient_types::*;
 use tracing::{info, warn};
 
@@ -53,32 +50,28 @@ async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[Deriv
 /// preserves a still-present producerless artifact, because nothing rebuilds it
 /// and deleting the only copy dead-ends every dependent on `InputsUnavailable`
 /// forever (a present one means a transient fetch miss, so the build just retries).
-pub(super) async fn reconcile_missing_inputs(
-    state: &Arc<ServerState>,
+pub(crate) async fn reconcile_missing_inputs(
+    ctx: &DbContext,
     failed_derivation: DerivationId,
     missing_paths: &[String],
 ) -> Result<()> {
-    let db = &state.worker_db;
+    let db = &ctx.worker_db;
+    let nar_storage = &ctx.storage.nar_storage;
     let mut purged = 0usize;
     let mut referrers_demoted = 0usize;
     let mut sources_purged: Vec<&str> = Vec::new();
     let mut demoted_producers: Vec<DerivationId> = Vec::new();
-    // Set when a missing input cannot be reached upward (no producer row and
-    // no indexed referrer, or an orphan producer with no indexed referrer):
-    // an absent orphan pruned out of the graph. Recovered after the loop by
-    // demoting the failed build's cached deps so the next eval re-walks them.
+    // Set when a missing input cannot be reached upward: an absent orphan pruned
+    // out of the graph, recovered after the loop by demoting the failed build's
+    // cached deps so the next eval re-walks them.
     let mut needs_dep_rewalk = false;
     for path in missing_paths {
         let Some(hash) = store_path_hash(path) else {
             continue;
         };
 
-        // Diagnostic: record why the worker found this input unfetchable
-        // even though dispatch treated its producer as done. `fully_cached`
-        // true means the DB claimed a complete NAR (stale cached_path / lost
-        // object); the producer statuses show whether it was trusted
-        // `Substituted` or really `Completed`. The eval arg is unused by the
-        // global diagnosis query.
+        // Diagnostic: why the worker found this input unfetchable even though
+        // dispatch treated its producer as done.
         match gradient_db::diagnose_missing_input(db, EvaluationId::now_v7(), hash).await {
             Ok(d) => warn!(
                 %path,
@@ -93,7 +86,7 @@ pub(super) async fn reconcile_missing_inputs(
             Err(e) => warn!(%path, error = %e, "missing input: diagnosis query failed"),
         }
 
-        match gradient_db::demote_cached_output(db, &state.nar_storage, hash).await {
+        match gradient_db::demote_cached_output(db, nar_storage, hash).await {
             Ok(drvs) if !drvs.is_empty() => {
                 purged += 1;
                 // The leaf rebuilds + re-pushes closure-complete; meanwhile drop
@@ -103,17 +96,13 @@ pub(super) async fn reconcile_missing_inputs(
                     warn!(%path, error = %e, "reconcile: clear closure_complete failed");
                 }
 
-                // If the producer is an orphan (no `build_job`, so promotion can
-                // never queue it - it was pruned out of the build graph because
-                // some referrer's output was cached without its closure), the
-                // gentle flag clear is not enough: the referrer stays cached,
-                // stays pruned, and the orphan is never re-walked. Demote the
-                // referrers so the next eval re-walks them, re-records the edge,
-                // and schedules the producer.
+                // An orphan producer (no `build_job`) can never be queued, so the
+                // flag clear is not enough: demote the referrers instead, and the
+                // next eval re-walks them, re-records the edge and schedules it.
                 let orphan = !any_reachable(db, &drvs).await;
                 demoted_producers.extend(drvs);
                 if orphan {
-                    match gradient_db::demote_referrers_of(db, &state.nar_storage, hash).await {
+                    match gradient_db::demote_referrers_of(db, nar_storage, hash).await {
                         Ok(refs) if !refs.is_empty() => {
                             referrers_demoted += refs.len();
                             demoted_producers.extend(refs);
@@ -129,11 +118,8 @@ pub(super) async fn reconcile_missing_inputs(
                 sources_purged.push(path);
                 // No producing derivation (a source / `.drv`): it only returns to
                 // the cache as part of a referrer's closure, so demote the
-                // rebuildable *output* referrers - their rebuild re-pushes it. A
-                // producerless `.drv`/source referrer is left intact: deleting it
-                // re-pushes nothing and would strand its own live dependents behind
-                // the dispatch gate ([`demote_referrers_of`]).
-                match gradient_db::demote_referrers_of(db, &state.nar_storage, hash).await {
+                // rebuildable output referrers - their rebuild re-pushes it.
+                match gradient_db::demote_referrers_of(db, nar_storage, hash).await {
                     Ok(drvs) if !drvs.is_empty() => {
                         referrers_demoted += drvs.len();
                         demoted_producers.extend(drvs);
@@ -146,13 +132,10 @@ pub(super) async fn reconcile_missing_inputs(
         }
     }
 
-    // Absent orphan: a missing input with no producer row and no indexed
-    // referrer cannot be reached upward, so reach it downward from the failing
-    // build - demote its output-only-cached direct deps to force the next eval
-    // to re-walk them and re-record the orphan (and its now-buildable subtree).
+    // Absent orphan: unreachable upward, so reach it downward from the failing
+    // build and demote its output-only-cached direct deps.
     if needs_dep_rewalk {
-        match gradient_db::demote_output_only_cached_deps(db, &state.nar_storage, failed_derivation)
-            .await
+        match gradient_db::demote_output_only_cached_deps(db, nar_storage, failed_derivation).await
         {
             Ok(drvs) => {
                 referrers_demoted += drvs.len();
@@ -169,11 +152,8 @@ pub(super) async fn reconcile_missing_inputs(
         }
     }
 
-    // A demanded output whose producer is terminal-*failed* (not 3/7, which
-    // `demote_cached_output` already reset) must retry: the dependent that just
-    // failed is a fresh build intent, and waiting for an eval to requeue it
-    // dead-ends whenever evals are aborted. Re-queue on demand, decoupled from
-    // eval completion - `requeue_failed_anchors` only touches statuses 4/5/6/9.
+    // A demanded output whose producer is terminal-failed must retry on demand:
+    // waiting for an eval to requeue it dead-ends whenever evals are aborted.
     let requeued = if demoted_producers.is_empty() {
         0
     } else {

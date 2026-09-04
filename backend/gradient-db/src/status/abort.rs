@@ -67,7 +67,8 @@ async fn gate_evaluation_aborting(ctx: &DbContext, evaluation_id: EvaluationId) 
     }
 }
 
-async fn abort_eval_anchors(
+/// Abort every anchor only `evaluation` still needs, returning the ids it moved.
+pub async fn abort_eval_anchors(
     ctx: &DbContext,
     evaluation: &MEvaluation,
 ) -> Result<Vec<DerivationBuildId>, sea_orm::DbErr> {

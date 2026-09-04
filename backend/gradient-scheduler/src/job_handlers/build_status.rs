@@ -6,8 +6,9 @@
 
 //! Build status transitions, output recording, and job completion/failure.
 
+use std::sync::Arc;
+
 use anyhow::Result;
-use gradient_entity::build::BuildStatus;
 use sea_orm::EntityTrait;
 use tracing::{info, warn};
 
@@ -17,7 +18,6 @@ use gradient_types::*;
 
 use crate::Scheduler;
 use crate::actor::SchedulerMsg;
-use crate::build;
 use crate::jobs::PendingJob;
 
 impl Scheduler {
@@ -30,33 +30,26 @@ impl Scheduler {
             }
         };
 
-        match EDerivationBuild::find_by_id(derivation_build)
-            .one(&self.state.worker_db)
+        match self
+            .state
+            .graph
+            .transition(Transition::BuildStarted {
+                anchor: derivation_build,
+            })
             .await
         {
-            Ok(Some(anchor)) => {
-                // Backstop for the dispatch/abort race: an anchor dispatched by an
-                // in-flight pass just before its evaluation was aborted reports
-                // started here. Its status is already Aborted, so tell the worker
-                // to stop instead of letting it build to completion.
-                if anchor.status == BuildStatus::Aborted {
-                    let job_id = format!("build:{derivation_build}");
-                    self.abort_job(worker_id, job_id, "evaluation aborted".to_owned())
-                        .await;
-                    info!(%derivation_build, %worker_id, "aborting build that started after its evaluation was aborted");
-                    return;
-                }
-
-                gradient_db::update_derivation_build_status(
-                    &self.state.db(),
-                    anchor,
-                    BuildStatus::Building,
-                )
-                .await;
+            // Backstop for the dispatch/abort race: an anchor dispatched by an
+            // in-flight pass just before its evaluation was aborted reports
+            // started here, so tell the worker to stop rather than build on.
+            Ok(report) if report.already_aborted => {
+                let job_id = format!("build:{derivation_build}");
+                self.abort_job(worker_id, job_id, "evaluation aborted".to_owned())
+                    .await;
+                info!(%derivation_build, %worker_id, "aborting build that started after its evaluation was aborted");
             }
-            Ok(None) => warn!(%derivation_build, "anchor not found for Building status update"),
+            Ok(_) => {}
             Err(e) => {
-                warn!(error = %e, %derivation_build, "failed to fetch anchor for status update")
+                warn!(error = %e, %derivation_build, "Building update did not reach the graph actor")
             }
         }
     }
@@ -73,23 +66,25 @@ impl Scheduler {
             .parse()
             .map_err(|_| anyhow::anyhow!("invalid derivation_build: {}", build_id_str))?;
 
-        let job = match self.active_job(job_id).await {
-            Some(PendingJob::Build(j)) => j,
+        match self.active_job(job_id).await {
+            Some(PendingJob::Build(_)) => {}
             Some(_) => anyhow::bail!("job {} is not a build job", job_id),
             None => {
                 warn!(%job_id, "build output for unknown job - ignoring");
                 return Ok(());
             }
-        };
-        build::handle_build_output(
-            &self.state,
-            &job,
-            derivation_build,
-            outputs,
-            metrics,
-            substituted,
-        )
-        .await
+        }
+
+        self.state
+            .graph
+            .transition(Transition::BuildOutput {
+                anchor: derivation_build,
+                outputs,
+                metrics,
+                substituted,
+            })
+            .await
+            .map(|_| ())
     }
 
     // ── Job completion ────────────────────────────────────────────────────────
@@ -162,12 +157,34 @@ impl Scheduler {
                 r
             }
             Some(PendingJob::Build(j)) => {
-                let r = build::handle_build_job_completed(&self.state, j.derivation_build).await;
+                let report = self
+                    .state
+                    .graph
+                    .transition(Transition::BuildCompleted {
+                        anchor: j.derivation_build,
+                    })
+                    .await?;
+                if let Some(log) = report.substitute_log {
+                    let state = Arc::clone(&self.state);
+                    self.state.shutdown.spawn(async move {
+                        if let Err(e) = crate::log_substitution::substitute_log(
+                            state,
+                            log.anchor,
+                            log.derivation,
+                            log.drv_path,
+                            true,
+                        )
+                        .await
+                        {
+                            warn!(error = %e, anchor = %log.anchor, "substitute log fetch failed");
+                        }
+                    });
+                }
                 if worker_idle {
                     self.kick_dispatch();
                 }
 
-                r
+                Ok(())
             }
             None => {
                 warn!(%job_id, "job_completed for unknown job");
@@ -210,16 +227,18 @@ impl Scheduler {
                 self.kick_dispatch();
                 r
             }
-            Some(PendingJob::Build(j)) => {
-                build::handle_build_job_failed(
-                    &self.state,
-                    j.derivation_build,
-                    error,
+            Some(PendingJob::Build(j)) => self
+                .state
+                .graph
+                .transition(Transition::BuildFailed {
+                    anchor: j.derivation_build,
+                    error: error.to_owned(),
+                    log_banner: gradient_sources::strip_nix_log_tail(error),
                     kind,
-                    missing_paths,
-                )
+                    missing_paths: missing_paths.to_vec(),
+                })
                 .await
-            }
+                .map(|_| ()),
             None => {
                 warn!(%job_id, "job_failed for unknown job");
                 Ok(())

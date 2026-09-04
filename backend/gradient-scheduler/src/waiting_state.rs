@@ -20,7 +20,7 @@ use gradient_types::*;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, Statement, Value,
 };
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// How long an evaluation must have sat `graph_stuck` before `.drv`-recovery
 /// re-evaluates it, so a still-in-flight `.drv` upload isn't raced into a
@@ -264,11 +264,15 @@ async fn attempt_graph_unstick(
     // The canonical healing pipeline in Unstick scope: edges_complete
     // restore, terminal-failed thaw, cache-trust reconcile, flag fixpoints,
     // promotion (see `gradient_db::reconcile`).
-    gradient_db::reconcile_build_graph(
-        &state.db(),
-        gradient_db::ReconcileScope::Unstick(evaluation_id),
-    )
-    .await;
+    if let Err(e) = state
+        .graph
+        .transition(gradient_graph::Transition::Reconcile {
+            scope: gradient_db::ReconcileScope::Unstick(evaluation_id),
+        })
+        .await
+    {
+        error!(error = %e, %evaluation_id, "unstick reconcile did not reach the graph actor");
+    }
 
     if let Some((EvaluationStatus::Building, reason)) =
         assess_buildability(state, evaluation_id, worker_caps).await?

@@ -10,9 +10,13 @@
 pub mod actor;
 pub mod messages;
 
+mod demote;
 mod ingest;
 mod known;
 mod nar;
+pub mod policy;
+mod requeue;
+mod self_heal;
 mod transition;
 
 use std::sync::Arc;
@@ -25,6 +29,7 @@ use tokio::sync::watch;
 
 use actor::{CALL_TIMEOUT, GraphActor, GraphArgs, GraphMsg, HEALTH_NAME, RPC_TIMEOUT};
 pub use messages::*;
+pub use policy::retry_backoff_elapsed;
 
 /// The live actor, republished on every (re)spawn; a caller waits on the
 /// watch so a restart looks like latency.
@@ -120,5 +125,59 @@ impl Graph {
     pub async fn transition(&self, transition: Transition) -> anyhow::Result<TransitionReport> {
         self.call(|reply| GraphMsg::Transition(transition, reply))
             .await
+    }
+
+    /// Move anchors back to `Queued`; returns how many moved.
+    pub async fn requeue(&self, scope: RequeueScope) -> anyhow::Result<u64> {
+        self.call(|reply| GraphMsg::Requeue(scope, reply)).await
+    }
+
+    /// Drop a path's claim on the cache index, or a whole sweep of them.
+    pub async fn demote(&self, demotion: Demotion) -> anyhow::Result<DemoteReport> {
+        self.call(|reply| GraphMsg::Demote(demotion, reply)).await
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_ctx {
+    use std::sync::Arc;
+
+    use clap::Parser as _;
+    use gradient_db::{DbContext, NoReactor, WebDb, WorkerDb};
+    use gradient_storage::{FileLogStorage, NarStore, StorageCtx};
+    use gradient_types::{Cli, RuntimeConfig};
+    use gradient_util::shutdown::Shutdown;
+    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
+
+    /// A context over `db`, plus the pool handle its transaction log is read from.
+    pub(crate) async fn ctx(db: DatabaseConnection) -> (DbContext, WorkerDb) {
+        let dir = std::env::temp_dir().join(format!("gradient-graph-{}", uuid::Uuid::now_v7()));
+        let cli = Cli::try_parse_from([
+            "gradient-server",
+            "--crypt-secret-file",
+            "test-secret",
+            "--jwt-secret-file",
+            "test-jwt",
+            "--serve-url",
+            "http://127.0.0.1:3000",
+            "--base-path",
+            dir.to_str().unwrap(),
+        ])
+        .expect("test cli");
+        let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("test config"));
+        let worker_db = WorkerDb::new(db);
+        let ctx = DbContext {
+            worker_db: worker_db.clone(),
+            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
+            config,
+            storage: StorageCtx {
+                nar_storage: NarStore::local(dir.to_str().unwrap()).unwrap(),
+                log_storage: Arc::new(FileLogStorage::new(&dir).await.unwrap()),
+            },
+            shutdown: Shutdown::new(),
+            board_events: tokio::sync::broadcast::channel(16).0,
+            reactor: Arc::new(NoReactor),
+        };
+        (ctx, worker_db)
     }
 }

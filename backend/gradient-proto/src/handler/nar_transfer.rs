@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use gradient_core::ServerState;
+use gradient_graph::Demotion;
 use gradient_scheduler::Scheduler;
 use tracing::{debug, error, warn};
 
@@ -895,7 +896,13 @@ pub(super) async fn serve_nar_request(
 /// letting the next build either rebuild from source or pick the path up from a
 /// configured upstream. The derivation graph is untouched.
 async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path: &str) {
-    match gradient_db::demote_cached_output(&state.worker_db, &state.nar_storage, hash).await {
+    match state
+        .graph
+        .demote(Demotion::MissingNar {
+            hash: hash.to_owned(),
+        })
+        .await
+    {
         Ok(_) => warn!(
             %hash,
             %store_path,

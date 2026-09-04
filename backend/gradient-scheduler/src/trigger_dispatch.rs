@@ -92,6 +92,7 @@ use std::sync::Arc;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger, trigger::maybe_trigger_input_update};
 use gradient_core::ServerState;
 use gradient_entity::task_trigger as ept;
+use gradient_graph::Transition;
 use gradient_sources::{check_task_updates, get_commit_info};
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
@@ -221,13 +222,18 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
                 Ok(ApplyOutcome::Created {
                     evaluation: eval,
                     aborted_evaluation,
-                    aborted_anchors,
+                    hard_abort,
                 }) => {
                     if let Some(aborted_id) = aborted_evaluation {
-                        scheduler
-                            .cancel_evaluation_jobs(aborted_id, &aborted_anchors)
-                            .await;
+                        let anchors = if hard_abort {
+                            abort_eval_anchors(state, aborted_id).await
+                        } else {
+                            Vec::new()
+                        };
+
+                        scheduler.cancel_evaluation_jobs(aborted_id, &anchors).await;
                     }
+
                     info!(task = %task.name, trigger_id = %trig.id, evaluation_id = %eval.id, "trigger created evaluation");
                     gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
                 }
@@ -243,6 +249,25 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         update_last_fired(state, &trig, now).await;
     }
     Ok(())
+}
+
+/// Abort the anchors a hard-aborted evaluation alone still needed; the graph
+/// actor owns that write, and the caller cancels the in-memory jobs.
+async fn abort_eval_anchors(
+    state: &Arc<ServerState>,
+    evaluation: EvaluationId,
+) -> Vec<DerivationBuildId> {
+    match state
+        .graph
+        .transition(Transition::AbortEvaluationAnchors { evaluation })
+        .await
+    {
+        Ok(report) => report.aborted_anchors,
+        Err(e) => {
+            warn!(error = %e, evaluation_id = %evaluation, "aborting the evaluation's anchors did not reach the graph actor");
+            Vec::new()
+        }
+    }
 }
 
 async fn update_last_fired(state: &Arc<ServerState>, trig: &ept::Model, now: NaiveDateTime) {
