@@ -30,7 +30,9 @@ pub use wire::{decode_client_message, decode_server_message};
 ///     deterministic build failure.
 /// v9: `JobCompleted`/`JobFailed` carry the worker's phase timeline (`spans`);
 ///     `EvalStatsReport` drops the three phase-millisecond fields it never set.
-pub const PROTO_VERSION: u16 = 9;
+/// v10: `QueryMode::PullClosure` asks the server to answer for a path's whole
+///      reference closure, not just the path.
+pub const PROTO_VERSION: u16 = 10;
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 

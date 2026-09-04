@@ -38,7 +38,7 @@ fn reject_reason(msg: &ClientMessage) -> Option<&'static str> {
     match msg {
         ClientMessage::CacheQuery { mode, .. } => match mode {
             QueryMode::Push => Some("Push not allowed on a read-only cache session"),
-            QueryMode::Normal | QueryMode::Pull => None,
+            QueryMode::Normal | QueryMode::Pull | QueryMode::PullClosure => None,
         },
         ClientMessage::NarRequest { .. } => None,
         _ => Some("only CacheQuery and NarRequest are allowed on a cache session"),

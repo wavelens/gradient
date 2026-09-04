@@ -302,6 +302,13 @@ pub enum QueryMode {
     /// `NarPush`.  Cached paths have `cached: true` and no URL (skip them).
     /// Used after `FetchFlake` to push fetched inputs to the server cache.
     Push,
+    /// Like [`QueryMode::Pull`], but the server also expands each queried path's
+    /// runtime-reference closure and answers for its members in the same reply,
+    /// up to the shared per-reply path bound. Bonus members are only ever
+    /// included when they are cached and serveable, so a caller may treat any
+    /// uncached entry as one it asked for. Lets a worker learn a whole closure
+    /// in one round trip instead of one hop at a time.
+    PullClosure,
 }
 
 /// A store path entry returned in [`CacheStatus`].
