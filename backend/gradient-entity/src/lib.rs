@@ -71,6 +71,7 @@ pub mod user;
 pub mod worker_registration;
 
 pub mod dispatched_job;
+pub mod dispatched_job_phase;
 pub mod metric_rollup;
 pub mod phase_event;
 pub mod worker_connection;

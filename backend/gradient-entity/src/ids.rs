@@ -140,6 +140,7 @@ id_newtype!(CliDeviceAuthorizationId);
 id_newtype!(BuildAttemptId);
 id_newtype!(BuildJobId);
 id_newtype!(DispatchedJobId);
+id_newtype!(DispatchedJobPhaseId);
 id_newtype!(MetricRollupId);
 id_newtype!(PhaseEventId);
 id_newtype!(WorkerConnectionId);
