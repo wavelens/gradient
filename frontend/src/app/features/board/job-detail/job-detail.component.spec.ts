@@ -25,6 +25,13 @@ const DETAIL: DispatchedJobDetail = {
   pname: null,
   queued_at: '2026-06-08T00:00:00Z',
   finished_at: null,
+  ready_at: '2026-06-08T00:00:30Z',
+  outcome: null,
+  phases: [
+    { seq: 0, parent_seq: null, phase: 'build', start_ms: 0, end_ms: 5000, paths: 0, bytes: 0 },
+    { seq: 1, parent_seq: null, phase: 'compress', start_ms: 5000, end_ms: 6000, paths: 2, bytes: 0 },
+    { seq: 2, parent_seq: 1, phase: 'nar_push', start_ms: 5100, end_ms: 5900, paths: 1, bytes: 1024 },
+  ],
   derivation_build_id: 'a1',
   derivations: [{ build: 'bj1', derivation_build: 'a1', drv_path: '/nix/store/xxx-foo', pname: 'foo' }],
   score_breakdown: { rules: { wait: 3.5, missing: -1.2 }, total: 12.5 },
