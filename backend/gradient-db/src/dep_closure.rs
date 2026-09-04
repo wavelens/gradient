@@ -17,7 +17,7 @@
 use crate::closure::transitive_closure_reachable;
 use crate::fetch_in_chunks;
 use gradient_entity::build::BuildStatus;
-use gradient_entity::ids::{DerivationClosureId, DerivationId, EntryPointId, EvaluationId};
+use gradient_entity::ids::{DerivationId, EntryPointId, EvaluationId};
 use gradient_types::*;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
@@ -88,7 +88,6 @@ pub async fn materialize_entry_point_closures<C: ConnectionTrait>(
             .filter(|&&dep| dep != root.id)
             .map(|&dep| {
                 MDerivationClosure {
-                    id: DerivationClosureId::now_v7(),
                     root_derivation: root.id,
                     dep_derivation: dep,
                 }

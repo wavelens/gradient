@@ -155,8 +155,8 @@ async fn sync_reference_index(
     db.execute_raw(sea_orm::Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         r#"
-        INSERT INTO cached_path_reference (id, referrer, reference, reference_hash, position)
-        SELECT uuidv7(), $1, t.tok, split_part(t.tok, '-', 1), t.ord
+        INSERT INTO cached_path_reference (referrer, reference, reference_hash, position)
+        SELECT $1, t.tok, split_part(t.tok, '-', 1), t.ord
         FROM unnest($2::text[]) WITH ORDINALITY AS t(tok, ord)
         WHERE t.tok <> ''
         ON CONFLICT (referrer, reference) DO NOTHING

@@ -294,7 +294,6 @@ mod tests {
 
     fn dep(derivation: DerivationId, dependency: DerivationId) -> derivation_dependency::Model {
         derivation_dependency::Model {
-            id: DerivationDependencyId::now_v7(),
             derivation,
             dependency,
         }
