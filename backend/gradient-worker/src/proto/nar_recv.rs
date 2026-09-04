@@ -27,8 +27,9 @@
 //! [`gradient_proto::messages::ServerMessage::NarPushResume`], handing the
 //! pusher the byte offset to seek to.
 
+use gradient_util::sync::Mutex;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -152,7 +153,7 @@ impl NarReceiver {
     pub fn register(&self, job_id: &str, store_path: &str) -> PendingNar {
         let key = (job_id.to_owned(), store_path.to_owned());
         let (tx, rx) = oneshot::channel();
-        self.inner.lock().unwrap().waiters.insert(key, tx);
+        self.inner.lock().waiters.insert(key, tx);
         PendingNar {
             job_id: job_id.to_owned(),
             store_path: store_path.to_owned(),
@@ -182,7 +183,7 @@ impl NarReceiver {
                 store_path
             )),
             Err(_) => {
-                let mut g = self.inner.lock().unwrap();
+                let mut g = self.inner.lock();
                 g.buffers.remove(&key);
                 g.headers.remove(&key);
                 g.waiters.remove(&key);
@@ -208,7 +209,7 @@ impl NarReceiver {
     /// Record the `NarStreamHeader` that precedes a pull's chunks.
     pub fn note_header(&self, job_id: &str, store_path: &str, total_bytes: u64, token: &str) {
         let key = (job_id.to_owned(), store_path.to_owned());
-        self.inner.lock().unwrap().headers.insert(
+        self.inner.lock().headers.insert(
             key,
             HeaderInfo {
                 total_bytes,
@@ -232,7 +233,7 @@ impl NarReceiver {
         // Snapshot the active token and stamp the start time without holding
         // the lock across disk I/O.
         let token = {
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.inner.lock();
             if !data.is_empty() {
                 g.started
                     .entry(key.clone())
@@ -257,7 +258,6 @@ impl NarReceiver {
                 _ => {
                     self.inner
                         .lock()
-                        .unwrap()
                         .buffers
                         .entry(key.clone())
                         .or_default()
@@ -273,7 +273,7 @@ impl NarReceiver {
         // Take the in-memory state under the lock; read/discard the on-disk
         // partial off the runtime.
         let (expected, started, disk_key, mem_buf) = {
-            let mut g = self.inner.lock().unwrap();
+            let mut g = self.inner.lock();
             let expected = g.headers.remove(&key).map(|h| h.total_bytes);
             let started = g.started.remove(&key);
             let disk_key = match (self.partial.as_ref(), partial_key(job_id, store_path)) {
@@ -322,7 +322,7 @@ impl NarReceiver {
 
     /// Resolve the waiter for `key`, warning if none is registered.
     fn deliver(&self, key: &Key, result: Result<Vec<u8>, String>) {
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.inner.lock();
         match g.waiters.remove(key) {
             Some(tx) => {
                 if tx.send(result).is_err() {
@@ -340,7 +340,7 @@ impl NarReceiver {
     /// later request can resume from where it stopped.
     pub fn fail(&self, job_id: &str, store_path: &str, reason: String) {
         let key = (job_id.to_owned(), store_path.to_owned());
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.inner.lock();
         g.buffers.remove(&key);
         g.headers.remove(&key);
         g.started.remove(&key);
@@ -360,14 +360,14 @@ impl NarReceiver {
     pub fn register_push(&self, job_id: &str, store_path: &str) -> PushResumeGate {
         let key = (job_id.to_owned(), store_path.to_owned());
         let (tx, rx) = oneshot::channel();
-        self.inner.lock().unwrap().push_waiters.insert(key, tx);
+        self.inner.lock().push_waiters.insert(key, tx);
         PushResumeGate { rx }
     }
 
     /// Resolve a push-resume gate with the server's `received_bytes`.
     pub fn resolve_push(&self, job_id: &str, store_path: &str, received_bytes: u64) {
         let key = (job_id.to_owned(), store_path.to_owned());
-        if let Some(tx) = self.inner.lock().unwrap().push_waiters.remove(&key) {
+        if let Some(tx) = self.inner.lock().push_waiters.remove(&key) {
             let _ = tx.send(received_bytes);
         } else {
             debug!(%job_id, %store_path, "NarPushResume with no push gate - discarding");
@@ -377,7 +377,7 @@ impl NarReceiver {
     /// Drop in-memory state for a job. On-disk partials (keyed by hash) are
     /// left for the GC sweep so a later attempt can still resume.
     pub fn forget_job(&self, job_id: &str) {
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.inner.lock();
         g.buffers.retain(|(j, _), _| j != job_id);
         g.headers.retain(|(j, _), _| j != job_id);
         g.waiters.retain(|(j, _), _| j != job_id);

@@ -7,8 +7,9 @@
 //! Background scoring tasks: compute `missing_count` per candidate and send
 //! `RequestJobChunk` messages back to the server.
 
+use gradient_util::sync::Mutex;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use gradient_proto::messages::{CandidateScore, JobCandidate, JobKind};
 use tracing::warn;
@@ -57,7 +58,7 @@ pub(super) fn spawn_scoring_task(
         };
 
         let to_send: Vec<CandidateScore> = {
-            let mut g = last_scores.lock().unwrap();
+            let mut g = last_scores.lock();
             let mut out = Vec::with_capacity(scores.len());
             for s in scores {
                 if !delta_filter || g.get(&s.job_id) != Some(&s) {

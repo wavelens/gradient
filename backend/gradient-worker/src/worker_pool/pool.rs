@@ -11,10 +11,11 @@
 
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
+use gradient_util::sync::Mutex;
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, trace};
@@ -87,7 +88,7 @@ impl EvalWorkerPool {
 
     /// Snapshot of every live eval-subprocess pid.
     pub(super) fn live_pids(&self) -> Vec<u32> {
-        self.live.lock().unwrap().iter().copied().collect()
+        self.live.lock().iter().copied().collect()
     }
 
     /// Reaper feedback: latches the pressure flag `acquire` throttles on.
@@ -119,7 +120,7 @@ impl EvalWorkerPool {
         // Skip such corpses so we never hand out a worker whose first stdin
         // write fails with a broken pipe; spawn fresh once the idle vec drains.
         let worker = loop {
-            let candidate = self.idle.lock().unwrap().pop();
+            let candidate = self.idle.lock().pop();
             match candidate {
                 Some(mut w) => {
                     let pid = w.pid();
@@ -165,7 +166,7 @@ impl EvalWorkerPool {
         self.semaphore.close();
 
         let drained: Vec<EvalWorker> = {
-            let mut idle = self.idle.lock().unwrap();
+            let mut idle = self.idle.lock();
             std::mem::take(&mut *idle)
         };
         if drained.is_empty() {
@@ -187,7 +188,7 @@ impl EvalWorkerPool {
     /// still usable - and `kill_on_drop` reaps the discarded children.
     pub(super) fn recycle_idle(&self) {
         let drained: Vec<EvalWorker> = {
-            let mut idle = self.idle.lock().unwrap();
+            let mut idle = self.idle.lock();
             std::mem::take(&mut *idle)
         };
         if !drained.is_empty() {
@@ -198,7 +199,7 @@ impl EvalWorkerPool {
 
     #[cfg(test)]
     pub(super) fn idle_count(&self) -> usize {
-        self.idle.lock().unwrap().len()
+        self.idle.lock().len()
     }
 
     #[cfg(test)]
@@ -210,7 +211,7 @@ impl EvalWorkerPool {
     /// `acquire()` calls reuse it instead of spawning a fresh one.
     #[cfg(test)]
     pub(super) fn push_for_test(&self, worker: EvalWorker) {
-        self.idle.lock().unwrap().push(worker);
+        self.idle.lock().push(worker);
     }
 }
 
@@ -259,13 +260,17 @@ impl PooledEvalWorker {
 impl Deref for PooledEvalWorker {
     type Target = EvalWorker;
     fn deref(&self) -> &Self::Target {
-        self.worker.as_ref().unwrap()
+        self.worker
+            .as_ref()
+            .expect("the worker is taken only by Drop")
     }
 }
 
 impl DerefMut for PooledEvalWorker {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.worker.as_mut().unwrap()
+        self.worker
+            .as_mut()
+            .expect("the worker is taken only by Drop")
     }
 }
 
@@ -291,12 +296,7 @@ impl Drop for PooledEvalWorker {
                 }
             }
             Disposition::ReturnToIdle => {
-                if let Ok(mut idle) = self.idle.lock() {
-                    idle.push(worker);
-                } else {
-                    debug!("discarding eval worker (idle mutex poisoned)");
-                    drop(worker);
-                }
+                self.idle.lock().push(worker);
             }
             Disposition::Kill => {
                 debug!("discarding eval worker (unhealthy)");
@@ -466,16 +466,16 @@ mod tests {
         use super::super::transport::PidGuard;
 
         let live = Arc::new(Mutex::new(HashSet::new()));
-        live.lock().unwrap().insert(4242u32);
+        live.lock().insert(4242u32);
         {
             let _guard = PidGuard {
                 live: Some(Arc::clone(&live)),
                 pid: Some(4242),
             };
-            assert!(live.lock().unwrap().contains(&4242));
+            assert!(live.lock().contains(&4242));
         }
         assert!(
-            !live.lock().unwrap().contains(&4242),
+            !live.lock().contains(&4242),
             "PidGuard must remove its pid from the live registry on drop"
         );
     }

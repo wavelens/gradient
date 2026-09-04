@@ -17,7 +17,8 @@
 
 use gradient_proto::messages::CredentialKind;
 use gradient_types::SecretBytes;
-use std::sync::{Arc, Mutex};
+use gradient_util::sync::Mutex;
+use std::sync::Arc;
 
 #[derive(Default)]
 struct Inner {
@@ -37,7 +38,7 @@ impl CredentialStore {
 
     /// Store a credential delivered by the server.
     pub fn store(&self, kind: CredentialKind, data: Vec<u8>) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         match kind {
             CredentialKind::SshKey => {
                 inner.ssh_key = Some(SecretBytes::new(data));
@@ -49,7 +50,6 @@ impl CredentialStore {
     pub fn ssh_key(&self) -> Option<SecretBytes> {
         self.inner
             .lock()
-            .unwrap()
             .ssh_key
             .as_ref()
             .map(|b| SecretBytes::new(b.expose().to_vec()))
@@ -57,7 +57,7 @@ impl CredentialStore {
 
     /// Clear all stored credentials (called after a job completes).
     pub fn clear(&self) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.ssh_key = None;
     }
 }

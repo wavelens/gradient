@@ -9,9 +9,10 @@
 //! lifecycle lives in [`super::pool`], memory accounting in [`super::memory`].
 
 use anyhow::{Context, Result};
+use gradient_util::sync::Mutex;
 use std::collections::HashSet;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -80,7 +81,7 @@ pub(super) struct PidGuard {
 impl Drop for PidGuard {
     fn drop(&mut self) {
         if let (Some(live), Some(pid)) = (&self.live, self.pid) {
-            live.lock().unwrap().remove(&pid);
+            live.lock().remove(&pid);
         }
     }
 }
@@ -130,7 +131,7 @@ impl EvalWorker {
         // Register the pid so the memory reaper can find this subprocess even
         // while it is checked out of the pool. Deregistered by `PidGuard`.
         if let Some(pid) = worker.pid_guard.pid {
-            live.lock().unwrap().insert(pid);
+            live.lock().insert(pid);
         }
         worker.pid_guard.live = Some(live);
 

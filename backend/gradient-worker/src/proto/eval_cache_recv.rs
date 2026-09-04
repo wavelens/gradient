@@ -20,8 +20,9 @@
 //! Mirrors [`super::nar_recv`] but simpler: the executor runs one eval at a
 //! time so a single in-flight pull *or* push per `job_id` is enough.
 
+use gradient_util::sync::Mutex;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::Result;
 use gradient_proto::messages::{EvalCachePullOutcome, EvalCachePushMode, TRANSFER_TIMEOUT};
@@ -96,7 +97,7 @@ impl PendingPull {
     /// mode and await the assembled blob delivered on `is_final`.
     pub async fn await_inline(self, total_bytes: u64) -> Result<Vec<u8>> {
         let (bytes_tx, bytes_rx) = oneshot::channel();
-        self.recv.inner.lock().unwrap().pending.insert(
+        self.recv.inner.lock().pending.insert(
             self.job_id.clone(),
             Pending::PullStream {
                 buf: Vec::with_capacity(total_bytes as usize),
@@ -164,7 +165,6 @@ impl EvalCacheReceiver {
         let (result_tx, result_rx) = oneshot::channel();
         self.inner
             .lock()
-            .unwrap()
             .pending
             .insert(job_id.to_owned(), Pending::Pull { result_tx });
         PendingPull {
@@ -179,7 +179,6 @@ impl EvalCacheReceiver {
         let (grant_tx, grant_rx) = oneshot::channel();
         self.inner
             .lock()
-            .unwrap()
             .pending
             .insert(job_id.to_owned(), Pending::Push { grant_tx });
         PendingPush {
@@ -191,7 +190,7 @@ impl EvalCacheReceiver {
 
     /// Route an `EvalCachePullResult` to its waiter.
     pub fn deliver_pull_result(&self, job_id: &str, outcome: EvalCachePullOutcome) {
-        let pending = self.inner.lock().unwrap().pending.remove(job_id);
+        let pending = self.inner.lock().pending.remove(job_id);
         match pending {
             Some(Pending::Pull { result_tx }) => {
                 if result_tx.send(outcome).is_err() {
@@ -205,7 +204,7 @@ impl EvalCacheReceiver {
     /// Append an inline `EvalCacheChunk`; on `is_final` deliver the assembled
     /// blob. A non-contiguous offset fails the waiter, mirroring `nar_recv`.
     pub fn deliver_pull_chunk(&self, job_id: &str, data: Vec<u8>, offset: u64, is_final: bool) {
-        let mut g = self.inner.lock().unwrap();
+        let mut g = self.inner.lock();
         let Some(Pending::PullStream { buf, .. }) = g.pending.get_mut(job_id) else {
             warn!(%job_id, "EvalCacheChunk with no inline pull stream - discarding");
             return;
@@ -238,7 +237,7 @@ impl EvalCacheReceiver {
 
     /// Route an `EvalCachePushGrant` to its waiter.
     pub fn deliver_push_grant(&self, job_id: &str, mode: EvalCachePushMode) {
-        let pending = self.inner.lock().unwrap().pending.remove(job_id);
+        let pending = self.inner.lock().pending.remove(job_id);
         match pending {
             Some(Pending::Push { grant_tx }) => {
                 if grant_tx.send(mode).is_err() {
@@ -252,7 +251,7 @@ impl EvalCacheReceiver {
     /// Drop any pending transfer state for `job_id`. Called from job cleanup
     /// next to `nar_recv.forget_job`.
     pub fn forget_job(&self, job_id: &str) {
-        self.inner.lock().unwrap().pending.remove(job_id);
+        self.inner.lock().pending.remove(job_id);
     }
 }
 

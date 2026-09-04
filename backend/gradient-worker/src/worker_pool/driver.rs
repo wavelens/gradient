@@ -12,9 +12,10 @@
 //! through [`EvalWorker`] means the test covers both sides of the wire.
 
 use anyhow::{Context, Result};
+use gradient_util::sync::Mutex;
 use serde_json::json;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use super::transport::EvalWorker;
 use gradient_eval::ipc::EvalRequest;
