@@ -60,7 +60,9 @@ evaluation's own tables are the evaluation's alone: builds hang off
 `derivation_build` anchors that are shared with every other evaluation that
 built the same derivation, so `build_attempt`, `phase_event` and the
 `derivation*` tables carry rows made for other evaluations, and the file will
-show attempts older than the evaluation itself. `worker_registration` and
+show attempts older than the evaluation itself. `dispatched_job_phase` is not
+one of those: it hangs off this evaluation's own dispatched jobs.
+`worker_registration` and
 `upstream_metric` describe the whole instance; `worker_connection` and
 `worker_sample` cover the workers that ran this evaluation, for as long as it
 ran.
@@ -73,6 +75,23 @@ The file is an ordinary SQLite database, so any client opens it:
 sqlite3 gradient-report-01a05a38-2026-09-01.db \
   "SELECT name, status FROM derivation_build JOIN derivation ON derivation.id = derivation_build.derivation"
 ```
+
+`dispatched_job_phase` holds the worker's phase timeline, one row per span,
+nested through `parent_seq`. `phase` is the numeric discriminant; the names are
+listed in [the job board page](usage/job-board.md). To see where a job's time
+actually went:
+
+```sh
+sqlite3 gradient-report-01a05a38-2026-09-01.db \
+  'SELECT j.worker_id, p.phase, p.end_ms - p.start_ms AS ms
+     FROM dispatched_job_phase p
+     JOIN dispatched_job j ON j.id = p.dispatched_job
+    ORDER BY ms DESC LIMIT 20'
+```
+
+`dispatched_job.outcome` says how each job ended (0 completed, 1 failed); it is
+null for a job still running when the report was taken, and for one whose worker
+disconnected without reporting.
 
 `commit` is a reserved word in SQLite, so the revision table needs quoting:
 
