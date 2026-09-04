@@ -389,7 +389,7 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     if !to_delete.is_empty()
         && let Err(e) = crate::for_each_chunk(&to_delete, |chunk| async move {
             use sea_orm::TransactionTrait;
-            let txn = db.inner().begin().await?;
+            let txn = db.begin().await?;
             ECachedPath::delete_many()
                 .filter(CCachedPath::Hash.is_in(chunk.clone()))
                 .exec(&txn)

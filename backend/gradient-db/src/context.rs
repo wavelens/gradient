@@ -29,3 +29,21 @@ pub struct DbContext {
     pub board_events: broadcast::Sender<BoardEvent>,
     pub reactor: Arc<dyn StatusReactor>,
 }
+
+impl DbContext {
+    /// The same context with every statement bound to `tx`.
+    pub fn in_transaction(&self, tx: Arc<sea_orm::DatabaseTransaction>) -> DbContext {
+        DbContext {
+            worker_db: self.worker_db.in_transaction(tx),
+            ..self.clone()
+        }
+    }
+
+    /// The same context on the pool, for work spawned past the current transaction.
+    pub fn detached(&self) -> DbContext {
+        DbContext {
+            worker_db: self.worker_db.detached(),
+            ..self.clone()
+        }
+    }
+}

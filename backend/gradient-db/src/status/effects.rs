@@ -117,7 +117,7 @@ pub async fn emit_transition_effects(ctx: &DbContext, changes: &[TransitionChang
             // Only declared entry points get a forge check; skip the spawn for
             // intermediate builds instead of no-opping inside the reactor.
             if ci_reports(c.to) && entry_keys.contains(&(job.evaluation, job.derivation)) {
-                let action_ctx = ctx.clone();
+                let action_ctx = ctx.detached();
                 let job = job.clone();
                 let to = c.to;
                 ctx.shutdown.spawn(async move {

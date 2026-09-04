@@ -107,7 +107,7 @@ pub async fn update_evaluation_status(
             status: i32::from(event_status) as i16,
         });
 
-    let action_ctx = ctx.clone();
+    let action_ctx = ctx.detached();
     let action_eval = updated_eval.clone();
     ctx.shutdown.spawn(async move {
         action_ctx
@@ -116,7 +116,7 @@ pub async fn update_evaluation_status(
             .await;
     });
 
-    let pe_ctx = ctx.clone();
+    let pe_ctx = ctx.detached();
     let pe_id = updated_eval.id.into_inner();
     ctx.shutdown.spawn(async move {
         record_phase_event(

@@ -206,7 +206,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
         // inflated after TTL eviction even though the NAR file is gone.
         if !output_hashes.is_empty() {
             use sea_orm::TransactionTrait;
-            let txn = state.worker_db.inner().begin().await?;
+            let txn = state.worker_db.begin().await?;
             txn.execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 r#"
@@ -350,7 +350,7 @@ async fn purge_zombie_cached_paths(
         let hashes: Vec<String> = chunk.iter().map(|(_, h)| h.clone()).collect();
         let deleted = async {
             use sea_orm::TransactionTrait;
-            let txn = state.worker_db.inner().begin().await?;
+            let txn = state.worker_db.begin().await?;
             let res = ECachedPath::delete_many()
                 .filter(CCachedPath::Id.is_in(ids))
                 .exec(&txn)

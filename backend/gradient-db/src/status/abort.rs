@@ -227,7 +227,7 @@ async fn finalize_aborted_logs(ctx: &DbContext, building_ids: &[DerivationBuildI
     for &anchor_id in building_ids {
         if let Some(att) = attempts.get(&anchor_id) {
             let attempt_id = att.id;
-            let log_ctx = ctx.clone();
+            let log_ctx = ctx.detached();
             ctx.shutdown.spawn(async move {
                 finalize_build_log(&log_ctx, attempt_id).await;
             });

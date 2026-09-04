@@ -111,7 +111,7 @@ pub async fn update_derivation_build_status(
         }
     }
 
-    let pe_ctx = ctx.clone();
+    let pe_ctx = ctx.detached();
     let pe_worker = crate::build_attempt::latest_attempt_worker(&ctx.worker_db, updated.id)
         .await
         .ok()
@@ -133,7 +133,7 @@ pub async fn update_derivation_build_status(
         && let Ok(Some(attempt_id)) =
             crate::build_attempt::latest_attempt_id(&ctx.worker_db, updated.id).await
     {
-        let log_ctx = ctx.clone();
+        let log_ctx = ctx.detached();
         ctx.shutdown.spawn(async move {
             finalize_build_log(&log_ctx, attempt_id).await;
         });
@@ -236,7 +236,7 @@ pub async fn announce_entry_point_statuses(
             continue;
         };
 
-        let action_ctx = ctx.clone();
+        let action_ctx = ctx.detached();
         ctx.shutdown.spawn(async move {
             action_ctx
                 .reactor
