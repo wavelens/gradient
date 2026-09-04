@@ -16,7 +16,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, FromQueryResult,
     QueryFilter, Statement,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use gradient_types::*;
 
@@ -104,39 +104,32 @@ pub async fn references_for_hash<C: ConnectionTrait>(
     )
 }
 
-/// BFS over `cached_path_reference` from `seed_hashes`; returns every reached
-/// `cached_path` row keyed by hash. Seeds and references without a `cached_path`
-/// row (NAR not yet uploaded) are simply absent from the result.
+/// Reference closure of `seed_hashes` as one recursive statement; returns every
+/// reached `cached_path` row keyed by hash. Seeds and references without a
+/// `cached_path` row (NAR not yet uploaded) are simply absent from the result.
 pub async fn runtime_closure_reachable<C: ConnectionTrait>(
     db: &C,
     seed_hashes: &[String],
 ) -> Result<HashMap<String, gradient_entity::cached_path::Model>, DbErr> {
-    let mut reached: HashMap<String, gradient_entity::cached_path::Model> = HashMap::new();
-    let mut visited: HashSet<String> = seed_hashes.iter().cloned().collect();
-    let mut frontier: Vec<String> = seed_hashes.to_vec();
-
-    while !frontier.is_empty() {
-        let rows = crate::fetch_in_chunks(&frontier, |chunk| async move {
-            ECachedPath::find()
-                .filter(CCachedPath::Hash.is_in(chunk))
-                .all(db)
-                .await
-        })
-        .await?;
-        let edges = reference_edges(db, &frontier).await?;
-        frontier.clear();
-
-        for row in rows {
-            reached.insert(row.hash.clone(), row);
-        }
-        for (_, reference_hash) in edges {
-            if visited.insert(reference_hash.clone()) {
-                frontier.push(reference_hash);
-            }
-        }
+    if seed_hashes.is_empty() {
+        return Ok(HashMap::new());
     }
 
-    Ok(reached)
+    let sql = format!(
+        "{} SELECT cp.* FROM cached_path cp JOIN refs r ON cp.hash = r.hash",
+        crate::graph_sql::reference_closure_cte("refs", "SELECT unnest($1::text[])")
+    );
+    Ok(ECachedPath::find()
+        .from_raw_sql(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            sql,
+            [seed_hashes.to_vec().into()],
+        ))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|row| (row.hash.clone(), row))
+        .collect())
 }
 
 /// Total NAR size of the runtime closure seeded at `seed_hashes`.
@@ -163,9 +156,9 @@ mod tests {
         assert_eq!(parse_reference_hash(""), None);
     }
 
-    // Empty seeds never query and sum to zero. The non-trivial walk over
-    // `cached_path_reference` is covered end-to-end by the cache integration test
-    // (MockDatabase cannot represent the per-level model + edge queries).
+    // Empty seeds never query and sum to zero. The walk itself is one recursive
+    // statement now, so its behaviour is Postgres's; the cache integration test
+    // covers it end to end.
     #[tokio::test]
     async fn empty_seeds_is_zero() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
