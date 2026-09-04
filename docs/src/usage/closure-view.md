@@ -49,3 +49,9 @@ Response (`ClosureGraph`): `roots`, `total_size_bytes`, `node_count`,
 `edges` (`source` → `target`, where `target` depends on `source`). Node ids are
 derivation UUIDs for the build closure and store-path hashes for the runtime
 closure.
+
+Both closures are resolved by a single recursive statement rather than one query
+per graph level, so response time tracks the size of the closure rather than its
+depth. The walks are generated in `gradient-db/src/graph_sql.rs`; see
+[Recursive Graph Walks](../development/internals.md#recursive-graph-walks) for
+the query shape and why it is written the way it is.

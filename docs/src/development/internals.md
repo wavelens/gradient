@@ -160,6 +160,41 @@ Batching the BFS (one DB round-trip per level) keeps the query count proportiona
 
 ---
 
+## Recursive Graph Walks
+
+Every unbounded traversal is generated in `gradient-db/src/graph_sql.rs`: the build closure and the failure cascade over `derivation_dependency`, and the NAR reference closure over `cached_path_reference`. Callers pass a seed and a direction and get back a `WITH RECURSIVE` prelude, so no two walkers can disagree about what "reachable" means.
+
+The recursive term is always a `LATERAL` probe behind an `OFFSET 0` fence:
+
+```sql
+WITH RECURSIVE closure(derivation) AS (
+    SELECT unnest($1::uuid[])
+  UNION
+    SELECT s.next FROM closure c, LATERAL (
+      SELECT e.dependency AS next FROM derivation_dependency e
+      WHERE e.derivation = c.derivation OFFSET 0) s)
+```
+
+The fence is load-bearing, not decoration. Postgres estimates a recursive CTE's working table at ten times the seed; on a 44 000-node evaluation closure that is 348 870 rows estimated against 2 439 actual. At the estimated cardinality a merge join against the whole edge index costs out cheaper than a nested loop, so the planner rescans all four million edges once per iteration. `OFFSET 0` stops the subquery being pulled up, and a correlated lateral can only run as a nested loop with a per-row index lookup. Measured against production:
+
+| walk | plain join | fenced |
+|---|---|---|
+| evaluation closure, 43 898 nodes | 5 278 ms | 955 ms |
+| GC keep-set, 315 155 nodes | 40 069 ms | 9 746 ms |
+| `cached_path_reference` closure sweep | over 180 000 ms | 18 425 ms |
+
+The set operator stays `UNION`. It is what deduplicates the frontier on each iteration; the dependents walk emits 940 000 rows for 68 000 distinct nodes, and `UNION ALL` would make the walk exponential in depth on a diamond-shaped graph.
+
+Both edge tables carry a covering index in the direction they are probed, so the walk is index-only rather than one heap fetch per row: `(derivation, dependency)` and `(dependency, derivation)` on `derivation_dependency`, `(referrer, reference_hash)` on `cached_path_reference`. Neither table has a surrogate key; the natural pair is the primary key.
+
+### SQL/PGQ
+
+PostgreSQL 19 implements SQL/PGQ (ISO SQL:2023 part 16), which layers a property-graph view over ordinary tables and queries it with `GRAPH_TABLE`. Gradient does not use it, and adopting it is not currently possible: the first implementation matches fixed-length patterns only, with no quantified path patterns and no transitive closure, and every walk here is unbounded depth.
+
+Nothing needs to change for that to become an option. `derivation` is already a vertex table and `derivation_dependency` an edge table with foreign keys to both ends, which is the shape `CREATE PROPERTY GRAPH ... EDGE TABLES (... SOURCE ... DESTINATION ...)` requires, and keeping every traversal inside `graph_sql.rs` means a switch would touch one module. Revisit when quantified path patterns land.
+
+---
+
 ## Authentication
 
 **JWT** - `HS256` signed with `GRADIENT_JWT_SECRET`. Payload contains `sub: user_uuid`. Regular tokens expire after 24 hours; `remember_me` tokens after 30 days. Generated in `web::authorization::encode_jwt`.

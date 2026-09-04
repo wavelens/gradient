@@ -7926,3 +7926,42 @@ and `finished_at` is set, and that the evaluation's three phase columns are
 non-zero. That last assertion is what proves the columns are now derived from
 the timeline rather than from the `EvalStatsReport` fields that were removed;
 they had been shipping as zeros.
+
+## Cheap graph walks and one closure representation (#598)
+
+Every unbounded traversal now runs as one recursive statement whose recursive
+term is a `LATERAL` probe behind an `OFFSET 0` fence. The fence is what forces a
+nested loop with a per-row index lookup instead of the merge join Postgres picks
+from its ten-times-the-seed estimate of the working table, and nothing in the
+Rust type system notices if it is dropped, so it needs a test that reads the
+plan.
+
+**`gradient-db/src/graph_sql.rs`** covers what the generator emits: the
+dependents direction walks upward and the dependencies direction downward; every
+generated walk (evaluation closure, GC keep-set, dependents, reference closure)
+carries `LATERAL (` and `OFFSET 0) s`; and none of them says `UNION ALL`. That
+last assertion is not a style rule. `UNION` is what deduplicates the frontier on
+each iteration, and on a diamond-shaped graph dropping it makes the walk
+exponential in depth.
+
+**`gradient-db/src/cache_storage.rs`** keeps its existing ordering assertion:
+Postgres accepts exactly one self-reference and only in the last arm of a `UNION`
+chain, so the `.drv` seed must stay ahead of the reference walk. Rewriting the
+walk moved the self-reference from a `JOIN eval_paths` to a `FROM eval_paths c`,
+and the test now looks for the new shape.
+
+**`gradient-db/src/closure.rs`** and **`dependency_graph.rs`** cover the collapse
+from a level-at-a-time BFS to one statement: the mock now serves a single result
+set instead of one per level, and a derivation nothing depends on still reports
+itself. The old layer-ordering and cycle-termination tests are gone, because
+termination is now Postgres's `UNION` rather than a Rust visited set; keeping
+them would have been testing `MockDatabase`.
+
+**The cache VM test** (`nix/tests/gradient/cache/default.nix`, Phase 5b) is the
+only place the plan itself can be checked. Against the real graph it asserts that
+both covering indexes exist and no junction table kept a surrogate key, that the
+fenced walk selects exactly the same node set as the plain join in both
+directions (a symmetric `EXCEPT` in each direction, which is the only check that
+the rewrite preserved meaning), that `EXPLAIN` shows a `Nested Loop` and no
+`Merge Join`, and that the maintained `entry_point_dep_count` histogram agrees
+with a recompute from the materialised closure.
