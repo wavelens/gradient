@@ -337,7 +337,7 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
             }
         };
 
-        match gradient_ci::trigger_drv_recovery(state.worker_db.inner(), &task, &eval).await {
+        match gradient_ci::trigger_drv_recovery(&state.worker_db, &task, &eval).await {
             Ok(new_eval) => {
                 info!(stuck = %eval.id, recovery = %new_eval.id, "auto-triggered .drv-recovery re-evaluation");
                 gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &new_eval).await;
@@ -363,7 +363,6 @@ async fn eval_blocked_on_unproducible_drv(
 ) -> Result<bool> {
     let row = state
         .worker_db
-        .inner()
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             unproducible_drv_block_sql(),

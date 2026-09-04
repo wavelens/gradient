@@ -29,7 +29,6 @@ pub async fn invalidate_cache_for_path(state: Arc<ServerState>, path: String) ->
 
     let txn = state
         .worker_db
-        .inner()
         .begin()
         .await
         .context("Failed to open invalidation transaction")?;

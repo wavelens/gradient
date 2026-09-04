@@ -263,7 +263,7 @@ impl Scheduler {
         };
 
         gradient_db::insert_evaluation_message(
-            self.state.worker_db.inner(),
+            &self.state.worker_db,
             evaluation_id,
             entity_level,
             message,

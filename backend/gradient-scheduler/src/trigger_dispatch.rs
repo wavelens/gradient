@@ -188,13 +188,9 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         // independent of whether HEAD advanced - upstream input updates never
         // move the repo, so gating this on a new commit would never run it.
         // Self-gated: no-ops unless the task qualifies.
-        if let Err(e) = maybe_trigger_input_update(
-            state.worker_db.inner(),
-            task,
-            commit_hash.clone(),
-            Some(trig.id),
-        )
-        .await
+        if let Err(e) =
+            maybe_trigger_input_update(&state.worker_db, task, commit_hash.clone(), Some(trig.id))
+                .await
         {
             warn!(error = %e, trigger_id = %trig.id, "input_update trigger failed");
         }
@@ -204,7 +200,7 @@ pub(crate) async fn dispatch_once(scheduler: &Scheduler) -> anyhow::Result<()> {
         if has_update || is_time {
             let trigger_type = cfg.trigger_type();
             match apply_trigger(
-                state.worker_db.inner(),
+                &state.worker_db,
                 task,
                 ApplyInput {
                     trigger_id: trig.id,
