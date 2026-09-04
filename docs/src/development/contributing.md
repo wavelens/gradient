@@ -70,7 +70,11 @@ nix build .#checks.x86_64-linux.gradient-remote    -L
 ### Rust
 
 - Format with `cargo fmt` before committing.
-- No `unwrap()` in production paths - use `?` or explicit error handling.
+- No `unwrap()` in production paths - enforced by `clippy::unwrap_used = "deny"`. Use `?`, an
+  explicit error branch, or `.expect("<the invariant>")` where the call is infallible by
+  construction and the message says why.
+- Shared state uses `gradient_util::sync::Mutex`, not `std::sync::Mutex`: it ignores poisoning,
+  so a panic in one critical section does not become a panic at every later `lock()`.
 - New API endpoints go in `web/src/endpoints/` following the pattern: extract path/query params → check authorization → query DB → return response.
 - New database tables require a migration in `migration/src/` and an entity module in `entity/src/`.
 - Log with `tracing::{info, debug, warn, error}`, not `println!`. Add `#[instrument]` to significant async functions.
@@ -98,6 +102,10 @@ nix build .#checks.x86_64-linux.clippy -L   # cargo clippy --workspace --all-tar
   (CI grep-gate) - fix the underlying warning instead of silencing it.
 - Every other `#[allow(...)]` must carry a `reason = "..."` (`clippy::allow_attributes_without_reason`).
   `clippy::too_many_arguments` allows are temporary and tracked in #503.
+- `clippy.toml` sets `allow-unwrap-in-tests`, which only reaches code lexically inside a `#[test]`
+  function. Integration tests and `gradient-test-support` keep their fixture helpers outside one, so
+  those files carry a crate-level `#![expect(clippy::unwrap_used, reason = "...")]` - `expect` rather
+  than `allow` so the attribute itself warns once the last `unwrap()` in the file is gone.
 
 CI (`.github/workflows/rust.yml`) runs fmt, the grep-gate and cargo-deny; clippy runs as the
 `checks.clippy` flake check.

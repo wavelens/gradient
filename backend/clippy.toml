@@ -1,3 +1,5 @@
+allow-unwrap-in-tests = true
+
 disallowed-methods = [
     { path = "tokio::task::spawn", reason = "use Shutdown::spawn for a tracked task or Shutdown::supervise for a loop" },
 ]

@@ -20,6 +20,7 @@ unreachable_code = "warn"
 dbg_macro                       = "warn"
 todo                            = "warn"
 allow_attributes_without_reason = "warn"
+unwrap_used                     = "deny"
 
 [workspace.dependencies]
 # Internal crates
