@@ -10,9 +10,14 @@ machines.
 Three tables are written per evaluation:
 
 - **`evaluation_metric`** - per-eval aggregate: total thunks, function calls,
-  primop calls, lookups, allocated bytes, peak GC heap (MB), peak RSS (MB), the
-  per-phase wall-clock (`fetch_ms`, `eval_flake_ms`, `eval_drv_ms`,
-  `total_eval_ms`) and the `worker_id` that ran it.
+  primop calls, lookups, allocated bytes, peak GC heap (MB), peak RSS (MB),
+  `total_eval_ms` and the `worker_id` that ran it. The three per-phase columns
+  (`fetch_ms`, `eval_flake_ms`, `eval_drv_ms`) are **not** part of the eval
+  stats: they are summed from the job timeline's `fetch`, `eval_flake` and
+  `eval_derivations` spans when the job reports its terminal message. They are
+  therefore 0 for the window between `EvalStats` and job completion, and stay 0
+  for an eval whose worker vanished before reporting. See
+  [the job board](../usage/job-board.md) for the full phase list.
 - **`evaluation_attr_cost`** - per-entry-point hotspots: thunks, function calls,
   eval wall-clock and allocated bytes bucketed by user entry-point.
 - **`flake_output_node`** - the walked flake-output subgraph: `path`, `parent`,

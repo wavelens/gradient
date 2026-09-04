@@ -70,9 +70,11 @@ impl Scheduler {
             alloc_bytes: report.alloc_bytes as i64,
             peak_heap_mb: report.peak_heap_mb as i64,
             peak_rss_mb: report.peak_rss_mb as i64,
-            fetch_ms: report.fetch_ms as i64,
-            eval_flake_ms: report.eval_flake_ms as i64,
-            eval_drv_ms: report.eval_drv_ms as i64,
+            // Filled from the job timeline's phase spans once the job's
+            // terminal message arrives (see job_handlers::timeline).
+            fetch_ms: 0,
+            eval_flake_ms: 0,
+            eval_drv_ms: 0,
             total_eval_ms: report.total_eval_ms as i64,
             worker_id: report.worker_id,
             created_at: gradient_types::now(),
