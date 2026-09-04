@@ -840,6 +840,7 @@ mod tests {
             .writer
             .send(ClientMessage::JobCompleted {
                 job_id: updater.job_id.clone(),
+                spans: vec![],
             })
             .await
             .unwrap();
@@ -866,6 +867,7 @@ mod tests {
                 error: "something went wrong".to_owned(),
                 kind: gradient_proto::messages::BuildFailureKind::Permanent,
                 missing_paths: vec![],
+                spans: vec![],
             })
             .await
             .unwrap();

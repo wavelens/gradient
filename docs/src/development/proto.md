@@ -891,8 +891,8 @@ enum ClientMessage {
     RequestJob { kind: JobKind },               // "I have capacity for one job" - re-sent every 10s as heartbeat
     RequestAllCandidates,                       // startup-only: ask server to re-send all active candidates once
     JobUpdate { job_id: Uuid, update: JobUpdateKind },
-    JobCompleted { job_id: Uuid },              // all steps done; results already sent via JobUpdate. Per-build metrics travel on JobUpdate::BuildOutput
-    JobFailed { job_id: Uuid, error: String, kind: BuildFailureKind, missing_paths: Vec<String> }, // missing_paths set only for kind=InputsUnavailable
+    JobCompleted { job_id: Uuid, spans: Vec<JobPhaseSpan> },  // all steps done; results already sent via JobUpdate. Per-build metrics travel on JobUpdate::BuildOutput
+    JobFailed { job_id: Uuid, error: String, kind: BuildFailureKind, missing_paths: Vec<String>, spans: Vec<JobPhaseSpan> }, // missing_paths set only for kind=InputsUnavailable
     Draining,                                   // no more jobs; finishing in-flight work then disconnecting
 
     // Streaming
@@ -974,6 +974,49 @@ Typical producer sites today:
 ## Job Updates
 
 Workers send `JobUpdate` messages to report progress. The server maps these directly to `EvaluationStatus` and `BuildStatus` in the database, which drives the frontend UI.
+
+### Phase timeline
+
+`JobUpdate` is the live signal: it says what the worker is doing right now. The
+timeline is the record of what it did, sent once at the end on `JobCompleted` or
+`JobFailed`. The two are independent; a failed job still reports the partial
+timeline it managed to record.
+
+```rust
+struct JobPhaseSpan {
+    phase: JobPhase,
+    start_ms: u64,      // offset from the moment the worker accepted the job
+    end_ms: u64,
+    parent: Option<u32>, // index of the enclosing span in the same Vec
+    paths: u32,          // store paths the phase moved, 0 when not path-shaped
+    bytes: u64,          // bytes the phase moved, 0 when it moves none
+}
+```
+
+Spans nest: `parent` indexes the enclosing span in the same vector, so a NAR
+push sits underneath the compress phase that opened it. Offsets are always
+milliseconds from job acceptance, never from the enclosing span.
+
+| Phase | Recorded around |
+| --- | --- |
+| `fetch` | the whole `FetchFlake` step |
+| `push_inputs` | uploading the archived flake's paths to the cache |
+| `eval_flake` | the `EvaluateFlake` step |
+| `eval_derivations` | the `EvaluateDerivations` step |
+| `eval_cache_pull` | waiting for the shared eval-cache blob |
+| `eval_cache_push` | handing the eval-cache blob back |
+| `known_derivations_wait` | waiting on `QueryKnownDerivations` |
+| `drv_closure_push` | pushing a batch's `.drv` runtime closure |
+| `prefetch` | importing a build's cache-resident inputs |
+| `substitute_relay` | relaying an `external_cached` output |
+| `build` | one derivation build |
+| `compress` | the post-build compress and push loop |
+| `nar_push` | one output NAR upload, nested under `compress` |
+| `cache_query_wait` | waiting for a `CacheStatus` or `CacheError` reply |
+
+The server writes one `dispatched_job_phase` row per span, derives the eval
+phase columns of `evaluation_metric` from them, and rolls each into
+`metric_rollup` as `phase.<kind>.<phase>.ms`.
 
 ```rust
 enum JobUpdateKind {

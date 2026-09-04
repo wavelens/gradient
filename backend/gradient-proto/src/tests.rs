@@ -5,9 +5,10 @@
  */
 
 use crate::messages::{
-    BuildMetrics, BuildOutput, CachedPath, ClientMessage, EvalCachePullOutcome, EvalCachePushMode,
-    FlakeInputOverride, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities, Job, JobCandidate,
-    JobUpdateKind, PROTO_VERSION, QueryMode, RequiredPath, ServerMessage,
+    BuildFailureKind, BuildMetrics, BuildOutput, CachedPath, ClientMessage, EvalCachePullOutcome,
+    EvalCachePushMode, FlakeInputOverride, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities,
+    Job, JobCandidate, JobPhase, JobPhaseSpan, JobUpdateKind, PROTO_VERSION, QueryMode,
+    RequiredPath, ServerMessage,
 };
 use rkyv::rancor::Error as RkyvError;
 
@@ -285,6 +286,7 @@ fn cached_path_not_cached_no_url() {
 fn job_completed_roundtrip() {
     let original = ClientMessage::JobCompleted {
         job_id: "job-123".to_string(),
+        spans: vec![],
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
@@ -570,3 +572,54 @@ fn eval_cache_push_grant_inline_roundtrip() {
 
 // Full WebSocket handshake integration tests (InitConnection → InitAck) live in
 // the `web` crate's integration tests where `test-support` is available.
+
+/// A nested timeline survives the rkyv round trip with its parent links and
+/// byte counters intact; without this the board would silently flatten.
+#[test]
+fn job_completed_timeline_roundtrip() {
+    let original = ClientMessage::JobCompleted {
+        job_id: "job-1".into(),
+        spans: vec![
+            JobPhaseSpan {
+                phase: JobPhase::Compress,
+                start_ms: 0,
+                end_ms: 900,
+                parent: None,
+                paths: 3,
+                bytes: 0,
+            },
+            JobPhaseSpan {
+                phase: JobPhase::NarPush,
+                start_ms: 100,
+                end_ms: 850,
+                parent: Some(0),
+                paths: 3,
+                bytes: 4_194_304,
+            },
+        ],
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+/// A failed job reports the partial timeline it managed to record.
+#[test]
+fn job_failed_partial_timeline_roundtrip() {
+    let original = ClientMessage::JobFailed {
+        job_id: "job-2".into(),
+        error: "boom".into(),
+        kind: BuildFailureKind::Permanent,
+        missing_paths: vec![],
+        spans: vec![JobPhaseSpan {
+            phase: JobPhase::Build,
+            start_ms: 5,
+            end_ms: 60_000,
+            parent: None,
+            ..Default::default()
+        }],
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}

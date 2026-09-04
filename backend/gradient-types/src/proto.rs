@@ -514,6 +514,109 @@ pub struct EvalStatsReport {
     pub flake_nodes: Vec<FlakeOutputNode>,
 }
 
+// ── Job timeline ─────────────────────────────────────────────────────────────
+
+/// One phase of a job's life on the worker. The board renders these in order
+/// and the rollup keys `phase.<kind>.<phase>.ms` off the snake_case name.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[rkyv(derive(Debug, PartialEq))]
+pub enum JobPhase {
+    #[default]
+    Fetch,
+    PushInputs,
+    EvalFlake,
+    EvalDerivations,
+    EvalCachePull,
+    EvalCachePush,
+    KnownDerivationsWait,
+    DrvClosurePush,
+    Prefetch,
+    SubstituteRelay,
+    Build,
+    Compress,
+    NarPush,
+    CacheQueryWait,
+}
+
+impl JobPhase {
+    /// Stable identifier for the API, the rollup metric key and the DB column.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fetch => "fetch",
+            Self::PushInputs => "push_inputs",
+            Self::EvalFlake => "eval_flake",
+            Self::EvalDerivations => "eval_derivations",
+            Self::EvalCachePull => "eval_cache_pull",
+            Self::EvalCachePush => "eval_cache_push",
+            Self::KnownDerivationsWait => "known_derivations_wait",
+            Self::DrvClosurePush => "drv_closure_push",
+            Self::Prefetch => "prefetch",
+            Self::SubstituteRelay => "substitute_relay",
+            Self::Build => "build",
+            Self::Compress => "compress",
+            Self::NarPush => "nar_push",
+            Self::CacheQueryWait => "cache_query_wait",
+        }
+    }
+
+    /// Wire/DB discriminant, written out so reordering the enum cannot silently
+    /// re-label historical rows.
+    pub const fn as_i16(self) -> i16 {
+        match self {
+            Self::Fetch => 0,
+            Self::PushInputs => 1,
+            Self::EvalFlake => 2,
+            Self::EvalDerivations => 3,
+            Self::EvalCachePull => 4,
+            Self::EvalCachePush => 5,
+            Self::KnownDerivationsWait => 6,
+            Self::DrvClosurePush => 7,
+            Self::Prefetch => 8,
+            Self::SubstituteRelay => 9,
+            Self::Build => 10,
+            Self::Compress => 11,
+            Self::NarPush => 12,
+            Self::CacheQueryWait => 13,
+        }
+    }
+
+    pub const fn from_i16(v: i16) -> Option<Self> {
+        Some(match v {
+            0 => Self::Fetch,
+            1 => Self::PushInputs,
+            2 => Self::EvalFlake,
+            3 => Self::EvalDerivations,
+            4 => Self::EvalCachePull,
+            5 => Self::EvalCachePush,
+            6 => Self::KnownDerivationsWait,
+            7 => Self::DrvClosurePush,
+            8 => Self::Prefetch,
+            9 => Self::SubstituteRelay,
+            10 => Self::Build,
+            11 => Self::Compress,
+            12 => Self::NarPush,
+            13 => Self::CacheQueryWait,
+            _ => return None,
+        })
+    }
+}
+
+/// A closed interval on the job's own clock, in milliseconds since the worker
+/// accepted the job. `parent` indexes the enclosing span in the same `Vec`, so
+/// nesting crosses the wire without a tree type.
+#[derive(Archive, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[rkyv(derive(Debug, PartialEq))]
+pub struct JobPhaseSpan {
+    pub phase: JobPhase,
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub parent: Option<u32>,
+    /// Store paths the phase moved; 0 when the phase is not path-shaped.
+    pub paths: u32,
+    /// Bytes the phase moved; 0 when the phase moves no bytes.
+    pub bytes: u64,
+}
+
 // ── Credential types ─────────────────────────────────────────────────────────
 
 /// Type of credential delivered via the protocol.

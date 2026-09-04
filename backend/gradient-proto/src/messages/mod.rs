@@ -16,8 +16,8 @@ pub use gradient_types::proto::{
     BumpedInputWire, CacheInfo, CachedPath, CandidateScore, CredentialKind, DerivationOutput,
     DiscoveredDerivation, EvalAttrCost, EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel,
     EvalStatsReport, FlakeInputOverride, FlakeJob, FlakeOutputNode, FlakeSource, FlakeStep,
-    GradientCapabilities, InputUpdateSpec, Job, JobCandidate, JobKind, JobUpdateKind, QueryMode,
-    RequiredPath,
+    GradientCapabilities, InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan,
+    JobUpdateKind, QueryMode, RequiredPath,
 };
 pub use server::{FailedPeer, ServerMessage};
 pub use wire::{decode_client_message, decode_server_message};
@@ -28,7 +28,9 @@ pub use wire::{decode_client_message, decode_server_message};
 ///     `NarUploaded` carries the path's content address (`ca`).
 /// v8: `BuildFailureKind::Aborted` distinguishes a server-ordered abort from a
 ///     deterministic build failure.
-pub const PROTO_VERSION: u16 = 8;
+/// v9: `JobCompleted`/`JobFailed` carry the worker's phase timeline (`spans`);
+///     `EvalStatsReport` drops the three phase-millisecond fields it never set.
+pub const PROTO_VERSION: u16 = 9;
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 

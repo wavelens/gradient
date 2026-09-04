@@ -6,7 +6,7 @@
 
 use gradient_types::proto::{
     BuildFailureKind, CandidateScore, EvalMessageLevel, GradientCapabilities, JobKind,
-    JobUpdateKind, QueryMode,
+    JobPhaseSpan, JobUpdateKind, QueryMode,
 };
 use rkyv::{Archive, Deserialize, Serialize};
 
@@ -96,7 +96,11 @@ pub enum ClientMessage {
     /// All steps in a job completed successfully.
     /// Results were already sent via [`ClientMessage::JobUpdate`].
     /// Per-build resource metrics travel inline on each `JobUpdate::BuildOutput`.
-    JobCompleted { job_id: String },
+    JobCompleted {
+        job_id: String,
+        /// The worker's phase timeline; empty when the job recorded no phase.
+        spans: Vec<JobPhaseSpan>,
+    },
 
     /// A step in the job failed; remaining steps are skipped.
     JobFailed {
@@ -106,6 +110,8 @@ pub enum ClientMessage {
         /// For `BuildFailureKind::InputsUnavailable`: the required input store
         /// paths the cache could not serve. Empty for every other kind.
         missing_paths: Vec<String>,
+        /// The partial phase timeline recorded up to the failure.
+        spans: Vec<JobPhaseSpan>,
     },
 
     /// Worker is draining - it will finish in-flight jobs then disconnect.
