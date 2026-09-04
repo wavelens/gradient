@@ -15,10 +15,11 @@ use base64::Engine;
 use bytes::Bytes;
 use futures::stream::BoxStream;
 use gradient_core::ServerState;
+use gradient_graph::Demotion;
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use gradient_util::nix_hash::{normalize_nar_hash, strip_hash_algo};
-use sea_orm::{ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, TransactionTrait};
+use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 
@@ -402,62 +403,20 @@ pub(super) async fn delete_nar_from_cache(
     cache_id: CacheId,
     hash: &str,
 ) -> WebResult<(MCachedPath, DeleteOutcome)> {
-    let tx = state.web_db.inner().begin().await?;
+    let report = state
+        .graph
+        .demote(Demotion::CacheClaim {
+            cache: cache_id,
+            hash: hash.to_owned(),
+        })
+        .await
+        .map_err(|e| WebError::internal(e.to_string()))?;
+    let cached_path = report.cached_path.or_not_found("Nar")?;
 
-    let cached_path = ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(hash))
-        .one(&tx)
-        .await?
-        .or_not_found("Nar")?;
-
-    let sig = ECachedPathSignature::find()
-        .filter(CCachedPathSignature::CachedPath.eq(cached_path.id))
-        .filter(CCachedPathSignature::Cache.eq(cache_id))
-        .one(&tx)
-        .await?
-        .or_not_found("Nar")?;
-
-    ECachedPathSignature::delete_by_id(sig.id).exec(&tx).await?;
-
-    let derivation_ids: Vec<DerivationId> = EDerivationOutput::find()
-        .filter(CDerivationOutput::Hash.eq(hash))
-        .all(&tx)
-        .await?
-        .into_iter()
-        .map(|o| o.derivation)
-        .collect();
-
-    let txn = &tx;
-    gradient_db::for_each_chunk(&derivation_ids, |chunk| async move {
-        ECacheDerivation::delete_many()
-            .filter(CCacheDerivation::Cache.eq(cache_id))
-            .filter(CCacheDerivation::Derivation.is_in(chunk))
-            .exec(txn)
-            .await
-    })
-    .await?;
-
-    let remaining = ECachedPathSignature::find()
-        .filter(CCachedPathSignature::CachedPath.eq(cached_path.id))
-        .count(&tx)
-        .await?;
-    let ref_counted_others = remaining > 0;
-
-    // Last cache dropped the path: demote through the shared helper so the
-    // producer anchor, gate flags, and referrer closures reset symmetrically
-    // (a bare is_cached clear leaves a Completed producer with no backing NAR,
-    // the exact stale-flag dead zone the reconciler exists to prevent).
-    if !ref_counted_others {
-        gradient_db::cache_storage::demote_cached_output(&tx, &state.nar_storage, hash).await?;
-        gradient_db::cache_storage::clear_gate_flags_for_hashes(&tx, &[hash.to_string()]).await?;
-        gradient_db::cache_storage::clear_closure_complete_for_referrers(&tx, hash).await?;
-    }
-
-    tx.commit().await?;
-
-    let _ = state
-        .board_events
-        .send(gradient_types::BoardEvent::CacheChanged);
-
-    Ok((cached_path, DeleteOutcome { ref_counted_others }))
+    Ok((
+        cached_path,
+        DeleteOutcome {
+            ref_counted_others: report.others_remain,
+        },
+    ))
 }

@@ -17,6 +17,7 @@ use axum::{Extension, Json, Router};
 use chrono::Utc;
 use gradient_ci::{ApplyInput, ApplyOutcome, apply_trigger};
 use gradient_core::ServerState;
+use gradient_graph::Transition;
 use gradient_scheduler::Scheduler;
 use gradient_sources::resolve_head;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
@@ -433,13 +434,18 @@ pub async fn fire_now(
         ApplyOutcome::Created {
             evaluation: eval,
             aborted_evaluation,
-            aborted_anchors,
+            hard_abort,
         } => {
             if let Some(aborted_id) = aborted_evaluation {
-                scheduler
-                    .cancel_evaluation_jobs(aborted_id, &aborted_anchors)
-                    .await;
+                let anchors = if hard_abort {
+                    abort_eval_anchors(&state, aborted_id).await
+                } else {
+                    Vec::new()
+                };
+
+                scheduler.cancel_evaluation_jobs(aborted_id, &anchors).await;
             }
+
             gradient_ci::actions::dispatch_evaluation_created(&state.ci(), &eval).await;
             serde_json::json!({
                 "outcome": "Created",
@@ -453,4 +459,23 @@ pub async fn fire_now(
     };
 
     Ok(ok_json(body))
+}
+
+/// Abort the anchors a hard-aborted evaluation alone still needed; the graph
+/// actor owns that write, and the caller cancels the in-memory jobs.
+async fn abort_eval_anchors(
+    state: &Arc<ServerState>,
+    evaluation: EvaluationId,
+) -> Vec<DerivationBuildId> {
+    match state
+        .graph
+        .transition(Transition::AbortEvaluationAnchors { evaluation })
+        .await
+    {
+        Ok(report) => report.aborted_anchors,
+        Err(e) => {
+            tracing::warn!(error = %e, evaluation_id = %evaluation, "aborting the evaluation's anchors did not reach the graph actor");
+            Vec::new()
+        }
+    }
 }

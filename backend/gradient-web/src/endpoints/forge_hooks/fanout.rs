@@ -12,6 +12,7 @@ use super::response::{QueuedEvaluation, SkippedTask, WebhookTriggerOutcome};
 use gradient_ci::{ApplyInput, ApplyOutcome, ApprovalInfo, apply_trigger, parse_owner_repo};
 use gradient_core::ServerState;
 use gradient_entity::task_trigger as ept;
+use gradient_graph::Transition;
 use gradient_scheduler::Scheduler;
 use gradient_types::triggers::{TriggerConfig, TriggerType};
 use gradient_types::*;
@@ -356,12 +357,16 @@ async fn apply_and_record(
         Ok(ApplyOutcome::Created {
             evaluation: eval,
             aborted_evaluation,
-            aborted_anchors,
+            hard_abort,
         }) => {
             if let Some(aborted_id) = aborted_evaluation {
-                scheduler
-                    .cancel_evaluation_jobs(aborted_id, &aborted_anchors)
-                    .await;
+                let anchors = if hard_abort {
+                    abort_eval_anchors(state, aborted_id).await
+                } else {
+                    Vec::new()
+                };
+
+                scheduler.cancel_evaluation_jobs(aborted_id, &anchors).await;
             }
             info!(
                 task_id = %task.id,
@@ -385,6 +390,25 @@ async fn apply_and_record(
         Err(e) => {
             warn!(error = %e, task_id = %task.id, "apply_trigger failed in webhook fan-out");
             push_skipped(outcome, task, project_name, "error");
+        }
+    }
+}
+
+/// Abort the anchors a hard-aborted evaluation alone still needed; the graph
+/// actor owns that write, and the caller cancels the in-memory jobs.
+async fn abort_eval_anchors(
+    state: &Arc<ServerState>,
+    evaluation: EvaluationId,
+) -> Vec<DerivationBuildId> {
+    match state
+        .graph
+        .transition(Transition::AbortEvaluationAnchors { evaluation })
+        .await
+    {
+        Ok(report) => report.aborted_anchors,
+        Err(e) => {
+            warn!(error = %e, evaluation_id = %evaluation, "aborting the evaluation's anchors did not reach the graph actor");
+            Vec::new()
         }
     }
 }

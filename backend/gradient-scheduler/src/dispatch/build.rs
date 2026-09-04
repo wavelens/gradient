@@ -10,8 +10,8 @@ use std::sync::atomic::Ordering;
 
 use crate::dispatch_mode::{BuildDispatchMode, arch_available, decide_dispatch_mode};
 use gradient_core::ServerState;
-use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
+use gradient_graph::{RequeueScope, Transition};
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -58,11 +58,23 @@ pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool,
         } else {
             gradient_db::ReconcileScope::Tick
         };
-        gradient_db::reconcile_build_graph(&scheduler.state.db(), scope).await;
+        if let Err(e) = scheduler
+            .state
+            .graph
+            .transition(Transition::Reconcile { scope })
+            .await
+        {
+            error!(error = %e, "reconcile did not reach the graph actor");
+        }
     }
 
-    if let Err(e) = requeue_transient_failures(scheduler).await {
-        error!(error = %e, "requeue_transient_failures error");
+    if let Err(e) = scheduler
+        .state
+        .graph
+        .requeue(RequeueScope::TransientRetries)
+        .await
+    {
+        error!(error = %e, "transient retry requeue did not reach the graph actor");
     }
     if let Err(e) = dispatch_ready_builds(scheduler).await {
         error!(error = %e, "build dispatch error");
@@ -187,27 +199,6 @@ pub(super) fn child_spec(scheduler: &Arc<Scheduler>) -> ChildSpec {
     }
 }
 
-/// Move `FailedTransient` anchors whose backoff window has elapsed back to
-/// `Queued` so the ready-builds pass can dispatch them again.
-pub(crate) async fn requeue_transient_failures(scheduler: &Scheduler) -> anyhow::Result<()> {
-    use crate::build::retry_backoff_elapsed;
-    let state = &scheduler.state;
-    let base = state.config.eval.build_retry_backoff_secs;
-    let now = gradient_types::now();
-
-    let transient = EDerivationBuild::find()
-        .filter(CDerivationBuild::Status.eq(BuildStatus::FailedTransient))
-        .all(&state.worker_db)
-        .await?;
-    for anchor in transient {
-        if retry_backoff_elapsed(anchor.attempt, anchor.updated_at, now, base) {
-            gradient_db::update_derivation_build_status(&state.db(), anchor, BuildStatus::Queued)
-                .await;
-        }
-    }
-    Ok(())
-}
-
 /// All DB data needed to assemble [`PendingBuildJob`]s for a dispatch pass.
 ///
 /// Loaded in bulk (one IN-list query per table) by [`BuildDispatchMaps::load`],
@@ -232,9 +223,11 @@ struct BuildDispatchMaps {
     /// sent in the `external_cached` `BuildSpec` so the worker substitutes the
     /// outputs without fetching the `.drv`.
     self_outputs: HashMap<DerivationId, Vec<DerivationOutput>>,
-    /// derivation_id → transitive closure size (bytes). Loaded from
-    /// `derivation.closure_size`; NULLs are computed once and persisted here.
+    /// derivation_id -> transitive closure size (bytes), from
+    /// `derivation.closure_size` or computed here when it is NULL.
     closure_sizes: HashMap<DerivationId, Option<i64>>,
+    /// The sizes this pass computed; the graph actor persists them.
+    computed_sizes: HashMap<DerivationId, i64>,
     /// derivation_id → historical resource prediction (default when the
     /// derivation has no `pname` or no matching history).
     histories: HashMap<DerivationId, gradient_score::HistoryPrediction>,
@@ -515,7 +508,7 @@ impl BuildDispatchMaps {
                 .push(DerivationOutput { name: o.name, path });
         }
 
-        let (closure_sizes, histories) =
+        let (closure_sizes, histories, computed_sizes) =
             load_sizes_and_histories(state, &derivations, uses_history).await;
 
         Ok(Self {
@@ -528,6 +521,7 @@ impl BuildDispatchMaps {
             direct_inputs,
             self_outputs,
             closure_sizes,
+            computed_sizes,
             histories,
             substitute_misses,
             driving_eval,
@@ -586,7 +580,7 @@ impl BuildDispatchMaps {
         );
 
         if mode == BuildDispatchMode::SubstituteStalled
-            && !crate::build::retry_backoff_elapsed(
+            && !gradient_graph::retry_backoff_elapsed(
                 miss_count as i32,
                 anchor.updated_at,
                 now(),
@@ -710,8 +704,8 @@ enum DispatchOutcome {
 /// Closure sizes and historical predictions, consumed only by policies that
 /// read history (resource-aware); the simple policy skips the walk and uses
 /// whatever is persisted. Derivations missing `closure_size` are sized in one
-/// batched walk and backfilled; history is queried once per distinct
-/// `(pname, size bucket)` instead of once per derivation.
+/// batched walk, returned as the third element for the graph actor to persist;
+/// history is queried once per distinct `(pname, size bucket)`.
 async fn load_sizes_and_histories(
     state: &Arc<ServerState>,
     derivations: &HashMap<DerivationId, MDerivation>,
@@ -719,6 +713,7 @@ async fn load_sizes_and_histories(
 ) -> (
     HashMap<DerivationId, Option<i64>>,
     HashMap<DerivationId, gradient_score::HistoryPrediction>,
+    HashMap<DerivationId, i64>,
 ) {
     let mut closure_sizes: HashMap<DerivationId, Option<i64>> = HashMap::new();
     let mut histories: HashMap<DerivationId, gradient_score::HistoryPrediction> = HashMap::new();
@@ -726,7 +721,7 @@ async fn load_sizes_and_histories(
         for (drv_id, drv) in derivations {
             closure_sizes.insert(*drv_id, drv.closure_size);
         }
-        return (closure_sizes, histories);
+        return (closure_sizes, histories, HashMap::new());
     }
 
     let need: Vec<DerivationId> = derivations
@@ -744,20 +739,6 @@ async fn load_sizes_and_histories(
                 HashMap::new()
             })
     };
-    for (drv_id, size) in &computed {
-        if let Err(e) = EDerivation::update_many()
-            .col_expr(
-                CDerivation::ClosureSize,
-                sea_orm::sea_query::Expr::value(*size),
-            )
-            .filter(CDerivation::Id.eq(*drv_id))
-            .exec(&state.worker_db)
-            .await
-        {
-            error!(derivation_id = %drv_id, error = %e, "failed to persist closure size");
-        }
-    }
-
     let mut predictions: HashMap<(String, Option<i64>), gradient_score::HistoryPrediction> =
         HashMap::new();
     for (drv_id, drv) in derivations {
@@ -776,7 +757,7 @@ async fn load_sizes_and_histories(
         histories.insert(*drv_id, prediction);
     }
 
-    (closure_sizes, histories)
+    (closure_sizes, histories, computed)
 }
 
 /// Whether an evaluation has reached a terminal status (won't drive new builds).
@@ -813,24 +794,7 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
         return Ok(());
     }
 
-    // Stamp ready_at the first time an anchor becomes dispatchable (deps satisfied).
     let ready_ids: Vec<_> = new_anchors.iter().map(|a| a.id).collect();
-    let db = &state.worker_db;
-    if let Err(e) = gradient_db::for_each_chunk(&ready_ids, |chunk| async move {
-        EDerivationBuild::update_many()
-            .col_expr(
-                CDerivationBuild::ReadyAt,
-                sea_orm::sea_query::Expr::value(now()),
-            )
-            .filter(CDerivationBuild::Id.is_in(chunk))
-            .filter(CDerivationBuild::ReadyAt.is_null())
-            .exec(db)
-            .await
-    })
-    .await
-    {
-        error!(error = %e, "failed to stamp anchor ready_at");
-    }
 
     let connected_architectures: HashSet<String> = scheduler
         .board_workers()
@@ -865,6 +829,20 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
             }
         }
     }
+
+    // One write for the pass: the ready stamp on every anchor it enqueued and
+    // the closure sizes it had to compute.
+    if let Err(e) = state
+        .graph
+        .transition(Transition::Ready {
+            anchors: ready_ids,
+            closure_sizes: maps.computed_sizes.iter().map(|(k, v)| (*k, *v)).collect(),
+        })
+        .await
+    {
+        error!(error = %e, "ready stamp did not reach the graph actor");
+    }
+
     debug!(
         enqueued,
         elapsed_ms = started.elapsed().as_millis() as u64,

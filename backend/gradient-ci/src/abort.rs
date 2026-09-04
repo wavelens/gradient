@@ -6,21 +6,18 @@
 
 //! Aborting an in-flight evaluation.
 //!
-//! - `AbortKind::Hard` marks the evaluation `Aborted` and aborts every active
-//!   `derivation_build` anchor this evaluation needs that no other live
-//!   evaluation also needs. Anchors still wanted by another non-terminal
-//!   evaluation keep running. The scheduler drops the in-memory job entries via
-//!   `Scheduler::cancel_evaluation_jobs` once this returns; that lives in the
-//!   scheduler crate, not here, since the abort helper is DB-only.
-//! - `AbortKind::Soft` marks only the evaluation. In-flight builds keep running
-//!   and their outputs land in the cache for the next eval to reuse.
+//! Both kinds mark the evaluation `Aborted` in the trigger's transaction, and
+//! that is all this helper does. After a [`AbortKind::Hard`] the caller asks the
+//! graph actor to abort every anchor no other live evaluation still needs, then
+//! drops the in-memory job entries via `Scheduler::cancel_evaluation_jobs`.
+//! After a [`AbortKind::Soft`] the in-flight builds keep running and their
+//! outputs land in the cache for the next evaluation to reuse.
 
-use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
-use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
-use std::collections::HashSet;
+use sea_orm::{ActiveModelTrait, ConnectionTrait, EntityTrait};
+use tracing::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbortKind {
@@ -28,116 +25,26 @@ pub enum AbortKind {
     Soft,
 }
 
+/// Marks `eval_id` aborted, reporting whether this call was the one that did it.
 pub async fn abort_evaluation<C: ConnectionTrait>(
     db: &C,
     eval_id: EvaluationId,
     kind: AbortKind,
-) -> Result<Vec<DerivationBuildId>, sea_orm::DbErr> {
-    let eval = EEvaluation::find_by_id(eval_id).one(db).await?;
-    let Some(eval) = eval else {
-        return Ok(Vec::new());
+) -> Result<bool, sea_orm::DbErr> {
+    let Some(eval) = EEvaluation::find_by_id(eval_id).one(db).await? else {
+        return Ok(false);
     };
     if !eval.status.is_active() {
-        return Ok(Vec::new());
+        return Ok(false);
     }
 
-    let mut active: AEvaluation = eval.clone().into();
+    let mut active: AEvaluation = eval.into();
     active.status = Set(EvaluationStatus::Aborted);
     active.updated_at = Set(gradient_types::now());
     active.update(db).await?;
 
-    if kind == AbortKind::Hard {
-        return abort_eval_anchors(db, eval_id).await;
-    }
-
-    Ok(Vec::new())
-}
-
-/// Abort the active anchors this evaluation needs that no other live evaluation
-/// still needs, returning the aborted [`DerivationBuildId`]s.
-async fn abort_eval_anchors<C: ConnectionTrait>(
-    db: &C,
-    eval_id: EvaluationId,
-) -> Result<Vec<DerivationBuildId>, sea_orm::DbErr> {
-    let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
-        .filter(CBuildJob::Evaluation.eq(eval_id))
-        .all(db)
-        .await?
-        .into_iter()
-        .map(|j| j.derivation_build)
-        .collect();
-    if anchor_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let active = EDerivationBuild::find()
-        .filter(CDerivationBuild::Id.is_in(anchor_ids))
-        .filter(CDerivationBuild::Status.is_in([
-            BuildStatus::Created,
-            BuildStatus::Queued,
-            BuildStatus::Building,
-        ]))
-        .all(db)
-        .await?;
-    if active.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let active_ids: Vec<DerivationBuildId> = active.iter().map(|a| a.id).collect();
-    let shared = shared_anchor_ids(db, eval_id, &active_ids).await?;
-
-    let mut aborted = Vec::new();
-    for anchor in active {
-        if shared.contains(&anchor.id) {
-            continue;
-        }
-
-        aborted.push(anchor.id);
-        let mut ab: ADerivationBuild = anchor.into();
-        ab.status = Set(BuildStatus::Aborted);
-        ab.updated_at = Set(gradient_types::now());
-        ab.update(db).await?;
-    }
-
-    Ok(aborted)
-}
-
-/// Of `anchor_ids`, those a non-terminal evaluation other than `this_eval` still
-/// needs via its own `build_job`. Those anchors must keep running.
-async fn shared_anchor_ids<C: ConnectionTrait>(
-    db: &C,
-    this_eval: EvaluationId,
-    anchor_ids: &[DerivationBuildId],
-) -> Result<HashSet<DerivationBuildId>, sea_orm::DbErr> {
-    let other_jobs = EBuildJob::find()
-        .filter(CBuildJob::DerivationBuild.is_in(anchor_ids.to_vec()))
-        .filter(CBuildJob::Evaluation.ne(this_eval))
-        .all(db)
-        .await?;
-    if other_jobs.is_empty() {
-        return Ok(HashSet::new());
-    }
-
-    let other_eval_ids: Vec<EvaluationId> = other_jobs
-        .iter()
-        .map(|j| j.evaluation)
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    let live: HashSet<EvaluationId> = EEvaluation::find()
-        .filter(CEvaluation::Id.is_in(other_eval_ids))
-        .all(db)
-        .await?
-        .into_iter()
-        .filter(|e| e.status.is_active())
-        .map(|e| e.id)
-        .collect();
-
-    Ok(other_jobs
-        .into_iter()
-        .filter(|j| live.contains(&j.evaluation))
-        .map(|j| j.derivation_build)
-        .collect())
+    debug!(evaluation_id = %eval_id, ?kind, "evaluation marked aborted");
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -155,38 +62,16 @@ mod tests {
         }
     }
 
-    fn make_job(
-        eval_id: EvaluationId,
-        anchor: DerivationBuildId,
-    ) -> gradient_entity::build_job::Model {
-        gradient_entity::build_job::Model {
-            id: BuildJobId::now_v7(),
-            evaluation: eval_id,
-            derivation: DerivationId::nil(),
-            derivation_build: anchor,
-            ..Default::default()
-        }
-    }
-
-    fn make_anchor(status: BuildStatus) -> gradient_entity::derivation_build::Model {
-        gradient_entity::derivation_build::Model {
-            id: DerivationBuildId::now_v7(),
-            derivation: DerivationId::nil(),
-            status,
-            ..Default::default()
-        }
-    }
-
     #[tokio::test]
     async fn abort_terminal_eval_is_noop() {
         let eval = make_eval(EvaluationStatus::Completed);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![eval.clone()]])
             .into_connection();
-        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard)
+        let aborted = abort_evaluation(&db, eval.id, AbortKind::Hard)
             .await
             .unwrap();
-        assert!(ids.is_empty());
+        assert!(!aborted, "a terminal evaluation is left alone");
     }
 
     #[tokio::test]
@@ -200,128 +85,9 @@ mod tests {
                 rows_affected: 1,
             }])
             .into_connection();
-        let ids = abort_evaluation(&db, eval.id, AbortKind::Soft)
+        let aborted = abort_evaluation(&db, eval.id, AbortKind::Soft)
             .await
             .unwrap();
-        assert!(ids.is_empty(), "soft abort returns no anchor IDs");
-    }
-
-    #[tokio::test]
-    async fn hard_abort_keeps_anchors_shared_with_a_running_eval() {
-        // E1 is aborted; anchor A is also needed by E2, which is still Building.
-        // A must NOT be aborted - it keeps building for E2.
-        let eval = make_eval(EvaluationStatus::Building);
-        let other_eval = make_eval(EvaluationStatus::Building);
-        let shared_anchor = make_anchor(BuildStatus::Building);
-        let job_e1 = make_job(eval.id, shared_anchor.id);
-        let job_e2 = make_job(other_eval.id, shared_anchor.id);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // initial eval fetch
-            .append_query_results([vec![eval.clone()]])
-            // eval update read-back
-            .append_query_results([vec![eval.clone()]])
-            // eval exec
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            // build_job rows for E1 -> anchor A
-            .append_query_results([vec![job_e1.clone()]])
-            // active anchors (A is Building)
-            .append_query_results([vec![shared_anchor.clone()]])
-            // shared lookup: E2 also has a build_job for A
-            .append_query_results([vec![job_e2.clone()]])
-            // live-eval lookup: E2 is still Building (active)
-            .append_query_results([vec![other_eval.clone()]])
-            .into_connection();
-        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard)
-            .await
-            .unwrap();
-        assert!(
-            ids.is_empty(),
-            "an anchor still needed by a running evaluation must not be aborted"
-        );
-    }
-
-    #[tokio::test]
-    async fn hard_abort_marks_anchors_shared_only_with_a_terminal_eval() {
-        // Anchor A is referenced by E2 too, but E2 already Completed - so A is no
-        // longer needed elsewhere and must be aborted with E1.
-        let eval = make_eval(EvaluationStatus::Building);
-        let done_eval = make_eval(EvaluationStatus::Completed);
-        let anchor = make_anchor(BuildStatus::Building);
-        let anchor_id = anchor.id;
-        let job_e1 = make_job(eval.id, anchor.id);
-        let job_done = make_job(done_eval.id, anchor.id);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_query_results([vec![eval.clone()]])
-            .append_query_results([vec![eval.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .append_query_results([vec![job_e1.clone()]])
-            .append_query_results([vec![anchor.clone()]])
-            // shared lookup: only the Completed eval also references A
-            .append_query_results([vec![job_done.clone()]])
-            // live-eval lookup: E2 is Completed (not active) -> A is not shared
-            .append_query_results([vec![done_eval.clone()]])
-            // anchor refetch for update
-            .append_query_results([vec![anchor.clone()]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .into_connection();
-        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard)
-            .await
-            .unwrap();
-        assert_eq!(
-            ids,
-            vec![anchor_id],
-            "an anchor shared only with a terminal eval must be aborted"
-        );
-    }
-
-    #[tokio::test]
-    async fn hard_abort_marks_unshared_active_anchors() {
-        let eval = make_eval(EvaluationStatus::Building);
-        let active_anchor = make_anchor(BuildStatus::Building);
-        let done_anchor = make_anchor(BuildStatus::Completed);
-        let active_anchor_id = active_anchor.id;
-        let job_active = make_job(eval.id, active_anchor.id);
-        let job_done = make_job(eval.id, done_anchor.id);
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // initial eval fetch
-            .append_query_results([vec![eval.clone()]])
-            // eval update read-back
-            .append_query_results([vec![eval.clone()]])
-            // eval exec
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            // build_job anchor ids for the eval
-            .append_query_results([vec![job_active.clone(), job_done.clone()]])
-            // active anchors (only the Building one is returned by the status filter)
-            .append_query_results([vec![active_anchor.clone()]])
-            // shared lookup: no other eval references the anchor
-            .append_query_results([Vec::<gradient_entity::build_job::Model>::new()])
-            // anchor refetch for update
-            .append_query_results([vec![active_anchor.clone()]])
-            // anchor exec
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            .into_connection();
-        let ids = abort_evaluation(&db, eval.id, AbortKind::Hard)
-            .await
-            .unwrap();
-        assert_eq!(
-            ids,
-            vec![active_anchor_id],
-            "hard abort returns anchors it marked Aborted"
-        );
+        assert!(aborted, "an active evaluation is marked aborted");
     }
 }

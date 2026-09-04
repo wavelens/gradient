@@ -33,6 +33,7 @@ pub use self::sign_sweep::sign_missing_signatures;
 
 use futures::future::BoxFuture;
 use gradient_core::ServerState;
+use gradient_graph::Demotion;
 use gradient_util::supervision::ChildSpec;
 use std::sync::Arc;
 use std::time::Duration;
@@ -147,9 +148,9 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     // touching the producer's trust flags; demote any anchor the dispatch gate
     // would trust whose output is no longer fetchable, so its dependents stop
     // failing `InputsUnavailable` and the next eval rebuilds it.
-    match gradient_db::demote_unbacked_trusted_outputs(&state.worker_db, &state.nar_storage).await {
-        Ok(n) if n > 0 => info!(
-            reset = n,
+    match state.graph.demote(Demotion::UnbackedTrustedOutputs).await {
+        Ok(report) if report.demoted > 0 => info!(
+            reset = report.demoted,
             "Demoted trusted producers with unfetchable outputs"
         ),
         Ok(_) => {}

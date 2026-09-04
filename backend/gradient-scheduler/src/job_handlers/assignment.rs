@@ -9,10 +9,11 @@
 use std::sync::Arc;
 
 use sea_orm::EntityTrait;
-use sea_orm::{ColumnTrait, IntoActiveModel, QueryFilter};
+use sea_orm::IntoActiveModel;
 use tracing::{info, warn};
 
 use gradient_core::ServerState;
+use gradient_graph::Transition;
 use gradient_types::proto::{CandidateScore, JobKind};
 use gradient_types::*;
 
@@ -167,104 +168,17 @@ async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: 
         return;
     };
 
-    // Find/create the build_job attributing this anchor to the driving eval,
-    // then open the attempt keyed on (build_job, anchor).
-    if let Some(build_job) =
-        find_or_create_build_job(state, rec.evaluation_id, derivation_build).await
-        && let Err(e) = gradient_db::open_attempt(
-            &state.worker_db,
-            build_job,
-            derivation_build,
-            dispatched_job_id,
-            rec.substitute,
-            rec.build_context.clone(),
-        )
+    if let Err(e) = state
+        .graph
+        .transition(Transition::Dispatched {
+            evaluation: rec.evaluation_id,
+            anchor: derivation_build,
+            dispatched_job: dispatched_job_id,
+            substitute: rec.substitute,
+            build_context: rec.build_context.clone(),
+        })
         .await
     {
-        warn!(error = %e, "failed to open build_attempt");
-    }
-
-    if let Err(e) = gradient_entity::derivation_build::Entity::update_many()
-        .col_expr(
-            gradient_entity::derivation_build::Column::DispatchedAt,
-            sea_orm::sea_query::Expr::value(now),
-        )
-        .filter(gradient_entity::derivation_build::Column::Id.eq(derivation_build))
-        .filter(gradient_entity::derivation_build::Column::DispatchedAt.is_null())
-        .exec(&state.worker_db)
-        .await
-    {
-        warn!(error = %e, %derivation_build, "failed to stamp anchor dispatched_at");
-    }
-}
-
-/// The `build_job` for `(evaluation, anchor.derivation)`. `resolve_anchors`
-/// normally pre-creates it at eval time; this upserts then selects so dispatch
-/// stays correct for any anchor whose build_job is missing.
-async fn find_or_create_build_job(
-    state: &Arc<ServerState>,
-    evaluation: EvaluationId,
-    derivation_build: DerivationBuildId,
-) -> Option<gradient_entity::ids::BuildJobId> {
-    let anchor = match EDerivationBuild::find_by_id(derivation_build)
-        .one(&state.worker_db)
-        .await
-    {
-        Ok(Some(a)) => a,
-        Ok(None) => {
-            warn!(%derivation_build, "anchor missing while opening build_attempt");
-            return None;
-        }
-        Err(e) => {
-            warn!(error = %e, %derivation_build, "anchor lookup failed while opening build_attempt");
-            return None;
-        }
-    };
-
-    let existing = EBuildJob::find()
-        .filter(CBuildJob::Evaluation.eq(evaluation))
-        .filter(CBuildJob::Derivation.eq(anchor.derivation))
-        .one(&state.worker_db)
-        .await;
-    match existing {
-        Ok(Some(j)) => return Some(j.id),
-        Ok(None) => {}
-        Err(e) => warn!(error = %e, "build_job lookup failed"),
-    }
-
-    let row = gradient_entity::build_job::Model {
-        id: gradient_entity::ids::BuildJobId::now_v7(),
-        evaluation,
-        derivation: anchor.derivation,
-        derivation_build,
-        score: 0.0,
-        score_breakdown: serde_json::Value::Null,
-        created_at: now(),
-    }
-    .into_active_model();
-    match gradient_entity::build_job::Entity::insert(row)
-        .on_conflict(
-            sea_orm::sea_query::OnConflict::columns([CBuildJob::Evaluation, CBuildJob::Derivation])
-                .do_nothing()
-                .to_owned(),
-        )
-        .exec_without_returning(&state.worker_db)
-        .await
-    {
-        Ok(_) => {}
-        Err(e) => warn!(error = %e, "build_job upsert failed"),
-    }
-
-    match EBuildJob::find()
-        .filter(CBuildJob::Evaluation.eq(evaluation))
-        .filter(CBuildJob::Derivation.eq(anchor.derivation))
-        .one(&state.worker_db)
-        .await
-    {
-        Ok(j) => j.map(|j| j.id),
-        Err(e) => {
-            warn!(error = %e, "build_job re-select failed");
-            None
-        }
+        warn!(error = %e, %derivation_build, "dispatch record did not reach the graph actor");
     }
 }

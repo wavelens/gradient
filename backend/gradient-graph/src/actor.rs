@@ -23,9 +23,10 @@ use tracing::{info, warn};
 
 use crate::ingest::{self, EvalEdgeAccumulator};
 use crate::messages::{
-    IngestBatch, IngestReport, NarCommit, NarCommitted, Transition, TransitionReport,
+    DemoteReport, Demotion, IngestBatch, IngestReport, NarCommit, NarCommitted, RequeueScope,
+    Transition, TransitionReport,
 };
-use crate::{known, nar, transition};
+use crate::{demote, known, nar, requeue, transition};
 
 /// How long a caller waits for the actor to exist after a restart.
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -49,6 +50,8 @@ pub enum GraphMsg {
     },
     CommitNar(NarCommit, Reply<NarCommitted>),
     Transition(Transition, Reply<TransitionReport>),
+    Requeue(RequeueScope, Reply<u64>),
+    Demote(Demotion, Reply<DemoteReport>),
     Flush,
 }
 
@@ -150,6 +153,24 @@ impl Actor for GraphActor {
                 let GraphState { ctx, edges, .. } = st;
                 let result = transact(ctx, GRAPH_TX_BUDGET, async |scoped| {
                     transition::apply(scoped, edges, t).await
+                })
+                .await;
+                st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
+                let _ = reply.send(result);
+            }
+            GraphMsg::Requeue(scope, reply) => {
+                flush(st).await;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
+                    requeue::apply(scoped, scope).await
+                })
+                .await;
+                st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
+                let _ = reply.send(result);
+            }
+            GraphMsg::Demote(demotion, reply) => {
+                flush(st).await;
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
+                    demote::apply(scoped, demotion).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
@@ -274,44 +295,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser as _;
-    use gradient_db::{NoReactor, WebDb, WorkerDb};
+    use crate::test_ctx::ctx;
     use gradient_entity::evaluation::EvaluationStatus;
-    use gradient_storage::{FileLogStorage, NarStore, StorageCtx};
     use gradient_types::*;
-    use gradient_util::shutdown::Shutdown;
-    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase};
-
-    async fn ctx(db: DatabaseConnection) -> (DbContext, WorkerDb) {
-        let dir = std::env::temp_dir().join(format!("gradient-graph-{}", uuid::Uuid::now_v7()));
-        let cli = Cli::try_parse_from([
-            "gradient-server",
-            "--crypt-secret-file",
-            "test-secret",
-            "--jwt-secret-file",
-            "test-jwt",
-            "--serve-url",
-            "http://127.0.0.1:3000",
-            "--base-path",
-            dir.to_str().unwrap(),
-        ])
-        .expect("test cli");
-        let config = Arc::new(RuntimeConfig::from_cli(&cli).expect("test config"));
-        let worker_db = WorkerDb::new(db);
-        let ctx = DbContext {
-            worker_db: worker_db.clone(),
-            web_db: WebDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection()),
-            config,
-            storage: StorageCtx {
-                nar_storage: NarStore::local(dir.to_str().unwrap()).unwrap(),
-                log_storage: Arc::new(FileLogStorage::new(&dir).await.unwrap()),
-            },
-            shutdown: Shutdown::new(),
-            board_events: tokio::sync::broadcast::channel(16).0,
-            reactor: Arc::new(NoReactor),
-        };
-        (ctx, worker_db)
-    }
+    use sea_orm::{DatabaseBackend, MockDatabase};
 
     fn evaluation(id: EvaluationId) -> MEvaluation {
         MEvaluation {
