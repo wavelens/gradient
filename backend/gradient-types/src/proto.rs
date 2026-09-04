@@ -613,7 +613,7 @@ pub struct JobPhaseSpan {
     pub parent: Option<u32>,
     /// Store paths the phase moved; 0 when the phase is not path-shaped.
     pub paths: u32,
-    /// Bytes the phase moved; 0 when the phase moves no bytes.
+    /// Bytes the phase moved; 0 when it moves none or does not count them.
     pub bytes: u64,
 }
 

@@ -25,6 +25,7 @@ use tracing::{debug, error, info, warn};
 use crate::config::WorkerConfig;
 use crate::connection::{ProtoReader, ProtoWriter};
 use crate::executor::JobExecutor;
+use crate::executor::timeline::JobTimeline;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::{CacheWaiters, JobUpdater, KnownDerivationWaiters};
 use crate::proto::scorer::JobScorer;
@@ -108,10 +109,13 @@ pub(super) async fn run_dispatch_loop(
 // ── Per-job bookkeeping ───────────────────────────────────────────────────────
 
 /// Registry of in-flight jobs: abort channels, kinds for capacity accounting,
-/// and the completion channel every spawned job reports back on.
+/// phase timelines, and the completion channel every spawned job reports back on.
 struct JobRegistry {
     abort_senders: HashMap<String, watch::Sender<bool>>,
     job_kinds: HashMap<String, JobKind>,
+    /// Shared with the job task, so the terminal message can report the
+    /// timeline once the task itself is gone.
+    timelines: HashMap<String, Arc<JobTimeline>>,
     done_tx: mpsc::UnboundedSender<(String, Result<()>)>,
 }
 
@@ -177,6 +181,7 @@ impl DispatchState {
             jobs: JobRegistry {
                 abort_senders: HashMap::new(),
                 job_kinds: HashMap::new(),
+                timelines: HashMap::new(),
                 done_tx,
             },
             done_rx: Some(done_rx),
@@ -337,28 +342,31 @@ impl DispatchState {
         self.credentials.clear();
 
         let completed_kind = self.jobs.job_kinds.remove(&job_id);
+        let timeline = self.jobs.timelines.remove(&job_id);
+        let dropped_spans = timeline.as_ref().map(|t| t.dropped()).unwrap_or_default();
+        let spans = timeline.map(|t| t.snapshot()).unwrap_or_default();
+        if dropped_spans > 0 {
+            debug!(%job_id, dropped_spans, "phase timeline hit its span cap");
+        }
 
         match result {
             Ok(()) => {
-                info!(%job_id, "job completed");
+                info!(%job_id, phases = spans.len(), "job completed");
                 self.writer
-                    .send(ClientMessage::JobCompleted {
-                        job_id,
-                        spans: vec![],
-                    })
+                    .send(ClientMessage::JobCompleted { job_id, spans })
                     .await?;
             }
             Err(e) => {
                 let error_chain = format!("{e:#}");
                 let (kind, missing_paths) = crate::executor::failure::wire_failure(&e);
-                error!(%job_id, error = %error_chain, ?kind, "job failed");
+                error!(%job_id, error = %error_chain, ?kind, phases = spans.len(), "job failed");
                 self.writer
                     .send(ClientMessage::JobFailed {
                         job_id,
                         error: error_chain,
                         kind,
                         missing_paths,
-                        spans: vec![],
+                        spans,
                     })
                     .await?;
             }
@@ -593,6 +601,10 @@ impl DispatchState {
         let job_eval_cache_recv = self.eval_cache_recv.clone();
         let job_done_tx = self.jobs.done_tx.clone();
         let jid = job_id.clone();
+        let timeline = JobTimeline::new();
+        self.jobs
+            .timelines
+            .insert(job_id.clone(), Arc::clone(&timeline));
 
         tokio::spawn(async move {
             let mut updater = JobUpdater::new(
@@ -603,6 +615,7 @@ impl DispatchState {
                 job_nar_recv,
                 job_eval_cache_recv,
                 Some(job_store),
+                timeline,
             );
             let result = run_job(executor, job, &mut updater, &credentials, abort_rx).await;
             let _ = job_done_tx.send((jid, result));
