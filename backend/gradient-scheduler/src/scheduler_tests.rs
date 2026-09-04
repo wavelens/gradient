@@ -530,9 +530,6 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     };
 
     let db = MockDatabase::new(DatabaseBackend::Postgres)
-        // register_worker resolves the worker's owning project from worker_registration;
-        // an empty result means "no registration row" and skips the connection record.
-        .append_query_results([Vec::<gradient_entity::worker_registration::Model>::new()])
         .append_query_results([vec![archived_eval]])
         .into_connection();
     let scheduler = Arc::new(Scheduler::new(test_state(db)));
@@ -543,22 +540,23 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
     fetch_job.job.steps = vec![FlakeStep::FetchFlake];
     let job_id = format!("eval:{eval_id}");
 
+    // Attach with the job already active: a dispatched assignment would spawn
+    // the dispatched_job insert, which races the ordered mock for the eval row.
+    let (session, _signals) = port();
     scheduler
-        .enqueue_eval_job(job_id.clone(), fetch_job)
+        .reattach_worker(
+            "w1",
+            GradientCapabilities {
+                eval: true,
+                fetch: true,
+                ..GradientCapabilities::default()
+            },
+            HashSet::new(),
+            session,
+            vec![(job_id.clone(), crate::jobs::PendingJob::Eval(fetch_job))],
+        )
         .await
-        .unwrap();
-    register(
-        &scheduler,
-        "w1",
-        GradientCapabilities {
-            eval: true,
-            fetch: true,
-            ..GradientCapabilities::default()
-        },
-        HashSet::new(),
-    )
-    .await;
-    scheduler.request_job("w1", JobKind::Flake).await;
+        .expect("reattach");
 
     scheduler
         .handle_job_completed("w1", &job_id)
