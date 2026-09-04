@@ -883,8 +883,8 @@ fn flake_nodes_from_roots(root_drvs: &[(String, String)]) -> Vec<FlakeOutputNode
 }
 
 /// Convert the resolver's accumulated totals into the wire report. Per-entry
-/// `eval_ms` is not tracked by the aggregator, so it stays 0; phase timings and
-/// `worker_id` are filled by the caller.
+/// `eval_ms` is not tracked by the aggregator, so it stays 0; `worker_id` is
+/// filled by the caller. Phase timings come from the job timeline, not here.
 fn build_eval_stats_report(
     totals: crate::worker_pool::eval_stats::EvalStatsTotals,
     flake_nodes: Vec<FlakeOutputNode>,
