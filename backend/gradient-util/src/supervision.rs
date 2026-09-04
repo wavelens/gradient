@@ -98,6 +98,11 @@ pub struct SupervisorHealth {
 }
 
 impl SupervisorHealth {
+    /// Give `name` a row so the snapshot lists a child before its first pass.
+    pub fn register(&self, name: &'static str) {
+        self.with(name, |_| {});
+    }
+
     pub fn with(&self, name: &'static str, f: impl FnOnce(&mut LoopHealth)) {
         let mut map = self.loops.lock().unwrap_or_else(|e| e.into_inner());
         f(map.entry(name).or_default());
@@ -264,6 +269,7 @@ async fn spawn_child(
         ChildSpec::Custom { spawn, .. } => spawn(ctx).await?,
     };
     state.live.insert(cell.get_id(), spec.name());
+    state.args.health.register(spec.name());
     info!(loop_name = spec.name(), "supervised loop started");
     Ok(())
 }
@@ -453,6 +459,24 @@ mod tests {
             "ticking resumed after the restart"
         );
         assert!(h.last_ok_at.is_some());
+        shutdown.cancel_and_drain(Duration::from_secs(2)).await;
+    }
+
+    #[tokio::test]
+    async fn a_child_is_listed_in_health_before_its_first_pass() {
+        let shutdown = Shutdown::new();
+        let spec = ChildSpec::periodic(
+            "hourly",
+            Duration::from_secs(3600),
+            Duration::from_secs(60),
+            || async { Ok(()) },
+        );
+        shutdown.supervise_now(spec).await.expect("supervise");
+        let health = shutdown.supervision_health().expect("tree");
+        let names: Vec<_> = health.snapshot().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, vec!["hourly"]);
+        let h = health.get("hourly");
+        assert!(h.last_ok_at.is_none() && h.restarts == 0, "{h:?}");
         shutdown.cancel_and_drain(Duration::from_secs(2)).await;
     }
 
