@@ -345,10 +345,10 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_dependency",
-            "CREATE TABLE derivation_dependency (id TEXT, derivation TEXT, dependency TEXT)",
-            "SELECT dd.id::text, dd.derivation::text, dd.dependency::text FROM derivation_dependency dd WHERE dd.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
+            "CREATE TABLE derivation_dependency (derivation TEXT, dependency TEXT)",
+            "SELECT dd.derivation::text, dd.dependency::text FROM derivation_dependency dd WHERE dd.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
             "the evaluation's derivations, shared with every other evaluation that built them",
-            ["id", "derivation", "dependency"]
+            ["derivation", "dependency"]
         ),
         spec!(
             "cached_path",
@@ -371,10 +371,10 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "cached_path_reference",
-            "CREATE TABLE cached_path_reference (id TEXT, referrer TEXT, reference TEXT, reference_hash TEXT, position INTEGER)",
-            "SELECT r.id::text, r.referrer::text, r.reference::text, r.reference_hash::text, r.position::text FROM cached_path_reference r WHERE r.referrer IN (SELECT o.hash FROM derivation_output o WHERE o.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1))",
+            "CREATE TABLE cached_path_reference (referrer TEXT, reference TEXT, reference_hash TEXT, position INTEGER)",
+            "SELECT r.referrer::text, r.reference::text, r.reference_hash::text, r.position::text FROM cached_path_reference r WHERE r.referrer IN (SELECT o.hash FROM derivation_output o WHERE o.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1))",
             "the evaluation's output hashes, shared with every other evaluation that produced them",
-            ["id", "referrer", "reference", "reference_hash", "position"]
+            ["referrer", "reference", "reference_hash", "position"]
         ),
     ];
 

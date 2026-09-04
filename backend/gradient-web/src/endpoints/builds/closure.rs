@@ -299,16 +299,20 @@ mod tests {
         }
     }
 
+    // The closure walk projects one `derivation` column; the mock only has to
+    // carry that, so the edge model stands in with both ends set to the node.
+    fn node(derivation: DerivationId) -> derivation_dependency::Model {
+        dep(derivation, derivation)
+    }
+
     // root depends on child; sizes 100 + 40 => total 140, two nodes, one edge.
     #[tokio::test]
     async fn build_closure_graph_sums_and_links() {
         let root = DerivationId::now_v7();
         let child = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // derivation_closure_reachable: wave 1 (root) -> edge root->child
-            .append_query_results([vec![dep(root, child)]])
-            // wave 2 (child) -> no further edges
-            .append_query_results([Vec::<derivation_dependency::Model>::new()])
+            // derivation_closure_reachable is now one statement
+            .append_query_results([vec![node(root), node(child)]])
             // output_sizes_by_drv: outputs for [root, child] (drives both total and per-node)
             .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
             // EDerivation::find for nodes
@@ -334,7 +338,6 @@ mod tests {
         );
     }
 
-    // The runtime closure graph walks `cached_path_reference` (per-level model +
-    // edge queries); it is covered end-to-end by the cache integration test rather
-    // than a MockDatabase fixture that cannot represent that query sequence.
+    // The runtime closure graph walks `cached_path_reference` in one recursive
+    // statement; it is covered end to end by the cache integration test.
 }

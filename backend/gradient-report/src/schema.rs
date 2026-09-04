@@ -13,7 +13,7 @@ use rusqlite::Connection;
 
 /// Bumped whenever an exported table's shape changes, so an inspector can
 /// refuse a file it does not understand rather than print wrong answers.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ReportOptions {
