@@ -24,9 +24,10 @@ mod dispatch;
 mod id;
 mod scoring;
 
+use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use gradient_proto::messages::{ClientMessage, JobCandidate, JobKind};

@@ -9,8 +9,9 @@
 //! [`JobUpdater`] wraps the WebSocket sender and provides typed methods for
 //! reporting progress back to the server during job execution.
 
+use gradient_util::sync::Mutex;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -57,7 +58,6 @@ pub(crate) fn register_cache_waiter(
     let (reply, rx) = oneshot::channel();
     waiters
         .lock()
-        .unwrap()
         .insert(query_id, CacheWaiter { job_id, reply });
     rx
 }
@@ -70,7 +70,7 @@ pub(crate) fn deliver_cache_reply(
     query_id: &str,
     result: Result<Vec<CachedPath>, String>,
 ) -> bool {
-    match waiters.lock().unwrap().remove(query_id) {
+    match waiters.lock().remove(query_id) {
         Some(w) => {
             let _ = w.reply.send(result);
             true
@@ -82,13 +82,13 @@ pub(crate) fn deliver_cache_reply(
 /// Drop the waiter for a single timed-out query so a late reply is discarded
 /// rather than delivered to a closed channel.
 pub(crate) fn forget_cache_waiter(waiters: &CacheWaiters, query_id: &str) {
-    waiters.lock().unwrap().remove(query_id);
+    waiters.lock().remove(query_id);
 }
 
 /// Drop every waiter belonging to `job_id` so a query a finished or aborted job
 /// left in flight can't leak its slot.
 pub(crate) fn forget_cache_waiters_for_job(waiters: &CacheWaiters, job_id: &str) {
-    waiters.lock().unwrap().retain(|_, w| w.job_id != job_id);
+    waiters.lock().retain(|_, w| w.job_id != job_id);
 }
 
 /// Shared map from job-id to a oneshot sender that delivers `KnownDerivations`
@@ -444,7 +444,7 @@ async fn known_derivations_chunk(
 ) -> Result<Vec<String>> {
     let path_count = drv_paths.len();
     let (tx, rx) = oneshot::channel();
-    waiters.lock().unwrap().insert(job_id.to_owned(), tx);
+    waiters.lock().insert(job_id.to_owned(), tx);
     writer
         .send(ClientMessage::QueryKnownDerivations {
             job_id: job_id.to_owned(),
@@ -457,7 +457,7 @@ async fn known_derivations_chunk(
             "known-derivation waiter dropped - connection closed or superseded?"
         )),
         Err(_) => {
-            waiters.lock().unwrap().remove(job_id);
+            waiters.lock().remove(job_id);
             Err(anyhow::anyhow!(
                 "QueryKnownDerivations for {} paths timed out after {}s (job_id={})",
                 path_count,
@@ -901,7 +901,7 @@ mod tests {
                         deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
                     }
                     gradient_proto::messages::ServerMessage::KnownDerivations { job_id, known } => {
-                        let waiter = known_waiters.lock().unwrap().remove(&job_id);
+                        let waiter = known_waiters.lock().remove(&job_id);
                         if let Some(tx) = waiter {
                             let _ = tx.send(known);
                         }

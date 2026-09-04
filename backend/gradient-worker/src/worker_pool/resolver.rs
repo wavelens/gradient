@@ -12,9 +12,10 @@ use gradient_db::{Derivation, parse_drv};
 use gradient_eval::ipc::ResolvedItem;
 use gradient_exec::path_utils::nix_store_path;
 use gradient_nix::{DerivationResolver, FlakeDiscovery, ResolvedDerivation};
+use gradient_util::sync::Mutex;
 use std::collections::VecDeque;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tracing::debug;
 
 use super::eval_stats::{EvalStatsAccumulator, EvalStatsTotals, StatsDelta};
@@ -125,7 +126,7 @@ where
             loop {
                 // Scope the pop so the guard drops before the await; holding
                 // it across `.await` would deadlock the executor.
-                let item = queue.lock().unwrap().pop_front();
+                let item = queue.lock().pop_front();
                 let Some(item) = item else { break };
                 run(item).await?;
             }
@@ -267,7 +268,7 @@ impl WorkerPoolResolver {
 
     /// Bucket one worker delta under `entry_point`, folding peak RSS in too.
     fn observe_stats(&self, entry_point: &str, delta: StatsDelta, rss: u64) {
-        self.stats.lock().unwrap().observe(entry_point, delta, rss);
+        self.stats.lock().observe(entry_point, delta, rss);
     }
 
     /// Post-call bookkeeping shared by every successful worker call: record
@@ -289,14 +290,14 @@ impl WorkerPoolResolver {
     /// bleed is minor.
     fn bucket_of(&self, first_attr: Option<&String>) -> String {
         first_attr
-            .map(|a| entry_point_of(a, &self.patterns.lock().unwrap()))
+            .map(|a| entry_point_of(a, &self.patterns.lock()))
             .unwrap_or_default()
     }
 
     /// Drain the accumulated per-eval stats, resetting the accumulator so the
     /// next eval starts clean. Called once by the executor at eval completion.
     pub fn take_eval_stats(&self) -> EvalStatsTotals {
-        let acc = std::mem::take(&mut *self.stats.lock().unwrap());
+        let acc = std::mem::take(&mut *self.stats.lock());
         acc.finish()
     }
 
@@ -444,7 +445,7 @@ impl WorkerPoolResolver {
 
     fn record_warnings(&self, warnings: Vec<String>) {
         if !warnings.is_empty() {
-            self.resolve_warnings.lock().unwrap().extend(warnings);
+            self.resolve_warnings.lock().extend(warnings);
         }
     }
 }
@@ -458,7 +459,7 @@ impl DerivationResolver for WorkerPoolResolver {
         overrides: &[(String, String)],
     ) -> Result<FlakeDiscovery> {
         // Record the user entry-points so the resolve pass can bucket by them.
-        *self.patterns.lock().unwrap() = wildcards
+        *self.patterns.lock() = wildcards
             .iter()
             .filter(|w| !w.starts_with('!'))
             .cloned()
@@ -523,21 +524,21 @@ impl DerivationResolver for WorkerPoolResolver {
                 pattern.extend_from_slice(excludes);
 
                 let (a, w, e) = self.list_shard(repo, pattern, overrides).await?;
-                attrs.lock().unwrap().extend(a);
-                warnings.lock().unwrap().extend(w);
-                errors.lock().unwrap().extend(e);
+                attrs.lock().extend(a);
+                warnings.lock().extend(w);
+                errors.lock().extend(e);
                 Ok(())
             })
             .await?;
         }
 
-        let mut attrs = attrs.into_inner().unwrap();
+        let mut attrs = attrs.into_inner();
         attrs.sort_unstable();
         attrs.dedup();
-        let mut warnings = warnings.into_inner().unwrap();
+        let mut warnings = warnings.into_inner();
         warnings.sort_unstable();
         warnings.dedup();
-        let mut errors = errors.into_inner().unwrap();
+        let mut errors = errors.into_inner();
         errors.sort_unstable();
         errors.dedup();
 
@@ -589,15 +590,15 @@ impl DerivationResolver for WorkerPoolResolver {
                 // A crash became per-attr errors in the pure core; only a
                 // protocol violation or pool failure is a hard error.
                 let resolved = resolve_chunk(resolve_batch, batch, 0).await?;
-                indexed.lock().unwrap().extend(resolved);
+                indexed.lock().extend(resolved);
                 Ok(())
             })
             .await?;
         }
 
-        let mut indexed = indexed.into_inner().unwrap();
+        let mut indexed = indexed.into_inner();
         indexed.sort_by_key(|(idx, _)| *idx);
-        let mut all_warnings = std::mem::take(&mut *self.resolve_warnings.lock().unwrap());
+        let mut all_warnings = std::mem::take(&mut *self.resolve_warnings.lock());
         all_warnings.sort_unstable();
         all_warnings.dedup();
 
@@ -625,8 +626,8 @@ impl DerivationResolver for WorkerPoolResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gradient_util::sync::Mutex;
     use std::collections::{HashMap, HashSet};
-    use std::sync::Mutex;
 
     #[test]
     fn entry_point_longest_prefix_match() {
@@ -680,7 +681,7 @@ mod tests {
         }
 
         fn calls(&self) -> usize {
-            *self.calls.lock().unwrap()
+            *self.calls.lock()
         }
     }
 
@@ -705,7 +706,7 @@ mod tests {
             let resolve_once = move |attrs: Vec<String>| -> BoxFuture<'_, Result<BatchCall>> {
                 Box::pin(async move {
                     let prior = {
-                        let mut n = stub.calls.lock().unwrap();
+                        let mut n = stub.calls.lock();
                         let prior = *n;
                         *n += 1;
                         prior
@@ -805,12 +806,12 @@ mod tests {
         let seen = Mutex::new(Vec::new());
         let seen_ref = &seen;
         pooled_fan_out(3, (0..10).collect(), |n| async move {
-            seen_ref.lock().unwrap().push(n);
+            seen_ref.lock().push(n);
             Ok(())
         })
         .await
         .expect("no errors");
-        let mut got = seen.into_inner().unwrap();
+        let mut got = seen.into_inner();
         got.sort_unstable();
         assert_eq!(got, (0..10).collect::<Vec<_>>());
 

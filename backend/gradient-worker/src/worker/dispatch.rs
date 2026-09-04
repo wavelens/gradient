@@ -10,8 +10,9 @@
 //! [`run_dispatch_loop`] is the main entry point. It owns one [`DispatchState`]
 //! per connection; every inbound [`ServerMessage`] is routed to a method on it.
 
+use gradient_util::sync::Mutex;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use gradient_proto::messages::{
@@ -330,10 +331,7 @@ impl DispatchState {
     async fn on_job_done(&mut self, job_id: String, result: Result<()>) -> Result<()> {
         self.jobs.abort_senders.remove(&job_id);
         crate::proto::job::forget_cache_waiters_for_job(&self.cache_waiters, &job_id);
-        self.known_derivation_waiters
-            .lock()
-            .unwrap()
-            .remove(&job_id);
+        self.known_derivation_waiters.lock().remove(&job_id);
         self.nar_recv.forget_job(&job_id);
         self.eval_cache_recv.forget_job(&job_id);
         self.credentials.clear();
@@ -427,7 +425,7 @@ impl DispatchState {
             return;
         }
         {
-            let mut g = self.candidates.lock().unwrap();
+            let mut g = self.candidates.lock();
             for c in &cands {
                 g.insert(c.job_id.clone(), c.clone());
             }
@@ -450,7 +448,7 @@ impl DispatchState {
             return;
         }
         let new_candidates: Vec<JobCandidate> = {
-            let mut g = self.candidates.lock().unwrap();
+            let mut g = self.candidates.lock();
             cands
                 .into_iter()
                 .filter(|c| {
@@ -486,8 +484,8 @@ impl DispatchState {
 
     fn on_revoke_job(&mut self, job_ids: Vec<String>) {
         debug!(?job_ids, "jobs revoked");
-        let mut cands = self.candidates.lock().unwrap();
-        let mut scores = self.last_scores.lock().unwrap();
+        let mut cands = self.candidates.lock();
+        let mut scores = self.last_scores.lock();
         for id in &job_ids {
             cands.remove(id);
             scores.remove(id);
@@ -495,7 +493,7 @@ impl DispatchState {
     }
 
     async fn on_request_all_scores(&mut self) {
-        let all: Vec<JobCandidate> = self.candidates.lock().unwrap().values().cloned().collect();
+        let all: Vec<JobCandidate> = self.candidates.lock().values().cloned().collect();
         debug!(
             count = all.len(),
             "RequestAllScores - re-scoring all cached candidates"
@@ -524,8 +522,8 @@ impl DispatchState {
     /// re-offer is treated as new and re-scored (the delta filter skips
     /// unchanged cached entries).
     fn forget_candidate(&self, job_id: &str) {
-        self.candidates.lock().unwrap().remove(job_id);
-        self.last_scores.lock().unwrap().remove(job_id);
+        self.candidates.lock().remove(job_id);
+        self.last_scores.lock().remove(job_id);
     }
 
     async fn on_assign_job(&mut self, job_id: String, job: Job) -> Result<()> {
@@ -657,12 +655,7 @@ impl DispatchState {
     }
 
     fn on_known_derivations(&mut self, job_id: String, known: Vec<String>) {
-        if let Some(tx) = self
-            .known_derivation_waiters
-            .lock()
-            .unwrap()
-            .remove(&job_id)
-        {
+        if let Some(tx) = self.known_derivation_waiters.lock().remove(&job_id) {
             let _ = tx.send(known);
         } else {
             debug!(%job_id, count = known.len(), "KnownDerivations arrived after waiter cleared");
