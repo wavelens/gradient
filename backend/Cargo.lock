@@ -2735,6 +2735,7 @@ dependencies = [
  "gradient-entity",
  "gradient-exec",
  "gradient-forge",
+ "gradient-graph",
  "gradient-nix",
  "gradient-notify",
  "gradient-proto",

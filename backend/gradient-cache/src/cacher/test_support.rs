@@ -62,6 +62,6 @@ pub(crate) fn test_server_state_with_log(
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         upstream_query: Arc::new(tokio::sync::Semaphore::new(32)),
         reactor: Arc::new(gradient_db::NoReactor),
-        graph: gradient_core::Graph::new(),
+        graph: gradient_core::Graph::stub(),
     })
 }

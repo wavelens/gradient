@@ -220,7 +220,7 @@ mod tests {
         let err = ingest_nar(
             &db,
             &store,
-            &Graph::new(),
+            &Graph::stub(),
             vec![1],
             input("not-a-store-path"),
             SignTargets::Cache(cache_id()),

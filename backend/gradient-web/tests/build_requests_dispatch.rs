@@ -6,8 +6,9 @@
 
 //! Integration tests for `POST /api/v1/build-requests/{session}/dispatch`
 //! (issue #234, task 11). Covers the conflict/gone surfaces and the happy
-//! path which exercises the full materialise → cached_path → task →
-//! commit → evaluation pipeline against a mock DB.
+//! path, which exercises the materialise, task, commit and evaluation steps
+//! against a mock DB. The source NAR's cache-index row is the graph actor's
+//! write, so it is not in this transaction.
 
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
@@ -88,20 +89,6 @@ fn task_row(id: TaskId, managed: bool) -> gradient_entity::task::Model {
         keep_evaluations: 30,
         concurrency: ConcurrencyPolicy::SoftAbort,
         sign_cache: true,
-        ..Default::default()
-    }
-}
-
-fn cached_path_row(hash: &str) -> gradient_entity::cached_path::Model {
-    gradient_entity::cached_path::Model {
-        id: CachedPathId::now_v7(),
-        hash: hash.into(),
-        package: "source".into(),
-        file_hash: Some(format!("sha256:{}", hash)),
-        file_size: Some(0),
-        nar_size: Some(0),
-        nar_hash: Some(format!("sha256:{}", hash)),
-        created_at: Utc::now().naive_utc(),
         ..Default::default()
     }
 }
@@ -246,7 +233,6 @@ fn happy_path_creates_task_commit_and_evaluation() {
         let task_model = task_row(task_id, true);
         let commit_model = commit_row();
         let eval_model = eval_row(task_id, commit_model.id);
-        let cp_row = cached_path_row("00000000000000000000000000000000");
 
         let updated = gradient_entity::upload_session::Model {
             dispatched_at: Some(Utc::now().naive_utc()),
@@ -257,16 +243,6 @@ fn happy_path_creates_task_commit_and_evaluation() {
             .append_query_results([vec![upload_session(upload, vec![], false, false)]])
             .append_query_results([vec![membership()]])
             .append_query_results([vec![write_role_row()]])
-            // ensure_cached_path → SELECT (None)
-            .append_query_results([Vec::<gradient_entity::cached_path::Model>::new()])
-            // ensure_cached_path → INSERT (returns row)
-            .append_query_results([vec![cp_row]])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
-            // queue_signature_placeholders → list project caches (empty, early return)
-            .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             // ensure_build_request_task → SELECT existing (None)
             .append_query_results([Vec::<gradient_entity::task::Model>::new()])
             // ensure_build_request_task → INSERT task (returns row)
@@ -362,7 +338,6 @@ fn happy_path_reuses_existing_build_request_task() {
         let task_model = task_row(task_id, true);
         let commit_model = commit_row();
         let eval_model = eval_row(task_id, commit_model.id);
-        let cp_row = cached_path_row("00000000000000000000000000000000");
 
         let updated = gradient_entity::upload_session::Model {
             dispatched_at: Some(Utc::now().naive_utc()),
@@ -373,10 +348,6 @@ fn happy_path_reuses_existing_build_request_task() {
             .append_query_results([vec![upload_session(upload, vec![], false, false)]])
             .append_query_results([vec![membership()]])
             .append_query_results([vec![write_role_row()]])
-            // ensure_cached_path → SELECT existing returns the row
-            .append_query_results([vec![cp_row]])
-            // queue_signature_placeholders → project caches (empty)
-            .append_query_results([Vec::<gradient_entity::project_cache::Model>::new()])
             // ensure_build_request_task → SELECT existing returns the row
             .append_query_results([vec![task_model.clone()]])
             .append_query_results([vec![commit_model.clone()]])
