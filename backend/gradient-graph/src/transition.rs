@@ -488,18 +488,6 @@ async fn build_failed(
         0
     };
 
-    if let Err(e) = fail_latest_attempt(
-        &ctx.worker_db,
-        derivation_build,
-        policy::attempt_outcome(kind),
-        policy::attempt_reason(kind),
-        Some(policy::truncate_failure_message(error)),
-    )
-    .await
-    {
-        warn!(%derivation_build, error = %e, "failed to record attempt failure reason");
-    }
-
     let max_loops = ctx.config.eval.inputs_unavailable_max_loops;
     let inputs_circuit_open = matches!(kind, BuildFailureKind::InputsUnavailable)
         && policy::inputs_unavailable_circuit_open(prior_inputs_unavailable, max_loops);
@@ -520,10 +508,26 @@ async fn build_failed(
 
     // `InputsUnavailable` retries in-eval (the self-heal re-queues its input),
     // but once the breaker trips the input is unrecoverable - stop retrying.
-    let outcome = match policy::decide_failure_outcome(kind, attempt, max_attempts) {
-        FailureOutcome::Retry if inputs_circuit_open => FailureOutcome::Permanent,
-        other => other,
-    };
+    let outcome =
+        match policy::decide_failure_outcome(kind, attempt, max_attempts, anchor.substitutable) {
+            FailureOutcome::Retry if inputs_circuit_open => FailureOutcome::Permanent,
+            other => other,
+        };
+
+    // Recorded after the outcome is decided: the stored reason depends on it,
+    // and the breaker above deliberately counts only prior attempts.
+    if let Err(e) = fail_latest_attempt(
+        &ctx.worker_db,
+        derivation_build,
+        policy::attempt_outcome(kind),
+        policy::attempt_reason_for(kind, outcome),
+        Some(policy::truncate_failure_message(error)),
+    )
+    .await
+    {
+        warn!(%derivation_build, error = %e, "failed to record attempt failure reason");
+    }
+
     match outcome {
         FailureOutcome::Retry => {
             let mut active: ADerivationBuild = anchor.clone().into_active_model();

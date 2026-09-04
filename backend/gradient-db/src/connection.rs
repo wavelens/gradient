@@ -5,8 +5,6 @@
  */
 
 use anyhow::{Context, Result};
-use gradient_entity::build::BuildStatus;
-use gradient_entity::evaluation::EvaluationStatus;
 use gradient_migration::Migrator;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectOptions, ConnectionTrait, Database,
@@ -189,57 +187,12 @@ pub async fn connect_cache_db(cli: &Cli) -> Result<DatabaseConnection> {
     .context("Failed to connect cache database pool")
 }
 
-/// Evaluations the scheduler re-dispatches on its own after a restart, so
-/// startup recovery must leave them alone: `Queued` is re-offered by the eval
-/// dispatcher, `Waiting` (evaluated, builds queued for a free worker) is
-/// re-driven by build reconcile. Every other active status was running on a
-/// now-disconnected worker and is genuinely lost.
-fn eval_survives_restart(status: EvaluationStatus) -> bool {
-    matches!(status, EvaluationStatus::Queued | EvaluationStatus::Waiting)
-}
-
+/// Schema-time setup only. Restart recovery belongs to
+/// [`crate::recover_interrupted_work`], which runs once at server startup: this
+/// ran first and aborted the evaluations out from under it, so its anchor
+/// cleanup found nothing to do and every anchor those evaluations drove was
+/// left `Created`/`Queued` forever.
 async fn update_db(db: &DatabaseConnection) -> Result<(), DbErr> {
-    // Recover work interrupted by the restart. Anchors are global, so a build
-    // that was mid-compile on a now-lost worker is simply re-queued for the
-    // scheduler to re-dispatch (its orphaned attempt is closed by recovery);
-    // queued/waiting evaluations are left for the dispatcher to re-offer.
-    EDerivationBuild::update_many()
-        .col_expr(
-            CDerivationBuild::Status,
-            sea_orm::sea_query::Expr::value(BuildStatus::Queued),
-        )
-        .col_expr(
-            CDerivationBuild::UpdatedAt,
-            sea_orm::sea_query::Expr::value(now()),
-        )
-        .filter(CDerivationBuild::Status.eq(BuildStatus::Building))
-        .exec(db)
-        .await?;
-
-    let evaluations = EEvaluation::find()
-        .filter(CEvaluation::Status.is_in(EvaluationStatus::ACTIVE))
-        .all(db)
-        .await?;
-
-    for evaluation in evaluations {
-        if eval_survives_restart(evaluation.status) {
-            continue;
-        }
-
-        // Direct-build evaluations have no task; skip force_evaluation for those.
-        if let Some(task_id) = evaluation.task
-            && let Some(task) = ETask::find_by_id(task_id).one(db).await?
-        {
-            let mut atask: ATask = task.into();
-            atask.force_evaluation = Set(true);
-            atask.update(db).await?;
-        }
-
-        let mut aevaluation: AEvaluation = evaluation.into();
-        aevaluation.status = Set(EvaluationStatus::Aborted);
-        aevaluation.update(db).await?;
-    }
-
     seed_builtin_role(db, BASE_ROLE_ADMIN_ID, "Admin", admin_mask()).await?;
     seed_builtin_role(db, BASE_ROLE_WRITE_ID, "Write", write_mask()).await?;
     seed_builtin_role(db, BASE_ROLE_VIEW_ID, "View", view_mask()).await?;
@@ -489,32 +442,5 @@ mod pg_version_tests {
     fn accepts_postgres_18_and_newer() {
         assert!(require_supported_pg_version(180_000).is_ok());
         assert!(require_supported_pg_version(190_002).is_ok());
-    }
-}
-
-#[cfg(test)]
-mod startup_recovery_tests {
-    use super::eval_survives_restart;
-    use gradient_entity::evaluation::EvaluationStatus;
-
-    #[test]
-    fn queued_and_waiting_evaluations_survive_restart() {
-        assert!(eval_survives_restart(EvaluationStatus::Queued));
-        assert!(eval_survives_restart(EvaluationStatus::Waiting));
-    }
-
-    #[test]
-    fn actively_running_evaluations_are_aborted_on_restart() {
-        for status in [
-            EvaluationStatus::Fetching,
-            EvaluationStatus::EvaluatingFlake,
-            EvaluationStatus::EvaluatingDerivation,
-            EvaluationStatus::Building,
-        ] {
-            assert!(
-                !eval_survives_restart(status),
-                "{status:?} must not survive"
-            );
-        }
     }
 }

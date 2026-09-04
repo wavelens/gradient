@@ -8026,3 +8026,48 @@ roughly half its attempts aborted, and anything reading attempt outcomes read
 noise. `terminal_outcome_records_success_and_never_stays_running` asserts both
 mappings and, more importantly, that neither `Running` nor `Aborted` can come
 back from the success path.
+
+## Restart recovery and substitute-relay classification
+
+Two defects surfaced from a production report where an evaluation sat `Aborted`
+with no `finished_at`, 94 of its anchors stuck `Created` and 11 stuck `Queued`,
+and four large packages marked `FailedPermanent` by an object-store wobble.
+
+**`gradient-db/src/recovery.rs`** now owns restart recovery outright.
+`connection.rs::update_db` used to abort interrupted evaluations itself, and it
+runs during database init, which is before `recover_interrupted_work`. By the
+time recovery queried for interrupted evaluations there were none left, so
+`abort_anchors_for_evals` found nothing and every anchor those evaluations drove
+stayed `Created`/`Queued` forever. The old test in `connection.rs` passed
+throughout: it asserted a `Building` evaluation does not survive a restart, which
+was true, it was simply aborted by the path that could not finish the job.
+
+`recovery_owns_every_active_status_a_restart_loses` and
+`recovery_leaves_the_statuses_the_scheduler_re_drives` pin the two halves of the
+predicate, and `the_lost_set_is_exactly_active_minus_the_survivors` pins that the
+set is derived from `EvaluationStatus::ACTIVE` rather than listed, so a newly
+added active status is recovered by default instead of silently surviving a
+restart it cannot survive. The abort now writes `finished_at` alongside `status`
+and `updated_at` and records the terminal phase event, because a row reading
+`Aborted` with no end time reads as still running and retention keys off the
+column.
+
+**`gradient-graph/src/policy.rs`** stops a failed substitute relay from
+condemning the derivation. A relay failure is our own cache write breaking, not a
+verdict on a path that builds fine and is sitting on an upstream, but a
+`Transient` classification escalated to `FailedPermanent` once the attempt budget
+ran out, poisoning a global build-once anchor and cascading `DependencyFailed`
+over everything above it.
+`an_exhausted_substitute_requeues_instead_of_failing_the_derivation` pins the new
+outcome, and `a_substitutable_anchor_still_retries_before_its_budget_is_spent`
+pins what deliberately did not change: one blip must not turn a substitutable
+build into a from-scratch one, which is why the fix lives at budget exhaustion
+rather than in the worker's classifier.
+
+`every_requeue_records_the_reason_its_miss_budget_counts` is the one that keeps
+this terminating. `FailureOutcome::Requeue` returns an anchor to `Queued` without
+bumping `attempt`, so nothing about the anchor itself limits the loop; the
+substitute miss budget does, and it counts attempts carrying
+`SubstituteUnavailable`. A requeue recorded with no reason would re-dispatch,
+fail and requeue forever, so `attempt_reason_for` records that reason for every
+`Requeue` whatever kind produced it.
