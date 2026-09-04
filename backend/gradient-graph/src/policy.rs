@@ -30,6 +30,7 @@ pub(crate) fn decide_failure_outcome(
     kind: BuildFailureKind,
     attempt: i32,
     max_attempts: u32,
+    substitutable: bool,
 ) -> FailureOutcome {
     match kind {
         BuildFailureKind::Timeout => FailureOutcome::Timeout,
@@ -41,6 +42,15 @@ pub(crate) fn decide_failure_outcome(
         BuildFailureKind::InputsUnavailable | BuildFailureKind::Transient => {
             if (attempt + 1) < max_attempts as i32 {
                 FailureOutcome::Retry
+            } else if substitutable {
+                // Nothing ever tried to build this: the relay out of an upstream
+                // is what kept failing, so a permanent mark is a verdict on the
+                // wrong thing. It poisons a global build-once anchor for a path
+                // that builds fine and is sitting on an upstream, and cascades
+                // `DependencyFailed` over everything above it. Fall into the
+                // substitute-miss loop instead, which escalates to a real build
+                // once the miss budget is spent.
+                FailureOutcome::Requeue
             } else {
                 FailureOutcome::Permanent
             }
@@ -80,6 +90,21 @@ pub(crate) fn terminal_success_outcome(outputs_already_valid: bool) -> AttemptOu
 /// Best-effort mapping from the worker's failure classification to a stored
 /// `build_attempt.reason`. `Transient` has no single cause, so it stays `None`;
 /// an abort is not a failure of the derivation and carries no reason at all.
+/// Stored `build_attempt.reason` for a decided `outcome`. A `Requeue` always
+/// records `SubstituteUnavailable`, whatever kind produced it: the substitute
+/// miss budget counts exactly those rows and is the only thing that ends the
+/// re-queue loop by escalating the anchor to a real build. Leaving it `None`
+/// (as a bare `Transient` would) requeues forever.
+pub(crate) fn attempt_reason_for(
+    kind: BuildFailureKind,
+    outcome: FailureOutcome,
+) -> Option<AttemptFailureReason> {
+    match outcome {
+        FailureOutcome::Requeue => Some(AttemptFailureReason::SubstituteUnavailable),
+        _ => attempt_reason(kind),
+    }
+}
+
 pub(crate) fn attempt_reason(kind: BuildFailureKind) -> Option<AttemptFailureReason> {
     match kind {
         BuildFailureKind::SubstituteUnavailable => {
@@ -149,9 +174,9 @@ pub(crate) fn truncate_failure_message(error: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        FailureOutcome, attempt_outcome, attempt_reason, decide_failure_outcome,
-        inputs_unavailable_circuit_open, retry_backoff_elapsed, terminal_success_outcome,
-        terminal_success_status, truncate_failure_message,
+        FailureOutcome, attempt_outcome, attempt_reason, attempt_reason_for,
+        decide_failure_outcome, inputs_unavailable_circuit_open, retry_backoff_elapsed,
+        terminal_success_outcome, terminal_success_status, truncate_failure_message,
     };
     use gradient_entity::build::BuildStatus;
     use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
@@ -167,7 +192,7 @@ mod tests {
     fn abort_is_not_a_deterministic_build_failure() {
         for attempt in [0, 1, 99] {
             assert_eq!(
-                decide_failure_outcome(BuildFailureKind::Aborted, attempt, 3),
+                decide_failure_outcome(BuildFailureKind::Aborted, attempt, 3, false),
                 FailureOutcome::Aborted,
                 "an abort is never a build verdict, at any attempt count"
             );
@@ -211,7 +236,7 @@ mod tests {
     #[test]
     fn permanent_is_terminal_regardless_of_attempt() {
         assert_eq!(
-            decide_failure_outcome(BuildFailureKind::Permanent, 0, 3),
+            decide_failure_outcome(BuildFailureKind::Permanent, 0, 3, false),
             FailureOutcome::Permanent
         );
     }
@@ -219,7 +244,7 @@ mod tests {
     #[test]
     fn timeout_is_terminal() {
         assert_eq!(
-            decide_failure_outcome(BuildFailureKind::Timeout, 0, 3),
+            decide_failure_outcome(BuildFailureKind::Timeout, 0, 3, false),
             FailureOutcome::Timeout
         );
     }
@@ -227,15 +252,15 @@ mod tests {
     #[test]
     fn transient_retries_until_budget_then_permanent() {
         assert_eq!(
-            decide_failure_outcome(BuildFailureKind::Transient, 0, 3),
+            decide_failure_outcome(BuildFailureKind::Transient, 0, 3, false),
             FailureOutcome::Retry
         );
         assert_eq!(
-            decide_failure_outcome(BuildFailureKind::Transient, 1, 3),
+            decide_failure_outcome(BuildFailureKind::Transient, 1, 3, false),
             FailureOutcome::Retry
         );
         assert_eq!(
-            decide_failure_outcome(BuildFailureKind::Transient, 2, 3),
+            decide_failure_outcome(BuildFailureKind::Transient, 2, 3, false),
             FailureOutcome::Permanent
         );
     }
@@ -244,7 +269,7 @@ mod tests {
     fn substitute_unavailable_requeues_penalty_free() {
         for attempt in [0, 5, 100] {
             assert_eq!(
-                decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, attempt, 3),
+                decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, attempt, 3, false),
                 FailureOutcome::Requeue
             );
         }
@@ -282,23 +307,23 @@ mod tests {
     #[test]
     fn substitute_miss_requeues_but_real_failures_cap_at_three() {
         assert!(matches!(
-            decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 0, 3),
+            decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 0, 3, false),
             FailureOutcome::Requeue
         ));
         assert!(matches!(
-            decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 99, 3),
+            decide_failure_outcome(BuildFailureKind::SubstituteUnavailable, 99, 3, false),
             FailureOutcome::Requeue
         ));
         assert!(matches!(
-            decide_failure_outcome(BuildFailureKind::Transient, 0, 3),
+            decide_failure_outcome(BuildFailureKind::Transient, 0, 3, false),
             FailureOutcome::Retry
         ));
         assert!(matches!(
-            decide_failure_outcome(BuildFailureKind::Transient, 1, 3),
+            decide_failure_outcome(BuildFailureKind::Transient, 1, 3, false),
             FailureOutcome::Retry
         ));
         assert!(matches!(
-            decide_failure_outcome(BuildFailureKind::Transient, 2, 3),
+            decide_failure_outcome(BuildFailureKind::Transient, 2, 3, false),
             FailureOutcome::Permanent
         ));
     }
@@ -309,15 +334,15 @@ mod tests {
     #[test]
     fn inputs_unavailable_retries_like_transient_then_permanent() {
         assert_eq!(
-            decide_failure_outcome(BuildFailureKind::InputsUnavailable, 0, 3),
+            decide_failure_outcome(BuildFailureKind::InputsUnavailable, 0, 3, false),
             FailureOutcome::Retry
         );
         assert_eq!(
-            decide_failure_outcome(BuildFailureKind::InputsUnavailable, 1, 3),
+            decide_failure_outcome(BuildFailureKind::InputsUnavailable, 1, 3, false),
             FailureOutcome::Retry
         );
         assert_eq!(
-            decide_failure_outcome(BuildFailureKind::InputsUnavailable, 2, 3),
+            decide_failure_outcome(BuildFailureKind::InputsUnavailable, 2, 3, false),
             FailureOutcome::Permanent
         );
     }
@@ -339,6 +364,60 @@ mod tests {
         assert!(out.len() <= 8 * 1024 + " [truncated]".len());
         assert!(out.ends_with(" [truncated]"));
         assert!(std::str::from_utf8(out.as_bytes()).is_ok());
+    }
+
+    /// A relay out of an upstream that keeps failing is our cache write breaking,
+    /// not a verdict on the derivation. Marking it `FailedPermanent` poisoned a
+    /// global anchor for a path that builds fine: an object-store wobble took out
+    /// mesa, thunderbird and clang at once and cascaded `DependencyFailed` over
+    /// everything above them.
+    #[test]
+    fn an_exhausted_substitute_requeues_instead_of_failing_the_derivation() {
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::Transient, 2, 3, true),
+            FailureOutcome::Requeue
+        );
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::Transient, 2, 3, false),
+            FailureOutcome::Permanent
+        );
+    }
+
+    /// Below the budget nothing changes: one blip must not turn a substitutable
+    /// build into a from-scratch one.
+    #[test]
+    fn a_substitutable_anchor_still_retries_before_its_budget_is_spent() {
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::Transient, 0, 3, true),
+            FailureOutcome::Retry
+        );
+        assert_eq!(
+            decide_failure_outcome(BuildFailureKind::Transient, 1, 3, true),
+            FailureOutcome::Retry
+        );
+    }
+
+    /// What terminates the re-queue loop. The substitute miss budget counts
+    /// attempts carrying `SubstituteUnavailable`, so a `Requeue` recorded with no
+    /// reason would re-dispatch, fail, and requeue forever.
+    #[test]
+    fn every_requeue_records_the_reason_its_miss_budget_counts() {
+        for kind in [
+            BuildFailureKind::Transient,
+            BuildFailureKind::InputsUnavailable,
+            BuildFailureKind::SubstituteUnavailable,
+        ] {
+            assert_eq!(
+                attempt_reason_for(kind, FailureOutcome::Requeue),
+                Some(AttemptFailureReason::SubstituteUnavailable),
+                "{kind:?} requeued without a counted reason"
+            );
+        }
+        // Any other outcome keeps the kind's own mapping.
+        assert_eq!(
+            attempt_reason_for(BuildFailureKind::Permanent, FailureOutcome::Permanent),
+            attempt_reason(BuildFailureKind::Permanent)
+        );
     }
 
     #[test]

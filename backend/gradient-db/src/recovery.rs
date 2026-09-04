@@ -14,6 +14,25 @@ use sea_orm::{
 
 use gradient_types::*;
 
+/// Evaluations the scheduler re-drives on its own after a restart, so recovery
+/// must leave them alone: `Queued` is re-offered by the eval dispatcher and
+/// `Waiting` (evaluated, builds queued for a free worker) by build reconcile.
+/// Every other active status was running on a now-disconnected worker and is
+/// genuinely lost.
+fn eval_survives_restart(status: EvaluationStatus) -> bool {
+    matches!(status, EvaluationStatus::Queued | EvaluationStatus::Waiting)
+}
+
+/// The active statuses this sweep aborts. Derived from `ACTIVE` rather than
+/// listed, so a newly added active status is recovered by default instead of
+/// silently surviving a restart it cannot survive.
+fn lost_eval_statuses() -> Vec<EvaluationStatus> {
+    EvaluationStatus::ACTIVE
+        .into_iter()
+        .filter(|s| !eval_survives_restart(*s))
+        .collect()
+}
+
 #[derive(Debug, Default)]
 pub struct RecoveryReport {
     pub attempts_aborted: u64,
@@ -53,27 +72,38 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         .await?;
     report.builds_requeued = res.rows_affected;
 
-    // 3a. Collect pre-build evals that were in-flight on a now-dead worker.
-    let pre_build_statuses = [
-        EvaluationStatus::Fetching,
-        EvaluationStatus::EvaluatingFlake,
-        EvaluationStatus::EvaluatingDerivation,
-    ];
+    // 3a. Collect the evals a restart lost, `Building` included: their anchors
+    // and their terminal transition are this sweep's to finish.
     let inflight_evals = EEvaluation::find()
-        .filter(CEvaluation::Status.is_in(pre_build_statuses))
+        .filter(CEvaluation::Status.is_in(lost_eval_statuses()))
         .all(conn)
         .await?;
 
-    // 3b. Abort those evaluations.
+    // 3b. Abort those evaluations as a complete terminal transition. `finished_at`
+    // belongs with the status: a reader that sees Aborted with no end time reads
+    // it as still running, and retention keys off the column. The live path
+    // (`update_evaluation_status`) also runs the reactor effects; startup has no
+    // context for those, so the row is at least consistent on its own.
     let eval_ids: Vec<EvaluationId> = inflight_evals.iter().map(|e| e.id).collect();
     if !eval_ids.is_empty() {
         let res = EEvaluation::update_many()
             .col_expr(CEvaluation::Status, Expr::value(EvaluationStatus::Aborted))
             .col_expr(CEvaluation::UpdatedAt, Expr::value(now))
+            .col_expr(CEvaluation::FinishedAt, Expr::value(now))
             .filter(CEvaluation::Id.is_in(eval_ids.clone()))
             .exec(conn)
             .await?;
         report.evals_aborted = res.rows_affected;
+
+        let subjects: Vec<uuid::Uuid> = eval_ids.iter().map(|e| e.into_inner()).collect();
+        crate::status::record_phase_events(
+            conn,
+            crate::status::PhaseSubjectKind::Evaluation,
+            &subjects,
+            i32::from(EvaluationStatus::Aborted) as i16,
+            now,
+        )
+        .await;
     }
 
     // 3c. Abort the anchors those evals drove. When the server dies mid-eval the
@@ -152,6 +182,47 @@ async fn abort_anchors_for_evals<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `Building` is the status this sweep used to miss. Startup aborted such an
+    /// evaluation before recovery looked for it, so `abort_anchors_for_evals`
+    /// found nothing and every anchor it drove stayed Created/Queued forever.
+    #[test]
+    fn recovery_owns_every_active_status_a_restart_loses() {
+        let lost = lost_eval_statuses();
+        assert!(lost.contains(&EvaluationStatus::Building), "{lost:?}");
+        assert!(lost.contains(&EvaluationStatus::Fetching), "{lost:?}");
+        assert!(
+            lost.contains(&EvaluationStatus::EvaluatingFlake),
+            "{lost:?}"
+        );
+        assert!(
+            lost.contains(&EvaluationStatus::EvaluatingDerivation),
+            "{lost:?}"
+        );
+    }
+
+    /// The scheduler re-drives these two itself; aborting them would cancel work
+    /// that is still live.
+    #[test]
+    fn recovery_leaves_the_statuses_the_scheduler_re_drives() {
+        let lost = lost_eval_statuses();
+        assert!(!lost.contains(&EvaluationStatus::Queued), "{lost:?}");
+        assert!(!lost.contains(&EvaluationStatus::Waiting), "{lost:?}");
+    }
+
+    /// Derived from `ACTIVE`, never listed: a newly added active status must be
+    /// recovered by default rather than silently surviving a restart.
+    #[test]
+    fn the_lost_set_is_exactly_active_minus_the_survivors() {
+        let lost = lost_eval_statuses();
+        let expected: Vec<EvaluationStatus> = EvaluationStatus::ACTIVE
+            .into_iter()
+            .filter(|s| !matches!(s, EvaluationStatus::Queued | EvaluationStatus::Waiting))
+            .collect();
+        assert_eq!(lost, expected);
+        assert_eq!(lost.len(), EvaluationStatus::ACTIVE.len() - 2);
+    }
+
     use gradient_entity::evaluation::Model as MEval;
     use gradient_entity::ids::{CommitId, EvaluationId, TaskId};
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
