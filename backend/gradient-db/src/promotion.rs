@@ -43,7 +43,8 @@
 //! separate `edges_unresolved` flag instead of a clear.
 
 use crate::graph_sql::{
-    ClosureDirection, dependency_closure_cte, eval_closure_cte, eval_closure_cte_body,
+    ClosureDirection, bounded_dependency_closure_cte_body, dependency_closure_cte,
+    dependency_closure_cte_body, eval_closure_cte, eval_closure_cte_body,
 };
 use crate::status::TransitionChange;
 use crate::status_sql;
@@ -529,14 +530,18 @@ fn dependency_failed_reconcile_sql(scope: Option<gradient_types::EvaluationId>) 
         ),
         Some(_) => (
             format!(
-                r#"WITH RECURSIVE {closure},
-    dependents(derivation) AS (
-        SELECT derivation FROM derivation_build
-        WHERE status IN ({terminal_failure}) AND derivation IN (SELECT derivation FROM closure)
-        UNION
-        SELECT e.derivation FROM derivation_dependency e JOIN dependents c ON e.dependency = c.derivation
-        WHERE e.derivation IN (SELECT derivation FROM closure))"#,
+                "WITH RECURSIVE {closure},\n    {dependents}",
                 closure = eval_closure_cte_body(),
+                dependents = bounded_dependency_closure_cte_body(
+                    "dependents",
+                    &format!(
+                        "SELECT derivation FROM derivation_build \
+                         WHERE status IN ({terminal_failure}) \
+                           AND derivation IN (SELECT derivation FROM closure)"
+                    ),
+                    ClosureDirection::Dependents,
+                    "e.derivation IN (SELECT derivation FROM closure)",
+                ),
             ),
             " AND db.derivation IN (SELECT derivation FROM closure)".to_string(),
         ),
@@ -745,17 +750,18 @@ pub async fn requeue_failed_anchors<C: ConnectionTrait>(
 fn requeue_ctes(closure_seed: &str) -> String {
     let deterministic = deterministic_build_failure("dbf");
     format!(
-        r#"WITH RECURSIVE closure(derivation) AS (
-        {closure_seed}
-        UNION
-        SELECT e.dependency FROM derivation_dependency e JOIN closure c ON e.derivation = c.derivation),
-    deterministic_blocked(derivation) AS (
-        SELECT dbf.derivation FROM derivation_build dbf
-        WHERE dbf.derivation IN (SELECT derivation FROM closure) AND {deterministic}
-        UNION
-        SELECT e.derivation FROM derivation_dependency e
-        JOIN deterministic_blocked c ON e.dependency = c.derivation
-        WHERE e.derivation IN (SELECT derivation FROM closure))"#
+        "WITH RECURSIVE {closure},\n    {blocked}",
+        closure =
+            dependency_closure_cte_body("closure", closure_seed, ClosureDirection::Dependencies,),
+        blocked = bounded_dependency_closure_cte_body(
+            "deterministic_blocked",
+            &format!(
+                "SELECT dbf.derivation FROM derivation_build dbf \
+                 WHERE dbf.derivation IN (SELECT derivation FROM closure) AND {deterministic}"
+            ),
+            ClosureDirection::Dependents,
+            "e.derivation IN (SELECT derivation FROM closure)",
+        ),
     )
 }
 
@@ -932,7 +938,9 @@ mod tests {
                 "blocked set must seed from a reproducible builder-nonzero exit: {sql}"
             );
             assert!(
-                sql.contains("JOIN deterministic_blocked c ON e.dependency = c.derivation"),
+                sql.contains(
+                "SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation"
+            ),
                 "must close upward over dependents so DependencyFailed victims are caught: {sql}"
             );
             assert!(
@@ -990,7 +998,9 @@ mod tests {
             "must capture the pre-update status for the effects emitter: {sql}"
         );
         assert!(
-            sql.contains("JOIN dependents c ON e.dependency = c.derivation"),
+            sql.contains(
+                "SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation"
+            ),
             "must walk dependents upward via the dependency edge: {sql}"
         );
         assert!(

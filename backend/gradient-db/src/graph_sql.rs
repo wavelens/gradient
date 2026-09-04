@@ -56,16 +56,36 @@ pub fn dependency_closure_cte_body(
     seed_select: &str,
     direction: ClosureDirection,
 ) -> String {
+    bounded_dependency_closure_cte_body(name, seed_select, direction, "")
+}
+
+/// A closure walk confined to a set another CTE in the same statement already
+/// binds (an eval closure, a requeue candidate set). `bound` is an extra
+/// predicate over the edge alias `e`, applied inside the lateral probe so it
+/// prunes at the index lookup rather than after the join; an empty `bound` is
+/// the unrestricted walk.
+pub fn bounded_dependency_closure_cte_body(
+    name: &str,
+    seed_select: &str,
+    direction: ClosureDirection,
+    bound: &str,
+) -> String {
     let (probe, project) = match direction {
         ClosureDirection::Dependencies => ("e.derivation", "e.dependency"),
         ClosureDirection::Dependents => ("e.dependency", "e.derivation"),
+    };
+    let restrict = if bound.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {bound}")
     };
     format!(
         "{name}(derivation) AS ({seed_select} UNION {})",
         lateral_step(
             name,
             &format!(
-                "SELECT {project} AS next FROM derivation_dependency e WHERE {probe} = c.derivation"
+                "SELECT {project} AS next FROM derivation_dependency e \
+                 WHERE {probe} = c.derivation{restrict}"
             ),
         )
     )
