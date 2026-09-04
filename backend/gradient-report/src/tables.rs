@@ -285,8 +285,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "dispatched_job",
-            "CREATE TABLE dispatched_job (id TEXT, kind INTEGER, evaluation_id TEXT, project TEXT, task TEXT, worker_id TEXT, score REAL, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, finished_at TEXT, score_breakdown TEXT, worker_context TEXT, job_context TEXT, candidates TEXT, created_at TEXT, instance_context TEXT)",
-            "SELECT id::text, kind::text, evaluation_id::text, project::text, task::text, worker_id::text, score::text, queued_at::text, ready_at::text, dispatched_at::text, finished_at::text, score_breakdown::text, worker_context::text, job_context::text, candidates::text, created_at::text, instance_context::text FROM dispatched_job WHERE evaluation_id = $1",
+            "CREATE TABLE dispatched_job (id TEXT, kind INTEGER, evaluation_id TEXT, project TEXT, task TEXT, worker_id TEXT, score REAL, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, finished_at TEXT, outcome INTEGER, score_breakdown TEXT, worker_context TEXT, job_context TEXT, candidates TEXT, created_at TEXT, instance_context TEXT)",
+            "SELECT id::text, kind::text, evaluation_id::text, project::text, task::text, worker_id::text, score::text, queued_at::text, ready_at::text, dispatched_at::text, finished_at::text, outcome::text, score_breakdown::text, worker_context::text, job_context::text, candidates::text, created_at::text, instance_context::text FROM dispatched_job WHERE evaluation_id = $1",
             "the evaluation",
             [
                 "id",
@@ -300,12 +300,31 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "ready_at",
                 "dispatched_at",
                 "finished_at",
+                "outcome",
                 "score_breakdown",
                 "worker_context",
                 "job_context",
                 "candidates",
                 "created_at",
                 "instance_context"
+            ]
+        ),
+        spec!(
+            "dispatched_job_phase",
+            "CREATE TABLE dispatched_job_phase (id TEXT, dispatched_job TEXT, seq INTEGER, parent_seq INTEGER, phase INTEGER, start_ms INTEGER, end_ms INTEGER, paths INTEGER, bytes INTEGER, created_at TEXT)",
+            "SELECT p.id::text, p.dispatched_job::text, p.seq::text, p.parent_seq::text, p.phase::text, p.start_ms::text, p.end_ms::text, p.paths::text, p.bytes::text, p.created_at::text FROM dispatched_job_phase p WHERE p.dispatched_job IN (SELECT id FROM dispatched_job WHERE evaluation_id = $1)",
+            "the evaluation",
+            [
+                "id",
+                "dispatched_job",
+                "seq",
+                "parent_seq",
+                "phase",
+                "start_ms",
+                "end_ms",
+                "paths",
+                "bytes",
+                "created_at"
             ]
         ),
         spec!(
@@ -592,6 +611,28 @@ mod tests {
                 "{name} must not scope by project: {sql}"
             );
         }
+    }
+
+    /// A phase span belongs to a dispatched job, not to the evaluation, so it
+    /// is scoped through the jobs this evaluation dispatched. Scoping it any
+    /// other way would either miss the build jobs or pull in a stranger's.
+    #[test]
+    fn phase_spans_are_scoped_through_the_evaluations_dispatched_jobs() {
+        let sql = spec_named("dispatched_job_phase").sql;
+        assert!(
+            sql.contains("SELECT id FROM dispatched_job WHERE evaluation_id = $1"),
+            "{sql}"
+        );
+    }
+
+    /// The outcome is what separates "the worker finished" from "the worker
+    /// vanished" when reading a report offline, so it must be exported.
+    #[test]
+    fn a_dispatched_job_exports_its_outcome() {
+        let spec = spec_named("dispatched_job");
+        assert!(spec.columns.contains(&"outcome"), "{:?}", spec.columns);
+        assert!(spec.ddl.contains("outcome INTEGER"), "{}", spec.ddl);
+        assert!(spec.sql.contains("outcome::text"), "{}", spec.sql);
     }
 
     fn redactor(identities: bool, packages: bool) -> Redactor {
