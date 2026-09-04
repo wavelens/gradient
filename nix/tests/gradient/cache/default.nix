@@ -661,6 +661,36 @@ in {
       assert status(f"http://server/cache/debuginfo/{build_id}.debug") == "404"
 
       # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
+      # ── Phase 10b: the worker reported a phase timeline for the build ────
+      # Regression guard (#589): the timeline rides inside JobCompleted, so a
+      # protocol or handler mistake shows up as a job with zero phases rather
+      # than as an error anywhere.
+      banner("Phase 10b: the completed build job has worker phase spans")
+      job_id = sql(
+          f"SELECT id FROM dispatched_job WHERE evaluation_id = '{eval_id}' "
+          f"AND kind = 1 AND finished_at IS NOT NULL ORDER BY dispatched_at DESC LIMIT 1;"
+      )
+      assert job_id, "no finished build job was recorded for the evaluation"
+
+      job = json.loads(api_get(token, f"board/jobs/{job_id}"))["message"]
+      phases = {p["phase"] for p in job["phases"]}
+      print(f"job {job_id} phases: {sorted(phases)}")
+      assert "build" in phases, f"no build span in {sorted(phases)}"
+      assert "nar_push" in phases, f"no nar push span in {sorted(phases)}"
+      assert all(p["end_ms"] >= p["start_ms"] for p in job["phases"]), job["phases"]
+      assert job["outcome"] == "completed", job["outcome"]
+      assert job["finished_at"] is not None
+      nested = [p for p in job["phases"] if p["parent_seq"] is not None]
+      assert nested, "the timeline recorded no nesting at all"
+
+      # The eval's phase columns are summed from its own timeline, so a zero
+      # here means the eval job's spans never reached evaluation_metric.
+      eval_ms = sql(
+          f"SELECT fetch_ms + eval_flake_ms + eval_drv_ms FROM evaluation_metric "
+          f"WHERE evaluation = '{eval_id}' LIMIT 1;"
+      )
+      assert eval_ms and int(eval_ms) > 0, f"eval phase columns not derived from the timeline: {eval_ms!r}"
+
       banner("Phase 11: every supervised loop is running; SIGTERM drains")
       health = json.loads(api_get(token, "board/health"))["message"]
       names = sorted(l["name"] for l in health["supervised"])

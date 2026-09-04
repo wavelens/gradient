@@ -7871,3 +7871,58 @@ into a panic at every later `lock()`), plus `the_guard_writes_through`.
 The policy itself has no test: `clippy::unwrap_used = "deny"` in
 `backend/Cargo.toml` is the assertion, and `nix build
 .#checks.x86_64-linux.clippy` is where it runs.
+
+## How a job spent its time on the worker (#589)
+
+The server's marks say when a job was queued, dispatched and finished; they say
+nothing about the hours in between. The worker now records nested phase spans
+and ships them inside `JobCompleted` / `JobFailed`, so the failure this suite
+guards against is a timeline that silently arrives empty, flattened, or
+unbounded, none of which surfaces as an error anywhere.
+
+**`gradient-worker/src/executor/timeline.rs`** covers the recorder itself: a
+span opened inside another records it as its parent; siblings share the
+enclosing parent rather than chaining off each other; a span still open when the
+job fails is closed by the snapshot, so a failed job still yields a usable
+partial timeline; offsets run from job start and never move backwards; and the
+guard carries the path and byte counters. Two more cover the ceiling: a job that
+opens more than `MAX_SPANS` phases keeps the first 2000 and counts the rest, and
+an inert guard past that ceiling does not become a parent. Without the cap, a
+large evaluation pushing one NAR per closure member would put tens of thousands
+of spans in one message, which is the shape that has wedged this socket before.
+
+**`gradient-proto/src/tests.rs`** round-trips both terminal messages through
+rkyv, one with nesting and byte counters and one with the partial timeline of a
+failed job. A dropped `parent` link survives encoding as a flat list that looks
+plausible, so the assertion is on the whole message rather than on a length.
+
+**`gradient-scheduler/src/job_handlers/timeline.rs`** covers the mapping to
+rows: the wire's positional `parent` index becomes an explicit `parent_seq`; a
+span whose end precedes its start is clamped rather than dropped, so the phase
+still appears instead of rendering as a negative bar; the eval phase totals are
+summed across every matching span, so an eval split into batches still reports
+one total per phase; and a build-only timeline contributes no eval totals. There
+is deliberately no unit test for the database write here: `MockDatabase` cannot
+verify SQL and its ordered result buffer races the spawned tasks on this path,
+so such a test would assert nothing while looking like it did. The write is
+covered end to end instead, below.
+
+**`gradient-report/src/tables.rs`** covers the diagnostic report: phase spans are
+scoped through the evaluation's own dispatched jobs, and a dispatched job
+exports its outcome. The pre-existing `every_spec_is_scoped_and_internally_consistent`
+catches a column added to the DDL but not the column list, which is the way this
+change would otherwise ship a skewed report.
+
+**`frontend/.../job-timeline.component.spec.ts`** covers the drawing maths:
+nesting depth, each phase as a share of the job total, an empty timeline, and
+two malformed shapes that must not hang the depth walk (a `parent_seq` pointing
+at a span that never arrived, and a span that is its own parent).
+
+**The cache VM test** (`nix/tests/gradient/cache/default.nix`, Phase 10b) is the
+only place the whole path is exercised: after a real build completes it asserts
+the dispatched job carries both a `build` and a `nar_push` span, that every span
+is non-negative, that at least one span is nested, that `outcome` is `completed`
+and `finished_at` is set, and that the evaluation's three phase columns are
+non-zero. That last assertion is what proves the columns are now derived from
+the timeline rather than from the `EvalStatsReport` fields that were removed;
+they had been shipping as zeros.
