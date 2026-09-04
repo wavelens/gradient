@@ -6,6 +6,8 @@
 
 //! Persists the worker's phase timeline and the job's finish mark.
 
+use std::sync::Arc;
+
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, Set,
 };
@@ -78,8 +80,12 @@ impl Scheduler {
     /// one row per span, and fill the eval phase columns the worker no longer
     /// reports directly. Best effort throughout: instrumentation must never
     /// fail a job.
+    ///
+    /// Only the job lookup runs inline, because the caller is about to drop the
+    /// job from the active map; the writes are detached so telemetry never adds
+    /// database latency to the connection's message loop.
     pub async fn record_job_timeline(
-        &self,
+        self: &Arc<Self>,
         worker_id: &str,
         job_id: &str,
         outcome: DispatchedJobOutcome,
@@ -90,6 +96,24 @@ impl Scheduler {
         };
         let evaluation_id = job.evaluation_id();
 
+        let scheduler = Arc::clone(self);
+        let worker_id = worker_id.to_owned();
+        let job_id = job_id.to_owned();
+        self.state.shutdown.spawn(async move {
+            scheduler
+                .persist_job_timeline(&worker_id, &job_id, evaluation_id, outcome, spans)
+                .await;
+        });
+    }
+
+    async fn persist_job_timeline(
+        &self,
+        worker_id: &str,
+        job_id: &str,
+        evaluation_id: EvaluationId,
+        outcome: DispatchedJobOutcome,
+        spans: Vec<JobPhaseSpan>,
+    ) {
         let row = match EDispatchedJob::find()
             .filter(CDispatchedJob::WorkerId.eq(worker_id))
             .filter(CDispatchedJob::EvaluationId.eq(evaluation_id))
