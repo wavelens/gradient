@@ -5,6 +5,11 @@
 
 //! Integration tests for `POST /api/v1/caches/{cache}/nars`.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use axum_test::multipart::{MultipartForm, Part};

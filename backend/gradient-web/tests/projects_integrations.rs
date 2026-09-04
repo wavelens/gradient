@@ -15,6 +15,11 @@
 //!   `has_secret`/`has_access_token` booleans so non-admin members cannot
 //!   probe credential state.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_entity::integration::IntegrationKind;
 use gradient_entity::{github_installation, ids::*, integration, project_user, role};
 use gradient_test_support::fixtures::{project, project_id, test_date, user, user_id};

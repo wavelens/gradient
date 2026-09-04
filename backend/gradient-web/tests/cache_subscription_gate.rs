@@ -25,6 +25,11 @@
 //!   8. SELECT cache_user (membership)
 //!   9. SELECT cache_role (bitmask)  - only when member exists
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_db::permissions::{admin_mask, cache_admin_mask, cache_view_mask, mask_from};
 use gradient_entity::{cache, cache_role, cache_user, ids::*, project_cache, project_user, role};
 use gradient_test_support::fixtures::{project, project_id, test_date, user, user_id};

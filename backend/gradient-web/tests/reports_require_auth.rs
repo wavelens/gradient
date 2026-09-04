@@ -14,6 +14,11 @@
 //! passed `include_instance=false`. The OpenAPI contract has always listed this
 //! path under the global `bearerAuth`; these tests hold the code to it.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_entity::ids::EvaluationId;
 use gradient_test_support::web::make_test_server;
 use sea_orm::{DatabaseBackend, MockDatabase};

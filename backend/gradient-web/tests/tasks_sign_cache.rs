@@ -10,6 +10,11 @@
 //! `axum_test::TestServer`, and `MockDatabase` because `#[tokio::test]`
 //! macro expansion clashes with the local `core` crate name.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use gradient_core::ServerState;

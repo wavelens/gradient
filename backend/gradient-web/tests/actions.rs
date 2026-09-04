@@ -10,6 +10,11 @@
 //! + `MockDatabase`. The SMTP-disabled test builds its own `ServerState` so it
 //!   can swap in an `InMemoryEmailSender::disabled()`.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum_test::TestServer;
 use gradient_core::ServerState;
 use gradient_db::{WebDb, WorkerDb};

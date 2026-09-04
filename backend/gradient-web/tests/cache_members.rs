@@ -7,6 +7,11 @@
 //! Integration tests for the cache member management API
 //! (`/api/v1/caches/{cache}/members`).
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_db::permissions::{cache_admin_mask, cache_view_mask};
 use gradient_entity::{cache, cache_role, cache_user, ids::*, user};
 use gradient_test_support::fixtures::{test_date, user, user_id};

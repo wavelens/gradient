@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
 #![allow(clippy::disallowed_methods, reason = "test harness server")]
 
 //! PKCE regression tests (issue #318): the authorization redirect must carry

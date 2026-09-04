@@ -8,6 +8,11 @@
 //!
 //! Async assertions use sync `#[test]` + `tokio::runtime::Builder::block_on`.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use bytes::Bytes;
 use futures::StreamExt as _;
 use gradient_storage::nar_extract::{

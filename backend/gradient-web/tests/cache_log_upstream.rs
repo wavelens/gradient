@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
 #![allow(clippy::disallowed_methods, reason = "test harness server")]
 
 //! A pull-through cache must serve build logs it does not hold itself (#547).

@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_entity::ids::*;
 use gradient_entity::task_flake_input_override;
 use gradient_test_support::fixtures::{project, project_id, task_id, test_date, user, user_id};

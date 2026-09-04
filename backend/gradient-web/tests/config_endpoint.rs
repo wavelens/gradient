@@ -7,6 +7,11 @@
 //! `GET /api/v1/config` exposes the `create_project` / `create_cache` permission
 //! knobs so the frontend can hide the create buttons (issue #470).
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use gradient_test_support::web::{make_test_server, make_test_server_configured};
 use gradient_types::CreatePermission;
 use sea_orm::{DatabaseBackend, MockDatabase};

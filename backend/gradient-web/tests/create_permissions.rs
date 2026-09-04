@@ -11,6 +11,11 @@
 //! only the auth query chain. The allow path is proven by reaching the
 //! name-taken pre-check (409) with the gate satisfied.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum::http::StatusCode;
 use gradient_entity::ids::*;
 use gradient_entity::{cache, project};

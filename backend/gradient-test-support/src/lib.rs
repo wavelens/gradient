@@ -19,6 +19,11 @@
 //! }
 //! ```
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 pub mod cache_fixture;
 pub mod cli;
 pub mod db;

@@ -8,6 +8,11 @@
 //! `nix`-feature CLI uploads a pre-packed source NAR; the server computes the
 //! store path and queues a build-request evaluation.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "test scaffolding: a fixture helper that cannot build its value should fail the test loudly"
+)]
+
 use axum::http::StatusCode;
 use axum_test::multipart::{MultipartForm, Part};
 use chrono::Utc;
