@@ -37,6 +37,33 @@ pub enum DispatchedJobKind {
     Build = 1,
 }
 
+/// How a dispatched job ended. `None` on the row means still running, or a
+/// worker that disconnected without reporting.
+#[repr(i16)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    DeriveActiveEnum,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
+#[sea_orm(rs_type = "i16", db_type = "SmallInteger")]
+#[serde(rename_all = "snake_case")]
+pub enum DispatchedJobOutcome {
+    #[default]
+    #[sea_orm(num_value = 0)]
+    Completed = 0,
+    #[sea_orm(num_value = 1)]
+    Failed = 1,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "dispatched_job")]
 pub struct Model {
@@ -52,6 +79,7 @@ pub struct Model {
     pub ready_at: Option<NaiveDateTime>,
     pub dispatched_at: NaiveDateTime,
     pub finished_at: Option<NaiveDateTime>,
+    pub outcome: Option<DispatchedJobOutcome>,
     pub score_breakdown: Json,
     pub worker_context: Json,
     pub job_context: Json,
