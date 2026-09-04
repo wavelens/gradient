@@ -61,7 +61,6 @@ mod tests {
 
     fn dep_edge(derivation: DerivationId, dependency: DerivationId) -> MDerivationDependency {
         gradient_entity::derivation_dependency::Model {
-            id: DerivationDependencyId::now_v7(),
             derivation,
             dependency,
         }

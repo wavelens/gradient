@@ -99,8 +99,6 @@ id_newtype!(CachedPathSignatureId);
 id_newtype!(CommitId);
 id_newtype!(DebugInfoId);
 id_newtype!(DerivationId);
-id_newtype!(DerivationClosureId);
-id_newtype!(DerivationDependencyId);
 id_newtype!(DerivationInputSourceId);
 id_newtype!(DerivationMetricId);
 id_newtype!(DerivationFeatureId);

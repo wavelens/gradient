@@ -828,7 +828,6 @@ async fn flush_ready_edges(
             let src_id = known[src];
             deps.iter().map(move |dep| {
                 MDerivationDependency {
-                    id: DerivationDependencyId::now_v7(),
                     derivation: src_id,
                     dependency: known[dep],
                 }
@@ -947,7 +946,6 @@ pub(crate) async fn flush_deferred_deps(
         .iter()
         .map(|(src, dep)| {
             MDerivationDependency {
-                id: DerivationDependencyId::now_v7(),
                 derivation: *src,
                 dependency: *dep,
             }

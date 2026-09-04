@@ -39,6 +39,7 @@ mod m20260822_000001_rename_organization_to_project;
 mod m20260827_000000_metric_rollup_scope_project;
 mod m20260827_000001_commit_hash_index;
 mod m20260904_000000_dispatched_job_phase;
+mod m20260904_000001_graph_edge_indexes;
 
 pub struct Migrator;
 
@@ -79,6 +80,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260827_000000_metric_rollup_scope_project::Migration),
             Box::new(m20260827_000001_commit_hash_index::Migration),
             Box::new(m20260904_000000_dispatched_job_phase::Migration),
+            Box::new(m20260904_000001_graph_edge_indexes::Migration),
         ]
     }
 }

@@ -12,14 +12,14 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DerivationClosureId, DerivationId};
+use crate::ids::DerivationId;
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "derivation_closure")]
 pub struct Model {
-    #[sea_orm(primary_key)]
-    pub id: DerivationClosureId,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub root_derivation: DerivationId,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub dep_derivation: DerivationId,
 }
 
