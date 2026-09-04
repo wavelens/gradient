@@ -4,10 +4,28 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! The single definition of the recursive build-graph walk. Every traversal of
+//! The single definition of the recursive graph walks. Every traversal of
 //! `derivation_dependency` (failure cascades, eval-closure sweeps, GC
-//! reachability) is generated here so the walkers can never disagree on what
-//! "reachable" means.
+//! reachability) and of `cached_path_reference` (NAR reference closures) is
+//! generated here so the walkers can never disagree on what "reachable" means,
+//! and so the join shape below has exactly one place to live.
+//!
+//! Postgres estimates a recursive CTE's working table at ten times the seed,
+//! which for these walks overshoots by two orders of magnitude (348,870
+//! estimated against 2,439 actual on a 44k-node eval closure). At that
+//! cardinality a merge join against the whole edge index costs out cheaper than
+//! a nested loop, so the planner rescans all four million edges once per
+//! iteration. Every recursive term here is therefore written as a `LATERAL`
+//! subquery with an `OFFSET 0` optimisation fence: the fence stops the planner
+//! pulling the subquery back up, which leaves a nested loop with a per-row index
+//! lookup as the only legal plan. Measured on production: eval closure 5,278 ms
+//! to 955 ms, GC keep-set 40,069 ms to 9,746 ms, the `cached_path_reference`
+//! walk from over 180,000 ms to 18,425 ms.
+//!
+//! The set operator stays `UNION`. It is what deduplicates the frontier on each
+//! iteration, and these graphs are diamond-heavy enough that the dependents walk
+//! already emits 940k rows for 68k distinct nodes; `UNION ALL` would drop the
+//! deduplication and make the walk exponential in depth.
 
 pub enum ClosureDirection {
     /// Walk from the roots toward the inputs they need (the build-time closure).
@@ -38,15 +56,51 @@ pub fn dependency_closure_cte_body(
     seed_select: &str,
     direction: ClosureDirection,
 ) -> String {
-    let step = match direction {
-        ClosureDirection::Dependencies => format!(
-            "SELECT e.dependency FROM derivation_dependency e JOIN {name} c ON e.derivation = c.derivation"
-        ),
-        ClosureDirection::Dependents => format!(
-            "SELECT e.derivation FROM derivation_dependency e JOIN {name} c ON e.dependency = c.derivation"
-        ),
+    let (probe, project) = match direction {
+        ClosureDirection::Dependencies => ("e.derivation", "e.dependency"),
+        ClosureDirection::Dependents => ("e.dependency", "e.derivation"),
     };
-    format!("{name}(derivation) AS ({seed_select} UNION {step})")
+    format!(
+        "{name}(derivation) AS ({seed_select} UNION {})",
+        lateral_step(
+            name,
+            &format!(
+                "SELECT {project} AS next FROM derivation_dependency e WHERE {probe} = c.derivation"
+            ),
+        )
+    )
+}
+
+/// One fenced recursive term: join the working table `{name}` (aliased `c`) to
+/// `probe_select` through a `LATERAL` subquery that `OFFSET 0` keeps the planner
+/// from pulling up. See the module docs for why the fence is load-bearing rather
+/// than decorative. `probe_select` projects a single column aliased `next` and
+/// correlates to the working-table row through `c`.
+fn lateral_step(name: &str, probe_select: &str) -> String {
+    format!("SELECT s.next FROM {name} c, LATERAL ({probe_select} OFFSET 0) s")
+}
+
+/// A `WITH RECURSIVE {name}(hash) AS (...)` prelude closing `seed_select` over
+/// `cached_path_reference`, walking from a referrer to the store hashes it
+/// references. This is the NAR-level closure (what a client must fetch), as
+/// opposed to the build-time closure over `derivation_dependency`.
+pub fn reference_closure_cte(name: &str, seed_select: &str) -> String {
+    format!(
+        "WITH RECURSIVE {}",
+        reference_closure_cte_body(name, seed_select)
+    )
+}
+
+/// The bare `{name}(hash) AS (...)` reference-closure body, for statements that
+/// bind it as a prelude to an UPDATE or alongside another CTE.
+pub fn reference_closure_cte_body(name: &str, seed_select: &str) -> String {
+    format!(
+        "{name}(hash) AS ({seed_select} UNION {})",
+        lateral_step(
+            name,
+            "SELECT r.reference_hash AS next FROM cached_path_reference r WHERE r.referrer = c.hash",
+        )
+    )
 }
 
 /// Dependency-readiness of anchor `{alias}`: every build dependency is
@@ -163,7 +217,9 @@ mod tests {
             "{cte}"
         );
         assert!(
-            cte.contains("SELECT e.derivation FROM derivation_dependency e JOIN dependents c ON e.dependency = c.derivation"),
+            cte.contains(
+                "SELECT e.derivation AS next FROM derivation_dependency e WHERE e.dependency = c.derivation"
+            ),
             "must walk dependents upward via the dependency edge: {cte}"
         );
     }
@@ -182,7 +238,9 @@ mod tests {
             "{cte}"
         );
         assert!(
-            cte.contains("SELECT e.dependency FROM derivation_dependency e JOIN closure c ON e.derivation = c.derivation"),
+            cte.contains(
+                "SELECT e.dependency AS next FROM derivation_dependency e WHERE e.derivation = c.derivation"
+            ),
             "must recurse toward dependencies: {cte}"
         );
     }
@@ -239,8 +297,61 @@ mod tests {
             "build_job derivations are roots: {cte}"
         );
         assert!(
-            cte.contains("SELECT e.dependency"),
+            cte.contains("SELECT e.dependency AS next"),
             "recursion walks toward dependencies (the inputs a root needs): {cte}"
+        );
+    }
+
+    /// The fence is the whole performance fix: without `LATERAL (... OFFSET 0)`
+    /// the planner takes the recursive CTE's 10x working-table estimate at face
+    /// value and merge-joins the entire edge table once per iteration. Assert it
+    /// on every generated walk so a later tidy-up cannot quietly drop it.
+    #[test]
+    fn every_recursive_term_is_fenced_into_a_nested_loop() {
+        for cte in [
+            norm(&eval_closure_cte()),
+            norm(&reachable_derivations_cte()),
+            norm(&dependency_closure_cte(
+                "dependents",
+                "SELECT $1::uuid",
+                ClosureDirection::Dependents,
+            )),
+            norm(&reference_closure_cte("refs", "SELECT $1::text")),
+        ] {
+            assert!(
+                cte.contains("LATERAL ("),
+                "recursive term must be lateral: {cte}"
+            );
+            assert!(
+                cte.contains("OFFSET 0) s"),
+                "lateral probe must be fenced: {cte}"
+            );
+            assert!(
+                !cte.contains("UNION ALL"),
+                "UNION dedupes the frontier; UNION ALL is exponential on a diamond graph: {cte}"
+            );
+        }
+    }
+
+    /// The reference closure walks NAR references (what a client must fetch),
+    /// not build inputs, so it keys on `cached_path_reference` and carries a
+    /// `hash` column rather than a `derivation` one.
+    #[test]
+    fn reference_closure_walks_cached_path_reference_by_referrer() {
+        let cte = norm(&reference_closure_cte(
+            "eval_paths",
+            "SELECT $1::text AS hash",
+        ));
+
+        assert!(
+            cte.starts_with("WITH RECURSIVE eval_paths(hash) AS"),
+            "{cte}"
+        );
+        assert!(
+            cte.contains(
+                "SELECT r.reference_hash AS next FROM cached_path_reference r WHERE r.referrer = c.hash"
+            ),
+            "must walk referrer to referenced hash: {cte}"
         );
     }
 }
