@@ -42,3 +42,6 @@ pub const BASE_CACHE_ROLE_WRITE_ID: RoleId =
     RoleId::new(uuid!("00000000-0000-0000-0000-000000000012"));
 pub const BASE_CACHE_ROLE_VIEW_ID: RoleId =
     RoleId::new(uuid!("00000000-0000-0000-0000-000000000013"));
+
+/// How long a project or cache invitation stays redeemable.
+pub const INVITATION_VALIDITY_DAYS: i64 = 7;
