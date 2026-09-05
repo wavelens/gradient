@@ -1,0 +1,55 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout
+  [breadcrumb]="[{ label: 'Caches', link: ['/caches'] }, { label: cacheName, link: ['/caches', cacheName] }, { label: 'Subscriptions' }]"
+  title="Subscriptions"
+  subtitle="Projects asking to use this cache"
+>
+  @if (errorMessage()) {
+    <gr-message-banner slot="banner" type="error">{{ errorMessage() }}</gr-message-banner>
+  }
+
+  @if (loading()) {
+    <gr-loading-spinner message="Loading subscription requests..." />
+  } @else if (requests().length === 0) {
+    <gr-empty-state
+      icon="hub"
+      title="No pending requests"
+      message="A project that asks to subscribe to this cache appears here for approval."
+    />
+  } @else {
+    <gr-row-list>
+      @for (request of requests(); track request.project) {
+        <gr-row icon="folder">
+          {{ request.project_display_name }}
+          <span slot="meta">
+            Requested by {{ request.requested_by }} ·
+            {{ request.created_at | date: 'medium' }}
+          </span>
+          <button
+            slot="actions"
+            grButton
+            label="Approve"
+            icon="check"
+            [loading]="deciding() === request.project"
+            [disabled]="deciding() !== null"
+            (click)="approve(request.project)"
+          ></button>
+          <button
+            slot="actions"
+            grButton
+            label="Deny"
+            icon="close"
+            severity="danger"
+            [disabled]="deciding() !== null"
+            (click)="deny(request.project)"
+          ></button>
+        </gr-row>
+      }
+    </gr-row-list>
+  }
+</gr-page-layout>

@@ -231,6 +231,15 @@ export const routes: Routes = [
             (m) => m.CacheMembersRolesComponent,
           ),
       },
+      {
+        path: 'subscriptions',
+        title: 'Cache Subscriptions',
+        canActivate: [authGuard],
+        loadComponent: () =>
+          import('./features/caches/cache-subscriptions/cache-subscriptions.component').then(
+            (m) => m.CacheSubscriptionRequestsComponent,
+          ),
+      },
     ],
   },
 

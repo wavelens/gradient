@@ -137,6 +137,14 @@
           Members &amp; Roles
           <span slot="meta">Who has access to this cache, and what they can do</span>
         </gr-row>
+        <gr-row
+          icon="hub"
+          linkLabel="Subscriptions"
+          [link]="['/caches', cacheName, 'subscriptions']"
+        >
+          Subscriptions
+          <span slot="meta">Projects asking to use this cache</span>
+        </gr-row>
       </gr-row-list>
     </gr-settings-section>
 
