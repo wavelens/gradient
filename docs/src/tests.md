@@ -8186,3 +8186,18 @@ signals `SessionSignal::Close`, so the worker drops the connection and
 reconnects - and `unregister_of_an_unknown_worker_signals_nothing` keeps the
 repeat call harmless, which matters because the session's own `post_stop`
 unregisters again on its way out.
+
+**`backend/gradient-web/tests/cache_members.rs`** and
+**`backend/gradient-web/tests/cache_subscription_gate.rs`** were rewritten to the
+invite contract, because they pinned the behaviour this change deliberately
+replaces. `add_member_admin_creates_a_pending_invitation` is the old
+`add_member_admin_succeeds`: an admin now invites and the membership waits on
+the user, so the assertion moved from "a member exists" to "an invitation was
+sent", and `add_member_superuser_skips_the_invitation` covers the one caller
+that still writes the membership directly.
+`subscribe_without_cache_permission_records_a_request` and
+`subscribe_to_a_public_cache_records_a_request_for_a_non_member` replace two
+tests that asserted 403 and 404: lacking cache-side permission is no longer a
+refusal but a request, which is the whole point of the change, and a public
+cache is readable without membership. `subscribe_succeeds_when_both_granted`
+keeps its meaning and only gains the two lookups the branch decision now costs.
