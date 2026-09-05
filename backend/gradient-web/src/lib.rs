@@ -245,6 +245,10 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
                 .delete(projects::delete_project_users),
         )
         .route(
+            "/projects/{project}/invitations",
+            get(projects::get_project_invitations).delete(projects::delete_project_invitation),
+        )
+        .route(
             "/projects/{project}/roles",
             get(projects::get_project_roles).post(projects::post_project_role),
         )

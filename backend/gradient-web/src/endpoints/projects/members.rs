@@ -9,10 +9,12 @@ use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, role_names};
+use crate::invites::invitation_expiry;
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_notify::{InvitationMail, InviteScope, generate_token};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -59,6 +61,21 @@ async fn find_project_membership(
             Condition::all()
                 .add(CProjectUser::Project.eq(project_id))
                 .add(CProjectUser::User.eq(user_id)),
+        )
+        .one(&state.web_db)
+        .await?)
+}
+
+async fn find_project_invitation(
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+    user_id: UserId,
+) -> WebResult<Option<MProjectInvitation>> {
+    Ok(EProjectInvitation::find()
+        .filter(
+            Condition::all()
+                .add(CProjectInvitation::Project.eq(project_id))
+                .add(CProjectInvitation::User.eq(user_id)),
         )
         .one(&state.web_db)
         .await?)
@@ -139,6 +156,13 @@ pub async fn post_project_users(
         return Err(WebError::already_exists("User already in Project"));
     }
 
+    if find_project_invitation(&state, project.id, target_user.id)
+        .await?
+        .is_some()
+    {
+        return Err(WebError::already_exists("User already invited"));
+    }
+
     let role = ERole::find()
         .filter(
             Condition::all().add(CRole::Name.eq(body.role.clone())).add(
@@ -151,20 +175,76 @@ pub async fn post_project_users(
         .await?
         .or_not_found("Role")?;
 
-    MProjectUser {
-        id: ProjectUserId::now_v7(),
+    if user.superuser {
+        MProjectUser {
+            id: ProjectUserId::now_v7(),
+            project: project.id,
+            user: target_user.id,
+            role: role.id,
+        }
+        .into_active_model()
+        .insert(&state.web_db)
+        .await?;
+
+        audit_record(
+            &state.web_db,
+            Some(user.id),
+            events::PROJECT_MEMBER_ADD,
+            &info,
+            Some(serde_json::json!({
+                "project_id": project.id.to_string(),
+                "target_user_id": target_user.id.to_string(),
+                "role": role.name,
+            })),
+        )
+        .await;
+
+        return Ok(ok_json("User added".to_string()));
+    }
+
+    let now = gradient_types::now();
+    let token = generate_token();
+
+    MProjectInvitation {
+        id: ProjectInvitationId::now_v7(),
         project: project.id,
         user: target_user.id,
         role: role.id,
+        invited_by: user.id,
+        token: token.clone(),
+        created_at: now,
+        expires_at: invitation_expiry(now),
     }
     .into_active_model()
     .insert(&state.web_db)
     .await?;
 
+    if state.email.is_enabled()
+        && let Err(e) = state
+            .email
+            .send_invitation_email(
+                &target_user.email,
+                &target_user.name,
+                &InvitationMail {
+                    scope: InviteScope::Project,
+                    scope_display_name: &project.display_name,
+                    role: &role.name,
+                    inviter: &user.username,
+                    accept_url: format!(
+                        "{}/settings/invites?token={}",
+                        state.config.server.serve_url, token
+                    ),
+                },
+            )
+            .await
+    {
+        tracing::warn!(error = %e, "Failed to send project invitation email");
+    }
+
     audit_record(
         &state.web_db,
         Some(user.id),
-        events::PROJECT_MEMBER_ADD,
+        events::PROJECT_INVITATION_CREATE,
         &info,
         Some(serde_json::json!({
             "project_id": project.id.to_string(),
@@ -174,7 +254,7 @@ pub async fn post_project_users(
     )
     .await;
 
-    Ok(ok_json("User invited".to_string()))
+    Ok(ok_json("Invitation sent".to_string()))
 }
 
 pub async fn patch_project_users(
