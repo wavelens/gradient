@@ -5,6 +5,7 @@
  */
 
 pub mod integrations;
+pub mod invitations;
 pub mod management;
 pub mod members;
 pub mod roles;
@@ -16,6 +17,10 @@ pub use self::integrations::{
     CreateIntegrationRequest, IntegrationResponse, IntegrationSummaryResponse,
     PatchIntegrationRequest, delete_integration, get_integration, get_integration_summaries,
     get_integrations, patch_integration, put_integration,
+};
+pub use self::invitations::{
+    PendingInvitationItem, RevokeInvitationRequest, delete_project_invitation,
+    get_project_invitations,
 };
 pub use self::management::{
     MakeProjectRequest, PatchProjectRequest, ProjectResponse, ProjectSummary, delete_project, get,

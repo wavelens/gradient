@@ -42,6 +42,10 @@ pub mod events {
     pub const PROJECT_MEMBER_ADD: &str = "project.member.add";
     pub const PROJECT_MEMBER_REMOVE: &str = "project.member.remove";
     pub const PROJECT_MEMBER_ROLE_CHANGE: &str = "project.member.role_change";
+    pub const PROJECT_INVITATION_CREATE: &str = "project.invitation.create";
+    pub const PROJECT_INVITATION_REVOKE: &str = "project.invitation.revoke";
+    pub const PROJECT_INVITATION_ACCEPT: &str = "project.invitation.accept";
+    pub const PROJECT_INVITATION_DECLINE: &str = "project.invitation.decline";
     pub const PROJECT_ROLE_CREATE: &str = "project.role.create";
     pub const PROJECT_ROLE_UPDATE: &str = "project.role.update";
     pub const PROJECT_ROLE_DELETE: &str = "project.role.delete";
@@ -55,6 +59,14 @@ pub mod events {
     pub const CACHE_MEMBER_CREATE: &str = "cache.member.create";
     pub const CACHE_MEMBER_UPDATE: &str = "cache.member.update";
     pub const CACHE_MEMBER_DELETE: &str = "cache.member.delete";
+    pub const CACHE_INVITATION_CREATE: &str = "cache.invitation.create";
+    pub const CACHE_INVITATION_REVOKE: &str = "cache.invitation.revoke";
+    pub const CACHE_INVITATION_ACCEPT: &str = "cache.invitation.accept";
+    pub const CACHE_INVITATION_DECLINE: &str = "cache.invitation.decline";
+    pub const CACHE_SUBSCRIPTION_REQUEST: &str = "cache.subscription.request";
+    pub const CACHE_SUBSCRIPTION_APPROVE: &str = "cache.subscription.approve";
+    pub const CACHE_SUBSCRIPTION_DENY: &str = "cache.subscription.deny";
+    pub const CACHE_SUBSCRIPTION_CANCEL: &str = "cache.subscription.cancel";
 }
 
 /// Caller context derived from the inbound HTTP request - used to enrich
