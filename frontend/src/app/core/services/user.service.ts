@@ -10,6 +10,7 @@ import { ApiService } from './api.service';
 import {
   ApiKey,
   AuditLogEntry,
+  Invite,
   PaginatedResponse,
   Session,
   UserSettings,
@@ -87,6 +88,18 @@ export class UserService {
 
   revokeApiKey(id: string): Observable<string> {
     return this.api.post<string>(`user/keys/${id}/revoke`, {});
+  }
+
+  getInvites(): Observable<Invite[]> {
+    return this.api.get<Invite[]>('user/invites');
+  }
+
+  acceptInvite(token: string): Observable<string> {
+    return this.api.post<string>('user/invites/accept', { token });
+  }
+
+  declineInvite(token: string): Observable<string> {
+    return this.api.post<string>('user/invites/decline', { token });
   }
 
   getSessions(): Observable<Session[]> {
