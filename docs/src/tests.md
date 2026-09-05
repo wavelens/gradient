@@ -8126,3 +8126,50 @@ pseudonym invalidates the compiled set, and
 `a_name_minted_from_a_store_path_is_replaced_everywhere_in_the_same_text` pin the
 semantics the single pass has to keep - including the one the old loop got wrong,
 where a token could be rewritten again by a pseudonym minted later.
+
+**`backend/gradient-web/src/invite_policy.rs`** covers the rule that decides
+whether an invitation token may be redeemed. The token travels by e-mail, so it
+is forwardable, and the module keeps the two guards that make that harmless.
+`a_forwarded_token_does_not_let_a_stranger_redeem` and
+`ownership_is_checked_before_expiry` pin the important half: the token names the
+invitation, the session names the redeemer, and they must agree - and the
+ownership check runs first, so an expired token never confirms to a stranger
+that it was real. `invitee_redeems_before_expiry`,
+`expiry_is_inclusive_of_the_last_second` and `expiry_is_seven_days_out` pin the
+window itself, including the boundary second that decides whether a link mailed
+exactly seven days ago still works. `merge_returns_both_kinds_newest_first` and
+`merge_handles_one_empty_side` cover the merge of the two invitation tables into
+the single list `GET /user/invites` returns.
+
+**`frontend/src/app/features/settings/invites/invites.component.spec.ts`**
+covers the My Invites page. `lists a pending invite with its scope and role` and
+`shows an empty state when there is nothing to accept` cover the two renders;
+`accepts an invite by token when Accept is clicked` and
+`declines an invite by token when Decline is clicked` pin that the page acts on
+the token rather than a row index; and
+`accepts the token carried in the query string on load` covers the mailed link,
+which lands on this page with `?token=` and must act on it without a second
+click.
+
+**`frontend/src/app/features/projects/members-roles/members-roles.component.spec.ts`**
+and
+**`frontend/src/app/features/caches/members-roles/cache-members-roles.component.spec.ts`**
+cover the pending panel added beside each member list.
+`lists a pending invitation separately from members` is what keeps an invited
+user from reading as a member, which is the whole point of the change, and
+`revokes a pending invitation` covers the admin's way back out. The cache spec
+takes an access argument because the revoke button sits behind `appWritable`;
+a viewer sees the panel but no button.
+
+**`frontend/src/app/features/projects/cache-subscriptions/cache-subscriptions.component.spec.ts`**
+covers the project's side of an unapproved subscription.
+`marks a pending subscription as awaiting approval` and
+`offers Cancel request on a pending row and Unsubscribe on an active one` pin
+that the merged list distinguishes the two: a pending row grants nothing, so it
+must not look like a working cache.
+
+**`frontend/src/app/features/caches/cache-subscriptions/cache-subscriptions.component.spec.ts`**
+covers the cache admin's queue. `lists a pending request with the asking project`
+and `shows an empty state when nothing is waiting` cover the renders;
+`approves a request by project name` and `denies a request by project name` pin
+that both decisions address the request by the project that made it.

@@ -920,6 +920,97 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /user/invites:
+    get:
+      tags: [user]
+      summary: List my pending invitations
+      description: |
+        Project and cache invitations addressed to the authenticated user,
+        newest first.
+      operationId: listUserInvites
+      responses:
+        '200':
+          description: Pending invitations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Invite'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /user/invites/accept:
+    post:
+      tags: [user]
+      summary: Accept an invitation
+      description: |
+        Redeems an invitation token and creates the membership. The token must
+        address the authenticated user: a token forwarded to somebody else
+        answers `404`, so the mailed link is a convenience and never the trust
+        boundary. An expired invitation answers `410` and is discarded.
+      operationId: acceptUserInvite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteTokenRequest'
+      responses:
+        '200':
+          description: Invitation accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: The invitation has expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+
+  /user/invites/decline:
+    post:
+      tags: [user]
+      summary: Decline an invitation
+      description: |
+        Discards an invitation addressed to the authenticated user. The same
+        token and expiry rules as accept apply.
+      operationId: declineUserInvite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteTokenRequest'
+      responses:
+        '200':
+          description: Invitation declined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '410':
+          description: The invitation has expired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+
   /user/sessions:
     get:
       tags: [user]
@@ -1296,10 +1387,19 @@ paths:
           $ref: '#/components/responses/NotFound'
     post:
       tags: [projects]
-      summary: Add member
+      summary: Invite member
       description: |
-        Adds a user to the project by username. Requires the caller to
+        Invites a user to the project by username. Requires the caller to
         hold the **admin** role in the project.
+
+        The user is **not** a member until they accept. The response message is
+        `Invitation sent`, and the pending row appears under
+        `GET /projects/{project}/invitations` until it is accepted, declined or
+        revoked. An invitation expires after 7 days.
+
+        A **superuser** who already holds the permission adds the member
+        directly instead, answering `User added`. State-managed projects reject
+        this endpoint entirely; their members come from the state file.
       operationId: addProjectUser
       requestBody:
         required: true
@@ -1309,7 +1409,7 @@ paths:
               $ref: '#/components/schemas/AddUserRequest'
       responses:
         '200':
-          description: Member added
+          description: Invitation sent, or member added when the caller is a superuser
           content:
             application/json:
               schema:
@@ -1323,7 +1423,11 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The user is already a member or already invited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
     patch:
       tags: [projects]
       summary: Update member role
@@ -1370,6 +1474,63 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{project}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/ProjectSlug'
+    get:
+      tags: [projects]
+      summary: List pending invitations
+      description: |
+        Invitations that have been sent but not yet accepted or declined.
+        Requires `manageMembers` on the project.
+      operationId: listProjectInvitations
+      responses:
+        '200':
+          description: Pending invitations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/PendingInvitation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [projects]
+      summary: Revoke a pending invitation
+      description: Requires `manageMembers` on the project.
+      operationId: revokeProjectInvitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoveUserRequest'
+      responses:
+        '200':
+          description: Invitation revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1609,14 +1770,21 @@ paths:
       - $ref: '#/components/parameters/CacheSlug'
     post:
       tags: [projects]
-      summary: Subscribe to cache
+      summary: Subscribe to cache, or request a subscription
       description: |
-        Adds a binary cache to the project's list of substituters.
-        Requires `manageSubscriptions` on the project AND `manageCacheSubscriptions` on the cache.
+        Requires `manageSubscriptions` on the project, and the cache must be
+        visible to the caller.
+
+        When the caller also holds `manageCacheSubscriptions` on the cache, or is
+        a superuser, the cache is added to the project's substituters
+        immediately. Otherwise a **subscription request** is recorded instead and
+        the response message is `Subscription requested`; a cache admin then
+        approves it through
+        `POST /caches/{cache}/subscription-requests/{project}`.
       operationId: subscribeProjectToCache
       responses:
         '200':
-          description: Subscribed
+          description: Subscribed, or subscription requested
           content:
             application/json:
               schema:
@@ -1629,14 +1797,15 @@ paths:
           $ref: '#/components/responses/Conflict'
     delete:
       tags: [projects]
-      summary: Unsubscribe from cache
+      summary: Unsubscribe from cache, or cancel a pending request
       description: |
-        Removes a binary cache from the project's substituters.
-        Requires `manageSubscriptions` on the project AND `manageCacheSubscriptions` on the cache.
+        Removes a binary cache from the project's substituters. When no
+        subscription exists but a request is still pending, the request is
+        cancelled instead. Requires `manageSubscriptions` on the project.
       operationId: unsubscribeProjectFromCache
       responses:
         '200':
-          description: Unsubscribed
+          description: Unsubscribed, or subscription request cancelled
           content:
             application/json:
               schema:
@@ -5761,8 +5930,16 @@ paths:
           $ref: '#/components/responses/NotFound'
     post:
       tags: [caches]
-      summary: Add cache member
-      description: Adds a user to the cache with the given role. Requires `manageCacheMembers`.
+      summary: Invite cache member
+      description: |
+        Invites a user to the cache with the given role. Requires
+        `manageCacheMembers`.
+
+        The user is **not** a member until they accept; the response message is
+        `Invitation sent` and the pending row appears under
+        `GET /caches/{cache}/invitations`. An invitation expires after 7 days. A
+        **superuser** who already holds the permission adds the member directly
+        instead, answering `User added`.
       operationId: addCacheMember
       requestBody:
         required: true
@@ -5772,7 +5949,7 @@ paths:
               $ref: '#/components/schemas/AddCacheMemberRequest'
       responses:
         '200':
-          description: Member added
+          description: Invitation sent, or member added when the caller is a superuser
           content:
             application/json:
               schema:
@@ -5786,7 +5963,11 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The user is already a member or already invited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
     patch:
       tags: [caches]
       summary: Update cache member role
@@ -5843,6 +6024,136 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  /caches/{cache}/invitations:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: List pending cache invitations
+      description: Requires `manageCacheMembers`.
+      operationId: listCacheInvitations
+      responses:
+        '200':
+          description: Pending invitations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/PendingInvitation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [caches]
+      summary: Revoke a pending cache invitation
+      description: Requires `manageCacheMembers`.
+      operationId: revokeCacheInvitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemoveCacheMemberRequest'
+      responses:
+        '200':
+          description: Invitation revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/subscription-requests:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+    get:
+      tags: [caches]
+      summary: List subscription requests
+      description: |
+        Projects that have asked to subscribe to this cache and are waiting for
+        a decision. Requires `manageCacheSubscriptions`.
+      operationId: listCacheSubscriptionRequests
+      responses:
+        '200':
+          description: Pending requests, newest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BaseResponse'
+                  - type: object
+                    properties:
+                      message:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/SubscriptionRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /caches/{cache}/subscription-requests/{project}:
+    parameters:
+      - $ref: '#/components/parameters/CacheSlug'
+      - $ref: '#/components/parameters/ProjectSlug'
+    post:
+      tags: [caches]
+      summary: Approve a subscription request
+      description: |
+        Turns the pending request into a real subscription, using the mode the
+        project asked for, and re-queues any evaluation parked for want of a
+        cache. Requires `manageCacheSubscriptions`.
+      operationId: approveCacheSubscriptionRequest
+      responses:
+        '200':
+          description: Subscription approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [caches]
+      summary: Deny a subscription request
+      description: Requires `manageCacheSubscriptions`.
+      operationId: denyCacheSubscriptionRequest
+      responses:
+        '200':
+          description: Subscription request denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /caches/{cache}/roles:
     parameters:
@@ -7692,6 +8003,105 @@ components:
       properties:
         name:
           type: string
+
+    # ── Invitations ───────────────────────────────────────────────────────────
+
+    Invite:
+      type: object
+      required: [kind, token, scope, scope_display_name, role, invited_by, created_at, expires_at]
+      properties:
+        kind:
+          type: string
+          enum: [project, cache]
+          description: What the invitation grants membership of
+        token:
+          type: string
+          description: |
+            Opaque redemption token, also carried by the invitation e-mail. Only
+            redeemable by the invited account.
+        scope:
+          type: string
+          description: Name of the project or cache
+        scope_display_name:
+          type: string
+        role:
+          type: string
+          description: Role the invitee receives on accepting
+        invited_by:
+          type: string
+          description: Username of the inviter
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+
+    InviteTokenRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+
+    PendingInvitation:
+      type: object
+      required: [user, name, role, created_at, expires_at]
+      properties:
+        user:
+          type: string
+          description: Username of the invitee
+        name:
+          type: string
+          description: Full name of the invitee
+        role:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+
+    SubscriptionRequest:
+      type: object
+      required: [project, project_display_name, mode, requested_by, created_at]
+      properties:
+        project:
+          type: string
+          description: Name of the project asking to subscribe
+        project_display_name:
+          type: string
+        mode:
+          type: integer
+          enum: [0, 1, 2]
+          description: Requested subscription mode - 0 read/write, 1 read only, 2 write only
+        requested_by:
+          type: string
+          description: Username of the requester
+        created_at:
+          type: string
+          format: date-time
+
+    CacheSubscriptionItem:
+      type: object
+      required: [id, name, mode, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        mode:
+          type: integer
+          enum: [0, 1, 2]
+          description: 0 read/write, 1 read only, 2 write only
+        status:
+          type: string
+          enum: [active, pending]
+          description: |
+            `pending` rows are subscription requests awaiting a cache admin's
+            approval; they grant nothing until approved.
 
     # ── Server config ─────────────────────────────────────────────────────────
 

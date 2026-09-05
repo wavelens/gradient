@@ -26,6 +26,7 @@ nav:
       - Forge Integration: usage/integration.md
       - Actions: usage/actions.md
       - Caches: usage/caches.md
+      - Invites: usage/invites.md
       - Cache NARs: usage/cache-nars.md
       - Closure View: usage/closure-view.md
       - Diagnostic Reports: diagnostic-reports.md
