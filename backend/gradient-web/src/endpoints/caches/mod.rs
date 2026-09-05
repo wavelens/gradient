@@ -7,6 +7,7 @@
 pub mod build_log;
 mod debuginfo;
 mod helpers;
+pub mod invitations;
 mod keys;
 mod management;
 pub mod members;

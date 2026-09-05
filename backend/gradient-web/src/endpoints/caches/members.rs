@@ -9,10 +9,12 @@ use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json};
+use crate::invites::invitation_expiry;
 use crate::permissions::CachePermission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
+use gradient_notify::{InvitationMail, InviteScope, generate_token};
 use gradient_types::consts::BASE_CACHE_ROLE_ADMIN_ID;
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
@@ -58,6 +60,21 @@ async fn find_cache_membership(
             Condition::all()
                 .add(CCacheUser::Cache.eq(cache_id))
                 .add(CCacheUser::User.eq(user_id)),
+        )
+        .one(&state.web_db)
+        .await?)
+}
+
+async fn find_cache_invitation(
+    state: &Arc<ServerState>,
+    cache_id: CacheId,
+    user_id: UserId,
+) -> WebResult<Option<MCacheInvitation>> {
+    Ok(ECacheInvitation::find()
+        .filter(
+            Condition::all()
+                .add(CCacheInvitation::Cache.eq(cache_id))
+                .add(CCacheInvitation::User.eq(user_id)),
         )
         .one(&state.web_db)
         .await?)
@@ -145,6 +162,13 @@ pub async fn post_cache_member(
         return Err(WebError::already_exists("User already in Cache"));
     }
 
+    if find_cache_invitation(&state, cache.id, target_user.id)
+        .await?
+        .is_some()
+    {
+        return Err(WebError::already_exists("User already invited"));
+    }
+
     let role = ECacheRole::find()
         .filter(
             Condition::all()
@@ -159,20 +183,76 @@ pub async fn post_cache_member(
         .await?
         .or_not_found("Role")?;
 
-    MCacheUser {
-        id: CacheUserId::now_v7(),
+    if user.superuser {
+        MCacheUser {
+            id: CacheUserId::now_v7(),
+            cache: cache.id,
+            user: target_user.id,
+            role: role.id,
+        }
+        .into_active_model()
+        .insert(&state.web_db)
+        .await?;
+
+        audit_record(
+            &state.web_db,
+            Some(user.id),
+            events::CACHE_MEMBER_CREATE,
+            &info,
+            Some(serde_json::json!({
+                "cache_id": cache.id.to_string(),
+                "target_user_id": target_user.id.to_string(),
+                "role": role.name,
+            })),
+        )
+        .await;
+
+        return Ok(ok_json("User added".to_string()));
+    }
+
+    let now = gradient_types::now();
+    let token = generate_token();
+
+    MCacheInvitation {
+        id: CacheInvitationId::now_v7(),
         cache: cache.id,
         user: target_user.id,
         role: role.id,
+        invited_by: user.id,
+        token: token.clone(),
+        created_at: now,
+        expires_at: invitation_expiry(now),
     }
     .into_active_model()
     .insert(&state.web_db)
     .await?;
 
+    if state.email.is_enabled()
+        && let Err(e) = state
+            .email
+            .send_invitation_email(
+                &target_user.email,
+                &target_user.name,
+                &InvitationMail {
+                    scope: InviteScope::Cache,
+                    scope_display_name: &cache.display_name,
+                    role: &role.name,
+                    inviter: &user.username,
+                    accept_url: format!(
+                        "{}/settings/invites?token={}",
+                        state.config.server.serve_url, token
+                    ),
+                },
+            )
+            .await
+    {
+        tracing::warn!(error = %e, "Failed to send cache invitation email");
+    }
+
     audit_record(
         &state.web_db,
         Some(user.id),
-        events::CACHE_MEMBER_CREATE,
+        events::CACHE_INVITATION_CREATE,
         &info,
         Some(serde_json::json!({
             "cache_id": cache.id.to_string(),
@@ -182,7 +262,7 @@ pub async fn post_cache_member(
     )
     .await;
 
-    Ok(ok_json("User added".to_string()))
+    Ok(ok_json("Invitation sent".to_string()))
 }
 
 pub async fn patch_cache_member(
