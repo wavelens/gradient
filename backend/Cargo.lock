@@ -2564,6 +2564,7 @@ dependencies = [
 name = "gradient-report"
 version = "1.3.0"
 dependencies = [
+ "aho-corasick",
  "anyhow",
  "gradient-db",
  "gradient-entity",

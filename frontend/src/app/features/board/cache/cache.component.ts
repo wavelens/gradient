@@ -15,56 +15,61 @@ import {
   BoardUpstreamStats,
 } from '@core/services/board.service';
 import { LiveService } from '@core/services/live.service';
-import { MetricChartComponent } from '@shared/ui';
+import { LoadingSpinnerComponent, MetricChartComponent } from '@shared/ui';
+import { firstLoad } from '../first-load';
 
 const GIB = 1024 ** 3;
 
 @Component({
   selector: 'app-board-cache',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent],
+  imports: [CommonModule, MetricChartComponent, LoadingSpinnerComponent],
   template: `
-    <div class="kpis">
-      <div class="kpi"><span class="label">Compressed size</span><span class="value">{{ gib(stats()?.totals?.bytes) }} GiB</span></div>
-      <div class="kpi"><span class="label">NAR size</span><span class="value">{{ gib(stats()?.totals?.nar_bytes) }} GiB</span></div>
-      <div class="kpi"><span class="label">Packages</span><span class="value">{{ stats()?.totals?.packages ?? 0 }}</span></div>
-      <div class="kpi"><span class="label">Served total</span><span class="value">{{ gib(stats()?.totals?.bytes_sent_total) }} GiB</span></div>
-      <div class="kpi"><span class="label">Requests total</span><span class="value">{{ stats()?.totals?.requests_total ?? 0 }}</span></div>
-    </div>
+    @if (first.loading()) {
+      <gr-loading-spinner message="Loading cache stats..." />
+    } @else {
+      <div class="kpis">
+        <div class="kpi"><span class="label">Compressed size</span><span class="value">{{ gib(stats()?.totals?.bytes) }} GiB</span></div>
+        <div class="kpi"><span class="label">NAR size</span><span class="value">{{ gib(stats()?.totals?.nar_bytes) }} GiB</span></div>
+        <div class="kpi"><span class="label">Packages</span><span class="value">{{ stats()?.totals?.packages ?? 0 }}</span></div>
+        <div class="kpi"><span class="label">Served total</span><span class="value">{{ gib(stats()?.totals?.bytes_sent_total) }} GiB</span></div>
+        <div class="kpi"><span class="label">Requests total</span><span class="value">{{ stats()?.totals?.requests_total ?? 0 }}</span></div>
+      </div>
 
-    <gr-metric-chart
-      title="Cache traffic (GiB served per hour)"
-      type="area"
-      [series]="trafficSeries()"
-      [categories]="trafficCats()"
-      [colors]="['#17a2b8']"
-    ></gr-metric-chart>
-
-    <gr-metric-chart
-      title="NAR requests per hour"
-      type="line"
-      [series]="requestSeries()"
-      [categories]="trafficCats()"
-      [colors]="['#6f42c1']"
-    ></gr-metric-chart>
-
-    <gr-metric-chart
-      title="Storage growth (GiB added per hour)"
-      type="area"
-      [series]="storageSeries()"
-      [categories]="storageCats()"
-      [colors]="['#28a745']"
-    ></gr-metric-chart>
-
-    <h3 class="upstreams-title">Upstreams</h3>
-    @for (u of upstreams()?.upstreams ?? []; track u.upstream_id) {
       <gr-metric-chart
-        [title]="upstreamTitle(u)"
-        type="line"
-        [series]="[{ name: 'latency', data: u.latency.map((p) => p.sum) }]"
-        [categories]="u.latency.map((p) => p.bucket_start.slice(11, 16))"
-        [colors]="['#fd7e14']"
+        title="Cache traffic (GiB served per hour)"
+        type="area"
+        [series]="trafficSeries()"
+        [categories]="trafficCats()"
+        [colors]="['#17a2b8']"
       ></gr-metric-chart>
+
+      <gr-metric-chart
+        title="NAR requests per hour"
+        type="line"
+        [series]="requestSeries()"
+        [categories]="trafficCats()"
+        [colors]="['#6f42c1']"
+      ></gr-metric-chart>
+
+      <gr-metric-chart
+        title="Storage growth (GiB added per hour)"
+        type="area"
+        [series]="storageSeries()"
+        [categories]="storageCats()"
+        [colors]="['#28a745']"
+      ></gr-metric-chart>
+
+      <h3 class="upstreams-title">Upstreams</h3>
+      @for (u of upstreams()?.upstreams ?? []; track u.upstream_id) {
+        <gr-metric-chart
+          [title]="upstreamTitle(u)"
+          type="line"
+          [series]="[{ name: 'latency', data: u.latency.map((p) => p.sum) }]"
+          [categories]="u.latency.map((p) => p.bucket_start.slice(11, 16))"
+          [colors]="['#fd7e14']"
+        ></gr-metric-chart>
+      }
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -74,6 +79,7 @@ export class BoardCacheComponent implements OnInit, OnDestroy {
   private board = inject(BoardService);
   private live = inject(LiveService);
   private liveSub?: Subscription;
+  protected first = firstLoad();
   stats = signal<BoardCacheStats | null>(null);
   upstreams = signal<BoardUpstreamStats | null>(null);
 
@@ -112,7 +118,7 @@ export class BoardCacheComponent implements OnInit, OnDestroy {
   }
 
   private load(): void {
-    this.board.getCache(24).subscribe((s) => this.stats.set(s));
-    this.board.getUpstreams(24).subscribe((u) => this.upstreams.set(u));
+    this.board.getCache(24).pipe(this.first.track()).subscribe((s) => this.stats.set(s));
+    this.board.getUpstreams(24).pipe(this.first.track()).subscribe((u) => this.upstreams.set(u));
   }
 }

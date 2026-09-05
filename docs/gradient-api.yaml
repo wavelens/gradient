@@ -3143,6 +3143,10 @@ paths:
         they name, so a log cannot reintroduce what the columns redacted.
         Nix store hashes are always preserved: they are one-way, and they are
         what makes an upstream cache check possible.
+
+        The parameter defaults below apply to callers that omit them. The web
+        dialog asks the inverse question - what to *include* - and always sends
+        all four explicitly, with build logs off unless asked for.
       operationId: getEvaluationReport
       parameters:
         - name: anonymize_identities

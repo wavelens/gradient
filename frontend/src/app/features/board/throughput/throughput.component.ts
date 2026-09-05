@@ -8,42 +8,48 @@ import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@ang
 import { CommonModule } from '@angular/common';
 import { forkJoin } from 'rxjs';
 import { BoardService, MetricPoint, BoardWorker } from '@core/services/board.service';
-import { MetricChartComponent } from '@shared/ui';
+import { LoadingSpinnerComponent, MetricChartComponent } from '@shared/ui';
+import { firstLoad } from '../first-load';
 
 @Component({
   selector: 'app-board-throughput',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent],
+  imports: [CommonModule, MetricChartComponent, LoadingSpinnerComponent],
   template: `
-    <gr-metric-chart
-      title="Build pipeline (hourly)"
-      type="line"
-      [series]="buildSeries()"
-      [categories]="buildCategories()"
-      [colors]="['#17a2b8', '#28a745', '#dc3545']"
-    ></gr-metric-chart>
+    @if (first.loading()) {
+      <gr-loading-spinner message="Loading throughput..." />
+    } @else {
+      <gr-metric-chart
+        title="Build pipeline (hourly)"
+        type="line"
+        [series]="buildSeries()"
+        [categories]="buildCategories()"
+        [colors]="['#17a2b8', '#28a745', '#dc3545']"
+      ></gr-metric-chart>
 
-    <gr-metric-chart
-      title="Evaluations (hourly)"
-      type="line"
-      [series]="evalSeries()"
-      [categories]="evalCategories()"
-      [colors]="['#28a745', '#dc3545']"
-    ></gr-metric-chart>
+      <gr-metric-chart
+        title="Evaluations (hourly)"
+        type="line"
+        [series]="evalSeries()"
+        [categories]="evalCategories()"
+        [colors]="['#28a745', '#dc3545']"
+      ></gr-metric-chart>
 
-    <gr-metric-chart
-      title="Active jobs per worker"
-      type="bar"
-      [series]="workerSeries()"
-      [categories]="workerCategories()"
-      [colors]="['#fd7e14']"
-    ></gr-metric-chart>
+      <gr-metric-chart
+        title="Active jobs per worker"
+        type="bar"
+        [series]="workerSeries()"
+        [categories]="workerCategories()"
+        [colors]="['#fd7e14']"
+      ></gr-metric-chart>
+    }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './throughput.component.scss',
 })
 export class BoardThroughputComponent implements OnInit {
   private board = inject(BoardService);
+  protected first = firstLoad();
 
   buildCategories = signal<string[]>([]);
   buildSeries = signal<{ name: string; data: number[] }[]>([]);
@@ -57,29 +63,33 @@ export class BoardThroughputComponent implements OnInit {
       created: this.board.query('builds.created', 'hour'),
       completed: this.board.query('builds.completed', 'hour'),
       failed: this.board.query('builds.failed', 'hour'),
-    }).subscribe(({ created, completed, failed }) => {
-      const { categories, series } = align([
-        ['created', created],
-        ['completed', completed],
-        ['failed', failed],
-      ]);
-      this.buildCategories.set(categories);
-      this.buildSeries.set(series);
-    });
+    })
+      .pipe(this.first.track())
+      .subscribe(({ created, completed, failed }) => {
+        const { categories, series } = align([
+          ['created', created],
+          ['completed', completed],
+          ['failed', failed],
+        ]);
+        this.buildCategories.set(categories);
+        this.buildSeries.set(series);
+      });
 
     forkJoin({
       completed: this.board.query('evals.completed', 'hour'),
       failed: this.board.query('evals.failed', 'hour'),
-    }).subscribe(({ completed, failed }) => {
-      const { categories, series } = align([
-        ['completed', completed],
-        ['failed', failed],
-      ]);
-      this.evalCategories.set(categories);
-      this.evalSeries.set(series);
-    });
+    })
+      .pipe(this.first.track())
+      .subscribe(({ completed, failed }) => {
+        const { categories, series } = align([
+          ['completed', completed],
+          ['failed', failed],
+        ]);
+        this.evalCategories.set(categories);
+        this.evalSeries.set(series);
+      });
 
-    this.board.getWorkers().subscribe((workers) => this.applyWorkers(workers));
+    this.board.getWorkers().pipe(this.first.track()).subscribe((workers) => this.applyWorkers(workers));
   }
 
   private applyWorkers(workers: BoardWorker[]): void {

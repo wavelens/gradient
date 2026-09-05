@@ -188,10 +188,12 @@ a {
   font-family: $font-family-base;
   font-size: $font-size-md;
 
+  // One highlight, not two: the field's own edge carries the accent and the
+  // ring only thickens it, rather than flashing a bright rim around it.
   &:focus-visible {
     border-color: var(--gr-accent);
-    outline: $focus-ring-width solid var(--gr-focus-ring);
-    outline-offset: $focus-ring-offset;
+    outline: $focus-ring-width solid color-mix(in srgb, var(--gr-accent) 40%, transparent);
+    outline-offset: 0;
   }
 
   &:disabled {
@@ -304,9 +306,8 @@ textarea:disabled {
 // Projected content carries the caller's encapsulation, so a slotted group of
 // controls cannot be reached from the primitive's own stylesheet. Any wrapper
 // a caller uses to group several controls is a row.
-// Consecutive rows are separated by a rule. Inside a list they sit flush against
-// it; sharing a card they also take the block gap. Stated once, for both, because
-// a row cannot see whether it is in a list from its own stylesheet.
+// Rows sharing one card are separated by a rule and the block gap. Stated here
+// because a row cannot see from its own stylesheet whether it is in a list.
 gr-row + gr-row {
   display: block;
   border-top: 1px solid var(--gr-border-subtle);
@@ -314,7 +315,10 @@ gr-row + gr-row {
   padding-top: $space-block;
 }
 
+// In a list each row is already its own card with a gap between, so a rule on
+// top of that reads as a second edge.
 gr-row-list gr-row + gr-row {
+  border-top: 0;
   margin-top: 0;
   padding-top: 0;
 }

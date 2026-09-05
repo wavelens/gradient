@@ -187,8 +187,9 @@
           </div>
         </div>
         <div class="info-bar-right">
-          @if (isRunning() && authService.isAuthenticated()) {
-            <button grButton label="Abort" icon="close" severity="danger" size="small"
+          @if (isRunning()) {
+            <button *appWritable="triggerAccess()" grButton label="Abort" icon="close"
+              severity="danger" size="small"
               (click)="abortEvaluation()" [loading]="aborting()" [disabled]="aborting()"></button>
           }
         </div>

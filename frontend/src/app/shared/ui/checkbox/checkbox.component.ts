@@ -5,7 +5,9 @@
  */
 
 import { NG_VALUE_ACCESSOR, ControlValueAccessor } from '@angular/forms';
-import { Component, booleanAttribute, forwardRef, input, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, booleanAttribute, computed, forwardRef, input, signal, ChangeDetectionStrategy } from '@angular/core';
+
+let nextCheckboxId = 0;
 
 @Component({
   selector: 'gr-checkbox',
@@ -14,14 +16,14 @@ import { Component, booleanAttribute, forwardRef, input, signal, ChangeDetection
     <input
       type="checkbox"
       class="gr-checkbox__input"
-      [id]="inputId()"
+      [id]="resolvedId()"
       [checked]="checked()"
       [disabled]="isDisabled()"
       (change)="onToggle($event)"
       (blur)="onTouched()"
     />
     @if (label()) {
-      <label class="gr-checkbox__label" [attr.for]="inputId()">{{ label() }}</label>
+      <label class="gr-checkbox__label" [attr.for]="resolvedId()">{{ label() }}</label>
     }
   `,
   styleUrl: './checkbox.component.scss',
@@ -34,6 +36,11 @@ export class CheckboxComponent implements ControlValueAccessor {
   inputId = input('');
   label = input('');
   binary = input(true, { transform: booleanAttribute });
+
+  // A label only toggles the box it is bound to, so a caller that gives no id
+  // still gets one rather than an inert `for=""`.
+  private readonly fallbackId = `gr-checkbox-${nextCheckboxId++}`;
+  protected resolvedId = computed(() => this.inputId() || this.fallbackId);
 
   protected checked = signal(false);
   protected isDisabled = signal(false);

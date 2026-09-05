@@ -38,6 +38,13 @@ table {
     font-variant-numeric: tabular-nums;
   }
 
+  // A numeric column is read down its digits, so it aligns right wherever a
+  // table has one, rather than each page restating it.
+  th.num,
+  td.num {
+    text-align: right;
+  }
+
   thead th {
     background: var(--gr-surface-hover);
     color: var(--gr-text-secondary);

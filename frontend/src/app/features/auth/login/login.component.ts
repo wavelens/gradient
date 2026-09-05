@@ -16,7 +16,6 @@ import {
   ButtonComponent,
   CheckboxComponent,
   FormFieldComponent,
-  IconComponent,
   InputDirective,
   LogoComponent,
   MessageBannerComponent,
@@ -26,7 +25,7 @@ import {
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent, IconComponent, FormFieldComponent, InputDirective, MessageBannerComponent, PasswordInputComponent, CheckboxComponent, LogoComponent],
+  imports: [CommonModule, ReactiveFormsModule, RouterModule, ButtonComponent, FormFieldComponent, InputDirective, MessageBannerComponent, PasswordInputComponent, CheckboxComponent, LogoComponent],
   templateUrl: './login.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './login.component.scss',

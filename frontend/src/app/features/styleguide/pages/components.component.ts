@@ -10,7 +10,7 @@ import {
   ButtonComponent, CheckboxComponent, SelectComponent, SelectButtonComponent,
   AutoCompleteComponent, MenuComponent, MenuItem, PopoverComponent, TooltipDirective,
   InputDirective, FormFieldComponent, LabelHelpComponent, DialogComponent, PasswordInputComponent,
-  NameFieldComponent, NameCheckState, TabSwitchComponent,
+  NameFieldComponent, NameCheckState, TabSwitchComponent, TableComponent,
 } from '@shared/ui';
 
 @Component({
@@ -20,7 +20,7 @@ import {
     FormsModule, ButtonComponent, CheckboxComponent, SelectComponent, SelectButtonComponent,
     AutoCompleteComponent, MenuComponent, PopoverComponent, TooltipDirective, InputDirective,
     FormFieldComponent, LabelHelpComponent, DialogComponent, PasswordInputComponent, NameFieldComponent,
-    TabSwitchComponent,
+    TabSwitchComponent, TableComponent,
   ],
   templateUrl: './components.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -46,6 +46,11 @@ export class ComponentsComponent {
   regions = [
     { label: 'Europe', value: 'eu' },
     { label: 'North America', value: 'na' },
+  ];
+  workerRows = [
+    { worker: 'builder-01', state: 'active', builds: 12 },
+    { worker: 'builder-02', state: 'draining', builds: 3 },
+    { worker: 'builder-03', state: 'active', builds: 0 },
   ];
   menuItems: MenuItem[] = [
     { label: 'Rebuild', icon: 'refresh' },

@@ -9,7 +9,7 @@ import { ActivatedRoute, Router, convertToParamMap, provideRouter } from '@angul
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { vi } from 'vitest';
-import { of, throwError } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 import { TaskDetailComponent, filenameFromDisposition } from './task-detail.component';
 import { TasksService } from '@core/services/tasks.service';
 import { ProjectsService } from '@core/services/projects.service';
@@ -295,6 +295,40 @@ describe('TaskDetailComponent - abort modal', () => {
     component.confirmAbort();
     expect(spy).toHaveBeenCalledWith(component.projectName, component.taskName, 'e1');
   });
+
+  /// Aborting takes a server round trip, so the dialog stays up and busy
+  /// rather than closing on a request that has not landed yet.
+  it('holds the dialog open and busy while the abort is in flight', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+    vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(NEVER);
+    const component = fixture.componentInstance;
+    component.abortTarget.set('e1');
+    component.confirmAbort();
+    expect(component.aborting()).toBe(true);
+    expect(component.abortTarget()).toBe('e1');
+  });
+
+  it('reports a failed abort instead of swallowing it', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+    vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(
+      throwError(() => new Error('Evaluation already finished')),
+    );
+    const component = fixture.componentInstance;
+    component.abortTarget.set('e1');
+    component.confirmAbort();
+    expect(component.aborting()).toBe(false);
+    expect(component.errorMessage()).toBe('Evaluation already finished');
+  });
+
+  it('ignores a second confirm while one abort is still running', () => {
+    const { fixture, tasksService } = setup({ managed: false, canEdit: true, canTrigger: true });
+    const spy = vi.spyOn(tasksService, 'abortEvaluation').mockReturnValue(NEVER);
+    const component = fixture.componentInstance;
+    component.abortTarget.set('e1');
+    component.confirmAbort();
+    component.confirmAbort();
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('TaskDetailComponent diagnostic report', () => {
@@ -303,9 +337,14 @@ describe('TaskDetailComponent diagnostic report', () => {
     return fixture.componentInstance;
   }
 
-  it('offers the diagnostic report below Metrics', () => {
+  it('offers the logs first, then metrics and the diagnostic report', () => {
     const labels = component().panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Metrics', 'Diagnostic report']);
+    expect(labels).toEqual(['Logs', 'Metrics', 'Diagnostic report']);
+  });
+
+  it('points the logs entry at the selected evaluation', () => {
+    const item = component().panelMenuModel().find(i => i.label === 'Logs');
+    expect(item?.routerLink).toEqual(['/project', 'acme', 'log', 'e1']);
   });
 
   /// Generating a report is an authenticated endpoint, so the entry point is
@@ -313,7 +352,7 @@ describe('TaskDetailComponent diagnostic report', () => {
   it('hides the diagnostic report from anonymous visitors', () => {
     const { fixture } = setup({ managed: false, canEdit: true, canTrigger: true }, {}, false);
     const labels = fixture.componentInstance.panelMenuModel().map(i => i.label);
-    expect(labels).toEqual(['Metrics']);
+    expect(labels).toEqual(['Logs', 'Metrics']);
   });
 
   it('opens the dialog from the menu command', () => {
@@ -325,20 +364,21 @@ describe('TaskDetailComponent diagnostic report', () => {
   });
 
   /// The shipped default hands over a report that names which package broke
-  /// but not whose repository it is.
-  it('defaults to hidden identities and real package names', () => {
+  /// but not whose repository it is. Build logs carry whatever a build printed,
+  /// so they are opted into rather than out of.
+  it('defaults to hidden identities, real package names and no build logs', () => {
     const o = component().reportOptions();
-    expect(o.anonymize_identities).toBe(true);
-    expect(o.anonymize_packages).toBe(false);
-    expect(o.include_logs).toBe(true);
+    expect(o.include_identities).toBe(false);
+    expect(o.include_packages).toBe(true);
+    expect(o.include_logs).toBe(false);
     expect(o.include_instance).toBe(true);
   });
 
   it('toggles one option without disturbing the others', () => {
     const c = component();
-    c.setReportOption('anonymize_packages', true);
-    expect(c.reportOptions().anonymize_packages).toBe(true);
-    expect(c.reportOptions().anonymize_identities).toBe(true);
+    c.setReportOption('include_identities', true);
+    expect(c.reportOptions().include_identities).toBe(true);
+    expect(c.reportOptions().include_packages).toBe(true);
   });
 });
 

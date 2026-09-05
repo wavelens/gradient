@@ -5,29 +5,23 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import { ThemeService } from '@core/services/theme.service';
 import { LogoComponent } from './logo.component';
 
 describe('gr-logo', () => {
-  async function render(theme: 'light' | 'dark') {
-    TestBed.configureTestingModule({
-      providers: [{ provide: ThemeService, useValue: { resolved: () => theme } }],
-    });
+  async function render() {
     const fixture = TestBed.createComponent(LogoComponent);
     fixture.detectChanges();
     await fixture.whenStable();
-    return (fixture.nativeElement as HTMLElement).querySelector('img') as HTMLImageElement;
+    return (fixture.nativeElement as HTMLElement).querySelector('.mark') as HTMLElement;
   }
 
-  it('uses the light mark on a dark background', async () => {
-    expect((await render('dark')).getAttribute('src')).toBe('/images/logo.svg');
-  });
-
-  it('uses the dark mark on a light background', async () => {
-    expect((await render('light')).getAttribute('src')).toBe('/images/logo-black.png');
-  });
-
   it('names the product for assistive tech', async () => {
-    expect((await render('dark')).getAttribute('alt')).toBe('Gradient');
+    const mark = await render();
+    expect(mark.getAttribute('role')).toBe('img');
+    expect(mark.getAttribute('aria-label')).toBe('Gradient');
+  });
+
+  it('draws one mark for both themes rather than swapping files', async () => {
+    expect((await render()).querySelector('img')).toBeNull();
   });
 });

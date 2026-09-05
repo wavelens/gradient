@@ -101,17 +101,22 @@ export class TasksService {
     );
   }
 
+  /// The dialog asks what to include; the endpoint asks what to anonymise. The
+  /// inversion lives here so no double negative reaches the UI.
   downloadReport(evaluationId: string, options: ReportOptions): Observable<HttpResponse<Blob>> {
-    const query = Object.entries(options)
-      .map(([key, value]) => `${key}=${value}`)
-      .join('&');
+    const query = new URLSearchParams({
+      anonymize_identities: String(!options.include_identities),
+      anonymize_packages: String(!options.include_packages),
+      include_logs: String(options.include_logs),
+      include_instance: String(options.include_instance),
+    });
     return this.api.getBlob(`evals/${evaluationId}/report?${query}`);
   }
 }
 
 export interface ReportOptions {
-  anonymize_identities: boolean;
-  anonymize_packages: boolean;
+  include_identities: boolean;
+  include_packages: boolean;
   include_logs: boolean;
   include_instance: boolean;
 }

@@ -11,6 +11,8 @@ import { Router, RouterModule } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { BoardService, DispatchedJobSummary, DispatchDecisionView, PendingJobSummary } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
+import { LoadingSpinnerComponent, TableComponent } from '@shared/ui';
+import { firstLoad } from '../first-load';
 
 type KindFilter = 'all' | 'eval' | 'build';
 type StatusFilter = 'all' | 'pending' | 'dispatched';
@@ -29,115 +31,119 @@ interface DecisionRow {
 @Component({
   selector: 'app-board-live-jobs',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule],
+  imports: [CommonModule, FormsModule, RouterModule, TableComponent, LoadingSpinnerComponent],
   template: `
-    <div class="view-toggle">
-      <button [class.active]="view() === 'dispatched'" (click)="setView('dispatched')">Dispatched</button>
-      <button [class.active]="view() === 'pending'" (click)="setView('pending')">Pending</button>
-    </div>
-
-    @if (view() === 'dispatched') {
-      <div class="banner">
-        Showing {{ filteredJobs().length }} of {{ jobs().length }} dispatched job(s) you can see.
-        @if (otherRunning() > 0) {
-          <span class="muted">+ {{ otherRunning() }} other running (hidden).</span>
-        }
+    @if (first.loading()) {
+      <gr-loading-spinner message="Loading jobs..." />
+    } @else {
+      <div class="view-toggle">
+        <button [class.active]="view() === 'dispatched'" (click)="setView('dispatched')">Dispatched</button>
+        <button [class.active]="view() === 'pending'" (click)="setView('pending')">Pending</button>
       </div>
 
-      <div class="filters">
-        <label>Scores
-          <select [ngModel]="scoreScope()" (ngModelChange)="setScoreScope($event)">
-            <option value="current">dispatched</option>
-            <option value="all">incl. rejected</option>
-          </select>
-        </label>
-        <label>Type
-          <select [ngModel]="kindFilter()" (ngModelChange)="kindFilter.set($event)">
-            <option value="all">all</option>
-            <option value="eval">eval</option>
-            <option value="build">build</option>
-          </select>
-        </label>
-        <label>Status
-          <select [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)">
-            <option value="all">all</option>
-            <option value="pending">pending (live)</option>
-            <option value="dispatched">dispatched</option>
-          </select>
-        </label>
-        <label>Score min
-          <input type="number" step="0.1" [ngModel]="scoreMin()" (ngModelChange)="scoreMin.set($event)" placeholder="-" />
-        </label>
-        <label>Score max
-          <input type="number" step="0.1" [ngModel]="scoreMax()" (ngModelChange)="scoreMax.set($event)" placeholder="-" />
-        </label>
-      </div>
-
-      @if (scoreScope() === 'current') {
-        <table class="jobs">
-          <thead>
-            <tr><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>Dispatched</th><th></th></tr>
-          </thead>
-          <tbody>
-            @for (j of filteredJobs(); track j.id) {
-              <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
-                <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
-                <td class="mono">{{ j.worker_id }}</td>
-                <td class="mono">{{ j.pname ?? '-' }}</td>
-                <td>{{ j.score | number: '1.1-1' }}</td>
-                <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
-                <td>{{ canInspect(j) ? '›' : '' }}</td>
-              </tr>
-            } @empty {
-              <tr><td colspan="6" class="muted">No matching dispatched jobs.</td></tr>
-            }
-          </tbody>
-        </table>
-      } @else {
-        <table class="jobs">
-          <thead>
-            <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>When</th><th></th></tr>
-          </thead>
-          <tbody>
-            @for (r of decisionRows(); track r.id) {
-              <tr [class.negative]="r.score < 0" class="clickable" (click)="inspectDecision(r)">
-                <td>{{ r.won ? 'dispatched' : 'passed over' }}</td>
-                <td>{{ r.kind === 1 ? 'build' : 'eval' }}</td>
-                <td class="mono">{{ r.worker_id }}</td>
-                <td class="mono">{{ r.pname ?? '-' }}</td>
-                <td>{{ r.score | number: '1.1-1' }}</td>
-                <td>{{ r.at | date: 'HH:mm:ss' }}</td>
-                <td>›</td>
-              </tr>
-            } @empty {
-              <tr><td colspan="7" class="muted">No recent decisions (superuser-only).</td></tr>
-            }
-          </tbody>
-        </table>
-      }
-    }
-
-    @if (view() === 'pending') {
-      <div class="banner">
-        {{ pendingJobs().length }} pending job(s) you can see.
-        @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
-      </div>
-      <table class="jobs">
-        <thead><tr><th>Kind</th><th>Evaluation</th><th>Derivation</th><th>Deps</th><th>Queued</th></tr></thead>
-        <tbody>
-          @for (p of pendingJobs(); track p.evaluation_id + (p.build_id ?? '')) {
-            <tr class="clickable" [routerLink]="['/board/jobs', p.evaluation_id]">
-              <td>{{ p.kind === 1 ? 'build' : 'eval' }}</td>
-              <td class="mono">{{ p.evaluation_id.slice(0, 8) }}</td>
-              <td class="mono">{{ p.pname ?? '-' }}</td>
-              <td>{{ p.dependency_count }}</td>
-              <td>{{ p.queued_at | date: 'HH:mm:ss' }}</td>
-            </tr>
-          } @empty {
-            <tr><td colspan="5" class="muted">No pending jobs.</td></tr>
+      @if (view() === 'dispatched') {
+        <div class="banner">
+          Showing {{ filteredJobs().length }} of {{ jobs().length }} dispatched job(s) you can see.
+          @if (otherRunning() > 0) {
+            <span class="muted">+ {{ otherRunning() }} other running (hidden).</span>
           }
-        </tbody>
-      </table>
+        </div>
+
+        <div class="filters">
+          <label>Scores
+            <select [ngModel]="scoreScope()" (ngModelChange)="setScoreScope($event)">
+              <option value="current">dispatched</option>
+              <option value="all">incl. rejected</option>
+            </select>
+          </label>
+          <label>Type
+            <select [ngModel]="kindFilter()" (ngModelChange)="kindFilter.set($event)">
+              <option value="all">all</option>
+              <option value="eval">eval</option>
+              <option value="build">build</option>
+            </select>
+          </label>
+          <label>Status
+            <select [ngModel]="statusFilter()" (ngModelChange)="statusFilter.set($event)">
+              <option value="all">all</option>
+              <option value="pending">pending (live)</option>
+              <option value="dispatched">dispatched</option>
+            </select>
+          </label>
+          <label>Score min
+            <input type="number" step="0.1" [ngModel]="scoreMin()" (ngModelChange)="scoreMin.set($event)" placeholder="-" />
+          </label>
+          <label>Score max
+            <input type="number" step="0.1" [ngModel]="scoreMax()" (ngModelChange)="scoreMax.set($event)" placeholder="-" />
+          </label>
+        </div>
+
+        @if (scoreScope() === 'current') {
+          <gr-table class="jobs">
+            <thead>
+              <tr><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>Dispatched</th><th></th></tr>
+            </thead>
+            <tbody>
+              @for (j of filteredJobs(); track j.id) {
+                <tr [class.live]="isLive(j)" [class.clickable]="canInspect(j)" (click)="inspect(j)">
+                  <td>{{ j.kind === 1 ? 'build' : 'eval' }}</td>
+                  <td class="mono">{{ j.worker_id }}</td>
+                  <td class="mono">{{ j.pname ?? '-' }}</td>
+                  <td>{{ j.score | number: '1.1-1' }}</td>
+                  <td>{{ j.dispatched_at | date: 'HH:mm:ss' }}</td>
+                  <td>{{ canInspect(j) ? '›' : '' }}</td>
+                </tr>
+              } @empty {
+                <tr><td colspan="6" class="muted">No matching dispatched jobs.</td></tr>
+              }
+            </tbody>
+          </gr-table>
+        } @else {
+          <gr-table class="jobs">
+            <thead>
+              <tr><th>Outcome</th><th>Kind</th><th>Worker</th><th>Derivation</th><th>Score</th><th>When</th><th></th></tr>
+            </thead>
+            <tbody>
+              @for (r of decisionRows(); track r.id) {
+                <tr [class.negative]="r.score < 0" class="clickable" (click)="inspectDecision(r)">
+                  <td>{{ r.won ? 'dispatched' : 'passed over' }}</td>
+                  <td>{{ r.kind === 1 ? 'build' : 'eval' }}</td>
+                  <td class="mono">{{ r.worker_id }}</td>
+                  <td class="mono">{{ r.pname ?? '-' }}</td>
+                  <td>{{ r.score | number: '1.1-1' }}</td>
+                  <td>{{ r.at | date: 'HH:mm:ss' }}</td>
+                  <td>›</td>
+                </tr>
+              } @empty {
+                <tr><td colspan="7" class="muted">No recent decisions (superuser-only).</td></tr>
+              }
+            </tbody>
+          </gr-table>
+        }
+      }
+
+      @if (view() === 'pending') {
+        <div class="banner">
+          {{ pendingJobs().length }} pending job(s) you can see.
+          @if (otherPending() > 0) { <span class="muted">+ {{ otherPending() }} hidden.</span> }
+        </div>
+        <gr-table class="jobs">
+          <thead><tr><th>Kind</th><th>Evaluation</th><th>Derivation</th><th>Deps</th><th>Queued</th></tr></thead>
+          <tbody>
+            @for (p of pendingJobs(); track p.evaluation_id + (p.build_id ?? '')) {
+              <tr class="clickable" [routerLink]="['/board/jobs', p.evaluation_id]">
+                <td>{{ p.kind === 1 ? 'build' : 'eval' }}</td>
+                <td class="mono">{{ p.evaluation_id.slice(0, 8) }}</td>
+                <td class="mono">{{ p.pname ?? '-' }}</td>
+                <td>{{ p.dependency_count }}</td>
+                <td>{{ p.queued_at | date: 'HH:mm:ss' }}</td>
+              </tr>
+            } @empty {
+              <tr><td colspan="5" class="muted">No pending jobs.</td></tr>
+            }
+          </tbody>
+        </gr-table>
+      }
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -154,6 +160,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private sub?: Subscription;
   private refreshTimer?: ReturnType<typeof setTimeout>;
+  protected first = firstLoad();
 
   jobs = signal<DispatchedJobSummary[]>([]);
   otherRunning = signal(0);
@@ -280,14 +287,14 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   }
 
   private loadDecisions(): void {
-    this.board.getDispatchDecisions().subscribe({
+    this.board.getDispatchDecisions().pipe(this.first.track()).subscribe({
       next: (d) => this.decisions.set(d),
       error: () => this.decisions.set([]),
     });
   }
 
   private loadDispatched(): void {
-    this.board.getDispatchedJobs().subscribe((r) => {
+    this.board.getDispatchedJobs().pipe(this.first.track()).subscribe((r) => {
       this.jobs.set(r.jobs);
       this.otherRunning.set(r.other_running);
     });
@@ -321,7 +328,7 @@ export class BoardLiveJobsComponent implements OnInit, OnDestroy {
   }
 
   private loadPending(): void {
-    this.board.getPendingJobs().subscribe((r) => {
+    this.board.getPendingJobs().pipe(this.first.track()).subscribe((r) => {
       this.pendingJobs.set(r.jobs);
       this.otherPending.set(r.other_pending);
     });

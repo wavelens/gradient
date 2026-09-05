@@ -9,7 +9,6 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import {
   EmptyStateComponent,
-  IconComponent,
   LoadingSpinnerComponent,
   MetricChartComponent,
   PageLayoutComponent,
@@ -29,7 +28,7 @@ const CHART_COLORS = {
 @Component({
   selector: 'app-task-metrics',
   standalone: true,
-  imports: [CommonModule, RouterModule, MetricChartComponent, LoadingSpinnerComponent, IconComponent, PageLayoutComponent, EmptyStateComponent],
+  imports: [CommonModule, RouterModule, MetricChartComponent, LoadingSpinnerComponent, PageLayoutComponent, EmptyStateComponent],
   templateUrl: './task-metrics.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './task-metrics.component.scss',

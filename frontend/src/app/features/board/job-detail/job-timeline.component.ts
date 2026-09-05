@@ -11,8 +11,7 @@ import { CustomChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent } from 'echarts/components';
 import { SVGRenderer } from 'echarts/renderers';
 import { JobPhase } from '@core/services/board.service';
-import { EmptyStateComponent } from '@shared/ui';
-import { resolveChartTheme } from '@shared/ui/metric-chart/metric-chart.component';
+import { EmptyStateComponent, resolveChartTheme } from '@shared/ui';
 import { ThemeService } from '@core/services/theme.service';
 
 echarts.use([CustomChart, GridComponent, TooltipComponent, SVGRenderer]);
@@ -113,16 +112,7 @@ export function phaseLabel(phase: string): string {
       <gr-empty-state icon="schedule" title="No timeline" message="This job reported no phase spans." flat />
     }
   `,
-  styles: [`
-    .chart { width: 100%; }
-    table.phases { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-    table.phases th { text-align: left; color: var(--gr-text-secondary); font-weight: 500; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--gr-border); }
-    table.phases td { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--gr-border); }
-    .num { text-align: right; }
-    .mono { font-family: var(--gr-font-mono); }
-    .bar-cell { width: 30%; }
-    .bar { height: 8px; border-radius: 2px; background: var(--gr-graph-running); min-width: 1px; }
-  `],
+  styleUrl: './job-timeline.component.scss',
 })
 export class JobTimelineComponent implements OnDestroy {
   readonly phases = input.required<JobPhase[]>();

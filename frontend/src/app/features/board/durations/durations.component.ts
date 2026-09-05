@@ -7,42 +7,48 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { BoardService, MetricPoint, DurationsHeatmap } from '@core/services/board.service';
-import { MetricChartComponent } from '@shared/ui';
+import { LoadingSpinnerComponent, MetricChartComponent } from '@shared/ui';
+import { firstLoad } from '../first-load';
 
 @Component({
   selector: 'app-board-durations',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent],
+  imports: [CommonModule, MetricChartComponent, LoadingSpinnerComponent],
   template: `
-    <gr-metric-chart
-      title="Build duration distribution (count by band × hour)"
-      type="heatmap"
-      [height]="300"
-      [series]="heatmapSeries()"
-      [colors]="['#17a2b8']"
-    ></gr-metric-chart>
+    @if (first.loading()) {
+      <gr-loading-spinner message="Loading durations..." />
+    } @else {
+      <gr-metric-chart
+        title="Build duration distribution (count by band × hour)"
+        type="heatmap"
+        [height]="300"
+        [series]="heatmapSeries()"
+        [colors]="['#17a2b8']"
+      ></gr-metric-chart>
 
-    <gr-metric-chart
-      title="Build duration (s, hourly avg vs max)"
-      type="area"
-      [series]="buildSeries()"
-      [categories]="buildCategories()"
-      [colors]="['#17a2b8', '#dc3545']"
-    ></gr-metric-chart>
+      <gr-metric-chart
+        title="Build duration (s, hourly avg vs max)"
+        type="area"
+        [series]="buildSeries()"
+        [categories]="buildCategories()"
+        [colors]="['#17a2b8', '#dc3545']"
+      ></gr-metric-chart>
 
-    <gr-metric-chart
-      title="Wait (s, hourly avg): queue (excl. deps) vs dependency"
-      type="area"
-      [series]="waitSeries()"
-      [categories]="waitCategories()"
-      [colors]="['#6f42c1', '#fd7e14']"
-    ></gr-metric-chart>
+      <gr-metric-chart
+        title="Wait (s, hourly avg): queue (excl. deps) vs dependency"
+        type="area"
+        [series]="waitSeries()"
+        [categories]="waitCategories()"
+        [colors]="['#6f42c1', '#fd7e14']"
+      ></gr-metric-chart>
+    }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './durations.component.scss',
 })
 export class BoardDurationsComponent implements OnInit {
   private board = inject(BoardService);
+  protected first = firstLoad();
 
   private build = signal<MetricPoint[]>([]);
   private wait = signal<MetricPoint[]>([]);
@@ -75,9 +81,9 @@ export class BoardDurationsComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    this.board.query('builds.duration_ms', 'hour').subscribe((p) => this.build.set(p));
-    this.board.query('dispatch.wait_ms', 'hour').subscribe((p) => this.wait.set(p));
-    this.board.query('deps.wait_ms', 'hour').subscribe((p) => this.deps.set(p));
-    this.board.getDurationsHeatmap(24).subscribe((h) => this.heatmap.set(h));
+    this.board.query('builds.duration_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.build.set(p));
+    this.board.query('dispatch.wait_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.wait.set(p));
+    this.board.query('deps.wait_ms', 'hour').pipe(this.first.track()).subscribe((p) => this.deps.set(p));
+    this.board.getDurationsHeatmap(24).pipe(this.first.track()).subscribe((h) => this.heatmap.set(h));
   }
 }

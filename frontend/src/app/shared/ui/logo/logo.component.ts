@@ -4,22 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-import { Component, computed, inject, ChangeDetectionStrategy } from '@angular/core';
-import { ThemeService } from '@core/services/theme.service';
+import { Component, ChangeDetectionStrategy } from '@angular/core';
 
-/// The wordmark. It is drawn light, so a light background needs the dark file;
-/// stated here once rather than at each of the places it appears.
+/// The wordmark. One file for both themes, masked so it takes the current text
+/// colour: two drawings drift apart in weight and size, one cannot.
 @Component({
   selector: 'gr-logo',
   standalone: true,
-  template: '<img [src]="src()" alt="Gradient" />',
+  template: '<span class="mark" role="img" aria-label="Gradient"></span>',
   styleUrl: './logo.component.scss',
   changeDetection: ChangeDetectionStrategy.Eager,
 })
-export class LogoComponent {
-  private theme = inject(ThemeService);
-
-  protected src = computed(() =>
-    this.theme.resolved() === 'light' ? '/images/logo-black.png' : '/images/logo.svg',
-  );
-}
+export class LogoComponent {}

@@ -18,7 +18,7 @@ import {
   Windowed,
 } from '@core/services/board.service';
 import { EvaluationsService, BuildWithOutputs } from '@core/services/evaluations.service';
-import { ButtonComponent, DialogComponent, PopoverComponent } from '@shared/ui';
+import { ButtonComponent, DialogComponent, LoadingSpinnerComponent, PopoverComponent, TableComponent } from '@shared/ui';
 import { JobTimelineComponent } from './job-timeline.component';
 
 interface RuleRow {
@@ -32,7 +32,7 @@ interface RuleRow {
 @Component({
   selector: 'app-board-job-detail',
   standalone: true,
-  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, PopoverComponent, JobTimelineComponent],
+  imports: [CommonModule, RouterModule, DialogComponent, ButtonComponent, PopoverComponent, JobTimelineComponent, TableComponent, LoadingSpinnerComponent],
   template: `
     <a routerLink="/board/live" class="back">← Live Jobs</a>
 
@@ -71,7 +71,7 @@ interface RuleRow {
       }
 
       <h2>Score breakdown</h2>
-      <table class="rules">
+      <gr-table class="rules">
         <thead><tr><th>Rule</th><th class="num">Contribution</th><th>Share</th></tr></thead>
         <tbody>
           @for (r of rules(); track r.name) {
@@ -91,7 +91,7 @@ interface RuleRow {
             <tr><td colspan="3" class="muted">No per-rule breakdown recorded.</td></tr>
           }
         </tbody>
-      </table>
+      </gr-table>
 
       <gr-popover #rulePop>
         @if (activeRule(); as a) {
@@ -106,7 +106,7 @@ interface RuleRow {
 
       <section class="ctx worker">
         <h2>Worker context</h2>
-        <table class="kv">
+        <gr-table class="kv">
           <tbody>
             <tr><td class="label">Architectures</td><td class="mono">{{ j.worker_context.architectures.join(', ') || '-' }}</td></tr>
             <tr><td class="label">System features</td><td class="mono">{{ j.worker_context.system_features.join(', ') || '-' }}</td></tr>
@@ -119,12 +119,12 @@ interface RuleRow {
             <tr><td class="label">Disk speed</td><td class="mono">{{ j.worker_context.disk_speed_mbps != null ? (j.worker_context.disk_speed_mbps | number) + ' MB/s' : '-' }}</td></tr>
             <tr><td class="label">Network speed</td><td class="mono">{{ j.worker_context.network_speed_mbps != null ? (j.worker_context.network_speed_mbps | number) + ' Mbps' : '-' }}</td></tr>
           </tbody>
-        </table>
+        </gr-table>
       </section>
 
       <section class="ctx job">
         <h2>Job context</h2>
-        <table class="kv">
+        <gr-table class="kv">
           <tbody>
             <tr><td class="label">Kind</td><td class="mono">{{ j.job_context.kind }}</td></tr>
             @if (j.job_context.kind === 'Build') {
@@ -146,11 +146,11 @@ interface RuleRow {
               <tr><td class="label">Fetch flake</td><td class="mono">{{ j.job_context.fetch_flake ? 'yes' : 'no' }}</td></tr>
             }
           </tbody>
-        </table>
+        </gr-table>
 
         @if (j.job_context.kind === 'Build' && j.job_context.history; as h) {
           <h3>History</h3>
-          <table class="kv">
+          <gr-table class="kv">
             <tbody>
               <tr><td class="label">Peak RAM</td><td class="mono">{{ h.peak_ram_mb | number }} MB</td></tr>
               <tr><td class="label">Avg CPU time</td><td class="mono">{{ h.avg_cpu_time_ms | number }} ms</td></tr>
@@ -159,7 +159,7 @@ interface RuleRow {
               <tr><td class="label">OOM rate</td><td class="mono">{{ h.oom_rate | number: '1.0-3' }}</td></tr>
               <tr><td class="label">Samples</td><td class="mono">{{ h.samples }}</td></tr>
             </tbody>
-          </table>
+          </gr-table>
         }
 
         @if (j.derivations.length) {
@@ -178,7 +178,7 @@ interface RuleRow {
       @if (j.instance_context; as inst) {
         <section class="ctx instance">
           <h2>Instance context</h2>
-          <table class="rules">
+          <gr-table class="rules">
             <thead><tr><th>Metric</th><th class="num">5m</th><th class="num">1h</th><th class="num">24h</th></tr></thead>
             <tbody>
               @for (m of instanceWindows(inst); track m.name) {
@@ -190,22 +190,22 @@ interface RuleRow {
                 </tr>
               }
             </tbody>
-          </table>
-          <table class="kv counts">
+          </gr-table>
+          <gr-table class="kv counts">
             <tbody>
               <tr><td class="label">Active builds</td><td class="mono">{{ inst.active_builds }}</td></tr>
               <tr><td class="label">Pending builds</td><td class="mono">{{ inst.pending_builds }}</td></tr>
               <tr><td class="label">Total workers</td><td class="mono">{{ inst.total_workers }}</td></tr>
               <tr><td class="label">Idle workers</td><td class="mono">{{ inst.idle_workers }}</td></tr>
             </tbody>
-          </table>
+          </gr-table>
         </section>
       }
 
       @if (j.previous_attempts.length > 1) {
         <section class="attempts">
           <h2>Previous Build Attempts</h2>
-          <table class="rules">
+          <gr-table class="rules">
             <thead><tr><th>#</th><th>Mode</th><th>Outcome</th><th>Reason</th><th>When</th><th></th></tr></thead>
             <tbody>
               @for (a of j.previous_attempts; track a.dispatched_job_id; let i = $index) {
@@ -219,7 +219,7 @@ interface RuleRow {
                 </tr>
               }
             </tbody>
-          </table>
+          </gr-table>
         </section>
       }
     } @else if (pending(); as p) {
@@ -243,7 +243,7 @@ interface RuleRow {
     } @else if (notFound()) {
       <p class="muted">Job not found.</p>
     } @else {
-      <p class="muted">Loading job…</p>
+      <gr-loading-spinner message="Loading job..." />
     }
 
     <gr-dialog
@@ -253,7 +253,7 @@ interface RuleRow {
       width="640px"
     >
       @if (buildLoading()) {
-        <p class="muted">Loading build…</p>
+        <gr-loading-spinner message="Loading build..." />
       } @else if (buildError()) {
         <p class="muted">{{ buildError() }}</p>
       } @else if (build(); as b) {
