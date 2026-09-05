@@ -11,6 +11,13 @@ exposes a substituter URL and a set of trusted public keys that clients add to
 their Nix configuration. The cache detail page renders the exact snippet for a
 given cache.
 
+## Sharing a cache with another project
+
+A project subscribes to a cache to use it as a substituter and to push its build
+outputs there. When the person subscribing does not administer the cache, the
+call records a request instead and a cache admin approves it from the cache's
+**Subscriptions** page. See [Invites](invites.md) for the full flow.
+
 ## Authentication
 
 Private caches require credentials. Install them on the client as root with the
