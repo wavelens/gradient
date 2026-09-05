@@ -1,0 +1,57 @@
+<!--
+  SPDX-FileCopyrightText: 2026 Wavelens GmbH <info@wavelens.io>
+
+  SPDX-License-Identifier: AGPL-3.0-only
+-->
+
+<gr-page-layout title="My Invites" subtitle="Projects and caches waiting for your answer">
+  @if (errorMessage()) {
+    <gr-message-banner slot="banner" type="error">{{ errorMessage() }}</gr-message-banner>
+  }
+
+  @if (successMessage()) {
+    <gr-message-banner slot="banner" type="success">{{ successMessage() }}</gr-message-banner>
+  }
+
+  @if (loading()) {
+    <gr-loading-spinner message="Loading invitations..." />
+  } @else if (invites().length === 0) {
+    <gr-empty-state
+      icon="mail"
+      title="No pending invitations"
+      message="Invitations to projects and caches appear here."
+    />
+  } @else {
+    <gr-row-list>
+      @for (invite of invites(); track invite.token) {
+        <gr-row [icon]="invite.kind === 'cache' ? 'inventory_2' : 'folder'">
+          {{ invite.scope_display_name }}
+          <gr-badge severity="info">{{ invite.kind }}</gr-badge>
+          <span slot="meta">
+            Role {{ invite.role }} ·
+            Invited by {{ invite.invited_by }} ·
+            Expires {{ invite.expires_at | date: 'medium' }}
+          </span>
+          <button
+            slot="actions"
+            grButton
+            label="Accept"
+            icon="check"
+            [disabled]="pendingToken() === invite.token"
+            [loading]="pendingToken() === invite.token"
+            (click)="accept(invite.token)"
+          ></button>
+          <button
+            slot="actions"
+            grButton
+            label="Decline"
+            icon="close"
+            severity="danger"
+            [disabled]="pendingToken() === invite.token"
+            (click)="decline(invite.token)"
+          ></button>
+        </gr-row>
+      }
+    </gr-row-list>
+  }
+</gr-page-layout>
