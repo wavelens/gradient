@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Integration tests for the bilateral permission gate on project→cache subscription.
+//! Integration tests for the permission gate on project→cache subscription.
 //!
-//! Each POST /projects/{project}/subscribe/{cache} requires:
-//!   - ManageSubscriptions on the project (project-side)
-//!   - ManageCacheSubscriptions on the cache (cache-side)
+//! POST /projects/{project}/subscribe/{cache} requires ManageSubscriptions on
+//! the project and that the cache be visible to the caller. Holding
+//! ManageCacheSubscriptions on the cache too subscribes immediately; without it
+//! the call records a request for a cache admin to approve, which is what makes
+//! cross-organisation subscription possible at all.
 //!
 //! Auth query sequence (authorize middleware):
 //!   1. SELECT session
@@ -20,10 +22,12 @@
 //!   5. SELECT project_user (membership)
 //!   6. SELECT role (bitmask)
 //!
-//! load_cache with Require(ManageCacheSubscriptions):
+//! load_cache with Readable:
 //!   7. SELECT cache (by name)
-//!   8. SELECT cache_user (membership)
-//!   9. SELECT cache_role (bitmask)  - only when member exists
+//!   8. SELECT cache_user (membership)  - skipped for a public cache
+//!
+//! then the already-subscribed check, the pending-request check, and
+//! has_cache_permission (cache_user + cache_role) to pick the branch.
 
 #![expect(
     clippy::unwrap_used,
@@ -31,7 +35,10 @@
 )]
 
 use gradient_db::permissions::{admin_mask, cache_admin_mask, cache_view_mask, mask_from};
-use gradient_entity::{cache, cache_role, cache_user, ids::*, project_cache, project_user, role};
+use gradient_entity::{
+    cache, cache_role, cache_subscription_request, cache_user, ids::*, project_cache, project_user,
+    role,
+};
 use gradient_test_support::fixtures::{project, project_id, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;
@@ -182,20 +189,44 @@ fn subscribe_requires_project_manage_subscriptions() {
 }
 
 #[test]
-fn subscribe_requires_cache_manage_subscriptions() {
+fn subscribe_without_cache_permission_records_a_request() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // User has Admin on project (ManageSubscriptions passes) but only View on
-        // the cache (no ManageCacheSubscriptions) → 403.
+        let pending = cache_subscription_request::Model {
+            id: CacheSubscriptionRequestId::now_v7(),
+            project: project_id(),
+            cache: cache_id(),
+            mode: project_cache::CacheSubscriptionMode::ReadWrite,
+            requested_by: user_id(),
+            created_at: test_date(),
+        };
+
+        // Admin on the project, View on the cache: the cache is visible, so the
+        // call is allowed, but approving it is not the caller's to make.
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![project()]])
             .append_query_results([vec![admin_project_membership()]])
             .append_query_results([vec![admin_project_role()]])
+            // load_cache Readable: cache → membership (visible as a member)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![view_cache_member()]])
-            .append_query_results([vec![view_cache_role()]]);
+            // already-subscribed check → empty
+            .append_query_results([Vec::<project_cache::Model>::new()])
+            // pending-request check → empty
+            .append_query_results([Vec::<cache_subscription_request::Model>::new()])
+            // has_cache_permission: membership → role (View, so no approval right)
+            .append_query_results([vec![view_cache_member()]])
+            .append_query_results([vec![view_cache_role()]])
+            // INSERT cache_subscription_request
+            .append_query_results([vec![pending]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            // notify_cache_admins: admin lookup → empty
+            .append_query_results([Vec::<cache_user::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
         let res = server
@@ -203,7 +234,12 @@ fn subscribe_requires_cache_manage_subscriptions() {
             .add_header("authorization", format!("Bearer {}", token))
             .await;
 
-        res.assert_status(axum::http::StatusCode::FORBIDDEN);
+        res.assert_status_ok();
+        let body: serde_json::Value = res.json();
+        assert_eq!(
+            body["message"], "Subscription requested",
+            "no cache-side permission means a request, not a subscription"
+        );
     });
 }
 
@@ -225,12 +261,16 @@ fn subscribe_succeeds_when_both_granted() {
             .append_query_results([vec![project()]])
             .append_query_results([vec![admin_project_membership()]])
             .append_query_results([vec![admin_project_role()]])
-            // load_cache
+            // load_cache Readable: cache → membership
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_cache_member()]])
-            .append_query_results([vec![admin_cache_role()]])
             // already-subscribed check → empty
             .append_query_results([Vec::<project_cache::Model>::new()])
+            // pending-request check → empty
+            .append_query_results([Vec::<cache_subscription_request::Model>::new()])
+            // has_cache_permission: membership → role (Admin, so subscribe directly)
+            .append_query_results([vec![admin_cache_member()]])
+            .append_query_results([vec![admin_cache_role()]])
             // insert project_cache row
             .append_query_results([vec![inserted_link]])
             .append_exec_results([MockExecResult {
@@ -255,19 +295,41 @@ fn subscribe_succeeds_when_both_granted() {
 }
 
 #[test]
-fn subscribe_public_cache_still_requires_cache_permission() {
+fn subscribe_to_a_public_cache_records_a_request_for_a_non_member() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
 
-        // cache.public = true but user has no cache_user row →
-        // Require(ManageCacheSubscriptions) returns 404 (not_found) because
-        // the member lookup finds no row and the label is "Cache".
+        let pending = cache_subscription_request::Model {
+            id: CacheSubscriptionRequestId::now_v7(),
+            project: project_id(),
+            cache: cache_id(),
+            mode: project_cache::CacheSubscriptionMode::ReadWrite,
+            requested_by: user_id(),
+            created_at: test_date(),
+        };
+
+        // A public cache is readable without membership, so the request is
+        // accepted; a cache admin still decides whether it becomes real.
         let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![project()]])
             .append_query_results([vec![admin_project_membership()]])
             .append_query_results([vec![admin_project_role()]])
+            // load_cache Readable: public, so no membership lookup
             .append_query_results([vec![cache_row(true)]])
+            // already-subscribed check → empty
+            .append_query_results([Vec::<project_cache::Model>::new()])
+            // pending-request check → empty
+            .append_query_results([Vec::<cache_subscription_request::Model>::new()])
+            // has_cache_permission: no cache_user row → false
+            .append_query_results([Vec::<cache_user::Model>::new()])
+            // INSERT cache_subscription_request
+            .append_query_results([vec![pending]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }])
+            // notify_cache_admins: admin lookup → empty
             .append_query_results([Vec::<cache_user::Model>::new()]);
 
         let server = make_test_server(db.into_connection());
@@ -276,7 +338,8 @@ fn subscribe_public_cache_still_requires_cache_permission() {
             .add_header("authorization", format!("Bearer {}", token))
             .await;
 
-        // Require with no member row → not_found (no longer bypassed for public caches)
-        res.assert_status(axum::http::StatusCode::NOT_FOUND);
+        res.assert_status_ok();
+        let body: serde_json::Value = res.json();
+        assert_eq!(body["message"], "Subscription requested");
     });
 }

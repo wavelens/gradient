@@ -13,8 +13,8 @@
 )]
 
 use gradient_db::permissions::{cache_admin_mask, cache_view_mask};
-use gradient_entity::{cache, cache_role, cache_user, ids::*, user};
-use gradient_test_support::fixtures::{test_date, user, user_id};
+use gradient_entity::{cache, cache_invitation, cache_role, cache_user, ids::*, user};
+use gradient_test_support::fixtures::{superuser_user, test_date, user, user_id};
 use gradient_test_support::web::{live_session, make_test_server, make_token};
 use gradient_types::SessionId;
 use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_CACHE_ROLE_VIEW_ID};
@@ -115,6 +115,26 @@ fn with_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
         .append_query_results([vec![user()]])
 }
 
+fn with_superuser_auth(db: MockDatabase, session_id: SessionId) -> MockDatabase {
+    let session = live_session(session_id);
+    db.append_query_results([vec![session.clone()]])
+        .append_query_results([vec![session]])
+        .append_query_results([vec![superuser_user()]])
+}
+
+fn pending_invitation() -> cache_invitation::Model {
+    cache_invitation::Model {
+        id: CacheInvitationId::now_v7(),
+        cache: cache_id(),
+        user: other_user_id(),
+        role: BASE_CACHE_ROLE_VIEW_ID,
+        invited_by: user_id(),
+        token: "tok".into(),
+        created_at: test_date(),
+        expires_at: test_date(),
+    }
+}
+
 fn run<F: std::future::Future>(fut: F) -> F::Output {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -204,7 +224,49 @@ fn add_member_requires_manage_cache_members() {
 }
 
 #[test]
-fn add_member_admin_succeeds() {
+fn add_member_admin_creates_a_pending_invitation() {
+    run(async {
+        let session_id = SessionId::now_v7();
+        let token = make_token(session_id);
+
+        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
+            // load_cache Require(ManageCacheMembers): cache → member → role
+            .append_query_results([vec![cache_row(false)]])
+            .append_query_results([vec![admin_member()]])
+            .append_query_results([vec![admin_role_row()]])
+            // find_user_by_username
+            .append_query_results([vec![other_user_row()]])
+            // find_cache_membership (check not already a member) → empty
+            .append_query_results([Vec::<cache_user::Model>::new()])
+            // find_cache_invitation (check not already invited) → empty
+            .append_query_results([Vec::<cache_invitation::Model>::new()])
+            // role lookup by name
+            .append_query_results([vec![view_role_row()]])
+            // INSERT cache_invitation
+            .append_query_results([vec![pending_invitation()]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 1,
+            }]);
+
+        let server = make_test_server(db.into_connection());
+        let res = server
+            .post("/api/v1/caches/test-cache/members")
+            .add_header("authorization", format!("Bearer {}", token))
+            .json(&json!({"user": "otheruser", "role": "View"}))
+            .await;
+
+        res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(
+            body["message"], "Invitation sent",
+            "an admin invites; membership waits on the user accepting"
+        );
+    });
+}
+
+#[test]
+fn add_member_superuser_skips_the_invitation() {
     run(async {
         let session_id = SessionId::now_v7();
         let token = make_token(session_id);
@@ -216,18 +278,15 @@ fn add_member_admin_succeeds() {
             role: BASE_CACHE_ROLE_VIEW_ID,
         };
 
-        let db = with_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
-            // load_cache Require(ManageCacheMembers): cache → member → role
+        let db = with_superuser_auth(MockDatabase::new(DatabaseBackend::Postgres), session_id)
             .append_query_results([vec![cache_row(false)]])
             .append_query_results([vec![admin_member()]])
             .append_query_results([vec![admin_role_row()]])
-            // find_user_by_username
             .append_query_results([vec![other_user_row()]])
-            // find_cache_membership (check not already a member) → empty
             .append_query_results([Vec::<cache_user::Model>::new()])
-            // role lookup by name
+            .append_query_results([Vec::<cache_invitation::Model>::new()])
             .append_query_results([vec![view_role_row()]])
-            // INSERT
+            // INSERT cache_user directly, no invitation
             .append_query_results([vec![new_member]])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
@@ -242,6 +301,8 @@ fn add_member_admin_succeeds() {
             .await;
 
         res.assert_status_ok();
+        let body: Value = res.json();
+        assert_eq!(body["message"], "User added");
     });
 }
 
