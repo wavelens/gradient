@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-use crate::access::{CacheAccess, Caller, ProjectAccess, load_cache, load_project};
+use crate::access::{
+    CacheAccess, Caller, ProjectAccess, cache_admin_emails, has_cache_permission, load_cache,
+    load_project,
+};
 use crate::authorization::MaybeApiKey;
 use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
@@ -14,6 +17,7 @@ use axum::{Extension, Json};
 use gradient_core::ServerState;
 use gradient_db::permissions::CachePermission;
 use gradient_entity::project_cache::CacheSubscriptionMode;
+use gradient_notify::{SubscriptionEvent, SubscriptionMail};
 use gradient_types::*;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
@@ -27,11 +31,19 @@ pub struct SubscribeCacheRequest {
     pub mode: Option<CacheSubscriptionMode>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SubscriptionStatus {
+    Active,
+    Pending,
+}
+
 #[derive(Serialize)]
 pub struct CacheSubscriptionItem {
     pub id: CacheId,
     pub name: String,
     pub mode: CacheSubscriptionMode,
+    pub status: SubscriptionStatus,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -113,6 +125,23 @@ pub async fn get_project_subscribe(
                 id: oc.cache,
                 name: cache.name,
                 mode: oc.mode,
+                status: SubscriptionStatus::Active,
+            });
+        }
+    }
+
+    let pending = ECacheSubscriptionRequest::find()
+        .filter(CCacheSubscriptionRequest::Project.eq(project.id))
+        .all(&state.web_db)
+        .await?;
+
+    for request in pending {
+        if let Ok(Some(cache)) = ECache::find_by_id(request.cache).one(&state.web_db).await {
+            subscribed.push(CacheSubscriptionItem {
+                id: request.cache,
+                name: cache.name,
+                mode: request.mode,
+                status: SubscriptionStatus::Pending,
             });
         }
     }
@@ -144,10 +173,7 @@ pub async fn post_project_subscribe_cache(
         Caller::User(&user),
         api_key.as_ref(),
         cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheSubscriptions,
-            reject_managed: false,
-        },
+        CacheAccess::Readable,
     )
     .await?;
 
@@ -166,9 +192,50 @@ pub async fn post_project_subscribe_cache(
         ));
     }
 
+    let pending = ECacheSubscriptionRequest::find()
+        .filter(
+            Condition::all()
+                .add(CCacheSubscriptionRequest::Project.eq(project.id))
+                .add(CCacheSubscriptionRequest::Cache.eq(cache.id)),
+        )
+        .one(&state.web_db)
+        .await?;
+
+    if pending.is_some() {
+        return Err(WebError::already_exists("Subscription already requested"));
+    }
+
     let mode = body
         .and_then(|b| b.mode.clone())
         .unwrap_or(CacheSubscriptionMode::ReadWrite);
+
+    let may_approve = user.superuser
+        || has_cache_permission(
+            &state,
+            user.id,
+            cache.id,
+            CachePermission::ManageCacheSubscriptions,
+            api_key.as_ref(),
+        )
+        .await?;
+
+    if !may_approve {
+        MCacheSubscriptionRequest {
+            id: CacheSubscriptionRequestId::now_v7(),
+            project: project.id,
+            cache: cache.id,
+            mode: mode.clone(),
+            requested_by: user.id,
+            created_at: gradient_types::now(),
+        }
+        .into_active_model()
+        .insert(&state.web_db)
+        .await?;
+
+        notify_cache_admins(&state, &project, &cache, &user, &mode).await;
+
+        return Ok(ok_json("Subscription requested".to_string()));
+    }
 
     let unparks_builds = matches!(
         mode,
@@ -204,6 +271,58 @@ pub async fn post_project_subscribe_cache(
     enqueue_backfill_signatures(&state, project.id, cache.id).await;
 
     Ok(ok_json("Cache subscribed".to_string()))
+}
+
+/// Best-effort notice to the cache's admins that a project wants in. Silent
+/// when SMTP is not configured: the request row and the cache's requests page
+/// carry the flow on their own.
+async fn notify_cache_admins(
+    state: &Arc<ServerState>,
+    project: &MProject,
+    cache: &MCache,
+    requester: &MUser,
+    mode: &CacheSubscriptionMode,
+) {
+    if !state.email.is_enabled() {
+        return;
+    }
+
+    let recipients = match cache_admin_emails(state, cache.id).await {
+        Ok(list) => list,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to resolve cache admin recipients");
+            return;
+        }
+    };
+
+    if let Err(e) = state
+        .email
+        .send_subscription_mail(
+            &recipients,
+            &SubscriptionMail {
+                event: SubscriptionEvent::Requested,
+                project_display_name: &project.display_name,
+                cache_display_name: &cache.display_name,
+                mode: mode_label(mode),
+                actor: &requester.username,
+                link: format!(
+                    "{}/caches/{}/subscriptions",
+                    state.config.server.serve_url, cache.name
+                ),
+            },
+        )
+        .await
+    {
+        tracing::warn!(error = %e, "failed to send cache subscription request email");
+    }
+}
+
+pub fn mode_label(mode: &CacheSubscriptionMode) -> &'static str {
+    match mode {
+        CacheSubscriptionMode::ReadWrite => "read and write",
+        CacheSubscriptionMode::ReadOnly => "read only",
+        CacheSubscriptionMode::WriteOnly => "write only",
+    }
 }
 
 /// Insert null-signature placeholders for every `cached_path` reachable
@@ -293,10 +412,7 @@ pub async fn delete_project_subscribe_cache(
         Caller::User(&user),
         api_key.as_ref(),
         cache,
-        CacheAccess::Require {
-            permission: CachePermission::ManageCacheSubscriptions,
-            reject_managed: false,
-        },
+        CacheAccess::Readable,
     )
     .await?;
 
@@ -307,8 +423,23 @@ pub async fn delete_project_subscribe_cache(
                 .add(CProjectCache::Cache.eq(cache.id)),
         )
         .one(&state.web_db)
-        .await?
-        .ok_or_else(|| WebError::bad_request("Project not subscribed to Cache"))?;
+        .await?;
+
+    let Some(record) = record else {
+        let request = ECacheSubscriptionRequest::find()
+            .filter(
+                Condition::all()
+                    .add(CCacheSubscriptionRequest::Project.eq(project.id))
+                    .add(CCacheSubscriptionRequest::Cache.eq(cache.id)),
+            )
+            .one(&state.web_db)
+            .await?
+            .ok_or_else(|| WebError::bad_request("Project not subscribed to Cache"))?;
+
+        request.into_active_model().delete(&state.web_db).await?;
+
+        return Ok(ok_json("Subscription request cancelled".to_string()));
+    };
 
     let active: AProjectCache = record.into();
     active.delete(&state.web_db).await?;
