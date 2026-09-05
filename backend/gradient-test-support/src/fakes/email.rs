@@ -6,7 +6,10 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use gradient_notify::{EmailSender, MailDeliveryResult};
+use gradient_notify::{
+    EmailSender, InvitationMail, InviteScope, MailDeliveryResult, SubscriptionEvent,
+    SubscriptionMail,
+};
 use std::sync::Mutex;
 
 #[derive(Debug, Clone)]
@@ -27,6 +30,19 @@ pub enum SentEmail {
         to: Vec<String>,
         subject: String,
         body: String,
+    },
+    Invitation {
+        to_email: String,
+        scope: String,
+        scope_display_name: String,
+        role: String,
+        accept_url: String,
+    },
+    Subscription {
+        to: Vec<String>,
+        event: String,
+        project: String,
+        cache: String,
     },
 }
 
@@ -110,5 +126,44 @@ impl EmailSender for InMemoryEmailSender {
             status_code: 250,
             server_response: "Ok".to_string(),
         })
+    }
+
+    async fn send_invitation_email(
+        &self,
+        to_email: &str,
+        _to_name: &str,
+        invite: &InvitationMail<'_>,
+    ) -> Result<()> {
+        let scope = match invite.scope {
+            InviteScope::Project => "project",
+            InviteScope::Cache => "cache",
+        };
+        self.sent.lock().unwrap().push(SentEmail::Invitation {
+            to_email: to_email.to_string(),
+            scope: scope.to_string(),
+            scope_display_name: invite.scope_display_name.to_string(),
+            role: invite.role.to_string(),
+            accept_url: invite.accept_url.clone(),
+        });
+        Ok(())
+    }
+
+    async fn send_subscription_mail(
+        &self,
+        to: &[String],
+        mail: &SubscriptionMail<'_>,
+    ) -> Result<()> {
+        let event = match mail.event {
+            SubscriptionEvent::Requested => "requested",
+            SubscriptionEvent::Approved => "approved",
+            SubscriptionEvent::Denied => "denied",
+        };
+        self.sent.lock().unwrap().push(SentEmail::Subscription {
+            to: to.to_vec(),
+            event: event.to_string(),
+            project: mail.project_display_name.to_string(),
+            cache: mail.cache_display_name.to_string(),
+        });
+        Ok(())
     }
 }
