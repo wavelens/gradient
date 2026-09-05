@@ -81,6 +81,15 @@
       </gr-row-list>
     </gr-settings-section>
 
+    <gr-settings-section title="More Settings" [card]="false">
+      <gr-row-list>
+        <gr-row icon="mail" linkLabel="My invites" [link]="['/settings', 'invites']">
+          My Invites
+          <span slot="meta">Projects and caches waiting for your answer</span>
+        </gr-row>
+      </gr-row-list>
+    </gr-settings-section>
+
     <gr-settings-section title="Danger Zone" danger>
       <gr-row>
         Delete Account

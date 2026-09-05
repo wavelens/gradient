@@ -446,6 +446,14 @@ export const routes: Routes = [
             (m) => m.SessionsComponent
           ),
       },
+      {
+        path: 'settings/invites',
+        title: 'My Invites',
+        loadComponent: () =>
+          import('./features/settings/invites/invites.component').then(
+            (m) => m.InvitesComponent
+          ),
+      },
     ],
   },
 
