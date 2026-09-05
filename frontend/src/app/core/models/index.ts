@@ -18,3 +18,4 @@ export * from './trigger.model';
 export * from './flake-input-override.model';
 export * from './access.model';
 export * from './action.model';
+export * from './invite.model';

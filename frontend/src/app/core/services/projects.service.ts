@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Project, Paginated } from '@core/models';
+import { CacheSubscription, PendingInvitation, Project, Paginated } from '@core/models';
 import { PermissionDescriptor } from '@core/models/permission.model';
 
 export interface ProjectMember {
@@ -90,6 +90,14 @@ export class ProjectsService {
     return this.api.delete<string>(`projects/${project}/users`, { user });
   }
 
+  getInvitations(project: string): Observable<PendingInvitation[]> {
+    return this.api.get<PendingInvitation[]>(`projects/${project}/invitations`);
+  }
+
+  revokeInvitation(project: string, user: string): Observable<string> {
+    return this.api.delete<string>(`projects/${project}/invitations`, { user });
+  }
+
   getRoles(project: string): Observable<RoleListResponse> {
     return this.api.get<RoleListResponse>(`projects/${project}/roles`);
   }
@@ -125,8 +133,8 @@ export class ProjectsService {
     return this.api.get<boolean>(`projects/available?name=${encodeURIComponent(name)}`);
   }
 
-  getSubscribedCaches(project: string): Observable<{ id: string; name: string }[]> {
-    return this.api.get<{ id: string; name: string }[]>(`projects/${project}/subscribe`);
+  getSubscribedCaches(project: string): Observable<CacheSubscription[]> {
+    return this.api.get<CacheSubscription[]>(`projects/${project}/subscribe`);
   }
 
   subscribeCache(project: string, cache: string): Observable<string> {

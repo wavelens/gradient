@@ -7,7 +7,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { ApiService } from './api.service';
-import { Cache, Paginated } from '@core/models';
+import { Cache, Paginated, PendingInvitation, SubscriptionRequest } from '@core/models';
 import { CacheMemberItem, CacheRole, CacheRoleListResponse } from '@core/models/cache-permission.model';
 
 export type CacheSubscriptionMode = 'ReadWrite' | 'ReadOnly' | 'WriteOnly';
@@ -213,6 +213,26 @@ export class CachesService {
 
   deleteCacheNar(cache: string, hash: string): Observable<void> {
     return this.api.delete<void>(`caches/${cache}/nars/${hash}`);
+  }
+
+  getInvitations(cache: string): Observable<PendingInvitation[]> {
+    return this.api.get<PendingInvitation[]>(`caches/${cache}/invitations`);
+  }
+
+  revokeInvitation(cache: string, user: string): Observable<string> {
+    return this.api.delete<string>(`caches/${cache}/invitations`, { user });
+  }
+
+  getSubscriptionRequests(cache: string): Observable<SubscriptionRequest[]> {
+    return this.api.get<SubscriptionRequest[]>(`caches/${cache}/subscription-requests`);
+  }
+
+  approveSubscriptionRequest(cache: string, project: string): Observable<string> {
+    return this.api.post<string>(`caches/${cache}/subscription-requests/${project}`, {});
+  }
+
+  denySubscriptionRequest(cache: string, project: string): Observable<string> {
+    return this.api.delete<string>(`caches/${cache}/subscription-requests/${project}`);
   }
 
   getMembers(cache: string): Observable<CacheMemberItem[]> {
