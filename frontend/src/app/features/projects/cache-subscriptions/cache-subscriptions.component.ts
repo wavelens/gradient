@@ -13,6 +13,7 @@ import { CachesService } from '@core/services/caches.service';
 import { ProjectAccessService } from '@core/services/project-access.service';
 import {
   AutoCompleteComponent,
+  BadgeComponent,
   ButtonComponent,
   DialogComponent,
   EmptyStateComponent,
@@ -25,7 +26,7 @@ import {
   TooltipDirective,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
-import { AccessState } from '@core/models';
+import { AccessState, CacheSubscription } from '@core/models';
 
 @Component({
   selector: 'app-cache-subscriptions',
@@ -35,6 +36,7 @@ import { AccessState } from '@core/models';
     RouterModule,
     FormsModule,
     DialogComponent,
+    BadgeComponent,
     ButtonComponent,
     AutoCompleteComponent,
     LoadingSpinnerComponent,
@@ -68,7 +70,7 @@ export class CacheSubscriptionsComponent implements OnInit {
 
   projectName = '';
   projectDisplayName = signal('');
-  caches = signal<{ id: string; name: string }[]>([]);
+  caches = signal<CacheSubscription[]>([]);
   newCacheName = '';
   cacheSuggestions = signal<string[]>([]);
   private availableCacheNames: string[] = [];

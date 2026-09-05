@@ -32,6 +32,9 @@
         @for (cache of caches(); track cache.id) {
           <gr-row icon="storage">
             {{ cache.name }}
+            @if (cache.status === 'pending') {
+              <gr-badge severity="warning">Pending approval</gr-badge>
+            }
             <div slot="actions">
               <a
                 grButton
@@ -45,7 +48,7 @@
               <button
                 *appWritable="access()"
                 grButton
-                label="Unsubscribe"
+                [label]="cache.status === 'pending' ? 'Cancel request' : 'Unsubscribe'"
                 icon="close"
                 severity="danger"
                 size="small"

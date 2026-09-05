@@ -38,7 +38,11 @@ function setup(access: AccessState): ComponentFixture<CacheSubscriptionsComponen
         provide: ProjectsService,
         useValue: {
           getProject: () => of({ id: 'o', display_name: 'Acme' }),
-          getSubscribedCaches: () => of([{ id: 'c', name: 'shared' }]),
+          getSubscribedCaches: () =>
+            of([
+              { id: 'c', name: 'shared', mode: 0, status: 'active' },
+              { id: 'c2', name: 'staging', mode: 0, status: 'pending' },
+            ]),
         },
       },
       { provide: CachesService, useValue: {} },
@@ -80,5 +84,22 @@ describe('CacheSubscriptionsComponent - row actions', () => {
     const open = root.querySelector('.row-actions a') as HTMLAnchorElement | null;
     expect(open?.getAttribute('href')).toBe('/caches/shared');
     expect(findByText(root, 'unsubscribe')).not.toBeNull();
+  });
+});
+
+describe('CacheSubscriptionsComponent - pending requests', () => {
+  it('marks a pending subscription as awaiting approval', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent || '';
+    expect(text).toContain('staging');
+    expect(text).toContain('Pending approval');
+  });
+
+  it('offers Cancel request on a pending row and Unsubscribe on an active one', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    expect(findByText(fixture.nativeElement, 'cancel request')).not.toBeNull();
+    expect(findByText(fixture.nativeElement, 'unsubscribe')).not.toBeNull();
   });
 });
