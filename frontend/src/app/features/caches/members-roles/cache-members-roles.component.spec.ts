@@ -13,10 +13,13 @@ import { CacheMembersRolesComponent } from './cache-members-roles.component';
 import { CachesService } from '@core/services/caches.service';
 import { UserService } from '@core/services/user.service';
 
-function activatedRouteStub() {
+function activatedRouteStub(canEdit = false) {
+  const data = canEdit
+    ? { cacheAccess: { access: { managed: false, canEdit: true, canTrigger: true } } }
+    : {};
   return {
     snapshot: { paramMap: convertToParamMap({ cache: 'my-cache' }) },
-    parent: { data: of({}) },
+    parent: { data: of(data) },
   } as unknown as ActivatedRoute;
 }
 
@@ -27,14 +30,17 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
-function setup(): ComponentFixture<CacheMembersRolesComponent> {
+const revokeInvitation = vi.fn().mockReturnValue(of('Invitation revoked'));
+
+function setup(canEdit = false): ComponentFixture<CacheMembersRolesComponent> {
+  revokeInvitation.mockClear();
   TestBed.configureTestingModule({
     imports: [CacheMembersRolesComponent],
     providers: [
       provideRouter([]),
       provideHttpClient(),
       provideHttpClientTesting(),
-      { provide: ActivatedRoute, useValue: activatedRouteStub() },
+      { provide: ActivatedRoute, useValue: activatedRouteStub(canEdit) },
       {
         provide: CachesService,
         useValue: {
@@ -50,6 +56,17 @@ function setup(): ComponentFixture<CacheMembersRolesComponent> {
           createRole: () => of({}),
           updateRole: () => of({}),
           deleteRole: () => of(true),
+          getInvitations: () =>
+            of([
+              {
+                user: 'bob',
+                name: 'Bob',
+                role: 'Admin',
+                created_at: '2026-09-05T12:00:00',
+                expires_at: '2026-09-12T12:00:00',
+              },
+            ]),
+          revokeInvitation,
         },
       },
       { provide: UserService, useValue: { searchUsers: () => of([]) } },
@@ -76,5 +93,26 @@ describe('CacheMembersRolesComponent', () => {
     await settled(fixture);
     expect(findByText(fixture.nativeElement, 'add member')).toBeNull();
     expect(findByText(fixture.nativeElement, 'new role')).toBeNull();
+  });
+});
+
+describe('CacheMembersRolesComponent - pending invitations', () => {
+  it('lists a pending invitation separately from members', async () => {
+    const fixture = setup();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent || '';
+    expect(text).toContain('Pending Invitations');
+    expect(text).toContain('bob');
+  });
+
+  it('revokes a pending invitation', async () => {
+    const fixture = setup(true);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
+    expect(revokeInvitation).toHaveBeenCalledWith('my-cache', 'bob');
   });
 });

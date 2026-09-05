@@ -57,6 +57,34 @@
   }
   </gr-settings-section>
 
+  @if (invitations().length > 0) {
+    <gr-settings-section title="Pending Invitations" [card]="false" maxWidth="none">
+      <gr-row-list>
+        @for (invitation of invitations(); track invitation.user) {
+          <gr-row icon="mail">
+            <span class="mono">{{ invitation.user }}</span>
+            <span slot="meta">
+              Role {{ invitation.role }} ·
+              Expires {{ invitation.expires_at | date: 'medium' }}
+            </span>
+            <button
+              slot="actions"
+              *appWritable="access()"
+              grButton
+              label="Revoke"
+              icon="close"
+              severity="danger"
+              [loading]="revokingUser() === invitation.user"
+              [disabled]="revokingUser() !== null"
+              [appManagedDisable]="access()"
+              (click)="revokeInvitation(invitation.user)"
+            ></button>
+          </gr-row>
+        }
+      </gr-row-list>
+    </gr-settings-section>
+  }
+
   <!-- Roles -->
   <gr-settings-section title="Roles" [card]="false" maxWidth="none">
     <button

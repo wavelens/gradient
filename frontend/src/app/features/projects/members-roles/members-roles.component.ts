@@ -34,7 +34,7 @@ import {
   SettingsSectionComponent,
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
-import { AccessState } from '@core/models';
+import { AccessState, PendingInvitation } from '@core/models';
 
 interface RoleFormState {
   name: string;
@@ -84,11 +84,13 @@ export class MembersRolesComponent implements OnInit {
   rolesLoading = signal(true);
   addingMember = signal(false);
   removingMember = signal<string | null>(null);
+  revokingUser = signal<string | null>(null);
   updatingRole = signal<string | null>(null);
   savingRole = signal(false);
   deletingRole = signal<string | null>(null);
 
   members = signal<ProjectMember[]>([]);
+  invitations = signal<PendingInvitation[]>([]);
   roles = signal<ProjectRole[]>([]);
   availablePermissions = signal<PermissionDescriptor[]>([]);
   userSuggestions = signal<string[]>([]);
@@ -115,6 +117,7 @@ export class MembersRolesComponent implements OnInit {
     this.projectAccess.forProject(this.projectName).then((s) => this.access.set(s));
     this.loadRoles();
     this.loadMembers();
+    this.loadInvitations();
   }
 
   loadMembers(): void {
@@ -125,6 +128,27 @@ export class MembersRolesComponent implements OnInit {
         this.membersLoading.set(false);
       },
       error: () => this.membersLoading.set(false),
+    });
+  }
+
+  loadInvitations(): void {
+    this.projectsService.getInvitations(this.projectName).subscribe({
+      next: (invitations) => this.invitations.set(invitations),
+      error: () => this.invitations.set([]),
+    });
+  }
+
+  revokeInvitation(username: string): void {
+    this.revokingUser.set(username);
+    this.projectsService.revokeInvitation(this.projectName, username).subscribe({
+      next: () => {
+        this.revokingUser.set(null);
+        this.loadInvitations();
+      },
+      error: () => {
+        this.revokingUser.set(null);
+        this.memberError.set('Failed to revoke the invitation.');
+      },
     });
   }
 

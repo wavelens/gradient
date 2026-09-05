@@ -26,7 +26,10 @@ function findByText(root: HTMLElement, text: string): HTMLElement | null {
   ) ?? null;
 }
 
+const revokeInvitation = vi.fn().mockReturnValue(of('Invitation revoked'));
+
 function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
+  revokeInvitation.mockClear();
   TestBed.configureTestingModule({
     imports: [MembersRolesComponent],
     providers: [
@@ -43,6 +46,17 @@ function setup(access: AccessState): ComponentFixture<MembersRolesComponent> {
               roles: [{ id: 'r1', name: 'Admin', builtin: true, permissions: [], project: null }],
               available_permissions: [],
             }),
+          getInvitations: () =>
+            of([
+              {
+                user: 'bob',
+                name: 'Bob',
+                role: 'Admin',
+                created_at: '2026-09-05T12:00:00',
+                expires_at: '2026-09-12T12:00:00',
+              },
+            ]),
+          revokeInvitation,
         },
       },
       { provide: UserService, useValue: { listUsers: () => of([]) } },
@@ -75,5 +89,22 @@ describe('MembersRolesComponent - access gating', () => {
     expect(addBtn!.disabled).toBe(true);
     expect(newRoleBtn).not.toBeNull();
     expect(newRoleBtn!.disabled).toBe(true);
+  });
+});
+
+describe('MembersRolesComponent - pending invitations', () => {
+  it('lists a pending invitation separately from members', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    const text = (fixture.nativeElement as HTMLElement).textContent || '';
+    expect(text).toContain('Pending Invitations');
+    expect(text).toContain('bob');
+  });
+
+  it('revokes a pending invitation', async () => {
+    const fixture = setup({ managed: false, canEdit: true, canTrigger: true });
+    await settled(fixture);
+    (findByText(fixture.nativeElement, 'revoke') as HTMLButtonElement).click();
+    expect(revokeInvitation).toHaveBeenCalledWith('acme', 'bob');
   });
 });

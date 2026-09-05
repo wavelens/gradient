@@ -30,6 +30,7 @@ import {
 } from '@shared/ui';
 import { WritableDirective, ManagedDisableDirective } from '@shared/access';
 import { injectCacheAccess } from '@core/resolvers/inject-access';
+import { PendingInvitation } from '@core/models';
 
 interface RoleFormState {
   name: string;
@@ -78,11 +79,13 @@ export class CacheMembersRolesComponent implements OnInit {
   rolesLoading = signal(true);
   addingMember = signal(false);
   removingMember = signal<string | null>(null);
+  revokingUser = signal<string | null>(null);
   updatingRole = signal<string | null>(null);
   savingRole = signal(false);
   deletingRole = signal<string | null>(null);
 
   members = signal<CacheMemberItem[]>([]);
+  invitations = signal<PendingInvitation[]>([]);
   roles = signal<CacheRole[]>([]);
   availablePermissions = signal<CachePermissionDescriptor[]>([]);
   userSuggestions = signal<string[]>([]);
@@ -108,6 +111,7 @@ export class CacheMembersRolesComponent implements OnInit {
     this.cacheName = this.route.snapshot.paramMap.get('cache') || '';
     this.loadRoles();
     this.loadMembers();
+    this.loadInvitations();
   }
 
   loadMembers(): void {
@@ -118,6 +122,27 @@ export class CacheMembersRolesComponent implements OnInit {
         this.membersLoading.set(false);
       },
       error: () => this.membersLoading.set(false),
+    });
+  }
+
+  loadInvitations(): void {
+    this.cachesService.getInvitations(this.cacheName).subscribe({
+      next: (invitations) => this.invitations.set(invitations),
+      error: () => this.invitations.set([]),
+    });
+  }
+
+  revokeInvitation(username: string): void {
+    this.revokingUser.set(username);
+    this.cachesService.revokeInvitation(this.cacheName, username).subscribe({
+      next: () => {
+        this.revokingUser.set(null);
+        this.loadInvitations();
+      },
+      error: () => {
+        this.revokingUser.set(null);
+        this.memberError.set('Failed to revoke the invitation.');
+      },
     });
   }
 
