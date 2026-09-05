@@ -210,6 +210,10 @@ impl Actor for SessionActor {
                     myself.stop(Some("write failed".into()));
                 }
             }
+            SessionMsg::Signal(SessionSignal::Close { reason }) => {
+                warn!(peer_id = %st.peer_id, %reason, "closing session at the scheduler's request");
+                myself.stop(Some(reason));
+            }
             SessionMsg::Signal(SessionSignal::Drain) => {
                 if st.draining {
                     return Ok(());

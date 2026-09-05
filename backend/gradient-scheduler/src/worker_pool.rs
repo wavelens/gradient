@@ -259,11 +259,21 @@ impl WorkerPool {
         })
     }
 
+    /// Remove a worker and close its session. Dropping the slot alone would
+    /// leave a live connection the pool no longer tracks: the worker would never
+    /// learn it was evicted, never reconnect, and the pool would stay empty
+    /// while the socket kept talking.
     pub fn unregister(&mut self, id: &str) -> Vec<String> {
         self.worker_projects.remove(id);
         self.workers
             .remove(id)
-            .map(|slot| slot.shared().assigned_jobs.iter().cloned().collect())
+            .map(|slot| {
+                let shared = slot.shared();
+                shared.session.signal(SessionSignal::Close {
+                    reason: "unregistered by the scheduler".into(),
+                });
+                shared.assigned_jobs.iter().cloned().collect()
+            })
             .unwrap_or_default()
     }
 
@@ -849,6 +859,29 @@ mod tests {
                 reason: "why".into()
             })
         );
+    }
+
+    #[test]
+    fn unregister_closes_the_evicted_session() {
+        let mut pool = WorkerPool::new();
+        let (session, mut signals) = port();
+        pool.register("w1".into(), caps(), HashSet::new(), session);
+
+        pool.unregister("w1");
+
+        assert_eq!(
+            signals.try_recv(),
+            Ok(SessionSignal::Close {
+                reason: "unregistered by the scheduler".into()
+            }),
+            "an evicted worker must be told, or it keeps a session the pool no longer knows about"
+        );
+    }
+
+    #[test]
+    fn unregister_of_an_unknown_worker_signals_nothing() {
+        let mut pool = WorkerPool::new();
+        assert!(pool.unregister("nope").is_empty());
     }
 
     #[test]
