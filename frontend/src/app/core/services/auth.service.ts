@@ -6,9 +6,9 @@
 
 import { Injectable, signal, computed, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { BehaviorSubject, Observable, filter, take } from 'rxjs';
-import { tap, switchMap, finalize } from 'rxjs/operators';
-import { ApiService } from './api.service';
+import { BehaviorSubject, Observable, filter, of, take } from 'rxjs';
+import { tap, switchMap, finalize, catchError, map } from 'rxjs/operators';
+import { ApiError, ApiService } from './api.service';
 import { User } from '@core/models';
 
 @Injectable({ providedIn: 'root' })
@@ -26,9 +26,14 @@ export class AuthService {
   initialized$ = this.initializedSubject.asObservable().pipe(filter(v => v), take(1));
 
   // Computed signals (read-only)
+  // True when the last probe never reached the server, so the session state is
+  // unknown rather than absent.
+  private unreachableSignal = signal(false);
+
   user = this.userSignal.asReadonly();
   token = this.tokenSignal.asReadonly();
   loading = this.loadingSignal.asReadonly();
+  serverUnreachable = this.unreachableSignal.asReadonly();
   isAuthenticated = computed(() => !!this.userSignal());
 
   constructor() {
@@ -103,17 +108,39 @@ export class AuthService {
    * Load user information from API
    */
   private loadUser(onComplete?: () => void): void {
-    this.api.get<User>('user').subscribe({
-      next: (user) => {
+    this.probe().subscribe(() => onComplete?.());
+  }
+
+  /// Probes `/user` and records what it learned. An unreachable server says
+  /// nothing about the session, so forgetting it here is what would turn an
+  /// outage into a login screen; the state stays unknown until a real answer
+  /// comes back.
+  private probe(): Observable<boolean> {
+    return this.api.get<User>('user').pipe(
+      tap((user) => {
         this.userSignal.set(user);
-        onComplete?.();
-      },
-      error: () => {
-        this.userSignal.set(null);
-        this.tokenSignal.set(null);
-        onComplete?.();
-      },
-    });
+        this.unreachableSignal.set(false);
+      }),
+      map(() => true),
+      catchError((error: unknown) => {
+        const unreachable = error instanceof ApiError && error.unreachable;
+        this.unreachableSignal.set(unreachable);
+        if (!unreachable) {
+          this.userSignal.set(null);
+          this.tokenSignal.set(null);
+        }
+        return of(false);
+      })
+    );
+  }
+
+  /// Re-runs the probe after an outage, so a guard does not decide on an answer
+  /// that never arrived.
+  resolveSession(): Observable<boolean> {
+    if (!this.unreachableSignal()) {
+      return of(this.isAuthenticated());
+    }
+    return this.probe();
   }
 
   /**

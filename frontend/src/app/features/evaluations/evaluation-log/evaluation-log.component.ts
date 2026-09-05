@@ -35,6 +35,9 @@ import { auditTime, switchMap } from 'rxjs/operators';
 import { EvaluationsService, BuildItem, BuildWithOutputs } from '@core/services/evaluations.service';
 import { LiveService } from '@core/services/live.service';
 import { ProjectsService } from '@core/services/projects.service';
+import { TasksService } from '@core/services/tasks.service';
+import { AccessService, WritableDirective } from '@shared/access';
+import { AccessState, accessFromEntity } from '@core/models/access.model';
 import { Evaluation, EvaluationMessage, EvaluationStatus, WaitingReason, TriggerType } from '@core/models';
 import { AuthService } from '@core/services/auth.service';
 import {
@@ -53,7 +56,7 @@ import { environment } from '@environments/environment';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, MessageBannerComponent],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, MessageBannerComponent, WritableDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -69,6 +72,8 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   private evalService = inject(EvaluationsService);
   private live = inject(LiveService);
   private projectsService = inject(ProjectsService);
+  private tasksService = inject(TasksService);
+  private accessService = inject(AccessService);
   protected authService = inject(AuthService);
   private sanitizer = inject(DomSanitizer);
   private cdr = inject(ChangeDetectorRef);
@@ -85,6 +90,10 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   logLineCount = signal(0);
   logLoading = signal(true);
   aborting = signal(false);
+  // The log page is reachable without the task route's access resolver, so the
+  // owning task is asked directly: a viewer must not be offered an abort.
+  access = signal<AccessState>({ managed: false, canEdit: false, canTrigger: false });
+  triggerAccess = computed(() => this.accessService.triggerAccess(this.access()));
   autoScroll = signal(true);
   showScrollBtn = signal(false);
   duration = signal('0s');
@@ -201,6 +210,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       next: (evaluation) => {
         this.evaluation.set(evaluation);
         this.loading.set(false);
+        this.loadAccess(evaluation.task_name);
         this.loadBuilds();
         this.loadMessages();
         this.startDurationTimer(evaluation);
@@ -208,6 +218,17 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       },
       error: () => this.loading.set(false),
     });
+  }
+
+  private loadAccess(taskName?: string): void {
+    if (!taskName) return;
+    this.tasksService
+      .getTask(this.projectName, taskName)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (task) => this.access.set(accessFromEntity(task)),
+        error: () => {},
+      });
   }
 
   loadMessages(): void {

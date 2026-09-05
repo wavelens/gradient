@@ -4,16 +4,18 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-// A height the consumer can override; without one the image would collapse.
+// A height the consumer can override; without one the mark would collapse.
 :host {
   display: inline-flex;
   align-items: center;
   height: 32px;
+  color: var(--gr-text-primary);
 }
 
-img {
+.mark {
   display: block;
   height: 100%;
-  width: auto;
-  max-width: 100%;
+  aspect-ratio: 42 / 27;
+  background: currentcolor;
+  mask: url('/images/logo.svg') no-repeat center / contain;
 }

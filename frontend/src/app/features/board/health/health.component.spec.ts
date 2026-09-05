@@ -140,7 +140,7 @@ describe('BoardHealthComponent', () => {
 
   it('lists every supervised loop and flags restarts', () => {
     const fixture = setup(() => of(true));
-    const rows = fixture.nativeElement.querySelectorAll('table.supervision tbody tr');
+    const rows = fixture.nativeElement.querySelectorAll('gr-table.supervision tbody tr');
     expect(rows.length).toBe(2);
     expect(rows[0].textContent).toContain('build-dispatch');
     expect(rows[0].querySelector('td.bad')?.textContent?.trim()).toBe('1');

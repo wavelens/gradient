@@ -59,6 +59,7 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
   starting = signal(false);
   errorMessage = signal<string | null>(null);
   abortTarget = signal<string | null>(null);
+  aborting = signal(false);
   tick = signal(Date.now());
 
   projectName = '';
@@ -233,11 +234,19 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   confirmAbort(): void {
     const id = this.abortTarget();
-    this.abortTarget.set(null);
-    if (!id) return;
+    if (!id || this.aborting()) return;
+    this.aborting.set(true);
     this.tasksService.abortEvaluation(this.projectName, this.taskName, id).subscribe({
-      next: () => this.loadTaskData(false),
-      error: (error) => console.error('Failed to abort evaluation:', error),
+      next: () => {
+        this.aborting.set(false);
+        this.abortTarget.set(null);
+        this.loadTaskData(false);
+      },
+      error: (error: Error) => {
+        this.aborting.set(false);
+        this.abortTarget.set(null);
+        this.errorMessage.set(error?.message || 'Failed to abort evaluation.');
+      },
     });
   }
 
@@ -351,21 +360,28 @@ export class TaskDetailComponent implements OnInit, OnDestroy {
 
   // Report generation is authenticated server-side, so an anonymous visitor
   // browsing a public task is not offered an action that can only 403.
-  panelMenuModel = computed<MenuItem[]>(() => [
-    { label: 'Metrics', icon: 'show_chart',
-      routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
-    ...(this.authService.isAuthenticated()
-      ? [{ label: 'Diagnostic report', icon: 'bug_report', disabled: !this.selected(),
-           command: () => this.reportDialogOpen.set(true) }]
-      : []),
-  ]);
+  panelMenuModel = computed<MenuItem[]>(() => {
+    const selected = this.selected();
+    return [
+      { label: 'Logs', icon: 'article', disabled: !selected,
+        routerLink: selected
+          ? ['/project', this.projectName, 'log', selected.id]
+          : undefined },
+      { label: 'Metrics', icon: 'show_chart',
+        routerLink: ['/project', this.projectName, 'task', this.taskName, 'metrics'] },
+      ...(this.authService.isAuthenticated()
+        ? [{ label: 'Diagnostic report', icon: 'bug_report', disabled: !selected,
+             command: () => this.reportDialogOpen.set(true) }]
+        : []),
+    ];
+  });
 
   reportDialogOpen = signal(false);
   reportBusy = signal(false);
   reportOptions = signal<ReportOptions>({
-    anonymize_identities: true,
-    anonymize_packages: false,
-    include_logs: true,
+    include_identities: false,
+    include_packages: true,
+    include_logs: false,
     include_instance: true,
   });
 

@@ -100,6 +100,9 @@ zstd              = { version = "0.13", default-features = false }
 # Bytes / buffers
 bytes = { version = "1.11", default-features = false, features = ["std"] }
 
+# Text search
+aho-corasick = { version = "1.1", default-features = false, features = ["std", "perf-literal"] }
+
 # Concurrency
 arc-swap = { version = "1", default-features = false }
 

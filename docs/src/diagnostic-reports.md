@@ -13,10 +13,12 @@ instance.
 ## Generating one
 
 On a task page, open the three-dot menu on the evaluation panel and choose
-**Diagnostic report**. Four independent options control what goes in; the
-download starts when you press Generate.
+**Diagnostic report**. Four independent options control what goes in; every box
+ticked is the fullest report you may generate. The download starts when you
+press Generate, and building one takes a few minutes on a large evaluation.
 
-The same thing over the API:
+The same thing over the API. The endpoint asks what to *anonymise*, which is the
+inverse of what the dialog asks:
 
 ```sh
 curl -sO -J -H "Authorization: Bearer $TOKEN" \
@@ -25,17 +27,27 @@ curl -sO -J -H "Authorization: Bearer $TOKEN" \
 
 ## What the options do
 
-| Option | Default | Effect |
-| --- | --- | --- |
-| Anonymise identities | on | Repository URLs, project and task names, user emails, worker names and ids become per-report tokens (`repo-a1b2`, `worker-7f3c`). |
-| Anonymise package names | off | The name half of store paths and flake attribute paths becomes a token. Off by default, because knowing *which* package broke is usually what makes a report useful. |
-| Include build logs | on | The full log of every failed or aborted attempt. Successful builds are not included. |
-| Include instance context | on | Worker fleet, upstream caches and the resolved server config. Requires the `ManageWorkers` permission. |
+| Option | Default | API parameter | Effect |
+| --- | --- | --- | --- |
+| Include identities | off | `anonymize_identities=true` | Off by default: repository URLs, project and task names, user emails, worker names and ids become per-report tokens (`repo-a1b2`, `worker-7f3c`). |
+| Include package names | on | `anonymize_packages=false` | On by default, because knowing *which* package broke is usually what makes a report useful. Unticked, the name half of store paths and flake attribute paths becomes a token. |
+| Include build logs | off | `include_logs=false` | Off by default: the full log of every failed or aborted attempt, carrying whatever the build printed. Successful builds are never included. |
+| Include instance context | on | `include_instance=true` | Worker fleet, upstream caches and the resolved server config. Requires the `ManageWorkers` permission. |
+
+The API keeps its own defaults for callers that omit a parameter
+(`anonymize_identities=true`, `anonymize_packages=false`, `include_logs=true`,
+`include_instance=true`); the dialog always sends all four explicitly.
 
 Anonymisation is stable pseudonymisation, not deletion. The same input always
 maps to the same token within one report, so dependency and closure reasoning
 still works; a fresh salt per report means two reports of the same instance
 cannot be correlated. The salt is never written to the file.
+
+Free text - build logs and commit messages - is rewritten against every
+pseudonym the report has minted, in one pass over the text. Both the pass and
+the pseudonym set it is compiled from are shared across every log, so the cost
+of anonymising a report grows with its size rather than with its size times its
+package count.
 
 Nix store **hashes are always preserved**, even with everything anonymised.
 They are one-way, and they are what lets a maintainer check whether a path is

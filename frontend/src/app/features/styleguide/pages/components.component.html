@@ -71,6 +71,32 @@
   <gr-autocomplete inputId="sg-ac" [suggestions]="suggestions" placeholder="Start typing..." />
 </gr-form-field>
 
+<h2>Table</h2>
+<p>One recipe for every table: the card edge, the header band, the row rule and the
+   horizontal scroll all come from <code>gr-table</code>, so a page brings only its
+   own columns. A sortable header is a button and states the sort for assistive
+   tech; a numeric column takes <code>class="num"</code> and aligns right.</p>
+<gr-table>
+  <thead>
+    <tr>
+      <th>Worker</th>
+      <th>State</th>
+      <th class="num" aria-sort="descending">
+        <button class="gr-th-sort" type="button">Builds</button>
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    @for (row of workerRows; track row.worker) {
+      <tr>
+        <td class="mono">{{ row.worker }}</td>
+        <td>{{ row.state }}</td>
+        <td class="num">{{ row.builds }}</td>
+      </tr>
+    }
+  </tbody>
+</gr-table>
+
 <h2>Overlays</h2>
 <button grButton label="Open menu" icon="more_vert" severity="secondary" (click)="menu.toggle($event)"></button>
 <gr-menu #menu [model]="menuItems" />

@@ -9,27 +9,32 @@ import { CommonModule } from '@angular/common';
 import { Subscription } from 'rxjs';
 import { BoardService, MetricPoint } from '@core/services/board.service';
 import { BoardLiveService } from '@core/services/board-live.service';
-import { MetricChartComponent } from '@shared/ui';
+import { LoadingSpinnerComponent, MetricChartComponent } from '@shared/ui';
+import { firstLoad } from '../first-load';
 
 @Component({
   selector: 'app-board-overview',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent],
+  imports: [CommonModule, MetricChartComponent, LoadingSpinnerComponent],
   template: `
-    <div class="kpis">
-      <div class="kpi"><span class="label">Connected workers</span><span class="value">{{ workers() }}</span></div>
-      <div class="kpi"><span class="label">Jobs pending</span><span class="value">{{ pending() }}</span></div>
-      <div class="kpi"><span class="label">Jobs active</span><span class="value">{{ active() }}</span></div>
-      <div class="kpi"><span class="label">Dispatched (live)</span><span class="value">{{ dispatchedCount() }}</span></div>
-    </div>
+    @if (first.loading()) {
+      <gr-loading-spinner message="Loading overview..." />
+    } @else {
+      <div class="kpis">
+        <div class="kpi"><span class="label">Connected workers</span><span class="value">{{ workers() }}</span></div>
+        <div class="kpi"><span class="label">Jobs pending</span><span class="value">{{ pending() }}</span></div>
+        <div class="kpi"><span class="label">Jobs active</span><span class="value">{{ active() }}</span></div>
+        <div class="kpi"><span class="label">Dispatched (live)</span><span class="value">{{ dispatchedCount() }}</span></div>
+      </div>
 
-    <gr-metric-chart
-      title="Builds completed per hour (24h)"
-      type="area"
-      [series]="completedSeries()"
-      [categories]="categories()"
-      [colors]="['#28a745']"
-    ></gr-metric-chart>
+      <gr-metric-chart
+        title="Builds completed per hour (24h)"
+        type="area"
+        [series]="completedSeries()"
+        [categories]="categories()"
+        [colors]="['#28a745']"
+      ></gr-metric-chart>
+    }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrl: './overview.component.scss',
@@ -38,6 +43,7 @@ export class BoardOverviewComponent implements OnInit, OnDestroy {
   private board = inject(BoardService);
   private live = inject(BoardLiveService);
   private sub?: Subscription;
+  protected first = firstLoad();
 
   workers = signal(0);
   pending = signal(0);
@@ -47,9 +53,15 @@ export class BoardOverviewComponent implements OnInit, OnDestroy {
   categories = signal<string[]>([]);
 
   ngOnInit(): void {
-    this.board.getWorkers().subscribe((w) => this.workers.set(w.length));
-    this.board.getDispatchedJobs().subscribe((r) => this.dispatchedCount.set(r.jobs.length + r.other_running));
-    this.board.query('builds.completed', 'hour').subscribe((points) => this.applyCompleted(points));
+    this.board.getWorkers().pipe(this.first.track()).subscribe((w) => this.workers.set(w.length));
+    this.board
+      .getDispatchedJobs()
+      .pipe(this.first.track())
+      .subscribe((r) => this.dispatchedCount.set(r.jobs.length + r.other_running));
+    this.board
+      .query('builds.completed', 'hour')
+      .pipe(this.first.track())
+      .subscribe((points) => this.applyCompleted(points));
     this.sub = this.live.connect().subscribe({
       next: (ev) => {
         if (ev.type === 'queue_depth') {

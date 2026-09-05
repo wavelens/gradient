@@ -27,21 +27,16 @@ h2 { color: var(--gr-text-primary); font-size: $font-size-lg; margin: 1.75rem 0 
 .build-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .build-grid .span2 { grid-column: 1 / -1; }
 .build-grid .out { word-break: break-all; margin-top: 0.25rem; }
-table.rules { width: 100%; border-collapse: collapse; background: var(--gr-surface-raised); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-md; overflow: hidden; }
-th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--gr-border-subtle); font-size: $font-size-sm; color: var(--gr-text-secondary); }
-th { color: var(--gr-text-primary); }
-.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--gr-status-success); }
-.num.neg { color: var(--gr-status-danger); }
+td.num { color: var(--gr-status-success); }
+td.num.neg { color: var(--gr-status-danger); }
 .bar-cell { width: 40%; }
 .bar { height: 10px; background: var(--gr-status-success); border-radius: 3px; min-width: 2px; }
 .bar.neg { background: var(--gr-status-danger); }
 pre { background: var(--gr-surface-base); padding: 0.75rem; border-radius: $border-radius-sm; overflow: auto; color: var(--gr-text-secondary); font-size: $font-size-xs; }
 .muted { color: var(--gr-text-muted); }
 .ctx h3 { color: var(--gr-text-primary); font-size: $font-size-md; margin: 1.25rem 0 0.5rem; }
-table.kv { width: 100%; border-collapse: collapse; background: var(--gr-surface-raised); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-md; overflow: hidden; }
-table.kv td { padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--gr-border-subtle); font-size: $font-size-sm; }
-table.kv td.label { width: 40%; display: table-cell; }
-table.kv.counts { margin-top: 1rem; }
+gr-table.kv td.label { width: 40%; display: table-cell; }
+gr-table.kv.counts { display: block; margin-top: 1rem; }
 .drv-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .drv-row { display: flex; flex-direction: column; gap: 0.15rem; background: var(--gr-surface-raised); border: 1px solid var(--gr-border-subtle); border-radius: $border-radius-sm; padding: 0.5rem 0.75rem; }
 .drv-row.clickable { cursor: pointer; transition: background 0.1s, border-color 0.1s; }

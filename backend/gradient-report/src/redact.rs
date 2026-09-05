@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use aho_corasick::{AhoCorasick, MatchKind};
 use sha2::{Digest as _, Sha256};
 
 use crate::schema::ReportOptions;
@@ -26,6 +27,61 @@ pub struct Redactor {
     opts: ReportOptions,
     salt: [u8; 32],
     seen: Mutex<HashMap<String, String>>,
+    /// Free text is rewritten against every pseudonym minted so far. Compiled
+    /// once per pattern set and reused: a scan of the text per pseudonym costs
+    /// the product of both, which is what made a large report take minutes.
+    matcher: Mutex<Option<Matcher>>,
+    #[cfg(test)]
+    compilations: std::sync::atomic::AtomicUsize,
+}
+
+/// The minted pseudonyms, compiled into one pass over the text.
+struct Matcher {
+    /// How many pseudonyms this was built from; a mint invalidates it.
+    covers: usize,
+    /// `None` when the pattern set could not be compiled. The fallback then
+    /// scans once per pseudonym rather than letting an original through.
+    automaton: Option<AhoCorasick>,
+    patterns: Vec<String>,
+    tokens: Vec<String>,
+}
+
+impl Matcher {
+    fn build(pairs: Vec<(String, String)>) -> Self {
+        let covers = pairs.len();
+        let (patterns, tokens): (Vec<String>, Vec<String>) = pairs.into_iter().unzip();
+        let automaton = AhoCorasick::builder()
+            .match_kind(MatchKind::LeftmostLongest)
+            .build(&patterns)
+            .inspect_err(|e| {
+                tracing::warn!(
+                    error = %e,
+                    patterns = covers,
+                    "report: pseudonym matcher did not compile, redacting the slow way",
+                );
+            })
+            .ok();
+
+        Self {
+            covers,
+            automaton,
+            patterns,
+            tokens,
+        }
+    }
+
+    fn apply(&self, text: &str) -> String {
+        match &self.automaton {
+            Some(automaton) => automaton.replace_all(text, &self.tokens),
+            None => self
+                .patterns
+                .iter()
+                .zip(&self.tokens)
+                .fold(text.to_owned(), |acc, (original, token)| {
+                    acc.replace(original, token)
+                }),
+        }
+    }
 }
 
 impl Redactor {
@@ -34,6 +90,9 @@ impl Redactor {
             opts,
             salt: rand::random(),
             seen: Mutex::new(HashMap::new()),
+            matcher: Mutex::new(None),
+            #[cfg(test)]
+            compilations: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -91,15 +150,24 @@ impl Redactor {
 
     /// Free text names the same things the columns do, so a log is redacted
     /// against every pseudonym this report has already minted, plus any store
-    /// path it happens to name. Longest original first, so a shorter one that
-    /// is a prefix of another cannot clip it.
+    /// path it happens to name. One pass, longest match first, so a shorter
+    /// original that is a prefix of another cannot clip it and a token cannot
+    /// be rewritten again by a pseudonym minted later.
     pub fn text(&self, text: &str) -> String {
-        let mut out = self.redact_store_paths(text);
-        for (original, token) in self.minted() {
-            out = out.replace(&original, &token);
+        // Rewriting store paths mints the package names this text introduces,
+        // so the matcher is resolved after it rather than before.
+        let out = self.redact_store_paths(text);
+        let minted = self.seen.lock().expect("redactor mutex").len();
+
+        let mut matcher = self.matcher.lock().expect("redactor matcher mutex");
+        if matcher.as_ref().is_none_or(|m| m.covers != minted) {
+            #[cfg(test)]
+            self.compilations
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            *matcher = Some(Matcher::build(self.minted()));
         }
 
-        out
+        matcher.as_ref().map_or(out.clone(), |m| m.apply(&out))
     }
 
     /// What [`Redactor::text`] will actually do, for the manifest to declare.
@@ -231,6 +299,66 @@ mod tests {
     fn store_path_is_untouched_when_packages_are_not_anonymized() {
         let p = "/nix/store/2s7ijz3qblblfb903r4spy3pvd7ag35f-clap_complete-4.6.9";
         assert_eq!(Redactor::new(opts(true, false)).store_path(p), p);
+    }
+
+    /// Recompiling the pattern set for every log is the other half of the
+    /// quadratic cost, so only a fresh pseudonym may invalidate it.
+    #[test]
+    fn the_pseudonym_matcher_is_compiled_once_per_pattern_set() {
+        use std::sync::atomic::Ordering;
+
+        let r = Redactor::new(opts(true, false));
+        r.identity(REPO, "repo");
+        r.text("first log");
+        r.text("second log");
+        assert_eq!(r.compilations.load(Ordering::Relaxed), 1);
+
+        r.identity("someone@example.invalid", "user");
+        r.text("third log");
+        assert_eq!(
+            r.compilations.load(Ordering::Relaxed),
+            2,
+            "a new pseudonym has to reach the next log"
+        );
+    }
+
+    /// Free text is rewritten in one pass, so a token minted from a shorter
+    /// original cannot be found again inside one already substituted.
+    #[test]
+    fn free_text_substitutes_each_position_once() {
+        let r = Redactor::new(opts(true, false));
+        let short = r.identity("acme", "user");
+        r.identity("acme corp", "user");
+        assert_eq!(
+            r.text(&format!("hello {short}")),
+            format!("hello {short}"),
+            "a minted token must survive a later pass"
+        );
+    }
+
+    /// The longest original wins where two overlap, so a shorter one that is a
+    /// prefix of another cannot clip it.
+    #[test]
+    fn the_longest_match_wins_where_two_originals_overlap() {
+        let r = Redactor::new(opts(true, false));
+        r.identity("acme", "user");
+        let long = r.identity("acme-infra", "user");
+        assert_eq!(
+            r.text("built by acme-infra today"),
+            format!("built by {long} today")
+        );
+    }
+
+    /// A token minted while scanning the same text still has to be applied to
+    /// the bare mentions elsewhere in it.
+    #[test]
+    fn a_name_minted_from_a_store_path_is_replaced_everywhere_in_the_same_text() {
+        let r = Redactor::new(opts(true, true));
+        let out = r.text(
+            "building /nix/store/2s7ijz3qblblfb903r4spy3pvd7ag35f-clap_complete-4.6.9; \
+             clap_complete-4.6.9 failed",
+        );
+        assert!(!out.contains("clap_complete"), "{out}");
     }
 
     #[test]

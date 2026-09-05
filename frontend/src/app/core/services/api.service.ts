@@ -5,11 +5,30 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { HttpClient, HttpHeaders, HttpResponse } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpHeaders, HttpResponse } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { map, catchError } from 'rxjs/operators';
 import { environment } from '@environments/environment';
 import { ApiResponse } from '@core/models';
+
+/// A failed request, carrying the status so a caller can tell "the server said
+/// no" from "the server never answered". Extends Error, so the many callers
+/// that only read `message` keep working.
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+
+  /// The server could not be reached or is not serving: nothing about the
+  /// request itself was rejected.
+  get unreachable(): boolean {
+    return this.status === 0 || this.status === 502 || this.status === 503 || this.status === 504;
+  }
+}
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -42,10 +61,14 @@ export class ApiService {
           }
           return response.message as T;
         }),
-        catchError((error) => {
-          // Handle HTTP errors
-          const errorMessage = error.error?.message || error.message || 'An unknown error occurred';
-          return throwError(() => new Error(errorMessage));
+        catchError((error: unknown) => {
+          if (error instanceof HttpErrorResponse) {
+            const message = error.error?.message || error.message || 'An unknown error occurred';
+            return throwError(() => new ApiError(message, error.status));
+          }
+          return throwError(() =>
+            error instanceof Error ? error : new Error('An unknown error occurred')
+          );
         })
       );
   }

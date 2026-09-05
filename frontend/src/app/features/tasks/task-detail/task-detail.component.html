@@ -169,13 +169,15 @@
   <gr-dialog
     header="Abort evaluation"
     [visible]="abortTarget() !== null"
-    (visibleChange)="!$event && abortTarget.set(null)"
+    (visibleChange)="!$event && !aborting() && abortTarget.set(null)"
     width="400px"
   >
     <p>Do you really want to abort the eval?</p>
     <div grDialogFooter>
-      <button grButton label="Cancel" severity="secondary" (click)="abortTarget.set(null)"></button>
-      <button grButton label="Abort" severity="danger" (click)="confirmAbort()"></button>
+      <button grButton label="Cancel" severity="secondary" [disabled]="aborting()"
+              (click)="abortTarget.set(null)"></button>
+      <button grButton label="Abort" severity="danger" [loading]="aborting()"
+              [disabled]="aborting()" (click)="confirmAbort()"></button>
     </div>
   </gr-dialog>
 
@@ -186,23 +188,23 @@
     width="480px"
   >
     <p>
-      Exports this evaluation, the instance state that explains it, and the logs
-      of every failed build as a SQLite file you can attach to a bug report.
+      Exports this evaluation and the state that explains it as a SQLite file you
+      can attach to a bug report. Everything ticked below goes in as it is.
     </p>
-    <p class="report-note">This might take a few Minutes.</p>
+    <p class="report-note">This might take a few minutes.</p>
     <div class="report-options">
-      <gr-checkbox label="Anonymise identities"
-                   [ngModel]="reportOptions().anonymize_identities"
-                   (ngModelChange)="setReportOption('anonymize_identities', $event)"
-                   grTooltip="Replaces repository URLs, project and task names, emails and worker names with per-report tokens."></gr-checkbox>
-      <gr-checkbox label="Anonymise package names"
-                   [ngModel]="reportOptions().anonymize_packages"
-                   (ngModelChange)="setReportOption('anonymize_packages', $event)"
-                   grTooltip="Off by default: knowing which package broke is usually what makes the report useful. Store path hashes are kept either way."></gr-checkbox>
+      <gr-checkbox label="Include identities"
+                   [ngModel]="reportOptions().include_identities"
+                   (ngModelChange)="setReportOption('include_identities', $event)"
+                   grTooltip="Off by default: repository URLs, project and task names, emails and worker names are replaced with per-report tokens."></gr-checkbox>
+      <gr-checkbox label="Include package names"
+                   [ngModel]="reportOptions().include_packages"
+                   (ngModelChange)="setReportOption('include_packages', $event)"
+                   grTooltip="On by default: knowing which package broke is usually what makes the report useful. Store path hashes are kept either way."></gr-checkbox>
       <gr-checkbox label="Include build logs"
                    [ngModel]="reportOptions().include_logs"
                    (ngModelChange)="setReportOption('include_logs', $event)"
-                   grTooltip="Full logs for failed and aborted attempts only. Build output can contain anything the build printed."></gr-checkbox>
+                   grTooltip="Off by default: full logs for failed and aborted attempts, carrying whatever the build printed."></gr-checkbox>
       <gr-checkbox label="Include instance context"
                    [ngModel]="reportOptions().include_instance"
                    (ngModelChange)="setReportOption('include_instance', $event)"

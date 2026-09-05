@@ -8071,3 +8071,58 @@ substitute miss budget does, and it counts attempts carrying
 `SubstituteUnavailable`. A requeue recorded with no reason would re-dispatch,
 fail and requeue forever, so `attempt_reason_for` records that reason for every
 `Requeue` whatever kind produced it.
+
+## The frontend refinement pass (#607)
+
+**`frontend/src/app/shared/ui/checkbox/checkbox.component.spec.ts`** covers the
+label that did nothing. `inputId` defaulted to the empty string, so a caller that
+gave none rendered `for=""` and clicking the text missed the box entirely - which
+is what every checkbox in the diagnostic-report dialog did.
+`links the label to the box even when the caller gives no id`,
+`gives two unnamed boxes different ids, so one label cannot toggle both` and
+`clicking the label toggles the box` pin the generated fallback and that it is
+per instance rather than shared.
+
+**`frontend/src/app/core/services/tasks.service.spec.ts`** pins the inversion at
+the service boundary. The dialog asks what to *include*, the endpoint asks what
+to *anonymise*; `sends the wire its anonymise flags inverted` and
+`anonymises what the caller left unticked` keep the double negative out of the
+component, so every box ticked means the fullest report the caller may have.
+`frontend/.../task-detail.component.spec.ts` carries the matching defaults in
+`defaults to hidden identities, real package names and no build logs`.
+
+**`frontend/src/app/core/services/auth.service.spec.ts`** and
+**`frontend/src/app/core/guards/auth.guard.spec.ts`** cover the outage that read
+as a logout. `AuthService` treated any failed `/user` probe as "not signed in",
+so a 502 cleared the session and both buttons on the Bad Gateway page landed on
+the login form. `leaves the session unknown when the server is unreachable`,
+`re-probes once the server answers again, without a fresh page load` and
+`cancels the navigation rather than logging out when the server is unreachable`
+pin the three halves of the fix: an unreachable server is not an answer, a guard
+re-asks instead of deciding on one that never arrived, and while it stays
+unreachable the navigation is only cancelled so the error page stays up.
+
+**`frontend/src/app/features/board/first-load.spec.ts`** covers the board's
+spinner. A board page polls, so only its first paint earns one;
+`waits for every tracked request, not just the quickest` is why the helper counts
+requests instead of clearing on the first response, and
+`clears on a failed request too, so an error is not hidden by a spinner` is what
+keeps a dead endpoint from spinning forever.
+
+**`frontend/src/app/features/evaluations/evaluation-log/evaluation-log.component.spec.ts`**
+covers the abort the log page offered to anyone signed in. The evaluation page
+hides it behind the trigger permission and the log page showed the same
+evaluation, so it was the way around that check;
+`stays closed for a member who may only view` is the case that was open.
+
+**`backend/gradient-report/src/redact.rs`** covers why anonymising a report took
+minutes. `Redactor::text` rebuilt and re-sorted the whole pseudonym set per call
+and then scanned the text once per pseudonym, so a report with a large evaluation
+paid its log size times its package count.
+`the_pseudonym_matcher_is_compiled_once_per_pattern_set` pins that only a fresh
+pseudonym invalidates the compiled set, and
+`free_text_substitutes_each_position_once`,
+`the_longest_match_wins_where_two_originals_overlap` and
+`a_name_minted_from_a_store_path_is_replaced_everywhere_in_the_same_text` pin the
+semantics the single pass has to keep - including the one the old loop got wrong,
+where a token could be rewritten again by a pseudonym minted later.

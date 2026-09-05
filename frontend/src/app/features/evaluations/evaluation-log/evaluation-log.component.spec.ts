@@ -201,4 +201,25 @@ describe('EvaluationLogComponent', () => {
       );
     });
   });
+
+  // The evaluation page hides the abort behind write access; the log page shows
+  // the same evaluation and must not be the way around it.
+  describe('abort access', () => {
+    it('starts closed, so a view-only visitor is never offered an abort', () => {
+      const { cmp } = setup();
+      expect(cmp.triggerAccess().canEdit).toBe(false);
+    });
+
+    it('opens once the owning task reports the trigger permission', () => {
+      const { cmp } = setup();
+      cmp.access.set({ managed: false, canEdit: false, canTrigger: true });
+      expect(cmp.triggerAccess().canEdit).toBe(true);
+    });
+
+    it('stays closed for a member who may only view', () => {
+      const { cmp } = setup();
+      cmp.access.set({ managed: false, canEdit: true, canTrigger: false });
+      expect(cmp.triggerAccess().canEdit).toBe(false);
+    });
+  });
 });

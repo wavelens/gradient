@@ -7,6 +7,7 @@
 import { Component, OnInit, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
+import { LoadingSpinnerComponent, TableComponent } from '@shared/ui';
 import { BoardService, BoardHealth } from '@core/services/board.service';
 import { AdminService, AdminTask } from '@core/services/admin.service';
 
@@ -15,7 +16,7 @@ const MIB = 1024 ** 2;
 @Component({
   selector: 'app-board-health',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [CommonModule, RouterModule, TableComponent, LoadingSpinnerComponent],
   template: `
     @if (health(); as h) {
       @if (h.draining) {
@@ -47,7 +48,7 @@ const MIB = 1024 ** 2;
       </div>
 
       <h2>Supervision</h2>
-      <table class="http supervision">
+      <gr-table class="http supervision">
         <thead><tr><th>Loop</th><th>Restarts</th><th>Errors</th><th>Timeouts</th><th>Last ok</th><th>Last error</th></tr></thead>
         <tbody>
           @for (l of h.supervised; track l.name) {
@@ -63,7 +64,7 @@ const MIB = 1024 ** 2;
             <tr><td colspan="6" class="muted">No supervised loops reported.</td></tr>
           }
         </tbody>
-      </table>
+      </gr-table>
 
       <h2>Admin</h2>
       <div class="admin-actions">
@@ -77,7 +78,7 @@ const MIB = 1024 ** 2;
         @if (gcNotice(); as n) { <span class="notice">{{ n }}</span> }
       </div>
 
-      <table class="http">
+      <gr-table class="http">
         <thead><tr><th>Task</th><th>Status</th><th>Created</th><th>Finished</th><th>Error</th></tr></thead>
         <tbody>
           @for (t of tasks(); track t.id) {
@@ -92,9 +93,9 @@ const MIB = 1024 ** 2;
             <tr><td colspan="5" class="muted">No admin tasks yet.</td></tr>
           }
         </tbody>
-      </table>
+      </gr-table>
     } @else {
-      <p class="muted">Loading… (superuser only)</p>
+      <gr-loading-spinner message="Loading system health..." />
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,

@@ -12,68 +12,73 @@ import {
   ExpensiveResource,
   TopProjectBuildTime,
 } from '@core/services/board.service';
-import { MetricChartComponent } from '@shared/ui';
+import { LoadingSpinnerComponent, MetricChartComponent, TableComponent } from '@shared/ui';
+import { firstLoad } from '../first-load';
 
 type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
 
 @Component({
   selector: 'app-board-expensive-jobs',
   standalone: true,
-  imports: [CommonModule, MetricChartComponent],
+  imports: [CommonModule, MetricChartComponent, TableComponent, LoadingSpinnerComponent],
   template: `
-    <nav class="tabs">
-      @for (t of tabs; track t.key) {
-        <button [class.active]="tab() === t.key" (click)="setTab(t.key)">{{ t.label }}</button>
-      }
-    </nav>
-
-    <div class="controls">
-      <label>Window (days)
-        <select (change)="setWindow($event)">
-          <option value="7">7</option>
-          <option value="30" selected>30</option>
-          <option value="90">90</option>
-        </select>
-      </label>
-    </div>
-
-    @if (tab() === 'time') {
-      <table class="expensive">
-        <thead><tr><th>#</th><th>Derivation</th><th>Build time</th><th>Worker</th></tr></thead>
-        <tbody>
-          @for (b of builds(); track b.build_id; let i = $index) {
-            <tr><td>{{ i + 1 }}</td><td class="mono">{{ b.name }}</td><td>{{ formatMs(b.build_time_ms) }}</td><td class="mono">{{ b.worker ?? '-' }}</td></tr>
-          } @empty {
-            <tr><td colspan="4" class="muted">No builds in this window.</td></tr>
-          }
-        </tbody>
-      </table>
+    @if (first.loading()) {
+      <gr-loading-spinner message="Loading jobs..." />
     } @else {
-      @if (tab() === 'network') {
-        <p class="note">Network is a host-level peak measured during each build's window (cgroup v2 has no per-build network accounting); exact only when the build is the host's sole network user.</p>
-      }
-      <table class="expensive">
-        <thead><tr><th>#</th><th>Derivation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
-        <tbody>
-          @for (r of resources(); track r.derivation; let i = $index) {
-            <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ formatValue(r) }}</td><td class="mono">{{ r.worker || '-' }}</td></tr>
-          } @empty {
-            <tr><td colspan="4" class="muted">No per-build metrics recorded in this window (needs cgroup metrics enabled on workers).</td></tr>
-          }
-        </tbody>
-      </table>
-    }
+      <nav class="tabs">
+        @for (t of tabs; track t.key) {
+          <button [class.active]="tab() === t.key" (click)="setTab(t.key)">{{ t.label }}</button>
+        }
+      </nav>
 
-    @if (topProjects().length) {
-      <h2>Top projects by build time (superuser)</h2>
-      <gr-metric-chart
-        type="bar"
-        [horizontal]="true"
-        [height]="320"
-        [series]="topProjectSeries()"
-        [categories]="topProjectCategories()"
-        [colors]="['#fd7e14']"
-      ></gr-metric-chart>
+      <div class="controls">
+        <label>Window (days)
+          <select (change)="setWindow($event)">
+            <option value="7">7</option>
+            <option value="30" selected>30</option>
+            <option value="90">90</option>
+          </select>
+        </label>
+      </div>
+
+      @if (tab() === 'time') {
+        <gr-table class="expensive">
+          <thead><tr><th>#</th><th>Derivation</th><th>Build time</th><th>Worker</th></tr></thead>
+          <tbody>
+            @for (b of builds(); track b.build_id; let i = $index) {
+              <tr><td>{{ i + 1 }}</td><td class="mono">{{ b.name }}</td><td>{{ formatMs(b.build_time_ms) }}</td><td class="mono">{{ b.worker ?? '-' }}</td></tr>
+            } @empty {
+              <tr><td colspan="4" class="muted">No builds in this window.</td></tr>
+            }
+          </tbody>
+        </gr-table>
+      } @else {
+        @if (tab() === 'network') {
+          <p class="note">Network is a host-level peak measured during each build's window (cgroup v2 has no per-build network accounting); exact only when the build is the host's sole network user.</p>
+        }
+        <gr-table class="expensive">
+          <thead><tr><th>#</th><th>Derivation</th><th>{{ valueHeader() }}</th><th>Worker</th></tr></thead>
+          <tbody>
+            @for (r of resources(); track r.derivation; let i = $index) {
+              <tr><td>{{ i + 1 }}</td><td class="mono">{{ r.name }}</td><td>{{ formatValue(r) }}</td><td class="mono">{{ r.worker || '-' }}</td></tr>
+            } @empty {
+              <tr><td colspan="4" class="muted">No per-build metrics recorded in this window (needs cgroup metrics enabled on workers).</td></tr>
+            }
+          </tbody>
+        </gr-table>
+      }
+
+      @if (topProjects().length) {
+        <h2>Top projects by build time (superuser)</h2>
+        <gr-metric-chart
+          type="bar"
+          [horizontal]="true"
+          [height]="320"
+          [series]="topProjectSeries()"
+          [categories]="topProjectCategories()"
+          [colors]="['#fd7e14']"
+        ></gr-metric-chart>
+      }
     }
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
@@ -81,6 +86,7 @@ type Tab = 'time' | 'ram' | 'cpu' | 'disk' | 'network';
 })
 export class BoardExpensiveJobsComponent implements OnInit {
   private board = inject(BoardService);
+  protected first = firstLoad();
   builds = signal<ExpensiveBuild[]>([]);
   resources = signal<ExpensiveResource[]>([]);
   topProjects = signal<TopProjectBuildTime[]>([]);
@@ -107,13 +113,14 @@ export class BoardExpensiveJobsComponent implements OnInit {
 
   private load(): void {
     if (this.tab() === 'time') {
-      this.board.getExpensive(this.windowDays).subscribe((b) => this.builds.set(b));
+      this.board.getExpensive(this.windowDays).pipe(this.first.track()).subscribe((b) => this.builds.set(b));
     } else {
       this.board
         .getExpensiveByResource(this.tab() as 'ram' | 'cpu' | 'disk' | 'network', this.windowDays)
+        .pipe(this.first.track())
         .subscribe((r) => this.resources.set(r));
     }
-    this.board.getTopProjects(this.windowDays).subscribe({
+    this.board.getTopProjects(this.windowDays).pipe(this.first.track()).subscribe({
       next: (o) => this.topProjects.set(o),
       error: () => this.topProjects.set([]),
     });

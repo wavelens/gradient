@@ -59,6 +59,42 @@ describe('gr-checkbox label', () => {
     // beside, not stacked: the label starts to the right of the box
     expect(label.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   });
+
+  it('links the label to the box even when the caller gives no id', async () => {
+    const fixture = TestBed.createComponent(CheckboxComponent);
+    fixture.componentRef.setInput('label', 'Include build logs');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    const box = root.querySelector('input')!;
+    expect(box.id).not.toBe('');
+    expect(root.querySelector('label')!.getAttribute('for')).toBe(box.id);
+  });
+
+  it('gives two unnamed boxes different ids, so one label cannot toggle both', async () => {
+    const first = TestBed.createComponent(CheckboxComponent);
+    first.componentRef.setInput('label', 'One');
+    first.detectChanges();
+    const second = TestBed.createComponent(CheckboxComponent);
+    second.componentRef.setInput('label', 'Two');
+    second.detectChanges();
+    await second.whenStable();
+    const id = (f: typeof first) => (f.nativeElement as HTMLElement).querySelector('input')!.id;
+    expect(id(first)).not.toBe(id(second));
+  });
+
+  it('clicking the label toggles the box', async () => {
+    const fixture = TestBed.createComponent(CheckboxComponent);
+    fixture.componentRef.setInput('label', 'Include build logs');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const root = fixture.nativeElement as HTMLElement;
+    document.body.appendChild(root);
+    root.querySelector('label')!.click();
+    fixture.detectChanges();
+    expect(root.querySelector('input')!.checked).toBe(true);
+    root.remove();
+  });
 });
 
 describe('CheckboxComponent', () => {
