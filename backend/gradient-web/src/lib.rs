@@ -14,7 +14,7 @@ pub(crate) mod client_ip;
 pub mod endpoints;
 pub mod error;
 pub mod helpers;
-pub mod invites;
+pub mod invite_policy;
 pub mod ip_allowlist;
 pub mod metrics_scope;
 pub mod otlp;
@@ -452,6 +452,15 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .route("/user/keys/permissions", get(user::get_key_permissions))
         .route("/user/keys/{api_id}", patch(user::patch_key))
         .route("/user/keys/{api_id}/revoke", post(user::post_key_revoke))
+        .route("/user/invites", get(endpoints::invites::get_user_invites))
+        .route(
+            "/user/invites/accept",
+            post(endpoints::invites::post_accept_invite),
+        )
+        .route(
+            "/user/invites/decline",
+            post(endpoints::invites::post_decline_invite),
+        )
         .route("/user/sessions", get(user::get_sessions))
         .route(
             "/user/sessions/{session_id}",

@@ -9,7 +9,7 @@ use crate::audit::{RequestInfo, events, record as audit_record};
 use crate::authorization::{MaybeApiKey, MaybeUser};
 use crate::error::{WebError, WebResult};
 use crate::helpers::{OptionExt, ok_json, role_names};
-use crate::invites::invitation_expiry;
+use crate::invite_policy::invitation_expiry;
 use crate::permissions::Permission;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
