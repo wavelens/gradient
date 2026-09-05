@@ -27,11 +27,12 @@ use crate::permissions::{
 };
 use gradient_core::ServerState;
 use gradient_db::{get_any_cache_by_name, get_any_project_by_name, get_any_task_by_name};
+use gradient_types::consts::{BASE_CACHE_ROLE_ADMIN_ID, BASE_ROLE_ADMIN_ID};
 use gradient_types::ids::{CacheId, IntegrationId, ProjectId, UserId};
 use gradient_types::{
-    CCache, CCacheUser, CIntegration, CProjectCache, CProjectUser, ECacheRole, ECacheUser,
-    EIntegration, EProjectCache, EProjectUser, ERole, MCache, MIntegration, MProject, MProjectUser,
-    MTask, MUser,
+    CCache, CCacheUser, CIntegration, CProjectCache, CProjectUser, CUser, ECacheRole, ECacheUser,
+    EIntegration, EProjectCache, EProjectUser, ERole, EUser, MCache, MIntegration, MProject,
+    MProjectUser, MTask, MUser,
 };
 use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -552,6 +553,37 @@ async fn cache_role_mask(
     Ok(Some(role.permission))
 }
 
+/// Role mask narrowed by the API key's own mask, then tested for `permission`.
+/// Shared so [`has_cache_permission`] and [`require_cache_permission`] cannot
+/// disagree about what a mask grants.
+fn cache_mask_allows(
+    role_mask: i64,
+    api_key: Option<&ApiKeyContext>,
+    permission: CachePermission,
+) -> bool {
+    let key_mask = api_key
+        .and_then(|k| k.cache_permission_mask)
+        .unwrap_or(i64::MAX);
+
+    cache_mask_grants(role_mask & key_mask, permission)
+}
+
+/// Non-erroring form of [`require_cache_permission`]: `false` wherever that
+/// function would answer `NotFound` or `Forbidden`.
+pub async fn has_cache_permission(
+    state: &Arc<ServerState>,
+    user_id: UserId,
+    cache_id: CacheId,
+    permission: CachePermission,
+    api_key: Option<&ApiKeyContext>,
+) -> WebResult<bool> {
+    let Some(role_mask) = cache_role_mask(state, user_id, cache_id).await? else {
+        return Ok(false);
+    };
+
+    Ok(cache_mask_allows(role_mask, api_key, permission))
+}
+
 async fn require_cache_permission(
     state: &Arc<ServerState>,
     user_id: UserId,
@@ -563,17 +595,65 @@ async fn require_cache_permission(
     let role_mask = cache_role_mask(state, user_id, cache_id)
         .await?
         .ok_or_else(|| WebError::not_found(label))?;
-    let key_mask = api_key
-        .and_then(|k| k.cache_permission_mask)
-        .unwrap_or(i64::MAX);
-    let effective = role_mask & key_mask;
-    if !cache_mask_grants(effective, permission) {
+
+    if !cache_mask_allows(role_mask, api_key, permission) {
         return Err(WebError::forbidden(format!(
             "Missing cache permission `{}`.",
             permission.as_wire_name()
         )));
     }
+
     Ok(())
+}
+
+/// E-mail addresses of every Admin of `project_id`, for notifications that
+/// target "whoever runs this project" rather than one named user.
+pub async fn project_admin_emails(
+    state: &Arc<ServerState>,
+    project_id: ProjectId,
+) -> WebResult<Vec<String>> {
+    let admin_ids: Vec<UserId> = EProjectUser::find()
+        .filter(CProjectUser::Project.eq(project_id))
+        .filter(CProjectUser::Role.eq(BASE_ROLE_ADMIN_ID))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|m| m.user)
+        .collect();
+
+    admin_emails(state, admin_ids).await
+}
+
+/// E-mail addresses of every Admin of `cache_id`.
+pub async fn cache_admin_emails(
+    state: &Arc<ServerState>,
+    cache_id: CacheId,
+) -> WebResult<Vec<String>> {
+    let admin_ids: Vec<UserId> = ECacheUser::find()
+        .filter(CCacheUser::Cache.eq(cache_id))
+        .filter(CCacheUser::Role.eq(BASE_CACHE_ROLE_ADMIN_ID))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|m| m.user)
+        .collect();
+
+    admin_emails(state, admin_ids).await
+}
+
+async fn admin_emails(state: &Arc<ServerState>, ids: Vec<UserId>) -> WebResult<Vec<String>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    Ok(EUser::find()
+        .filter(CUser::Id.is_in(ids))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .filter(|u| u.active && !u.email.is_empty())
+        .map(|u| u.email)
+        .collect())
 }
 
 fn reject_managed_cache(cache: &MCache) -> WebResult<()> {

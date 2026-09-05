@@ -127,6 +127,21 @@ pub fn make_ctx() -> crate::CiContext {
                 server_response: String::new(),
             })
         }
+        async fn send_invitation_email(
+            &self,
+            _: &str,
+            _: &str,
+            _: &gradient_notify::InvitationMail<'_>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn send_subscription_mail(
+            &self,
+            _: &[String],
+            _: &gradient_notify::SubscriptionMail<'_>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
     }
 
     let cli = gradient_types::Cli {

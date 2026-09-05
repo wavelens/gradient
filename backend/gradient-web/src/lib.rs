@@ -441,6 +441,15 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
             get(caches::invitations::get_cache_invitations)
                 .delete(caches::invitations::delete_cache_invitation),
         )
+        .route(
+            "/caches/{cache}/subscription-requests",
+            get(caches::subscriptions::get_cache_subscription_requests),
+        )
+        .route(
+            "/caches/{cache}/subscription-requests/{project}",
+            post(caches::subscriptions::post_approve_subscription_request)
+                .delete(caches::subscriptions::delete_subscription_request),
+        )
         .route("/user", get(user::get).delete(user::delete))
         .route("/user/search", get(user::get_search))
         .route(

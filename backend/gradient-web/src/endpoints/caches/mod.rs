@@ -18,6 +18,7 @@ mod nars;
 mod proto;
 pub mod roles;
 mod serve;
+pub mod subscriptions;
 mod upload;
 mod upstreams;
 
