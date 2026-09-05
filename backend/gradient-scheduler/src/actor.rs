@@ -33,8 +33,18 @@ pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 pub enum SessionSignal {
     Offers(u64),
     Reauth,
-    Abort { job_id: String, reason: String },
+    Abort {
+        job_id: String,
+        reason: String,
+    },
     Drain,
+    /// Tear the session down now. Unlike [`SessionSignal::Drain`] this does not
+    /// wait for in-flight jobs: the scheduler has already re-queued them, so the
+    /// worker must drop the connection and reconnect rather than keep reporting
+    /// into a session the pool no longer knows about.
+    Close {
+        reason: String,
+    },
 }
 
 pub trait SessionPort: Send + Sync + 'static {

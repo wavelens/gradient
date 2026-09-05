@@ -8173,3 +8173,16 @@ covers the cache admin's queue. `lists a pending request with the asking project
 and `shows an empty state when nothing is waiting` cover the renders;
 `approves a request by project name` and `denies a request by project name` pin
 that both decisions address the request by the project that made it.
+
+**`backend/gradient-scheduler/src/worker_pool.rs`** covers the eviction that
+wedged the instance on 2026-09-05. The liveness reaper unregisters a worker that
+has missed its heartbeat deadline and re-queues its jobs, but the pool only
+dropped the slot: a worker that was merely busy rather than dead kept its
+session, never learned it had been evicted, and so never reconnected, leaving
+`connected_workers: 0` and every evaluation parked while the socket carried on
+sending results for jobs the scheduler had already re-queued.
+`unregister_closes_the_evicted_session` pins the missing half - eviction now
+signals `SessionSignal::Close`, so the worker drops the connection and
+reconnects - and `unregister_of_an_unknown_worker_signals_nothing` keeps the
+repeat call harmless, which matters because the session's own `post_stop`
+unregisters again on its way out.
