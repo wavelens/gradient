@@ -74,10 +74,16 @@ built the same derivation, so `build_attempt`, `phase_event` and the
 `derivation*` tables carry rows made for other evaluations, and the file will
 show attempts older than the evaluation itself. `dispatched_job_phase` is not
 one of those: it hangs off this evaluation's own dispatched jobs.
-`worker_registration` and
-`upstream_metric` describe the whole instance; `worker_connection` and
-`worker_sample` cover the workers that ran this evaluation, for as long as it
-ran.
+`worker_registration`, `base_worker` and
+`upstream_metric` describe the whole instance; `project_base_worker` names the
+base workers this project opted into; `worker_connection` and `worker_sample`
+cover the workers that ran this evaluation, from its creation until it finished
+(or until the report was taken, if it had not).
+
+A worker only opens a `worker_connection` row once it has a
+`worker_registration`, so on an instance whose fleet is base workers those two
+tables and `worker_sample` come back empty. Read `base_worker` before concluding
+an evaluation had no workers to run on.
 
 ## Reading one
 
@@ -104,6 +110,15 @@ sqlite3 gradient-report-01a05a38-2026-09-01.db \
 `dispatched_job.outcome` says how each job ended (0 completed, 1 failed); it is
 null for a job still running when the report was taken, and for one whose worker
 disconnected without reporting.
+
+An evaluation still in `EvaluatingFlake` or `EvaluatingDerivation` whose newest
+eval job carries a `finished_at` is one whose terminal report never landed. The
+scheduler's `eval-completion-watchdog` pass re-drives that transition, so the
+shape should not survive a running server for long.
+
+`evaluation_input_update` is present only for a flake-lock evaluation, and names
+the inputs it holds. While such an evaluation is active no further input-update
+run is created for its task, so a wedged one silently stops the flake updater.
 
 `commit` is a reserved word in SQLite, so the revision table needs quoting:
 

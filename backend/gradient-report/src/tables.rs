@@ -64,9 +64,14 @@ pub fn redact_value(
         ("worker_connection", "display_name") | ("worker_registration", "display_name") => {
             r.identity(&v, "worker")
         }
-        ("worker_registration", "url") | ("cache_upstream", "url") => r.identity(&v, "url"),
+        ("base_worker", "worker_id") | ("base_worker", "display_name") => r.identity(&v, "worker"),
+        ("worker_registration", "url") | ("cache_upstream", "url") | ("base_worker", "url") => {
+            r.identity(&v, "url")
+        }
         ("upstream_metric", "upstream_url") => r.identity(&v, "url"),
-        ("worker_registration", "created_by") => r.identity(&v, "user"),
+        ("worker_registration", "created_by")
+        | ("base_worker", "created_by")
+        | ("project_base_worker", "created_by") => r.identity(&v, "user"),
         ("cache_upstream", "display_name") | ("cache_upstream", "remote_cache_name") => {
             r.identity(&v, "cache")
         }
@@ -376,6 +381,23 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
             "the evaluation's output hashes, shared with every other evaluation that produced them",
             ["referrer", "reference", "reference_hash", "position"]
         ),
+        spec!(
+            "evaluation_input_update",
+            "CREATE TABLE evaluation_input_update (id TEXT, evaluation TEXT, base_commit TEXT, generator TEXT, target_inputs TEXT, bumped_inputs TEXT, discover_only INTEGER, created_at TEXT, updated_at TEXT)",
+            "SELECT id::text, evaluation::text, base_commit::text, generator::text, target_inputs::text, bumped_inputs::text, discover_only::int::text, created_at::text, updated_at::text FROM evaluation_input_update WHERE evaluation = $1",
+            "the evaluation's input-update sidecar",
+            [
+                "id",
+                "evaluation",
+                "base_commit",
+                "generator",
+                "target_inputs",
+                "bumped_inputs",
+                "discover_only",
+                "created_at",
+                "updated_at"
+            ]
+        ),
     ];
 
     SPECS
@@ -409,7 +431,7 @@ pub fn instance_tables() -> &'static [TableSpec] {
         spec!(
             "worker_connection",
             "CREATE TABLE worker_connection (id TEXT, worker_id TEXT, project TEXT, display_name TEXT, connected_at TEXT, disconnected_at TEXT, capabilities TEXT, reason INTEGER)",
-            "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, updated_at) AS ended FROM evaluation WHERE id = $1) SELECT c.id::text, c.worker_id::text, c.project::text, c.display_name::text, c.connected_at::text, c.disconnected_at::text, c.capabilities::text, c.reason::text FROM worker_connection c, w WHERE c.worker_id IN (SELECT worker_id FROM dispatched_job WHERE evaluation_id = $1) AND c.connected_at <= w.ended AND (c.disconnected_at IS NULL OR c.disconnected_at >= w.started)",
+            "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE \'UTC\')) AS ended FROM evaluation WHERE id = $1) SELECT c.id::text, c.worker_id::text, c.project::text, c.display_name::text, c.connected_at::text, c.disconnected_at::text, c.capabilities::text, c.reason::text FROM worker_connection c, w WHERE c.worker_id IN (SELECT worker_id FROM dispatched_job WHERE evaluation_id = $1) AND c.connected_at <= w.ended AND (c.disconnected_at IS NULL OR c.disconnected_at >= w.started)",
             "the workers that ran this evaluation, while it ran",
             [
                 "id",
@@ -425,7 +447,7 @@ pub fn instance_tables() -> &'static [TableSpec] {
         spec!(
             "worker_sample",
             "CREATE TABLE worker_sample (id TEXT, worker_id TEXT, project TEXT, at TEXT, cpu_usage_pct REAL, ram_free_mb INTEGER, ram_total_mb INTEGER, disk_speed_mbps REAL, network_speed_mbps REAL, assigned_jobs INTEGER, max_concurrent_builds INTEGER, state INTEGER, capabilities TEXT)",
-            "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, updated_at) AS ended FROM evaluation WHERE id = $1) SELECT s.id::text, s.worker_id::text, s.project::text, s.at::text, s.cpu_usage_pct::text, s.ram_free_mb::text, s.ram_total_mb::text, s.disk_speed_mbps::text, s.network_speed_mbps::text, s.assigned_jobs::text, s.max_concurrent_builds::text, s.state::text, s.capabilities::text FROM worker_sample s, w WHERE s.worker_id IN (SELECT worker_id FROM dispatched_job WHERE evaluation_id = $1) AND s.at BETWEEN w.started AND w.ended",
+            "WITH w AS (SELECT created_at AS started, COALESCE(finished_at, (now() AT TIME ZONE \'UTC\')) AS ended FROM evaluation WHERE id = $1) SELECT s.id::text, s.worker_id::text, s.project::text, s.at::text, s.cpu_usage_pct::text, s.ram_free_mb::text, s.ram_total_mb::text, s.disk_speed_mbps::text, s.network_speed_mbps::text, s.assigned_jobs::text, s.max_concurrent_builds::text, s.state::text, s.capabilities::text FROM worker_sample s, w WHERE s.worker_id IN (SELECT worker_id FROM dispatched_job WHERE evaluation_id = $1) AND s.at BETWEEN w.started AND w.ended",
             "the workers that ran this evaluation, while it ran",
             [
                 "id",
@@ -474,6 +496,31 @@ pub fn instance_tables() -> &'static [TableSpec] {
                 "narinfo_misses",
                 "upstream_url"
             ]
+        ),
+        spec!(
+            "base_worker",
+            "CREATE TABLE base_worker (id TEXT, worker_id TEXT, display_name TEXT, url TEXT, enabled INTEGER, enable_fetch INTEGER, enable_eval INTEGER, enable_build INTEGER, created_by TEXT, created_at TEXT)",
+            "SELECT id::text, worker_id::text, display_name::text, url::text, enabled::int::text, enable_fetch::int::text, enable_eval::int::text, enable_build::int::text, created_by::text, created_at::text FROM base_worker WHERE $1 IS NOT NULL",
+            "the whole instance",
+            [
+                "id",
+                "worker_id",
+                "display_name",
+                "url",
+                "enabled",
+                "enable_fetch",
+                "enable_eval",
+                "enable_build",
+                "created_by",
+                "created_at"
+            ]
+        ),
+        spec!(
+            "project_base_worker",
+            "CREATE TABLE project_base_worker (id TEXT, project TEXT, base_worker TEXT, created_by TEXT, created_at TEXT)",
+            "SELECT id::text, project::text, base_worker::text, created_by::text, created_at::text FROM project_base_worker WHERE project = $1",
+            "this project's base worker opt-ins",
+            ["id", "project", "base_worker", "created_by", "created_at"]
         ),
     ];
 
@@ -633,6 +680,60 @@ mod tests {
         assert!(spec.columns.contains(&"outcome"), "{:?}", spec.columns);
         assert!(spec.ddl.contains("outcome INTEGER"), "{}", spec.ddl);
         assert!(spec.sql.contains("outcome::text"), "{}", spec.sql);
+    }
+
+    /// A stuck evaluation is exactly the one worth reporting on, and
+    /// `updated_at` freezes at the moment it wedged: bounding the worker window
+    /// there ends it before the interesting period instead of at "now".
+    #[test]
+    fn the_worker_window_stays_open_while_the_evaluation_is_unfinished() {
+        for name in ["worker_connection", "worker_sample"] {
+            let sql = spec_named(name).sql;
+            assert!(
+                sql.contains("COALESCE(finished_at, (now() AT TIME ZONE 'UTC'))"),
+                "{name}: {sql}"
+            );
+            assert!(
+                !sql.contains("COALESCE(finished_at, updated_at)"),
+                "{name} still bounds the window at the wedge: {sql}"
+            );
+        }
+    }
+
+    /// `record_worker_connection` only opens a row for a worker that has a
+    /// `worker_registration`, so on an instance running base workers all three
+    /// worker tables are empty and the report reads as "no workers at all".
+    /// The fleet itself has to be exported for that to be distinguishable.
+    #[test]
+    fn the_base_worker_fleet_is_exported() {
+        let spec = spec_named("base_worker");
+        assert!(spec.columns.contains(&"enable_eval"), "{:?}", spec.columns);
+        assert!(spec.columns.contains(&"enabled"), "{:?}", spec.columns);
+        assert!(
+            !spec.columns.contains(&"token_hash"),
+            "a base worker's token must never leave the instance"
+        );
+        assert!(
+            spec_named("project_base_worker")
+                .sql
+                .contains("project = $1")
+        );
+    }
+
+    /// An `input_update` evaluation blocks every later flake-lock run for its
+    /// task while it stays active, and the sidecar is the only row saying which
+    /// inputs it holds.
+    #[test]
+    fn an_input_update_evaluation_exports_its_sidecar() {
+        let spec = spec_named("evaluation_input_update");
+        assert!(spec.sql.contains("WHERE evaluation = $1"), "{}", spec.sql);
+        for column in ["target_inputs", "discover_only", "generator"] {
+            assert!(spec.columns.contains(&column), "{:?}", spec.columns);
+        }
+        assert!(
+            !spec.columns.contains(&"candidate_lock"),
+            "a whole generated flake.lock is not scheduling evidence"
+        );
     }
 
     fn redactor(identities: bool, packages: bool) -> Redactor {
