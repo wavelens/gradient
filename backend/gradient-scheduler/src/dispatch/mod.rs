@@ -11,7 +11,7 @@
 //! pass past its budget is cancelled in place, and shutdown stops the tree.
 //!
 //! Split across submodules by concern:
-//! - [`background`] - consistency sweep, worker liveness, and metrics passes
+//! - [`background`] - consistency sweep, worker liveness, lost-completion watchdog, and metrics passes
 //! - [`eval`] - `dispatch_queued_evals`: finds `Queued` evaluations and enqueues `FlakeJob`s
 //! - [`build`] - the build dispatch actor: finds ready `Queued` `derivation_build` anchors and enqueues `BuildJob`s
 //!
@@ -45,6 +45,9 @@ pub(super) const DISPATCH_TICK: Duration = Duration::from_secs(DISPATCH_TICK_SEC
 pub(super) const DISPATCH_BUDGET: Duration = Duration::from_secs(120);
 const METRICS_BUDGET: Duration = Duration::from_secs(60);
 const CONSISTENCY_BUDGET: Duration = Duration::from_secs(600);
+/// Repair tick for evaluations whose terminal job report was lost. Detection
+/// latency is this plus the watchdog's own grace, so a minute is ample.
+const EVAL_WATCHDOG_TICK: Duration = Duration::from_secs(60);
 
 /// Registers the scheduler node (core actor plus the three dispatch passes) and
 /// the maintenance passes on the process supervision tree.
@@ -103,6 +106,13 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
             Duration::from_secs(metrics.instance_metrics_interval_secs.max(1)),
             METRICS_BUDGET,
             background::instance_metrics_pass,
+        ),
+        periodic(
+            scheduler,
+            "eval-completion-watchdog",
+            EVAL_WATCHDOG_TICK,
+            CONSISTENCY_BUDGET,
+            background::eval_completion_watchdog_pass,
         ),
     ];
 

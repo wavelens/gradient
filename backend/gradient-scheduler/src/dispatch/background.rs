@@ -4,15 +4,27 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gradient_db::LostCompletion;
+use gradient_entity::dispatched_job::DispatchedJobOutcome;
+use gradient_graph::Transition;
+use gradient_types::EvaluationId;
+use gradient_types::proto::BuildFailureKind;
 use tracing::{debug, warn};
 
 use crate::Scheduler;
 
 /// Poll ~3x per heartbeat deadline so worst-case detection latency is timeout + tick.
 const LIVENESS_POLLS_PER_DEADLINE: u64 = 3;
+
+/// How long an evaluation must sit in the evaluating pair after its job closed
+/// before the watchdog calls the terminal report lost. Comfortably above the
+/// graph actor's 600 s RPC timeout, so a transition that is merely slow is
+/// never mistaken for a dropped one.
+const LOST_COMPLETION_GRACE_SECS: i64 = 900;
 
 /// Liveness poll period, or `None` when the watchdog is disabled by config.
 pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
@@ -109,4 +121,148 @@ pub(super) async fn worker_sample_pass(scheduler: Arc<Scheduler>) -> anyhow::Res
             active,
         });
     Ok(())
+}
+
+/// Which transition a lost terminal report needs re-sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EvalRepair {
+    Complete,
+    Fail,
+}
+
+fn eval_job_id(evaluation: EvaluationId) -> String {
+    format!("eval:{evaluation}")
+}
+
+/// Keep only the evaluations the scheduler has no job for, and map each
+/// reported outcome onto the transition that was lost.
+///
+/// The tracker, not the database, decides what is still in flight: a job the
+/// scheduler still holds is one it may yet finish on its own, and `untracked`
+/// deliberately claims every id during a core outage so a repair pass does
+/// nothing rather than racing a scheduler that is coming back.
+fn plan_eval_repairs(
+    lost: &[LostCompletion],
+    untracked: &HashSet<String>,
+) -> Vec<(EvaluationId, EvalRepair)> {
+    lost.iter()
+        .filter(|l| untracked.contains(&eval_job_id(l.evaluation)))
+        .map(|l| {
+            let repair = match l.outcome {
+                DispatchedJobOutcome::Completed => EvalRepair::Complete,
+                DispatchedJobOutcome::Failed => EvalRepair::Fail,
+            };
+            (l.evaluation, repair)
+        })
+        .collect()
+}
+
+/// Re-send the terminal transition for evaluations whose worker report was
+/// dropped, so a single lost message stops being permanent.
+///
+/// `EvalStreamCompleted` is idempotent - it settles edges, reconciles the
+/// eval's closure, promotes out of the evaluating pair and finalizes - so
+/// re-driving one that did land costs a reconcile and changes nothing.
+pub(super) async fn eval_completion_watchdog_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+    let lost =
+        gradient_db::lost_eval_completions(&scheduler.state.worker_db, LOST_COMPLETION_GRACE_SECS)
+            .await?;
+    if lost.is_empty() {
+        debug!("eval completion watchdog clean");
+        return Ok(());
+    }
+
+    let untracked: HashSet<String> = scheduler
+        .untracked(lost.iter().map(|l| eval_job_id(l.evaluation)).collect())
+        .await
+        .into_iter()
+        .collect();
+
+    let mut repaired = 0;
+    for (evaluation, repair) in plan_eval_repairs(&lost, &untracked) {
+        warn!(
+            evaluation_id = %evaluation,
+            ?repair,
+            grace_secs = LOST_COMPLETION_GRACE_SECS,
+            "evaluation stranded past its job's terminal report - re-driving the lost transition"
+        );
+
+        let transition = match repair {
+            EvalRepair::Complete => Transition::EvalStreamCompleted { evaluation },
+            EvalRepair::Fail => Transition::EvalFailed {
+                evaluation,
+                error: "the worker reported this evaluation failed, but the failure was never \
+                        recorded; recovered by the completion watchdog"
+                    .to_string(),
+                kind: BuildFailureKind::Permanent,
+                missing_paths: Vec::new(),
+            },
+        };
+
+        match scheduler.state.graph.transition(transition).await {
+            Ok(_) => repaired += 1,
+            Err(e) => {
+                warn!(error = %e, evaluation_id = %evaluation, "lost-completion repair failed")
+            }
+        }
+    }
+
+    if repaired > 0 {
+        scheduler.kick_dispatch();
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lost(outcome: DispatchedJobOutcome) -> LostCompletion {
+        LostCompletion {
+            evaluation: EvaluationId::now_v7(),
+            outcome,
+        }
+    }
+
+    #[test]
+    fn each_outcome_maps_to_the_transition_that_was_lost() {
+        let rows = vec![
+            lost(DispatchedJobOutcome::Completed),
+            lost(DispatchedJobOutcome::Failed),
+        ];
+        let untracked = rows.iter().map(|l| eval_job_id(l.evaluation)).collect();
+
+        assert_eq!(
+            plan_eval_repairs(&rows, &untracked),
+            vec![
+                (rows[0].evaluation, EvalRepair::Complete),
+                (rows[1].evaluation, EvalRepair::Fail),
+            ]
+        );
+    }
+
+    /// A job the scheduler still tracks may yet report on its own; re-driving
+    /// it would race the handler that is about to run.
+    #[test]
+    fn an_evaluation_the_scheduler_still_tracks_is_left_alone() {
+        let tracked = lost(DispatchedJobOutcome::Completed);
+        let stranded = lost(DispatchedJobOutcome::Completed);
+        let untracked = HashSet::from([eval_job_id(stranded.evaluation)]);
+
+        assert_eq!(
+            plan_eval_repairs(&[tracked, stranded], &untracked),
+            vec![(stranded.evaluation, EvalRepair::Complete)]
+        );
+    }
+
+    /// `untracked` reports every id as tracked while the core is down, which
+    /// must read as "repair nothing", not "repair everything".
+    #[test]
+    fn a_core_outage_repairs_nothing() {
+        let rows = vec![
+            lost(DispatchedJobOutcome::Completed),
+            lost(DispatchedJobOutcome::Failed),
+        ];
+        assert!(plan_eval_repairs(&rows, &HashSet::new()).is_empty());
+    }
 }

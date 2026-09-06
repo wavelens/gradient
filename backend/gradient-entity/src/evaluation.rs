@@ -72,6 +72,10 @@ impl EvaluationStatus {
     ];
 
     pub const TERMINAL: [Self; 3] = [Self::Completed, Self::Failed, Self::Aborted];
+
+    /// The statuses an eval job owns end to end: the only exit is the worker's
+    /// terminal report, so a lost report strands the evaluation here.
+    pub const EVALUATING: [Self; 2] = [Self::EvaluatingFlake, Self::EvaluatingDerivation];
 }
 
 #[cfg(test)]
@@ -97,6 +101,26 @@ mod status_tests {
             assert_eq!(i32::from(status), n);
         }
         assert_eq!(EvaluationStatus::iter().count(), 9);
+    }
+
+    /// `EVALUATING` drives the lost-completion watchdog. `Fetching` must stay
+    /// out: its job completing enqueues the cached eval follow-up rather than
+    /// finishing the stream, so re-driving it would promote a half-done eval.
+    #[test]
+    fn evaluating_is_the_pair_the_eval_stream_owns() {
+        assert_eq!(
+            EvaluationStatus::EVALUATING,
+            [
+                EvaluationStatus::EvaluatingFlake,
+                EvaluationStatus::EvaluatingDerivation
+            ]
+        );
+        assert!(!EvaluationStatus::EVALUATING.contains(&EvaluationStatus::Fetching));
+        assert!(
+            EvaluationStatus::EVALUATING
+                .iter()
+                .all(EvaluationStatus::is_active)
+        );
     }
 
     /// `kind` is persisted as a raw integer; a renumber silently reinterprets

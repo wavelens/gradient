@@ -178,6 +178,20 @@ terminal-success outputs, Building evaluations with no active anchors - and
 logs them as warnings, so a non-converging heal surfaces as an alert instead of
 a user-reported stuck evaluation.
 
+An evaluation in `EvaluatingFlake` or `EvaluatingDerivation` has one exit: the
+`EvalStreamCompleted` / `EvalFailed` transition the scheduler sends once, when
+the worker reports its job terminal. That message is droppable - both handlers
+swallow a job the tracker has forgotten, and the graph call can time out or lose
+its mailbox on an actor restart - and nothing else re-drives it, since the
+waiting-state sweep leaves a pre-build evaluation alone whenever an eval-capable
+worker is connected and `recover_interrupted_work` runs only at startup. The
+`eval-completion-watchdog` pass (60s) closes that dead zone: it finds
+evaluations whose newest eval job already carries a `finished_at` yet have not
+been written for 900s, confirms the scheduler holds no job for them, and re-sends
+the transition. The grace sits above the graph actor's 600s RPC timeout so a slow
+transition is never mistaken for a lost one, and `EvalStreamCompleted` is
+idempotent, so re-driving one that did land changes nothing.
+
 Promotion and dispatch are finally gated on a derivation's `inputSrcs` being in
 the cache. A `.drv`'s build-time source paths (`inputSrcs`, e.g.
 `builtins.toFile` configs) have no producing derivation, so the dependency-anchor

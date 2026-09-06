@@ -22,6 +22,7 @@ root
 ├── sessions                             supervisor: one actor per worker connection
 ├── worker-sample, instance-metrics      periodic passes
 ├── worker-liveness, graph-consistency   periodic passes, absent when disabled
+├── eval-completion-watchdog            periodic pass (60s)
 ├── cache-maintenance, sign-sweep,
 │   debug-index, eval-cache-sweep        cache sweeps
 ├── retention, rollup, otlp-snapshot     metrics pipeline
