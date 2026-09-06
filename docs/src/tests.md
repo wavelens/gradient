@@ -8201,3 +8201,70 @@ tests that asserted 403 and 404: lacking cache-side permission is no longer a
 refusal but a request, which is the whole point of the change, and a public
 cache is readable without membership. `subscribe_succeeds_when_both_granted`
 keeps its meaning and only gains the two lookups the branch decision now costs.
+
+## An evaluation whose terminal job report was lost is wedged forever
+
+`EvaluatingFlake` and `EvaluatingDerivation` have exactly one exit: the
+`EvalStreamCompleted` / `EvalFailed` transition the scheduler sends once, when
+the worker reports its job terminal. C3D2 evaluation `01a073c5` sat in
+`EvaluatingDerivation` for 16 hours with `updated_at` frozen at the millisecond
+it entered, while its only eval job had closed cleanly (outcome `Completed`, a
+full twelve-span phase timeline, metrics written). All 64 of its anchors were
+already `Completed` from earlier evaluations, so the correct end state was
+`Completed` and it was reachable immediately.
+
+Nothing re-drove it. `check_evaluation_done` returns early unless the status is
+already `Building`; `decide_pre_build_target` returns `None` whenever an
+eval-capable worker is connected, so the waiting-state sweep looks at the row
+every tick and deliberately leaves it; `recover_interrupted_work` covers the
+status but runs only at startup. Because the evaluation was an `input_update`
+run and the trigger skips a task with any active one, the flake updater for that
+task was silently dead the whole time.
+
+`backend/gradient-entity/src/evaluation.rs`:
+- `evaluating_is_the_pair_the_eval_stream_owns` - `EVALUATING` is the watchdog's
+  scope, and `Fetching` must stay out of it: a fetch job completing enqueues the
+  cached eval follow-up rather than finishing the stream, so re-driving one
+  would promote a half-done evaluation.
+
+`backend/gradient-db/src/eval_watchdog.rs`:
+- `the_scope_is_the_evaluating_pair_only` - the query composes its status list
+  from the pinned enum numbers, so a renumber cannot widen it to `Building`.
+
+`backend/gradient-scheduler/src/dispatch/background.rs`:
+- `each_outcome_maps_to_the_transition_that_was_lost` - a closed job reporting
+  `Completed` needs `EvalStreamCompleted`, one reporting `Failed` needs
+  `EvalFailed`.
+- `an_evaluation_the_scheduler_still_tracks_is_left_alone` - the tracker, not
+  the database, decides what is still in flight.
+- `a_core_outage_repairs_nothing` - `untracked` claims every id while the core
+  is down, and that has to read as "repair nothing" rather than "repair
+  everything".
+
+## The diagnostic report was blind to base workers and closed its window early
+
+Reading the report for `01a073c5` cost more than it should have, in two ways.
+
+`worker_registration`, `worker_connection` and `worker_sample` were all empty on
+an instance with four eval-capable workers, so the file read as "no workers at
+all". `record_worker_connection` resolves a worker's identity from
+`worker_registration` and returns early when there is no row, and base workers
+live in `base_worker` (tracked in #587); the report then had no table that could
+contradict the empty ones.
+
+Both worker scopes also bounded their window at
+`COALESCE(finished_at, updated_at)`. For a stuck evaluation `updated_at` freezes
+at the moment it wedged, so the window ended at 03:02:56 while the job it was
+meant to cover ran until 03:05:15. The one report shape worth taking is the one
+the window excludes.
+
+`backend/gradient-report/src/tables.rs`:
+- `the_worker_window_stays_open_while_the_evaluation_is_unfinished` - an
+  unfinished evaluation's window runs to now, not to its last write.
+- `the_base_worker_fleet_is_exported` - `base_worker` and `project_base_worker`
+  join the export, and the assertion that `token_hash` is not among the columns
+  keeps the fleet table from carrying a credential.
+- `an_input_update_evaluation_exports_its_sidecar` - `evaluation_input_update`
+  names the inputs a flake-lock run holds, which is what says whether a wedged
+  one is blocking its task's updater. `candidate_lock` stays out: a whole
+  generated `flake.lock` is not scheduling evidence.
