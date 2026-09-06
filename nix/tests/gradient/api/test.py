@@ -60,6 +60,21 @@ def status(method, path, token=None, code=200):
     assert out == str(code), f"{method} {path}: expected {code}, got {out}"
 
 
+def accept_invite(kind, scope, invitee_token):
+    """Redeem the pending invitation for `scope` as the invitee.
+
+    The token travels in the invitation mail; `GET /user/invites` is the
+    in-app equivalent, and either way redemption needs the invitee's session.
+    """
+    invites = api("GET", "user/invites", token=invitee_token)
+    invite = next(
+        (i for i in invites if i["kind"] == kind and i["scope"] == scope), None
+    )
+    assert invite, f"no pending {kind} invitation for {scope}: {invites}"
+    api("POST", "user/invites/accept", token=invitee_token,
+        body=json.dumps({"token": invite["token"]}))
+
+
 # ── Phase 0: health ───────────────────────────────────────────────────────────
 banner("Phase 0: health")
 print(machine.succeed(f"curl -sS --fail {API}/health -i"))
@@ -97,6 +112,13 @@ api("POST", "auth/basic/register", body=json.dumps({
     "username": member, "name": "Team Mate",
     "email": "teammate@gradient.local", "password": "SecureTest123!",
 }))
+# Membership is invite-based and only the invitee can redeem their own
+# invitation, so the second user needs a token from here on, not just in the
+# multi-actor phase. One more rate-limit token, hence the wait.
+time.sleep(8)
+team_token = api("POST", "auth/basic/login", body=json.dumps({
+    "loginname": member, "password": "SecureTest123!"}))
+assert team_token, "second-user login returned empty token"
 
 # Public/unauthenticated-ish reads.
 print(machine.succeed(f"curl -sS {API}/config -i"))
@@ -159,13 +181,28 @@ api("GET", f"projects/myproject/roles/{role_id}", token=token)
 api("PATCH", f"projects/myproject/roles/{role_id}", token=token, body=json.dumps({"name": "viewers2"}))
 api("DELETE", f"projects/myproject/roles/{role_id}", token=token)
 
-# Project membership: add the second user, change their role, then remove them.
-# Members are referenced by username; "View"/"Write" are built-in roles.
+# Project membership is invite-based: POST records an invitation, and the
+# membership exists only once the invitee redeems it. Members are referenced by
+# username; "View"/"Write" are built-in roles.
 api("POST", "projects/myproject/users", token=token,
     body=json.dumps({"user": member, "role": "View"}))
 api("POST", "projects/myproject/users", token=token, expect_error=True,
-    body=json.dumps({"user": member, "role": "View"}))  # already a member
+    body=json.dumps({"user": member, "role": "View"}))  # already invited
+assert not any(m["id"] == member for m in api("GET", "projects/myproject/users", token=token)), \
+    "an invitation must not create the membership"
+assert any(i["user"] == member for i in api("GET", "projects/myproject/invitations", token=token)), \
+    "invitation not listed"
+
+# Revoking withdraws the offer; re-inviting and accepting is what adds them.
+api("DELETE", "projects/myproject/invitations", token=token, body=json.dumps({"user": member}))
+assert not any(i["user"] == member for i in api("GET", "projects/myproject/invitations", token=token)), \
+    "invitation not revoked"
+api("POST", "projects/myproject/users", token=token,
+    body=json.dumps({"user": member, "role": "View"}))
+accept_invite("project", "myproject", team_token)
 assert any(m["id"] == member for m in api("GET", "projects/myproject/users", token=token)), "member not added"
+assert not any(i["user"] == member for i in api("GET", "projects/myproject/invitations", token=token)), \
+    "an accepted invitation must not stay pending"
 api("PATCH", "projects/myproject/users", token=token,
     body=json.dumps({"user": member, "role": "Write"}))
 api("DELETE", "projects/myproject/users", token=token, body=json.dumps({"user": member}))
@@ -303,11 +340,17 @@ api("GET", "caches/clicache", token=token, expect_error=True)
 
 # ── Phase 6b: cache sub-resources (members, roles, upstreams, subscription) ───
 banner("Phase 6b: cache members / roles / upstreams")
-# Members (second user, by username; "View"/"Write" are built-in cache roles).
+# Members are invited, not added (second user, by username; "View"/"Write" are
+# built-in cache roles).
 api("POST", "caches/maincache/members", token=token,
     body=json.dumps({"user": member, "role": "View"}))
 api("POST", "caches/maincache/members", token=token, expect_error=True,
-    body=json.dumps({"user": member, "role": "View"}))  # already a member
+    body=json.dumps({"user": member, "role": "View"}))  # already invited
+assert not any(m["id"] == member for m in api("GET", "caches/maincache/members", token=token)), \
+    "a cache invitation must not create the membership"
+assert any(i["user"] == member for i in api("GET", "caches/maincache/invitations", token=token)), \
+    "cache invitation not listed"
+accept_invite("cache", "maincache", team_token)
 assert any(m["id"] == member for m in api("GET", "caches/maincache/members", token=token)), \
     "cache member not added"
 api("PATCH", "caches/maincache/members", token=token,
@@ -419,19 +462,20 @@ api("GET", f"builds/{missing}/graph", token=token, expect_error=True)
 api("GET", f"commits/{missing}", token=token, expect_error=True)
 
 # ── Phase 8b: permissions (multi-actor) ───────────────────────────────────────
-# The second user logs in and acts with their own token. The built-in "View"
-# role grants read access but none of the project-management permissions, so those
-# mutations must be rejected; promotion to "Admin" then unlocks them.
+# The second user acts with their own token (obtained in phase 1). The built-in
+# "View" role grants read access but none of the project-management permissions,
+# so those mutations must be rejected; promotion to "Admin" then unlocks them.
 banner("Phase 8b: permissions (multi-actor)")
-team_token = api("POST", "auth/basic/login", body=json.dumps({
-    "loginname": member, "password": "SecureTest123!"}))
-assert team_token, "second-user login returned empty token"
 
 # Non-member cannot read a private project.
 api("GET", "projects/myproject", token=team_token, expect_error=True)
 
-# Operator grants "View"; the member can read but cannot manage.
+# Operator invites "View". A pending invitation grants nothing on its own - the
+# access arrives with the acceptance - after which the member can read but not
+# manage.
 api("POST", "projects/myproject/users", token=token, body=json.dumps({"user": member, "role": "View"}))
+api("GET", "projects/myproject", token=team_token, expect_error=True)   # still nothing
+accept_invite("project", "myproject", team_token)
 api("GET", "projects/myproject", token=team_token)                                    # ViewProject granted
 api("PATCH", "projects/myproject", token=team_token, expect_error=True,
     body=json.dumps({"display_name": "hijack"}))                              # no ManageProjectSettings

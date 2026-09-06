@@ -8268,3 +8268,38 @@ the window excludes.
   names the inputs a flake-lock run holds, which is what says whether a wedged
   one is blocking its task's updater. `candidate_lock` stays out: a whole
   generated `flake.lock` is not scheduling evidence.
+
+## The API VM test still asserted the pre-invite membership contract
+
+The invite change rewrote the two `gradient-web` membership test files but not
+`nix/tests/gradient/api/test.py`, which drives the same endpoints over real
+HTTP. CI caught it on main:
+
+```
+AssertionError: member not added
+=== build failed: Cannot build 'vm-test-run-gradient-api.drv'.
+```
+
+`POST /projects/{project}/users` had recorded a `project.invitation.create`
+audit event and returned "Invitation sent", exactly as designed, and the very
+next `GET .../users` found nobody. The assertion was right about the old
+contract and wrong about the new one.
+
+Rewriting it made the test better rather than merely green, because the property
+worth pinning is one no unit test can reach: an invitation on its own grants
+nothing. Phase 8b now invites, checks the invitee still cannot read the private
+project, accepts, and only then sees access appear. Phase 3 covers the
+invitation's own lifecycle (created, listed, revoked, re-issued, accepted, gone
+from pending) and phase 6b the cache equivalent.
+
+Redemption needs the invitee's session, so `team_token` moved from phase 8b up
+to phase 1 where the second user is registered. That costs one more wait on the
+auth rate limiter (burst 5, one token per 6s) and removes the duplicate login
+phase 8b used to do, so the number of throttled calls is unchanged.
+
+`accept_invite(kind, scope, invitee_token)` reads `GET /user/invites` and posts
+the token back, which is the in-app half of the flow the mail link drives.
+
+The declarative-state phases needed no change: `gradient-state` writes
+`project_user` and `cache_user` rows directly rather than through the endpoint,
+so state-managed members are still applied without an invitation.
