@@ -7,7 +7,6 @@
 use super::helpers::{CacheContext, cache_client_ip};
 use crate::client_ip::OptionalPeer;
 use crate::error::{WebError, WebResult};
-use crate::helpers::OptionExt;
 use axum::body::Body;
 use axum::extract::{Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, header};
@@ -61,37 +60,65 @@ pub async fn upstream_nar(
     let client_ip = cache_client_ip(&state, &headers, peer);
     let ctx = CacheContext::load(&state, &headers, client_ip, cache_name).await?;
 
-    let upstream = ECacheUpstream::find_by_id(upstream_id)
+    let upstreams = ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(ctx.cache.id))
-        .one(&state.web_db)
-        .await?
-        .or_not_found("Upstream")?;
+        .all(&state.web_db)
+        .await?;
 
-    let base_url = upstream
-        .url
-        .ok_or_else(|| WebError::bad_request("Not an external upstream"))?;
-
-    let nar_url = build_upstream_nar_url(&base_url, &path, query.as_deref());
-    let resp = gradient_util::http::download_client()
-        .get(&nar_url)
-        .send()
-        .await
-        .map_err(|e| WebError::internal(format!("Upstream request failed: {}", e)))?;
-
-    if !resp.status().is_success() {
-        return Err(WebError::not_found("NAR in upstream"));
+    let bases = upstream_bases(&upstreams, upstream_id);
+    if bases.is_empty() {
+        return Err(WebError::not_found("Upstream"));
     }
 
-    let mut builder = Response::builder().header(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/x-nix-nar"),
-    );
-    if let Some(len) = resp.content_length() {
-        builder = builder.header(header::CONTENT_LENGTH, len);
+    let client = gradient_util::http::download_client();
+    for base in bases {
+        let nar_url = build_upstream_nar_url(&base, &path, query.as_deref());
+        let Ok(resp) = client.get(&nar_url).send().await else {
+            continue;
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+
+        let mut builder = Response::builder().header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/x-nix-nar"),
+        );
+        if let Some(len) = resp.content_length() {
+            builder = builder.header(header::CONTENT_LENGTH, len);
+        }
+        return builder
+            .body(Body::from_stream(resp.bytes_stream()))
+            .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)));
     }
-    builder
-        .body(Body::from_stream(resp.bytes_stream()))
-        .map_err(|e| WebError::internal(format!("Failed to build response: {}", e)))
+
+    Err(WebError::not_found("NAR in upstream"))
+}
+
+/// Which upstreams to try for a proxied NAR, best first.
+///
+/// The URL names an upstream by row id, but that row is configuration: removing
+/// an upstream would otherwise permanently 404 every narinfo already handed out
+/// that names it, because a client caches narinfo and never refetches it. The
+/// NAR path itself is content-addressed - the filename is a file hash - so any
+/// upstream of this cache that serves that path serves the same bytes. Try the
+/// named one first, then the rest, and only give up when none of them has it.
+fn upstream_bases(upstreams: &[MCacheUpstream], named: Uuid) -> Vec<String> {
+    let mut bases: Vec<String> = Vec::with_capacity(upstreams.len());
+    let named_first = upstreams
+        .iter()
+        .filter(|u| u.id.into_inner() == named)
+        .chain(upstreams.iter().filter(|u| u.id.into_inner() != named));
+
+    for upstream in named_first {
+        let Some(url) = upstream.url.as_deref() else {
+            continue;
+        };
+        if !bases.iter().any(|b| b == url) {
+            bases.push(url.to_owned());
+        }
+    }
+    bases
 }
 
 pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
@@ -176,6 +203,76 @@ fn build_upstream_nar_url(base_url: &str, path: &str, query: Option<&str>) -> St
 mod tests {
     use super::*;
     use sea_orm::{DatabaseBackend, MockDatabase};
+
+    fn upstream_row(id: u128, url: Option<&str>) -> MCacheUpstream {
+        MCacheUpstream {
+            id: gradient_types::ids::CacheUpstreamId::new(uuid::Uuid::from_u128(id)),
+            url: url.map(str::to_owned),
+            ..Default::default()
+        }
+    }
+
+    /// The named upstream is still the right first guess: it is the one whose
+    /// layout the narinfo was written against.
+    #[test]
+    fn the_named_upstream_is_tried_first() {
+        let rows = vec![
+            upstream_row(1, Some("https://a.example")),
+            upstream_row(2, Some("https://b.example")),
+        ];
+
+        let bases = upstream_bases(&rows, uuid::Uuid::from_u128(2));
+
+        assert_eq!(bases, vec!["https://b.example", "https://a.example"]);
+    }
+
+    /// The case that broke a real substitution: the upstream row named in an
+    /// already-issued narinfo was deleted. A client caches narinfo and never
+    /// refetches, so 404ing here strands that path forever - the remaining
+    /// upstreams have to be tried.
+    #[test]
+    fn a_deleted_upstream_falls_back_to_the_rest() {
+        let rows = vec![
+            upstream_row(1, Some("https://a.example")),
+            upstream_row(2, Some("https://b.example")),
+        ];
+
+        let bases = upstream_bases(&rows, uuid::Uuid::from_u128(99));
+
+        assert_eq!(bases, vec!["https://a.example", "https://b.example"]);
+    }
+
+    /// An upstream that is another Gradient cache rather than an external URL
+    /// has nothing to proxy to; it must be skipped, not turned into an error
+    /// that hides the upstreams which would have served the path.
+    #[test]
+    fn upstreams_without_a_url_are_skipped() {
+        let rows = vec![
+            upstream_row(1, None),
+            upstream_row(2, Some("https://b.example")),
+        ];
+
+        assert_eq!(
+            upstream_bases(&rows, uuid::Uuid::from_u128(1)),
+            vec!["https://b.example"]
+        );
+        assert!(upstream_bases(&[upstream_row(1, None)], uuid::Uuid::from_u128(1)).is_empty());
+    }
+
+    /// The named upstream also appears in the "rest", so without dedup every
+    /// fallback would re-fetch it.
+    #[test]
+    fn the_named_upstream_is_not_tried_twice() {
+        let rows = vec![
+            upstream_row(1, Some("https://a.example")),
+            upstream_row(2, Some("https://a.example")),
+        ];
+
+        assert_eq!(
+            upstream_bases(&rows, uuid::Uuid::from_u128(1)),
+            vec!["https://a.example"]
+        );
+    }
 
     // Placeholder file hash (nix32 52-char) as it appears in a narinfo URL.
     const FILE_HASH_NIX32: &str = "0mdqa9w1p6cmli6976v4wi0sw9r4p5prkj7lzfd1877wk11c9c73";
