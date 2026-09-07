@@ -20,8 +20,9 @@ The newest commit is usually still building when the timer fires, so by default
 the service waits for it rather than reporting that nothing was built.
 
 It follows the task's live WebSocket, `/api/v1/tasks/<project>/<task>/live`, and
-re-checks on every event, so it reacts as soon as the build finishes without
-polling the API. The wait ends when:
+re-checks on every event, so it reacts as soon as the build finishes and never
+polls the API. If the socket drops it reconnects and re-checks, since a
+reconnect gap replays nothing. The wait ends when:
 
 - the system closure for this host is built, and is switched to;
 - that build fails, or the whole evaluation fails or is aborted;
@@ -36,8 +37,10 @@ successfully. Waiting itself is unbounded, so a run that outlives its own timer
 just makes systemd skip the next trigger.
 
 The target therefore needs outbound WebSocket access to the Gradient server, not
-only plain HTTP. Set `waitForBuild = false` to restore the old behaviour of
-exiting as soon as nothing is built yet.
+only plain HTTP. Where the network cannot carry a WebSocket upgrade, set
+`websockets = false` and the service re-checks every `pollIntervalSec` instead.
+Set `waitForBuild = false` to restore the old behaviour of exiting as soon as
+nothing is built yet.
 
 ## Setup
 
@@ -81,7 +84,8 @@ Add `gradient.nixosModules.deploy` to the target machine's NixOS configuration:
 | `task` | | `project/task` slug to watch |
 | `deployFor` | hostname | Name of the deployment configuration to apply |
 | `waitForBuild` | `true` | Wait for an in-flight evaluation instead of exiting when nothing is built yet |
-| `idleRecheckSec` | `300` | Failsafe re-check interval while waiting, in seconds. Bounds how long a dropped event can stall a deployment; events drive the normal path |
+| `websockets` | `true` | Follow the task's live WebSocket while waiting. Disable where a WebSocket upgrade cannot get through |
+| `pollIntervalSec` | `60` | Re-check interval while waiting with `websockets` disabled. Unused otherwise |
 | `dates` | `"04:00"` | When the timer fires, in `systemd.time(7)` format |
 | `randomizedDelaySec` | `"0"` | Randomized delay added before each run |
 
