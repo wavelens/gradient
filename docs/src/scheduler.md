@@ -386,6 +386,16 @@ in the separate retention loop instead.
 
 #### Upstream substitutability
 
+An upstream that stops answering is taken out of rotation rather than probed
+again on every request. Each probe is bounded at five seconds, and three
+consecutive *transport* failures in a row trip that upstream for a minute, after
+which one request is let through to test it - failing again re-trips it, so a
+cache that is down costs nothing while it stays down and is picked up on its own
+when it returns. A 404 is not a failure: it means the upstream answered and
+simply lacks the path, which is the ordinary case during any large substitution.
+The same health is shared by the worker cache-query path and the cache's own
+narinfo endpoint, so a dead upstream is learned about once.
+
 A derivation is just another build that can be substituted when its output is
 available on a cache, exactly like any other - fixed-output derivations are not
 special-cased. At eval time `resolve_anchors` runs a project-scoped lookup

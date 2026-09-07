@@ -11,8 +11,10 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use gradient_core::ServerState;
-use gradient_sources::{get_hash_from_url, verify_narinfo_signature};
+use gradient_core::upstream::UpstreamProbe;
+use gradient_sources::get_hash_from_url;
 use gradient_types::*;
+use gradient_util::http;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
 use tracing::warn;
@@ -154,63 +156,79 @@ pub async fn path(
     Err(WebError::not_found("Path"))
 }
 
+/// Point the narinfo's `URL:` at our own proxy endpoint, so a client fetching
+/// the NAR comes back through us rather than straight to the upstream.
+fn rewrite_nar_url(body: &str, upstream: CacheUpstreamId) -> String {
+    body.lines()
+        .map(|line| {
+            if let Some(nar_path) = line.strip_prefix("URL: ") {
+                format!("URL: nar/upstream/{}/{}", upstream, nar_path.trim())
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
+/// The narinfo for a path we do not hold, from whichever upstream has it.
+///
+/// Probing is concurrent and bounded, and an upstream that stops answering is
+/// taken out of rotation: a cache must answer a miss quickly, and serialising
+/// this meant one unreachable upstream cost every miss the full client timeout -
+/// long enough that a substituter's own stall detector fired first.
 async fn fetch_from_upstream(
     state: &Arc<ServerState>,
     cache: &MCache,
     path_hash: &str,
 ) -> Option<String> {
-    let upstreams = ECacheUpstream::find()
+    let upstreams: Vec<UpstreamProbe> = ECacheUpstream::find()
         .filter(CCacheUpstream::Cache.eq(cache.id))
         .all(&state.web_db)
         .await
-        .unwrap_or_default();
-
-    let http_client = gradient_util::http::download_client();
-    for upstream in upstreams {
-        let Some(base_url) = upstream.url.as_deref() else {
-            continue;
-        };
-        let Some(public_key) = upstream.public_key.as_deref() else {
-            warn!(upstream = %upstream.id, "upstream missing public_key; skipping");
-            continue;
-        };
-        let narinfo_url = format!("{}/{}.narinfo", base_url.trim_end_matches('/'), path_hash);
-        let Ok(resp) = http_client.get(&narinfo_url).send().await else {
-            continue;
-        };
-        if !resp.status().is_success() {
-            continue;
-        }
-        let Ok(body) = resp.text().await else {
-            continue;
-        };
-
-        // Only forward narinfos whose Sig matches the upstream's configured
-        // trusted public key. Unsigned / wrong-key / tampered narinfos are
-        // dropped and we fall through to the next upstream (or 404).
-        if !verify_narinfo_signature(public_key, &body) {
-            warn!(
-                upstream = %upstream.id,
-                path_hash,
-                "upstream narinfo Sig did not verify against configured public_key; dropping"
-            );
-            continue;
-        }
-
-        // Rewrite the URL: field to proxy through our upstream_nar endpoint.
-        let rewritten = body
-            .lines()
-            .map(|line| {
-                if let Some(nar_path) = line.strip_prefix("URL: ") {
-                    format!("URL: nar/upstream/{}/{}", upstream.id, nar_path.trim())
-                } else {
-                    line.to_string()
-                }
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|upstream| {
+            let url = upstream.url?;
+            let Some(public_key) = upstream.public_key else {
+                warn!(upstream = %upstream.id, "upstream missing public_key; skipping");
+                return None;
+            };
+            Some(UpstreamProbe {
+                id: upstream.id,
+                url,
+                public_key,
             })
-            .collect::<Vec<_>>()
-            .join("\n")
-            + "\n";
-        return Some(rewritten);
+        })
+        .collect();
+
+    let found =
+        gradient_core::upstream::fetch_narinfo_body(http::download_client(), &upstreams, path_hash)
+            .await?;
+
+    Some(rewrite_nar_url(&found.body, found.upstream))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rewrite_nar_url;
+    use gradient_types::ids::CacheUpstreamId;
+
+    /// A client must never be handed the upstream's own NAR URL: it would fetch
+    /// straight from there, bypassing this cache entirely.
+    #[test]
+    fn the_nar_url_is_rewritten_through_our_proxy() {
+        let id = CacheUpstreamId::new(uuid::Uuid::from_u128(7));
+        let body = "StorePath: /nix/store/aaa-foo\nURL: nar/1abc.nar.xz\nNarSize: 12\n";
+
+        let out = rewrite_nar_url(body, id);
+
+        assert!(
+            out.contains(&format!("URL: nar/upstream/{id}/nar/1abc.nar.xz")),
+            "{out}"
+        );
+        assert!(out.contains("StorePath: /nix/store/aaa-foo"));
+        assert!(out.ends_with('\n'));
     }
-    None
 }
