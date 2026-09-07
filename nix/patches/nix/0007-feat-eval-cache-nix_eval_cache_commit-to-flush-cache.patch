@@ -1,0 +1,106 @@
+From b51fd076bb1240e302300fb3290a4abb28a510d6 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sun, 14 Jun 2026 11:29:55 +0200
+Subject: [PATCH 07/13] feat(eval-cache): nix_eval_cache_commit to flush cache
+ without closing it
+
+EvalCache::commit() commits the AttrDb txn, wal_checkpoint(truncate)s it into the main .sqlite, and reopens the txn, so a long-lived evaluator persists the cache for a concurrent reader instead of only on last-connection close. Exposed via the libflake C API.
+---
+ src/libexpr/eval-cache.cc                  | 17 +++++++++++++++++
+ src/libexpr/include/nix/expr/eval-cache.hh |  9 +++++++++
+ src/libflake-c/nix_api_eval_cache.cc       |  9 +++++++++
+ src/libflake-c/nix_api_eval_cache.h        | 13 +++++++++++++
+ 4 files changed, 48 insertions(+)
+
+diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
+index 7422cd095..752c50fb5 100644
+--- a/src/libexpr/eval-cache.cc
++++ b/src/libexpr/eval-cache.cc
+@@ -373,6 +373,23 @@ ref<AttrCursor> EvalCache::getRoot()
+     return make_ref<AttrCursor>(ref(shared_from_this()), std::nullopt);
+ }
+ 
++void EvalCache::commit()
++{
++    if (!db)
++        return;
++    auto state(db->_state->lock());
++    if (db->failed || !state->txn || !state->txn->active)
++        return;
++    state->txn->commit();
++    state->txn.reset();
++    try {
++        state->db.exec("pragma wal_checkpoint(truncate);");
++    } catch (...) {
++        ignoreExceptionExceptInterrupt();
++    }
++    state->txn = std::make_unique<SQLiteTxn>(state->db);
++}
++
+ AttrCursor::AttrCursor(
+     ref<EvalCache> root, Parent parent, Value * value, std::optional<std::pair<AttrId, AttrValue>> && cachedValue)
+     : root(root)
+diff --git a/src/libexpr/include/nix/expr/eval-cache.hh b/src/libexpr/include/nix/expr/eval-cache.hh
+index 0feb7d564..db4660ddd 100644
+--- a/src/libexpr/include/nix/expr/eval-cache.hh
++++ b/src/libexpr/include/nix/expr/eval-cache.hh
+@@ -50,6 +50,15 @@ public:
+     EvalCache(std::optional<std::reference_wrapper<const Hash>> useCache, EvalState & state, RootLoader rootLoader);
+ 
+     ref<AttrCursor> getRoot();
++
++    /**
++     * Commit pending eval-cache writes and checkpoint the WAL into the main
++     * database file, so a concurrent reader of the `.sqlite` (without its
++     * `-wal` sidecar) sees them. Normally the cache is only committed when the
++     * last `AttrDb` connection closes; long-lived evaluators that keep the
++     * cache open need this to persist incrementally. No-op without a cache.
++     */
++    void commit();
+ };
+ 
+ enum AttrType {
+diff --git a/src/libflake-c/nix_api_eval_cache.cc b/src/libflake-c/nix_api_eval_cache.cc
+index d77cb3c64..aa4bd2c26 100644
+--- a/src/libflake-c/nix_api_eval_cache.cc
++++ b/src/libflake-c/nix_api_eval_cache.cc
+@@ -37,6 +37,15 @@ nix_attr_cursor * nix_eval_cache_get_root(nix_c_context * context, nix_eval_cach
+     NIXC_CATCH_ERRS_NULL
+ }
+ 
++nix_err nix_eval_cache_commit(nix_c_context * context, nix_eval_cache * cache)
++{
++    nix_clear_err(context);
++    try {
++        cache->cache->commit();
++    }
++    NIXC_CATCH_ERRS
++}
++
+ nix_attr_cursor * nix_attr_cursor_maybe_get_attr(nix_c_context * context, nix_attr_cursor * cursor, const char * name)
+ {
+     nix_clear_err(context);
+diff --git a/src/libflake-c/nix_api_eval_cache.h b/src/libflake-c/nix_api_eval_cache.h
+index ce8369306..5ed4b80d5 100644
+--- a/src/libflake-c/nix_api_eval_cache.h
++++ b/src/libflake-c/nix_api_eval_cache.h
+@@ -56,6 +56,19 @@ void nix_eval_cache_free(nix_eval_cache * cache);
+  */
+ nix_attr_cursor * nix_eval_cache_get_root(nix_c_context * context, nix_eval_cache * cache);
+ 
++/**
++ * @brief Commit pending writes and checkpoint the cache's SQLite WAL into the
++ * main `.sqlite` file.
++ *
++ * Persists eval-cache entries written so far so a reader of the database file
++ * (without its `-wal` sidecar) sees them, without closing the cache. Intended
++ * for long-lived evaluators that keep the cache open across many evaluations.
++ * @param[out] context Optional, stores error information
++ * @param[in] cache The evaluation cache
++ * @return NIX_OK on success.
++ */
++nix_err nix_eval_cache_commit(nix_c_context * context, nix_eval_cache * cache);
++
+ /**
+  * @brief Descend into a child attribute by name.
+  * @param[out] context Optional, stores error information

@@ -1,0 +1,62 @@
+From f1828b59cdf91a656b88196864828f990009d9b3 Mon Sep 17 00:00:00 2001
+From: adisbladis <adisbladis@gmail.com>
+Date: Wed, 22 Jul 2026 19:59:00 +0200
+Subject: [PATCH] libexpr-c: Add C API function
+ nix_eval_state_builder_set_setting
+
+To be able to drive evaluator settings from the C API.
+My motivation is to be able to set `pure-eval` without having global config state.
+---
+ src/libexpr-c/nix_api_expr.cc | 12 ++++++++++++
+ src/libexpr-c/nix_api_expr.h  | 15 +++++++++++++++
+ 2 files changed, 27 insertions(+)
+
+diff --git a/src/libexpr-c/nix_api_expr.cc b/src/libexpr-c/nix_api_expr.cc
+index 2387ee8c3..9c6bcefc3 100644
+--- a/src/libexpr-c/nix_api_expr.cc
++++ b/src/libexpr-c/nix_api_expr.cc
+@@ -152,6 +152,18 @@ nix_err nix_eval_state_builder_set_lookup_path(
+     NIXC_CATCH_ERRS
+ }
+ 
++nix_err nix_eval_state_builder_set_setting(
++    nix_c_context * context, nix_eval_state_builder * builder, const char * key, const char * value)
++{
++    if (context)
++        context->last_err_code = NIX_OK;
++    try {
++        if (!builder->settings.set(key, value))
++            return nix_set_err_msg(context, NIX_ERR_KEY, "Setting not found");
++    }
++    NIXC_CATCH_ERRS
++}
++
+ EvalState * nix_eval_state_build(nix_c_context * context, nix_eval_state_builder * builder)
+ {
+     if (context)
+diff --git a/src/libexpr-c/nix_api_expr.h b/src/libexpr-c/nix_api_expr.h
+index 0326e7bec..2fce9eab6 100644
+--- a/src/libexpr-c/nix_api_expr.h
++++ b/src/libexpr-c/nix_api_expr.h
+@@ -229,6 +229,21 @@ nix_err nix_eval_state_builder_load(nix_c_context * context, nix_eval_state_buil
+ nix_err nix_eval_state_builder_set_lookup_path(
+     nix_c_context * context, nix_eval_state_builder * builder, const char ** lookupPath);
+ 
++/**
++ * @brief Set an evaluator setting on the builder
++ * @ingroup libexpr_init
++ *
++ * Sets a single evaluator setting (as documented in the Nix manual) on the builder.
++ *
++ * @param[out] context Optional, stores error information
++ * @param[in] builder The builder to modify.
++ * @param[in] key The setting name.
++ * @param[in] value The setting value.
++ * @return NIX_OK if successful, NIX_ERR_KEY if the setting does not exist, an error code otherwise.
++ */
++nix_err nix_eval_state_builder_set_setting(
++    nix_c_context * context, nix_eval_state_builder * builder, const char * key, const char * value);
++
+ /**
+  * @brief Create a new Nix language evaluator state
+  * @ingroup libexpr_init

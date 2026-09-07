@@ -1,0 +1,142 @@
+From 4d9f0363a4b4ac4ef02e0ecfcd23d3eea9b216c1 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sat, 13 Jun 2026 17:57:14 +0200
+Subject: [PATCH 05/13] libexpr-c: expose nix_eval_state_get_stats_json via
+ EvalState::getStatisticsJSON
+
+---
+ src/libexpr-c/nix_api_expr.cc        | 14 ++++++++++++++
+ src/libexpr-c/nix_api_expr.h         | 15 +++++++++++++++
+ src/libexpr/eval.cc                  | 17 ++++++++++++-----
+ src/libexpr/include/nix/expr/eval.hh |  8 ++++++++
+ 4 files changed, 49 insertions(+), 5 deletions(-)
+
+diff --git a/src/libexpr-c/nix_api_expr.cc b/src/libexpr-c/nix_api_expr.cc
+index 9c6bcefc3..ff43b3510 100644
+--- a/src/libexpr-c/nix_api_expr.cc
++++ b/src/libexpr-c/nix_api_expr.cc
+@@ -2,6 +2,8 @@
+ #include <stdexcept>
+ #include <string>
+ 
++#include <nlohmann/json.hpp>
++
+ #include "nix/expr/eval.hh"
+ #include "nix/expr/eval-gc.hh"
+ #include "nix/store/globals.hh"
+@@ -103,6 +105,18 @@ nix_err nix_value_force_deep(nix_c_context * context, EvalState * state, nix_val
+     NIXC_CATCH_ERRS
+ }
+ 
++nix_err nix_eval_state_get_stats_json(
++    nix_c_context * context, EvalState * state, nix_get_string_callback callback, void * user_data)
++{
++    if (context)
++        context->last_err_code = NIX_OK;
++    try {
++        auto j = state->state.getStatisticsJSON();
++        return call_nix_get_string_callback(j.dump(), callback, user_data);
++    }
++    NIXC_CATCH_ERRS
++}
++
+ nix_eval_state_builder * nix_eval_state_builder_new(nix_c_context * context, Store * store)
+ {
+     if (context)
+diff --git a/src/libexpr-c/nix_api_expr.h b/src/libexpr-c/nix_api_expr.h
+index 2fce9eab6..6eeeadc5b 100644
+--- a/src/libexpr-c/nix_api_expr.h
++++ b/src/libexpr-c/nix_api_expr.h
+@@ -292,6 +292,21 @@ EvalState * nix_state_create(nix_c_context * context, const char ** lookupPath,
+  */
+ void nix_state_free(EvalState * state);
+ 
++/**
++ * @brief Get the evaluator statistics for a state as a JSON string.
++ *
++ * Returns the same data Nix writes to NIX_SHOW_STATS_PATH (cpuTime, nrThunks,
++ * nrAvoided, memory/GC counters, ...), serialized as JSON. Cheap; no GC first.
++ *
++ * @param[out] context Optional, stores error information
++ * @param[in] state the evaluator state to read statistics from
++ * @param[in] callback Called with the JSON string
++ * @param[in] user_data optional, passed to the callback
++ * @return NIX_OK if there were no errors.
++ */
++nix_err nix_eval_state_get_stats_json(
++    nix_c_context * context, EvalState * state, nix_get_string_callback callback, void * user_data);
++
+ /** @addtogroup GC
+  * @ingroup libexpr
+  * @brief Reference counting and garbage collector operations
+diff --git a/src/libexpr/eval.cc b/src/libexpr/eval.cc
+index dcf41d713..56f241028 100644
+--- a/src/libexpr/eval.cc
++++ b/src/libexpr/eval.cc
+@@ -3077,7 +3077,7 @@ void EvalState::maybePrintStats()
+     }
+ }
+ 
+-void EvalState::printStatistics()
++nlohmann::json EvalState::getStatisticsJSON()
+ {
+     std::chrono::microseconds cpuTimeDuration = getCpuUserTime();
+     float cpuTime = std::chrono::duration_cast<std::chrono::duration<float>>(cpuTimeDuration).count();
+@@ -3099,10 +3099,6 @@ void EvalState::printStatistics()
+     auto gcCycles = getGCCycles();
+ #endif
+ 
+-    auto outPath = getEnv("NIX_SHOW_STATS_PATH").value_or("-");
+-    std::fstream fs;
+-    if (outPath != "-")
+-        fs.open(outPath, std::fstream::out);
+     json topObj = json::object();
+     topObj["cpuTime"] = cpuTime;
+     topObj["time"] = {
+@@ -3206,9 +3202,20 @@ void EvalState::printStatistics()
+         auto & list = topObj["symbols"];
+         symbols.dump([&](std::string_view s) { list.emplace_back(s); });
+     }
++
++    return topObj;
++}
++
++void EvalState::printStatistics()
++{
++    json topObj = getStatisticsJSON();
++
++    auto outPath = getEnv("NIX_SHOW_STATS_PATH").value_or("-");
+     if (outPath == "-") {
+         std::cerr << topObj.dump(2) << std::endl;
+     } else {
++        std::fstream fs;
++        fs.open(outPath, std::fstream::out);
+         fs << topObj.dump(2) << std::endl;
+     }
+ }
+diff --git a/src/libexpr/include/nix/expr/eval.hh b/src/libexpr/include/nix/expr/eval.hh
+index a421a680b..59dc1e347 100644
+--- a/src/libexpr/include/nix/expr/eval.hh
++++ b/src/libexpr/include/nix/expr/eval.hh
+@@ -24,6 +24,8 @@
+ #include <boost/unordered/unordered_flat_map.hpp>
+ #include <boost/unordered/concurrent_flat_map_fwd.hpp>
+ 
++#include <nlohmann/json_fwd.hpp>
++
+ #include <map>
+ #include <optional>
+ #include <functional>
+@@ -1100,6 +1102,12 @@ public:
+      */
+     void maybePrintStats();
+ 
++    /**
++     * Build the evaluator-statistics JSON object (the same content printStatistics()
++     * writes), without performing any I/O. Cheap; does not run a GC first.
++     */
++    nlohmann::json getStatisticsJSON();
++
+     /**
+      * Print statistics, unconditionally, cheaply, without performing a GC first.
+      */

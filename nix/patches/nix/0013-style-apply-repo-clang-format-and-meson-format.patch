@@ -1,0 +1,21 @@
+From e9862aa7f45a4659c4d933310f5e8bd50530148f Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Fri, 3 Jul 2026 16:02:24 +0200
+Subject: [PATCH 13/13] style: apply repo clang-format and meson-format
+
+---
+ src/libexpr/include/nix/expr/eval.hh | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/libexpr/include/nix/expr/eval.hh b/src/libexpr/include/nix/expr/eval.hh
+index 45dd94c4f..2f86cf008 100644
+--- a/src/libexpr/include/nix/expr/eval.hh
++++ b/src/libexpr/include/nix/expr/eval.hh
+@@ -1128,6 +1128,7 @@ public:
+         uint64_t nrThunks, nrFunctionCalls, nrPrimOpCalls, nrLookups, nrOpUpdates;
+         uint64_t gcHeapSize, gcTotalBytes;
+     };
++
+     LeanStats getLeanStats();
+ 
+     /**

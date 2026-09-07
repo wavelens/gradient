@@ -1,0 +1,142 @@
+From aa24f5715359c12cb9c4577a9b1ca4c6ab8708ab Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sun, 14 Jun 2026 18:14:40 +0200
+Subject: [PATCH 08/13] feat(eval-cache): split commit (WAL append) from
+ checkpoint (truncate)
+
+EvalCache::commit() now only commits the SQLite transaction (appends to the WAL) without a truncate checkpoint, so several evaluators writing one cache concurrently no longer deadlock on the WAL read-slot locks. New EvalCache::checkpoint() (+ C API nix_eval_cache_checkpoint) folds the WAL into the main file once, with no concurrent readers.
+---
+ src/libexpr/eval-cache.cc                  | 20 ++++++++++++++++++
+ src/libexpr/include/nix/expr/eval-cache.hh | 20 +++++++++++++-----
+ src/libflake-c/nix_api_eval_cache.cc       |  9 ++++++++
+ src/libflake-c/nix_api_eval_cache.h        | 24 +++++++++++++++++-----
+ 4 files changed, 63 insertions(+), 10 deletions(-)
+
+diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
+index 752c50fb5..e9d251973 100644
+--- a/src/libexpr/eval-cache.cc
++++ b/src/libexpr/eval-cache.cc
+@@ -380,8 +380,28 @@ void EvalCache::commit()
+     auto state(db->_state->lock());
+     if (db->failed || !state->txn || !state->txn->active)
+         return;
++    // Commit the transaction (appending to the WAL) but do NOT checkpoint:
++    // a truncate checkpoint takes an exclusive lock on the WAL read slots and
++    // deadlocks when several evaluators write the same cache concurrently. The
++    // WAL is durable across processes, so a later commit/reader still sees these
++    // writes; call checkpoint() once (with no concurrent readers) to fold the
++    // WAL back into the main file.
+     state->txn->commit();
+     state->txn.reset();
++    state->txn = std::make_unique<SQLiteTxn>(state->db);
++}
++
++void EvalCache::checkpoint()
++{
++    if (!db)
++        return;
++    auto state(db->_state->lock());
++    if (db->failed)
++        return;
++    if (state->txn && state->txn->active) {
++        state->txn->commit();
++        state->txn.reset();
++    }
+     try {
+         state->db.exec("pragma wal_checkpoint(truncate);");
+     } catch (...) {
+diff --git a/src/libexpr/include/nix/expr/eval-cache.hh b/src/libexpr/include/nix/expr/eval-cache.hh
+index db4660ddd..c4bfd3784 100644
+--- a/src/libexpr/include/nix/expr/eval-cache.hh
++++ b/src/libexpr/include/nix/expr/eval-cache.hh
+@@ -52,13 +52,23 @@ public:
+     ref<AttrCursor> getRoot();
+ 
+     /**
+-     * Commit pending eval-cache writes and checkpoint the WAL into the main
+-     * database file, so a concurrent reader of the `.sqlite` (without its
+-     * `-wal` sidecar) sees them. Normally the cache is only committed when the
+-     * last `AttrDb` connection closes; long-lived evaluators that keep the
+-     * cache open need this to persist incrementally. No-op without a cache.
++     * Commit pending eval-cache writes by committing the SQLite transaction
++     * (appending to the WAL). Does NOT checkpoint, so it is safe to call from
++     * several evaluators writing the same cache concurrently — a truncate
++     * checkpoint would deadlock on the WAL read-slot locks. The writes are
++     * durable in the WAL; use checkpoint() to fold them into the main file.
++     * No-op without a cache.
+      */
+     void commit();
++
++    /**
++     * Fold the WAL into the main `.sqlite` file via a truncate checkpoint, so a
++     * reader of the database file (without its `-wal` sidecar) sees every
++     * committed write. Call this once with no concurrent readers/writers (e.g.
++     * at the end of an evaluation, before shipping the file); calling it while
++     * other connections hold WAL read locks will block. No-op without a cache.
++     */
++    void checkpoint();
+ };
+ 
+ enum AttrType {
+diff --git a/src/libflake-c/nix_api_eval_cache.cc b/src/libflake-c/nix_api_eval_cache.cc
+index aa4bd2c26..aa136ce66 100644
+--- a/src/libflake-c/nix_api_eval_cache.cc
++++ b/src/libflake-c/nix_api_eval_cache.cc
+@@ -46,6 +46,15 @@ nix_err nix_eval_cache_commit(nix_c_context * context, nix_eval_cache * cache)
+     NIXC_CATCH_ERRS
+ }
+ 
++nix_err nix_eval_cache_checkpoint(nix_c_context * context, nix_eval_cache * cache)
++{
++    nix_clear_err(context);
++    try {
++        cache->cache->checkpoint();
++    }
++    NIXC_CATCH_ERRS
++}
++
+ nix_attr_cursor * nix_attr_cursor_maybe_get_attr(nix_c_context * context, nix_attr_cursor * cursor, const char * name)
+ {
+     nix_clear_err(context);
+diff --git a/src/libflake-c/nix_api_eval_cache.h b/src/libflake-c/nix_api_eval_cache.h
+index 5ed4b80d5..bfd245e15 100644
+--- a/src/libflake-c/nix_api_eval_cache.h
++++ b/src/libflake-c/nix_api_eval_cache.h
+@@ -57,18 +57,32 @@ void nix_eval_cache_free(nix_eval_cache * cache);
+ nix_attr_cursor * nix_eval_cache_get_root(nix_c_context * context, nix_eval_cache * cache);
+ 
+ /**
+- * @brief Commit pending writes and checkpoint the cache's SQLite WAL into the
+- * main `.sqlite` file.
++ * @brief Commit pending writes to the cache's SQLite WAL, without checkpointing.
+  *
+- * Persists eval-cache entries written so far so a reader of the database file
+- * (without its `-wal` sidecar) sees them, without closing the cache. Intended
+- * for long-lived evaluators that keep the cache open across many evaluations.
++ * Persists eval-cache entries written so far into the WAL so they survive and
++ * remain visible to other connections, without closing the cache. Safe to call
++ * concurrently from several evaluators sharing one cache (it does not take the
++ * WAL read-slot locks a checkpoint needs). Use nix_eval_cache_checkpoint to fold
++ * the WAL into the main `.sqlite` file.
+  * @param[out] context Optional, stores error information
+  * @param[in] cache The evaluation cache
+  * @return NIX_OK on success.
+  */
+ nix_err nix_eval_cache_commit(nix_c_context * context, nix_eval_cache * cache);
+ 
++/**
++ * @brief Fold the cache's WAL into the main `.sqlite` file (truncate checkpoint).
++ *
++ * Makes every committed write visible to a reader of the database file alone
++ * (without its `-wal` sidecar). Call once with no concurrent readers/writers
++ * (e.g. at end of evaluation before shipping the file); it blocks while other
++ * connections hold WAL read locks.
++ * @param[out] context Optional, stores error information
++ * @param[in] cache The evaluation cache
++ * @return NIX_OK on success.
++ */
++nix_err nix_eval_cache_checkpoint(nix_c_context * context, nix_eval_cache * cache);
++
+ /**
+  * @brief Descend into a child attribute by name.
+  * @param[out] context Optional, stores error information

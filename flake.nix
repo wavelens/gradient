@@ -11,17 +11,9 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     crane.url = "github:ipetkov/crane";
-    nix = {
-      url = "github:DerDennisOP/nix/feat/eval-metrics-stats";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        nixpkgs-23-11.follows = "nixpkgs";
-        nixpkgs-regression.follows = "nixpkgs";
-      };
-    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, crane, nix, ... }@inputs: flake-utils.lib.eachDefaultSystem (system: let
+  outputs = { self, nixpkgs, flake-utils, crane, ... }@inputs: flake-utils.lib.eachDefaultSystem (system: let
     pkgs = import nixpkgs {
       inherit system;
       overlays = map (v: self.overlays.${v}) (builtins.attrNames self.overlays);
@@ -120,7 +112,10 @@
   }) // {
     overlays = {
       nix = final: prev: {
-        gradient-nix = nix.packages.${final.stdenv.hostPlatform.system}.nix.overrideScope (finalScope: prevScope: { withAWS = false; });
+        # Nixpkgs' latest Nix, carrying the eval-metrics and eval-cache C API that nix-bindings links against.
+        gradient-nix = ((prev.nixVersions.nixComponents_2_35.appendPatches (
+          map (patch: ./nix/patches/nix + "/${patch}") (builtins.attrNames (builtins.readDir ./nix/patches/nix))
+        )).overrideScope (finalScope: prevScope: { withAWS = false; })).nix-everything;
       };
       gradient = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient; };
       gradient-frontend = final: prev: { inherit (self.packages.${final.stdenv.hostPlatform.system}) gradient-frontend; };
