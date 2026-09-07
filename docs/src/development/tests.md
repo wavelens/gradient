@@ -13,7 +13,7 @@ the catalogue, and a per-test list goes stale and collides on every merge.
 | Shared harness | `backend/gradient-test-support/` | fakes, fixtures and the test server every suite reuses |
 | CLI | `cli/tests/*.rs`, `cli/connector/tests/*.rs` | the installed `gradient` binary against a stub HTTP server |
 | Frontend | `frontend/src/**/*.spec.ts` | components and services under vitest |
-| NixOS VM | `nix/tests/gradient/<name>/` | a booted machine running the packaged server |
+| NixOS VM | `nix/tests/gradient/<name>/` | a booted machine running the packaged server, or a NixOS module against a scripted API |
 
 A crate's own `tests/` directory is for anything that has to go through a public
 entry point (an HTTP route, a CLI invocation). Everything else belongs in a
@@ -73,6 +73,14 @@ sequence of effects rather than on internal state.
 **Closure and scheduling work uses `StoreFixture`.** It carries a real
 derivation graph, so dependency ordering, readiness and cache-presence logic get
 tested against genuine `.drv` shapes instead of a hand-built three-node tree.
+
+**A NixOS module under test gets a scripted API, not a server.** A module that
+only consumes the HTTP API (`nix/modules/gradient-deploy.nix`) is exercised
+against a stdlib-only stub in its test directory, driven through a `/control`
+endpoint that swaps the scripted state and pushes the matching live-WebSocket
+event. That keeps the VM free of Postgres and a builder, so the test asserts on
+the module's own behaviour: what it waits for, what it never requests, and how
+many times it asks.
 
 **CLI tests drive the real binary.** `assert_cmd` runs `gradient` with `HOME`
 and `XDG_CONFIG_HOME` pointed at a `TempDir` holding a seeded `config.toml`, and
