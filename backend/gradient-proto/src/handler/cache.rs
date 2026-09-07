@@ -22,6 +22,7 @@ use tracing::{error, warn};
 async fn build_local_cache_map(
     state: &ServerState,
     hashes: &[&str],
+    cached_paths: &[gradient_entity::cached_path::Model],
 ) -> Result<HashMap<String, (Option<i64>, Option<i64>)>, DbErr> {
     // Source the (file_size, nar_size) pair straight from `cached_path` -
     // the worker writes both columns there during NarUploaded, so it's the
@@ -36,24 +37,19 @@ async fn build_local_cache_map(
         .all(&state.cache_db)
         .await?;
 
-    let cached_paths = ECachedPath::find()
-        .filter(CCachedPath::Hash.is_in(hashes.to_vec()))
-        .all(&state.cache_db)
-        .await?;
-
     // Only paths whose NAR upload actually completed count as cached.
     // `is_fully_cached()` requires `file_hash IS NOT NULL`; rows without
     // it are placeholders for an in-flight or failed upload and would
     // cause the worker to issue a `NarRequest` the server can't satisfy.
-    let sizes: HashMap<String, (Option<i64>, Option<i64>)> = cached_paths
-        .into_iter()
+    let sizes: HashMap<&str, (Option<i64>, Option<i64>)> = cached_paths
+        .iter()
         .filter(|cp| cp.is_fully_cached())
-        .map(|cp| (cp.hash, (cp.file_size, cp.nar_size)))
+        .map(|cp| (cp.hash.as_str(), (cp.file_size, cp.nar_size)))
         .collect();
 
     Ok(derivation_outputs
         .into_iter()
-        .filter_map(|row| sizes.get(&row.hash).map(|sizes| (row.hash, *sizes)))
+        .filter_map(|row| sizes.get(row.hash.as_str()).map(|sizes| (row.hash, *sizes)))
         .collect())
 }
 
@@ -130,97 +126,127 @@ async fn ensure_push_signatures(
     }
 }
 
-async fn load_cached_path_signatures(
-    state: &ServerState,
-    cached_path_id: CachedPathId,
-    hash: &str,
-) -> Option<Vec<String>> {
-    let rows = match ECachedPathSignature::find()
-        .filter(CCachedPathSignature::CachedPath.eq(cached_path_id))
-        .all(&state.cache_db)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!(%hash, error = %e, "failed to load cached_path signatures");
-            return None;
-        }
-    };
+/// Every `Pull` answer's metadata, loaded in a fixed number of queries rather
+/// than per path.
+///
+/// `PullClosure` widens one requested path to its whole reference closure, up to
+/// `CACHE_QUERY_MAX_PATHS`, so anything done per path here is done up to a
+/// thousand times before the reply is written. Fetching the row, its references
+/// and its signatures individually put ~4000 sequential round trips in front of
+/// a 75 s deadline, which is what made small `PullClosure` queries time out.
+#[derive(Default)]
+struct PullMetadata {
+    references: HashMap<String, Vec<String>>,
+    signatures: HashMap<CachedPathId, Vec<String>>,
+}
 
-    let cache_ids: Vec<CacheId> = rows.iter().map(|r| r.cache).collect();
-    let cache_names: HashMap<CacheId, String> = if cache_ids.is_empty() {
-        HashMap::new()
-    } else {
-        ECache::find()
-            .filter(CCache::Id.is_in(cache_ids))
-            .all(&state.cache_db)
+impl PullMetadata {
+    async fn load(
+        state: &ServerState,
+        rows: &[gradient_entity::cached_path::Model],
+    ) -> Result<Self, DbErr> {
+        if rows.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let hashes: Vec<String> = rows.iter().map(|r| r.hash.clone()).collect();
+        let references = gradient_db::references_for_hashes(&state.cache_db, &hashes)
+            .await
+            .unwrap_or_default();
+
+        let ids: Vec<CachedPathId> = rows.iter().map(|r| r.id).collect();
+        let signature_rows = gradient_db::fetch_in_chunks(&ids, |chunk| async move {
+            ECachedPathSignature::find()
+                .filter(CCachedPathSignature::CachedPath.is_in(chunk))
+                .all(&state.cache_db)
+                .await
+        })
+        .await
+        .unwrap_or_default();
+
+        let cache_ids: Vec<CacheId> = signature_rows.iter().map(|r| r.cache).collect();
+        let cache_names: HashMap<CacheId, String> = if cache_ids.is_empty() {
+            HashMap::new()
+        } else {
+            gradient_db::fetch_in_chunks(&cache_ids, |chunk| async move {
+                ECache::find()
+                    .filter(CCache::Id.is_in(chunk))
+                    .all(&state.cache_db)
+                    .await
+            })
             .await
             .unwrap_or_default()
             .into_iter()
             .map(|c| (c.id, c.name))
             .collect()
-    };
+        };
 
-    let serve_url = &state.config.server.serve_url;
-    let sigs: Vec<String> = rows
-        .into_iter()
-        .filter_map(|r| {
-            let stored = r.signature?;
-            let cache_name = cache_names.get(&r.cache)?;
-            Some(gradient_sources::full_signature_token(
-                &stored, serve_url, cache_name,
-            ))
+        let serve_url = &state.config.server.serve_url;
+        let mut signatures: HashMap<CachedPathId, Vec<String>> = HashMap::new();
+        for row in signature_rows {
+            let (Some(stored), Some(cache_name)) = (row.signature, cache_names.get(&row.cache))
+            else {
+                continue;
+            };
+            signatures.entry(row.cached_path).or_default().push(
+                gradient_sources::full_signature_token(&stored, serve_url, cache_name),
+            );
+        }
+
+        Ok(Self {
+            references,
+            signatures,
         })
-        .collect();
-    if sigs.is_empty() { None } else { Some(sigs) }
+    }
+
+    fn references(&self, hash: &str) -> Option<Vec<String>> {
+        let tokens = self.references.get(hash)?;
+        expand_references(Some(&tokens.join(" ")))
+    }
+
+    fn signatures(&self, id: CachedPathId) -> Option<Vec<String>> {
+        self.signatures.get(&id).cloned()
+    }
+}
+
+/// The narinfo fields a `Pull` answer carries alongside the presigned URL.
+#[derive(Default)]
+struct PullFields {
+    nar_hash: Option<String>,
+    file_hash: Option<String>,
+    /// Full `/nix/store/...` paths.
+    references: Option<Vec<String>>,
+    /// Narinfo wire format.
+    signatures: Option<Vec<String>>,
+    deriver: Option<String>,
+    ca: Option<String>,
 }
 
 /// Resolve the import metadata a worker needs to construct a `ValidPathInfo`
-/// and call `add_to_store_nar` on its local nix-daemon.
-///
-/// Returns `(None, None, None, None, None)` if no `cached_path` row exists.
-async fn fetch_pull_metadata(
-    state: &ServerState,
-    hash: &str,
-) -> (
-    Option<String>,      // nar_hash
-    Option<String>,      // file_hash
-    Option<Vec<String>>, // references (full /nix/store/... paths)
-    Option<Vec<String>>, // signatures (narinfo wire format)
-    Option<String>,      // deriver
-    Option<String>,      // ca
-) {
-    let cached_row = match ECachedPath::find()
-        .filter(CCachedPath::Hash.eq(hash))
-        .one(&state.cache_db)
-        .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => return (None, None, None, None, None, None),
-        Err(e) => {
-            warn!(%hash, error = %e, "failed to load cached_path for Pull metadata");
-            return (None, None, None, None, None, None);
-        }
+/// and call `add_to_store_nar` on its local nix-daemon, from rows already in
+/// hand. Default when the path has no `cached_path` row.
+fn pull_fields(
+    row: Option<&gradient_entity::cached_path::Model>,
+    meta: &PullMetadata,
+) -> PullFields {
+    let Some(row) = row else {
+        return PullFields::default();
     };
 
-    let reference_tokens = gradient_db::references_for_hash(&state.cache_db, hash)
-        .await
-        .unwrap_or_default();
-    let references = (!reference_tokens.is_empty())
-        .then(|| expand_references(Some(&reference_tokens.join(" "))))
-        .flatten();
-    let signatures = load_cached_path_signatures(state, cached_row.id, hash).await;
-
-    (
-        cached_row.nar_hash,
-        cached_row.file_hash,
-        references,
-        signatures,
-        cached_row.deriver,
-        cached_row.ca,
-    )
+    PullFields {
+        nar_hash: row.nar_hash.clone(),
+        file_hash: row.file_hash.clone(),
+        references: meta.references(&row.hash),
+        signatures: meta.signatures(row.id),
+        deriver: row.deriver.clone(),
+        ca: row.ca.clone(),
+    }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one wire entry; splitting it would only move the arguments"
+)]
 async fn build_cached_entry(
     state: &ServerState,
     hash: &str,
@@ -229,6 +255,8 @@ async fn build_cached_entry(
     nar_size: &Option<i64>,
     mode: gradient_types::proto::QueryMode,
     expire: std::time::Duration,
+    row: Option<&gradient_entity::cached_path::Model>,
+    meta: &PullMetadata,
 ) -> gradient_types::proto::CachedPath {
     use gradient_types::proto::{CachedPath, QueryMode};
 
@@ -249,7 +277,7 @@ async fn build_cached_entry(
         };
     }
 
-    let (url, nar_hash, file_hash, references, signatures, deriver, ca) = match mode {
+    let (url, fields) = match mode {
         QueryMode::Pull | QueryMode::PullClosure => {
             let url = match state.nar_storage.presigned_get_url(hash, expire).await {
                 Ok(u) => u,
@@ -258,10 +286,9 @@ async fn build_cached_entry(
                     None
                 }
             };
-            let meta = fetch_pull_metadata(state, hash).await;
-            (url, meta.0, meta.1, meta.2, meta.3, meta.4, meta.5)
+            (url, pull_fields(row, meta))
         }
-        _ => (None, None, None, None, None, None, None),
+        _ => (None, PullFields::default()),
     };
 
     CachedPath {
@@ -270,12 +297,12 @@ async fn build_cached_entry(
         file_size: file_size.map(|v| v as u64),
         nar_size: nar_size.map(|v| v as u64),
         url,
-        nar_hash,
-        file_hash,
-        references,
-        signatures,
-        deriver,
-        ca,
+        nar_hash: fields.nar_hash,
+        file_hash: fields.file_hash,
+        references: fields.references,
+        signatures: fields.signatures,
+        deriver: fields.deriver,
+        ca: fields.ca,
     }
 }
 
@@ -574,11 +601,13 @@ async fn query(
 
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
 
-    let cached_map = build_local_cache_map(state, &hashes).await?;
+    // One read of `cached_path` feeds both the size map and the Pull metadata;
+    // it used to be queried three times over, once here, once for the sizes, and
+    // then once more per path inside the entry builder.
     let cached_path_rows = load_cached_path_rows(state, &hashes).await?;
+    let mut cached_map = build_local_cache_map(state, &hashes, &cached_path_rows).await?;
 
     // Merge source-path cache hits into the map (keyed by hash string).
-    let mut cached_map = cached_map;
     for cp in &cached_path_rows {
         if cp.is_fully_cached() {
             cached_map
@@ -593,14 +622,35 @@ async fn query(
         ensure_push_signatures(state, oid, &cached_path_rows).await;
     }
 
+    let rows_by_hash: HashMap<&str, &gradient_entity::cached_path::Model> = cached_path_rows
+        .iter()
+        .map(|r| (r.hash.as_str(), r))
+        .collect();
+    let meta = match mode {
+        QueryMode::Pull | QueryMode::PullClosure => {
+            PullMetadata::load(state, &cached_path_rows).await?
+        }
+        _ => PullMetadata::default(),
+    };
+
     let expire = crate::messages::PRESIGN_TTL;
     let mut result: Vec<gradient_types::proto::CachedPath> = Vec::new();
 
     for (hash, path) in &hash_path_pairs {
         if let Some((file_size, nar_size)) = cached_map.get(*hash) {
             result.push(
-                build_cached_entry(state, hash, path, file_size, nar_size, mode.clone(), expire)
-                    .await,
+                build_cached_entry(
+                    state,
+                    hash,
+                    path,
+                    file_size,
+                    nar_size,
+                    mode.clone(),
+                    expire,
+                    rows_by_hash.get(hash).copied(),
+                    &meta,
+                )
+                .await,
             );
         } else if matches!(mode, QueryMode::Push) {
             result.push(build_uncached_push_entry(state, hash, path, expire).await);
@@ -760,15 +810,29 @@ pub(super) async fn query_for_cache(
     let hashes: Vec<&str> = hash_path_pairs.iter().map(|(h, _)| *h).collect();
 
     let in_cache = hashes_in_cache(state, cache_id, &hashes).await;
+    let cached_path_rows = load_cached_path_rows(state, &hashes)
+        .await
+        .unwrap_or_default();
     // Cache-serve endpoint: a DB error degrades to a miss (the consumer falls
     // back to its other sources), matching `hashes_in_cache`'s fail-closed
     // behaviour. Only the build-prefetch `query` path propagates the error.
-    let cached_map = build_local_cache_map(state, &hashes)
+    let cached_map = build_local_cache_map(state, &hashes, &cached_path_rows)
         .await
         .unwrap_or_else(|e| {
             warn!(error = %e, "cache-serve local lookup failed; treating as miss");
             HashMap::new()
         });
+
+    let rows_by_hash: HashMap<&str, &gradient_entity::cached_path::Model> = cached_path_rows
+        .iter()
+        .map(|r| (r.hash.as_str(), r))
+        .collect();
+    let meta = match mode {
+        QueryMode::Pull | QueryMode::PullClosure => PullMetadata::load(state, &cached_path_rows)
+            .await
+            .unwrap_or_default(),
+        _ => PullMetadata::default(),
+    };
 
     let expire = crate::messages::PRESIGN_TTL;
     let mut result: Vec<gradient_types::proto::CachedPath> = Vec::new();
@@ -779,8 +843,18 @@ pub(super) async fn query_for_cache(
         }
         if let Some((file_size, nar_size)) = cached_map.get(*hash) {
             result.push(
-                build_cached_entry(state, hash, path, file_size, nar_size, mode.clone(), expire)
-                    .await,
+                build_cached_entry(
+                    state,
+                    hash,
+                    path,
+                    file_size,
+                    nar_size,
+                    mode.clone(),
+                    expire,
+                    rows_by_hash.get(hash).copied(),
+                    &meta,
+                )
+                .await,
             );
         }
     }

@@ -31,6 +31,12 @@ struct ReferenceToken {
     reference: String,
 }
 
+#[derive(FromQueryResult)]
+struct ReferrerToken {
+    referrer: String,
+    reference: String,
+}
+
 /// Extract the 32-char store hash from a `hash-name` reference token. Store
 /// hashes are dash-free, so the hash is everything before the first `-`.
 pub fn parse_reference_hash(reference: &str) -> Option<String> {
@@ -102,6 +108,41 @@ pub async fn references_for_hash<C: ConnectionTrait>(
         .map(|r| r.reference)
         .collect(),
     )
+}
+
+/// [`references_for_hash`] for many referrers at once, grouped by referrer and
+/// kept in stored order within each group.
+///
+/// Answering a `Pull` cache query one path at a time is what made a widened
+/// `PullClosure` miss its deadline: the widened set reaches
+/// `CACHE_QUERY_MAX_PATHS`, so a per-path lookup is up to a thousand sequential
+/// round trips before the first byte of the reply.
+pub async fn references_for_hashes<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<HashMap<String, Vec<String>>, DbErr> {
+    if hashes.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let rows = crate::fetch_in_chunks(hashes, |chunk| async move {
+        ReferrerToken::find_by_statement(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "SELECT referrer, reference FROM cached_path_reference \
+             WHERE referrer = ANY($1) ORDER BY referrer, position",
+            [chunk.into()],
+        ))
+        .all(db)
+        .await
+    })
+    .await?;
+
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for row in rows {
+        out.entry(row.referrer).or_default().push(row.reference);
+    }
+
+    Ok(out)
 }
 
 /// Reference closure of `seed_hashes` as one recursive statement; returns every
