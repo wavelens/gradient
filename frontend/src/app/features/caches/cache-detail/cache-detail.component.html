@@ -103,7 +103,7 @@
     </gr-form-field>
 
     <gr-form-field label="Trusted Public Keys" for="cache-keys">
-      <gr-copy-field id="cache-keys" [value]="allPublicKeys().join(' ') || 'Not available'" />
+      <gr-copy-field id="cache-keys" [value]="trustedPublicKeys().join(' ') || 'Not available'" />
     </gr-form-field>
 
     <gr-form-field label="nix.conf snippet" for="cache-conf">
