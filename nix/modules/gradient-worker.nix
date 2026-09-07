@@ -526,6 +526,7 @@ in {
             # page, which shreds a 4 MiB NAR chunk into hundreds of reads.
             extraConfig = ''
               proxy_buffer_size 256k;
+              proxy_buffers 4 256k;
               proxy_connect_timeout 90d;
               proxy_send_timeout 90d;
               proxy_read_timeout 90d;

@@ -1221,9 +1221,14 @@ in {
               # An upgraded connection is relayed through a buffer sized by
               # proxy_buffer_size, which defaults to a single page. NAR chunks
               # are 4 MiB, so the default turns one frame into hundreds of
-              # read/write pairs inside nginx.
+              # read/write pairs inside nginx. proxy_buffers has to move with
+              # it: nginx derives proxy_busy_buffers_size as twice the larger
+              # of the two and rejects the config unless that still fits in
+              # proxy_buffers minus one buffer, even though an upgraded
+              # connection never allocates them.
               extraConfig = ''
                 proxy_buffer_size 256k;
+                proxy_buffers 4 256k;
                 proxy_connect_timeout 90d;
                 proxy_send_timeout 90d;
                 proxy_read_timeout 90d;
@@ -1239,6 +1244,7 @@ in {
               proxyWebsockets = true;
               extraConfig = ''
                 proxy_buffer_size 256k;
+                proxy_buffers 4 256k;
                 proxy_connect_timeout 1h;
                 proxy_send_timeout 1h;
                 proxy_read_timeout 1h;
