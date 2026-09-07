@@ -594,6 +594,13 @@ mod tests {
         assert!(std::ptr::eq(breakers(), breakers()));
     }
 
+    /// The same constructor the server uses. `reqwest::Client::new()` panics
+    /// where no system CA bundle exists (the nix build sandbox); `build_client`
+    /// folds in `webpki_roots`, so it builds with or without native certs.
+    fn client() -> reqwest::Client {
+        gradient_util::http::build_client().expect("http client builds")
+    }
+
     /// The exact failure that cost every narinfo miss 30s: a port that completes
     /// the handshake and then never answers. Never accepting is enough - the
     /// kernel finishes the connection from the backlog, so the client is
@@ -620,12 +627,8 @@ mod tests {
         }];
 
         let started = Instant::now();
-        let got = super::fetch_narinfo_body(
-            &reqwest::Client::new(),
-            &probes,
-            "brj5bb4pny8pnngq3qdymkllwql6z29j",
-        )
-        .await;
+        let got =
+            super::fetch_narinfo_body(&client(), &probes, "brj5bb4pny8pnngq3qdymkllwql6z29j").await;
         let elapsed = started.elapsed();
 
         assert!(got.is_none());
@@ -651,12 +654,8 @@ mod tests {
         }];
 
         let started = Instant::now();
-        let got = super::fetch_narinfo_body(
-            &reqwest::Client::new(),
-            &probes,
-            "brj5bb4pny8pnngq3qdymkllwql6z29j",
-        )
-        .await;
+        let got =
+            super::fetch_narinfo_body(&client(), &probes, "brj5bb4pny8pnngq3qdymkllwql6z29j").await;
         let elapsed = started.elapsed();
 
         assert!(got.is_none());
