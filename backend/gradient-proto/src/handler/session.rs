@@ -338,13 +338,18 @@ fn decide_auth(
     is_base: bool,
 ) -> AuthDecision {
     if is_base {
-        return if authorized_peers_empty {
-            AuthDecision::Reject {
+        return match (authorized_peers_empty, emptied_by_missing_cache) {
+            (false, _) => AuthDecision::Accept,
+            // The projects did enable this worker; they just have no cache.
+            // Reporting "not enabled" here sends the operator to the wrong page.
+            (true, true) => AuthDecision::Reject {
+                code: 495,
+                reason: "project has no cache subscribed",
+            },
+            (true, false) => AuthDecision::Reject {
                 code: 403,
                 reason: "base worker not enabled by any project",
-            }
-        } else {
-            AuthDecision::Accept
+            },
         };
     }
 
@@ -451,6 +456,20 @@ mod auth_decision_tests {
     fn registered_emptied_by_missing_cache() {
         assert_eq!(
             decide_auth(false, false, false, true, true, false),
+            AuthDecision::Reject {
+                code: 495,
+                reason: "project has no cache subscribed",
+            }
+        );
+    }
+
+    /// A base worker whose only project was demoted for having no cache gets
+    /// the same 495 as a registered worker. The 403 sends the operator looking
+    /// for a disabled worker when the fix is to subscribe a cache.
+    #[test]
+    fn base_worker_emptied_by_missing_cache() {
+        assert_eq!(
+            decide_auth(false, false, false, true, true, true),
             AuthDecision::Reject {
                 code: 495,
                 reason: "project has no cache subscribed",

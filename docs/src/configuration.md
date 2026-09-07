@@ -316,9 +316,10 @@ it as root, so no shared group is needed. The token survives reboots and is
 never regenerated; delete the file and restart to rotate it.
 
 !!! note
-    A base worker that no project has enabled yet is refused at authentication,
-    so on a brand-new instance the worker sits in its reconnect backoff (60s
-    ceiling) until the first project exists. It joins on the next attempt.
+    A worker is only authorized for projects that have a cache subscribed, and a
+    base worker no project has enabled yet is refused outright. On a brand-new
+    instance the worker therefore sits in its reconnect backoff (60s ceiling)
+    until a project exists *and* has a cache; it joins on the next attempt.
 
 Set `services.gradient.localWorker = false` to opt out and configure
 `workerId` / `peersFile` by hand, exactly like a remote worker.
