@@ -1235,11 +1235,15 @@ in {
               proxyWebsockets = true;
               # A substituter pulls NARs that run to hundreds of MB. With the
               # default buffering nginx writes each one to proxy_temp_path first,
-              # which fills the disk and kills the transfer mid-stream.
+              # which fills the disk and kills the transfer mid-stream. The
+              # relay buffer is sized for those streams and for the 4 MiB NAR
+              # chunks a read-only `/cache/{cache}/proto` session serves, at the
+              # cost of that much memory per in-flight download.
               extraConfig = ''
                 client_max_body_size ${toString proxyMaxBodyBytes};
                 proxy_buffering off;
                 proxy_request_buffering off;
+                proxy_buffer_size 256k;
                 proxy_connect_timeout 1h;
                 proxy_send_timeout 1h;
                 proxy_read_timeout 1h;

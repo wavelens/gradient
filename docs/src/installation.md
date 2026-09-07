@@ -112,8 +112,9 @@ Add the public cache to avoid rebuilding Gradient from source:
 Workers and the server share one long-lived WebSocket per connection, carrying
 small latency-critical RPCs alongside multi-megabyte NAR chunks. Gradient
 disables Nagle's algorithm on every one of those sockets itself, and the NixOS
-modules raise nginx's relay buffer for the `/proto` location, so a default
-deployment needs no tuning.
+modules raise nginx's relay buffer for both `/proto` and `/cache/` - the latter
+covers the read-only `/cache/{cache}/proto` sessions a pull-through cache opens.
+A default deployment therefore needs no tuning.
 
 On a high-bandwidth or high-latency link, two kernel settings are worth adding:
 
