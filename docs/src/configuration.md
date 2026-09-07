@@ -290,23 +290,38 @@ The server does **not** start a worker automatically. Configure one explicitly u
 
 ### Co-located Worker
 
-To run a worker on the same machine as the server, import the worker module and configure `services.gradient.worker`:
+A worker on the server's own machine needs no credentials of its own:
 
 ```nix
-imports = [ inputs.gradient.nixosModules.gradient-worker ];
-
 services.gradient.worker = {
-  enable    = true;
-  serverUrl = "ws://127.0.0.1:3000/proto";
-  capabilities = {
-    fetch = true;
-    eval  = true;
-    build = true;
-    sign  = true;
-  };
+  enable = true;
   settings.buildMetrics = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
 };
 ```
+
+That is the whole configuration. `services.gradient.localWorker` defaults to
+`services.gradient.worker.enable`, and in that mode the server module does the
+registration work itself:
+
+- derives a stable worker UUID from the hostname, so the server can
+  pre-register it before either service has ever run
+- generates a 48-byte token on first start into `/var/lib/gradient-worker/local-token`
+  (mode 0400, owned by `gradient-worker`) and writes the matching peers file
+- registers the worker in `state.workers` as an `auto_enable` base worker, so
+  every project - including ones created later - picks it up without a
+  registration step in the web UI
+
+Both services read the token through systemd's `LoadCredential`, which resolves
+it as root, so no shared group is needed. The token survives reboots and is
+never regenerated; delete the file and restart to rotate it.
+
+!!! note
+    A base worker that no project has enabled yet is refused at authentication,
+    so on a brand-new instance the worker sits in its reconnect backoff (60s
+    ceiling) until the first project exists. It joins on the next attempt.
+
+Set `services.gradient.localWorker = false` to opt out and configure
+`workerId` / `peersFile` by hand, exactly like a remote worker.
 
 ### Remote Workers
 

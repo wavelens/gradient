@@ -33,10 +33,12 @@ pub(super) fn validate(lookup: &EntityLookup, errors: &mut ErrorCollector) {
                 );
             }
         }
-        if !lookup.user_exists(&worker.created_by) {
+        if let Some(created_by) = &worker.created_by
+            && !lookup.user_exists(created_by)
+        {
             errors.push(
                 format!("workers.{}.created_by", worker.worker_id),
-                format!("User '{}' does not exist", worker.created_by),
+                format!("User '{}' does not exist", created_by),
             );
         }
     }

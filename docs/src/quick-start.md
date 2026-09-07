@@ -22,25 +22,12 @@ Minimal setup: Gradient server + co-located worker on a single NixOS host.
 
 ## 2. Generate Secrets
 
-Pick a UUID for the worker - you will use it in the config and when registering the worker to your project:
+The server needs two secrets. The worker generates its own, so there is nothing
+to create for it:
 
 ```sh
-uuidgen
-```
-
-Generate all secret files:
-
-```sh
-# Server secrets
 openssl rand -base64 48 > /run/secrets/gradient-jwt
 openssl rand -base64 48 > /run/secrets/gradient-crypt
-
-# Worker token
-openssl rand -base64 48 > /run/secrets/gradient-worker-token
-
-# Peers file: one entry per line in the format <peer_id>:<token>.
-# * as peer_id means the worker responds with this token for any project's challenge.
-echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worker-peers
 ```
 
 !!! tip
@@ -62,16 +49,22 @@ echo "*:$(cat /run/secrets/gradient-worker-token)" > /run/secrets/gradient-worke
   };
 
   services.gradient.worker = {
-    enable    = true;
-    serverUrl = "ws://127.0.0.1:3000/proto";
-    workerId  = "<uuid from uuidgen>"; # if not provided, a random UUID will be generated and saved in /var/lib/gradient/worker-id
-    peersFile = "/run/secrets/gradient-worker-peers";
+    enable = true;
     settings.buildMetrics = true; # opt in to per-build resource metrics for smarter scheduling (enables Nix's cgroups experimental feature)
   };
 }
 ```
 
-After `nixos-rebuild switch`, navigate to `https://gradient.example.com/account/register` to create the first user, then create a project. Register the worker under **Project Settings → Workers** using the UUID from step 2 and the token from `/run/secrets/gradient-worker-token`.
+A worker on the server's own host registers itself: the module derives its
+identity, generates its token, and enables it for every project. See
+[Configuration → Co-located Worker](configuration.md#co-located-worker) for what
+it provisions and how to opt out.
+
+After `nixos-rebuild switch`, navigate to `https://gradient.example.com/account/register`
+to create the first user, then create a project. The worker shows up under
+**Project Settings → Workers** already enabled - a brand-new instance can take
+up to a minute to show it as connected, because the worker is refused until a
+project exists.
 
 ## Next Steps
 

@@ -291,7 +291,10 @@ pub struct StateWorker {
     pub token_file: String,
     /// Human-readable display name shown in the workers list.
     pub display_name: String,
-    pub created_by: String,
+    /// Username recorded as the creator. Optional: a worker the module
+    /// provisions for its own host has no declared user to attribute it to.
+    #[serde(default)]
+    pub created_by: Option<String>,
     /// Per-registration server-side gate for `fetch`. Defaults to true.
     #[serde(default = "default_true")]
     pub enable_fetch: bool,
@@ -312,6 +315,10 @@ pub struct StateWorker {
     /// Global enable for a base worker. Ignored for non-base workers.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// When true, every project enables this base worker at creation time
+    /// rather than opting in by hand. Ignored for non-base workers.
+    #[serde(default)]
+    pub auto_enable: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

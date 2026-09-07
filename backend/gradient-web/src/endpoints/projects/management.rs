@@ -14,6 +14,7 @@ use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 
 use gradient_core::ServerState;
+use gradient_scheduler::Scheduler;
 use gradient_sources::generate_ssh_key;
 use gradient_types::consts::BASE_ROLE_ADMIN_ID;
 use gradient_types::input::{check_index_name, validate_display_name};
@@ -196,6 +197,7 @@ pub async fn get(
 pub async fn put(
     state: State<Arc<ServerState>>,
     Extension(user): Extension<MUser>,
+    Extension(scheduler): Extension<Arc<Scheduler>>,
     Json(body): Json<MakeProjectRequest>,
 ) -> WebResult<Json<BaseResponse<String>>> {
     require_create_permission(state.config.server.create_project, &user)?;
@@ -256,7 +258,19 @@ pub async fn put(
     .insert(&tx)
     .await?;
 
+    let auto_enabled = gradient_db::base_workers::enable_auto_base_workers_for_project(
+        &tx,
+        project.id,
+        Some(user.id),
+    )
+    .await?;
+
     tx.commit().await?;
+
+    // A connected worker only learns about the new project when it re-auths.
+    for worker_id in &auto_enabled {
+        scheduler.request_reauth(worker_id).await;
+    }
 
     Ok(Json(BaseResponse {
         error: false,

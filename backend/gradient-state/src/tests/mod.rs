@@ -963,3 +963,58 @@ fn resolves_scim_group_to_project_role_grants() {
     assert_eq!(resolved.get("ops"), Some(&vec![(project, role)]));
     assert!(!resolved.contains_key("unmapped"));
 }
+
+#[test]
+fn state_worker_accepts_missing_created_by() {
+    // A host that provisions a worker for itself has no declared user to
+    // attribute it to, so `created_by` must be optional and validate clean.
+    let json = r#"{
+        "workers": {
+            "local": {
+                "worker_id": "550e8400-e29b-41d4-a716-446655440099",
+                "projects": [],
+                "token_file": "/dev/null",
+                "display_name": "Local Worker",
+                "base_worker": true,
+                "auto_enable": true
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    assert!(cfg.workers["local"].created_by.is_none());
+    let v = cfg.validate();
+    assert!(v.is_valid, "errors: {:?}", v.errors);
+}
+
+#[test]
+fn state_worker_rejects_unknown_created_by() {
+    let json = r#"{
+        "workers": {
+            "builder-1": {
+                "worker_id": "550e8400-e29b-41d4-a716-446655440001",
+                "projects": [],
+                "token_file": "/dev/null",
+                "display_name": "Builder",
+                "base_worker": true,
+                "created_by": "ghost"
+            }
+        }
+    }"#;
+    let cfg: StateConfiguration = serde_json::from_str(json).unwrap();
+    let v = cfg.validate();
+    assert!(!v.is_valid);
+    assert!(
+        v.errors.iter().any(|e| e
+            .field
+            .ends_with("550e8400-e29b-41d4-a716-446655440001.created_by")
+            && e.message.contains("ghost")),
+        "expected unknown created_by error, got: {:?}",
+        v.errors
+    );
+}
+
+#[test]
+fn state_base_worker_auto_enable_defaults_off() {
+    let cfg = worker_cfg(r#"["acme"]"#);
+    assert!(!cfg.workers["builder-1"].auto_enable);
+}

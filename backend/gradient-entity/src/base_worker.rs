@@ -28,6 +28,9 @@ pub struct Model {
     pub enable_build: bool,
     /// Global gate. When false the base worker is off for every project.
     pub enabled: bool,
+    /// When true, a project enables this worker the moment it is created,
+    /// instead of opting in by hand. A later opt-out from the UI sticks.
+    pub auto_enable: bool,
     /// Optional fixed auth identity used instead of per-project challenge.
     pub authorize_against: Option<Uuid>,
     pub created_by: Option<UserId>,
