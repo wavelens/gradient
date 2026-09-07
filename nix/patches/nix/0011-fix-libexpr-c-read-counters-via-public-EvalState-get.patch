@@ -1,0 +1,96 @@
+From d6112bee4316dfed4ea53be5dddba68ea5a8559d Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Mon, 15 Jun 2026 19:12:52 +0200
+Subject: [PATCH 11/13] fix(libexpr-c): read counters via public
+ EvalState::getLeanStats (privates/static unreachable from C API)
+
+---
+ src/libexpr-c/nix_api_expr.cc        | 20 ++++++++------------
+ src/libexpr/eval.cc                  | 17 +++++++++++++++++
+ src/libexpr/include/nix/expr/eval.hh | 13 +++++++++++++
+ 3 files changed, 38 insertions(+), 12 deletions(-)
+
+diff --git a/src/libexpr-c/nix_api_expr.cc b/src/libexpr-c/nix_api_expr.cc
+index 32bf051a8..eb73eea51 100644
+--- a/src/libexpr-c/nix_api_expr.cc
++++ b/src/libexpr-c/nix_api_expr.cc
+@@ -122,19 +122,15 @@ nix_err nix_eval_state_get_stats(nix_c_context * context, EvalState * state, nix
+     if (context)
+         context->last_err_code = NIX_OK;
+     try {
+-        auto & s = state->state;
++        auto s = state->state.getLeanStats();
+         *out = nix_eval_stats{};
+-        out->nr_thunks = s.nrThunks.load();
+-        out->nr_function_calls = s.nrFunctionCalls.load();
+-        out->nr_primop_calls = s.nrPrimOpCalls.load();
+-        out->nr_lookups = s.nrLookups.load();
+-        out->nr_op_updates = s.nrOpUpdates.load();
+-#if NIX_USE_BOEHMGC
+-        GC_word heapSize = 0, totalBytes = 0;
+-        GC_get_heap_usage_safe(&heapSize, 0, 0, 0, &totalBytes);
+-        out->gc_heap_size = (uint64_t) heapSize;
+-        out->gc_total_bytes = (uint64_t) totalBytes;
+-#endif
++        out->nr_thunks = s.nrThunks;
++        out->nr_function_calls = s.nrFunctionCalls;
++        out->nr_primop_calls = s.nrPrimOpCalls;
++        out->nr_lookups = s.nrLookups;
++        out->nr_op_updates = s.nrOpUpdates;
++        out->gc_heap_size = s.gcHeapSize;
++        out->gc_total_bytes = s.gcTotalBytes;
+         return NIX_OK;
+     }
+     NIXC_CATCH_ERRS
+diff --git a/src/libexpr/eval.cc b/src/libexpr/eval.cc
+index 56f241028..e29132631 100644
+--- a/src/libexpr/eval.cc
++++ b/src/libexpr/eval.cc
+@@ -3206,6 +3206,23 @@ nlohmann::json EvalState::getStatisticsJSON()
+     return topObj;
+ }
+ 
++EvalState::LeanStats EvalState::getLeanStats()
++{
++    LeanStats s{};
++    s.nrThunks = nrThunks.load();
++    s.nrFunctionCalls = nrFunctionCalls.load();
++    s.nrPrimOpCalls = nrPrimOpCalls.load();
++    s.nrLookups = nrLookups.load();
++    s.nrOpUpdates = nrOpUpdates.load();
++#if NIX_USE_BOEHMGC
++    GC_word heapSize = 0, totalBytes = 0;
++    GC_get_heap_usage_safe(&heapSize, 0, 0, 0, &totalBytes);
++    s.gcHeapSize = (uint64_t) heapSize;
++    s.gcTotalBytes = (uint64_t) totalBytes;
++#endif
++    return s;
++}
++
+ void EvalState::printStatistics()
+ {
+     json topObj = getStatisticsJSON();
+diff --git a/src/libexpr/include/nix/expr/eval.hh b/src/libexpr/include/nix/expr/eval.hh
+index 59dc1e347..e92a9ffbe 100644
+--- a/src/libexpr/include/nix/expr/eval.hh
++++ b/src/libexpr/include/nix/expr/eval.hh
+@@ -1108,6 +1108,19 @@ public:
+      */
+     nlohmann::json getStatisticsJSON();
+ 
++    /**
++     * Lean snapshot of the cheap cumulative evaluator counters, backing the
++     * C API's nix_eval_state_get_stats. Unlike getStatisticsJSON() it reads
++     * the private counters (and the file-static nrThunks) without building any
++     * JSON, so it is cheap enough to poll per request.
++     */
++    struct LeanStats
++    {
++        uint64_t nrThunks, nrFunctionCalls, nrPrimOpCalls, nrLookups, nrOpUpdates;
++        uint64_t gcHeapSize, gcTotalBytes;
++    };
++    LeanStats getLeanStats();
++
+     /**
+      * Print statistics, unconditionally, cheaply, without performing a GC first.
+      */

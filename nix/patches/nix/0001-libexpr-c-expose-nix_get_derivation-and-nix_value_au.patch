@@ -1,0 +1,179 @@
+From e65765821a584ade9151f573e95eec6ec42bdedb Mon Sep 17 00:00:00 2001
+From: NotAShelf <raf@notashelf.dev>
+Date: Fri, 8 May 2026 11:58:49 +0300
+Subject: [PATCH] libexpr-c: expose `nix_get_derivation` and
+ `nix_value_auto_call_function`
+
+These encapsulate internal evaluator machinery that cannot be replicated
+through the existing attrset/value access API, which makes them the bare
+minimum necessary surface for consuemers wanting to to traverse and
+inspect derivation trees.
+
+Signed-off-by: NotAShelf <raf@notashelf.dev>
+Change-Id: I1f6aa9222083068300de22e3f6aad3ac6a6a6964
+---
+ src/libexpr-c/meson.build     |  1 +
+ src/libexpr-c/nix_api_eval.cc | 85 +++++++++++++++++++++++++++++++++++
+ src/libexpr-c/nix_api_expr.h  | 45 +++++++++++++++++++
+ 3 files changed, 131 insertions(+)
+ create mode 100644 src/libexpr-c/nix_api_eval.cc
+
+diff --git a/src/libexpr-c/meson.build b/src/libexpr-c/meson.build
+index 5c6dc6d66..fb3a17ff2 100644
+--- a/src/libexpr-c/meson.build
++++ b/src/libexpr-c/meson.build
+@@ -30,6 +30,7 @@ subdir('nix-meson-build-support/subprojects')
+ subdir('nix-meson-build-support/common')
+ 
+ sources = files(
++  'nix_api_eval.cc',
+   'nix_api_expr.cc',
+   'nix_api_external.cc',
+   'nix_api_value.cc',
+diff --git a/src/libexpr-c/nix_api_eval.cc b/src/libexpr-c/nix_api_eval.cc
+new file mode 100644
+index 000000000..6a451c102
+--- /dev/null
++++ b/src/libexpr-c/nix_api_eval.cc
+@@ -0,0 +1,85 @@
++#include <stdexcept>
++
++#include "nix/expr/eval.hh"
++#include "nix/expr/get-drvs.hh"
++
++#include "nix_api_expr.h"
++#include "nix_api_expr_internal.h"
++#include "nix_api_store.h"
++#include "nix_api_store_internal.h"
++#include "nix_api_util.h"
++#include "nix_api_util_internal.h"
++
++static const nix::Value & value_in(const nix_value * value)
++{
++    if (!value) {
++        throw std::runtime_error("nix_value is null");
++    }
++    if (!value->value || !value->value->isValid()) {
++        throw std::runtime_error("nix_value is null or uninitialized");
++    }
++    return *value->value;
++}
++
++static nix::Value & value_in(nix_value * value)
++{
++    if (!value) {
++        throw std::runtime_error("nix_value is null");
++    }
++    if (!value->value || !value->value->isValid()) {
++        throw std::runtime_error("nix_value is null or uninitialized");
++    }
++    return *value->value;
++}
++
++static const nix::Bindings * get_bindings_or_null(nix_value * autoArgs)
++{
++    if (!autoArgs) {
++        return nullptr;
++    }
++    auto & v = value_in(autoArgs);
++    if (v.type() == nix::nAttrs) {
++        return v.attrs();
++    }
++    return nullptr;
++}
++
++extern "C" {
++
++StorePath *
++nix_get_derivation(nix_c_context * context, EvalState * state, nix_value * value, bool ignoreAssertionFailures)
++{
++    if (context)
++        context->last_err_code = NIX_OK;
++    try {
++        auto & v = value_in(value);
++        auto maybePkg = nix::getDerivation(state->state, v, ignoreAssertionFailures);
++        if (!maybePkg) {
++            return nullptr;
++        }
++        nix::StorePath sp = maybePkg->requireDrvPath();
++        return new StorePath{std::move(sp)};
++    }
++    NIXC_CATCH_ERRS_NULL
++}
++
++nix_err nix_value_auto_call_function(
++    nix_c_context * context, EvalState * state, nix_value * auto_args, nix_value * fn_val, nix_value * result)
++{
++    if (context)
++        context->last_err_code = NIX_OK;
++    try {
++        auto & fn = value_in(fn_val);
++        auto & res = *result->value;
++
++        const nix::Bindings * b = get_bindings_or_null(auto_args);
++        if (b) {
++            state->state.autoCallFunction(*b, fn, res);
++        } else {
++            state->state.autoCallFunction(nix::Bindings::emptyBindings, fn, res);
++        }
++    }
++    NIXC_CATCH_ERRS
++}
++
++} // extern "C"
+diff --git a/src/libexpr-c/nix_api_expr.h b/src/libexpr-c/nix_api_expr.h
+index 3623ee076..fc61cb5f3 100644
+--- a/src/libexpr-c/nix_api_expr.h
++++ b/src/libexpr-c/nix_api_expr.h
+@@ -342,6 +342,51 @@ void nix_gc_register_finalizer(void * obj, void * cd, void (*finalizer)(void * o
+ 
+ /** @} */ // doxygen group GC
+ 
++/** @addtogroup libexpr_eval
++ * @ingroup libexpr
++ * @brief Higher-level evaluation helpers
++ * @{
++ */
++
++/**
++ * @brief Attempt to interpret a Nix value as a derivation.
++ *
++ * If the value represents a derivation, returns its drvPath. Returns NULL
++ * (without setting an error) when the value is not a derivation and the
++ * caller should recurse into its attributes instead.
++ *
++ * Derivation metadata (name, system, outputs, meta) can be queried from
++ * the value itself using the existing attrset accessors
++ * (nix_get_attr_byname, nix_get_string, etc.).
++ *
++ * @param[out] context Optional, stores error information. Check
++ *  last_err_code to distinguish NULL-from-error from NULL-as-not-derivation.
++ * @param[in] state The evaluation state.
++ * @param[in] value The value to inspect.
++ * @param[in] ignoreAssertionFailures Whether to ignore AssertionErrors
++ *  in the derivation's meta evaluation.
++ * @return A new StorePath, or NULL. Free with nix_store_path_free().
++ */
++StorePath *
++nix_get_derivation(nix_c_context * context, EvalState * state, nix_value * value, bool ignoreAssertionFailures);
++
++/**
++ * @brief Auto-call a function with auto-args (the --arg / --argstr pattern).
++ *
++ * This corresponds to nix::EvalState::autoCallFunction.
++ *
++ * @param[out] context Optional, stores error information
++ * @param[in] state The evaluation state.
++ * @param[in] auto_args An attrset value containing auto-args, or NULL for
++ *  empty.
++ * @param[in] fn_val The function to call.
++ * @param[out] result Pre-allocated nix_value to receive the result.
++ */
++nix_err nix_value_auto_call_function(
++    nix_c_context * context, EvalState * state, nix_value * auto_args, nix_value * fn_val, nix_value * result);
++
++/** @} */ // doxygen group libexpr_eval
++
+ // cffi end
+ #ifdef __cplusplus
+ }

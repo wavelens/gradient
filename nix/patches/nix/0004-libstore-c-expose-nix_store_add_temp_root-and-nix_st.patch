@@ -1,0 +1,97 @@
+From be7bc78d606e196a1a7d5421e66cebc15d9139ea Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sat, 13 Jun 2026 17:48:24 +0200
+Subject: [PATCH 04/13] libstore-c: expose nix_store_add_temp_root and
+ nix_store_add_perm_root
+
+---
+ src/libstore-c/nix_api_store.cc | 34 +++++++++++++++++++++++++++++++++
+ src/libstore-c/nix_api_store.h  | 30 +++++++++++++++++++++++++++++
+ 2 files changed, 64 insertions(+)
+
+diff --git a/src/libstore-c/nix_api_store.cc b/src/libstore-c/nix_api_store.cc
+index c0b296254..e4c2af119 100644
+--- a/src/libstore-c/nix_api_store.cc
++++ b/src/libstore-c/nix_api_store.cc
+@@ -100,6 +100,40 @@ nix_store_get_version(nix_c_context * context, Store * store, nix_get_string_cal
+     NIXC_CATCH_ERRS
+ }
+ 
++nix_err nix_store_add_temp_root(nix_c_context * context, Store * store, const StorePath * path)
++{
++    if (context)
++        context->last_err_code = NIX_OK;
++    try {
++        store->ptr->addTempRoot(path->path);
++    }
++    NIXC_CATCH_ERRS
++}
++
++nix_err nix_store_add_perm_root(
++    nix_c_context * context,
++    Store * store,
++    const StorePath * path,
++    const char * gcRoot,
++    nix_get_string_callback callback,
++    void * user_data)
++{
++    if (context)
++        context->last_err_code = NIX_OK;
++    try {
++        if (!gcRoot)
++            throw nix::UsageError("gcRoot must not be null");
++
++        auto localStore = store->ptr.dynamic_pointer_cast<nix::LocalFSStore>();
++        if (!localStore)
++            throw nix::UsageError("store does not support permanent GC roots (not a local filesystem store)");
++
++        auto resultPath = localStore->addPermRoot(path->path, std::filesystem::path(gcRoot));
++        return call_nix_get_string_callback(resultPath.string(), callback, user_data);
++    }
++    NIXC_CATCH_ERRS
++}
++
+ bool nix_store_is_valid_path(nix_c_context * context, Store * store, const StorePath * path)
+ {
+     if (context)
+diff --git a/src/libstore-c/nix_api_store.h b/src/libstore-c/nix_api_store.h
+index e60a7d6c0..ebade943f 100644
+--- a/src/libstore-c/nix_api_store.h
++++ b/src/libstore-c/nix_api_store.h
+@@ -185,6 +185,36 @@ nix_err nix_store_realise(
+ nix_err
+ nix_store_get_version(nix_c_context * context, Store * store, nix_get_string_callback callback, void * user_data);
+ 
++/**
++ * @brief Register a temporary GC root for a store path (lives until the store is closed).
++ * @param[out] context Optional, stores error information
++ * @param[in] store nix store
++ * @param[in] path the store path to protect
++ * @return NIX_OK if there were no errors.
++ */
++nix_err nix_store_add_temp_root(nix_c_context * context, Store * store, const StorePath * path);
++
++/**
++ * @brief Register a permanent indirect GC root: a symlink at `gcRoot` pointing at `path`.
++ *
++ * Only supported by local filesystem stores; returns an error for remote/binary-cache stores.
++ *
++ * @param[out] context Optional, stores error information
++ * @param[in] store nix store (must be a local store)
++ * @param[in] path the store path to protect
++ * @param[in] gcRoot filesystem location of the gc-root symlink to create
++ * @param[in] callback Called with the resulting root path
++ * @param[in] user_data optional, passed to the callback
++ * @return NIX_OK if there were no errors.
++ */
++nix_err nix_store_add_perm_root(
++    nix_c_context * context,
++    Store * store,
++    const StorePath * path,
++    const char * gcRoot,
++    nix_get_string_callback callback,
++    void * user_data);
++
+ /**
+  * @brief Create a `nix_derivation` from a JSON representation of that derivation.
+  *

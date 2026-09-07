@@ -1,0 +1,81 @@
+From 510a241f9fb9b261a7a5547ed351c9106b36e04a Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sat, 13 Jun 2026 17:41:03 +0200
+Subject: [PATCH 03/13] libflake-c: expose nix_locked_flake_get_fingerprint
+
+---
+ src/libflake-c/nix_api_flake.cc | 19 +++++++++++++++++++
+ src/libflake-c/nix_api_flake.h  | 23 +++++++++++++++++++++++
+ 2 files changed, 42 insertions(+)
+
+diff --git a/src/libflake-c/nix_api_flake.cc b/src/libflake-c/nix_api_flake.cc
+index 5bdd0213b..a7c0c5270 100644
+--- a/src/libflake-c/nix_api_flake.cc
++++ b/src/libflake-c/nix_api_flake.cc
+@@ -7,8 +7,10 @@
+ #include "nix_api_expr_internal.h"
+ #include "nix_api_fetchers_internal.hh"
+ #include "nix_api_fetchers.h"
++#include "nix_api_store_internal.h"
+ 
+ #include "nix/flake/flake.hh"
++#include "nix/util/hash.hh"
+ 
+ extern "C" {
+ 
+@@ -208,4 +210,21 @@ nix_value * nix_locked_flake_get_output_attrs(
+     NIXC_CATCH_ERRS_NULL
+ }
+ 
++nix_err nix_locked_flake_get_fingerprint(
++    nix_c_context * context,
++    Store * store,
++    nix_fetchers_settings * fetchSettings,
++    nix_locked_flake * lockedFlake,
++    nix_get_string_callback callback,
++    void * user_data)
++{
++    nix_clear_err(context);
++    try {
++        auto fingerprint = lockedFlake->lockedFlake->getFingerprint(*store->ptr, *fetchSettings->settings);
++        std::string result = fingerprint ? fingerprint->to_string(nix::HashFormat::Base16, false) : "";
++        return call_nix_get_string_callback(result, callback, user_data);
++    }
++    NIXC_CATCH_ERRS
++}
++
+ } // extern "C"
+diff --git a/src/libflake-c/nix_api_flake.h b/src/libflake-c/nix_api_flake.h
+index 3c3208be3..88501409d 100644
+--- a/src/libflake-c/nix_api_flake.h
++++ b/src/libflake-c/nix_api_flake.h
+@@ -237,6 +237,29 @@ void nix_flake_reference_free(nix_flake_reference * store);
+ nix_value * nix_locked_flake_get_output_attrs(
+     nix_c_context * context, nix_flake_settings * settings, EvalState * evalState, nix_locked_flake * lockedFlake);
+ 
++/**
++ * @brief Get the fingerprint of a locked flake.
++ *
++ * The fingerprint is the cache key Nix uses for the evaluation cache. It is
++ * present only for flakes whose source is fully locked (immutable); for a
++ * mutable source the callback receives the empty string.
++ *
++ * @param[out] context Optional, stores error information
++ * @param[in] store nix store to resolve the fingerprint against
++ * @param[in] fetchSettings fetcher settings
++ * @param[in] lockedFlake the locked flake to fingerprint
++ * @param[in] callback Called with the Base16 fingerprint string (possibly empty)
++ * @param[in] user_data optional, passed to the callback
++ * @return NIX_OK if there were no errors.
++ */
++nix_err nix_locked_flake_get_fingerprint(
++    nix_c_context * context,
++    Store * store,
++    nix_fetchers_settings * fetchSettings,
++    nix_locked_flake * lockedFlake,
++    nix_get_string_callback callback,
++    void * user_data);
++
+ #ifdef __cplusplus
+ } // extern "C"
+ #endif

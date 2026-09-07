@@ -1,0 +1,77 @@
+From 49168e719ba81492561d33380d7a7e8dc45f7afa Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Sun, 14 Jun 2026 20:20:39 +0200
+Subject: [PATCH 09/13] fix(eval-cache): use PASSIVE checkpoint so it never
+ blocks on concurrent readers
+
+EvalCache::checkpoint() did wal_checkpoint(truncate), which takes the exclusive WAL read-slot lock and still deadlocked when a concurrent evaluator of the same flake held read locks. PASSIVE folds the WAL into the main file without that lock and never blocks; a lone evaluator still folds the whole WAL.
+---
+ src/libexpr/eval-cache.cc                  |  7 ++++++-
+ src/libexpr/include/nix/expr/eval-cache.hh | 12 +++++++-----
+ src/libflake-c/nix_api_eval_cache.h        | 11 ++++++-----
+ 3 files changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
+index e9d251973..8ba8bd090 100644
+--- a/src/libexpr/eval-cache.cc
++++ b/src/libexpr/eval-cache.cc
+@@ -403,7 +403,12 @@ void EvalCache::checkpoint()
+         state->txn.reset();
+     }
+     try {
+-        state->db.exec("pragma wal_checkpoint(truncate);");
++        // PASSIVE, not TRUNCATE: fold as many WAL frames into the main file as
++        // possible without taking the exclusive read-slot lock, so this never
++        // blocks (and never deadlocks) when another evaluator of the same flake
++        // is concurrently reading the cache. A lone evaluator still folds the
++        // whole WAL; under concurrency the rest is folded by a later checkpoint.
++        state->db.exec("pragma wal_checkpoint(passive);");
+     } catch (...) {
+         ignoreExceptionExceptInterrupt();
+     }
+diff --git a/src/libexpr/include/nix/expr/eval-cache.hh b/src/libexpr/include/nix/expr/eval-cache.hh
+index c4bfd3784..5d6ac0ea5 100644
+--- a/src/libexpr/include/nix/expr/eval-cache.hh
++++ b/src/libexpr/include/nix/expr/eval-cache.hh
+@@ -62,11 +62,13 @@ public:
+     void commit();
+ 
+     /**
+-     * Fold the WAL into the main `.sqlite` file via a truncate checkpoint, so a
+-     * reader of the database file (without its `-wal` sidecar) sees every
+-     * committed write. Call this once with no concurrent readers/writers (e.g.
+-     * at the end of an evaluation, before shipping the file); calling it while
+-     * other connections hold WAL read locks will block. No-op without a cache.
++     * Fold the WAL into the main `.sqlite` file via a PASSIVE checkpoint, so a
++     * reader of the database file (without its `-wal` sidecar) sees the committed
++     * writes. Never blocks: it does not take the exclusive WAL read-slot lock, so
++     * it is safe to call while other connections (e.g. a concurrent evaluator of
++     * the same flake) hold read locks. A lone caller folds the whole WAL; under
++     * concurrency it folds what it can and the rest waits for a later call.
++     * No-op without a cache.
+      */
+     void checkpoint();
+ };
+diff --git a/src/libflake-c/nix_api_eval_cache.h b/src/libflake-c/nix_api_eval_cache.h
+index bfd245e15..090c825d7 100644
+--- a/src/libflake-c/nix_api_eval_cache.h
++++ b/src/libflake-c/nix_api_eval_cache.h
+@@ -71,12 +71,13 @@ nix_attr_cursor * nix_eval_cache_get_root(nix_c_context * context, nix_eval_cach
+ nix_err nix_eval_cache_commit(nix_c_context * context, nix_eval_cache * cache);
+ 
+ /**
+- * @brief Fold the cache's WAL into the main `.sqlite` file (truncate checkpoint).
++ * @brief Fold the cache's WAL into the main `.sqlite` file (PASSIVE checkpoint).
+  *
+- * Makes every committed write visible to a reader of the database file alone
+- * (without its `-wal` sidecar). Call once with no concurrent readers/writers
+- * (e.g. at end of evaluation before shipping the file); it blocks while other
+- * connections hold WAL read locks.
++ * Makes committed writes visible to a reader of the database file alone (without
++ * its `-wal` sidecar). Never blocks: it does not take the exclusive WAL read-slot
++ * lock, so it is safe to call while other connections hold read locks (e.g. a
++ * concurrent evaluator of the same flake). A lone caller folds the whole WAL;
++ * under concurrency it folds what it can.
+  * @param[out] context Optional, stores error information
+  * @param[in] cache The evaluation cache
+  * @return NIX_OK on success.

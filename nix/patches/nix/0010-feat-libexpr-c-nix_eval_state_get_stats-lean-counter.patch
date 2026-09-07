@@ -1,0 +1,95 @@
+From 67da0f6190ce630c6ce4c563edf63e20c186e3cb Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Mon, 15 Jun 2026 18:19:58 +0200
+Subject: [PATCH 10/13] feat(libexpr-c): nix_eval_state_get_stats lean counter
+ snapshot
+
+---
+ src/libexpr-c/nix_api_expr.cc | 23 +++++++++++++++++++++++
+ src/libexpr-c/nix_api_expr.h  | 32 ++++++++++++++++++++++++++++++++
+ 2 files changed, 55 insertions(+)
+
+diff --git a/src/libexpr-c/nix_api_expr.cc b/src/libexpr-c/nix_api_expr.cc
+index ff43b3510..32bf051a8 100644
+--- a/src/libexpr-c/nix_api_expr.cc
++++ b/src/libexpr-c/nix_api_expr.cc
+@@ -117,6 +117,29 @@ nix_err nix_eval_state_get_stats_json(
+     NIXC_CATCH_ERRS
+ }
+ 
++nix_err nix_eval_state_get_stats(nix_c_context * context, EvalState * state, nix_eval_stats * out)
++{
++    if (context)
++        context->last_err_code = NIX_OK;
++    try {
++        auto & s = state->state;
++        *out = nix_eval_stats{};
++        out->nr_thunks = s.nrThunks.load();
++        out->nr_function_calls = s.nrFunctionCalls.load();
++        out->nr_primop_calls = s.nrPrimOpCalls.load();
++        out->nr_lookups = s.nrLookups.load();
++        out->nr_op_updates = s.nrOpUpdates.load();
++#if NIX_USE_BOEHMGC
++        GC_word heapSize = 0, totalBytes = 0;
++        GC_get_heap_usage_safe(&heapSize, 0, 0, 0, &totalBytes);
++        out->gc_heap_size = (uint64_t) heapSize;
++        out->gc_total_bytes = (uint64_t) totalBytes;
++#endif
++        return NIX_OK;
++    }
++    NIXC_CATCH_ERRS
++}
++
+ nix_eval_state_builder * nix_eval_state_builder_new(nix_c_context * context, Store * store)
+ {
+     if (context)
+diff --git a/src/libexpr-c/nix_api_expr.h b/src/libexpr-c/nix_api_expr.h
+index 6eeeadc5b..436e8dfe9 100644
+--- a/src/libexpr-c/nix_api_expr.h
++++ b/src/libexpr-c/nix_api_expr.h
+@@ -16,6 +16,7 @@
+ #include "nix_api_store.h"
+ #include "nix_api_util.h"
+ #include <stddef.h>
++#include <stdint.h>
+ 
+ #ifndef __has_c_attribute
+ #  define __has_c_attribute(x) 0
+@@ -307,6 +308,37 @@ void nix_state_free(EvalState * state);
+ nix_err nix_eval_state_get_stats_json(
+     nix_c_context * context, EvalState * state, nix_get_string_callback callback, void * user_data);
+ 
++/**
++ * @brief Flat snapshot of the cheap cumulative evaluator counters.
++ *
++ * All fields are monotonic over an EvalState's lifetime (gc_heap_size is a
++ * gauge); callers diff two snapshots to get per-evaluation cost without paying
++ * for JSON serialization on the hot path. GC fields are 0 when Boehm GC is off.
++ */
++typedef struct nix_eval_stats
++{
++    uint64_t nr_thunks;
++    uint64_t nr_function_calls;
++    uint64_t nr_primop_calls;
++    uint64_t nr_lookups;
++    uint64_t nr_op_updates;
++    uint64_t gc_heap_size;
++    uint64_t gc_total_bytes;
++} nix_eval_stats;
++
++/**
++ * @brief Read the lean evaluator statistics into a flat struct.
++ *
++ * Cheaper counterpart of ::nix_eval_state_get_stats_json with no JSON or
++ * allocation; intended to be polled per request to compute deltas.
++ *
++ * @param[out] context Optional, stores error information
++ * @param[in] state the evaluator state to read statistics from
++ * @param[out] out filled with the current counter snapshot
++ * @return NIX_OK if there were no errors.
++ */
++nix_err nix_eval_state_get_stats(nix_c_context * context, EvalState * state, nix_eval_stats * out);
++
+ /** @addtogroup GC
+  * @ingroup libexpr
+  * @brief Reference counting and garbage collector operations

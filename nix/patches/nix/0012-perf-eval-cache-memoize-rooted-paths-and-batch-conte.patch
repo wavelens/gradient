@@ -1,0 +1,117 @@
+From 8da66ee934e3fc6efabf19d31aac034febf2b827 Mon Sep 17 00:00:00 2001
+From: Dennis Wuitz <dennish@wuitz.de>
+Date: Fri, 3 Jul 2026 13:57:16 +0200
+Subject: [PATCH 12/13] perf(eval-cache): memoize rooted paths and batch
+ context validity checks
+
+Once addTempRoot succeeded and the path was confirmed valid on the eval
+store, the temp root pins it for the store handle's lifetime, so
+re-rooting and re-validating it is a redundant round-trip. Track such
+paths in EvalState::rootedValidPaths, check the remaining context paths
+of a cached string with one batched queryValidPaths instead of a
+per-path isValidPath, and seed the memo from derivationStrict where
+writeDerivation has just rooted and registered the path.
+
+On a daemon store this drops the dominant per-.drv AddTempRoot and
+IsValidPath round-trip pairs during cached-string reads (~10x fewer hot
+daemon ops on a cold flake walk that re-reads its own cache entries).
+---
+ src/libexpr/eval-cache.cc            | 17 ++++++++++++-----
+ src/libexpr/include/nix/expr/eval.hh |  9 +++++++++
+ src/libexpr/primops.cc               |  5 +++++
+ 3 files changed, 26 insertions(+), 5 deletions(-)
+
+diff --git a/src/libexpr/eval-cache.cc b/src/libexpr/eval-cache.cc
+index 8ba8bd090..c062a845b 100644
+--- a/src/libexpr/eval-cache.cc
++++ b/src/libexpr/eval-cache.cc
+@@ -649,6 +649,7 @@ string_t AttrCursor::getStringWithContext()
+         if (cachedValue && !std::get_if<placeholder_t>(&cachedValue->second)) {
+             if (auto s = std::get_if<string_t>(&cachedValue->second)) {
+                 bool valid = true;
++                StorePathSet toCheck;
+                 for (auto & c : s->second) {
+                     const StorePath & path = std::visit(
+                         overloaded{
+@@ -659,12 +660,17 @@ string_t AttrCursor::getStringWithContext()
+                             [&](const NixStringContextElem::Opaque & o) -> const StorePath & { return o.path; },
+                         },
+                         c.raw);
+-                    root->state.store->addTempRoot(path);
+-                    if (!root->state.store->isValidPath(path)) {
+-                        valid = false;
+-                        break;
++                    if (!root->state.rootedValidPaths.contains(path)) {
++                        root->state.store->addTempRoot(path);
++                        toCheck.insert(path);
+                     }
+                 }
++                if (!toCheck.empty()) {
++                    auto validPaths = root->state.store->queryValidPaths(toCheck);
++                    for (auto & path : validPaths)
++                        root->state.rootedValidPaths.insert(path);
++                    valid = validPaths.size() == toCheck.size();
++                }
+                 if (valid) {
+                     debug("using cached string attribute '%s'", getAttrPathStr());
+                     return *s;
+@@ -804,7 +810,7 @@ StorePath AttrCursor::forceDerivation()
+     auto aDrvPath = getAttr(root->state.s.drvPath);
+     auto drvPath = root->state.store->parseStorePath(aDrvPath->getString());
+     drvPath.requireDerivation();
+-    if (!settings.readOnlyMode) {
++    if (!settings.readOnlyMode && !root->state.rootedValidPaths.contains(drvPath)) {
+         root->state.store->addTempRoot(drvPath);
+         if (!root->state.store->isValidPath(drvPath)) {
+             /* The eval cache contains 'drvPath', but the actual path has
+@@ -814,6 +820,7 @@ StorePath AttrCursor::forceDerivation()
+                 throw Error(
+                     "don't know how to recreate store derivation '%s'!", root->state.store->printStorePath(drvPath));
+         }
++        root->state.rootedValidPaths.insert(drvPath);
+     }
+     return drvPath;
+ }
+diff --git a/src/libexpr/include/nix/expr/eval.hh b/src/libexpr/include/nix/expr/eval.hh
+index e92a9ffbe..45dd94c4f 100644
+--- a/src/libexpr/include/nix/expr/eval.hh
++++ b/src/libexpr/include/nix/expr/eval.hh
+@@ -23,6 +23,7 @@
+ 
+ #include <boost/unordered/unordered_flat_map.hpp>
+ #include <boost/unordered/concurrent_flat_map_fwd.hpp>
++#include <boost/unordered/concurrent_flat_set.hpp>
+ 
+ #include <nlohmann/json_fwd.hpp>
+ 
+@@ -498,6 +499,14 @@ public:
+      */
+     std::map<const Hash, ref<eval_cache::EvalCache>> evalCaches;
+ 
++    /**
++     * Store paths for which a temporary GC root has been added on `store`
++     * and that were valid at that moment. Since the temporary root pins
++     * such a path for the lifetime of the store handle, re-rooting and
++     * re-validating it would be a redundant store round-trip.
++     */
++    boost::concurrent_flat_set<StorePath> rootedValidPaths;
++
+ private:
+ 
+     /**
+diff --git a/src/libexpr/primops.cc b/src/libexpr/primops.cc
+index cbf368f54..73b4af3ec 100644
+--- a/src/libexpr/primops.cc
++++ b/src/libexpr/primops.cc
+@@ -1920,6 +1920,11 @@ static void derivationStrictInternal(EvalState & state, std::string_view drvName
+         settings.readOnlyMode ? computeStorePath(*state.store, drv) : state.store->writeDerivation(drv, state.repair);
+     auto drvPathS = state.store->printStorePath(drvPath);
+ 
++    /* writeDerivation just rooted and registered the path, so validity
++       checks against it (e.g. AttrCursor::forceDerivation) can be elided. */
++    if (!settings.readOnlyMode)
++        state.rootedValidPaths.insert(drvPath);
++
+     printMsg(lvlChatty, "instantiated '%1%' -> '%2%'", drvName, drvPathS);
+ 
+     /* Optimisation, but required in read-only mode! because in that
