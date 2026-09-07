@@ -240,3 +240,157 @@ async fn finalize_aborted_logs(ctx: &DbContext, building_ids: &[DerivationBuildI
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::WorkerDb;
+    use crate::test_ctx::ctx;
+    use sea_orm::{DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, Value};
+    use std::collections::BTreeMap;
+
+    fn eval_row(status: EvaluationStatus) -> MEvaluation {
+        MEvaluation {
+            id: EvaluationId::now_v7(),
+            status,
+            ..Default::default()
+        }
+    }
+
+    fn anchor_row(id: DerivationBuildId, derivation: DerivationId) -> MDerivationBuild {
+        MDerivationBuild {
+            id,
+            derivation,
+            status: BuildStatus::Building,
+            ..Default::default()
+        }
+    }
+
+    /// The opening select projects a single column, and a mock row is read by
+    /// position, so only its shape matters here.
+    fn anchor_id_row(id: DerivationBuildId) -> BTreeMap<String, Value> {
+        BTreeMap::from([("derivation_build".to_owned(), Value::from(id.into_inner()))])
+    }
+
+    fn job_row(
+        evaluation: EvaluationId,
+        anchor: DerivationBuildId,
+        derivation: DerivationId,
+    ) -> MBuildJob {
+        MBuildJob {
+            id: BuildJobId::now_v7(),
+            evaluation,
+            derivation,
+            derivation_build: anchor,
+            ..Default::default()
+        }
+    }
+
+    /// The query script `abort_eval_anchors` replays, in order: the aborting
+    /// evaluation's anchors, which of them are still active, the `build_job`
+    /// rows other evaluations hold on those anchors, and those evaluations.
+    /// Everything past the abort write (dep-count deltas, board events, phase
+    /// events, log finalize) is answered empty: the decision is made by then and
+    /// each of those paths is a no-op on empty input.
+    fn scripted_db(
+        anchors: Vec<BTreeMap<String, Value>>,
+        active: Vec<MDerivationBuild>,
+        other_jobs: Vec<MBuildJob>,
+        other_evals: Vec<MEvaluation>,
+    ) -> DatabaseConnection {
+        MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([anchors])
+            .append_query_results([active])
+            .append_query_results([other_jobs])
+            .append_query_results([other_evals])
+            .append_query_results(vec![Vec::<MBuildJob>::new(); 6])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                12
+            ])
+            .into_connection()
+    }
+
+    /// The `UPDATE derivation_build` the abort wrote, rendered with its bound ids.
+    fn abort_update(pool: WorkerDb) -> String {
+        pool.into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .find(|s| s.contains(r#"UPDATE \"derivation_build\""#))
+            .expect("the abort writes derivation_build")
+    }
+
+    /// Two live evaluations building the same derivation share its anchor, so
+    /// aborting one may only stop the anchors it alone still wants. The shared
+    /// one stays Building and is never written, which is what keeps the other
+    /// evaluation's build running instead of restarting it later.
+    #[tokio::test]
+    async fn an_abort_spares_an_anchor_another_live_evaluation_needs() {
+        let aborting = eval_row(EvaluationStatus::Building);
+        let other = eval_row(EvaluationStatus::Building);
+        let (shared, shared_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
+        let (mine, mine_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
+
+        let (ctx, pool) = ctx(scripted_db(
+            vec![anchor_id_row(shared), anchor_id_row(mine)],
+            vec![anchor_row(shared, shared_drv), anchor_row(mine, mine_drv)],
+            vec![job_row(other.id, shared, shared_drv)],
+            vec![other],
+        ))
+        .await;
+
+        let aborted = abort_eval_anchors(&ctx, &aborting)
+            .await
+            .expect("the abort runs");
+
+        assert_eq!(
+            aborted,
+            vec![mine],
+            "only the anchor no other evaluation wants is aborted"
+        );
+
+        drop(ctx);
+        let update = abort_update(pool);
+        assert!(
+            update.contains(&mine.to_string()),
+            "the exclusive anchor is aborted: {update}"
+        );
+        assert!(
+            !update.contains(&shared.to_string()),
+            "the shared anchor must keep building for the other evaluation: {update}"
+        );
+    }
+
+    /// Same graph, but the other evaluation has already finished: nothing live
+    /// needs the shared anchor any more, so the abort takes both.
+    #[tokio::test]
+    async fn an_abort_stops_a_shared_anchor_once_the_other_evaluation_is_terminal() {
+        let aborting = eval_row(EvaluationStatus::Building);
+        let other = eval_row(EvaluationStatus::Completed);
+        let (shared, shared_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
+        let (mine, mine_drv) = (DerivationBuildId::now_v7(), DerivationId::now_v7());
+
+        let (ctx, _pool) = ctx(scripted_db(
+            vec![anchor_id_row(shared), anchor_id_row(mine)],
+            vec![anchor_row(shared, shared_drv), anchor_row(mine, mine_drv)],
+            vec![job_row(other.id, shared, shared_drv)],
+            vec![other],
+        ))
+        .await;
+
+        let mut aborted = abort_eval_anchors(&ctx, &aborting)
+            .await
+            .expect("the abort runs");
+        aborted.sort();
+
+        let mut expected = vec![shared, mine];
+        expected.sort();
+        assert_eq!(
+            aborted, expected,
+            "a terminal evaluation holds nothing back"
+        );
+    }
+}

@@ -42,6 +42,9 @@ pub mod status_reactor;
 pub mod status_sql;
 pub mod task_board;
 
+#[cfg(test)]
+pub(crate) mod test_ctx;
+
 pub use self::build_attempt::*;
 pub use self::cache_reach::*;
 pub use self::cache_storage::{
