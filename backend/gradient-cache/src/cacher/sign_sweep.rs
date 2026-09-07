@@ -21,7 +21,8 @@ use gradient_types::*;
 use gradient_util::nix_hash::normalize_nar_hash;
 use gradient_util::sync::Mutex;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    QuerySelect, Set,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -30,6 +31,56 @@ use tracing::{debug, warn};
 /// Max pending rows processed per sweep pass. Bounds memory + time per
 /// invocation; remaining rows are picked up by the next scheduled pass.
 const SIGN_SWEEP_BATCH: u64 = 1000;
+
+/// Re-create `cached_path_signature` rows for paths that hold none at all.
+///
+/// A NAR whose owning job could not be resolved at commit time was written to
+/// `cached_path` with no cache claim, and the signing pass below cannot repair
+/// that: it only fills rows that already exist. Such a path is cached according
+/// to every gate flag yet 404s from the narinfo endpoint forever. Bounded the
+/// same way as the signing pass, and driven off the "no rows at all" anti-join
+/// so a healthy instance pays one indexed probe.
+const RECONCILE_ORPHAN_CLAIMS: &str = r#"
+WITH orphan AS (
+    SELECT cp.id
+    FROM cached_path cp
+    WHERE NOT EXISTS (
+        SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)
+    LIMIT $1
+), claim AS (
+    SELECT DISTINCT o.id AS cached_path, c.id AS cache
+    FROM orphan o
+    JOIN derivation_output dout ON dout.cached_path = o.id
+    JOIN build_job bj           ON bj.derivation = dout.derivation
+    JOIN evaluation e           ON e.id = bj.evaluation
+    JOIN task t                 ON t.id = e.task
+    JOIN project_cache pc       ON pc.project = t.project
+    JOIN cache c                ON c.id = pc.cache
+    WHERE t.sign_cache
+)
+INSERT INTO cached_path_signature (id, cached_path, cache, fetch_count, created_at)
+SELECT uuidv7(), claim.cached_path, claim.cache, 0, (now() AT TIME ZONE 'UTC')
+FROM claim
+ON CONFLICT (cached_path, cache) DO NOTHING
+"#;
+
+async fn reconcile_orphan_claims(state: &Arc<ServerState>) -> anyhow::Result<()> {
+    let res = state
+        .worker_db
+        .execute_raw(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            RECONCILE_ORPHAN_CLAIMS,
+            [sea_orm::Value::BigInt(Some(SIGN_SWEEP_BATCH as i64))],
+        ))
+        .await?;
+    if res.rows_affected() > 0 {
+        tracing::info!(
+            count = res.rows_affected(),
+            "sign sweep: re-created cache claims for paths that had none"
+        );
+    }
+    Ok(())
+}
 
 /// Skip a `cached_path` iff every producing task has `sign_cache=false`
 /// and at least one such task exists. Paths absent from `producers`
@@ -49,6 +100,12 @@ pub(crate) fn compute_skipped_cached_paths(
 /// `cache_derivation` where newly-signed paths complete a derivation
 /// closure. Errors on individual rows are logged and skipped.
 pub async fn sign_missing_signatures(state: Arc<ServerState>) -> anyhow::Result<()> {
+    // Before signing, give back a claim to any path that lost one, so this same
+    // pass signs it rather than leaving it unservable for another interval.
+    if let Err(e) = reconcile_orphan_claims(&state).await {
+        warn!(error = %e, "sign sweep: orphan claim reconcile failed");
+    }
+
     let pending = ECachedPathSignature::find()
         .filter(CCachedPathSignature::Signature.is_null())
         .limit(SIGN_SWEEP_BATCH)
@@ -403,6 +460,44 @@ async fn load_producing_task_flags(
     }
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod orphan_claim_tests {
+    use super::RECONCILE_ORPHAN_CLAIMS;
+
+    /// The signing pass fills `signature IS NULL` on rows that exist, so a path
+    /// with no row at all is invisible to it and 404s forever. The reconcile is
+    /// the only thing that gives such a path a claim back.
+    #[test]
+    fn the_reconcile_targets_paths_with_no_claim_at_all() {
+        assert!(
+            RECONCILE_ORPHAN_CLAIMS.contains("NOT EXISTS"),
+            "{RECONCILE_ORPHAN_CLAIMS}"
+        );
+        assert!(
+            RECONCILE_ORPHAN_CLAIMS.contains("INSERT INTO cached_path_signature"),
+            "{RECONCILE_ORPHAN_CLAIMS}"
+        );
+        assert!(
+            RECONCILE_ORPHAN_CLAIMS.contains("ON CONFLICT (cached_path, cache) DO NOTHING"),
+            "a re-created claim must never collide with a live one"
+        );
+    }
+
+    /// An unbounded fixpoint over `cached_path` has starved this scheduler
+    /// before, and the pass runs on a timer.
+    #[test]
+    fn the_reconcile_is_bounded_and_respects_the_sign_cache_opt_out() {
+        assert!(
+            RECONCILE_ORPHAN_CLAIMS.contains("LIMIT $1"),
+            "{RECONCILE_ORPHAN_CLAIMS}"
+        );
+        assert!(
+            RECONCILE_ORPHAN_CLAIMS.contains("t.sign_cache"),
+            "a task that opted out of signing must not be handed a claim"
+        );
+    }
 }
 
 #[cfg(test)]

@@ -111,6 +111,22 @@ sqlite3 gradient-report-01a05a38-2026-09-01.db \
 null for a job still running when the report was taken, and for one whose worker
 disconnected without reporting.
 
+`cached_path_signature` is the gate the binary cache actually serves on: a path
+is only fetchable if it has a row here for the asking cache with `signed = 1`.
+A `cached_path` row with no matching signature row is a path every other table
+calls cached and the cache still 404s, so join the two before trusting
+`derivation_output.is_cached`:
+
+```sh
+sqlite3 gradient-report-01a05a38-2026-09-01.db \
+  'SELECT cp.package, s.cache_name, s.signed
+     FROM cached_path cp
+     LEFT JOIN cached_path_signature s ON s.cached_path = cp.id
+    WHERE s.id IS NULL OR s.signed = 0'
+```
+
+The raw signature is never exported, only whether one exists.
+
 An evaluation still in `EvaluatingFlake` or `EvaluatingDerivation` whose newest
 eval job carries a `finished_at` is one whose terminal report never landed. The
 scheduler's `eval-completion-watchdog` pass re-drives that transition, so the
