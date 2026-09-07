@@ -674,16 +674,8 @@ impl<'a> DispatchContext<'a> {
     async fn on_job_completed(&mut self, job_id: String, spans: Vec<JobPhaseSpan>) {
         info!(peer_id = %self.peer_id, %job_id, phases = spans.len(), "job completed");
         self.active.remove(&job_id);
-        // Before `handle_job_completed`, which drops the job from the
-        // scheduler's active map that resolves it to an evaluation.
         self.scheduler
-            .record_job_timeline(
-                self.peer_id,
-                &job_id,
-                DispatchedJobOutcome::Completed,
-                spans,
-            )
-            .await;
+            .record_job_timeline(&job_id, DispatchedJobOutcome::Completed, spans);
         if let Err(e) = self
             .scheduler
             .handle_job_completed(self.peer_id, &job_id)
@@ -705,8 +697,7 @@ impl<'a> DispatchContext<'a> {
         warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
         self.active.remove(&job_id);
         self.scheduler
-            .record_job_timeline(self.peer_id, &job_id, DispatchedJobOutcome::Failed, spans)
-            .await;
+            .record_job_timeline(&job_id, DispatchedJobOutcome::Failed, spans);
         if let Err(e) = self
             .scheduler
             .handle_job_failed(self.peer_id, &job_id, &error, kind, &missing_paths)

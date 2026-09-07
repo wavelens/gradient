@@ -42,7 +42,7 @@ impl Scheduler {
             // in-flight pass just before its evaluation was aborted reports
             // started here, so tell the worker to stop rather than build on.
             Ok(report) if report.already_aborted => {
-                let job_id = format!("build:{derivation_build}");
+                let job_id = crate::jobs::build_job_key(derivation_build);
                 self.abort_job(worker_id, job_id, "evaluation aborted".to_owned())
                     .await;
                 info!(%derivation_build, %worker_id, "aborting build that started after its evaluation was aborted");
@@ -112,7 +112,7 @@ impl Scheduler {
                         .and_then(|e| e.flake_source);
                     return match store_path {
                         Some(path) => {
-                            let follow_id = format!("eval:{}", j.evaluation_id);
+                            let follow_id = crate::jobs::eval_job_key(j.evaluation_id);
                             if let Err(e) = self
                                 .enqueue_eval_job(follow_id, j.cached_followup(path))
                                 .await

@@ -149,7 +149,7 @@ export interface DispatchedJobDetail extends DispatchedJobSummary {
   queued_at: string;
   finished_at: string | null;
   ready_at: string | null;
-  outcome: 'completed' | 'failed' | null;
+  outcome: 'completed' | 'failed' | 'abandoned' | null;
   phases: JobPhase[];
   derivation_build_id: string | null;
   derivations: JobDerivationView[];

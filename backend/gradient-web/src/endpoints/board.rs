@@ -371,7 +371,8 @@ pub struct DispatchedJobDetail {
     pub dispatched_at: String,
     pub finished_at: Option<String>,
     pub ready_at: Option<String>,
-    /// `completed` or `failed`; `null` while the job is still running.
+    /// `completed`, `failed`, or `abandoned` when the worker never reported;
+    /// `null` while the job is still running.
     pub outcome: Option<String>,
     /// Worker phase spans in report order, nested via `parent_seq`.
     pub phases: Vec<JobPhaseView>,
@@ -543,6 +544,7 @@ pub async fn get_dispatched_job(
         outcome: j.outcome.map(|o| match o {
             DispatchedJobOutcome::Completed => "completed".to_string(),
             DispatchedJobOutcome::Failed => "failed".to_string(),
+            DispatchedJobOutcome::Abandoned => "abandoned".to_string(),
         }),
         phases,
         build_id,

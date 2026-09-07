@@ -114,6 +114,13 @@ fn child_specs(scheduler: &Arc<Scheduler>) -> Vec<ChildSpec> {
             CONSISTENCY_BUDGET,
             background::eval_completion_watchdog_pass,
         ),
+        periodic(
+            scheduler,
+            "abandoned-dispatch-sweep",
+            EVAL_WATCHDOG_TICK,
+            CONSISTENCY_BUDGET,
+            background::abandoned_dispatch_pass,
+        ),
     ];
 
     match background::liveness_period(scheduler) {

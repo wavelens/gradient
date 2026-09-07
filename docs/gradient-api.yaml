@@ -11180,8 +11180,11 @@ components:
         outcome:
           type: string
           nullable: true
-          enum: [completed, failed]
-          description: How the job ended. Null while it is still running, and for a job whose worker disconnected without reporting.
+          enum: [completed, failed, abandoned]
+          description: >-
+            How the job ended. Null while it is still running. `abandoned` means the worker never
+            reported a terminal state - it disconnected, or the server restarted while the job was
+            in flight - so the result is unknown rather than failed.
         phases:
           type: array
           description: The worker's phase timeline in report order, nested via parent_seq. Empty for a job that predates the timeline or never reported one.

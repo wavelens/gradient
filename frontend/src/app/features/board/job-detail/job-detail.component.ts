@@ -307,7 +307,7 @@ export class BoardJobDetailComponent implements OnInit {
     const b = this.build();
     if (b && b.id === j.build_id) return b.status;
 
-    return j.finished_at ? 'finished' : 'running';
+    return j.finished_at ? (j.outcome ?? 'finished') : 'running';
   });
 
   rules = computed<RuleRow[]>(() => {
