@@ -361,13 +361,27 @@ impl<'a> DispatchContext<'a> {
             return;
         };
 
-        // Resolve the owning project here, on the read loop, while the job is still
-        // active. The detached commit runs after this method returns, and the
-        // very next message on the connection (`JobComplete`) evicts the job
-        // from the tracker - so re-resolving `project_for_job` inside the task would
-        // race to `None`, drop the `cached_path_signature` placeholder, and the
-        // narinfo would 404 forever with the path stuck unsigned.
-        let project_id = self.scheduler.project_for_job(&job_id).await;
+        // Resolve the owning project here, on the read loop, while the job is
+        // still active; re-resolving inside the detached task would race the
+        // eviction that `JobCompleted` triggers. The tracker alone is not
+        // enough, though: `JobCompleted` rides the control writer lane and
+        // overtakes this job's own trailing `NarUploaded` frames on the bulk
+        // lane, so the job can already be gone. Fall back to the durable
+        // dispatch row rather than committing with no cache claim - that leaves
+        // a `cached_path` row the narinfo gate 404s forever.
+        let project_id = match self.scheduler.project_for_job(&job_id).await {
+            Some(project_id) => Some(project_id),
+            None => {
+                super::nar::project_for_dispatched_job(&self.state.worker_db, self.peer_id, &job_id)
+                    .await
+            }
+        };
+        if project_id.is_none() {
+            warn!(
+                peer_id = %self.peer_id, %job_id, %store_path,
+                "no owning project for this NAR; it will be stored with no cache claim"
+            );
+        }
 
         // The commit reads the whole staged NAR and writes it to `nar_storage`
         // (an S3 upload on object-store backends). Inline it froze this

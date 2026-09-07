@@ -72,9 +72,9 @@ pub fn redact_value(
         ("worker_registration", "created_by")
         | ("base_worker", "created_by")
         | ("project_base_worker", "created_by") => r.identity(&v, "user"),
-        ("cache_upstream", "display_name") | ("cache_upstream", "remote_cache_name") => {
-            r.identity(&v, "cache")
-        }
+        ("cache_upstream", "display_name")
+        | ("cache_upstream", "remote_cache_name")
+        | ("cached_path_signature", "cache_name") => r.identity(&v, "cache"),
         _ => v,
     };
 
@@ -380,6 +380,22 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
             "SELECT r.referrer::text, r.reference::text, r.reference_hash::text, r.position::text FROM cached_path_reference r WHERE r.referrer IN (SELECT o.hash FROM derivation_output o WHERE o.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1))",
             "the evaluation's output hashes, shared with every other evaluation that produced them",
             ["referrer", "reference", "reference_hash", "position"]
+        ),
+        spec!(
+            "cached_path_signature",
+            "CREATE TABLE cached_path_signature (id TEXT, cached_path TEXT, cache TEXT, cache_name TEXT, signed INTEGER, last_fetched_at TEXT, fetch_count INTEGER, created_at TEXT)",
+            "SELECT s.id::text, s.cached_path::text, s.cache::text, c.name::text, (s.signature IS NOT NULL)::int::text, s.last_fetched_at::text, s.fetch_count::text, s.created_at::text FROM cached_path_signature s LEFT JOIN cache c ON c.id = s.cache WHERE s.cached_path IN (SELECT cp.id FROM cached_path cp WHERE cp.hash IN (SELECT o.hash FROM derivation_output o WHERE o.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)))",
+            "the evaluation's output hashes, one row per cache holding the path",
+            [
+                "id",
+                "cached_path",
+                "cache",
+                "cache_name",
+                "signed",
+                "last_fetched_at",
+                "fetch_count",
+                "created_at"
+            ]
         ),
         spec!(
             "evaluation_input_update",
@@ -733,6 +749,55 @@ mod tests {
         assert!(
             !spec.columns.contains(&"candidate_lock"),
             "a whole generated flake.lock is not scheduling evidence"
+        );
+    }
+
+    /// A narinfo is only served when a `cached_path_signature` row exists for
+    /// the asking cache *and* carries a signature; without one the cache 404s a
+    /// path whose `cached_path` row says it is right there. That gate is
+    /// invisible in a report that stops at `cached_path`.
+    #[test]
+    fn the_narinfo_signature_gate_is_exported() {
+        let spec = spec_named("cached_path_signature");
+        assert!(spec.columns.contains(&"signed"), "{:?}", spec.columns);
+        assert!(
+            !spec.columns.contains(&"signature"),
+            "the raw Ed25519 blob is not evidence; whether it exists is"
+        );
+        assert!(
+            !spec.sql.contains("s.signature::"),
+            "a bytea signature must never be cast out verbatim: {}",
+            spec.sql
+        );
+        assert!(
+            spec.sql.contains("(s.signature IS NOT NULL)"),
+            "{}",
+            spec.sql
+        );
+        assert!(
+            spec.sql
+                .contains("SELECT derivation FROM build_job WHERE evaluation = $1"),
+            "the gate has to cover exactly the paths cached_path exports: {}",
+            spec.sql
+        );
+    }
+
+    /// The gate is per cache, so a row that names no cache cannot say whether
+    /// the cache the client asked is the one holding the signature.
+    #[test]
+    fn a_signature_row_names_its_cache() {
+        let spec = spec_named("cached_path_signature");
+        assert!(spec.columns.contains(&"cache_name"), "{:?}", spec.columns);
+        let r = redactor(true, false);
+        assert_ne!(
+            redact_value(
+                &r,
+                "cached_path_signature",
+                "cache_name",
+                Some("wavelens-prod".into())
+            ),
+            Some("wavelens-prod".into()),
+            "a cache name is an identity and follows cache_upstream's policy"
         );
     }
 
