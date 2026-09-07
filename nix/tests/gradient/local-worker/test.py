@@ -78,7 +78,7 @@ def worker_is_live():
 
 
 with machine.nested("waiting for the worker to connect"):
-    retry(lambda _: worker_is_live(), timeout=180)
+    retry(lambda _: worker_is_live(), timeout_seconds=180)
 
 banner("An opt-out is not undone by auto_enable")
 api("PATCH", f"projects/demo/workers/{identity}", token=admin,
