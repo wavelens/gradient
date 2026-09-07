@@ -837,6 +837,22 @@ pub fn create_router(state: Arc<ServerState>) -> Result<Router, InitError> {
         .with_state(state))
 }
 
+/// Disable Nagle on every accepted connection. The `/proto` upgrade rides this
+/// listener alongside the REST API, and Nagle holds a small control frame back
+/// until the peer's delayed ACK, costing the RPCs a worker blocks on tens of
+/// milliseconds. The return type stays concrete because
+/// `ConnectInfo<SocketAddr>` resolves through an impl keyed on `TapIo<L, F>`,
+/// which an `impl Listener` would hide.
+fn tuned_listener(
+    listener: tokio::net::TcpListener,
+) -> axum::serve::TapIo<tokio::net::TcpListener, fn(&mut tokio::net::TcpStream)> {
+    use axum::serve::ListenerExt;
+    fn tap(stream: &mut tokio::net::TcpStream) {
+        gradient_util::net::disable_nagle(stream);
+    }
+    listener.tap_io(tap as fn(&mut tokio::net::TcpStream))
+}
+
 pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
     let server_url = format!(
         "{}:{}",
@@ -901,6 +917,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             tracing::error!(addr = %server_url, error = %e, "Failed to bind listener");
             e
         })?;
+    let listener = tuned_listener(listener);
 
     let shutdown = state.shutdown.clone();
     install_signal_handler(shutdown.clone());
@@ -949,4 +966,27 @@ fn install_signal_handler(shutdown: gradient_util::shutdown::Shutdown) {
         }
         trigger.cancel();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tuned_listener;
+    use axum::serve::Listener as _;
+    use tokio::net::{TcpListener, TcpStream};
+
+    /// Reverts if `serve_web` stops wrapping its listener: every accepted
+    /// connection - REST, `/cache`, and the `/proto` upgrade alike - must have
+    /// Nagle disabled before it is handed to hyper.
+    #[tokio::test]
+    async fn accepted_connections_have_nagle_disabled() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let mut listener = tuned_listener(listener);
+
+        let (accepted, client) = tokio::join!(listener.accept(), TcpStream::connect(addr));
+        let (io, _peer) = accepted;
+        let _client = client.expect("connect");
+
+        assert!(io.nodelay().expect("read nodelay"));
+    }
 }

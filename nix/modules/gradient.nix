@@ -1218,7 +1218,12 @@ in {
             "/proto" = lib.mkIf (cfg.discoverable && cfg.proto.public) {
               proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
+              # An upgraded connection is relayed through a buffer sized by
+              # proxy_buffer_size, which defaults to a single page. NAR chunks
+              # are 4 MiB, so the default turns one frame into hundreds of
+              # read/write pairs inside nginx.
               extraConfig = ''
+                proxy_buffer_size 256k;
                 proxy_connect_timeout 90d;
                 proxy_send_timeout 90d;
                 proxy_read_timeout 90d;

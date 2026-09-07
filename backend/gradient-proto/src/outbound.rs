@@ -19,13 +19,11 @@ use std::time::Duration;
 use gradient_util::supervision::ChildSpec;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use tokio::sync::Mutex;
-use tokio_tungstenite::connect_async_with_config;
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tracing::{debug, error, info, warn};
 
 use gradient_entity::worker_registration::{Column, Entity as EWorkerRegistration};
 
-use crate::handler::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket, SessionsHandle, handle_socket};
+use crate::handler::{SessionsHandle, handle_socket};
 use gradient_scheduler::Scheduler;
 
 /// The outbound connection pass as a supervised child; each connection it
@@ -103,19 +101,12 @@ async fn connect_to_registered_workers(
         shutdown.spawn(async move {
             debug!(%worker_id, %url, "connecting outbound to worker");
 
-            let config = WebSocketConfig::default()
-                .max_message_size(Some(MAX_PROTO_MESSAGE_SIZE))
-                .max_frame_size(Some(MAX_PROTO_MESSAGE_SIZE));
-            let result = tokio::time::timeout(
-                Duration::from_secs(10),
-                connect_async_with_config(&url, Some(config), false),
-            )
-            .await;
+            let result =
+                tokio::time::timeout(Duration::from_secs(10), crate::client::dial(&url)).await;
 
             match result {
-                Ok(Ok((stream, _response))) => {
+                Ok(Ok(socket)) => {
                     info!(%worker_id, %url, "outbound connection established");
-                    let socket = ProtoSocket::Tungstenite(Box::new(stream));
                     handle_socket(
                         socket,
                         Arc::clone(&scheduler.state),

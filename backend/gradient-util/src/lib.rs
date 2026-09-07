@@ -8,6 +8,7 @@ pub mod glob;
 pub mod http;
 pub mod http_validation;
 pub mod hydra;
+pub mod net;
 pub mod nix_hash;
 pub mod shutdown;
 pub mod supervision;

@@ -522,7 +522,10 @@ in {
           locations."/proto" = {
             proxyPass = "http://${cfg.listenAddr}:${toString cfg.port}";
             proxyWebsockets = true;
+            # Matches the server module: the default relay buffer is a single
+            # page, which shreds a 4 MiB NAR chunk into hundreds of reads.
             extraConfig = ''
+              proxy_buffer_size 256k;
               proxy_connect_timeout 90d;
               proxy_send_timeout 90d;
               proxy_read_timeout 90d;

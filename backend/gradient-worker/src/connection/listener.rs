@@ -39,7 +39,7 @@ pub async fn start_listener(config: WorkerConfig, shutdown: CancellationToken) -
                 info!("shutdown requested; closing inbound listener");
                 return Ok(());
             }
-            accept = listener.accept() => match accept {
+            accept = accept_tuned(&listener) => match accept {
                 Ok((stream, addr)) => {
                     info!(%addr, "incoming connection accepted");
                     let config = config.clone();
@@ -58,6 +58,16 @@ pub async fn start_listener(config: WorkerConfig, shutdown: CancellationToken) -
     }
 }
 
+/// Accept one inbound connection with Nagle disabled, so the control frames
+/// the server is blocked on are not held back by the kernel.
+async fn accept_tuned(
+    listener: &TcpListener,
+) -> std::io::Result<(tokio::net::TcpStream, std::net::SocketAddr)> {
+    let (stream, addr) = listener.accept().await?;
+    gradient_util::net::disable_nagle(&stream);
+    Ok((stream, addr))
+}
+
 async fn handle_incoming(
     stream: tokio::net::TcpStream,
     config: WorkerConfig,
@@ -72,4 +82,26 @@ async fn handle_incoming(
     let (_disconnected, outcome) = worker.run(shutdown).await;
     executor_handle.shutdown().await;
     outcome.map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reverts if `accept_tuned` stops calling `disable_nagle`: an inbound
+    /// server connection carries the same latency-critical control frames as
+    /// an outbound one and must be tuned the same way.
+    #[tokio::test]
+    async fn accept_tuned_disables_nagle_on_the_inbound_stream() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let (accepted, client) = tokio::join!(
+            accept_tuned(&listener),
+            tokio::net::TcpStream::connect(addr)
+        );
+        let (stream, _peer) = accepted.expect("accept");
+        let _client = client.expect("connect");
+
+        assert!(stream.nodelay().expect("read nodelay"));
+    }
 }
