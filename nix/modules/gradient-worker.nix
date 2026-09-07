@@ -537,6 +537,8 @@ in {
         enable = true;
         virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
           inherit (cfg.reverseProxy.caddy) useACMEHost;
+          # Caddy tunnels the upgraded /proto connection with no intermediate
+          # buffer to size, so it needs no counterpart to the nginx tuning.
           extraConfig = ''
             reverse_proxy http://${cfg.listenAddr}:${toString cfg.port}
           '';

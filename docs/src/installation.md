@@ -112,9 +112,10 @@ Add the public cache to avoid rebuilding Gradient from source:
 Workers and the server share one long-lived WebSocket per connection, carrying
 small latency-critical RPCs alongside multi-megabyte NAR chunks. Gradient
 disables Nagle's algorithm on every one of those sockets itself, and the NixOS
-modules raise nginx's relay buffer for both `/proto` and `/cache/` - the latter
-covers the read-only `/cache/{cache}/proto` sessions a pull-through cache opens.
-A default deployment therefore needs no tuning.
+modules raise nginx's relay buffer for the two upgraded endpoints - `/proto`,
+and the `/cache/{cache}/proto` sessions a pull-through cache opens, which get a
+location of their own so plain NAR downloads keep the default per-request
+memory. A default deployment therefore needs no tuning.
 
 On a high-bandwidth or high-latency link, two kernel settings are worth adding:
 
@@ -129,9 +130,12 @@ On a high-bandwidth or high-latency link, two kernel settings are worth adding:
 ```
 
 BBR recovers throughput on paths with any loss, and the larger buffer maxima
-let a single connection fill a high bandwidth-delay-product link. Caddy has no
-equivalent of nginx's `proxy_buffer_size` for upgraded connections; it relays
-them with a fixed internal buffer and needs no configuration.
+let a single connection fill a high bandwidth-delay-product link.
+
+Caddy needs no counterpart to any of the nginx tuning. It tunnels an upgraded
+connection bidirectionally with no intermediate buffer to size, and its
+`request_buffers`/`response_buffers` are off by default, which is what
+streaming NARs want. Leave them off.
 
 ### Jumbo frames
 
