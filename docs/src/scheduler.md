@@ -386,6 +386,13 @@ in the separate retention loop instead.
 
 #### Upstream substitutability
 
+A narinfo proxied from an upstream is re-signed with the cache's own key before
+it is served, so a client trusts one key - the Gradient cache's - rather than the
+key of every cache it happens to proxy. The upstream's own signature is verified
+first and kept alongside ours: re-signing something unverified would launder it
+under our name, and a signature covers the fingerprint rather than the rewritten
+`URL:`, so the upstream's stays valid for anyone who wants to check it.
+
 An upstream that stops answering is taken out of rotation rather than probed
 again on every request. Each probe is bounded at two seconds, and three
 consecutive *transport* failures in a row trip that upstream for a minute, after
