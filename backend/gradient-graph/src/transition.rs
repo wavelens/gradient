@@ -128,19 +128,25 @@ pub(crate) async fn apply(
             Ok(TransitionReport::default())
         }
         Transition::OrphanedBuilds { anchors } => {
-            for anchor in anchors {
-                match EDerivationBuild::find_by_id(anchor)
-                    .one(&ctx.worker_db)
-                    .await
-                {
-                    Ok(Some(row)) if row.status == BuildStatus::Building => {
-                        update_derivation_build_status(ctx, row, BuildStatus::Queued).await;
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        warn!(error = %e, derivation_build = %anchor, "requeue orphaned build: load failed")
-                    }
+            // One read for every anchor the worker held; the status writes stay
+            // per row because each carries its own transition side effects.
+            let rows = match EDerivationBuild::find()
+                .filter(gradient_entity::derivation_build::Column::Id.is_in(anchors))
+                .all(&ctx.worker_db)
+                .await
+            {
+                Ok(rows) => rows,
+                Err(e) => {
+                    warn!(error = %e, "requeue orphaned builds: load failed");
+                    return Ok(TransitionReport::default());
                 }
+            };
+
+            for row in rows
+                .into_iter()
+                .filter(|r| r.status == BuildStatus::Building)
+            {
+                update_derivation_build_status(ctx, row, BuildStatus::Queued).await;
             }
 
             Ok(TransitionReport::default())

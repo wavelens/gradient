@@ -16,6 +16,7 @@ use gradient_db::{output_hashes_for_drvs, runtime_closure_size};
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -68,30 +69,56 @@ pub async fn get_task_metrics(
         .all(&state.web_db)
         .await?;
 
+    // Anchors, their attempts and the entry points come back for the whole page
+    // at once; only the closure walks below stay per evaluation, since each one
+    // is seeded by that evaluation's own entry points.
+    let eval_ids: Vec<EvaluationId> = evaluations.iter().map(|e| e.id).collect();
+
+    let mut anchors_by_eval: HashMap<EvaluationId, Vec<DerivationBuildId>> = HashMap::new();
+    for job in EBuildJob::find()
+        .filter(CBuildJob::Evaluation.is_in(eval_ids.clone()))
+        .all(&state.web_db)
+        .await?
+    {
+        anchors_by_eval
+            .entry(job.evaluation)
+            .or_default()
+            .push(job.derivation_build);
+    }
+
+    let all_anchors: Vec<DerivationBuildId> = anchors_by_eval.values().flatten().copied().collect();
+    let attempts = gradient_db::latest_attempts(&state.web_db, &all_anchors).await?;
+
+    let mut entry_points_by_eval: HashMap<EvaluationId, Vec<DerivationId>> = HashMap::new();
+    for ep in EEntryPoint::find()
+        .filter(CEntryPoint::Evaluation.is_in(eval_ids))
+        .all(&state.web_db)
+        .await?
+    {
+        entry_points_by_eval
+            .entry(ep.evaluation)
+            .or_default()
+            .push(ep.derivation);
+    }
+
     let mut points = Vec::new();
 
     for evaluation in evaluations {
         let eval_time_ms = (evaluation.updated_at - evaluation.created_at).num_milliseconds();
 
         // Sum build time over every anchor this eval needs (one per build_job).
-        let anchor_ids: Vec<DerivationBuildId> = EBuildJob::find()
-            .filter(CBuildJob::Evaluation.eq(evaluation.id))
-            .all(&state.web_db)
-            .await?
+        let build_time_total_ms: i64 = anchors_by_eval
+            .get(&evaluation.id)
             .into_iter()
-            .map(|j| j.derivation_build)
-            .collect();
-        let attempts = gradient_db::latest_attempts(&state.web_db, &anchor_ids).await?;
-        let build_time_total_ms: i64 = attempts.values().filter_map(|a| a.duration_ms()).sum();
+            .flatten()
+            .filter_map(|anchor| attempts.get(anchor))
+            .filter_map(|a| a.duration_ms())
+            .sum();
 
-        // Resolve entry-point derivations for this evaluation.
-        let ep_drv_ids: Vec<DerivationId> = EEntryPoint::find()
-            .filter(CEntryPoint::Evaluation.eq(evaluation.id))
-            .all(&state.web_db)
-            .await?
-            .into_iter()
-            .map(|ep| ep.derivation)
-            .collect();
+        let ep_drv_ids: Vec<DerivationId> = entry_points_by_eval
+            .get(&evaluation.id)
+            .cloned()
+            .unwrap_or_default();
 
         let entry_point_count = ep_drv_ids.len() as i64;
         let closure = derivation_closure_reachable(&state.web_db, ep_drv_ids.clone()).await?;
