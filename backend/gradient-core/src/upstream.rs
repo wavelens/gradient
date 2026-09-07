@@ -11,9 +11,10 @@
 //! metadata needed to import the path.
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
+use gradient_util::sync::Mutex;
 use tokio::sync::Semaphore;
 
 use gradient_db::{UpstreamAccum, UpstreamEndpoint};
@@ -32,6 +33,88 @@ pub struct ProbeSample {
     pub upstream: CacheUpstreamId,
     pub latency_ms: f64,
     pub kind: SampleKind,
+}
+
+/// Consecutive transport failures before an upstream is taken out of rotation.
+const TRIP_AFTER: u32 = 3;
+
+/// How long a tripped upstream stays out. Short enough that a cache coming back
+/// is picked up on its own, long enough that a black hole is not re-probed on
+/// every request.
+const BREAKER_COOLDOWN: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Default, Clone, Copy)]
+struct Breaker {
+    consecutive_errors: u32,
+    open_until: Option<Instant>,
+}
+
+/// Per-upstream health, so one unreachable cache cannot cost every request its
+/// probe budget.
+///
+/// A cache that accepts the connection and then never answers is the expensive
+/// case: without this, every narinfo miss pays the full probe timeout waiting on
+/// it. Only transport failures count - a 404 means the upstream answered and is
+/// healthy, it simply does not have the path, which is the common case and must
+/// never take a cache out of rotation.
+#[derive(Debug, Default)]
+pub struct UpstreamBreakers {
+    inner: Mutex<HashMap<CacheUpstreamId, Breaker>>,
+}
+
+impl UpstreamBreakers {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn allows(&self, id: CacheUpstreamId) -> bool {
+        self.allows_at(id, Instant::now())
+    }
+
+    pub fn record(&self, id: CacheUpstreamId, kind: SampleKind) {
+        self.record_at(id, kind, Instant::now());
+    }
+
+    /// Whether a probe to `id` may go out at `now`. Once the cooldown elapses
+    /// the upstream is allowed through again; a further failure trips it anew.
+    pub fn allows_at(&self, id: CacheUpstreamId, now: Instant) -> bool {
+        let mut guard = self.inner.lock();
+        match guard.get_mut(&id) {
+            Some(b) => match b.open_until {
+                Some(until) if now < until => false,
+                Some(_) => {
+                    b.open_until = None;
+                    true
+                }
+                None => true,
+            },
+            None => true,
+        }
+    }
+
+    pub fn record_at(&self, id: CacheUpstreamId, kind: SampleKind, now: Instant) {
+        let mut guard = self.inner.lock();
+        let b = guard.entry(id).or_default();
+        match kind {
+            SampleKind::Hit | SampleKind::Miss => {
+                b.consecutive_errors = 0;
+                b.open_until = None;
+            }
+            SampleKind::Error => {
+                b.consecutive_errors = b.consecutive_errors.saturating_add(1);
+                if b.consecutive_errors >= TRIP_AFTER {
+                    b.open_until = Some(now + BREAKER_COOLDOWN);
+                }
+            }
+        }
+    }
+}
+
+/// Process-wide breakers, shared by the worker cache-query path and the cache's
+/// own narinfo endpoint so one dead upstream is learned about once.
+pub fn breakers() -> &'static UpstreamBreakers {
+    static BREAKERS: OnceLock<UpstreamBreakers> = OnceLock::new();
+    BREAKERS.get_or_init(UpstreamBreakers::new)
 }
 
 pub const PARALLEL_THRESHOLD: usize = 4;
@@ -76,6 +159,7 @@ pub fn fold_samples(samples: &[ProbeSample], into: &mut HashMap<CacheUpstreamId,
 }
 
 const PROBE_TIMEOUT_SECS: u64 = 5;
+const PROBE_TIMEOUT: Duration = Duration::from_secs(PROBE_TIMEOUT_SECS);
 const BATCH_WINDOW: usize = 256;
 /// Cap on how long a probe waits for a query-pool permit before giving up. Keeps
 /// a saturated pool (a large eval flooding the shared semaphore) from making a
@@ -115,7 +199,7 @@ async fn probe_one(
         .await;
     let latency_ms = started.elapsed().as_secs_f64() * 1000.0;
 
-    match resp {
+    let out = match resp {
         Ok(r) if r.status().is_success() => match r.text().await {
             Ok(body) => match parse_upstream_narinfo(&ep.url, store_path, &body) {
                 Some(cp) => (latency_ms, SampleKind::Hit, Some(cp)),
@@ -128,7 +212,77 @@ async fn probe_one(
         }
         Ok(_) => (latency_ms, SampleKind::Error, None),
         Err(_) => (latency_ms, SampleKind::Error, None),
+    };
+    breakers().record(ep.id, out.1);
+    out
+}
+
+/// One upstream as the cache's own narinfo endpoint knows it: the key is needed
+/// to verify what comes back before it is served on to a client.
+#[derive(Debug, Clone)]
+pub struct UpstreamProbe {
+    pub id: CacheUpstreamId,
+    pub url: String,
+    pub public_key: String,
+}
+
+/// A verified narinfo body and the upstream it came from.
+#[derive(Debug, Clone)]
+pub struct UpstreamNarinfo {
+    pub upstream: CacheUpstreamId,
+    pub body: String,
+}
+
+/// The narinfo for `path_hash` from the first upstream that has it.
+///
+/// Probes concurrently and bounds each probe, so an unreachable upstream costs
+/// one timeout instead of stalling the request behind it, and the breaker then
+/// keeps it out of rotation entirely. Bodies whose `Sig` does not verify against
+/// that upstream's configured key are dropped, never served on.
+pub async fn fetch_narinfo_body(
+    http: &reqwest::Client,
+    upstreams: &[UpstreamProbe],
+    path_hash: &str,
+) -> Option<UpstreamNarinfo> {
+    use futures::stream::{FuturesUnordered, StreamExt as _};
+
+    let mut futs: FuturesUnordered<_> = upstreams
+        .iter()
+        .filter(|u| breakers().allows(u.id))
+        .map(|u| async move {
+            let url = format!("{}/{}.narinfo", u.url.trim_end_matches('/'), path_hash);
+            let resp = http.get(&url).timeout(PROBE_TIMEOUT).send().await;
+            let kind = match &resp {
+                Ok(r) if r.status().is_success() => SampleKind::Hit,
+                Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => SampleKind::Miss,
+                Ok(_) | Err(_) => SampleKind::Error,
+            };
+            breakers().record(u.id, kind);
+            if kind != SampleKind::Hit {
+                return None;
+            }
+            let body = resp.ok()?.text().await.ok()?;
+            if !gradient_sources::verify_narinfo_signature(&u.public_key, &body) {
+                tracing::warn!(
+                    upstream = %u.id,
+                    path_hash,
+                    "upstream narinfo Sig did not verify against configured public_key; dropping"
+                );
+                return None;
+            }
+            Some(UpstreamNarinfo {
+                upstream: u.id,
+                body,
+            })
+        })
+        .collect();
+
+    while let Some(found) = futs.next().await {
+        if found.is_some() {
+            return found;
+        }
     }
+    None
 }
 
 pub async fn lookup_upstream_narinfo(
@@ -139,6 +293,21 @@ pub async fn lookup_upstream_narinfo(
     store_path: String,
 ) -> ProbeResult {
     let mut samples = Vec::new();
+
+    // A tripped upstream is skipped rather than probed and recorded: folding a
+    // sample we never took would poison the hit-rate its ordering is built on.
+    let endpoints: Arc<Vec<UpstreamEndpoint>> = if endpoints.iter().all(|e| breakers().allows(e.id))
+    {
+        endpoints
+    } else {
+        Arc::new(
+            endpoints
+                .iter()
+                .filter(|e| breakers().allows(e.id))
+                .cloned()
+                .collect(),
+        )
+    };
 
     if should_race(endpoints.len()) {
         use futures::stream::{FuturesUnordered, StreamExt as _};
@@ -320,6 +489,183 @@ pub fn parse_upstream_narinfo(base_url: &str, store_path: &str, body: &str) -> O
 
 #[cfg(test)]
 mod tests {
+    use super::{BREAKER_COOLDOWN, SampleKind, TRIP_AFTER, UpstreamBreakers, breakers};
+    use gradient_types::ids::CacheUpstreamId;
+    use std::time::{Duration, Instant};
+
+    fn upstream(n: u128) -> CacheUpstreamId {
+        CacheUpstreamId::new(uuid::Uuid::from_u128(n))
+    }
+
+    /// The failure this exists for: a cache that accepts the connection and
+    /// never answers. After a few strikes it must be skipped outright, or every
+    /// narinfo miss keeps paying its probe timeout.
+    #[test]
+    fn a_black_holed_upstream_is_taken_out_of_rotation() {
+        let b = UpstreamBreakers::new();
+        let id = upstream(1);
+        let t0 = Instant::now();
+
+        for _ in 0..TRIP_AFTER {
+            assert!(b.allows_at(id, t0), "must keep trying up to the threshold");
+            b.record_at(id, SampleKind::Error, t0);
+        }
+
+        assert!(!b.allows_at(id, t0), "the upstream should be tripped");
+    }
+
+    /// A 404 is the common answer from a healthy cache that lacks the path.
+    /// Counting it as a failure would take every upstream out of rotation
+    /// during any large substitution.
+    #[test]
+    fn a_miss_is_not_a_failure() {
+        let b = UpstreamBreakers::new();
+        let id = upstream(2);
+        let t0 = Instant::now();
+
+        for _ in 0..(TRIP_AFTER * 3) {
+            b.record_at(id, SampleKind::Miss, t0);
+        }
+
+        assert!(b.allows_at(id, t0));
+    }
+
+    /// A single success clears the count, so intermittent errors never
+    /// accumulate into a trip over hours.
+    #[test]
+    fn a_success_resets_the_failure_count() {
+        let b = UpstreamBreakers::new();
+        let id = upstream(3);
+        let t0 = Instant::now();
+
+        b.record_at(id, SampleKind::Error, t0);
+        b.record_at(id, SampleKind::Error, t0);
+        b.record_at(id, SampleKind::Hit, t0);
+        b.record_at(id, SampleKind::Error, t0);
+
+        assert!(b.allows_at(id, t0), "two strikes short of the threshold");
+    }
+
+    /// The cooldown has to expire on its own: an upstream that comes back must
+    /// be picked up without an operator restarting anything.
+    #[test]
+    fn a_tripped_upstream_is_retried_after_the_cooldown() {
+        let b = UpstreamBreakers::new();
+        let id = upstream(4);
+        let t0 = Instant::now();
+
+        for _ in 0..TRIP_AFTER {
+            b.record_at(id, SampleKind::Error, t0);
+        }
+        assert!(!b.allows_at(id, t0));
+
+        let later = t0 + BREAKER_COOLDOWN + Duration::from_secs(1);
+        assert!(
+            b.allows_at(id, later),
+            "cooldown must let one probe through"
+        );
+    }
+
+    /// Half-open, not closed: the probe the cooldown let through failing again
+    /// has to trip it straight back rather than starting a fresh count.
+    #[test]
+    fn a_still_broken_upstream_trips_again_on_the_next_failure() {
+        let b = UpstreamBreakers::new();
+        let id = upstream(5);
+        let t0 = Instant::now();
+
+        for _ in 0..TRIP_AFTER {
+            b.record_at(id, SampleKind::Error, t0);
+        }
+        let later = t0 + BREAKER_COOLDOWN + Duration::from_secs(1);
+        assert!(b.allows_at(id, later));
+
+        b.record_at(id, SampleKind::Error, later);
+        assert!(
+            !b.allows_at(id, later),
+            "one failure re-trips a half-open upstream"
+        );
+    }
+
+    /// Both the worker cache-query path and the cache's narinfo endpoint have to
+    /// consult the same health, or each learns a dead upstream separately.
+    #[test]
+    fn the_breakers_are_process_wide() {
+        assert!(std::ptr::eq(breakers(), breakers()));
+    }
+
+    /// The exact failure that cost every narinfo miss 30s: a port that completes
+    /// the handshake and then never answers. Never accepting is enough - the
+    /// kernel finishes the connection from the backlog, so the client is
+    /// connected and waiting on bytes that never come. Returned by value so the
+    /// listener stays bound for the life of the test.
+    async fn black_hole() -> (String, tokio::net::TcpListener) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        (format!("http://{addr}"), listener)
+    }
+
+    /// The probe must give up on its own budget. Before this, the shared client's
+    /// 30s timeout was the only bound and a substituter's own stall detector
+    /// fired first.
+    #[tokio::test]
+    async fn a_black_hole_is_bounded_by_the_probe_timeout() {
+        let (url, _listener) = black_hole().await;
+        let probes = vec![super::UpstreamProbe {
+            id: upstream(10),
+            url,
+            public_key: "test:0000000000000000000000000000000000000000000=".into(),
+        }];
+
+        let started = Instant::now();
+        let got = super::fetch_narinfo_body(
+            &reqwest::Client::new(),
+            &probes,
+            "brj5bb4pny8pnngq3qdymkllwql6z29j",
+        )
+        .await;
+        let elapsed = started.elapsed();
+
+        assert!(got.is_none());
+        assert!(
+            elapsed < Duration::from_secs(super::PROBE_TIMEOUT_SECS + 3),
+            "a dead upstream must not hold the request: took {elapsed:?}"
+        );
+    }
+
+    /// Once tripped, a dead upstream costs nothing at all - which is what keeps
+    /// a miss fast while the cache is down.
+    #[tokio::test]
+    async fn a_tripped_upstream_is_not_probed_at_all() {
+        let (url, _listener) = black_hole().await;
+        let id = upstream(11);
+        for _ in 0..TRIP_AFTER {
+            breakers().record(id, SampleKind::Error);
+        }
+        let probes = vec![super::UpstreamProbe {
+            id,
+            url,
+            public_key: "test:0000000000000000000000000000000000000000000=".into(),
+        }];
+
+        let started = Instant::now();
+        let got = super::fetch_narinfo_body(
+            &reqwest::Client::new(),
+            &probes,
+            "brj5bb4pny8pnngq3qdymkllwql6z29j",
+        )
+        .await;
+        let elapsed = started.elapsed();
+
+        assert!(got.is_none());
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "a tripped upstream must be skipped, not probed: took {elapsed:?}"
+        );
+    }
+
     use super::*;
 
     #[test]
