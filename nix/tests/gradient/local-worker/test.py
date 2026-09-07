@@ -59,6 +59,13 @@ assert admin, "admin login returned empty token"
 api("PUT", "projects", token=admin, body=json.dumps({
     "name": "demo", "display_name": "Demo", "description": "zero-config"}))
 
+# A project with no cache subscribed cannot authorize any worker: every peer it
+# offers is demoted at auth time, so the worker would be refused.
+api("PUT", "caches", token=admin, body=json.dumps({
+    "name": "democache", "display_name": "Demo Cache", "description": "d",
+    "priority": 10}))
+api("POST", "projects/demo/subscribe/democache", token=admin)
+
 workers = api("GET", "projects/demo/workers", token=admin)
 entry = next((w for w in workers if w["worker_id"] == identity), None)
 assert entry is not None, f"local worker missing from the project's worker list: {workers}"

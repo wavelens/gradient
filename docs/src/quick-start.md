@@ -61,10 +61,10 @@ identity, generates its token, and enables it for every project. See
 it provisions and how to opt out.
 
 After `nixos-rebuild switch`, navigate to `https://gradient.example.com/account/register`
-to create the first user, then create a project. The worker shows up under
-**Project Settings → Workers** already enabled - a brand-new instance can take
-up to a minute to show it as connected, because the worker is refused until a
-project exists.
+to create the first user, then create a project and a cache for it. The worker
+shows up under **Project Settings → Workers** already enabled - a brand-new
+instance can take up to a minute to show it as connected, because a worker is
+refused until a project with a subscribed cache exists.
 
 ## Next Steps
 
