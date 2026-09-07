@@ -34,7 +34,11 @@ impl<'a> StateApplicator<'a> {
                 "worker token file",
             )?;
             let token_hash = password_auth::generate_hash(token.trim());
-            let created_by_id = lookup_id(&user_map, &state_worker.created_by, "User")?;
+            let created_by_id = state_worker
+                .created_by
+                .as_ref()
+                .map(|user| lookup_id(&user_map, user, "User"))
+                .transpose()?;
 
             if state_worker.base_worker {
                 apply_base_worker(
@@ -74,7 +78,7 @@ impl<'a> StateApplicator<'a> {
                     reg.enable_fetch = Set(state_worker.enable_fetch);
                     reg.enable_eval = Set(state_worker.enable_eval);
                     reg.enable_build = Set(state_worker.enable_build);
-                    reg.created_by = Set(Some(created_by_id));
+                    reg.created_by = Set(created_by_id);
                     reg.update(self.db).await?;
                     tracing::info!(
                         worker_id = %state_worker.worker_id,
@@ -94,7 +98,7 @@ impl<'a> StateApplicator<'a> {
                         enable_fetch: state_worker.enable_fetch,
                         enable_eval: state_worker.enable_eval,
                         enable_build: state_worker.enable_build,
-                        created_by: Some(created_by_id),
+                        created_by: created_by_id,
                         created_at: now(),
                     }
                     .into_active_model();
@@ -122,7 +126,7 @@ async fn apply_base_worker<C: ConnectionTrait>(
     db: &C,
     worker: &StateWorker,
     project_map: &HashMap<String, ProjectId>,
-    user_id: UserId,
+    user_id: Option<UserId>,
     token_hash: String,
 ) -> Result<(), DynError> {
     let authorize_against = worker
@@ -136,8 +140,12 @@ async fn apply_base_worker<C: ConnectionTrait>(
         .one(db)
         .await?;
 
-    let base_worker_id = if let Some(row) = existing {
+    // Sweeping every existing project is a one-shot: on the row's first
+    // provisioning, and when auto_enable is newly switched on. Repeating it on
+    // each restart would undo a project's deliberate opt-out from the UI.
+    let (base_worker_id, sweep_projects) = if let Some(row) = existing {
         let id = row.id;
+        let newly_auto = worker.auto_enable && !row.auto_enable;
         let mut am: base_worker::ActiveModel = row.into();
         am.token_hash = Set(token_hash);
         am.url = Set(worker.url.clone());
@@ -146,10 +154,11 @@ async fn apply_base_worker<C: ConnectionTrait>(
         am.enable_eval = Set(worker.enable_eval);
         am.enable_build = Set(worker.enable_build);
         am.enabled = Set(worker.enabled);
+        am.auto_enable = Set(worker.auto_enable);
         am.authorize_against = Set(authorize_against);
         am.update(db).await?;
         tracing::info!(worker_id = %worker.worker_id, "Updated base worker");
-        id
+        (id, newly_auto)
     } else {
         let id = BaseWorkerId::now_v7();
         base_worker::Model {
@@ -162,18 +171,35 @@ async fn apply_base_worker<C: ConnectionTrait>(
             enable_eval: worker.enable_eval,
             enable_build: worker.enable_build,
             enabled: worker.enabled,
+            auto_enable: worker.auto_enable,
             authorize_against,
-            created_by: Some(user_id),
+            created_by: user_id,
             created_at: now(),
         }
         .into_active_model()
         .insert(db)
         .await?;
         tracing::info!(worker_id = %worker.worker_id, "Created base worker");
-        id
+        (id, worker.auto_enable)
     };
 
-    reconcile_pre_enabled_projects(db, base_worker_id, worker, project_map, user_id).await
+    reconcile_pre_enabled_projects(db, base_worker_id, worker, project_map, user_id).await?;
+
+    if sweep_projects {
+        let enabled = gradient_db::base_workers::enable_base_worker_for_all_projects(
+            db,
+            base_worker_id,
+            user_id,
+        )
+        .await?;
+        tracing::info!(
+            worker_id = %worker.worker_id,
+            projects = enabled,
+            "auto-enabled base worker for existing projects"
+        );
+    }
+
+    Ok(())
 }
 
 async fn reconcile_pre_enabled_projects<C: ConnectionTrait>(
@@ -181,7 +207,7 @@ async fn reconcile_pre_enabled_projects<C: ConnectionTrait>(
     base_worker_id: BaseWorkerId,
     worker: &StateWorker,
     project_map: &HashMap<String, ProjectId>,
-    user_id: UserId,
+    user_id: Option<UserId>,
 ) -> Result<(), DynError> {
     let existing = project_base_worker::Entity::find()
         .filter(project_base_worker::Column::BaseWorker.eq(base_worker_id))
@@ -198,7 +224,7 @@ async fn reconcile_pre_enabled_projects<C: ConnectionTrait>(
             id: ProjectBaseWorkerId::now_v7(),
             project: project_id,
             base_worker: base_worker_id,
-            created_by: Some(user_id),
+            created_by: user_id,
             created_at: now(),
         }
         .into_active_model()
@@ -226,13 +252,14 @@ mod base_worker_tests {
             projects: vec![],
             token_file: "/dev/null".to_string(),
             display_name: "Base".to_string(),
-            created_by: "alice".to_string(),
+            created_by: Some("alice".to_string()),
             enable_fetch: true,
             enable_eval: true,
             enable_build: true,
             base_worker: true,
             authorize_against: None,
             enabled: true,
+            auto_enable: false,
         }
     }
 
@@ -253,7 +280,7 @@ mod base_worker_tests {
             &db,
             &base_worker(),
             &HashMap::new(),
-            UserId::now_v7(),
+            Some(UserId::now_v7()),
             "hash".to_string(),
         )
         .await

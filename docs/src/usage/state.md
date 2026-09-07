@@ -536,6 +536,13 @@ services.gradient.state.workers = {
 
 `projects` for a base worker lists projects to pre-enable at provisioning time. It may be empty - projects can still enable the worker later from the UI.
 
+`auto_enable = true` removes that step: every project enables the worker the
+moment it is created, and the existing projects are swept once, when the base
+worker first appears or when the flag is switched on. It is only ever additive -
+a project that turns the worker off from the UI stays off across restarts. This
+is what [the co-located worker](../configuration.md#co-located-worker) sets for
+the worker running on the server's own host.
+
 `enabled` is a global gate: setting it to `false` hides the base worker from every project until it is turned back on.
 
 If a project already has a normal worker registered under the same `worker_id`, that registration shadows the base worker: the base entry is hidden from that project's list and deleting the worker removes the project's own registration instead of erroring about state management.
@@ -563,7 +570,8 @@ The `peerFile` options for a base worker in order of preference:
 | `base_worker` | `false` | When true, makes this a server-level base worker visible to every project |
 | `enabled` | `true` | Global on/off for a base worker. Ignored for non-base workers |
 | `authorize_against` | `null` | Fixed UUID identity a base worker authenticates as. Ignored for non-base workers |
-| `created_by` | - | Username of creator (required) |
+| `auto_enable` | `false` | Every project enables this base worker at creation time instead of opting in from the UI. Ignored for non-base workers |
+| `created_by` | `null` | Username of creator. Null leaves the registration unattributed |
 
 ## Triggers
 

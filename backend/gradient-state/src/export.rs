@@ -313,16 +313,14 @@ pub async fn export_state<C: ConnectionTrait>(db: &C) -> Result<StateConfigurati
                 projects: worker_projects.remove(&reg.worker_id).unwrap_or_default(),
                 token_file: String::new(),
                 display_name: reg.display_name.clone(),
-                created_by: reg
-                    .created_by
-                    .and_then(|id| username.get(&id).cloned())
-                    .unwrap_or_default(),
+                created_by: reg.created_by.and_then(|id| username.get(&id).cloned()),
                 enable_fetch: reg.enable_fetch,
                 enable_eval: reg.enable_eval,
                 enable_build: reg.enable_build,
                 base_worker: false,
                 authorize_against: None,
                 enabled: true,
+                auto_enable: false,
             },
         );
     }
@@ -387,16 +385,14 @@ fn export_base_worker(
         projects,
         token_file: String::new(),
         display_name: bw.display_name.clone(),
-        created_by: bw
-            .created_by
-            .and_then(|id| username.get(&id).cloned())
-            .unwrap_or_default(),
+        created_by: bw.created_by.and_then(|id| username.get(&id).cloned()),
         enable_fetch: bw.enable_fetch,
         enable_eval: bw.enable_eval,
         enable_build: bw.enable_build,
         base_worker: true,
         authorize_against: bw.authorize_against.map(|u| u.to_string()),
         enabled: bw.enabled,
+        auto_enable: bw.auto_enable,
     }
 }
 
@@ -750,7 +746,7 @@ mod tests {
         assert!(sw.base_worker);
         assert!(sw.enabled);
         assert!(!sw.enable_eval);
-        assert_eq!(sw.created_by, "alice");
+        assert_eq!(sw.created_by, Some("alice".to_string()));
         assert_eq!(sw.authorize_against, Some(auth.to_string()));
         assert_eq!(sw.projects, vec!["project-a".to_string()]);
         assert!(sw.token_file.is_empty());

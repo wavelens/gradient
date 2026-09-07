@@ -832,8 +832,9 @@
       };
 
       created_by = mkOption {
-        type = types.str;
-        description = "Username of the user who created this worker registration";
+        type = types.nullOr types.str;
+        default = null;
+        description = "Username of the user who created this worker registration. Null leaves the registration unattributed, which is what a host that provisions a worker for itself wants.";
       };
 
       enable_fetch = mkOption {
@@ -865,6 +866,12 @@
         default = null;
         description = "Optional fixed UUID identity a base worker authenticates as, instead of the per-project challenge. Ignored for non-base workers.";
         example = "123e4567-e89b-12d3-a456-426614174000";
+      };
+
+      auto_enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = "When true, every project enables this base worker the moment it is created, instead of opting in from the UI. A project that later opts out stays opted out. Ignored for non-base workers.";
       };
 
       enabled = mkOption {

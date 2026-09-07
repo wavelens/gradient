@@ -42,6 +42,7 @@ mod m20260904_000000_dispatched_job_phase;
 mod m20260904_000001_graph_edge_indexes;
 mod m20260905_000000_invites;
 mod m20260907_000000_dispatched_job_job_id;
+mod m20260907_000001_base_worker_auto_enable;
 
 pub struct Migrator;
 
@@ -85,6 +86,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260904_000001_graph_edge_indexes::Migration),
             Box::new(m20260905_000000_invites::Migration),
             Box::new(m20260907_000000_dispatched_job_job_id::Migration),
+            Box::new(m20260907_000001_base_worker_auto_enable::Migration),
         ]
     }
 }

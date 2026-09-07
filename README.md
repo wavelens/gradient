@@ -86,6 +86,7 @@ Configure Gradient in your `configuration.nix`:
 {
   services.gradient = {
     enable                    = true;
+    worker.enable             = true;
     frontend.enable           = true;
     domain                    = "gradient.example.com";
     jwtSecretFile             = "/run/secrets/gradient-jwt"; # openssl rand -base64 48 > /run/secrets/gradient-jwt
@@ -93,14 +94,6 @@ Configure Gradient in your `configuration.nix`:
     configurePostgres         = true;
     reverseProxy.nginx.enable = true; # you can also use caddy with: reverseProxy.caddy.enable = true
     reportErrors              = true; # optional: will send crash reports to us
-  };
-
-  services.gradient.worker = {
-    enable    = true;
-    serverUrl = "ws://127.0.0.1:3000/proto";
-    workerId  = "<uuid from uuidgen>"; # if not provided, a random UUID will be generated and saved in /var/lib/gradient/worker-id
-    peersFile = "/run/secrets/gradient-worker-peers"; # format: *:<token> (token is generated with `openssl rand -base64 48`)
-    )
   };
 }
 ```

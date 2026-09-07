@@ -58,7 +58,7 @@ In your `configuration.nix`:
 }
 ```
 
-The server does **not** start a worker automatically. Add a co-located worker to handle jobs on the same machine (import the `gradient-worker` module and set `services.gradient.worker.enable = true`), or deploy `gradient-worker` on separate build machines. See [Configuration → Workers](configuration.md#workers) for the full setup.
+The server does **not** start a worker automatically. Setting `services.gradient.worker.enable = true` adds one on the same machine - it registers itself, so no token or UUID is needed - or deploy `gradient-worker` on separate build machines. See [Configuration → Workers](configuration.md#workers) for the full setup.
 
 All available options are searchable at the [Options Search](https://wavelens.github.io/gradient-search).
 

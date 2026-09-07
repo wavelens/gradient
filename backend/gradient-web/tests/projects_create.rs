@@ -10,7 +10,8 @@
 //!   * the in-handler pre-check that rejects a name already taken (lock-in
 //!     regression around the 409 response shape);
 //!   * the happy-path transactional flow where the pre-check is empty, both
-//!     `project` and `project_user` insert, and the tx commits.
+//!     `project` and `project_user` insert, the `auto_enable` base workers are
+//!     looked up, and the tx commits.
 //!
 //! `MockDatabase` cannot model unique-violation rollbacks - `begin()` and
 //! `commit()` succeed unconditionally. The race between the pre-check SELECT
@@ -110,6 +111,9 @@ fn put_project_creates_project_and_admin_membership() {
             .append_query_results::<project::Model, _, _>([Vec::<project::Model>::new()])
             .append_query_results([vec![inserted]])
             .append_query_results([vec![membership]])
+            // Auto-enable sweep: no base worker is flagged, so the lookup comes
+            // back empty and nothing is linked.
+            .append_query_results([Vec::<gradient_entity::base_worker::Model>::new()])
             .append_exec_results([
                 MockExecResult {
                     last_insert_id: 0,

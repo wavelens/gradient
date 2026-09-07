@@ -49,6 +49,28 @@
     lib.optional (int.access_token_file != null)
       "gradient_integration_${int.name}_token:${int.access_token_file}"
   ) cfg.state.integrations);
+  # A worker on this host provisions its own registration, so the admin never
+  # sees a token or a UUID. Its credential file is generated before either
+  # service starts; the server only reads it through LoadCredential. All of it
+  # lives here rather than in the worker module, which is also deployed on its
+  # own and must not reach for the server's options.
+  localWorker = cfg.worker.enable && cfg.localWorker;
+
+  # Derived from the hostname so it is stable across rebuilds and known at eval
+  # time, which is what lets the server pre-register the worker before either
+  # service has ever run.
+  identityHash = builtins.hashString "sha256" "gradient-local-worker:${config.networking.hostName}";
+  localIdentity = lib.concatStringsSep "-" [
+    (builtins.substring 0 8 identityHash)
+    (builtins.substring 8 4 identityHash)
+    (builtins.substring 12 4 identityHash)
+    (builtins.substring 16 4 identityHash)
+    (builtins.substring 20 12 identityHash)
+  ];
+
+  localTokenFile = "${cfg.worker.baseDir}/local-token";
+  localPeersFile = "${cfg.worker.baseDir}/local-peers";
+
   actionTokenFiles = lib.concatLists (lib.mapAttrsToList (_: task:
     lib.concatMap (action:
       let tokenFile = action.config.token_file or null; in
@@ -130,6 +152,24 @@ in {
       };
 
       configurePostgres = lib.mkEnableOption "PostgreSQL configuration";
+
+      localWorker = lib.mkOption {
+        description = ''
+          Provision credentials for a `services.gradient.worker` running on this
+          same host: a worker identity derived from the hostname, a token
+          generated on first start, the matching peers file, and a registration
+          as an `auto_enable` base worker. No UUID, token, or web-UI
+          registration step is needed.
+
+          Turn it off to run a co-located worker that authenticates the same way
+          a remote one does, with `worker.workerId` and `worker.peersFile` set by
+          hand.
+        '';
+        type = lib.types.bool;
+        default = cfg.worker.enable;
+        defaultText = lib.literalExpression "config.services.gradient.worker.enable";
+      };
+
       reportErrors = lib.mkEnableOption "error reporting to Sentry";
       useTls = lib.mkEnableOption "TLS" // { default = true; };
       enableQuic = lib.mkEnableOption "QUIC support";
@@ -882,7 +922,29 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    services.gradient = lib.mkIf localWorker {
+      state.workers.local = {
+        display_name = "Local Worker";
+        worker_id = localIdentity;
+        token_file = localTokenFile;
+        projects = [ ];
+        base_worker = true;
+        authorize_against = localIdentity;
+        auto_enable = true;
+      };
+
+      worker = {
+        workerId = lib.mkDefault localIdentity;
+        peersFile = lib.mkDefault localPeersFile;
+        serverUrl = lib.mkDefault "ws://127.0.0.1:${toString cfg.port}/proto";
+      };
+    };
+
     assertions = [
+      {
+        assertion = cfg.localWorker -> cfg.worker.enable;
+        message = "services.gradient.localWorker provisions credentials for a worker on this host, so it requires services.gradient.worker.enable.";
+      }
       {
         assertion = cfg.proto.federate -> cfg.discoverable;
         message = "proto.federate requires discoverable to be enabled";
@@ -893,12 +955,48 @@ in {
       }
     ];
 
+    # The worker owns its own credential: it generates the token in its own
+    # state directory, and the server only ever reads it through
+    # LoadCredential, which systemd resolves as root. Ownership is by name, so
+    # a switch to DynamicUser would strand these files.
+    systemd.services.gradient-local-worker-token = lib.mkIf localWorker {
+      description = "Gradient local worker credentials";
+      requiredBy = [ "gradient-worker.service" ];
+      before = [ "gradient-worker.service" ];
+
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        User = "gradient-worker";
+        Group = "gradient-worker";
+        StateDirectory = "gradient-worker";
+        UMask = "0077";
+      };
+
+      script = ''
+        umask 077
+        if [ ! -s ${localTokenFile} ]; then
+          ${lib.getExe pkgs.openssl} rand -base64 48 > ${localTokenFile}.new
+          mv ${localTokenFile}.new ${localTokenFile}
+        fi
+        printf '%s:%s\n' ${localIdentity} "$(cat ${localTokenFile})" > ${localPeersFile}.new
+        mv ${localPeersFile}.new ${localPeersFile}
+        chmod 0400 ${localTokenFile} ${localPeersFile}
+      '';
+    };
+
+    systemd.services.gradient-worker = lib.mkIf localWorker {
+      after = [ "gradient-local-worker-token.service" ];
+    };
+
     systemd.services.gradient-server = {
       wantedBy = [ "multi-user.target" ];
       after = [
         "network.target"
         "systemd-tmpfiles-setup.service"
-      ] ++ lib.optional cfg.configurePostgres "postgresql.target";
+      ] ++ lib.optional cfg.configurePostgres "postgresql.target"
+        ++ lib.optional localWorker "gradient-local-worker-token.service";
+      requires = lib.optional localWorker "gradient-local-worker-token.service";
 
       serviceConfig = {
         ExecStart = lib.getExe cfg.packages.server;
