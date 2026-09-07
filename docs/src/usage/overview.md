@@ -58,6 +58,8 @@ Exclusion patterns must be exact paths - they cannot contain `*` or `#`.
 Click **Start Evaluation** on the task page. Gradient clones the repo, evaluates each wildcard match, and dispatches the resulting derivations to connected workers.
 
 The evaluation log page shows per-build status, combined ANSI build output, and an **Abort** button.
+Builds are grouped by status, and within a group listed in dependency order - the entry point first,
+then each dependency layer sorted by name - so a build appears above the builds it needs.
 
 Evaluations can also be triggered automatically:
 
