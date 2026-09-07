@@ -325,10 +325,15 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
       if (!existing || b.id === selectedId) byKey.set(key, b);
     }
 
+    // The API's order: status, then dependency layer, then name within a layer
+    // (#614), so each section reads like the dependency graph page. Re-applied
+    // rather than taken as given because builds also arrive from live updates
+    // and deep links, out of the paged order.
     return [...byKey.values()].sort((a, b) => {
       const oa = this.buildStatusOrder[this.statusClass(a.status)] ?? 99;
       const ob = this.buildStatusOrder[this.statusClass(b.status)] ?? 99;
       if (oa !== ob) return oa - ob;
+      if (a.depth !== b.depth) return a.depth - b.depth;
       return this.buildDisplayName(a.name).localeCompare(this.buildDisplayName(b.name));
     });
   }
@@ -559,6 +564,9 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           has_artefacts: false,
           updated_at: b.updated_at,
           build_time_ms: null,
+          // `?build=` also scopes the list to this build's closure, so it is the
+          // root of everything the API returns.
+          depth: 0,
         };
         this.initialBuildId = null;
         this.builds.update(cur => this.sortBuilds([item, ...cur]));

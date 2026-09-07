@@ -3207,7 +3207,11 @@ paths:
             evaluation.
       responses:
         '200':
-          description: Paginated build list
+          description: |-
+            Paginated build list, ordered by build status (running, then failed,
+            aborted, queued, finished), then by dependency layer (`depth`), then
+            by derivation name within a layer - so within one status the entry
+            point heads the list and every build precedes the builds it needs.
           content:
             application/json:
               schema:
@@ -9420,7 +9424,7 @@ components:
 
     BuildItem:
       type: object
-      required: [id, name, status, updated_at]
+      required: [id, name, status, updated_at, depth]
       properties:
         id:
           type: string
@@ -9439,6 +9443,15 @@ components:
           type: integer
           nullable: true
           description: Measured build duration in milliseconds (null if not yet recorded)
+        depth:
+          type: integer
+          minimum: 0
+          description: |-
+            Dependency layer within the returned set: `0` for a build nothing
+            else in it depends on (an entry point, or the `scope` root), and one
+            more than the deepest build that needs this one otherwise. Secondary
+            sort key after build status, so within one status a build always
+            precedes everything it depends on.
 
     ArtefactTree:
       type: object

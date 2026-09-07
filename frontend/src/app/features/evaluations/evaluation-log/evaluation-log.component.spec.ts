@@ -11,8 +11,8 @@ import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EvaluationLogComponent } from './evaluation-log.component';
 import { BuildItem } from '@core/services/evaluations.service';
 
-function build(id: string, name: string, status = 'Completed'): BuildItem {
-  return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null };
+function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
+  return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, depth };
 }
 
 function setup(): { fixture: ComponentFixture<EvaluationLogComponent>; cmp: EvaluationLogComponent } {
@@ -25,6 +25,7 @@ function setup(): { fixture: ComponentFixture<EvaluationLogComponent>; cmp: Eval
 }
 
 type Internals = {
+  sortBuilds: (builds: BuildItem[]) => BuildItem[];
   appendStreamedLines: (lines: string[]) => void;
   loadWindow: (buildId: string, start: number, end: number, mode: 'replace' | 'append' | 'prepend') => Promise<void>;
   convertAnsiToHtml: (text: string) => string;
@@ -95,6 +96,39 @@ describe('EvaluationLogComponent', () => {
 
   // #341: sidebar search filters the build list by name without disturbing the
   // status-sorted indices used for keyboard navigation.
+  // #614: inside a status section the sidebar reads like the dependency graph -
+  // the entry point on top, then each dependency layer, alphabetical within one.
+  describe('build order', () => {
+    it('sorts by dependency layer, then by display name, within a status', () => {
+      const { cmp } = setup();
+      const sorted = (cmp as unknown as Internals).sortBuilds([
+        build('3', 'hash-zlib.drv', 'Completed', 2),
+        build('1', 'hash-app.drv', 'Completed', 0),
+        build('2', 'hash-openssl.drv', 'Completed', 1),
+        build('4', 'hash-acl.drv', 'Completed', 2),
+      ]);
+      expect(sorted.map(b => b.id)).toEqual(['1', '2', '4', '3']);
+    });
+
+    it('keeps status primary: a building dependency stays above a queued dependent', () => {
+      const { cmp } = setup();
+      const sorted = (cmp as unknown as Internals).sortBuilds([
+        build('top', 'hash-app.drv', 'Queued', 0),
+        build('dep', 'hash-openssl.drv', 'Building', 1),
+      ]);
+      expect(sorted.map(b => b.id)).toEqual(['dep', 'top']);
+    });
+
+    it('dedups the same derivation arriving under two ids', () => {
+      const { cmp } = setup();
+      const sorted = (cmp as unknown as Internals).sortBuilds([
+        build('a', 'hash-app.drv', 'Completed', 0),
+        build('b', 'hash-app.drv', 'Completed', 0),
+      ]);
+      expect(sorted.length).toBe(1);
+    });
+  });
+
   describe('sidebar search', () => {
     it('filters grouped builds by name, case-insensitively', () => {
       const { cmp } = setup();

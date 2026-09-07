@@ -164,13 +164,16 @@ pub async fn get_evaluation(
 /// tens of thousands of builds (issue #237).
 const IS_IN_CHUNK: usize = 10_000;
 
-fn status_rank(status: gradient_entity::build::BuildStatus) -> u32 {
+/// Display rank of a build status, matching the sidebar sections in
+/// `evaluation-log.component.ts::buildGroups`: what is running or broken stays
+/// above what is finished.
+fn status_rank(status: BuildStatus) -> u32 {
     use gradient_entity::build::BuildStatus::*;
     match status {
         Building => 0,
-        Created | Queued => 1,
-        FailedPermanent | FailedTimeout | FailedTransient => 2,
-        Aborted | DependencyFailed => 3,
+        FailedPermanent | FailedTimeout | FailedTransient | DependencyFailed => 1,
+        Aborted => 2,
+        Created | Queued => 3,
         Completed | Substituted => 4,
     }
 }
@@ -250,32 +253,47 @@ pub async fn get_evaluation_builds(
         }
     }
 
-    // Sort by status (Building -> Queued -> Failed -> Aborted/DependencyFailed ->
-    // Completed/Substituted), then by derivation name. Mirrors the client-side
-    // ordering in `evaluation-log.component.ts::buildStatusOrder`.
-    let mut sorted: Vec<(u32, &str, &MBuildJob, BuildStatus)> = jobs
+    // #614: within a status, order by dependency layer and then by derivation
+    // name, so each section reads like the dependency graph page - the entry
+    // point on top, every build above the builds it needs. Layers are taken
+    // over the jobs that survived the scope filter, so a scoped view layers
+    // relative to its own root.
+    let layers = gradient_db::dependency_layers(
+        &drv_ids.iter().copied().collect(),
+        &gradient_db::eval_dependency_edges(&state.web_db, evaluation.id).await?,
+    );
+
+    let mut sorted: Vec<(u32, u32, &str, &MBuildJob, BuildStatus)> = jobs
         .iter()
         .filter_map(|j| {
             let drv = derivations.get(&j.derivation)?;
             let status = anchors.get(&j.derivation_build)?.status.for_api();
-            Some((status_rank(status), drv.name.as_str(), j, status))
+            let layer = layers.get(&j.derivation).copied().unwrap_or(0);
+            Some((status_rank(status), layer, drv.name.as_str(), j, status))
         })
         .collect();
-    sorted.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
+    sorted.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(b.2))
+    });
 
     let total = sorted.len();
-    let active_count = sorted.iter().filter(|(rank, _, _, _)| *rank < 4).count();
+    let active_count = sorted
+        .iter()
+        .filter(|(_, _, _, _, status)| !status.is_terminal_success())
+        .count();
 
     let offset = query.offset.unwrap_or(0).min(total);
     let limit = query.limit.unwrap_or(total.saturating_sub(offset));
-    let page_slice: Vec<&(u32, &str, &MBuildJob, BuildStatus)> =
+    let page_slice: Vec<&(u32, u32, &str, &MBuildJob, BuildStatus)> =
         sorted.iter().skip(offset).take(limit).collect();
 
     // Hydrate `has_artefacts` only for the page. Bounded by `limit`, so the
     // `IN` clause is safe regardless of evaluation size.
     let page_drv_ids: Vec<DerivationId> = page_slice
         .iter()
-        .map(|(_, _, j, _)| j.derivation)
+        .map(|(_, _, _, j, _)| j.derivation)
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
@@ -305,12 +323,12 @@ pub async fn get_evaluation_builds(
     // per-build query here is an N+1 that made large build lists take ~10s (#391).
     let page_anchor_ids: Vec<DerivationBuildId> = page_slice
         .iter()
-        .map(|(_, _, j, _)| j.derivation_build)
+        .map(|(_, _, _, j, _)| j.derivation_build)
         .collect();
     let attempts = gradient_db::latest_attempts(&state.web_db, &page_anchor_ids).await?;
 
     let mut page = Vec::with_capacity(page_slice.len());
-    for (_, _, j, status) in &page_slice {
+    for (_, layer, _, j, status) in &page_slice {
         let drv = derivations
             .get(&j.derivation)
             .expect("derivation hydrated above");
@@ -328,6 +346,7 @@ pub async fn get_evaluation_builds(
             has_artefacts: has_artefacts.contains(&j.derivation),
             updated_at: anchor.updated_at,
             build_time_ms,
+            depth: *layer,
         });
     }
 

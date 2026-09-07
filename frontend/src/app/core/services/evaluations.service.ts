@@ -58,6 +58,7 @@ export interface BuildItem {
   has_artefacts: boolean;
   updated_at: string;
   build_time_ms: number | null;
+  depth: number;         // dependency layer, 0 = nothing in the list depends on it
 }
 
 export interface BuildWithOutputs {
