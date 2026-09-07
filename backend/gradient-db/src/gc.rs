@@ -83,39 +83,45 @@ pub async fn gc_task_evaluations(ctx: &DbContext, task_id: TaskId, keep: usize) 
             .context("GC: failed to NULL evaluation linked-list pointers")?;
     }
 
+    // The evals' `build_job` rows cascade away, but their `build_attempt` rows
+    // (and their logs) are set-null'd onto the surviving `derivation_build`
+    // anchor - their true, build-once owner - and reclaimed only when the
+    // derivation GC deletes that anchor. NAR files and GC roots are likewise
+    // owned by `derivation_output` / `cache_derivation` and cleaned up there.
+    //
+    // Commits are not cascaded, so they are reclaimed afterwards in one pass:
+    // deleting every evaluation first means the reference check sees the final
+    // state, exactly as the per-evaluation check used to.
+    let commit_ids: Vec<CommitId> = to_delete.iter().map(|e| e.commit).collect();
+
     for eval in &to_delete {
-        // The eval's `build_job` rows cascade away, but its `build_attempt` rows
-        // (and their logs) are set-null'd onto the surviving `derivation_build`
-        // anchor - their true, build-once owner - and reclaimed only when the
-        // derivation GC deletes that anchor. NAR files and GC roots are likewise
-        // owned by `derivation_output` / `cache_derivation` and cleaned up there.
-
-        // Collect commit ID before deletion (not cascaded).
-        let commit_id = eval.commit;
-
         let a: AEvaluation = eval.clone().into_active_model();
         a.delete(&ctx.worker_db)
             .await
             .context("GC: failed to delete evaluation")?;
+    }
 
-        // Clean up the commit record if no other evaluation references it.
-        let still_referenced = EEvaluation::find()
-            .filter(CEvaluation::Commit.eq(commit_id))
-            .one(&ctx.worker_db)
+    let still_referenced: std::collections::HashSet<CommitId> = EEvaluation::find()
+        .filter(CEvaluation::Commit.is_in(commit_ids.clone()))
+        .all(&ctx.worker_db)
+        .await
+        .context("GC: failed to check commit references")?
+        .into_iter()
+        .map(|e| e.commit)
+        .collect();
+
+    let orphaned: Vec<CommitId> = commit_ids
+        .into_iter()
+        .filter(|c| !still_referenced.contains(c))
+        .collect();
+
+    if !orphaned.is_empty()
+        && let Err(e) = ECommit::delete_many()
+            .filter(CCommit::Id.is_in(orphaned))
+            .exec(&ctx.worker_db)
             .await
-            .context("GC: failed to check commit references")?;
-
-        if still_referenced.is_none()
-            && let Some(c) = ECommit::find_by_id(commit_id)
-                .one(&ctx.worker_db)
-                .await
-                .context("GC: failed to query commit")?
-        {
-            let ac: ACommit = c.into_active_model();
-            if let Err(e) = ac.delete(&ctx.worker_db).await {
-                warn!(error = %e, commit_id = %commit_id, "GC: failed to delete orphaned commit");
-            }
-        }
+    {
+        warn!(error = %e, "GC: failed to delete orphaned commits");
     }
 
     info!(task_id = %task_id, deleted = to_delete.len(), "Per-task evaluation GC done");

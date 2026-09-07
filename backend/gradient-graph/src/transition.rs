@@ -19,7 +19,8 @@ use gradient_types::proto::{BuildFailureKind, BuildMetrics, BuildOutput};
 use gradient_types::*;
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
+    QueryFilter,
 };
 use tracing::{error, info, warn};
 
@@ -756,13 +757,24 @@ async fn ready(
     })
     .await?;
 
-    for (derivation, size) in closure_sizes {
-        EDerivation::update_many()
-            .col_expr(CDerivation::ClosureSize, Expr::value(*size))
-            .filter(CDerivation::Id.eq(*derivation))
-            .exec(db)
-            .await?;
-    }
+    // One statement per chunk rather than one per derivation: an evaluation
+    // reports a closure size for every derivation it walked.
+    gradient_db::for_each_chunk(closure_sizes, |chunk| async move {
+        let (ids, sizes): (Vec<uuid::Uuid>, Vec<i64>) = chunk
+            .iter()
+            .map(|(derivation, size)| (uuid::Uuid::from(*derivation), *size))
+            .unzip();
+
+        db.execute_raw(sea_orm::Statement::from_sql_and_values(
+            sea_orm::DatabaseBackend::Postgres,
+            "UPDATE derivation SET closure_size = v.size \
+             FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::bigint[]) AS size) v \
+             WHERE derivation.id = v.id",
+            [ids.into(), sizes.into()],
+        ))
+        .await
+    })
+    .await?;
 
     Ok(())
 }

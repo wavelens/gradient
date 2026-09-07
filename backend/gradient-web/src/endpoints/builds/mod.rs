@@ -174,15 +174,16 @@ async fn reachable_projects_accessible(
         .all(&state.web_db)
         .await?;
 
-    let mut project_ids: std::collections::HashSet<ProjectId> = std::collections::HashSet::new();
-    for ev in evals {
-        let Some(task_id) = ev.task else {
-            continue;
-        };
-        if let Some(p) = ETask::find_by_id(task_id).one(&state.web_db).await? {
-            project_ids.insert(p.project);
-        }
-    }
+    // One read for every task behind these evaluations: this runs on the
+    // authorization path of each request.
+    let task_ids: Vec<TaskId> = evals.iter().filter_map(|ev| ev.task).collect();
+    let project_ids: std::collections::HashSet<ProjectId> = ETask::find()
+        .filter(CTask::Id.is_in(task_ids))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|t| t.project)
+        .collect();
 
     for project_id in project_ids {
         if is_project_member(state, user.id, project_id, api_key).await? {

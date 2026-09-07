@@ -11,6 +11,7 @@ use gradient_ci::parse_owner_repo;
 use gradient_core::ServerState;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -206,35 +207,53 @@ pub(super) async fn resolve_github_app_targets(
         .map(|u| normalize_repo_url(u))
         .collect();
 
+    // Tasks and integrations for every candidate installation in one read each;
+    // a webhook resolving its targets should not scale queries with the number
+    // of installations.
+    let project_ids: Vec<ProjectId> = installs.iter().map(|i| i.project).collect();
+    let install_ids: Vec<GithubInstallationId> = installs.iter().map(|i| i.id).collect();
+
+    let mut tasks_by_project: HashMap<ProjectId, Vec<MTask>> = HashMap::new();
+    match ETask::find()
+        .filter(CTask::Project.is_in(project_ids.clone()))
+        .all(&state.web_db)
+        .await
+    {
+        Ok(rows) => {
+            for row in rows {
+                tasks_by_project.entry(row.project).or_default().push(row);
+            }
+        }
+        Err(e) => {
+            warn!(error = %e, "resolve_github_app_targets: task lookup failed");
+            return Vec::new();
+        }
+    }
+
+    let integrations_by_install: HashMap<GithubInstallationId, MIntegration> = EIntegration::find()
+        .filter(CIntegration::Project.is_in(project_ids))
+        .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
+        .filter(CIntegration::ForgeType.eq(i16::from(gradient_types::ForgeType::GitHub)))
+        .filter(CIntegration::GithubInstallation.is_in(install_ids))
+        .all(&state.web_db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|i| i.github_installation.map(|inst| (inst, i)))
+        .collect();
+
     let mut integrations = Vec::new();
     for inst in installs {
         let project_id = inst.project;
-        let tasks = match ETask::find()
-            .filter(CTask::Project.eq(project_id))
-            .all(&state.web_db)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!(error = %e, %project_id, "resolve_github_app_targets: task lookup failed");
-                continue;
-            }
-        };
-        let has_match = tasks
-            .iter()
+        let has_match = tasks_by_project
+            .get(&project_id)
+            .into_iter()
+            .flatten()
             .any(|p| webhook_urls.contains(&normalize_repo_url(&p.repository)));
         if !has_match {
             continue;
         }
-        let integration = EIntegration::find()
-            .filter(CIntegration::Project.eq(project_id))
-            .filter(CIntegration::Kind.eq(i16::from(IntegrationKind::Inbound)))
-            .filter(CIntegration::ForgeType.eq(i16::from(gradient_types::ForgeType::GitHub)))
-            .filter(CIntegration::GithubInstallation.eq(inst.id))
-            .one(&state.web_db)
-            .await
-            .ok()
-            .flatten();
+        let integration = integrations_by_install.get(&inst.id).cloned();
         match integration {
             Some(i) => {
                 let allowlist = i.allowed_ips.clone().unwrap_or_default();

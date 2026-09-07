@@ -1184,18 +1184,18 @@ async fn github_app_webhook_multi_project_routes_to_matching_project_inner() {
     // Mock chain:
     // resolve_github_app_targets:
     //   1. SELECT github_installation by installation_id → [inst_a, inst_b]
-    //   2. tasks.all for project A → [project_a_task]   (no URL match → skipped)
-    //   3. tasks.all for project B → [project_b_task]   (URL matches)
-    //   4. integration.one for project B (filtered by inst_b.id) → github_integration_row
+    //   2. tasks.all for BOTH projects in one read → [project_a_task (no URL
+    //      match → skipped), project_b_task (URL matches)]
+    //   3. integration.all for both installations, keyed by github_installation
+    //      → github_integration_row (inst_b's)
     // fan_out_triggers for project B's integration:
-    //   5. load_active_triggers → [trigger]
-    //   6. ETask::find_by_id → project_b_task
-    //   7. project_name_for → project B row
-    //   8+. apply_trigger chain
+    //   4. load_active_triggers → [trigger]
+    //   5. ETask::find_by_id → project_b_task
+    //   6. project_name_for → project B row
+    //   7+. apply_trigger chain
     let db = MockDatabase::new(DatabaseBackend::Postgres)
         .append_query_results([vec![inst_a, inst_b]])
-        .append_query_results([vec![project_a_task]])
-        .append_query_results([vec![project_b_task.clone()]])
+        .append_query_results([vec![project_a_task, project_b_task.clone()]])
         .append_query_results([vec![github_integration_row()]])
         .append_query_results([vec![trigger_row(reporter_push_trigger(vec![]))]])
         .append_query_results([vec![project_b_task.clone()]])
