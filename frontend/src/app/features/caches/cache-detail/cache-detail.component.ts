@@ -7,7 +7,7 @@
 import { Component, OnInit, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
-import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint, UpstreamCache } from '@core/services/caches.service';
+import { CachesService, CacheStats, CacheMetricPoint, StorageMetricPoint } from '@core/services/caches.service';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -68,7 +68,6 @@ export class CacheDetailComponent implements OnInit {
   loading = signal(true);
   statsLoading = signal(true);
   cache = signal<Cache | null>(null);
-  upstreams = signal<UpstreamCache[]>([]);
   stats = signal<CacheStats | null>(null);
   activeWindow = signal<Window>('hours');
 
@@ -76,15 +75,12 @@ export class CacheDetailComponent implements OnInit {
     this.activeWindow.set(value as Window);
   }
 
-  externalUpstreamKeys = computed(() =>
-    this.upstreams()
-      .filter(u => u.public_key)
-      .map(u => u.public_key!)
-  );
-
-  allPublicKeys = computed(() => {
+  // Only this cache's own key: the server re-signs everything it serves, paths
+  // proxied from an upstream included, so a client never needs the key of a
+  // cache we happen to proxy.
+  trustedPublicKeys = computed(() => {
     const own = this.cache()?.public_key;
-    return [...(own ? [own] : []), ...this.externalUpstreamKeys()];
+    return own ? [own] : [];
   });
 
   cacheName = '';
@@ -92,7 +88,7 @@ export class CacheDetailComponent implements OnInit {
   serverUrl = '';
 
   nixConfSnippet = computed(() => {
-    const keys = this.allPublicKeys();
+    const keys = this.trustedPublicKeys();
     return `substituters = ${this.cacheUrl}\ntrusted-public-keys = ${keys.length ? keys.join(' ') : '<unavailable>'}`;
   });
 
@@ -149,7 +145,6 @@ export class CacheDetailComponent implements OnInit {
     this.cacheUrl = `${this.serverUrl}/cache/${this.cacheName}`;
     this.loadCache();
     this.loadStats();
-    this.loadUpstreams();
   }
 
   loadCache(): void {
@@ -163,13 +158,6 @@ export class CacheDetailComponent implements OnInit {
         console.error('Failed to load cache:', error);
         this.loading.set(false);
       },
-    });
-  }
-
-  loadUpstreams(): void {
-    this.cachesService.getCacheUpstreams(this.cacheName).subscribe({
-      next: (upstreams) => this.upstreams.set(upstreams),
-      error: () => {},
     });
   }
 
