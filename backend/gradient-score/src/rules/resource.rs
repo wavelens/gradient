@@ -156,6 +156,9 @@ impl ScoreRule for ResourceSaturationRule {
 mod tests {
     use super::*;
     use crate::context::{HistoryPrediction, ScoredJob, Windowed, WorkerMetricsView};
+    // Asserted against the constant, not a literal, so tuning the penalty does
+    // not rewrite every expectation here.
+    use crate::weights::RESOURCE_SATURATION_PENALTY as PENALTY;
     use gradient_types::ids::ProjectId;
 
     fn job_with_history(h: HistoryPrediction) -> ScoredJob<'static> {
@@ -434,11 +437,11 @@ mod tests {
 
         assert_eq!(
             rule.score(&ctx(&job), &cpu_hot, &InstanceContext::default()),
-            -1000.0
+            -PENALTY
         );
         assert_eq!(
             rule.score(&ctx(&job), &ram_hot, &InstanceContext::default()),
-            -1000.0
+            -PENALTY
         );
         assert_eq!(
             rule.score(&ctx(&job), &idle, &InstanceContext::default()),
@@ -469,7 +472,7 @@ mod tests {
         let real = job_with_history(HistoryPrediction::default());
         assert_eq!(
             rule.score(&ctx(&real), &worker_with(warm), &InstanceContext::default()),
-            -1000.0
+            -PENALTY
         );
 
         // Evals (no architecture) and no-metrics workers are fully exempt even on a hot worker.
@@ -558,7 +561,7 @@ mod tests {
         });
         assert_eq!(
             rule.score(&ctx(&job), &tight, &InstanceContext::default()),
-            -1000.0
+            -PENALTY
         );
 
         // 12_000 free >= 11_000 needed and not saturated -> no penalty.
@@ -573,7 +576,7 @@ mod tests {
             0.0
         );
 
-        // Saturated CPU AND RAM won't fit -> both -1000 penalties stack.
+        // Saturated CPU AND RAM won't fit -> both penalties stack.
         let hot_and_tight = worker_with(WorkerMetricsView {
             cpu_usage_pct: Some(99.0),
             ram_total_mb: 16_000,
@@ -582,7 +585,7 @@ mod tests {
         });
         assert_eq!(
             rule.score(&ctx(&job), &hot_and_tight, &InstanceContext::default()),
-            -2000.0
+            -2.0 * PENALTY
         );
     }
 

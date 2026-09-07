@@ -11,7 +11,7 @@
 //!
 //! Relative scale (largest first): anti-starvation WAIT_TIME_CAP (4000)
 //! out-budgets everything so nothing waits forever; the resource penalties
-//! (RESOURCE_SATURATION_PENALTY 1000, stackable to 2000; RAM overshoot up to
+//! (RESOURCE_SATURATION_PENALTY 5000, stackable to 10000; RAM overshoot up to
 //! RESOURCE_FIT_RAM_PENALTY x MAX_OVERSHOOT = 800 before OOM factors) keep
 //! doomed placements out; cache-warmth bonuses (MISSING_NAR_SIZE_CAP 500,
 //! MISSING_PATHS_CAP 200) prefer cheap transfers; the rest are tie-breakers.
@@ -68,7 +68,7 @@ pub const CPU_AFFINITY_BONUS_CAP: f64 = 2.0;
 /// ResourceSaturationRule: flat penalty per tripped saturation signal
 /// (stackable), the CPU thresholds, the free-RAM fraction floor, and the
 /// headroom factor over the predicted peak.
-pub const RESOURCE_SATURATION_PENALTY: f64 = 1000.0;
+pub const RESOURCE_SATURATION_PENALTY: f64 = 5000.0;
 pub const CPU_SATURATED_PCT: f64 = 80.0;
 pub const CPU_SATURATED_PCT_BUILTIN: f64 = 90.0;
 pub const RAM_SATURATED_FREE_FRAC: f64 = 0.10;
