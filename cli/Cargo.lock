@@ -2211,7 +2211,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings"
 version = "0.2347.8"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#593e0cb6b996003278114d924799a90452197540"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#1f9819e05a2911919959f7fd1501dddc9c77dee0"
 dependencies = [
  "nix-bindings-sys",
 ]
@@ -2219,7 +2219,7 @@ dependencies = [
 [[package]]
 name = "nix-bindings-sys"
 version = "0.2347.8"
-source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#593e0cb6b996003278114d924799a90452197540"
+source = "git+https://github.com/DerDennisOP/nix-bindings?branch=feat%2Feval-metrics-stats#1f9819e05a2911919959f7fd1501dddc9c77dee0"
 dependencies = [
  "bindgen",
  "cc",
@@ -3617,7 +3617,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
