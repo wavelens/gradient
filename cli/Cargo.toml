@@ -35,6 +35,8 @@ futures = "0.3"
 git2 = "0.21"
 reqwest = { version = "0.13", features = ["multipart"] }
 ratatui = "0.30"
+rmcp = { version = "3.2", features = ["server", "macros", "transport-io"] }
+schemars = "1"
 
 [features]
 default = []
