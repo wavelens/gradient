@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::sea_query::Expr;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
 
 use gradient_core::ServerState;
 use gradient_entity::project_user;
@@ -183,29 +185,45 @@ async fn add_member(
 ) -> ScimResult<()> {
     let user_id = parse_uid(uid)?;
     let db = state.web_db.inner();
+
+    // One read of the user's existing memberships, then one write per distinct
+    // role plus one insert, instead of a lookup and a write per grant.
+    let projects: Vec<ProjectId> = grants.iter().map(|(p, _)| *p).collect();
+    let existing: HashSet<ProjectId> = project_user::Entity::find()
+        .filter(project_user::Column::Project.is_in(projects))
+        .filter(project_user::Column::User.eq(user_id))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|m| m.project)
+        .collect();
+
+    let mut by_role: HashMap<RoleId, Vec<ProjectId>> = HashMap::new();
+    let mut new_rows = Vec::new();
     for (project, role) in grants {
-        let exists = project_user::Entity::find()
-            .filter(project_user::Column::Project.eq(*project))
-            .filter(project_user::Column::User.eq(user_id))
-            .one(db)
-            .await?;
-        match exists {
-            Some(m) => {
-                let mut am: project_user::ActiveModel = m.into();
-                am.role = Set(*role);
-                am.update(db).await?;
-            }
-            None => {
-                project_user::ActiveModel {
-                    project: Set(*project),
-                    user: Set(user_id),
-                    role: Set(*role),
-                    ..Default::default()
-                }
-                .insert(db)
-                .await?;
-            }
+        if existing.contains(project) {
+            by_role.entry(*role).or_default().push(*project);
+        } else {
+            new_rows.push(project_user::ActiveModel {
+                project: Set(*project),
+                user: Set(user_id),
+                role: Set(*role),
+                ..Default::default()
+            });
         }
+    }
+
+    for (role, projects) in by_role {
+        project_user::Entity::update_many()
+            .col_expr(project_user::Column::Role, Expr::value(role))
+            .filter(project_user::Column::Project.is_in(projects))
+            .filter(project_user::Column::User.eq(user_id))
+            .exec(db)
+            .await?;
+    }
+
+    if !new_rows.is_empty() {
+        project_user::Entity::insert_many(new_rows).exec(db).await?;
     }
 
     Ok(())
@@ -218,13 +236,13 @@ async fn remove_member(
 ) -> ScimResult<()> {
     let user_id = parse_uid(uid)?;
     let db = state.web_db.inner();
-    for (project, _role) in grants {
-        project_user::Entity::delete_many()
-            .filter(project_user::Column::Project.eq(*project))
-            .filter(project_user::Column::User.eq(user_id))
-            .exec(db)
-            .await?;
-    }
+    let projects: Vec<ProjectId> = grants.iter().map(|(p, _)| *p).collect();
+
+    project_user::Entity::delete_many()
+        .filter(project_user::Column::Project.is_in(projects))
+        .filter(project_user::Column::User.eq(user_id))
+        .exec(db)
+        .await?;
 
     Ok(())
 }

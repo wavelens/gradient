@@ -24,7 +24,12 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, QueryFilter,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Postgres caps bind parameters per statement; the signature backfill can span
+/// an entire project cache, so it inserts in chunks.
+const SIGNATURE_INSERT_CHUNK: usize = 1_000;
 
 #[derive(Deserialize)]
 pub struct SubscribeCacheRequest {
@@ -118,28 +123,42 @@ pub async fn get_project_subscribe(
         .all(&state.web_db)
         .await?;
 
+    let pending = ECacheSubscriptionRequest::find()
+        .filter(CCacheSubscriptionRequest::Project.eq(project.id))
+        .all(&state.web_db)
+        .await?;
+
+    // Both lists resolve their cache names from one read.
+    let cache_ids: Vec<CacheId> = project_caches
+        .iter()
+        .map(|oc| oc.cache)
+        .chain(pending.iter().map(|r| r.cache))
+        .collect();
+    let names: HashMap<CacheId, String> = ECache::find()
+        .filter(CCache::Id.is_in(cache_ids))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|c| (c.id, c.name))
+        .collect();
+
     let mut subscribed = Vec::new();
     for oc in project_caches {
-        if let Ok(Some(cache)) = ECache::find_by_id(oc.cache).one(&state.web_db).await {
+        if let Some(name) = names.get(&oc.cache) {
             subscribed.push(CacheSubscriptionItem {
                 id: oc.cache,
-                name: cache.name,
+                name: name.clone(),
                 mode: oc.mode,
                 status: SubscriptionStatus::Active,
             });
         }
     }
 
-    let pending = ECacheSubscriptionRequest::find()
-        .filter(CCacheSubscriptionRequest::Project.eq(project.id))
-        .all(&state.web_db)
-        .await?;
-
     for request in pending {
-        if let Ok(Some(cache)) = ECache::find_by_id(request.cache).one(&state.web_db).await {
+        if let Some(name) = names.get(&request.cache) {
             subscribed.push(CacheSubscriptionItem {
                 id: request.cache,
-                name: cache.name,
+                name: name.clone(),
                 mode: request.mode,
                 status: SubscriptionStatus::Pending,
             });
@@ -362,29 +381,40 @@ async fn enqueue_backfill_signatures(
     let cp_ids: std::collections::HashSet<CachedPathId> =
         outputs.into_iter().filter_map(|o| o.cached_path).collect();
 
+    // The (cached_path, cache) uniqueness does the de-duplication, so the whole
+    // backfill is a batched insert rather than an existence check and an insert
+    // per path.
     let now = gradient_types::now();
-    for cp_id in cp_ids {
-        let exists = ECachedPathSignature::find()
-            .filter(CCachedPathSignature::CachedPath.eq(cp_id))
-            .filter(CCachedPathSignature::Cache.eq(cache_id))
-            .one(&state.web_db)
-            .await
-            .unwrap_or(None)
-            .is_some();
-        if exists {
-            continue;
-        }
-        let am = MCachedPathSignature {
-            id: CachedPathSignatureId::now_v7(),
-            cached_path: cp_id,
-            cache: cache_id,
-            created_at: now,
-            ..Default::default()
-        }
-        .into_active_model();
+    let rows: Vec<_> = cp_ids
+        .into_iter()
+        .map(|cp_id| {
+            MCachedPathSignature {
+                id: CachedPathSignatureId::now_v7(),
+                cached_path: cp_id,
+                cache: cache_id,
+                created_at: now,
+                ..Default::default()
+            }
+            .into_active_model()
+        })
+        .collect();
 
-        if let Err(e) = am.insert(&state.web_db).await {
-            tracing::warn!(cached_path = %cp_id, cache = %cache_id, error = %e, "backfill: placeholder insert failed");
+    for chunk in rows.chunks(SIGNATURE_INSERT_CHUNK) {
+        let res = ECachedPathSignature::insert_many(chunk.to_vec())
+            .on_conflict(
+                sea_orm::sea_query::OnConflict::columns([
+                    CCachedPathSignature::CachedPath,
+                    CCachedPathSignature::Cache,
+                ])
+                .do_nothing()
+                .to_owned(),
+            )
+            .exec(&state.web_db)
+            .await;
+        if let Err(e) = res
+            && !matches!(e, sea_orm::DbErr::RecordNotInserted)
+        {
+            tracing::warn!(cache = %cache_id, error = %e, "backfill: placeholder insert failed");
         }
     }
 }

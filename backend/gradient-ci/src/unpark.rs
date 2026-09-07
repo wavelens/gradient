@@ -68,22 +68,24 @@ pub async fn unpark_storage_full_all<C: ConnectionTrait>(
         .all(db)
         .await?;
 
+    let task_ids: Vec<TaskId> = parked
+        .iter()
+        .filter(|eval| {
+            eval.waiting_reason
+                .as_ref()
+                .and_then(WaitingReason::from_json)
+                .is_some_and(|r| matches!(r, WaitingReason::CacheStorageFull))
+        })
+        .filter_map(|eval| eval.task)
+        .collect();
+
     let mut projects: Vec<ProjectId> = Vec::new();
-    for eval in &parked {
-        let is_storage = eval
-            .waiting_reason
-            .as_ref()
-            .and_then(WaitingReason::from_json)
-            .is_some_and(|r| matches!(r, WaitingReason::CacheStorageFull));
-        if !is_storage {
-            continue;
-        }
-        let Some(task_id) = eval.task else {
-            continue;
-        };
-        if let Some(task) = ETask::find_by_id(task_id).one(db).await?
-            && !projects.contains(&task.project)
-        {
+    for task in ETask::find()
+        .filter(CTask::Id.is_in(task_ids))
+        .all(db)
+        .await?
+    {
+        if !projects.contains(&task.project) {
             projects.push(task.project);
         }
     }

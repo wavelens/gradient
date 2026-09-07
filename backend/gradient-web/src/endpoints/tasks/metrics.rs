@@ -214,37 +214,55 @@ pub async fn get_entry_point_metrics(
         .all(&state.web_db)
         .await?;
 
+    // Evaluation, anchor, build job and attempt for the whole page in four
+    // queries; the closure walks below stay per entry point, each seeded by its
+    // own derivation. The build-job read is narrowed by derivation too, so it
+    // returns the entry points rather than every build of every evaluation.
+    let eval_ids: Vec<EvaluationId> = entry_points.iter().map(|ep| ep.evaluation).collect();
+    let drv_ids: Vec<DerivationId> = entry_points.iter().map(|ep| ep.derivation).collect();
+
+    let evaluations: HashMap<EvaluationId, MEvaluation> = EEvaluation::find()
+        .filter(CEvaluation::Id.is_in(eval_ids.clone()))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|e| (e.id, e))
+        .collect();
+
+    let anchors: HashMap<DerivationId, MDerivationBuild> = EDerivationBuild::find()
+        .filter(CDerivationBuild::Derivation.is_in(drv_ids.clone()))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|a| (a.derivation, a))
+        .collect();
+
+    let build_jobs: HashMap<(EvaluationId, DerivationId), MBuildJob> = EBuildJob::find()
+        .filter(CBuildJob::Evaluation.is_in(eval_ids))
+        .filter(CBuildJob::Derivation.is_in(drv_ids))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|j| ((j.evaluation, j.derivation), j))
+        .collect();
+
+    let anchor_ids: Vec<DerivationBuildId> = anchors.values().map(|a| a.id).collect();
+    let attempts = gradient_db::latest_attempts(&state.web_db, &anchor_ids)
+        .await
+        .unwrap_or_default();
+
     let mut points = Vec::new();
 
     for ep in entry_points {
-        let Some(evaluation) = EEvaluation::find_by_id(ep.evaluation)
-            .one(&state.web_db)
-            .await?
-        else {
+        let (Some(evaluation), Some(anchor), Some(build_job)) = (
+            evaluations.get(&ep.evaluation),
+            anchors.get(&ep.derivation),
+            build_jobs.get(&(ep.evaluation, ep.derivation)),
+        ) else {
             continue;
         };
 
-        let Some(anchor) = EDerivationBuild::find()
-            .filter(CDerivationBuild::Derivation.eq(ep.derivation))
-            .one(&state.web_db)
-            .await?
-        else {
-            continue;
-        };
-        let Some(build_job) = EBuildJob::find()
-            .filter(CBuildJob::Evaluation.eq(ep.evaluation))
-            .filter(CBuildJob::Derivation.eq(ep.derivation))
-            .one(&state.web_db)
-            .await?
-        else {
-            continue;
-        };
-
-        let build_time_ms = gradient_db::latest_attempt(&state.web_db, anchor.id)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|a| a.duration_ms());
+        let build_time_ms = attempts.get(&anchor.id).and_then(|a| a.duration_ms());
 
         let closure = derivation_closure_reachable(&state.web_db, vec![ep.derivation]).await?;
         let dependencies_count = (closure.len() as i64).saturating_sub(1);
