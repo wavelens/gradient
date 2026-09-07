@@ -158,7 +158,7 @@ pub fn fold_samples(samples: &[ProbeSample], into: &mut HashMap<CacheUpstreamId,
     }
 }
 
-const PROBE_TIMEOUT_SECS: u64 = 5;
+const PROBE_TIMEOUT_SECS: u64 = 2;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(PROBE_TIMEOUT_SECS);
 const BATCH_WINDOW: usize = 256;
 /// Cap on how long a probe waits for a query-pool permit before giving up. Keeps

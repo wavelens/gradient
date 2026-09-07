@@ -387,7 +387,7 @@ in the separate retention loop instead.
 #### Upstream substitutability
 
 An upstream that stops answering is taken out of rotation rather than probed
-again on every request. Each probe is bounded at five seconds, and three
+again on every request. Each probe is bounded at two seconds, and three
 consecutive *transport* failures in a row trip that upstream for a minute, after
 which one request is let through to test it - failing again re-trips it, so a
 cache that is down costs nothing while it stays down and is picked up on its own
