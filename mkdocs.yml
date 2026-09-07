@@ -20,6 +20,7 @@ nav:
       - Job Board: usage/job-board.md
       - CLI: usage/cli.md
       - API: usage/api.md
+      - MCP Server: usage/mcp.md
       - State: usage/state.md
       - SCIM: usage/scim.md
       - Pull Deployment: usage/pull-deployment.md

@@ -328,6 +328,16 @@ default lean `gradient-cli`:
 nix run github:wavelens/gradient#gradient-cli-full -- eval 'packages.x86_64-linux.*'
 ```
 
+### MCP server
+
+```sh
+# Serve this instance to MCP clients over stdio (read-only)
+gradient mcp
+```
+
+Reuses the stored login, so an assistant can list evaluations and read build
+logs without separate credentials. See [MCP Server](mcp.md).
+
 ### Utilities
 
 ```sh

@@ -151,6 +151,8 @@ enum MainCommands {
     /// Evaluate a flake's outputs to derivations, like nix-eval-jobs
     #[cfg(feature = "eval")]
     Eval(eval::EvalArgs),
+    /// Serve this Gradient instance to MCP clients over stdio
+    Mcp,
     /// Hash a password as an argon2id PHC string for use in
     /// `services.gradient.state.users.<name>.password_file`.
     Hash,
@@ -374,6 +376,11 @@ async fn run_cli(cli: Cli) -> std::io::Result<()> {
         MainCommands::Generate { cmd } => generate::handle(cmd, out).await,
         #[cfg(feature = "eval")]
         MainCommands::Eval(_) => unreachable!("eval is dispatched before the runtime starts"),
+        MainCommands::Mcp => {
+            if let Err(e) = mcp::run().await {
+                out.err(ExitKind::Api, format!("mcp server failed: {e}"));
+            }
+        }
         MainCommands::Hash => {
             let password = ask_for_password();
             let confirm = ask_for_password();
