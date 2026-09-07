@@ -115,55 +115,63 @@ pub async fn get_dispatched_jobs(
         .all(&state.web_db)
         .await?;
 
-    let mut jobs = Vec::new();
-    let mut other_running = 0u64;
-    for j in open {
-        if scope.allows(&Uuid::from(j.project)) {
-            let attempt = build_attempt::Entity::find()
-                .filter(build_attempt::Column::DispatchedJob.eq(j.id))
-                .one(&state.web_db)
-                .await
-                .ok()
-                .flatten();
+    let (visible, other_running): (Vec<_>, Vec<_>) = open
+        .into_iter()
+        .partition(|j| scope.allows(&Uuid::from(j.project)));
+    let other_running = other_running.len() as u64;
 
-            let build_id = attempt.as_ref().map(|a| a.derivation_build.into());
+    // Three reads for the whole page instead of three per row: this list is
+    // polled by the board and holds up to 500 open dispatches.
+    let job_ids: Vec<DispatchedJobId> = visible.iter().map(|j| j.id).collect();
+    let attempts: HashMap<DispatchedJobId, build_attempt::Model> = build_attempt::Entity::find()
+        .filter(build_attempt::Column::DispatchedJob.is_in(job_ids))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|a| (a.dispatched_job, a))
+        .collect();
 
-            let pname = match attempt.as_ref() {
-                Some(a) => {
-                    let anchor = EDerivationBuild::find_by_id(a.derivation_build)
-                        .one(&state.web_db)
-                        .await
-                        .ok()
-                        .flatten();
-                    match anchor {
-                        Some(anchor) => {
-                            gradient_entity::derivation::Entity::find_by_id(anchor.derivation)
-                                .one(&state.web_db)
-                                .await
-                                .ok()
-                                .flatten()
-                                .and_then(|d| d.pname)
-                        }
-                        None => None,
-                    }
-                }
-                None => None,
-            };
+    let anchor_ids: Vec<DerivationBuildId> =
+        attempts.values().map(|a| a.derivation_build).collect();
+    let anchors: HashMap<DerivationBuildId, DerivationId> = EDerivationBuild::find()
+        .filter(gradient_entity::derivation_build::Column::Id.is_in(anchor_ids))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|a| (a.id, a.derivation))
+        .collect();
 
-            jobs.push(DispatchedJobSummary {
-                id: j.id.into(),
-                kind: i16::from(j.kind),
-                project: j.project.into(),
-                worker_id: j.worker_id,
-                score: j.score,
-                dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
-                build_id,
-                evaluation_id: j.evaluation_id.into(),
-                pname,
-            });
-        } else {
-            other_running += 1;
-        }
+    let pnames: HashMap<DerivationId, Option<String>> = gradient_entity::derivation::Entity::find()
+        .filter(
+            gradient_entity::derivation::Column::Id
+                .is_in(anchors.values().copied().collect::<Vec<_>>()),
+        )
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|d| (d.id, d.pname))
+        .collect();
+
+    let mut jobs = Vec::with_capacity(visible.len());
+    for j in visible {
+        let attempt = attempts.get(&j.id);
+        let pname = attempt
+            .and_then(|a| anchors.get(&a.derivation_build))
+            .and_then(|drv| pnames.get(drv))
+            .cloned()
+            .flatten();
+
+        jobs.push(DispatchedJobSummary {
+            id: j.id.into(),
+            kind: i16::from(j.kind),
+            project: j.project.into(),
+            worker_id: j.worker_id,
+            score: j.score,
+            dispatched_at: j.dispatched_at.and_utc().to_rfc3339(),
+            build_id: attempt.map(|a| a.derivation_build.into()),
+            evaluation_id: j.evaluation_id.into(),
+            pname,
+        });
     }
 
     Ok(ok_json(DispatchedJobsResponse {

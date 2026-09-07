@@ -41,18 +41,24 @@ async fn eval_anchor_jobs(
         .map(|a| (a.id, a))
         .collect();
 
+    // One read per table: an evaluation has as many build_jobs as it has
+    // derivations, so looking the name up per job put thousands of sequential
+    // round trips behind one log request.
+    let drv_ids: Vec<DerivationId> = jobs.iter().map(|j| j.derivation).collect();
+    let names: HashMap<DerivationId, String> = EDerivation::find()
+        .filter(CDerivation::Id.is_in(drv_ids))
+        .all(&state.web_db)
+        .await?
+        .into_iter()
+        .map(|d| (d.id, d.name))
+        .collect();
+
     let mut out = Vec::with_capacity(jobs.len());
     for job in jobs {
         let Some(anchor) = anchors.get(&job.derivation_build).cloned() else {
             continue;
         };
-        let name = match EDerivation::find_by_id(job.derivation)
-            .one(&state.web_db)
-            .await
-        {
-            Ok(Some(d)) => d.name,
-            _ => String::new(),
-        };
+        let name = names.get(&job.derivation).cloned().unwrap_or_default();
         out.push((anchor, name));
     }
 
