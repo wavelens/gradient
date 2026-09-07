@@ -51,12 +51,10 @@ in {
           Wait for an in-flight evaluation to produce a deployable build instead
           of giving up when the newest commit is still in CI.
 
-          The service follows the task's live WebSocket
-          (`/api/v1/tasks/<task>/live`) and re-checks on every event, so it
-          reacts to the build finishing without polling. It stops as soon as the
-          deployment is built, the evaluation or the build fails, or the target
-          is already running the evaluated system, and it never fails the unit
-          for any of those outcomes.
+          It stops as soon as the deployment is built, the evaluation or the
+          build fails, or the target is already running the evaluated system,
+          and it never fails the unit for any of those outcomes. How it notices
+          is governed by `websockets`.
 
           Waiting is unbounded: a run that outlives its timer simply makes
           systemd skip the next trigger. Disable to exit immediately when
@@ -64,14 +62,26 @@ in {
         '';
       };
 
-      idleRecheckSec = lib.mkOption {
-        type = lib.types.int;
-        default = 300;
-        example = 60;
+      websockets = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
         description = ''
-          Failsafe re-check interval, in seconds, while waiting on the live
-          WebSocket. Bounds how long a dropped event can stall a deployment; it
-          is not a polling cadence, since events drive the normal path.
+          Follow the task's live WebSocket while waiting, reacting to each event
+          instead of asking repeatedly. Disable when the path to the server
+          cannot carry a WebSocket upgrade; the service then falls back to
+          re-checking every `pollIntervalSec`.
+
+          Only consulted while `waitForBuild` is enabled.
+        '';
+      };
+
+      pollIntervalSec = lib.mkOption {
+        type = lib.types.int;
+        default = 60;
+        example = 300;
+        description = ''
+          How often, in seconds, to re-check while waiting with `websockets`
+          disabled. Unused otherwise, since events drive the wait.
         '';
       };
 
@@ -139,7 +149,7 @@ in {
           gzip
           jq
           xz.bin
-        ] ++ lib.optional cfg.waitForBuild pkgs.websocat
+        ] ++ lib.optional (cfg.waitForBuild && cfg.websockets) pkgs.websocat
         ++ [
           config.nix.package.out
         ];
@@ -254,7 +264,7 @@ in {
           echo "Nothing deployable yet for task ${cfg.task}; not waiting"
           exit 0
         ''
-        + lib.optionalString cfg.waitForBuild ''
+        + lib.optionalString (cfg.waitForBuild && cfg.websockets) ''
           echo "Task ${cfg.task} is still building; following ${liveUrl}"
 
           while true; do
@@ -268,7 +278,7 @@ in {
               exit 0
             fi
 
-            while read -r -t ${toString cfg.idleRecheckSec} _event <&3 || [ $? -gt 128 ]; do
+            while read -r _event <&3; do
               if settle; then
                 exit 0
               fi
@@ -278,6 +288,17 @@ in {
             kill "$stream" 2>/dev/null || true
             wait "$stream" 2>/dev/null || true
             sleep 30
+          done
+        ''
+        + lib.optionalString (cfg.waitForBuild && !cfg.websockets) ''
+          echo "Task ${cfg.task} is still building; re-checking every ${toString cfg.pollIntervalSec}s"
+
+          while true; do
+            sleep ${toString cfg.pollIntervalSec}
+
+            if settle; then
+              exit 0
+            fi
           done
         '';
       };
