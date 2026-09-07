@@ -66,8 +66,10 @@ assert entry["is_base"], "local worker should be a base worker"
 assert entry["active"], "local worker should be auto-enabled for a new project"
 
 banner("Worker authenticates and reports live")
-# A base worker with no projects is rejected until one exists, so the join
-# waits out the worker's reconnect backoff (60s ceiling).
+# Until the project existed the worker was refused (a base worker enabled by
+# nobody), so it is sitting in its reconnect backoff. Restart it to retry now
+# rather than making the test wait out a delay it is not asserting on.
+machine.systemctl("restart gradient-worker.service")
 
 
 def worker_is_live():
@@ -78,7 +80,7 @@ def worker_is_live():
 
 
 with machine.nested("waiting for the worker to connect"):
-    retry(lambda _: worker_is_live(), timeout_seconds=180)
+    retry(lambda _: worker_is_live(), timeout_seconds=60)
 
 banner("An opt-out is not undone by auto_enable")
 api("PATCH", f"projects/demo/workers/{identity}", token=admin,
