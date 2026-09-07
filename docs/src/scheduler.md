@@ -386,6 +386,12 @@ in the separate retention loop instead.
 
 #### Upstream substitutability
 
+A proxied NAR URL names its upstream by row id, but an upstream is configuration
+that can be removed. Since a client caches narinfo and never refetches it, giving
+up when that row is gone would strand the path forever, so the remaining
+upstreams are tried too - the NAR path is content-addressed, so any upstream that
+serves it serves the same bytes.
+
 A narinfo proxied from an upstream is re-signed with the cache's own key before
 it is served, so a client trusts one key - the Gradient cache's - rather than the
 key of every cache it happens to proxy. The upstream's own signature is verified
