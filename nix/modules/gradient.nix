@@ -1230,20 +1230,31 @@ in {
               '';
             };
 
+            # Regex, so it wins over the "/cache/" prefix: this is the only
+            # upgraded connection under it, and it is the only one that wants a
+            # relay buffer sized for 4 MiB NAR chunks. Widening "/cache/"
+            # instead would cost that much memory per in-flight NAR download.
+            "~ ^/cache/[^/]+/proto$" = {
+              proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
+              proxyWebsockets = true;
+              extraConfig = ''
+                proxy_buffer_size 256k;
+                proxy_connect_timeout 1h;
+                proxy_send_timeout 1h;
+                proxy_read_timeout 1h;
+              '';
+            };
+
             "/cache/" = {
               proxyPass = "http://${config.services.gradient.listenAddr}:${toString config.services.gradient.port}";
               proxyWebsockets = true;
               # A substituter pulls NARs that run to hundreds of MB. With the
               # default buffering nginx writes each one to proxy_temp_path first,
-              # which fills the disk and kills the transfer mid-stream. The
-              # relay buffer is sized for those streams and for the 4 MiB NAR
-              # chunks a read-only `/cache/{cache}/proto` session serves, at the
-              # cost of that much memory per in-flight download.
+              # which fills the disk and kills the transfer mid-stream.
               extraConfig = ''
                 client_max_body_size ${toString proxyMaxBodyBytes};
                 proxy_buffering off;
                 proxy_request_buffering off;
-                proxy_buffer_size 256k;
                 proxy_connect_timeout 1h;
                 proxy_send_timeout 1h;
                 proxy_read_timeout 1h;
@@ -1257,6 +1268,10 @@ in {
         enable = true;
         virtualHosts."${if cfg.useTls then "" else "http://"}${cfg.domain}" = {
           inherit (cfg.reverseProxy.caddy) useACMEHost;
+          # No counterpart to the nginx relay-buffer tuning: Caddy tunnels an
+          # upgraded connection bidirectionally with no intermediate buffer to
+          # size, and its request/response buffering is off by default, which
+          # is what streaming NARs want.
           extraConfig = ''
             request_body {
               max_size ${toString proxyMaxBodyBytes}
