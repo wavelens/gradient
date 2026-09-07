@@ -173,8 +173,8 @@ impl Scheduler {
         eval_id: EvaluationId,
         anchor_ids: &[DerivationBuildId],
     ) {
-        let mut job_ids = vec![format!("eval:{eval_id}")];
-        job_ids.extend(anchor_ids.iter().map(|id| format!("build:{id}")));
+        let mut job_ids = vec![crate::jobs::eval_job_key(eval_id)];
+        job_ids.extend(anchor_ids.iter().map(|id| crate::jobs::build_job_key(*id)));
         if let Err(e) = self
             .call(|reply| SchedulerMsg::RemoveJobs { job_ids, reply })
             .await

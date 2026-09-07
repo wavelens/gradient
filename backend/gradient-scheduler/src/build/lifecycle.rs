@@ -14,7 +14,7 @@ use gradient_entity::evaluation::EvaluationStatus;
 use gradient_graph::Transition;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::jobs::PendingJob;
 use crate::waiting_state::persist_waiting_reason;
@@ -66,12 +66,53 @@ async fn eval_dispatch_count(state: &Arc<ServerState>, evaluation_id: Evaluation
         })
 }
 
+/// Close the dispatch telemetry for jobs whose worker vanished. Without this the
+/// rows keep `finished_at IS NULL` forever and the job board reports them as
+/// running on a worker that is no longer in the fleet.
+async fn abandon_dispatched_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
+    use gradient_entity::dispatched_job::{
+        Column as CDispatchedJob, DispatchedJobOutcome, Entity as EDispatchedJob,
+    };
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let keys: Vec<String> = orphaned.iter().map(PendingJob::job_key).collect();
+    if keys.is_empty() {
+        return;
+    }
+
+    match EDispatchedJob::update_many()
+        .col_expr(
+            CDispatchedJob::FinishedAt,
+            sea_orm::sea_query::Expr::value(gradient_types::now()),
+        )
+        .col_expr(
+            CDispatchedJob::Outcome,
+            sea_orm::sea_query::Expr::value(i16::from(DispatchedJobOutcome::Abandoned)),
+        )
+        .filter(CDispatchedJob::JobId.is_in(keys))
+        .filter(CDispatchedJob::FinishedAt.is_null())
+        .exec(&state.worker_db)
+        .await
+    {
+        Ok(res) if res.rows_affected > 0 => {
+            info!(
+                rows = res.rows_affected,
+                "closed dispatch telemetry for orphaned jobs"
+            );
+        }
+        Ok(_) => {}
+        Err(e) => warn!(error = %e, "failed to close dispatch telemetry for orphaned jobs"),
+    }
+}
+
 /// Re-queue the in-flight jobs orphaned by a worker disconnect so they
 /// re-dispatch instead of lingering in a non-terminal DB status. Anchors move
 /// `Building -> Queued`; evaluations (which the state machine only lets reach
 /// `Queued` via `Waiting`) park to `Waiting` so the reconciler that runs right
 /// after recovers them to `Queued` once an eval-capable worker is free.
 pub async fn requeue_orphaned_jobs(state: &Arc<ServerState>, orphaned: &[PendingJob]) {
+    abandon_dispatched_jobs(state, orphaned).await;
+
     let anchors: Vec<DerivationBuildId> = orphaned
         .iter()
         .filter_map(|j| j.derivation_build())

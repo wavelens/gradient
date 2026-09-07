@@ -34,11 +34,14 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
         .await?;
 
     // One untracked check instead of a lock per eval.
-    let ids: Vec<String> = evals.iter().map(|e| format!("eval:{}", e.id)).collect();
+    let ids: Vec<String> = evals
+        .iter()
+        .map(|e| crate::jobs::eval_job_key(e.id))
+        .collect();
     let untracked: HashSet<String> = scheduler.untracked(ids).await.into_iter().collect();
     let evals: Vec<MEvaluation> = evals
         .into_iter()
-        .filter(|e| untracked.contains(&format!("eval:{}", e.id)))
+        .filter(|e| untracked.contains(&crate::jobs::eval_job_key(e.id)))
         .collect();
     if evals.is_empty() {
         return Ok(());
@@ -49,7 +52,7 @@ pub(crate) async fn dispatch_queued_evals(scheduler: &Scheduler) -> anyhow::Resu
     let eval_history = scheduler.eval_history.load();
 
     for eval in evals {
-        let job_id = format!("eval:{}", eval.id);
+        let job_id = crate::jobs::eval_job_key(eval.id);
 
         let Some(commit) = maps.commits.get(&eval.commit) else {
             error!(evaluation_id = %eval.id, "commit not found for evaluation");

@@ -41,6 +41,7 @@ mod m20260827_000001_commit_hash_index;
 mod m20260904_000000_dispatched_job_phase;
 mod m20260904_000001_graph_edge_indexes;
 mod m20260905_000000_invites;
+mod m20260907_000000_dispatched_job_job_id;
 
 pub struct Migrator;
 
@@ -83,6 +84,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260904_000000_dispatched_job_phase::Migration),
             Box::new(m20260904_000001_graph_edge_indexes::Migration),
             Box::new(m20260905_000000_invites::Migration),
+            Box::new(m20260907_000000_dispatched_job_job_id::Migration),
         ]
     }
 }

@@ -81,42 +81,35 @@ impl Scheduler {
     /// reports directly. Best effort throughout: instrumentation must never
     /// fail a job.
     ///
-    /// Only the job lookup runs inline, because the caller is about to drop the
-    /// job from the active map; the writes are detached so telemetry never adds
-    /// database latency to the connection's message loop.
-    pub async fn record_job_timeline(
+    /// The writes are detached so telemetry never adds database latency to the
+    /// connection's message loop. Everything it needs comes off the row, so a
+    /// report that arrives after the tracker has dropped the job still lands.
+    pub fn record_job_timeline(
         self: &Arc<Self>,
-        worker_id: &str,
         job_id: &str,
         outcome: DispatchedJobOutcome,
         spans: Vec<JobPhaseSpan>,
     ) {
-        let Some(job) = self.active_job(job_id).await else {
-            return;
-        };
-        let evaluation_id = job.evaluation_id();
-
         let scheduler = Arc::clone(self);
-        let worker_id = worker_id.to_owned();
         let job_id = job_id.to_owned();
         self.state.shutdown.spawn(async move {
             scheduler
-                .persist_job_timeline(&worker_id, &job_id, evaluation_id, outcome, spans)
+                .persist_job_timeline(&job_id, outcome, spans)
                 .await;
         });
     }
 
     async fn persist_job_timeline(
         &self,
-        worker_id: &str,
         job_id: &str,
-        evaluation_id: EvaluationId,
         outcome: DispatchedJobOutcome,
         spans: Vec<JobPhaseSpan>,
     ) {
+        // Keyed on the job itself: one worker commonly runs several jobs of the
+        // same evaluation at once, and matching on (worker, evaluation) closed
+        // whichever row was newest instead of this job's own.
         let row = match EDispatchedJob::find()
-            .filter(CDispatchedJob::WorkerId.eq(worker_id))
-            .filter(CDispatchedJob::EvaluationId.eq(evaluation_id))
+            .filter(CDispatchedJob::JobId.eq(job_id))
             .filter(CDispatchedJob::FinishedAt.is_null())
             .order_by_desc(CDispatchedJob::DispatchedAt)
             .one(&self.state.worker_db)
@@ -131,6 +124,7 @@ impl Scheduler {
         };
 
         let dispatched_job = row.id;
+        let evaluation_id = row.evaluation_id;
         let mut active = row.into_active_model();
         active.finished_at = Set(Some(now()));
         active.outcome = Set(Some(outcome));

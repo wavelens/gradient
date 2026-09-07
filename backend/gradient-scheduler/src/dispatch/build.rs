@@ -605,7 +605,7 @@ impl BuildDispatchMaps {
         project_id: ProjectId,
         mode: BuildDispatchMode,
     ) -> (String, PendingBuildJob) {
-        let job_id = format!("build:{}", anchor.id);
+        let job_id = crate::jobs::build_job_key(anchor.id);
         let substitute = matches!(
             mode,
             BuildDispatchMode::SubstituteBuiltin | BuildDispatchMode::SubstituteStalled
@@ -784,11 +784,14 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
     }
 
     // Filter out anchors already in the in-memory tracker.
-    let ids: Vec<String> = anchors.iter().map(|a| format!("build:{}", a.id)).collect();
+    let ids: Vec<String> = anchors
+        .iter()
+        .map(|a| crate::jobs::build_job_key(a.id))
+        .collect();
     let untracked: HashSet<String> = scheduler.untracked(ids).await.into_iter().collect();
     let new_anchors: Vec<MDerivationBuild> = anchors
         .into_iter()
-        .filter(|a| untracked.contains(&format!("build:{}", a.id)))
+        .filter(|a| untracked.contains(&crate::jobs::build_job_key(a.id)))
         .collect();
     if new_anchors.is_empty() {
         return Ok(());

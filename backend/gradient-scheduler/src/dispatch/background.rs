@@ -26,6 +26,11 @@ const LIVENESS_POLLS_PER_DEADLINE: u64 = 3;
 /// never mistaken for a dropped one.
 const LOST_COMPLETION_GRACE_SECS: i64 = 900;
 
+/// How long a dispatch row may sit open with no job behind it before the reaper
+/// closes it. Well above the heartbeat deadline so a worker that is merely slow
+/// to check in is never reaped out from under a running job.
+const ABANDONED_DISPATCH_GRACE_SECS: i64 = 1800;
+
 /// Liveness poll period, or `None` when the watchdog is disabled by config.
 pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
     let timeout_secs = scheduler.state.config.proto.worker_heartbeat_timeout_secs;
@@ -123,15 +128,96 @@ pub(super) async fn worker_sample_pass(scheduler: Arc<Scheduler>) -> anyhow::Res
     Ok(())
 }
 
+/// Which stale rows may be closed: those whose job the tracker no longer holds,
+/// plus rows written before `job_id` existed, which cannot be matched against the
+/// tracker at all and are historical by construction.
+///
+/// A row the scheduler still tracks is never reaped, however old, so a
+/// legitimately long build keeps its open row.
+fn plan_abandoned_reap(
+    stale: &[(uuid::Uuid, Option<String>)],
+    untracked: &HashSet<String>,
+) -> Vec<uuid::Uuid> {
+    stale
+        .iter()
+        .filter(|(_, key)| match key {
+            Some(key) => untracked.contains(key),
+            None => true,
+        })
+        .map(|(id, _)| *id)
+        .collect()
+}
+
+/// Close dispatch rows left open by a job that will never report.
+///
+/// [`crate::build::requeue_orphaned_jobs`] covers a clean disconnect, but a
+/// server restart drops the tracker without an unregister for the jobs the old
+/// process held, so nothing ever closes their rows and the job board shows them
+/// running forever - often on a worker that has since left the fleet.
+///
+/// The tracker, not the clock, decides what is live: a row whose `job_id` the
+/// scheduler still knows is left alone however old it is, so a legitimately long
+/// build is never reaped. Rows predating the `job_id` column cannot be matched
+/// that way; they are historical by construction and are closed on age alone.
+pub(super) async fn abandoned_dispatch_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
+    use gradient_entity::dispatched_job::{Column as CDispatchedJob, Entity as EDispatchedJob};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, sea_query::Expr};
+
+    let cutoff = gradient_types::now() - chrono::Duration::seconds(ABANDONED_DISPATCH_GRACE_SECS);
+    let stale: Vec<(uuid::Uuid, Option<String>)> = EDispatchedJob::find()
+        .filter(CDispatchedJob::FinishedAt.is_null())
+        .filter(CDispatchedJob::DispatchedAt.lt(cutoff))
+        .select_only()
+        .column(CDispatchedJob::Id)
+        .column(CDispatchedJob::JobId)
+        .into_tuple()
+        .all(&scheduler.state.worker_db)
+        .await?;
+
+    if stale.is_empty() {
+        debug!("abandoned dispatch sweep clean");
+        return Ok(());
+    }
+
+    let untracked: HashSet<String> = scheduler
+        .untracked(stale.iter().filter_map(|(_, k)| k.clone()).collect())
+        .await
+        .into_iter()
+        .collect();
+
+    let reap = plan_abandoned_reap(&stale, &untracked);
+    if reap.is_empty() {
+        return Ok(());
+    }
+
+    let reaped = reap.len();
+    EDispatchedJob::update_many()
+        .col_expr(
+            CDispatchedJob::FinishedAt,
+            Expr::value(gradient_types::now()),
+        )
+        .col_expr(
+            CDispatchedJob::Outcome,
+            Expr::value(i16::from(DispatchedJobOutcome::Abandoned)),
+        )
+        .filter(CDispatchedJob::Id.is_in(reap))
+        .filter(CDispatchedJob::FinishedAt.is_null())
+        .exec(&scheduler.state.worker_db)
+        .await?;
+
+    warn!(
+        rows = reaped,
+        grace_secs = ABANDONED_DISPATCH_GRACE_SECS,
+        "closed dispatch rows whose job will never report"
+    );
+    Ok(())
+}
+
 /// Which transition a lost terminal report needs re-sent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EvalRepair {
     Complete,
     Fail,
-}
-
-fn eval_job_id(evaluation: EvaluationId) -> String {
-    format!("eval:{evaluation}")
 }
 
 /// Keep only the evaluations the scheduler has no job for, and map each
@@ -146,13 +232,16 @@ fn plan_eval_repairs(
     untracked: &HashSet<String>,
 ) -> Vec<(EvaluationId, EvalRepair)> {
     lost.iter()
-        .filter(|l| untracked.contains(&eval_job_id(l.evaluation)))
-        .map(|l| {
+        .filter(|l| untracked.contains(&crate::jobs::eval_job_key(l.evaluation)))
+        .filter_map(|l| {
             let repair = match l.outcome {
                 DispatchedJobOutcome::Completed => EvalRepair::Complete,
                 DispatchedJobOutcome::Failed => EvalRepair::Fail,
+                // Nothing was reported, so there is no terminal transition to
+                // re-send; the orphan path re-queues the evaluation instead.
+                DispatchedJobOutcome::Abandoned => return None,
             };
-            (l.evaluation, repair)
+            Some((l.evaluation, repair))
         })
         .collect()
 }
@@ -173,7 +262,11 @@ pub(super) async fn eval_completion_watchdog_pass(scheduler: Arc<Scheduler>) -> 
     }
 
     let untracked: HashSet<String> = scheduler
-        .untracked(lost.iter().map(|l| eval_job_id(l.evaluation)).collect())
+        .untracked(
+            lost.iter()
+                .map(|l| crate::jobs::eval_job_key(l.evaluation))
+                .collect(),
+        )
         .await
         .into_iter()
         .collect();
@@ -224,13 +317,82 @@ mod tests {
         }
     }
 
+    fn row(key: Option<&str>) -> (uuid::Uuid, Option<String>) {
+        (uuid::Uuid::now_v7(), key.map(str::to_owned))
+    }
+
+    // The whole point of the sweep: a row the tracker still holds is a running
+    // job, however long it has been running.
+    #[test]
+    fn a_tracked_job_is_never_reaped() {
+        let tracked = row(Some("build:still-going"));
+        let untracked = HashSet::new();
+
+        assert!(plan_abandoned_reap(&[tracked], &untracked).is_empty());
+    }
+
+    #[test]
+    fn an_untracked_job_is_reaped() {
+        let gone = row(Some("build:worker-vanished"));
+        let untracked = HashSet::from(["build:worker-vanished".to_string()]);
+
+        assert_eq!(
+            plan_abandoned_reap(std::slice::from_ref(&gone), &untracked),
+            vec![gone.0]
+        );
+    }
+
+    // Rows written before the job_id column cannot be matched against the
+    // tracker; they predate the deploy, so age alone settles them.
+    #[test]
+    fn a_row_without_a_job_id_is_reaped_on_age_alone() {
+        let legacy = row(None);
+
+        assert_eq!(
+            plan_abandoned_reap(std::slice::from_ref(&legacy), &HashSet::new()),
+            vec![legacy.0]
+        );
+    }
+
+    // `untracked` returns nothing while the scheduler core is down, which must
+    // read as "everything is still tracked", not "reap the fleet".
+    #[test]
+    fn a_scheduler_outage_reaps_no_keyed_row() {
+        let rows = vec![row(Some("build:a")), row(Some("eval:b"))];
+
+        assert!(plan_abandoned_reap(&rows, &HashSet::new()).is_empty());
+    }
+
+    // An abandoned job never reported, so there is no terminal transition to
+    // re-send; re-driving one would invent an outcome the worker never gave.
+    #[test]
+    fn an_abandoned_job_is_not_re_driven() {
+        let rows = vec![lost(DispatchedJobOutcome::Abandoned)];
+        let untracked: HashSet<String> = rows
+            .iter()
+            .map(|l| crate::jobs::eval_job_key(l.evaluation))
+            .collect();
+
+        assert!(plan_eval_repairs(&rows, &untracked).is_empty());
+    }
+
+    #[test]
+    fn the_outcome_numbers_are_pinned() {
+        assert_eq!(i16::from(DispatchedJobOutcome::Completed), 0);
+        assert_eq!(i16::from(DispatchedJobOutcome::Failed), 1);
+        assert_eq!(i16::from(DispatchedJobOutcome::Abandoned), 2);
+    }
+
     #[test]
     fn each_outcome_maps_to_the_transition_that_was_lost() {
         let rows = vec![
             lost(DispatchedJobOutcome::Completed),
             lost(DispatchedJobOutcome::Failed),
         ];
-        let untracked = rows.iter().map(|l| eval_job_id(l.evaluation)).collect();
+        let untracked = rows
+            .iter()
+            .map(|l| crate::jobs::eval_job_key(l.evaluation))
+            .collect();
 
         assert_eq!(
             plan_eval_repairs(&rows, &untracked),
@@ -247,7 +409,7 @@ mod tests {
     fn an_evaluation_the_scheduler_still_tracks_is_left_alone() {
         let tracked = lost(DispatchedJobOutcome::Completed);
         let stranded = lost(DispatchedJobOutcome::Completed);
-        let untracked = HashSet::from([eval_job_id(stranded.evaluation)]);
+        let untracked = HashSet::from([crate::jobs::eval_job_key(stranded.evaluation)]);
 
         assert_eq!(
             plan_eval_repairs(&[tracked, stranded], &untracked),

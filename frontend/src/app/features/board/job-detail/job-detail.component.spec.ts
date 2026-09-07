@@ -276,6 +276,24 @@ describe('BoardJobDetailComponent - previous build attempts', () => {
     expect(rows.length).toBe(2);
   });
 
+  // A dispatch the worker never reported back on used to read as 'running'
+  // forever, on a worker that had long since left the fleet.
+  it('reports an abandoned dispatch as abandoned, not running', () => {
+    const abandoned: DispatchedJobDetail = {
+      ...DETAIL,
+      finished_at: '2026-06-08T00:31:00Z',
+      outcome: 'abandoned',
+    };
+    const el = setup({ getJob: () => of(abandoned) }).nativeElement as HTMLElement;
+    expect(el.textContent).toContain('abandoned');
+    expect(el.textContent).not.toContain('running');
+  });
+
+  it('still reports an unfinished dispatch as running', () => {
+    const el = setup({ getJob: () => of(DETAIL) }).nativeElement as HTMLElement;
+    expect(el.textContent).toContain('running');
+  });
+
   it('shows mode and outcome labels for each attempt', () => {
     const el = setup({ getJob: () => of(WITH_ATTEMPTS) }).nativeElement as HTMLElement;
     const section = el.querySelector('section.attempts') as HTMLElement;

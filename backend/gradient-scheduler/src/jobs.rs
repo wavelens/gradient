@@ -154,7 +154,29 @@ pub enum PendingJob {
     Build(PendingBuildJob),
 }
 
+/// The tracker's key for an evaluation job. The single definition: it is also
+/// persisted on `dispatched_job.job_id`, and a copy that drifts would silently
+/// stop terminal reports from closing their own row.
+pub fn eval_job_key(evaluation: EvaluationId) -> String {
+    format!("eval:{evaluation}")
+}
+
+/// The tracker's key for a build job, keyed on the build-once anchor.
+pub fn build_job_key(anchor: DerivationBuildId) -> String {
+    format!("build:{anchor}")
+}
+
 impl PendingJob {
+    /// The scheduler's key for this job, and the value persisted on
+    /// `dispatched_job.job_id`. Derived from durable ids, so it survives a
+    /// scheduler restart and is unique among in-flight jobs.
+    pub fn job_key(&self) -> String {
+        match self {
+            PendingJob::Eval(j) => eval_job_key(j.evaluation_id),
+            PendingJob::Build(j) => build_job_key(j.derivation_build),
+        }
+    }
+
     pub fn required_paths(&self) -> &[RequiredPath] {
         match self {
             PendingJob::Eval(j) => &j.required_paths,
@@ -268,6 +290,9 @@ pub struct Assignment {
 /// Owned snapshot of a dispatch decision for the `dispatched_job` table.
 #[derive(Clone)]
 pub struct DispatchRecord {
+    /// The tracker's key for this job; persisted so the terminal report can
+    /// close its own `dispatched_job` row.
+    pub job_id: String,
     pub kind: DispatchedJobKind,
     pub derivation_build: Option<DerivationBuildId>,
     pub evaluation_id: EvaluationId,
@@ -809,6 +834,7 @@ impl JobTracker {
             PendingJob::Eval(e) => (DispatchedJobKind::Eval, None, e.task_id),
         };
         Some(DispatchRecord {
+            job_id: job_id.to_owned(),
             kind: kind_disc,
             derivation_build,
             evaluation_id: job.evaluation_id(),
@@ -1092,6 +1118,36 @@ mod tests {
     use gradient_types::proto::{
         BuildJob, BuildSpec, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities,
     };
+
+    // `dispatched_job.job_id` stores this key, and a terminal report closes its
+    // row by matching on it. If the key stopped agreeing with what the
+    // dispatchers enqueue, close-out would find no row and fail silently, which
+    // is how dispatches came to sit "running" forever.
+    #[test]
+    fn a_jobs_key_is_the_id_it_was_enqueued_under() {
+        let evaluation = EvaluationId::now_v7();
+        let anchor = DerivationBuildId::now_v7();
+
+        assert_eq!(eval_job_key(evaluation), format!("eval:{evaluation}"));
+        assert_eq!(build_job_key(anchor), format!("build:{anchor}"));
+    }
+
+    #[test]
+    fn a_pending_job_reports_its_own_key() {
+        let peer = ProjectId::now_v7();
+
+        let eval = eval_job(peer);
+        let PendingJob::Eval(e) = &eval else {
+            unreachable!("eval_job builds an eval")
+        };
+        assert_eq!(eval.job_key(), eval_job_key(e.evaluation_id));
+
+        let build = build_job(peer, vec![]);
+        let PendingJob::Build(b) = &build else {
+            unreachable!("build_job builds a build")
+        };
+        assert_eq!(build.job_key(), build_job_key(b.derivation_build));
+    }
 
     fn eval_job(peer: ProjectId) -> PendingJob {
         PendingJob::Eval(PendingEvalJob {

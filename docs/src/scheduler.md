@@ -192,6 +192,27 @@ the transition. The grace sits above the graph actor's 600s RPC timeout so a slo
 transition is never mistaken for a lost one, and `EvalStreamCompleted` is
 idempotent, so re-driving one that did land changes nothing.
 
+The dispatch telemetry row has the mirror-image problem. `dispatched_job` is
+closed by the worker's own terminal report, which stamps `finished_at` and the
+outcome; a row with neither reads as running on the job board. Two things used
+to leave rows open forever. The report closed whichever row was the newest open
+one for its (worker, evaluation) pair rather than its own, so a worker running
+several jobs of one evaluation - the normal case - attached outcomes and phase
+timelines to the wrong rows and left the surplus open; the row now carries the
+scheduler's `job_id` (`build:<anchor>` / `eval:<evaluation>`, unique among
+in-flight jobs) and is matched on it. And a worker that vanished had no report
+to send at all, so `requeue_orphaned_jobs` now closes its rows as `Abandoned`
+alongside re-queuing the work. A server restart drops the tracker without an
+unregister, which neither path covers, so the `abandoned-dispatch-sweep` pass
+(60s) closes rows still open 1800s after dispatch whose `job_id` the scheduler
+no longer tracks. The tracker, not the clock, decides: a row it still holds is
+never swept, however long the build runs.
+
+`Abandoned` is deliberately distinct from `Failed`. The worker never reported,
+so the build may well have succeeded before contact was lost; recording it as a
+failure would feed invented failures into the board's rates and into
+history-based scoring.
+
 Promotion and dispatch are finally gated on a derivation's `inputSrcs` being in
 the cache. A `.drv`'s build-time source paths (`inputSrcs`, e.g.
 `builtins.toFile` configs) have no producing derivation, so the dependency-anchor

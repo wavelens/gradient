@@ -37,8 +37,9 @@ pub enum DispatchedJobKind {
     Build = 1,
 }
 
-/// How a dispatched job ended. `None` on the row means still running, or a
-/// worker that disconnected without reporting.
+/// How a dispatched job ended. `None` means the job is still running; a worker
+/// that vanished without reporting is closed out as `Abandoned` rather than
+/// left open forever.
 #[repr(i16)]
 #[derive(
     Debug,
@@ -62,6 +63,12 @@ pub enum DispatchedJobOutcome {
     Completed = 0,
     #[sea_orm(num_value = 1)]
     Failed = 1,
+    /// The worker never reported a terminal state: it disconnected, or the
+    /// server restarted while the job was in flight. Distinct from `Failed`
+    /// because the build may well have succeeded before contact was lost, so
+    /// this must not count towards failure rates or history-based scoring.
+    #[sea_orm(num_value = 2)]
+    Abandoned = 2,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
@@ -74,6 +81,11 @@ pub struct Model {
     pub project: ProjectId,
     pub task: Option<TaskId>,
     pub worker_id: String,
+    /// The scheduler's job key (`build:<anchor>` / `eval:<evaluation>`), unique
+    /// among in-flight jobs. Lets a terminal report close its own row instead of
+    /// guessing at the newest open one for the worker. `None` on rows written
+    /// before the column existed.
+    pub job_id: Option<String>,
     pub score: f64,
     pub queued_at: NaiveDateTime,
     pub ready_at: Option<NaiveDateTime>,
