@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use gradient_types::ids::*;
 
-use gradient_types::proto::{CandidateScore, FlakeJob, FlakeStep, GradientCapabilities, JobKind};
+use gradient_types::proto::{
+    BuildJob, BuildSpec, CandidateScore, FlakeJob, FlakeStep, GradientCapabilities, JobKind,
+};
 
 use super::Scheduler;
 use super::actor::{SessionPort, SessionSignal, WorkerCapabilities};
@@ -77,6 +79,44 @@ fn eval_job(peer: ProjectId) -> PendingEvalJob {
     }
 }
 
+/// One build job on the global anchor `derivation_build`, attributed to the
+/// evaluation that dispatched it.
+fn build_job(
+    evaluation_id: EvaluationId,
+    peer: ProjectId,
+    derivation_build: DerivationBuildId,
+) -> PendingBuildJob {
+    PendingBuildJob {
+        derivation_build,
+        evaluation_id,
+        project_id: peer,
+        job: BuildJob {
+            builds: vec![BuildSpec {
+                build_id: derivation_build.to_string(),
+                drv_path: "aaaa-hello.drv".into(),
+                external_cached: false,
+                is_fixed_output: false,
+                outputs: vec![],
+                timeout_secs: None,
+                max_silent_secs: None,
+            }],
+        },
+        required_paths: vec![],
+        architecture: "x86_64-linux".into(),
+        required_features: vec![],
+        dependency_count: 0,
+        closure_size: None,
+        prefer_local_build: false,
+        is_fixed_output: false,
+        history: gradient_score::HistoryPrediction::default(),
+        queued_at: gradient_types::now(),
+        ready_at: gradient_types::now(),
+        rescore_count: 0,
+        pname: None,
+        substitute: false,
+    }
+}
+
 /// A dedicated eval worker for scheduling-mechanics tests that aren't about
 /// capability gating: `eval` makes it eligible for the eval jobs they enqueue,
 /// and the absence of `fetch` keeps the reserve-fetch-workers rule from
@@ -84,6 +124,13 @@ fn eval_job(peer: ProjectId) -> PendingEvalJob {
 fn eval_worker_caps() -> GradientCapabilities {
     GradientCapabilities {
         eval: true,
+        ..GradientCapabilities::default()
+    }
+}
+
+fn build_worker_caps() -> GradientCapabilities {
+    GradientCapabilities {
+        build: true,
         ..GradientCapabilities::default()
     }
 }
@@ -392,7 +439,8 @@ async fn abort_evaluation_signals_the_worker_running_its_job() {
     assert_eq!(assigned.job_id, "j1");
     assert_eq!(assigned.pending.evaluation_id(), eval_id);
 
-    let aborted = scheduler.abort_evaluation_jobs(eval_id).await;
+    // An eval job has no anchor, so it stops on the evaluation alone.
+    let aborted = scheduler.abort_evaluation_jobs(eval_id, vec![]).await;
 
     assert_eq!(aborted, vec![("w1".to_string(), "j1".to_string())]);
     assert_eq!(
@@ -406,6 +454,63 @@ async fn abort_evaluation_signals_the_worker_running_its_job() {
         scheduler.counts().await.active,
         1,
         "the worker still runs it until it reports"
+    );
+}
+
+/// Two live evaluations building the same derivation share its global anchor.
+/// The database abort spares an anchor another live evaluation still holds a
+/// `build_job` on and reports only the anchors it moved, so the scheduler must
+/// stop exactly those: aborting by evaluation alone would kill a build the
+/// other evaluation is still waiting on.
+#[tokio::test]
+async fn abort_leaves_a_shared_anchor_running_for_the_other_evaluation() {
+    use crate::jobs::{PendingJob, build_job_key};
+
+    let scheduler = test_scheduler().await;
+    let peer = ProjectId::now_v7();
+    let aborted_eval = EvaluationId::now_v7();
+    let shared = DerivationBuildId::now_v7();
+    let only_mine = DerivationBuildId::now_v7();
+
+    // Both anchors are building on w1, dispatched by the evaluation being aborted.
+    let (session, mut signals) = port();
+    scheduler
+        .reattach_worker(
+            "w1",
+            build_worker_caps(),
+            HashSet::new(),
+            session,
+            vec![
+                (
+                    build_job_key(shared),
+                    PendingJob::Build(build_job(aborted_eval, peer, shared)),
+                ),
+                (
+                    build_job_key(only_mine),
+                    PendingJob::Build(build_job(aborted_eval, peer, only_mine)),
+                ),
+            ],
+        )
+        .await
+        .expect("reattach");
+
+    // The other evaluation still needs `shared`, so the database abort left it
+    // Building and reported only the anchor it took.
+    let aborted = scheduler
+        .abort_evaluation_jobs(aborted_eval, vec![only_mine])
+        .await;
+
+    assert_eq!(aborted, vec![("w1".to_string(), build_job_key(only_mine))]);
+    assert_eq!(
+        signals.recv().await,
+        Some(SessionSignal::Abort {
+            job_id: build_job_key(only_mine),
+            reason: "evaluation aborted".into()
+        })
+    );
+    assert!(
+        scheduler.active_job(&build_job_key(shared)).await.is_some(),
+        "the shared anchor keeps building for the evaluation that still needs it"
     );
 }
 
@@ -427,9 +532,7 @@ async fn record_eval_message_drops_when_job_unknown() {
 
 #[tokio::test]
 async fn record_eval_message_inserts_for_active_build_job() {
-    use crate::jobs::PendingBuildJob;
     use gradient_test_support::prelude::*;
-    use gradient_types::proto::{BuildJob, BuildSpec};
     use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
 
     let eval_id = EvaluationId::now_v7();
@@ -447,38 +550,7 @@ async fn record_eval_message_inserts_for_active_build_job() {
     scheduler.spawn_core(None).await.expect("core actor");
 
     scheduler
-        .enqueue_build_job(
-            "jbuild".into(),
-            PendingBuildJob {
-                derivation_build: build_id,
-                evaluation_id: eval_id,
-                project_id: peer,
-                job: BuildJob {
-                    builds: vec![BuildSpec {
-                        build_id: build_id.to_string(),
-                        drv_path: "aaaa-hello.drv".into(),
-                        external_cached: false,
-                        is_fixed_output: false,
-                        outputs: vec![],
-                        timeout_secs: None,
-                        max_silent_secs: None,
-                    }],
-                },
-                required_paths: vec![],
-                architecture: "x86_64-linux".into(),
-                required_features: vec![],
-                dependency_count: 0,
-                closure_size: None,
-                prefer_local_build: false,
-                is_fixed_output: false,
-                history: gradient_score::HistoryPrediction::default(),
-                queued_at: gradient_types::now(),
-                ready_at: gradient_types::now(),
-                rescore_count: 0,
-                pname: None,
-                substitute: false,
-            },
-        )
+        .enqueue_build_job("jbuild".into(), build_job(eval_id, peer, build_id))
         .await
         .unwrap();
     // Move to assigned so active_job() finds it. A zero-missing score clears the
@@ -587,8 +659,6 @@ async fn fetch_only_completion_enqueues_cached_eval_followup() {
 
 #[tokio::test]
 async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
-    use gradient_types::proto::{BuildJob, BuildSpec};
-
     let scheduler = test_scheduler().await;
     let peer = ProjectId::now_v7();
     let eval_id = EvaluationId::now_v7();
@@ -630,38 +700,7 @@ async fn cancel_evaluation_jobs_drops_eval_and_build_jobs() {
         (build_id_b, format!("build:{build_id_b}")),
     ] {
         scheduler
-            .enqueue_build_job(
-                job_id,
-                PendingBuildJob {
-                    derivation_build: build_id,
-                    evaluation_id: eval_id,
-                    project_id: peer,
-                    job: BuildJob {
-                        builds: vec![BuildSpec {
-                            build_id: build_id.to_string(),
-                            drv_path: "aaaa-hello.drv".into(),
-                            external_cached: false,
-                            is_fixed_output: false,
-                            outputs: vec![],
-                            timeout_secs: None,
-                            max_silent_secs: None,
-                        }],
-                    },
-                    required_paths: vec![],
-                    architecture: "x86_64-linux".into(),
-                    required_features: vec![],
-                    dependency_count: 0,
-                    closure_size: None,
-                    prefer_local_build: false,
-                    is_fixed_output: false,
-                    history: gradient_score::HistoryPrediction::default(),
-                    queued_at: gradient_types::now(),
-                    ready_at: gradient_types::now(),
-                    rescore_count: 0,
-                    pname: None,
-                    substitute: false,
-                },
-            )
+            .enqueue_build_job(job_id, build_job(eval_id, peer, build_id))
             .await
             .unwrap();
     }

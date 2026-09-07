@@ -14,7 +14,7 @@ use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 
 use gradient_score::{InstanceContext, ScoringPolicy};
-use gradient_types::ids::{DispatchedJobId, EvaluationId, ProjectId};
+use gradient_types::ids::{DerivationBuildId, DispatchedJobId, EvaluationId, ProjectId};
 use gradient_types::proto::{CandidateScore, GradientCapabilities, JobCandidate, JobKind};
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use tracing::{debug, info};
@@ -207,6 +207,10 @@ pub enum SchedulerMsg {
     },
     AbortEvaluation {
         evaluation_id: EvaluationId,
+        /// The anchors the database abort actually moved. A build anchor is
+        /// global, so the ones it spared are still wanted by a live evaluation
+        /// and their workers must keep building.
+        aborted_anchors: Vec<DerivationBuildId>,
         reply: RpcReplyPort<Vec<(String, String)>>,
     },
     RemoveJobs {
@@ -525,12 +529,22 @@ impl Actor for CoreActor {
             }
             SchedulerMsg::AbortEvaluation {
                 evaluation_id,
+                aborted_anchors,
                 reply,
             } => {
+                // Stop this evaluation's own eval job unconditionally, but a
+                // build only when the database aborted its anchor: an anchor
+                // shared with another live evaluation keeps building for it.
+                let aborted_anchors: HashSet<DerivationBuildId> =
+                    aborted_anchors.into_iter().collect();
                 let to_abort: Vec<(String, String)> = core
                     .tracker
                     .active_jobs()
                     .filter(|(_, _, job)| job.evaluation_id() == evaluation_id)
+                    .filter(|(_, _, job)| {
+                        job.derivation_build()
+                            .is_none_or(|anchor| aborted_anchors.contains(&anchor))
+                    })
                     .map(|(job_id, worker, _)| (worker.to_owned(), job_id.to_owned()))
                     .collect();
                 for (worker, job_id) in &to_abort {

@@ -2356,6 +2356,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "clap",
  "futures",
  "gradient-entity",
  "gradient-migration",

@@ -37,4 +37,5 @@ tracing           = { workspace = true }
 uuid              = { workspace = true }
 
 [dev-dependencies]
+clap     = { workspace = true }
 tempfile = { workspace = true }
