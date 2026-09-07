@@ -34,7 +34,6 @@ pub use cache_session::handle_cache_socket;
 pub use limiter::{PerIpLimiter, ProtoLimiter};
 pub(crate) use session::handle_socket;
 pub use sessions::SessionsHandle;
-pub(crate) use socket::ProtoSocket;
 
 #[cfg(test)]
 pub(crate) use socket::{HANDSHAKE_TIMEOUT, NAR_PUSH_CHUNK_SIZE};

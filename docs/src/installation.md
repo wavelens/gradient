@@ -107,6 +107,49 @@ Add the public cache to avoid rebuilding Gradient from source:
 }
 ```
 
+## Network Tuning (Optional)
+
+Workers and the server share one long-lived WebSocket per connection, carrying
+small latency-critical RPCs alongside multi-megabyte NAR chunks. Gradient
+disables Nagle's algorithm on every one of those sockets itself, and the NixOS
+modules raise nginx's relay buffer for the `/proto` location, so a default
+deployment needs no tuning.
+
+On a high-bandwidth or high-latency link, two kernel settings are worth adding:
+
+```nix
+{
+  boot.kernel.sysctl = {
+    "net.ipv4.tcp_congestion_control" = "bbr";
+    "net.ipv4.tcp_rmem" = "4096 131072 16777216";
+    "net.ipv4.tcp_wmem" = "4096 16384 16777216";
+  };
+}
+```
+
+BBR recovers throughput on paths with any loss, and the larger buffer maxima
+let a single connection fill a high bandwidth-delay-product link. Caddy has no
+equivalent of nginx's `proxy_buffer_size` for upgraded connections; it relays
+them with a fixed internal buffer and needs no configuration.
+
+### Jumbo frames
+
+Jumbo frames need no change to Gradient - MTU is a property of the network, and
+the kernel simply negotiates a larger segment size. They are also worth far less
+than they look: segmentation offload already hands the NIC large buffers, so
+moving from a 1500 to a 9000 byte MTU typically saves low single-digit percent
+CPU rather than the 6x fewer packets the arithmetic suggests.
+
+They carry a real risk in exchange. Every hop has to agree, including switches,
+bonded interfaces, and any VXLAN or similar overlay that consumes part of the
+payload. One hop that disagrees gives a path-MTU black hole, which on a
+long-lived connection looks like this: handshakes and small control frames
+succeed, large NAR transfers hang until the send timeout, and the job retries
+into the same wall.
+
+Enable them only where you control every hop end to end, and after the settings
+above.
+
 ## Applying the Configuration
 
 ```sh

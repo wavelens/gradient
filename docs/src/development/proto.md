@@ -11,6 +11,12 @@ graph LR
 
 Connection lifecycle: **handshake → auth challenge → capabilities → pull-based job loop**.
 
+Every proto socket is opened through `client::dial`, which applies the frame
+ceiling and disables Nagle's algorithm; inbound sockets are tuned the same way
+as they are accepted. A control frame is small and something is usually blocked
+on its reply, so waiting for the peer's delayed ACK before putting it on the
+wire costs tens of milliseconds for nothing.
+
 ---
 
 ## Handshake
