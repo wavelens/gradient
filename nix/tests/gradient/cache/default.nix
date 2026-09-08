@@ -646,7 +646,7 @@ in {
       drv_hash = store_path_drv.split("/")[-1].split("-")[0]
       declared = int(builder.succeed(
           f"{NIX} derivation show {store_path_drv} --extra-experimental-features nix-command "
-          f"| {JQ} '[.[].inputDrvs | length] | add'"
+          f"| {JQ} '[.derivations[] | (.inputDrvs // .inputs.drvs // {{}}) | length] | add'"
       ).strip())
       recorded = int(sql(
           f"SELECT count(*) FROM derivation_dependency e JOIN derivation d ON d.id = e.derivation "
