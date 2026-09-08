@@ -351,8 +351,8 @@ impl DispatchState {
             ServerMessage::CacheError { query_id, message } => {
                 self.on_cache_error(query_id, message);
             }
-            ServerMessage::KnownDerivations { job_id, known } => {
-                self.on_known_derivations(job_id, known);
+            ServerMessage::KnownDerivations { query_id, known } => {
+                self.on_known_derivations(query_id, known);
             }
             ServerMessage::EvalCachePullResult { job_id, outcome } => {
                 self.eval_cache_recv.deliver_pull_result(&job_id, outcome);
@@ -381,7 +381,10 @@ impl DispatchState {
     async fn on_job_done(&mut self, job_id: String, result: Result<()>) -> Result<()> {
         self.jobs.abort_senders.remove(&job_id);
         crate::proto::job::forget_cache_waiters_for_job(&self.cache_waiters, &job_id);
-        self.known_derivation_waiters.lock().remove(&job_id);
+        crate::proto::job::forget_known_derivation_waiters_for_job(
+            &self.known_derivation_waiters,
+            &job_id,
+        );
         self.nar_recv.forget_job(&job_id);
         self.eval_cache_recv.forget_job(&job_id);
         self.credentials.clear();
@@ -726,11 +729,14 @@ impl DispatchState {
         }
     }
 
-    fn on_known_derivations(&mut self, job_id: String, known: Vec<String>) {
-        if let Some(tx) = self.known_derivation_waiters.lock().remove(&job_id) {
-            let _ = tx.send(known);
-        } else {
-            debug!(%job_id, count = known.len(), "KnownDerivations arrived after waiter cleared");
+    fn on_known_derivations(&mut self, query_id: String, known: Vec<String>) {
+        let count = known.len();
+        if !crate::proto::job::deliver_known_derivations(
+            &self.known_derivation_waiters,
+            &query_id,
+            known,
+        ) {
+            debug!(%query_id, count, "KnownDerivations arrived after waiter cleared");
         }
     }
 

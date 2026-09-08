@@ -298,8 +298,12 @@ impl<'a> DispatchContext<'a> {
                 self.spawn_cache_query(job_id, query_id, paths, mode);
                 true
             }
-            ClientMessage::QueryKnownDerivations { job_id, drv_paths } => {
-                self.spawn_query_known_derivations(job_id, drv_paths);
+            ClientMessage::QueryKnownDerivations {
+                job_id,
+                query_id,
+                drv_paths,
+            } => {
+                self.spawn_query_known_derivations(job_id, query_id, drv_paths);
                 true
             }
             ClientMessage::EvalMessage {
@@ -376,11 +380,17 @@ impl<'a> DispatchContext<'a> {
             .spawn(async move { rpc.on_cache_query(job_id, query_id, paths, mode).await });
     }
 
-    fn spawn_query_known_derivations(&self, job_id: String, drv_paths: Vec<String>) {
+    fn spawn_query_known_derivations(
+        &self,
+        job_id: String,
+        query_id: String,
+        drv_paths: Vec<String>,
+    ) {
         let rpc = self.rpc();
-        self.state
-            .shutdown
-            .spawn(async move { rpc.on_query_known_derivations(job_id, drv_paths).await });
+        self.state.shutdown.spawn(async move {
+            rpc.on_query_known_derivations(job_id, query_id, drv_paths)
+                .await
+        });
     }
 
     // ── Eval cache ────────────────────────────────────────────────────────────
@@ -919,8 +929,13 @@ impl RpcContext {
         }
     }
 
-    async fn on_query_known_derivations(&self, job_id: String, drv_paths: Vec<String>) {
-        debug!(peer_id = %self.peer_id, %job_id, count = drv_paths.len(), "QueryKnownDerivations");
+    async fn on_query_known_derivations(
+        &self,
+        job_id: String,
+        query_id: String,
+        drv_paths: Vec<String>,
+    ) {
+        debug!(peer_id = %self.peer_id, %job_id, %query_id, count = drv_paths.len(), "QueryKnownDerivations");
         // Our own cache is output-only, so only `external_url` upstreams (which
         // serve a complete closure) gate pruning - see `gradient_graph::known`.
         let hashes: Vec<String> = drv_paths
@@ -947,10 +962,10 @@ impl RpcContext {
                 vec![]
             }
         };
-        debug!(peer_id = %self.peer_id, %job_id, known = known.len(), "KnownDerivations");
+        debug!(peer_id = %self.peer_id, %job_id, %query_id, known = known.len(), "KnownDerivations");
         if send_server_msg(
             &self.writer,
-            &ServerMessage::KnownDerivations { job_id, known },
+            &ServerMessage::KnownDerivations { query_id, known },
         )
         .await
         .is_err()

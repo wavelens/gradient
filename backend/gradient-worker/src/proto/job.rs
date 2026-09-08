@@ -15,10 +15,11 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use futures::{StreamExt as _, TryStreamExt as _};
 use gradient_proto::messages::{
-    BuildMetrics, BuildOutput, CACHE_QUERY_MAX_PATHS, CACHE_QUERY_TIMEOUT, CachedPath,
-    ClientMessage, DiscoveredDerivation, EvalCachePullOutcome, EvalCachePushMode, EvalMessageLevel,
-    EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
+    BuildMetrics, BuildOutput, CACHE_QUERY_MAX_PATHS, CACHE_QUERY_TIMEOUT, CACHE_QUERY_WINDOW,
+    CachedPath, ClientMessage, DiscoveredDerivation, EvalCachePullOutcome, EvalCachePushMode,
+    EvalMessageLevel, EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
 };
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -92,9 +93,58 @@ pub(crate) fn forget_cache_waiters_for_job(waiters: &CacheWaiters, job_id: &str)
     waiters.lock().retain(|_, w| w.job_id != job_id);
 }
 
-/// Shared map from job-id to a oneshot sender that delivers `KnownDerivations`
-/// responses back to the waiting job task.
-pub(crate) type KnownDerivationWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<Vec<String>>>>>;
+/// A pending `QueryKnownDerivations`: its reply channel plus the owning
+/// `job_id` so a finished or aborted job can drop any query it left in flight.
+pub(crate) struct KnownDerivationWaiter {
+    job_id: String,
+    reply: oneshot::Sender<Vec<String>>,
+}
+
+/// Shared map from a unique per-query id to its pending `QueryKnownDerivations`.
+/// Keying by the query id (not the `job_id`) lets one job keep several queries
+/// in flight without their replies colliding; the waiter still carries its
+/// `job_id` so job cleanup can drop the whole set.
+pub(crate) type KnownDerivationWaiters = Arc<Mutex<HashMap<String, KnownDerivationWaiter>>>;
+
+/// Register a oneshot for `query_id` (scoped to `job_id`) and hand back its
+/// receiver.
+pub(crate) fn register_known_derivation_waiter(
+    waiters: &KnownDerivationWaiters,
+    query_id: String,
+    job_id: String,
+) -> oneshot::Receiver<Vec<String>> {
+    let (reply, rx) = oneshot::channel();
+    waiters
+        .lock()
+        .insert(query_id, KnownDerivationWaiter { job_id, reply });
+    rx
+}
+
+/// Deliver a `KnownDerivations` to the waiter that sent `query_id`. Returns
+/// false (dropping the reply) when no waiter is registered - a late reply for
+/// an already-timed-out or superseded query.
+pub(crate) fn deliver_known_derivations(
+    waiters: &KnownDerivationWaiters,
+    query_id: &str,
+    known: Vec<String>,
+) -> bool {
+    match waiters.lock().remove(query_id) {
+        Some(w) => {
+            let _ = w.reply.send(known);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Drop every waiter belonging to `job_id` so a query a finished or aborted job
+/// left in flight can't leak its slot.
+pub(crate) fn forget_known_derivation_waiters_for_job(
+    waiters: &KnownDerivationWaiters,
+    job_id: &str,
+) {
+    waiters.lock().retain(|_, w| w.job_id != job_id);
+}
 
 /// Typed sender for reporting job progress back to the server.
 ///
@@ -443,25 +493,29 @@ impl JobUpdater {
 }
 
 /// Query the server's known-derivation set in [`CACHE_QUERY_MAX_PATHS`]-sized
-/// batches, one at a time, and concatenate the answers. See
-/// [`cache_query_with_timeout`] for why a whole eval's set must never ride in
-/// a single message.
+/// batches, [`CACHE_QUERY_WINDOW`] of them in flight, and concatenate the
+/// answers in request order. See [`cache_query_with_timeout`] for why a whole
+/// eval's set must never ride in a single message.
 async fn known_derivations_with_timeout(
     job_id: &str,
     writer: &ProtoWriter,
     waiters: &KnownDerivationWaiters,
     drv_paths: Vec<String>,
 ) -> Result<Vec<String>> {
-    let mut known = Vec::new();
-    for chunk in drv_paths.chunks(CACHE_QUERY_MAX_PATHS) {
-        known.extend(known_derivations_chunk(job_id, writer, waiters, chunk.to_vec()).await?);
-    }
+    let chunks = drv_paths
+        .chunks(CACHE_QUERY_MAX_PATHS)
+        .map(<[String]>::to_vec);
+    let answers: Vec<Vec<String>> = futures::stream::iter(chunks)
+        .map(|chunk| known_derivations_chunk(job_id, writer, waiters, chunk))
+        .buffered(CACHE_QUERY_WINDOW)
+        .try_collect()
+        .await?;
 
-    Ok(known)
+    Ok(answers.into_iter().flatten().collect())
 }
 
-/// Send one `QueryKnownDerivations` and wait for the matching
-/// `KnownDerivations`, with a hard timeout so a stalled dispatch loop can't
+/// Send one `QueryKnownDerivations` and wait for the `KnownDerivations` that
+/// echoes its `query_id`, with a hard timeout so a stalled dispatch loop can't
 /// hang the eval task.
 async fn known_derivations_chunk(
     job_id: &str,
@@ -470,11 +524,12 @@ async fn known_derivations_chunk(
     drv_paths: Vec<String>,
 ) -> Result<Vec<String>> {
     let path_count = drv_paths.len();
-    let (tx, rx) = oneshot::channel();
-    waiters.lock().insert(job_id.to_owned(), tx);
+    let query_id = uuid::Uuid::now_v7().to_string();
+    let rx = register_known_derivation_waiter(waiters, query_id.clone(), job_id.to_owned());
     writer
         .send(ClientMessage::QueryKnownDerivations {
             job_id: job_id.to_owned(),
+            query_id: query_id.clone(),
             drv_paths,
         })
         .await?;
@@ -484,26 +539,28 @@ async fn known_derivations_chunk(
             "known-derivation waiter dropped - connection closed or superseded?"
         )),
         Err(_) => {
-            waiters.lock().remove(job_id);
+            waiters.lock().remove(&query_id);
             Err(anyhow::anyhow!(
-                "QueryKnownDerivations for {} paths timed out after {}s (job_id={})",
+                "QueryKnownDerivations for {} paths timed out after {}s (job_id={job_id}, query_id={query_id})",
                 path_count,
                 CACHE_QUERY_TIMEOUT.as_secs(),
-                job_id,
             ))
         }
     }
 }
 
 /// Query cache state for `paths` in [`CACHE_QUERY_MAX_PATHS`]-sized batches,
-/// one at a time, and concatenate the answers in request order.
+/// [`CACHE_QUERY_WINDOW`] of them in flight, and concatenate the answers in
+/// request order.
 ///
-/// An eval's full path set (tens of thousands) would otherwise serialise into
-/// a multi-MB request whose `CacheStatus` reply is larger still. With both
-/// peers mid-write the socket buffers fill in both directions and neither
-/// dispatch loop gets back to reading - the connection wedges until the
-/// worker's send timeout tears it down, and the job is retried forever. One
-/// bounded query in flight keeps both sides drainable.
+/// One chunk is bounded because an eval's full path set (tens of thousands)
+/// would otherwise serialise into a multi-MB request whose `CacheStatus` reply
+/// is larger still: with both peers mid-write the socket buffers fill in both
+/// directions, neither dispatch loop gets back to reading, and the connection
+/// wedges until the worker's send timeout tears it down. Several such chunks
+/// in flight are safe because each is bounded on its own and every reply
+/// carries the `query_id` of the query it answers, so completion order is free
+/// while the concatenation stays in request order.
 async fn cache_query_with_timeout(
     job_id: &str,
     writer: &ProtoWriter,
@@ -511,14 +568,14 @@ async fn cache_query_with_timeout(
     paths: Vec<String>,
     mode: QueryMode,
 ) -> Result<Vec<CachedPath>> {
-    let mut cached = Vec::with_capacity(paths.len());
-    for chunk in paths.chunks(CACHE_QUERY_MAX_PATHS) {
-        cached.extend(
-            cache_query_chunk(job_id, writer, cache_waiters, chunk.to_vec(), mode.clone()).await?,
-        );
-    }
+    let chunks = paths.chunks(CACHE_QUERY_MAX_PATHS).map(<[String]>::to_vec);
+    let answers: Vec<Vec<CachedPath>> = futures::stream::iter(chunks)
+        .map(|chunk| cache_query_chunk(job_id, writer, cache_waiters, chunk, mode.clone()))
+        .buffered(CACHE_QUERY_WINDOW)
+        .try_collect()
+        .await?;
 
-    Ok(cached)
+    Ok(answers.into_iter().flatten().collect())
 }
 
 /// Send one `CacheQuery` and wait for the matching `CacheStatus`, with a hard
@@ -762,6 +819,32 @@ mod tests {
         assert_eq!(rx1.try_recv(), Err(TryRecvError::Closed));
     }
 
+    /// Job cleanup drops every known-derivation query that job left in flight
+    /// and nothing belonging to another job.
+    #[test]
+    fn job_cleanup_drops_only_that_jobs_known_derivation_waiters() {
+        use tokio::sync::oneshot::error::TryRecvError;
+        let waiters: KnownDerivationWaiters = Arc::new(Mutex::new(HashMap::new()));
+        let mut rx_a1 =
+            register_known_derivation_waiter(&waiters, "q1".to_string(), "job-A".to_string());
+        let mut rx_a2 =
+            register_known_derivation_waiter(&waiters, "q2".to_string(), "job-A".to_string());
+        let mut rx_b =
+            register_known_derivation_waiter(&waiters, "q3".to_string(), "job-B".to_string());
+
+        forget_known_derivation_waiters_for_job(&waiters, "job-A");
+
+        assert_eq!(rx_a1.try_recv(), Err(TryRecvError::Closed));
+        assert_eq!(rx_a2.try_recv(), Err(TryRecvError::Closed));
+        assert_eq!(waiters.lock().len(), 1);
+        assert!(deliver_known_derivations(
+            &waiters,
+            "q3",
+            vec!["/nix/store/d.drv".to_string()]
+        ));
+        assert_eq!(rx_b.try_recv(), Ok(vec!["/nix/store/d.drv".to_string()]));
+    }
+
     #[tokio::test]
     async fn updater_report_fetching() {
         let (conn, server_task, job_id) = server_then_client!("job-fetch", |sc| {
@@ -937,11 +1020,11 @@ mod tests {
                     gradient_proto::messages::ServerMessage::CacheStatus { query_id, cached } => {
                         deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
                     }
-                    gradient_proto::messages::ServerMessage::KnownDerivations { job_id, known } => {
-                        let waiter = known_waiters.lock().remove(&job_id);
-                        if let Some(tx) = waiter {
-                            let _ = tx.send(known);
-                        }
+                    gradient_proto::messages::ServerMessage::KnownDerivations {
+                        query_id,
+                        known,
+                    } => {
+                        deliver_known_derivations(&known_waiters, &query_id, known);
                     }
                     _ => {}
                 }
@@ -949,35 +1032,51 @@ mod tests {
         })
     }
 
-    /// A whole eval's path set must go out as several bounded `CacheQuery`
-    /// messages - one multi-MB request plus its larger reply deadlocks the
-    /// socket - and the replies must merge back into one answer covering
-    /// every path, in order.
+    /// The mock server holds every query until it has a full window, checks
+    /// that nothing more arrives while the window is outstanding, then answers
+    /// the window in reverse so reassembly order is proven, not assumed.
     #[tokio::test]
-    async fn cache_query_splits_oversized_path_list_into_bounded_chunks() {
-        let total = CACHE_QUERY_MAX_PATHS * 2 + 5;
-        let (conn, server_task, job_id) = server_then_client!("job-chunk", |sc| {
-            let mut seen: Vec<String> = Vec::new();
-            while seen.len() < total {
-                let msg = sc.recv().await.unwrap();
-                let ClientMessage::CacheQuery {
-                    query_id, paths, ..
-                } = msg
-                else {
-                    panic!("expected CacheQuery, got {msg:?}");
-                };
-                assert!(
-                    paths.len() <= CACHE_QUERY_MAX_PATHS,
-                    "CacheQuery carried {} paths, over the {CACHE_QUERY_MAX_PATHS} bound",
-                    paths.len()
-                );
-                let cached: Vec<CachedPath> = paths.iter().map(|p| cached(p)).collect();
-                seen.extend(paths);
-                sc.send(gradient_proto::messages::ServerMessage::CacheStatus { query_id, cached })
-                    .await
-                    .unwrap();
+    async fn cache_queries_are_pipelined_to_the_window_and_reassembled_in_order() {
+        use gradient_proto::messages::{CACHE_QUERY_WINDOW, ServerMessage};
+        let chunks = CACHE_QUERY_WINDOW * 2 + 1;
+        let total = CACHE_QUERY_MAX_PATHS * (chunks - 1) + 5;
+        let (conn, server_task, job_id) = server_then_client!("job-window", |sc| {
+            let mut pending: Vec<(String, Vec<String>)> = Vec::new();
+            let mut answered = 0usize;
+            let mut widest = 0usize;
+            while answered < chunks {
+                let outstanding = chunks - answered;
+                let want = outstanding.min(CACHE_QUERY_WINDOW);
+                while pending.len() < want {
+                    let msg = sc.recv().await.unwrap();
+                    let ClientMessage::CacheQuery {
+                        query_id, paths, ..
+                    } = msg
+                    else {
+                        panic!("expected CacheQuery, got {msg:?}");
+                    };
+                    assert!(paths.len() <= CACHE_QUERY_MAX_PATHS);
+                    pending.push((query_id, paths));
+                }
+                widest = widest.max(pending.len());
+                if outstanding > CACHE_QUERY_WINDOW {
+                    let extra =
+                        tokio::time::timeout(std::time::Duration::from_millis(200), sc.recv())
+                            .await;
+                    assert!(
+                        extra.is_err(),
+                        "a query arrived beyond the window: {extra:?}"
+                    );
+                }
+                for (query_id, paths) in pending.drain(..).rev() {
+                    let cached = paths.iter().map(|p| cached(p)).collect();
+                    sc.send(ServerMessage::CacheStatus { query_id, cached })
+                        .await
+                        .unwrap();
+                    answered += 1;
+                }
             }
-            seen
+            widest
         });
 
         let (mut updater, reader) = make_updater(job_id, conn);
@@ -986,49 +1085,69 @@ mod tests {
             updater.cache_waiters.clone(),
             updater.known_derivation_waiters.clone(),
         );
-
         let paths: Vec<String> = (0..total).map(|i| format!("/nix/store/path-{i}")).collect();
         let got = updater
             .query_cache(paths.clone(), QueryMode::Push)
             .await
             .unwrap();
 
+        assert_eq!(got.into_iter().map(|c| c.path).collect::<Vec<_>>(), paths);
         assert_eq!(
-            got.into_iter().map(|c| c.path).collect::<Vec<_>>(),
-            paths,
-            "merged reply must cover every queried path in order"
+            server_task.await.unwrap(),
+            CACHE_QUERY_WINDOW,
+            "the window must fill"
         );
-        assert_eq!(server_task.await.unwrap(), paths);
         pump.abort();
     }
 
-    /// Same bound for the BFS-prune query: a full `.drv` set must not ride in
-    /// one message.
+    /// Same window for the BFS-prune query, and its replies correlate by
+    /// `query_id`: answered in reverse, they still merge in request order.
     #[tokio::test]
-    async fn known_derivations_splits_oversized_path_list_into_bounded_chunks() {
-        let total = CACHE_QUERY_MAX_PATHS + 7;
-        let (conn, server_task, job_id) = server_then_client!("job-known", |sc| {
-            let mut seen: Vec<String> = Vec::new();
-            while seen.len() < total {
-                let msg = sc.recv().await.unwrap();
-                let ClientMessage::QueryKnownDerivations { job_id, drv_paths } = msg else {
-                    panic!("expected QueryKnownDerivations, got {msg:?}");
-                };
-                assert!(
-                    drv_paths.len() <= CACHE_QUERY_MAX_PATHS,
-                    "QueryKnownDerivations carried {} paths, over the {CACHE_QUERY_MAX_PATHS} bound",
-                    drv_paths.len()
-                );
-                let known = drv_paths.clone();
-                seen.extend(drv_paths);
-                sc.send(gradient_proto::messages::ServerMessage::KnownDerivations {
-                    job_id,
-                    known,
-                })
-                .await
-                .unwrap();
+    async fn known_derivation_queries_are_pipelined_and_correlate_by_query_id() {
+        use gradient_proto::messages::{CACHE_QUERY_WINDOW, ServerMessage};
+        let chunks = CACHE_QUERY_WINDOW * 2 + 1;
+        let total = CACHE_QUERY_MAX_PATHS * (chunks - 1) + 5;
+        let (conn, server_task, job_id) = server_then_client!("job-known-window", |sc| {
+            let mut pending: Vec<(String, Vec<String>)> = Vec::new();
+            let mut answered = 0usize;
+            let mut widest = 0usize;
+            while answered < chunks {
+                let outstanding = chunks - answered;
+                let want = outstanding.min(CACHE_QUERY_WINDOW);
+                while pending.len() < want {
+                    let msg = sc.recv().await.unwrap();
+                    let ClientMessage::QueryKnownDerivations {
+                        query_id,
+                        drv_paths,
+                        ..
+                    } = msg
+                    else {
+                        panic!("expected QueryKnownDerivations, got {msg:?}");
+                    };
+                    assert!(drv_paths.len() <= CACHE_QUERY_MAX_PATHS);
+                    pending.push((query_id, drv_paths));
+                }
+                widest = widest.max(pending.len());
+                if outstanding > CACHE_QUERY_WINDOW {
+                    let extra =
+                        tokio::time::timeout(std::time::Duration::from_millis(200), sc.recv())
+                            .await;
+                    assert!(
+                        extra.is_err(),
+                        "a query arrived beyond the window: {extra:?}"
+                    );
+                }
+                for (query_id, drv_paths) in pending.drain(..).rev() {
+                    sc.send(ServerMessage::KnownDerivations {
+                        query_id,
+                        known: drv_paths,
+                    })
+                    .await
+                    .unwrap();
+                    answered += 1;
+                }
             }
-            seen
+            widest
         });
 
         let (mut updater, reader) = make_updater(job_id, conn);
@@ -1037,7 +1156,6 @@ mod tests {
             updater.cache_waiters.clone(),
             updater.known_derivation_waiters.clone(),
         );
-
         let drvs: Vec<String> = (0..total)
             .map(|i| format!("/nix/store/d-{i}.drv"))
             .collect();
@@ -1045,8 +1163,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(got, drvs, "merged reply must cover every queried .drv");
-        assert_eq!(server_task.await.unwrap(), drvs);
+        assert_eq!(got, drvs);
+        assert_eq!(
+            server_task.await.unwrap(),
+            CACHE_QUERY_WINDOW,
+            "the window must fill"
+        );
         pump.abort();
     }
 }
