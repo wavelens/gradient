@@ -6,8 +6,6 @@
 
 //! One handler per [`Transition`], each run inside the actor's transaction.
 
-use std::collections::HashMap;
-
 use anyhow::{Context, Result};
 use gradient_db::{
     DbContext, cascade_dependency_failed, fail_latest_attempt, succeed_latest_attempt,
@@ -24,22 +22,12 @@ use sea_orm::{
 };
 use tracing::{error, info, warn};
 
-use crate::ingest::{EvalEdgeAccumulator, flush_deferred_deps};
 use crate::messages::{SubstituteLog, Transition, TransitionReport};
 use crate::policy::{self, FailureOutcome};
 
-pub(crate) async fn apply(
-    ctx: &DbContext,
-    edges: &mut HashMap<EvaluationId, EvalEdgeAccumulator>,
-    transition: Transition,
-) -> Result<TransitionReport> {
+pub(crate) async fn apply(ctx: &DbContext, transition: Transition) -> Result<TransitionReport> {
     match transition {
         Transition::EvalStreamCompleted { evaluation } => {
-            let pending = edges.remove(&evaluation).unwrap_or_default().into_pending();
-            if let Err(e) = flush_deferred_deps(&ctx.worker_db, evaluation, pending).await {
-                error!(error = %e, evaluation_id = %evaluation, "flush_deferred_deps failed");
-            }
-
             eval_stream_completed(ctx, evaluation).await?;
             Ok(TransitionReport::default())
         }
@@ -49,12 +37,10 @@ pub(crate) async fn apply(
             kind,
             missing_paths,
         } => {
-            edges.remove(&evaluation);
             eval_failed(ctx, evaluation, &error, kind, &missing_paths).await?;
             Ok(TransitionReport::default())
         }
         Transition::AbortEvaluation { evaluation } => {
-            edges.remove(&evaluation);
             let Some(eval) = EEvaluation::find_by_id(evaluation)
                 .one(&ctx.worker_db)
                 .await?
@@ -164,7 +150,6 @@ pub(crate) async fn apply(
             Ok(TransitionReport::default())
         }
         Transition::AbortEvaluationAnchors { evaluation } => {
-            edges.remove(&evaluation);
             let Some(eval) = EEvaluation::find_by_id(evaluation)
                 .one(&ctx.worker_db)
                 .await?
@@ -188,10 +173,10 @@ async fn eval_stream_completed(ctx: &DbContext, evaluation_id: EvaluationId) -> 
         error!(error = %e, %evaluation_id, "seed_entry_point_dep_counts failed (non-fatal)");
     }
 
-    // The dependency graph is now complete (edges flushed): run the canonical
-    // healing pipeline scoped to this eval, which marks its anchors
-    // edges_complete, heals cache trust across its closure, reconciles the gate
-    // flags, and promotes the ready frontier (see `gradient_db::reconcile`).
+    // Every edge landed with its batch, so the graph is complete here: run the
+    // canonical healing pipeline scoped to this eval, which thaws its closure,
+    // heals cache trust across it, reconciles the gate flags, and promotes the
+    // ready frontier (see `gradient_db::reconcile`).
     gradient_db::reconcile_build_graph(ctx, gradient_db::ReconcileScope::Eval(evaluation_id)).await;
 
     // Promotion is graph-driven (gradient_db::promotion), independent of eval

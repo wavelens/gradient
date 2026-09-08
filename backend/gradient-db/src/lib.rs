@@ -85,6 +85,7 @@ pub use self::promotion::{
     promote_dependents, promote_ready, propagate_closure_complete,
     reconcile_cached_anchors_for_eval, reconcile_closure_complete, reconcile_dependency_failed,
     reconcile_drv_closure_cached, requeue_failed_anchors, requeue_failed_closure_for_eval,
+    substitute_created_anchors,
 };
 pub use self::reachability::{
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,

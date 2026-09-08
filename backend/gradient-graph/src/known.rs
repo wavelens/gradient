@@ -32,20 +32,20 @@ pub(crate) async fn prunable(
         .all(db)
         .await?;
 
+    let walked: HashSet<DerivationId> = candidates
+        .iter()
+        .filter(|d| d.walked)
+        .map(|d| d.id)
+        .collect();
     let anchors = EDerivationBuild::find()
         .filter(CDerivationBuild::Derivation.is_in(drv_ids))
         .all(db)
         .await?;
-    let unresolved: HashSet<DerivationId> = anchors
-        .iter()
-        .filter(|b| b.edges_unresolved)
-        .map(|b| b.derivation)
-        .collect();
-    // Local-prune precondition: the anchor succeeded and its subtree's edges are
-    // durably recorded, so skipping the walk loses nothing the graph needs.
+    // Local-prune precondition: the anchor succeeded and its record is whole,
+    // so skipping the walk loses nothing the graph needs.
     let complete_anchors: HashSet<DerivationId> = anchors
         .iter()
-        .filter(|b| b.edges_complete && b.status.is_terminal_success())
+        .filter(|b| b.status.is_terminal_success())
         .map(|b| b.derivation)
         .collect();
 
@@ -72,7 +72,7 @@ pub(crate) async fn prunable(
     Ok(prunable_known_derivations(
         candidates,
         &outputs,
-        &unresolved,
+        &walked,
         &complete_anchors,
         &closure_cached,
     ))
@@ -80,18 +80,18 @@ pub(crate) async fn prunable(
 
 /// Decide which `(derivation_id, store_path)` candidates the eval BFS may prune.
 ///
-/// Upstream arm: every output is on a real upstream (`external_url`), which
-/// serves a complete closure, so a build worker fetches the pruned subtree on
-/// demand. Local arm: the anchor is terminal-success with `edges_complete` and
-/// every output has a fully-cached `cached_path` with `closure_complete`; bare
-/// `is_cached` is not enough, because our own cache is populated output-only and
-/// pruning on it stranded never-pushed closure members as permanent
-/// `InputsUnavailable` dead-ends. An `edges_unresolved` anchor is never prunable:
-/// only a re-walk rediscovers its dropped edge and clears the flag.
+/// A derivation is prunable only when walked: a stub's subtree was never
+/// recorded. Upstream arm: every output is on a real upstream (`external_url`),
+/// which serves a complete closure, so a build worker fetches the pruned subtree
+/// on demand. Local arm: the anchor is terminal-success and every output has a
+/// fully-cached `cached_path` with `closure_complete`; bare `is_cached` is not
+/// enough, because our own cache is populated output-only and pruning on it
+/// stranded never-pushed closure members as permanent `InputsUnavailable`
+/// dead-ends.
 fn prunable_known_derivations(
     candidates: Vec<(DerivationId, String)>,
     outputs: &[MDerivationOutput],
-    unresolved: &HashSet<DerivationId>,
+    walked: &HashSet<DerivationId>,
     complete_anchors: &HashSet<DerivationId>,
     closure_cached: &HashSet<String>,
 ) -> Vec<String> {
@@ -113,7 +113,7 @@ fn prunable_known_derivations(
             let (total, off_upstream, off_local) = counts.get(id).copied().unwrap_or((0, 0, 0));
             let upstream_ok = off_upstream == 0;
             let local_ok = off_local == 0 && complete_anchors.contains(id);
-            total > 0 && !unresolved.contains(id) && (upstream_ok || local_ok)
+            total > 0 && walked.contains(id) && (upstream_ok || local_ok)
         })
         .map(|(_, store_path)| store_path)
         .collect()
@@ -138,14 +138,14 @@ mod tests {
     fn prune(
         candidates: Vec<(DerivationId, String)>,
         outputs: &[MDerivationOutput],
-        unresolved: &HashSet<DerivationId>,
+        walked: &HashSet<DerivationId>,
         complete_anchors: &HashSet<DerivationId>,
         closure_cached: &HashSet<String>,
     ) -> Vec<String> {
         prunable_known_derivations(
             candidates,
             outputs,
-            unresolved,
+            walked,
             complete_anchors,
             closure_cached,
         )
@@ -177,11 +177,12 @@ mod tests {
             (output_less, "/nix/store/fff-output-less".to_string()),
             (unknown, "/nix/store/ggg-unknown".to_string()),
         ];
+        let walked = HashSet::from([local, upstream, partial, output_less, unknown]);
 
         let prunable = prune(
             candidates,
             &outputs,
-            &HashSet::new(),
+            &walked,
             &HashSet::new(),
             &HashSet::new(),
         );
@@ -209,6 +210,7 @@ mod tests {
             (no_anchor, "/nix/store/bbb-no-anchor".to_string()),
             (half_cached, "/nix/store/ccc-half".to_string()),
         ];
+        let walked = HashSet::from([complete, no_anchor, half_cached]);
         let complete_anchors = HashSet::from([complete, half_cached]);
         let closure_cached: HashSet<String> = ["aaa", "bbb", "ccc"]
             .iter()
@@ -218,7 +220,7 @@ mod tests {
         let prunable = prune(
             candidates,
             &outputs,
-            &HashSet::new(),
+            &walked,
             &complete_anchors,
             &closure_cached,
         );
@@ -226,15 +228,14 @@ mod tests {
         assert_eq!(prunable, vec!["/nix/store/aaa-complete".to_string()]);
     }
 
-    /// Pruning an `edges_unresolved` anchor skips the re-walk that rediscovers its
-    /// dropped edge, leaving it and its dependents stranded off promotion forever.
+    /// A stub (named by a batch, never walked) has no recorded subtree, so
+    /// pruning it would skip the walk that records it.
     #[test]
-    fn edges_unresolved_anchor_is_never_prunable() {
+    fn an_unwalked_derivation_is_never_prunable() {
         let upstream = DerivationId::now_v7();
         let mut o = output(upstream, "bbb");
         o.external_url = Some("https://cache.example/bbb.narinfo".to_string());
         let candidates = vec![(upstream, "/nix/store/bbb-upstream".to_string())];
-        let unresolved = HashSet::from([upstream]);
         let complete_anchors = HashSet::from([upstream]);
         let closure_cached: HashSet<String> = HashSet::from(["bbb".to_string()]);
 
@@ -242,12 +243,12 @@ mod tests {
             prune(
                 candidates,
                 &[o],
-                &unresolved,
+                &HashSet::new(),
                 &complete_anchors,
                 &closure_cached
             )
             .is_empty(),
-            "an edges_unresolved anchor must be re-walked, not pruned"
+            "an unwalked derivation must be walked, not pruned"
         );
     }
 }
