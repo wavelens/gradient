@@ -18,6 +18,7 @@ mod metrics;
 mod nix;
 mod proto;
 mod reconnect;
+mod shutdown;
 mod traits;
 mod worker;
 mod worker_pool;
@@ -26,12 +27,13 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::Parser;
-use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
 use config::WorkerConfig;
 use connection_state::RunOutcome;
 use reconnect::{SessionEnd, backoff_after_session, retry_reconnect};
+use shutdown::Shutdown;
 use tracing_subscriber::EnvFilter;
 use worker::Worker;
 
@@ -83,8 +85,12 @@ fn main() -> Result<()> {
             );
         }
 
-        let shutdown = CancellationToken::new();
-        install_signal_handler(shutdown.clone());
+        let shutdown = Shutdown::new();
+        install_signal_handler(shutdown.clone(), drain_budget(&config));
+
+        // Inbound sessions (discoverable mode) drain on the same signal, so the
+        // process has to outlive them instead of exiting from under their jobs.
+        let sessions = TaskTracker::new();
 
         // Periodic sweep of stale resumable-download `*.partial` files (#225).
         if config.nar_partial_ttl_secs > 0 {
@@ -105,7 +111,7 @@ fn main() -> Result<()> {
                 let mut tick = tokio::time::interval(period);
                 loop {
                     tokio::select! {
-                        _ = gc_shutdown.cancelled() => return,
+                        _ = gc_shutdown.drain_requested() => return,
                         _ = tick.tick() => {}
                     }
                     match store.gc().await {
@@ -121,9 +127,14 @@ fn main() -> Result<()> {
         if config.discoverable {
             let listener_config = config.clone();
             let listener_shutdown = shutdown.clone();
+            let listener_sessions = sessions.clone();
             tokio::spawn(async move {
-                if let Err(e) =
-                    connection::listener::start_listener(listener_config, listener_shutdown).await
+                if let Err(e) = connection::listener::start_listener(
+                    listener_config,
+                    listener_shutdown,
+                    listener_sessions,
+                )
+                .await
                 {
                     error!(error = %e, "listener failed");
                 }
@@ -134,7 +145,7 @@ fn main() -> Result<()> {
 
         // Initial connection - abandon retries if shutdown fires.
         let initial = tokio::select! {
-            _ = shutdown.cancelled() => None,
+            _ = shutdown.drain_requested() => None,
             w = async {
                 loop {
                     match Worker::connect(config.clone()).await {
@@ -153,8 +164,8 @@ fn main() -> Result<()> {
             } => Some(w),
         };
         let Some(mut worker) = initial else {
-            // Signal arrived before we connected: nothing to drain.
             info!("shutdown requested during initial connect");
+            drain_sessions(&sessions, &shutdown).await;
             return Ok(());
         };
         backoff = INITIAL_BACKOFF;
@@ -169,31 +180,35 @@ fn main() -> Result<()> {
         loop {
             let (disconnected, outcome) = worker.run(shutdown.clone()).await;
 
-            // Shutdown signalled during run(): exit before attempting reconnect.
-            if shutdown.is_cancelled() {
-                info!("shutdown signal received; tearing down worker");
+            // A local stop was requested: the dispatch loop has already drained
+            // (or abandoned) its jobs, so exit instead of reconnecting.
+            if shutdown.is_stopping() {
+                info!("worker drained; tearing down");
                 drop(disconnected);
+                drain_sessions(&sessions, &shutdown).await;
                 executor_handle.shutdown().await;
                 return Ok(());
             }
 
+            // A drained server is restarting, not dismissing the worker (#626):
+            // exiting here left the process gone for good, because the unit
+            // restarts `on-failure` and a drain exits cleanly.
             let session_end = match outcome {
-                Ok(RunOutcome::Drained) => {
-                    info!("server requested drain; shutting down");
-                    drop(disconnected);
-                    executor_handle.shutdown().await;
-                    return Ok(());
-                }
-                Ok(RunOutcome::Refused) => {
-                    warn!(
-                        delay_secs = backoff.as_secs(),
-                        "server refused the session; backing off"
-                    );
-                    SessionEnd::Refused
-                }
-                Ok(RunOutcome::CleanDisconnect) => {
-                    warn!(delay_secs = backoff.as_secs(), "connection closed; reconnecting");
-                    SessionEnd::Served
+                Ok(outcome) => {
+                    match outcome {
+                        RunOutcome::Drained => warn!(
+                            delay_secs = backoff.as_secs(),
+                            "server drained the session; reconnecting until it is back"
+                        ),
+                        RunOutcome::Refused => warn!(
+                            delay_secs = backoff.as_secs(),
+                            "server refused the session; backing off"
+                        ),
+                        RunOutcome::CleanDisconnect => {
+                            warn!(delay_secs = backoff.as_secs(), "connection closed; reconnecting")
+                        }
+                    }
+                    SessionEnd::from(outcome)
                 }
                 Err(e) => {
                     error!(error = %e, delay_secs = backoff.as_secs(), "dispatch loop error; reconnecting");
@@ -208,7 +223,7 @@ fn main() -> Result<()> {
             // mid-attempt the cached `executor_handle` still drives the
             // graceful pool shutdown.
             let reconnected = tokio::select! {
-                _ = shutdown.cancelled() => None,
+                _ = shutdown.drain_requested() => None,
                 w = retry_reconnect(
                     disconnected,
                     |d| async move { d.reconnect().await },
@@ -222,13 +237,14 @@ fn main() -> Result<()> {
                     info!("reconnected successfully");
                     worker = w;
                     // Reconnecting only proves the transport works. A session
-                    // the server refuses is not a served one, so its delay
-                    // keeps escalating instead of dropping back to the floor.
+                    // the server refuses or drains is not a served one, so its
+                    // delay keeps escalating instead of dropping to the floor.
                     backoff =
                         backoff_after_session(backoff, session_end, INITIAL_BACKOFF, MAX_BACKOFF);
                 }
                 None => {
                     info!("shutdown requested during reconnect");
+                    drain_sessions(&sessions, &shutdown).await;
                     executor_handle.shutdown().await;
                     return Ok(());
                 }
@@ -237,32 +253,73 @@ fn main() -> Result<()> {
     })
 }
 
-/// Install a SIGINT/SIGTERM handler that cancels `shutdown` so the run loop
-/// can break out and call [`Worker::shutdown`] before exit.
-fn install_signal_handler(shutdown: CancellationToken) {
+/// Install the two-stage SIGINT/SIGTERM handler.
+///
+/// The first signal drains: every session tells its server it wants no more
+/// work, finishes and reports the jobs it already has, then the process exits.
+/// The second one abandons them, so an operator is never stuck behind a long
+/// build that the budget has yet to cut off.
+fn install_signal_handler(shutdown: Shutdown, budget: Option<Duration>) {
     tokio::spawn(async move {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{SignalKind, signal};
-            let mut sigterm = match signal(SignalKind::terminate()) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!(error = %e, "failed to install SIGTERM handler");
-                    return;
-                }
-            };
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => info!("received SIGINT, shutting down"),
-                _ = sigterm.recv() => info!("received SIGTERM, shutting down"),
+        next_stop_signal().await;
+        info!("stop requested; draining: no new jobs, finishing the in-flight ones");
+        shutdown.request_drain(budget);
+
+        next_stop_signal().await;
+        warn!("second stop signal; abandoning in-flight jobs");
+        shutdown.request_abort();
+    });
+}
+
+/// How long a drain waits for in-flight jobs; `None` waits indefinitely.
+fn drain_budget(config: &WorkerConfig) -> Option<Duration> {
+    (config.drain_timeout_secs > 0).then(|| Duration::from_secs(config.drain_timeout_secs))
+}
+
+/// Wait for the inbound sessions to finish draining before the process exits.
+/// They observe the same budget, so the abort stage bounds this wait.
+async fn drain_sessions(sessions: &TaskTracker, shutdown: &Shutdown) {
+    sessions.close();
+    if sessions.is_empty() {
+        return;
+    }
+
+    info!(
+        sessions = sessions.len(),
+        "waiting for inbound sessions to drain"
+    );
+    tokio::select! {
+        () = sessions.wait() => {}
+        () = shutdown.abort_requested() => {
+            warn!(sessions = sessions.len(), "inbound sessions still draining; stopping anyway")
+        }
+    }
+}
+
+/// Resolves on the next SIGINT or SIGTERM (Ctrl-C only off unix).
+async fn next_stop_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => tokio::select! {
+                _ = tokio::signal::ctrl_c() => info!("received SIGINT"),
+                _ = sigterm.recv() => info!("received SIGTERM"),
+            },
+            // Losing SIGTERM must not cost us SIGINT as well, or an operator
+            // has nothing left but SIGKILL.
+            Err(e) => {
+                error!(error = %e, "failed to install SIGTERM handler; SIGINT only");
+                let _ = tokio::signal::ctrl_c().await;
+                info!("received SIGINT");
             }
         }
-        #[cfg(not(unix))]
-        {
-            let _ = tokio::signal::ctrl_c().await;
-            info!("received Ctrl-C, shutting down");
-        }
-        shutdown.cancel();
-    });
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+        info!("received Ctrl-C");
+    }
 }
 
 /// Build the tracing `EnvFilter` from the worker's log-level config.

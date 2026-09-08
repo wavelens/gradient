@@ -647,7 +647,7 @@ mod tests {
         let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        let (writer, _reader) = conn.split();
+        let (writer, _reader, _flush) = conn.split();
         let recv = NarReceiver::new();
         let recv2 = recv.clone();
         let sp = store_path_str.clone();
@@ -701,7 +701,7 @@ mod tests {
         let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        let (writer, _reader) = conn.split();
+        let (writer, _reader, _flush) = conn.split();
         let recv = NarReceiver::new();
         let recv2 = recv.clone();
         let sp = store_path_str.clone();
@@ -814,7 +814,7 @@ mod tests {
         let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        let (writer, _reader) = conn.split();
+        let (writer, _reader, _flush) = conn.split();
         upload_nar(
             "job-xyz",
             &store_path_str,
@@ -860,7 +860,7 @@ mod tests {
         let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        let (writer, _reader) = conn.split();
+        let (writer, _reader, _flush) = conn.split();
 
         let recv = NarReceiver::new();
         let err = upload_nar(
@@ -899,7 +899,7 @@ mod tests {
         let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        let (writer, _reader) = conn.split();
+        let (writer, _reader, _flush) = conn.split();
 
         let err = upload_nar(
             "job-meta-fail",
@@ -975,7 +975,7 @@ mod tests {
         let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        let (writer, _reader) = conn.split();
+        let (writer, _reader, _flush) = conn.split();
         let recv = NarReceiver::new();
         let recv2 = recv.clone();
         let push = tokio::spawn(async move {
@@ -1024,7 +1024,7 @@ mod tests {
         let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        let (writer, _reader) = conn.split();
+        let (writer, _reader, _flush) = conn.split();
         let meta = CompressedNarMeta {
             file_hash: "sha256:abc".into(),
             file_size: 3,
@@ -1078,7 +1078,7 @@ mod tests {
         let conn = crate::connection::ProtoConnection::open(&url)
             .await
             .unwrap();
-        let (writer, _reader) = conn.split();
+        let (writer, _reader, _flush) = conn.split();
         upload_nar(
             "job-verbatim",
             "/nix/store/cccccccccccccccccccccccccccccccc-verbatim",

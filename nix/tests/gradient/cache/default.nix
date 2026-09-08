@@ -786,6 +786,35 @@ in {
       server.succeed("journalctl -u gradient-server --no-pager | grep -q 'background tasks drained cleanly'")
       builder.succeed("journalctl -u gradient-worker --no-pager | grep -q 'server is draining'")
 
+      # ── Phase 12: a drained server does not decommission the worker (#626) ─
+      # The worker used to exit(0) on `Draining`, and because the unit restarts
+      # `on-failure` that left the fleet dead after every deploy until someone
+      # restarted each worker by hand.
+      banner("Phase 12: the worker survives the drain and reconnects")
+      builder.succeed("systemctl is-active gradient-worker.service")
+      builder.succeed("journalctl -u gradient-worker --no-pager | grep -q 'server drained the session'")
+
+      server.succeed("systemctl start gradient-server.service")
+      server.wait_for_open_port(3000)
+      builder.wait_until_succeeds(
+          "journalctl -u gradient-worker --no-pager | grep -q 'reconnected successfully'", timeout=180
+      )
+
+      # A local signal is the only thing that stops a worker: it drains first,
+      # then exits cleanly (the unit is idle here, so this is immediate).
+      banner("Phase 12b: SIGTERM drains the worker, then stops it")
+      t0 = time.time()
+      builder.succeed("systemctl stop gradient-worker.service")
+      stop_secs = time.time() - t0
+      print(f"gradient-worker stopped in {stop_secs:.1f}s")
+      assert stop_secs < 40, f"an idle worker took {stop_secs:.1f}s to drain"
+      builder.succeed(
+          "journalctl -u gradient-worker --no-pager | grep -q 'draining: no new jobs'"
+      )
+      assert builder.succeed(
+          "systemctl show -p Result --value gradient-worker.service"
+      ).strip() == "success"
+
       banner("Cache test PASSED")
       '';
   });

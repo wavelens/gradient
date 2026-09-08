@@ -151,6 +151,18 @@ pub struct WorkerConfig {
     #[arg(long, env = "GRADIENT_NAR_PARTIAL_TTL_SECS", default_value_t = 86400)]
     pub nar_partial_ttl_secs: u64,
 
+    /// How long a SIGINT/SIGTERM drain waits for in-flight jobs before giving
+    /// up on them. The worker stops accepting work immediately, finishes what
+    /// is running, reports it, and exits; jobs still running at the deadline
+    /// are aborted and re-queued server-side. Default 600 (10 min). Set to 0
+    /// to wait indefinitely, and keep the unit's `TimeoutStopSec` above this.
+    #[arg(
+        long,
+        env = "GRADIENT_WORKER_DRAIN_TIMEOUT_SECS",
+        default_value_t = 600
+    )]
+    pub drain_timeout_secs: u64,
+
     // ── Logging ───────────────────────────────────────────────────────────────
     #[arg(long, env = "GRADIENT_LOG_LEVEL", default_value = "info")]
     pub log_level: String,
@@ -438,6 +450,7 @@ mod tests {
             max_build_cores: None,
             max_nixdaemon_connections: 4,
             nar_partial_ttl_secs: 86400,
+            drain_timeout_secs: 600,
             log_level: "info".to_owned(),
             eval_log_level: None,
             build_log_level: None,
@@ -551,6 +564,7 @@ mod tests {
             max_build_cores: None,
             max_nixdaemon_connections: 4,
             nar_partial_ttl_secs: 86400,
+            drain_timeout_secs: 600,
             log_level: "info".to_owned(),
             eval_log_level: None,
             build_log_level: None,
@@ -627,6 +641,7 @@ mod tests {
             max_build_cores: None,
             max_nixdaemon_connections: 4,
             nar_partial_ttl_secs: 86400,
+            drain_timeout_secs: 600,
             log_level: "info".to_owned(),
             eval_log_level: None,
             build_log_level: None,
