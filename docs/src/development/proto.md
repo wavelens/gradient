@@ -687,7 +687,7 @@ sequenceDiagram
     S->>W: CacheStatus { cached: [{A,cached:true}, {C,cached:true}] }
 ```
 
-The server checks its local NAR store first. For paths not found locally it serves the upstream availability already persisted on `derivation_output.external_url` at eval time, and only then fetches `.narinfo` live from the upstream external caches configured for the project (`project → project_cache → cache → cache_upstream`). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
+The server checks its local NAR store first. For paths not found locally it serves the upstream availability already persisted on `derivation_output.external_url` at eval time, and only then fetches `.narinfo` live from the upstream external caches configured for the project (the project's `project_cache` rows, their `cache`, and each cache's `cache_upstream` entries). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
 
 An entry with `cached: true` is serveable regardless of `url`. In `Normal` mode a `url` only ever names an upstream - a local hit answers presence alone - and the worker downloads that NAR directly from the URL and relays it into the Gradient cache. When the upstream payload is already zstd-compressed with a window of at least 2 MiB - the window zstd level 6 produces (`windowLog` 21) - it is **stored verbatim**: no decompress, no recompress, no rehash, reusing the upstream `file_hash`/`nar_hash` from the narinfo. Only weaker windows (zstd levels 1-2) or non-zstd formats (xz, bzip2, uncompressed) are decompressed, verified against the upstream `nar_hash`, and recompressed at level 6.
 

@@ -528,11 +528,13 @@ in {
           f"WHERE bj.evaluation IN ('{eval_id}', '{eval2_id}') AND NOT d.walked;"
       ))
       assert unwalked == 0, f"{unwalked} derivations of the two evaluations are stubs"
+      edges = int(sql("SELECT count(*) FROM derivation_dependency;"))
+      assert edges > 0, "the graph recorded no dependency edge at all"
       unwalked_deps = int(sql(
           "SELECT count(*) FROM derivation_dependency e JOIN derivation d ON d.id = e.dependency "
           "WHERE NOT d.walked;"
       ))
-      assert unwalked_deps == 0, f"{unwalked_deps} dependency edges point at a stub"
+      assert unwalked_deps == 0, f"{unwalked_deps} of {edges} dependency edges point at a stub"
       j = server.succeed("journalctl -u gradient-server --no-pager")
       for needle in ("pool timed out", "graph call timed out", "graph actor unreachable",
                      "ingest transaction failed", "dropped as stale"):
@@ -650,6 +652,7 @@ in {
           f"SELECT count(*) FROM derivation_dependency e JOIN derivation d ON d.id = e.derivation "
           f"WHERE d.hash = '{drv_hash}';"
       ))
+      assert declared > 0, f"{store_path_drv} declares no input drv; the check would pass on nothing"
       assert declared == recorded, f"hello declares {declared} input drvs, the graph records {recorded}"
 
       # ── Phase 7: verify the cache serves the narinfo ──────────────────────
