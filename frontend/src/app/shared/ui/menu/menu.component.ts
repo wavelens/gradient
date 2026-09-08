@@ -5,7 +5,12 @@
  */
 
 import { ESCAPE } from '@angular/cdk/keycodes';
-import { Overlay, OverlayRef } from '@angular/cdk/overlay';
+import {
+  ConnectedPosition,
+  FlexibleConnectedPositionStrategyOrigin,
+  Overlay,
+  OverlayRef,
+} from '@angular/cdk/overlay';
 import { TemplatePortal } from '@angular/cdk/portal';
 import { disposeAnimated } from '../overlay/overlay-animation';
 import {
@@ -20,6 +25,20 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { MenuItem } from '../types';
+
+const DROPDOWN_POSITIONS: ConnectedPosition[] = [
+  { originX: 'end', originY: 'bottom', overlayX: 'end', overlayY: 'top', offsetY: 4 },
+  { originX: 'end', originY: 'top', overlayX: 'end', overlayY: 'bottom', offsetY: -4 },
+];
+
+// A point origin collapses every corner onto the cursor, so the four entries
+// only differ in which way the panel unfolds when it would leave the viewport.
+const CONTEXT_POSITIONS: ConnectedPosition[] = [
+  { originX: 'start', originY: 'bottom', overlayX: 'start', overlayY: 'top' },
+  { originX: 'end', originY: 'bottom', overlayX: 'end', overlayY: 'top' },
+  { originX: 'start', originY: 'top', overlayX: 'start', overlayY: 'bottom' },
+  { originX: 'end', originY: 'top', overlayX: 'end', overlayY: 'bottom' },
+];
 
 @Component({
   selector: 'gr-menu',
@@ -87,19 +106,32 @@ export class MenuComponent implements OnDestroy {
   }
 
   show(origin: HTMLElement): void {
+    this.attach(origin, DROPDOWN_POSITIONS);
+  }
+
+  /** Opens the menu at the cursor, replacing the browser's own context menu. */
+  openAt(event: MouseEvent): void {
+    event.preventDefault();
+    // The Menu key raises `contextmenu` without pointer coordinates; anchor to
+    // the element it fired on so keyboard users get the panel on their row.
+    const keyboard = event.clientX === 0 && event.clientY === 0;
+    const origin = keyboard
+      ? ((event.currentTarget ?? event.target) as HTMLElement)
+      : { x: event.clientX, y: event.clientY };
+    this.attach(origin, CONTEXT_POSITIONS);
+  }
+
+  private attach(
+    origin: FlexibleConnectedPositionStrategyOrigin,
+    positions: ConnectedPosition[],
+  ): void {
     this.hide();
     this.ref = this.overlay.create({
       hasBackdrop: true,
       backdropClass: 'cdk-overlay-transparent-backdrop',
       panelClass: 'gr-menu-panel',
       scrollStrategy: this.overlay.scrollStrategies.reposition(),
-      positionStrategy: this.overlay
-        .position()
-        .flexibleConnectedTo(origin)
-        .withPositions([
-          { originX: 'end', originY: 'bottom', overlayX: 'end', overlayY: 'top', offsetY: 4 },
-          { originX: 'end', originY: 'top', overlayX: 'end', overlayY: 'bottom', offsetY: -4 },
-        ]),
+      positionStrategy: this.overlay.position().flexibleConnectedTo(origin).withPositions(positions),
     });
     this.ref.backdropClick().subscribe(() => this.hide());
     this.ref.keydownEvents().subscribe((e) => e.keyCode === ESCAPE && this.hide());

@@ -335,9 +335,8 @@ pub async fn get_evaluation_builds(
         let anchor = anchors
             .get(&j.derivation_build)
             .expect("anchor hydrated above");
-        let build_time_ms = attempts
-            .get(&j.derivation_build)
-            .and_then(|a| a.duration_ms());
+        let attempt = attempts.get(&j.derivation_build);
+        let build_time_ms = attempt.and_then(|a| a.duration_ms());
 
         page.push(BuildItem {
             id: j.id,
@@ -346,6 +345,7 @@ pub async fn get_evaluation_builds(
             has_artefacts: has_artefacts.contains(&j.derivation),
             updated_at: anchor.updated_at,
             build_time_ms,
+            dispatched_job: attempt.map(|a| a.dispatched_job),
             depth: *layer,
         });
     }

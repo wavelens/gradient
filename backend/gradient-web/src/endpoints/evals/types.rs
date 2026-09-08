@@ -22,6 +22,9 @@ pub struct BuildItem {
     pub has_artefacts: bool,
     pub updated_at: chrono::NaiveDateTime,
     pub build_time_ms: Option<i64>,
+    /// The dispatched job behind the build's latest attempt - its Job Board
+    /// entry. `None` until the build has been dispatched at least once.
+    pub dispatched_job: Option<DispatchedJobId>,
     /// Dependency layer within the evaluation (0 = a build nothing else in the
     /// list depends on). Secondary sort key after build status, and the key the
     /// client re-sorts locally added builds by.
