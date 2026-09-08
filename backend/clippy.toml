@@ -2,4 +2,5 @@ allow-unwrap-in-tests = true
 
 disallowed-methods = [
     { path = "tokio::task::spawn", reason = "use Shutdown::spawn for a tracked task or Shutdown::supervise for a loop" },
+    { path = "reqwest::Client::new", reason = "use gradient_util::http::build_client, build_download_client or the process-wide download_client; a bare client leaks a pool and panics without a CA bundle" },
 ]
