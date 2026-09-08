@@ -296,12 +296,9 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     // would stay "succeeded" forever and every dependent fail `InputsUnavailable`
     // indefinitely. Reset it to a fresh build intent (Created, real build - not a
     // re-substitute of the deleted artifact); the next eval re-marks it
-    // substitutable if it is genuinely still on an upstream. `edges_complete` is
-    // left intact: `demoted_output` cleared `external_url` (not just `is_cached`),
-    // so the node is on no cache and the next eval re-walks it (pruning keys on
-    // `external_url`) - clearing the flag would only block promotion of a complete-edge
-    // node until that re-walk, stranding innocent demote victims (e.g. a shared dep
-    // swept up by the absent-orphan recovery) behind the closure gate.
+    // substitutable if it is genuinely still on an upstream, having re-walked it
+    // because `demoted_output` cleared `external_url` (not just `is_cached`) and
+    // pruning keys on that.
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
         db.execute_raw(Statement::from_sql_and_values(

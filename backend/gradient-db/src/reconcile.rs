@@ -98,7 +98,6 @@ impl ReconcileScope {
 /// What one reconciliation pass changed. All-zero on a converged graph.
 #[derive(Debug, Default)]
 pub struct ReconcileReport {
-    pub edges_marked: u64,
     pub thawed: u64,
     pub demoted_producers: u64,
     pub cached_reconciled: usize,
@@ -108,8 +107,7 @@ pub struct ReconcileReport {
 
 impl ReconcileReport {
     pub fn is_noop(&self) -> bool {
-        self.edges_marked == 0
-            && self.thawed == 0
+        self.thawed == 0
             && self.demoted_producers == 0
             && self.cached_reconciled == 0
             && self.dependency_failed.is_empty()
@@ -126,13 +124,6 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     let mut report = ReconcileReport::default();
 
     if let Some(evaluation) = scope.evaluation() {
-        match crate::promotion::mark_edges_complete_for_eval(db, evaluation).await {
-            Ok(n) => report.edges_marked = n,
-            Err(e) => {
-                error!(error = %e, %evaluation, "reconcile: mark_edges_complete_for_eval failed")
-            }
-        }
-
         // A prior evaluation's terminal failure is not this one's verdict:
         // thaw across the closure once, now that the closure is known.
         match crate::promotion::requeue_failed_closure_for_eval(db, evaluation).await {
@@ -225,7 +216,6 @@ pub async fn reconcile_build_graph(ctx: &DbContext, scope: ReconcileScope) -> Re
     if !report.is_noop() {
         debug!(
             ?scope,
-            edges_marked = report.edges_marked,
             thawed = report.thawed,
             demoted = report.demoted_producers,
             cached_reconciled = report.cached_reconciled,
