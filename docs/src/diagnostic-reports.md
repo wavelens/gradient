@@ -158,7 +158,7 @@ gradient-report REPORT sql "QUERY"  raw access
 ```
 
 `why-stuck` is the one to reach for first on a hung evaluation: for every anchor
-that never reached a terminal state it names which of `edges_complete`,
+that never reached a terminal state it names which of `walked`,
 `closure_complete` and `drv_closure_cached` is false, and lists the dependencies
 still unfinished underneath it.
 

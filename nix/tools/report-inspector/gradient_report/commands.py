@@ -49,7 +49,9 @@ ATTEMPT_REASON = {
 # evaluation sitting on one of these is waiting rather than finished.
 NON_TERMINAL_BUILD_STATUS = (0, 1, 2, 8)
 
-GATES = ("edges_complete", "closure_complete", "drv_closure_cached")
+# Promotion gates, with the table each one lives on: `walked` is a property of
+# the derivation, the closure gates of its anchor.
+GATES = (("d", "walked"), ("db", "closure_complete"), ("db", "drv_closure_cached"))
 
 
 def _lines(rows: list[str]) -> str:
@@ -159,9 +161,11 @@ def why_stuck(conn: sqlite3.Connection) -> str:
     """For each anchor that never reached a terminal state, name the gate that
     is false and the dependency holding it there."""
     placeholders = ", ".join("?" for _ in NON_TERMINAL_BUILD_STATUS)
+    gate_columns = ", ".join(f"{table}.{column}" for table, column in GATES)
     anchors = conn.execute(
-        f"SELECT id, derivation, status, {', '.join(GATES)} FROM derivation_build "
-        f"WHERE status IN ({placeholders})",
+        f"SELECT db.id, db.derivation, db.status, d.name, {gate_columns} "
+        f"FROM derivation_build db LEFT JOIN derivation d ON d.id = db.derivation "
+        f"WHERE db.status IN ({placeholders})",
         NON_TERMINAL_BUILD_STATUS,
     ).fetchall()
 
@@ -170,11 +174,8 @@ def why_stuck(conn: sqlite3.Connection) -> str:
 
     out = []
     for a in anchors:
-        blocked = [g for g in GATES if not a[g]]
-        name = conn.execute(
-            "SELECT name FROM derivation WHERE id = ?", (a["derivation"],)
-        ).fetchone()
-        label = name["name"] if name else a["derivation"]
+        blocked = [column for _, column in GATES if not a[column]]
+        label = a["name"] or a["derivation"]
 
         if blocked:
             out.append(f"{label}: {BUILD_STATUS.get(a['status'], a['status'])}, waiting on {', '.join(blocked)}")

@@ -523,12 +523,16 @@ in {
       assert only_in_one == 0, f"{only_in_one} derivations are in the first evaluation only"
       duplicates = int(sql("SELECT count(*) - count(DISTINCT hash) FROM derivation;"))
       assert duplicates == 0, f"{duplicates} duplicate derivation rows"
-      gaps = int(sql(
-          f"SELECT count(*) FROM build_job bj JOIN derivation_build db ON db.id = bj.derivation_build "
-          f"WHERE bj.evaluation IN ('{eval_id}', '{eval2_id}') "
-          f"AND (db.edges_unresolved OR NOT db.edges_complete);"
+      unwalked = int(sql(
+          f"SELECT count(*) FROM build_job bj JOIN derivation d ON d.id = bj.derivation "
+          f"WHERE bj.evaluation IN ('{eval_id}', '{eval2_id}') AND NOT d.walked;"
       ))
-      assert gaps == 0, f"{gaps} anchors of the two evaluations lack their edges"
+      assert unwalked == 0, f"{unwalked} derivations of the two evaluations are stubs"
+      unwalked_deps = int(sql(
+          "SELECT count(*) FROM derivation_dependency e JOIN derivation d ON d.id = e.dependency "
+          "WHERE NOT d.walked;"
+      ))
+      assert unwalked_deps == 0, f"{unwalked_deps} dependency edges point at a stub"
       j = server.succeed("journalctl -u gradient-server --no-pager")
       for needle in ("pool timed out", "graph call timed out", "graph actor unreachable",
                      "ingest transaction failed", "dropped as stale"):
@@ -634,6 +638,19 @@ in {
       store_hash = store_path.split("-")[0].replace("/nix/store/", "")
       print(f"Built derivation: {store_path_drv}")
       print(f"Output path:      {store_path}")
+
+      # Every edge a batch declares lands in the batch's own transaction, so the
+      # graph must record exactly the input drvs the `.drv` itself declares.
+      drv_hash = store_path_drv.split("/")[-1].split("-")[0]
+      declared = int(builder.succeed(
+          f"{NIX} derivation show {store_path_drv} --extra-experimental-features nix-command "
+          f"| {JQ} '[.[].inputDrvs | length] | add'"
+      ).strip())
+      recorded = int(sql(
+          f"SELECT count(*) FROM derivation_dependency e JOIN derivation d ON d.id = e.derivation "
+          f"WHERE d.hash = '{drv_hash}';"
+      ))
+      assert declared == recorded, f"hello declares {declared} input drvs, the graph records {recorded}"
 
       # ── Phase 7: verify the cache serves the narinfo ──────────────────────
       # `nix-cache-info` is unauthenticated and always available - a quick
