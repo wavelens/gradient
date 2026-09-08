@@ -38,9 +38,9 @@
 //! SET has been fully flushed by some evaluation, and that knowledge never
 //! regresses - edges are only ever added, anchors die only by `derivation`
 //! cascade, and nothing anywhere writes `edges_complete = false`. The one case
-//! where a flushed edge set is UNTRUSTWORTHY (a declared dependency
-//! `flush_deferred_deps` could not record) is held off promotion by the
-//! separate `edges_unresolved` flag instead of a clear.
+//! where a flushed edge set is UNTRUSTWORTHY (a declared dependency the
+//! evaluation never recorded) is held off promotion by the separate
+//! `edges_unresolved` flag instead of a clear.
 
 use crate::graph_sql::{
     ClosureDirection, bounded_dependency_closure_cte_body, dependency_closure_cte,
@@ -178,6 +178,41 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     ));
 
     Ok(affected)
+}
+
+/// Anchors an evaluation found whole in our cache move from `Created` to
+/// `Substituted`; a new anchor is inserted that way, this catches the ones a
+/// prior evaluation left pending. Returns the transitions for the effects
+/// emitter.
+pub async fn substitute_created_anchors<C: ConnectionTrait>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr> {
+    let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            substitute_created_anchors_sql(),
+            [ids.into()],
+        ))
+        .await?;
+
+    Ok(returned_transitions(rows))
+}
+
+fn substitute_created_anchors_sql() -> String {
+    format!(
+        r#"
+        UPDATE derivation_build AS db
+        SET status = {substituted}, substituted = true, closure_complete = true,
+            updated_at = (now() AT TIME ZONE 'UTC')
+        FROM derivation_build old
+        WHERE old.id = db.id AND db.status = {created} AND db.derivation = ANY($1::uuid[])
+        RETURNING db.derivation, old.status AS from_status, db.status AS to_status
+        "#,
+        substituted = status_sql::build(BuildStatus::Substituted),
+        created = status_sql::build(BuildStatus::Created),
+    )
 }
 
 /// Closure-complete gate for a terminal-success anchor `db`, shared verbatim by
@@ -1196,5 +1231,28 @@ mod tests {
             clear.contains("JOIN cached_path cp") && set.contains("JOIN cached_path cp"),
             "both passes must key on real .drv NAR backing (ground truth): {clear} | {set}"
         );
+    }
+
+    /// Cache presence is the ground truth for "built": a pending anchor whose
+    /// outputs are whole in our cache is settled `Substituted` without a
+    /// dispatch. Only `Created` moves, so a `Queued` anchor already in the
+    /// tracker is not pulled out from under the dispatcher.
+    #[test]
+    fn substitute_created_anchors_moves_only_created_rows() {
+        let sql = substitute_created_anchors_sql()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(sql.contains(&format!(
+            "SET status = {}",
+            status_sql::build(BuildStatus::Substituted)
+        )));
+        assert!(sql.contains(&format!(
+            "db.status = {}",
+            status_sql::build(BuildStatus::Created)
+        )));
+        assert!(sql.contains(
+            "RETURNING db.derivation, old.status AS from_status, db.status AS to_status"
+        ));
     }
 }

@@ -9,19 +9,17 @@
 //! savepoint per batch, and any other message flushes that queue first, which is
 //! what makes a known-derivations query read its callers' earlier writes.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, anyhow};
 use gradient_db::DbContext;
-use gradient_types::ids::EvaluationId;
 use gradient_util::supervision::SupervisorHealth;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
 use sea_orm::TransactionTrait;
 use tracing::{info, warn};
 
-use crate::ingest::{self, EvalEdgeAccumulator};
+use crate::ingest;
 use crate::messages::{
     DemoteReport, Demotion, IngestBatch, IngestReport, NarCommit, NarCommitted, RequeueScope,
     Transition, TransitionReport,
@@ -63,7 +61,6 @@ pub struct GraphArgs {
 pub struct GraphState {
     ctx: DbContext,
     health: Option<Arc<SupervisorHealth>>,
-    edges: HashMap<EvaluationId, EvalEdgeAccumulator>,
     queued: Vec<(IngestBatch, Reply<IngestReport>)>,
     queued_rows: usize,
     flush_pending: bool,
@@ -99,7 +96,6 @@ impl Actor for GraphActor {
         Ok(GraphState {
             ctx: args.ctx,
             health: args.health,
-            edges: HashMap::new(),
             queued: Vec::new(),
             queued_rows: 0,
             flush_pending: false,
@@ -150,9 +146,8 @@ impl Actor for GraphActor {
             }
             GraphMsg::Transition(t, reply) => {
                 flush(st).await;
-                let GraphState { ctx, edges, .. } = st;
-                let result = transact(ctx, GRAPH_TX_BUDGET, async |scoped| {
-                    transition::apply(scoped, edges, t).await
+                let result = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
+                    transition::apply(scoped, t).await
                 })
                 .await;
                 st.record(&result.as_ref().map(|_| ()).map_err(|e| anyhow!("{e}")));
@@ -194,12 +189,11 @@ async fn flush(st: &mut GraphState) {
     let (batches, replies): (Vec<IngestBatch>, Vec<Reply<IngestReport>>) =
         std::mem::take(&mut st.queued).into_iter().unzip();
     st.queued_rows = 0;
-    let GraphState { ctx, edges, .. } = st;
     let batches_ref = &batches;
-    let written = transact(ctx, GRAPH_TX_BUDGET, async |scoped| {
+    let written = transact(&st.ctx, GRAPH_TX_BUDGET, async |scoped| {
         let mut outcomes = Vec::with_capacity(batches_ref.len());
         for batch in batches_ref {
-            outcomes.push(ingest_one(scoped, edges, batch).await);
+            outcomes.push(ingest_one(scoped, batch).await);
         }
 
         Ok(outcomes)
@@ -226,7 +220,6 @@ async fn flush(st: &mut GraphState) {
             warn!(error = %e, batches = replies.len(), "ingest transaction failed; its evaluations are failed");
             st.record(&Err(anyhow!("{e}")));
             for (batch, reply) in batches.into_iter().zip(replies) {
-                st.edges.remove(&batch.evaluation);
                 ingest::fail_evaluation(&st.ctx, batch.evaluation, &e.to_string()).await;
                 let _ = reply.send(Err(anyhow!("{e}")));
             }
@@ -235,16 +228,10 @@ async fn flush(st: &mut GraphState) {
 }
 
 /// One batch under its own savepoint, so a bad batch fails only its caller.
-/// On failure the evaluation's accumulator is dropped with the rolled-back
-/// rows, so no later flush references ids that never landed.
-async fn ingest_one(
-    scoped: &DbContext,
-    edges: &mut HashMap<EvaluationId, EvalEdgeAccumulator>,
-    batch: &IngestBatch,
-) -> anyhow::Result<IngestReport> {
+async fn ingest_one(scoped: &DbContext, batch: &IngestBatch) -> anyhow::Result<IngestReport> {
     let savepoint = Arc::new(scoped.worker_db.begin().await.context("savepoint")?);
     let inner = scoped.in_transaction(Arc::clone(&savepoint));
-    let outcome = ingest::apply_batch(&inner, edges, batch).await;
+    let outcome = ingest::apply_batch(&inner, batch).await;
     drop(inner);
     let savepoint =
         Arc::try_unwrap(savepoint).map_err(|_| anyhow!("a savepoint handle escaped its batch"))?;
@@ -254,7 +241,6 @@ async fn ingest_one(
             Ok(report)
         }
         Err(e) => {
-            edges.remove(&batch.evaluation);
             let _ = savepoint.rollback().await;
             Err(e)
         }
