@@ -498,7 +498,7 @@ graph LR
 |------|----------|---------------------|----------------------|
 | **FetchFlake** | `fetch` + `source: Repository` | `source.url` + `source.commit`, SSH credential | For each fetched path (source + flake inputs): zstd-compressed NAR uploaded via `NarPush` / S3 PUT, followed by `NarUploaded` with full metadata (`file_hash`, `file_size`, `nar_size`, `nar_hash`, `references`). Closing `FetchResult { flake_source: Option<String> }` reports the archived flake source store path - the server passes it to a subsequent eval-only job as `FlakeSource::Cached { store_path }`. |
 | **EvaluateFlake** | `eval` | `wildcards` (attribute patterns), `timeout` (seconds) | `attrs: Vec<String>` - discovered attribute paths |
-| **EvaluateDerivations** | `eval` | (uses attrs from previous step) | `derivations: Vec<DiscoveredDerivation>` - drv paths, outputs, closure, required features; each produced `.drv` is also pushed (compressed) via `NarUploaded` before the batch is reported |
+| **EvaluateDerivations** | `eval` | (uses attrs from previous step) | `derivations: Vec<DiscoveredDerivation>` - the walked derivations' paths, outputs, dependency names, required features; each produced `.drv` is also pushed (compressed) via `NarUploaded` before the batch is reported |
 
 ```rust
 FlakeJob {
@@ -586,11 +586,10 @@ DiscoveredDerivation {
     dependencies: Vec<String>,          // drv paths this depends on
     architecture: String,               // Nix system string, e.g. "x86_64-linux", "builtin"
     required_features: Vec<String>,     // Nix system features needed to build (e.g. "kvm")
-    substituted: bool,                  // all outputs already present in the server's cache
 }
 ```
 
-`substituted: true` means all outputs for this derivation are already present in the **server's binary cache** - no build needed. The worker determines this by querying the server via `CacheQuery` during the closure walk (see below). The server marks these as `Substituted` (7).
+Only derivations the worker actually walked are reported; a dependency the server already knows stays named in its parent's `dependencies` and is never sent as a record of its own. Whether a derivation needs building is the server's call: it marks an anchor `Substituted` (7) when its own cache already holds every output whole.
 
 The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`, `"aarch64-linux"`, `"builtin"`). `"builtin"` means the derivation uses `builtin:fetchurl` or similar - it can run on any worker regardless of architecture.
 
@@ -600,7 +599,7 @@ The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`
 
 | Mode | Use case | Server returns |
 |------|----------|----------------|
-| `Normal` | Eval: mark derivations as substituted | Only cached paths (`cached: true`), no URLs, no metadata |
+| `Normal` | Is this path already in the cache? | Only cached paths (`cached: true`), no URLs, no metadata |
 | `Pull` | Build: fetch required store paths | **All** queried paths. Cached paths carry full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and a presigned S3 GET URL (or `url: None` for local - use `NarRequest`). Uncached paths carry `path` + `cached: false` only, signaling "the server has nothing to offer for this path" - neither in the local cache nor in any configured upstream. Lets the worker hard-fail before importing a dependent with an unsatisfiable reference. |
 | `Push` | Fetch: upload new inputs | **All** queried paths. Cached paths carry only `path` + `cached: true`. Uncached paths carry `path`, `cached: false`, and `url` - a presigned S3 PUT URL on S3-backed stores (`None` on local; worker falls back to `NarPush`). No other metadata, no upstream lookup. |
 | `PullClosure` | Build: fetch a required path and everything it references | `Pull`, widened with the serveable members of each queried path's runtime-reference closure. The server walks `cached_path_reference` itself, so one round trip answers for a whole closure instead of one hop per round trip. A bonus member is only ever included when the cache can serve it, so an uncached entry still means "a path you asked for is missing". The widened list stays under `CACHE_QUERY_MAX_PATHS`, so the reply still fits one frame; anything that does not fit is simply left for the caller's next query. |
@@ -669,23 +668,21 @@ CachedPath {
 
 Both are routed through the worker's `NarReceiver::fail` and surface as a build error instead of a hung task.
 
-**`Normal` mode during `EvaluateDerivations`:**
+**`Normal` mode - is this path already in the cache?**
 
 ```mermaid
 sequenceDiagram
     participant W as Worker
     participant S as Server
 
-    Note over W: closure walk discovers output paths
     W->>S: CacheQuery { mode: Normal, paths: [A, B, C, D, E] }
     Note right of S: checks NAR store (S3 / local)
     S->>W: CacheStatus { cached: [{A,cached:true}, {C,cached:true}] }
-    Note over W: marks A,C derivations as substituted
 ```
 
 The server checks its local NAR store first. For paths not found locally, it fetches `.narinfo` from any upstream external caches configured for the project (`project → project_cache → cache → cache_upstream`). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
 
-The worker marks derivations as `substituted` for all entries with `cached: true` regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL and relays it into the Gradient cache. When the upstream payload is already zstd-compressed with a window of at least 2 MiB - the window zstd level 6 produces (`windowLog` 21) - it is **stored verbatim**: no decompress, no recompress, no rehash, reusing the upstream `file_hash`/`nar_hash` from the narinfo. Only weaker windows (zstd levels 1-2) or non-zstd formats (xz, bzip2, uncompressed) are decompressed, verified against the upstream `nar_hash`, and recompressed at level 6.
+An entry with `cached: true` is serveable regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL and relays it into the Gradient cache. When the upstream payload is already zstd-compressed with a window of at least 2 MiB - the window zstd level 6 produces (`windowLog` 21) - it is **stored verbatim**: no decompress, no recompress, no rehash, reusing the upstream `file_hash`/`nar_hash` from the narinfo. Only weaker windows (zstd levels 1-2) or non-zstd formats (xz, bzip2, uncompressed) are decompressed, verified against the upstream `nar_hash`, and recompressed at level 6.
 
 ### Cache population
 
@@ -733,8 +730,8 @@ sequenceDiagram
     S->>W: CacheStatus { cached: [subset] }
     Note over W: compress + upload each uncached .drv
     W->>S: NarUploaded { ... } ×drvs
-    W->>S: JobUpdate::EvalResult (batch 1: 50 derivations, 12 substituted)
-    Note right of S: inserts rows, marks substituted
+    W->>S: JobUpdate::EvalResult (batch 1: 50 walked derivations)
+    Note right of S: inserts rows, assesses substitution
     W->>S: JobUpdate::EvalResult (batch 2: 30 derivations)
     Note right of S: inserts rows, queues builds
     W->>S: JobCompleted
@@ -746,7 +743,7 @@ Before enqueuing each wave of input-derivation paths, the worker sends `QueryKno
 
  1. Pre-marks all new dep paths as visited (prevents double-enqueuing).
  2. Enqueues **unknown** paths for further BFS traversal.
- 3. For **known** paths, adds a minimal `DiscoveredDerivation` entry (empty outputs/deps) directly to the batch - no further traversal needed. The server-side `DerivationInsertBatch` handles these via its `load_existing_derivations` path and creates build rows normally.
+ 3. For **known** paths, nothing: the path stays in its parent's `dependencies`, and the server records a stub row, the edge and this evaluation's `build_job` from that name. The subtree is never walked twice.
 
 This avoids redundantly re-walking the entire closure of large packages (e.g. stdenv) that were already fully recorded in a previous evaluation of the same project. The server answers `KnownDerivations` from the graph actor, after every evaluation batch queued before the query, so a subtree is never reported known while its edges are still unwritten.
 
@@ -758,15 +755,15 @@ sequenceDiagram
     Note over W: BFS wave - discovers deps [A, B, C, D]
     W->>S: QueryKnownDerivations { drv_paths: [A, B, C, D] }
     S->>W: KnownDerivations { known: [A, C] }
-    Note over W: A, C → add as minimal DiscoveredDerivation<br/>B, D → enqueue for full BFS traversal
+    Note over W: A, C stay named in their parents' dependencies<br/>B, D are enqueued for full BFS traversal
 ```
 
 The server processes each batch immediately:
 
- 1. Insert `derivation`, `derivation_output`, `derivation_dependency` rows.
- 2. Insert `build` rows - `Substituted` for derivations the worker marked as `substituted` (confirmed in cache), `Created` for the rest.
- 3. Create **entry points** for root derivations (those with a non-empty `attr`) - transitive dependencies are not tracked as entry points. Entry points map user-facing packages to their builds for CI reporting and the frontend UI.
- 4. Transition non-substituted builds from `Created` → `Queued` and **immediately dispatch** them to the in-memory job tracker. Workers are notified via `JobOffer` without waiting for the background dispatch loop.
+ 1. Upsert `derivation` rows: a stub for every dependency the batch names, the full record for every derivation it walked (`walked = true`), then `derivation_output`, `derivation_dependency` and `derivation_input_source` rows for the walked ones, each `ON CONFLICT DO NOTHING` on its natural key.
+ 2. Insert `derivation_build` anchors and this evaluation's `build_job` rows for every named derivation. An anchor whose outputs are whole in the gradient cache is `Substituted`; one an upstream serves is `substitutable`; the rest are `Created`.
+ 3. Create **entry points** for root derivations (those with a non-empty `attr`).
+ 4. The dispatch tick promotes `Created` anchors whose derivation is walked and whose dependencies are satisfied, and offers them to workers.
 
 This means builds can start **while evaluation is still in progress**, significantly reducing end-to-end latency for large closures.
 
@@ -1088,7 +1085,7 @@ The worker captures `BuildMetrics` best-effort from each build's cgroup (require
 | `FetchResult` | `evaluation` | Stays `Fetching`; server records `flake_source` as the evaluation's source store path (used later to dispatch eval-only jobs with `FlakeSource::Cached`). `cached_path` rows for the archived NARs were already written by the preceding `NarUploaded` messages. |
 | `EvaluatingFlake` | `evaluation` | `EvaluatingFlake` (1) |
 | `EvaluatingDerivations` | `evaluation` | `EvaluatingDerivation` (2) |
-| `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch; substituted → `Substituted` (7), rest → `Created` (0) → `Queued` (1). Creates `entry_point` rows for root derivations (non-empty `attr`). Immediately dispatches ready builds to workers. First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. Errors stored as `evaluation_message` rows with level `Error`; if `derivations` is empty and `errors` is non-empty, evaluation is immediately marked `Failed`. |
+| `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch: stubs for the dependencies the batch names, full records for the derivations it walked, then anchors and this evaluation's `build_job` rows. An anchor whose outputs the cache already holds whole is `Substituted` (7); the rest are `Created` (0) for the dispatch tick to promote. Creates `entry_point` rows for root derivations (non-empty `attr`). First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. Errors stored as `evaluation_message` rows with level `Error`; if `derivations` is empty and `errors` is non-empty, evaluation is immediately marked `Failed`. |
 | `Building` | `build` | `Building` (2) - per derivation in chain |
 | `BuildOutput` | `build` + `derivation_output` | `Completed` (3); updates output hash/size/path |
 | `Compressing` | - | No status change; informational - packing outputs into zstd NARs |
