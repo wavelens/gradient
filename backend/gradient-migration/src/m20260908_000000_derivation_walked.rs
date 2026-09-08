@@ -8,6 +8,13 @@
 //! edge, input sources) is in. Replaces `derivation_build.edges_complete` and
 //! `edges_unresolved`: a stub row now exists for every named dependency, so an
 //! edge is never deferred and never unresolvable.
+//!
+//! The backfill is one unbatched full-table `UPDATE derivation` followed by
+//! three non-concurrent `CREATE INDEX`, so it holds startup for as long as a
+//! production-sized graph takes. Dropping the two columns also makes this a
+//! stop-migrate-start deploy rather than a rolling one: an old server process
+//! still selecting `derivation_build.edges_complete` fails the moment the
+//! column goes.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;

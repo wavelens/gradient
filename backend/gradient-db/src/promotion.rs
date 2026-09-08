@@ -601,12 +601,13 @@ fn dependency_failed_reconcile_sql(scope: Option<gradient_types::EvaluationId>) 
 }
 
 /// Promote every `Created` anchor whose dependency anchors are all terminal-
-/// success (`Completed`/`Substituted`) to `Queued`. Run once an evaluation's
-/// full dependency graph is written (edges are deferred to stream completion):
-/// this seeds the graph from its leaves and from anchors whose deps were already
-/// cached/substituted at resolve time (for which no completion event ever
-/// fires). Subsequent completions cascade via [`promote_dependents`]. Returns
-/// the changes it made so the caller can feed the effects emitter.
+/// success (`Completed`/`Substituted`) to `Queued`. Only a `walked` derivation
+/// qualifies, so an anchor is weighed no earlier than the batch that wrote its
+/// declared edges: this seeds the graph from its leaves and from anchors whose
+/// deps were already cached/substituted at resolve time (for which no
+/// completion event ever fires). Subsequent completions cascade via
+/// [`promote_dependents`]. Returns the changes it made so the caller can feed
+/// the effects emitter.
 pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<TransitionChange>, DbErr> {
     let rows = db
         .query_all_raw(Statement::from_string(
@@ -650,9 +651,8 @@ fn promote_ready_sql() -> String {
 /// importable, satisfied by either the build-graph `drv_closure_cached` flag or the
 /// `.drv`'s own NAR-closure (`cached_path.closure_complete`, via
 /// [`crate::graph_sql::drv_nar_closure_complete_predicate`]). The flag diverges from
-/// that NAR ground truth when eval pruning leaves a substitutable dep's edges
-/// unrecorded, so keying on it alone stalls a build whose `.drv` closure is in fact
-/// fully cached. Ordered by dependency count desc (integration builds first), then
+/// that NAR ground truth when eval pruning leaves a dependency unwalked, so keying
+/// on it alone stalls a build whose `.drv` closure is in fact fully cached. Ordered by dependency count desc (integration builds first), then
 /// age. This is [`promote_ready`]'s predicate applied one step later - both embed
 /// [`crate::graph_sql::deps_ready_predicate`].
 pub async fn find_ready_anchors<C: ConnectionTrait>(
@@ -1106,9 +1106,9 @@ mod tests {
     /// gate adds the `.drv`-importability arm. That arm accepts either the
     /// build-graph `drv_closure_cached` flag OR the `.drv`'s own NAR-closure
     /// (`cached_path.closure_complete`, the ground truth) - the flag diverges when
-    /// eval pruning leaves edges unrecorded, so keying on it alone dead-zones a
-    /// build whose `.drv` closure is in fact fully cached. A drift between the two
-    /// statements is a latent dead zone.
+    /// eval pruning leaves a dependency unwalked, so keying on it alone dead-zones
+    /// a build whose `.drv` closure is in fact fully cached. A drift between the
+    /// two statements is a latent dead zone.
     #[test]
     fn promotion_and_dispatch_share_the_readiness_predicate() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
