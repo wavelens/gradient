@@ -16,7 +16,7 @@ from gradient_report.db import NotAReport, UnsupportedSchema, open_report
 EVAL_ID = "01a05a38-3276-7252-bc05-c139d9c8a015"
 
 
-def build_report(path, *, schema_version: int = 1, with_instance: bool = True) -> None:
+def build_report(path, *, schema_version: int = 7, with_instance: bool = True) -> None:
     conn = sqlite3.connect(path)
     conn.executescript(
         """
@@ -28,9 +28,9 @@ def build_report(path, *, schema_version: int = 1, with_instance: bool = True) -
         CREATE TABLE evaluation (id TEXT, status INTEGER, created_at TEXT,
             fetch_started_at TEXT, eval_flake_started_at TEXT, eval_drv_started_at TEXT,
             building_started_at TEXT, finished_at TEXT);
-        CREATE TABLE derivation (id TEXT, name TEXT);
+        CREATE TABLE derivation (id TEXT, name TEXT, walked INTEGER);
         CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER,
-            edges_complete INTEGER, closure_complete INTEGER, drv_closure_cached INTEGER);
+            closure_complete INTEGER, drv_closure_cached INTEGER);
         CREATE TABLE derivation_dependency (id TEXT, derivation TEXT, dependency TEXT);
         CREATE TABLE build_attempt (id TEXT, outcome INTEGER, reason INTEGER,
             failure_message TEXT, build_started_at TEXT, build_finished_at TEXT);
@@ -50,10 +50,10 @@ def build_report(path, *, schema_version: int = 1, with_instance: bool = True) -
         " '2026-08-31T23:48:08', '2026-08-31T23:48:08', NULL, NULL)",
         (EVAL_ID,),
     )
-    conn.execute("INSERT INTO derivation VALUES ('d1', 'vendor-registry')")
-    conn.execute("INSERT INTO derivation VALUES ('d2', 'cargo-package-clap_complete-4.6.9')")
-    conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 0, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 1, 1, 1)")
+    conn.execute("INSERT INTO derivation VALUES ('d1', 'vendor-registry', 0)")
+    conn.execute("INSERT INTO derivation VALUES ('d2', 'cargo-package-clap_complete-4.6.9', 1)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 1)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 1, 1)")
     conn.execute("INSERT INTO derivation_dependency VALUES ('dd1', 'd1', 'd2')")
     conn.execute(
         "INSERT INTO build_attempt VALUES ('a1', 3, 8, 'input prefetch failed', "
@@ -125,7 +125,7 @@ def test_manifest_shows_what_was_filtered_out(report):
 def test_why_stuck_names_the_gate_and_the_blocking_dependency(report):
     out = commands.why_stuck(report)
     assert "vendor-registry" in out
-    assert "edges_complete" in out
+    assert "walked" in out
     assert "closure_complete" in out
     assert "drv_closure_cached" not in out.split("waiting on")[1].split("\n")[0]
     assert "cargo-package-clap_complete-4.6.9" in out

@@ -606,7 +606,7 @@ The `architecture` field is a free-form Nix system string (e.g. `"x86_64-linux"`
 
 | Mode | Use case | Server returns |
 |------|----------|----------------|
-| `Normal` | Is this path already in the cache? | Only cached paths (`cached: true`), no URLs, no metadata |
+| `Normal` | Is this path already in the cache? | Only cached paths (`cached: true`). A local hit answers presence alone, with no URL and no import metadata; an upstream hit carries that upstream's NAR URL and the narinfo fields behind it, since that is all the server has to offer for it. |
 | `Pull` | Build: fetch required store paths | **All** queried paths. Cached paths carry full import metadata (`nar_hash`, `references`, `signatures`, `deriver`, `ca`) and a presigned S3 GET URL (or `url: None` for local - use `NarRequest`). Uncached paths carry `path` + `cached: false` only, signaling "the server has nothing to offer for this path" - neither in the local cache nor in any configured upstream. Lets the worker hard-fail before importing a dependent with an unsatisfiable reference. |
 | `Push` | Fetch: upload new inputs | **All** queried paths. Cached paths carry only `path` + `cached: true`. Uncached paths carry `path`, `cached: false`, and `url` - a presigned S3 PUT URL on S3-backed stores (`None` on local; worker falls back to `NarPush`). No other metadata, no upstream lookup. |
 | `PullClosure` | Build: fetch a required path and everything it references | `Pull`, widened with the serveable members of each queried path's runtime-reference closure. The server walks `cached_path_reference` itself, so one round trip answers for a whole closure instead of one hop per round trip. A bonus member is only ever included when the cache can serve it, so an uncached entry still means "a path you asked for is missing". The widened list stays under `CACHE_QUERY_MAX_PATHS`, so the reply still fits one frame; anything that does not fit is simply left for the caller's next query. |
@@ -620,7 +620,7 @@ CacheQuery {
 }
 
 enum QueryMode {
-    Normal,       // return only cached paths - no URLs, no metadata
+    Normal,       // return only cached paths - a local hit is presence only, an upstream hit carries its URL
     Pull,         // return cached paths with full import metadata + presigned GET URL
     Push,         // return all paths with path + cached; uncached also gets presigned PUT URL (S3)
     PullClosure,  // Pull, widened with each path's serveable reference closure
@@ -687,9 +687,9 @@ sequenceDiagram
     S->>W: CacheStatus { cached: [{A,cached:true}, {C,cached:true}] }
 ```
 
-The server checks its local NAR store first. For paths not found locally, it fetches `.narinfo` from any upstream external caches configured for the project (`project → project_cache → cache → cache_upstream`). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
+The server checks its local NAR store first. For paths not found locally it serves the upstream availability already persisted on `derivation_output.external_url` at eval time, and only then fetches `.narinfo` live from the upstream external caches configured for the project (`project → project_cache → cache → cache_upstream`). Found upstream paths are returned with `cached: true` and `url: Some(absolute_nar_url)`.
 
-An entry with `cached: true` is serveable regardless of `url`. For upstream paths (`url: Some`), the worker downloads the NAR directly from the provided URL and relays it into the Gradient cache. When the upstream payload is already zstd-compressed with a window of at least 2 MiB - the window zstd level 6 produces (`windowLog` 21) - it is **stored verbatim**: no decompress, no recompress, no rehash, reusing the upstream `file_hash`/`nar_hash` from the narinfo. Only weaker windows (zstd levels 1-2) or non-zstd formats (xz, bzip2, uncompressed) are decompressed, verified against the upstream `nar_hash`, and recompressed at level 6.
+An entry with `cached: true` is serveable regardless of `url`. In `Normal` mode a `url` only ever names an upstream - a local hit answers presence alone - and the worker downloads that NAR directly from the URL and relays it into the Gradient cache. When the upstream payload is already zstd-compressed with a window of at least 2 MiB - the window zstd level 6 produces (`windowLog` 21) - it is **stored verbatim**: no decompress, no recompress, no rehash, reusing the upstream `file_hash`/`nar_hash` from the narinfo. Only weaker windows (zstd levels 1-2) or non-zstd formats (xz, bzip2, uncompressed) are decompressed, verified against the upstream `nar_hash`, and recompressed at level 6.
 
 ### Cache population
 
@@ -855,7 +855,7 @@ enum ServerMessage {
     AssignJob { job_id: Uuid, dispatch: Uuid, job: Job },  // dispatch is the dispatched_job id the server minted for this hand-out; the server drops a report whose dispatch is not the one it assigned
     AbortJob { job_id: Uuid, reason: String },
     RequestAllScores,                           // startup-only: ask worker to re-send all scores once
-    Draining,                                   // server shutting down; finish work, buffer results, delay reconnect
+    Draining,                                   // server shutting down; finish and report in-flight work, then reconnect with backoff
 
     // Credentials (sent before or alongside AssignJob)
     Credential { kind: CredentialKind, data: Vec<u8> },
@@ -1092,9 +1092,9 @@ The worker captures `BuildMetrics` best-effort from each build's cgroup (require
 | `FetchResult` | `evaluation` | Stays `Fetching`; server records `flake_source` as the evaluation's source store path (used later to dispatch eval-only jobs with `FlakeSource::Cached`). `cached_path` rows for the archived NARs were already written by the preceding `NarUploaded` messages. |
 | `EvaluatingFlake` | `evaluation` | `EvaluatingFlake` (1) |
 | `EvaluatingDerivations` | `evaluation` | `EvaluatingDerivation` (2) |
-| `EvalResult` | `evaluation` + `derivation` + `build` + `entry_point` + `evaluation_message` | Inserts rows per batch: stubs for the dependencies the batch names, full records for the derivations it walked, then anchors and this evaluation's `build_job` rows. An anchor whose outputs the cache already holds whole is `Substituted` (7); the rest are `Created` (0) for the dispatch tick to promote. Creates `entry_point` rows for root derivations (non-empty `attr`). First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. Errors stored as `evaluation_message` rows with level `Error`; if `derivations` is empty and `errors` is non-empty, evaluation is immediately marked `Failed`. |
-| `Building` | `build` | `Building` (2) - per derivation in chain |
-| `BuildOutput` | `build` + `derivation_output` | `Completed` (3); updates output hash/size/path |
+| `EvalResult` | `evaluation` + `derivation` + `derivation_build` + `build_job` + `entry_point` + `evaluation_message` | Inserts rows per batch: stubs for the dependencies the batch names, full records for the derivations it walked, then anchors and this evaluation's `build_job` rows. An anchor whose outputs the cache already holds whole is `Substituted` (7); the rest are `Created` (0) for the dispatch tick to promote. Creates `entry_point` rows for root derivations (non-empty `attr`). First `EvalResult` sets eval to `Building` (3). Warnings stored as `evaluation_message` rows with level `Warning`. Errors stored as `evaluation_message` rows with level `Error`; if `derivations` is empty and `errors` is non-empty, evaluation is immediately marked `Failed`. |
+| `Building` | `derivation_build` | `Building` (2) - per derivation in chain |
+| `BuildOutput` | `derivation_build` + `derivation_output` | `Completed` (3); updates output hash/size/path |
 | `Compressing` | - | No status change; informational - packing outputs into zstd NARs |
 
 `JobCompleted` sets the final terminal status. `JobFailed` sets `Failed` and cascades `DependencyFailed` to downstream builds.
@@ -1407,24 +1407,24 @@ graph TD
 
 ### Server Restart
 
-When the server restarts (deploy, crash, maintenance), workers experience a WebSocket disconnect. The protocol is designed so no work is lost:
+When the server restarts (deploy, crash, maintenance), workers experience a WebSocket disconnect. Nothing is lost from the queue: the interrupted work is abandoned on both sides and re-queued.
 
 **Worker behavior:**
 
  1. Detect disconnect (WebSocket close or missed pong).
- 2. **Keep running in-progress jobs** - do not abort immediately. Results are buffered locally.
+ 2. **Abort every in-flight job.** Its result can never reach the server over the dead writer, and the server re-queues the job on its side, so a job left running would only double-execute after the reconnect. The reference worker fires each job's abort channel as its dispatch loop unwinds (`worker/dispatch.rs`).
  3. **Keep candidate cache and scores in memory** - do not discard.
  4. Reconnect with exponential backoff: 1s → 2s → 4s → ... → 60s max, with jitter.
  5. On reconnect, send `InitConnection` + `WorkerCapabilities` (full re-handshake).
- 6. Send `JobUpdate`/`JobCompleted`/`JobFailed` for any jobs that progressed or finished during the outage. The server matches these by `job_id` **and** the `dispatch` id it assigned, and only within the session that handed the job out - a report for another dispatch (a worker declared dead whose job has since been re-dispatched) is dropped.
+ 6. Report nothing from the previous connection. The server matches every report by `job_id` **and** the `dispatch` id it assigned, and only within the session that handed the job out, so a report a worker buffered across the outage - its job has since been re-dispatched - is dropped.
  7. Send `RequestAllCandidates` (startup-only) to resync the candidate cache (server may have revoked or added candidates during the outage).
  8. Respond to `RequestAllScores` (startup-only, sent by server at handshake) with all cached scores so the server can rebuild its in-memory score table.
 
-**Server behavior on startup:**
+**Server behavior on startup:** `recover_interrupted_work` runs once, before any session opens.
 
- 1. Scan for orphaned jobs: any `build` with status `Building` (2) or `evaluation` with status `Fetching`/`EvaluatingFlake`/`EvaluatingDerivation` that has no connected worker.
- 2. Wait a **grace period** (default: 120s) for workers to reconnect and report results.
- 3. After the grace period, mark remaining orphaned jobs as `Failed` and re-queue them.
+ 1. Abort every orphaned `Running` build attempt - the worker that owned it is gone.
+ 2. Re-queue `Building` anchors (`Building` to `Queued`) for re-dispatch.
+ 3. Abort pre-build in-flight evaluations (`Fetching`/`EvaluatingFlake`/`EvaluatingDerivation`) and their anchors, and force a fresh evaluation: a partly-walked graph is never merged with a new walk's.
  4. Send `RequestAllScores` to each reconnected worker (once, at handshake completion) to rebuild the in-memory score table.
 
 ```mermaid
@@ -1434,12 +1434,12 @@ sequenceDiagram
 
     Note over W: executing job, candidates [J2,J4,J5] cached
     S-xW: server goes down
+    Note over W: in-flight job aborted, its result has nowhere to go
     W--xS: reconnect (backoff)
-    Note over S: server comes back
+    Note over S: server comes back, re-queues the interrupted job
     W->>S: InitConnection { id }
     S->>W: InitAck
     W->>S: WorkerCapabilities
-    W->>S: JobCompleted { buffered job }
     S->>W: RequestAllScores
     W->>S: RequestJobChunk { scores: [{J2,...},{J4,...},{J5,...}] }
     Note over S: score table rebuilt
@@ -1453,7 +1453,7 @@ sequenceDiagram
     W->>S: RequestJob { kind: Build }
 ```
 
-This means short server restarts (< grace period) cause **zero job loss** - workers buffer results and replay them on reconnect. Score state is rebuilt in a single startup round-trip via `RequestAllScores` + `RequestAllCandidates` (both sent exactly once per connection). The 10-second `RequestJob` heartbeat ensures the server recovers the "worker needs work" state even if it restarts and loses that information.
+A server restart therefore costs the work in flight, never a queue entry: the interrupted jobs are aborted worker-side and re-queued server-side, and the next dispatch hands them out again. Score state is rebuilt in a single startup round-trip via `RequestAllScores` + `RequestAllCandidates` (both sent exactly once per connection). The 10-second `RequestJob` heartbeat ensures the server recovers the "worker needs work" state even if it restarts and loses that information.
 
 ### Graceful Server Shutdown
 
@@ -1477,9 +1477,9 @@ offered and assigned nothing more; a session closes as soon as the worker has
 no job in flight, or 20 s after `Draining` at the latest. The rest of the tree
 stops, and the graph actor is stopped after every other child so a draining
 session's last batch still lands. Tracked tasks (NAR writes, action deliveries)
-finish within the 30 s drain budget. Workers, on `Draining`, stop requesting jobs, keep in-flight
-results, and replay them on reconnect; startup recovery re-queues whatever was
-interrupted, so a restart loses no job.
+finish within the 30 s drain budget. Workers, on `Draining`, stop requesting jobs and
+report their in-flight results over the still-open session; startup recovery re-queues
+whatever the 20 s cut-off interrupted, so a restart loses no queue entry.
 
 A server-side `Draining` ends the session, never the worker (#626): the worker
 finishes its last jobs, disconnects, keeps serving any other server it is

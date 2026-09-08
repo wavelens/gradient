@@ -55,7 +55,7 @@ Wildcard segments:
 
 **3. Server-side batch insert** (on each `EvalResult` batch)
 
-Derivations, outputs, dependency edges, and builds are bulk-inserted in chunks of 1 000 rows in FK order: `derivation` → `derivation_output` → `derivation_dependency` → `build`. Substituted builds (already in the worker's store) are inserted with status `Substituted` and immediately eligible for signing.
+Every batch is one transaction in the graph actor: `derivation` rows are upserted (a stub for each named dependency, the full record for each walked derivation), then outputs, dependency edges and input sources for the walked ones, then `derivation_build` anchors and this evaluation's `build_job` rows for every name. A derivation whose outputs are whole in our cache is inserted `Substituted`.
 
 **4. Status transitions**
 
@@ -69,7 +69,7 @@ evaluation:  Queued → Fetching → EvaluatingFlake → EvaluatingDerivation �
 
 `Substituted` is distinct from `Completed`: it means the derivation was already in the local Nix store at evaluation time and never ran on a builder.
 
-Builds promote `Created → Queued` incrementally (#392): as soon as a derivation's full set of direct dependency edges is in the DB - which may happen mid-walk - its build is queued, and the dispatcher (which gates on dependencies, not evaluation status) may start it while later derivations still evaluate. The evaluation row stays in `EvaluatingDerivation` until the walk finishes, then moves to `Building`.
+Builds promote `Created → Queued` incrementally (#392): as soon as a derivation is walked and its dependencies are satisfied - which may happen mid-walk - its build is queued, and the dispatcher (which gates on dependencies, not evaluation status) may start it while later derivations still evaluate. The evaluation row stays in `EvaluatingDerivation` until the walk finishes, then moves to `Building`.
 
 ---
 
