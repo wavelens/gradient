@@ -59,14 +59,17 @@ whose batch fails is marked `Failed` rather than left with a hole, because the
 wire carries no acknowledgement a worker could retry on; and a batch for an
 evaluation that is not streaming (terminal, `Building`, parked) is dropped, so a
 worker that died mid-walk cannot merge late batches into the re-dispatched walk
-once it has completed. Still open for #590: the per-evaluation rewrite of the
-global `substitutable` flag, the per-batch thaw of failed anchors, stub rows for
-named dependencies so no edge stays unresolvable, and a dispatch id that tells
-two walks of one evaluation apart while both stream.
+once it has completed. Two walks of the *same* evaluation are told apart by the
+dispatch id the scheduler mints at assignment: the worker echoes it on every
+report, and a report naming a dispatch its session did not hand out is dropped.
+The one fact a batch writes globally is `substitutable`, only ever set, never
+cleared, and only on an anchor that has not yet succeeded, so one evaluation's
+upstream probe can add a substitution for another walk but never take one away.
 
-On a restart nothing is rebuilt: a message being processed fails to its caller
-and the per-evaluation edge accumulator starts empty (its pending pairs are
-re-derived by the completion flush from the rows already written).
+Nothing is deferred between messages, so a restart leaves no pending graph
+state: a batch's stubs, records, edges, anchors and jobs are one transaction
+that either lands whole or fails to its caller, and a batch still queued for the
+next flush fails the same way.
 
 #### Promotion
 
@@ -234,11 +237,12 @@ still a structural reference of any dependent's `.drv`. A substitutable anchor i
 substitutes its output and never imports its `.drv`, so the gate skips it.
 
 Because the anchor is global and build-once, a new evaluation is treated as a
-fresh build intent: `resolve_anchors` re-queues anchors a previous eval left
-terminal-failed, and the substitute-miss budget is scoped per evaluation. A
-permanent failure (or an exhausted substitute budget) therefore does not poison
-every later evaluation that needs the derivation - the world (upstream cache,
-network) may have changed since it failed.
+fresh build intent: the eval-scoped reconcile thaws every anchor a previous eval
+left terminal-failed across the evaluation's closure
+(`requeue_failed_closure_for_eval`), and the substitute-miss budget is scoped
+per evaluation. A permanent failure (or an exhausted substitute budget)
+therefore does not poison every later evaluation that needs the derivation - the
+world (upstream cache, network) may have changed since it failed.
 
 Only a *genuine* miss counts toward the substitute-miss budget. The worker reports
 `SubstituteUnavailable` (escalation-eligible) only when an output is on no upstream;
