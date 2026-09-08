@@ -683,16 +683,21 @@ A server restart kills every in-flight job, so `recover_interrupted_work` runs
 once at startup to reconcile the durable state the dead process left behind:
 
 - Orphaned `Running` build attempts are marked `Aborted`.
-- `Building` anchors are re-queued to `Queued` for re-dispatch (their evaluation
-  reached the build phase, so their derivations are already walked).
-- Pre-build in-flight evaluations (`Fetching`/`EvaluatingFlake`/
-  `EvaluatingDerivation`) are aborted - their closure was never walked to the
-  end - and their tasks get `ForceEvaluation` so a fresh evaluation
-  re-walks them and writes a complete graph.
+- Every `Building` anchor is reset to `Queued`: the worker that was building it
+  is gone. This is a blanket reset, not a re-dispatch decision - the eval sweep
+  below still aborts the ones no live evaluation wants.
+- Every active evaluation a restart loses is aborted, and its task gets
+  `ForceEvaluation` so a fresh evaluation re-walks it and writes a complete
+  graph. That set is `EvaluationStatus::ACTIVE` minus the two the scheduler
+  re-drives on its own (`Queued`, re-offered by the eval dispatcher, and
+  `Waiting`, picked up by build reconcile), so `Building` is in it: an
+  evaluation that had finished walking is re-evaluated rather than resumed,
+  because nothing else would drive its remaining builds.
 - The anchors those aborted evaluations drove are aborted too
-  (`Created`/`Queued`/`Building` -> `Aborted`), mirroring the explicit-abort
-  path: the builder aborts the evaluation's builds when the server dies, so the
-  server reflects it. A global build-once anchor a still-live evaluation also
-  needs is left running (shared-anchor safety). The forced re-evaluation
-  re-drives the aborted anchors - `requeue_failed_anchors` resets them to
-  `Created` - and they promote once their derivations are walked.
+  (`Created`/`Queued`/`Building` -> `Aborted`), including the ones the
+  `Building` reset just re-queued. This mirrors the explicit-abort path: the
+  builder aborts the evaluation's builds when the server dies, so the server
+  reflects it. A global build-once anchor a still-live evaluation also needs is
+  left running (shared-anchor safety). The forced re-evaluation re-drives the
+  aborted anchors - `requeue_failed_anchors` resets them to `Created` - and they
+  promote once their derivations are walked.
