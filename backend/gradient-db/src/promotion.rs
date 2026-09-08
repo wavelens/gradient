@@ -652,8 +652,9 @@ fn promote_ready_sql() -> String {
 /// `.drv`'s own NAR-closure (`cached_path.closure_complete`, via
 /// [`crate::graph_sql::drv_nar_closure_complete_predicate`]). The flag diverges from
 /// that NAR ground truth when eval pruning leaves a dependency unwalked, so keying
-/// on it alone stalls a build whose `.drv` closure is in fact fully cached. Ordered by dependency count desc (integration builds first), then
-/// age. This is [`promote_ready`]'s predicate applied one step later - both embed
+/// on it alone stalls a build whose `.drv` closure is in fact fully cached.
+/// Ordered by dependency count desc (integration builds first), then age. This is
+/// [`promote_ready`]'s predicate applied one step later - both embed
 /// [`crate::graph_sql::deps_ready_predicate`].
 pub async fn find_ready_anchors<C: ConnectionTrait>(
     db: &C,
