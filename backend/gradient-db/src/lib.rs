@@ -24,6 +24,7 @@ pub mod drv_output_spec;
 pub mod eval_watchdog;
 pub mod gc;
 pub mod graph_sql;
+pub mod nar_closure;
 pub mod permissions;
 pub mod pool;
 pub mod project_cache;
@@ -75,6 +76,9 @@ pub use self::eval_watchdog::{LostCompletion, lost_eval_completions};
 pub use self::gc::*;
 pub use self::graph_sql::{
     ClosureDirection, dependency_closure_cte, eval_closure_cte, reachable_derivations_cte,
+};
+pub use self::nar_closure::{
+    Retired, retire_paths, ripple_unwhole, ripple_whole, seed_references, whole_predicate,
 };
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
 pub use self::project_cache::project_has_writable_cache;
