@@ -16,6 +16,8 @@ use std::time::Duration;
 
 use tracing::error;
 
+use crate::connection_state::RunOutcome;
+
 /// How the previous session ended, as far as reconnect pacing cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionEnd {
@@ -25,15 +27,32 @@ pub enum SessionEnd {
     /// The server refused the session outright - e.g. `Reject` 496 while a
     /// zombie session still owns this worker's slot. Nothing was served.
     Refused,
+    /// The server sent `Draining`: it is going away for a deploy or
+    /// maintenance and will serve nothing more on this session.
+    Drained,
+}
+
+/// Every way a session can end is a reconnect. Only a local shutdown signal
+/// stops the worker, so this mapping is total by construction - a server-side
+/// ending can never become a process exit.
+impl From<RunOutcome> for SessionEnd {
+    fn from(outcome: RunOutcome) -> Self {
+        match outcome {
+            RunOutcome::CleanDisconnect => SessionEnd::Served,
+            RunOutcome::Refused => SessionEnd::Refused,
+            RunOutcome::Drained => SessionEnd::Drained,
+        }
+    }
 }
 
 /// Delay before the next reconnect attempt.
 ///
 /// Reconnecting is only "successful" in the transport sense: the worker can
-/// complete a handshake and still be refused at registration. Treating that as
-/// a healthy connection resets the backoff to its floor, so the worker
-/// hammers the server about once a second until the stale session is reaped.
-/// A refused session therefore escalates instead.
+/// complete a handshake and still be refused at registration, or be drained
+/// again by a server that is still shutting down. Treating either as a healthy
+/// connection resets the backoff to its floor, so the worker hammers the server
+/// about once a second until the stale session is reaped or the deploy lands.
+/// A session that served nothing therefore escalates instead.
 pub fn backoff_after_session(
     previous: Duration,
     end: SessionEnd,
@@ -42,7 +61,7 @@ pub fn backoff_after_session(
 ) -> Duration {
     match end {
         SessionEnd::Served => initial,
-        SessionEnd::Refused => (previous * 2).min(max),
+        SessionEnd::Refused | SessionEnd::Drained => (previous * 2).min(max),
     }
 }
 
@@ -104,6 +123,36 @@ mod tests {
             delay = backoff_after_session(delay, SessionEnd::Refused, initial, max);
             assert_eq!(delay, Duration::from_secs(expected));
         }
+    }
+
+    /// A drained server is coming back (deploy, maintenance restart), so the
+    /// worker must keep reconnecting - but a server still mid-shutdown drains
+    /// every fresh session too, so the delay escalates like a refusal instead
+    /// of resetting to the floor.
+    #[test]
+    fn drained_sessions_escalate_the_backoff() {
+        let initial = Duration::from_secs(1);
+        let max = Duration::from_secs(60);
+
+        let mut delay = initial;
+        for expected in [2, 4, 8, 16, 32, 60, 60] {
+            delay = backoff_after_session(delay, SessionEnd::Drained, initial, max);
+            assert_eq!(delay, Duration::from_secs(expected));
+        }
+    }
+
+    /// Regression for #626: no session outcome ends the worker process. A
+    /// drained session used to return from `main`, and because the unit
+    /// restarts `on-failure` that clean exit left the worker dead until an
+    /// operator restarted it by hand.
+    #[test]
+    fn every_session_outcome_reconnects() {
+        assert_eq!(
+            SessionEnd::from(RunOutcome::CleanDisconnect),
+            SessionEnd::Served
+        );
+        assert_eq!(SessionEnd::from(RunOutcome::Refused), SessionEnd::Refused);
+        assert_eq!(SessionEnd::from(RunOutcome::Drained), SessionEnd::Drained);
     }
 
     /// A session that actually ran restarts from the floor: a genuine network

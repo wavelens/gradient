@@ -31,7 +31,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use gradient_proto::messages::{ClientMessage, JobCandidate, JobKind};
-use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::config::WorkerConfig;
@@ -42,8 +41,13 @@ use crate::executor::{JobExecutor, WorkerEvaluator};
 use crate::nix::store::LocalNixStore;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::scorer::JobScorer;
+use crate::shutdown::Shutdown;
 
 use id::load_or_generate_id;
+
+/// How long a stopping worker waits for the writer task to put its final
+/// reports on the wire.
+const WRITER_FLUSH_BUDGET: std::time::Duration = std::time::Duration::from_secs(10);
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -180,12 +184,9 @@ impl Worker<Connected> {
     /// On an `Err` outcome the disconnected worker is still returned so the
     /// caller can reconnect without losing the executor / credential caches.
     ///
-    /// `shutdown` is observed by the inner `select!`; cancelling it causes
-    /// the loop to exit cleanly with [`RunOutcome::CleanDisconnect`].
-    pub async fn run(
-        self,
-        shutdown: CancellationToken,
-    ) -> (Worker<Disconnected>, Result<RunOutcome>) {
+    /// `shutdown` is observed by the inner `select!`: a drain request finishes
+    /// the in-flight jobs and then ends the loop, an abort ends it at once.
+    pub async fn run(self, shutdown: Shutdown) -> (Worker<Disconnected>, Result<RunOutcome>) {
         let Worker {
             config,
             executor,
@@ -197,7 +198,7 @@ impl Worker<Connected> {
             ..
         } = self;
 
-        let (writer, reader) = conn.split();
+        let (writer, reader, flush) = conn.split();
         let state = dispatch::DispatchState::new(
             writer,
             config.clone(),
@@ -207,7 +208,15 @@ impl Worker<Connected> {
             Arc::clone(&candidates),
             Arc::clone(&last_scores),
         );
-        let outcome = dispatch::run_dispatch_loop(state, reader, shutdown).await;
+        let outcome = dispatch::run_dispatch_loop(state, reader, shutdown.clone()).await;
+
+        // The loop owned the writer, so by now only background tasks can still
+        // hold a clone. A worker on its way out has to see its last reports
+        // leave the queue; a session that ends to be reconnected does not, the
+        // writer task finishes on its own.
+        if shutdown.is_stopping() {
+            flush.flush(WRITER_FLUSH_BUDGET).await;
+        }
 
         let disconnected = Worker {
             config,

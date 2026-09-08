@@ -20,6 +20,7 @@ use futures::{SinkExt, StreamExt};
 use rkyv::rancor::Error as RkyvError;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, tungstenite::Message as TungsteniteMessage,
 };
@@ -286,14 +287,27 @@ impl ProtoSocket {
     /// Peer-role counterpart of [`Self::split`]: read `ServerMessage`, write
     /// `ClientMessage`. Used by the worker after its handshake, which owns
     /// its own runtime and has no shutdown tracker to register against.
+    ///
+    /// The returned handle finishes once every queued frame has reached the
+    /// socket, which is when the last [`MsgWriter`] clone has dropped. A peer
+    /// about to exit awaits it so its final reports leave the queue first.
     #[expect(
         clippy::disallowed_methods,
         reason = "no shutdown tracker on the peer side"
     )]
-    pub fn split_peer(self, send_chunk_timeout: Duration) -> (ServerReader, ClientWriter) {
-        self.split_typed(send_chunk_timeout, |task| {
-            tokio::spawn(task);
-        })
+    pub fn split_peer(
+        self,
+        send_chunk_timeout: Duration,
+    ) -> (ServerReader, ClientWriter, JoinHandle<()>) {
+        let mut writer_task = None;
+        let (reader, writer) = self.split_typed(send_chunk_timeout, |task| {
+            writer_task = Some(tokio::spawn(task));
+        });
+        (
+            reader,
+            writer,
+            writer_task.expect("split_typed always spawns the writer task"),
+        )
     }
 
     fn split_typed<In: WireMessage, Out: WireMessage>(

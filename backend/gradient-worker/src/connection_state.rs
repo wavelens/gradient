@@ -29,12 +29,14 @@ pub struct Disconnected;
 
 // ── RunOutcome ────────────────────────────────────────────────────────────────
 
-/// Why the dispatch loop (`Worker::run`) exited.
-#[derive(Debug)]
+/// Why the dispatch loop (`Worker::run`) exited. Every variant reconnects; the
+/// worker process only ends on a local shutdown signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunOutcome {
     /// Server closed the connection cleanly - reconnecting is appropriate.
     CleanDisconnect,
-    /// Server sent `Draining` - the worker should shut down gracefully.
+    /// Server sent `Draining` - it is going away for a deploy or maintenance.
+    /// In-flight work is finished, then the worker reconnects until it returns.
     Drained,
     /// Server refused the session (post-handshake `Reject`), so nothing was
     /// served. Reconnecting is appropriate but must back off.

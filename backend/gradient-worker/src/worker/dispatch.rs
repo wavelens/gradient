@@ -19,7 +19,6 @@ use gradient_proto::messages::{
     CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage,
 };
 use tokio::sync::{mpsc, watch};
-use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::config::WorkerConfig;
@@ -29,6 +28,7 @@ use crate::executor::timeline::JobTimeline;
 use crate::proto::credentials::CredentialStore;
 use crate::proto::job::{CacheWaiters, JobUpdater, KnownDerivationWaiters};
 use crate::proto::scorer::JobScorer;
+use crate::shutdown::Shutdown;
 
 use super::scoring::{send_score_chunks, spawn_scoring_task};
 
@@ -46,7 +46,7 @@ pub(super) struct LoopEnd {
 pub(super) async fn run_dispatch_loop(
     mut state: DispatchState,
     mut reader: ProtoReader,
-    shutdown: CancellationToken,
+    shutdown: Shutdown,
 ) -> Result<LoopEnd> {
     let mut done_rx = state
         .done_rx
@@ -56,19 +56,40 @@ pub(super) async fn run_dispatch_loop(
     let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
     heartbeat.tick().await;
 
+    let mut local_drain = false;
+
     info!("entering dispatch loop");
 
     loop {
         tokio::select! {
             biased;
 
-            _ = shutdown.cancelled() => {
-                info!("shutdown requested; exiting dispatch loop");
+            _ = shutdown.abort_requested() => {
+                warn!(active = state.jobs.len(), "stop requested; abandoning in-flight jobs");
                 break;
+            }
+
+            // A local signal drains this worker: take nothing new, finish and
+            // report what is running, then exit. A server-side `Draining` is
+            // the other direction entirely and never ends the process (#626).
+            _ = shutdown.drain_requested(), if !local_drain => {
+                local_drain = true;
+                state.begin_drain().await?;
+                if state.jobs.is_idle() {
+                    break;
+                }
+                info!(
+                    active = state.jobs.len(),
+                    "draining: finishing in-flight jobs before shutdown"
+                );
             }
 
             Some((job_id, result)) = done_rx.recv() => {
                 state.on_job_done(job_id, result).await?;
+                if local_drain && state.jobs.is_idle() {
+                    info!("drained: every in-flight job has reported");
+                    break;
+                }
             }
 
             _ = heartbeat.tick() => {
@@ -101,7 +122,9 @@ pub(super) async fn run_dispatch_loop(
     }
 
     Ok(LoopEnd {
-        draining: state.draining,
+        // A local drain sets the same "take no more work" flag, but it is this
+        // worker stopping, not the server going away - never a reconnect.
+        draining: state.draining && !local_drain,
         refused: state.refused,
     })
 }
@@ -124,6 +147,14 @@ struct JobRegistry {
 impl JobRegistry {
     fn active(&self, kind: JobKind) -> u32 {
         self.job_kinds.values().filter(|k| **k == kind).count() as u32
+    }
+
+    fn len(&self) -> usize {
+        self.job_kinds.len()
+    }
+
+    fn is_idle(&self) -> bool {
+        self.job_kinds.is_empty()
     }
 }
 
@@ -199,6 +230,13 @@ impl DispatchState {
             draining: false,
             refused: false,
         }
+    }
+
+    /// Local drain: tell the server to stop offering work so nothing new is
+    /// assigned while the in-flight jobs finish.
+    async fn begin_drain(&mut self) -> Result<()> {
+        self.draining = true;
+        self.writer.send(ClientMessage::Draining).await
     }
 
     fn max_for(&self, kind: JobKind) -> u32 {

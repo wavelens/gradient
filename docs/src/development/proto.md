@@ -310,6 +310,13 @@ sequenceDiagram
 
 The server treats `Draining` as "do not assign new jobs to this worker". The worker is free to disconnect once all in-flight jobs complete.
 
+The reference worker takes this path on SIGINT/SIGTERM: the first signal sends
+`Draining`, keeps the session open until every in-flight job has reported, then
+flushes the writer queue and exits. Jobs still running after
+`drainTimeoutSecs` (default 600 s) are aborted and re-queued server-side, and a
+second signal skips the wait entirely. The unit's `TimeoutStopSec` is derived
+from the budget so systemd never SIGKILLs a build that is about to finish.
+
 ---
 
 ## Job Dispatch
@@ -1473,6 +1480,12 @@ session's last batch still lands. Tracked tasks (NAR writes, action deliveries)
 finish within the 30 s drain budget. Workers, on `Draining`, stop requesting jobs, keep in-flight
 results, and replay them on reconnect; startup recovery re-queues whatever was
 interrupted, so a restart loses no job.
+
+A server-side `Draining` ends the session, never the worker (#626): the worker
+finishes its last jobs, disconnects, keeps serving any other server it is
+connected to, and reconnects to this one with escalating backoff until it is
+back. Only a local signal stops the worker process - a server can never
+decommission a worker it does not own.
 
 ---
 

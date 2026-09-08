@@ -722,7 +722,7 @@ mod tests {
         job_id: String,
         conn: crate::connection::ProtoConnection,
     ) -> (JobUpdater, crate::connection::ProtoReader) {
-        let (writer, reader) = conn.split();
+        let (writer, reader, _flush) = conn.split();
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
         let known_derivation_waiters = Arc::new(Mutex::new(HashMap::new()));
         let nar_recv = NarReceiver::new();
