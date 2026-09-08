@@ -48,9 +48,19 @@ pub(crate) struct ActiveJob {
     pub pending: PendingJob,
 }
 
-/// A report is accepted only from the dispatch this session handed out. A
-/// worker that was declared dead and reconnects still holds its old id, and
-/// the job has been re-dispatched by then.
+/// A report is accepted only when it names the dispatch this session handed
+/// out: `current` is the session's own entry for the job. That covers the
+/// motivating case, a worker declared dead that reconnects, because its fresh
+/// session holds no job at all while the id it buffered names a dispatch the
+/// scheduler has long since re-issued.
+///
+/// It consults no scheduler state, so one hole stays open: a worker the
+/// heartbeat or zombie sweep evicted while its socket is still up keeps its
+/// session map, and a report it sends after the job was re-dispatched to
+/// another worker still matches here. Closing it needs the `DispatchedJobId`
+/// on `JobTracker`'s active entry and the comparison made inside the core
+/// actor that owns the tracker, which belongs with the scheduler work in the
+/// next PR rather than an actor round-trip per report from here.
 pub(super) fn dispatch_matches(current: Option<DispatchedJobId>, reported: &str) -> bool {
     match (current, reported.parse::<DispatchedJobId>()) {
         (Some(current), Ok(reported)) => current == reported,
@@ -305,6 +315,8 @@ impl<'a> DispatchContext<'a> {
     }
 
     /// The dispatch id of `job_id` when this session runs it under `reported`.
+    /// Session-local by construction: [`dispatch_matches`] states what that
+    /// guarantees and what it leaves to the scheduler.
     fn owned(&self, job_id: &str, reported: &str) -> Option<DispatchedJobId> {
         let current = self.active.get(job_id).map(|a| a.dispatch);
         if dispatch_matches(current, reported) {
