@@ -59,8 +59,9 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
     db: &C,
 ) -> Result<ConsistencyReport, DbErr> {
     let closure_gate = crate::promotion::closure_complete_gate();
-    let drv_gate = crate::promotion::DRV_CLOSURE_CACHED_GATE;
+    let drv_gate = crate::promotion::drv_closure_cached_gate();
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");
+    let walked = crate::graph_sql::walked_predicate("db");
     let unbacked = crate::cache_storage::unbacked_trusted_outputs_select();
 
     let stale_closure_complete = count(
@@ -86,7 +87,7 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
         format!(
             "SELECT count(*) AS n FROM derivation_build db \
              WHERE db.status = {created} \
-               AND db.edges_complete \
+               AND {walked} \
                AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) \
                AND (db.substitutable OR ({deps_ready}))",
             created = status_sql::build(BuildStatus::Created),

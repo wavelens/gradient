@@ -27,18 +27,6 @@ pub struct Model {
     pub status: BuildStatus,
     pub substitutable: bool,
     pub substituted: bool,
-    /// True once this anchor's dependency edges have been flushed (at the
-    /// flushing eval's completion). Promotion and dispatch gate on it: an anchor
-    /// created mid-stream by a still-running, failed, or interrupted eval has no
-    /// edges yet and must not be promoted as if it were dependency-free.
-    pub edges_complete: bool,
-    /// True when `flush_deferred_deps` could not resolve one of this anchor's
-    /// declared dependency edges (the dependency derivation was never recorded).
-    /// Its edge set is known-incomplete, so `mark_edges_complete_for_eval` refuses
-    /// to promote it - otherwise a build_job with zero recorded edges would be
-    /// dispatched as dependency-free and fail `InputsUnavailable`. Cleared when a
-    /// later eval resolves every edge.
-    pub edges_unresolved: bool,
     /// True once this anchor reached a terminal-success status (Completed /
     /// Substituted) AND every output's full runtime closure is present in our
     /// cache. Dispatch gates dependents on it: a dep marked done whose closure

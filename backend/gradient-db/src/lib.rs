@@ -81,11 +81,10 @@ pub use self::project_cache::project_has_writable_cache;
 pub use self::project_derivations::derivation_ids_for_project;
 pub use self::project_workers::project_has_eval_capable_worker_registration;
 pub use self::promotion::{
-    cascade_dependency_failed, find_ready_anchors, mark_edges_complete_for_eval,
-    promote_dependents, promote_ready, propagate_closure_complete,
-    reconcile_cached_anchors_for_eval, reconcile_closure_complete, reconcile_dependency_failed,
-    reconcile_drv_closure_cached, requeue_failed_anchors, requeue_failed_closure_for_eval,
-    substitute_created_anchors,
+    cascade_dependency_failed, find_ready_anchors, promote_dependents, promote_ready,
+    propagate_closure_complete, reconcile_cached_anchors_for_eval, reconcile_closure_complete,
+    reconcile_dependency_failed, reconcile_drv_closure_cached, requeue_failed_anchors,
+    requeue_failed_closure_for_eval, substitute_created_anchors,
 };
 pub use self::reachability::{
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
