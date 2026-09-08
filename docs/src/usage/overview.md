@@ -61,6 +61,10 @@ The evaluation log page shows per-build status, combined ANSI build output, and 
 Builds are grouped by status, and within a group listed in dependency order - the entry point first,
 then each dependency layer sorted by name - so a build appears above the builds it needs.
 
+Right-clicking a build in the list opens its actions: **Graph** (the dependency graph), **Show Job**
+(the Job Board entry for the dispatch that ran it), **Artefacts**, and **Download Log**, which saves
+the complete log rather than the portion currently on screen.
+
 Evaluations can also be triggered automatically:
 
 - **GitHub App** - when the App is installed, push events from GitHub trigger evaluations instantly (no polling). See [GitHub App](../configuration.md#github-app).

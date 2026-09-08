@@ -48,6 +48,8 @@ import {
   IconComponent,
   InputDirective,
   LoadingSpinnerComponent,
+  MenuComponent,
+  MenuItem,
   MessageBannerComponent,
 } from '@shared/ui';
 import { commitLabel, formatEvaluationDuration, isRunningEvaluationStatus, parseUtcTimestamp } from '@shared/evaluation';
@@ -56,7 +58,7 @@ import { environment } from '@environments/environment';
 @Component({
   selector: 'app-evaluation-log',
   standalone: true,
-  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, MessageBannerComponent, WritableDirective],
+  imports: [CommonModule, RouterModule, LoadingSpinnerComponent, ButtonComponent, IconComponent, BadgeComponent, EvalStatusBadgeComponent, InputDirective, MenuComponent, MessageBannerComponent, WritableDirective],
   templateUrl: './evaluation-log.component.html',
   changeDetection: ChangeDetectionStrategy.Eager,
   styleUrls: [
@@ -126,6 +128,46 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
   );
 
   visibleBuilds = signal<BuildItem[]>([]);
+
+  // The build the sidebar's right-click menu is acting on - every per-build
+  // action lives there rather than in hover affordances on the row.
+  contextBuild = signal<BuildItem | null>(null);
+
+  buildMenuModel = computed<MenuItem[]>(() => {
+    const build = this.contextBuild();
+    if (!build) return [];
+
+    const inEvaluation = { evalId: this.evaluationId };
+    const job = build.dispatched_job;
+    return [
+      {
+        label: 'Graph',
+        icon: 'account_tree',
+        routerLink: ['/project', this.projectName, 'graph', build.id],
+        queryParams: inEvaluation,
+      },
+      {
+        label: 'Show Job',
+        icon: 'work',
+        disabled: !job,
+        routerLink: job ? ['/board', 'jobs', job] : undefined,
+      },
+      {
+        label: 'Artefacts',
+        icon: 'inventory_2',
+        disabled: !build.has_artefacts,
+        routerLink: build.has_artefacts ? ['/project', this.projectName, 'artefacts', build.id] : undefined,
+        queryParams: inEvaluation,
+      },
+      { separator: true },
+      {
+        label: 'Download Log',
+        icon: 'download',
+        disabled: ['Created', 'Queued'].includes(build.status),
+        command: () => void this.downloadLog(build),
+      },
+    ];
+  });
 
   errorMessages = computed(() => this.messages().filter(m => m.level === 'Error'));
   warningMessages = computed(() => this.messages().filter(m => m.level === 'Warning'));
@@ -564,6 +606,7 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
           has_artefacts: false,
           updated_at: b.updated_at,
           build_time_ms: null,
+          dispatched_job: b.dispatched_job,
           // `?build=` also scopes the list to this build's closure, so it is the
           // root of everything the API returns.
           depth: 0,
@@ -1258,6 +1301,35 @@ export class EvaluationLogComponent implements OnInit, OnDestroy {
 
   isRunningStatus(status: EvaluationStatus): boolean {
     return isRunningEvaluationStatus(status);
+  }
+
+  // ── Build actions ───────────────────────────────────────────────────────────
+
+  openBuildMenu(event: MouseEvent, build: BuildItem, menu: MenuComponent): void {
+    this.contextBuild.set(build);
+    menu.openAt(event);
+  }
+
+  /// Saves the build's complete log, which is not what the page holds in memory:
+  /// the viewer only ever materializes a window of a chunked log.
+  async downloadLog(build: BuildItem): Promise<void> {
+    let log: string;
+    try {
+      const response = await fetch(`${environment.apiUrl}/builds/${build.id}/log`, { credentials: 'include' });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.error || typeof data.message !== 'string') return;
+      log = data.message;
+    } catch {
+      return;
+    }
+
+    const url = URL.createObjectURL(new Blob([log], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${this.buildDisplayName(build.name)}.log`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   // ── Abort ───────────────────────────────────────────────────────────────────

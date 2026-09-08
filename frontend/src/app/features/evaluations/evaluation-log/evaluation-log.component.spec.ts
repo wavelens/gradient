@@ -10,9 +10,10 @@ import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { EvaluationLogComponent } from './evaluation-log.component';
 import { BuildItem } from '@core/services/evaluations.service';
+import { Evaluation } from '@core/models';
 
 function build(id: string, name: string, status = 'Completed', depth = 0): BuildItem {
-  return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, depth };
+  return { id, name, status, has_artefacts: false, updated_at: '', build_time_ms: null, dispatched_job: null, depth };
 }
 
 function setup(): { fixture: ComponentFixture<EvaluationLogComponent>; cmp: EvaluationLogComponent } {
@@ -233,6 +234,120 @@ describe('EvaluationLogComponent', () => {
       expect(cmp.formatWaitingReason(reason)).toBe(
         'Workers are available, but 9 builds are blocked on dependencies. Recovering automatically.',
       );
+    });
+  });
+
+  // Every per-build action lives in the sidebar's right-click menu, so the model
+  // is what decides which of them a given build actually offers.
+  describe('build context menu', () => {
+    function target(over: Partial<BuildItem> = {}): BuildItem {
+      return { ...build('b1', 'hash-hello-1.0.drv'), ...over };
+    }
+
+    function open(cmp: EvaluationLogComponent, item: BuildItem) {
+      cmp.projectName = 'proj';
+      cmp.evaluationId = 'eval-1';
+      cmp.contextBuild.set(item);
+      const labelled = cmp.buildMenuModel().filter((i) => !i.separator);
+      return new Map(labelled.map((i) => [i.label, i]));
+    }
+
+    it('offers graph, job, artefacts and log download for a dispatched build', () => {
+      const { cmp } = setup();
+      const items = open(cmp, target({ dispatched_job: 'job-1', has_artefacts: true }));
+      expect([...items.keys()]).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log']);
+      expect(items.get('Graph')!.routerLink).toEqual(['/project', 'proj', 'graph', 'b1']);
+      expect(items.get('Graph')!.queryParams).toEqual({ evalId: 'eval-1' });
+      expect(items.get('Show Job')!.routerLink).toEqual(['/board', 'jobs', 'job-1']);
+      expect(items.get('Artefacts')!.routerLink).toEqual(['/project', 'proj', 'artefacts', 'b1']);
+      expect([...items.values()].some((i) => i.disabled)).toBe(false);
+    });
+
+    it('disables the job entry for a build that was never dispatched', () => {
+      const { cmp } = setup();
+      expect(open(cmp, target({ dispatched_job: null })).get('Show Job')!.disabled).toBe(true);
+    });
+
+    it('disables artefacts for a build that published none', () => {
+      const { cmp } = setup();
+      expect(open(cmp, target({ has_artefacts: false })).get('Artefacts')!.disabled).toBe(true);
+    });
+
+    it('disables the log download while the build is still queued', () => {
+      const { cmp } = setup();
+      expect(open(cmp, target({ status: 'Queued' })).get('Download Log')!.disabled).toBe(true);
+    });
+
+    it('opens on a right-click anywhere on the build row, for that row', () => {
+      const { fixture, cmp } = setup();
+      fixture.detectChanges();
+      cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as Evaluation);
+      cmp.visibleBuilds.set([target({ id: 'b1' }), target({ id: 'b2', dispatched_job: 'job-2' })]);
+      fixture.detectChanges();
+
+      const rows = fixture.nativeElement.querySelectorAll('.build-item') as NodeListOf<HTMLElement>;
+      rows[1].dispatchEvent(new MouseEvent('contextmenu', { clientX: 9, clientY: 9, bubbles: true, cancelable: true }));
+      fixture.detectChanges();
+
+      expect(cmp.contextBuild()!.id).toBe('b2');
+      const labels = Array.from(document.querySelectorAll('.gr-menu__item span:last-child')).map((e) => e.textContent);
+      expect(labels).toEqual(['Graph', 'Show Job', 'Artefacts', 'Download Log']);
+    });
+
+    it('leaves no hover affordance on the row behind', () => {
+      const { fixture, cmp } = setup();
+      fixture.detectChanges();
+      cmp.evaluation.set({ id: 'eval-1', status: 'Completed', created_at: '2026-01-01T00:00:00', trigger: null } as Evaluation);
+      cmp.visibleBuilds.set([target({ has_artefacts: true })]);
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelectorAll('.build-item a')).toHaveLength(0);
+    });
+  });
+
+  // The download must serve the complete log, not the virtualized window the
+  // page happens to be showing.
+  describe('log download', () => {
+    const objectUrls = URL as unknown as Record<string, unknown>;
+
+    afterEach(() => {
+      delete objectUrls['createObjectURL'];
+      delete objectUrls['revokeObjectURL'];
+    });
+
+    it('saves the whole log under the build display name', async () => {
+      const { cmp } = setup();
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ error: false, message: 'line 1\nline 2\n' }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const created: Blob[] = [];
+      objectUrls['createObjectURL'] = (b: Blob) => (created.push(b), 'blob:log');
+      const revoke = vi.fn();
+      objectUrls['revokeObjectURL'] = revoke;
+      const clicked: HTMLAnchorElement[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+        clicked.push(this);
+      });
+
+      await cmp.downloadLog(build('b1', 'hash-hello-1.0.drv'));
+
+      expect(fetchMock).toHaveBeenCalledWith('/api/v1/builds/b1/log', { credentials: 'include' });
+      expect(await created[0].text()).toBe('line 1\nline 2\n');
+      expect(clicked[0].download).toBe('hello-1.0.log');
+      expect(revoke).toHaveBeenCalledWith('blob:log');
+    });
+
+    it('saves nothing when the log cannot be read', async () => {
+      const { cmp } = setup();
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, json: async () => ({}) }));
+      const create = vi.fn();
+      objectUrls['createObjectURL'] = create;
+
+      await cmp.downloadLog(build('b1', 'hash-hello-1.0.drv'));
+
+      expect(create).not.toHaveBeenCalled();
     });
   });
 

@@ -207,22 +207,3 @@
   }
 }
 
-.build-dl-link,
-.graph-link {
-  display: none;
-  align-items: center;
-  color: var(--gr-text-muted);
-  text-decoration: none;
-  flex-shrink: 0;
-  padding: 2px;
-  border-radius: $border-radius-sm;
-  transition: color $transition-fast, background $transition-fast;
-
-  &:hover {
-    color: var(--gr-text-primary);
-    background: var(--gr-surface-hover);
-  }
-}
-
-.build-item:hover .build-dl-link,
-.build-item:hover .graph-link { display: flex; }

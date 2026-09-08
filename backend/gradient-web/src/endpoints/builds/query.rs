@@ -10,7 +10,7 @@ use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use gradient_core::ServerState;
-use gradient_db::latest_attempt_worker;
+use gradient_db::latest_attempt;
 use gradient_sources::get_path_from_derivation_output;
 use gradient_types::*;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
@@ -31,6 +31,9 @@ pub struct BuildWithOutputs {
     /// Worker identity (the `worker_id` string from `InitConnection`) that
     /// executed this build. `None` if the build never reached a worker.
     pub worker: Option<String>,
+    /// The dispatched job behind the latest attempt - the build's Job Board
+    /// entry. `None` until the build has been dispatched at least once.
+    pub dispatched_job: Option<DispatchedJobId>,
     pub output: HashMap<String, String>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
@@ -69,10 +72,17 @@ pub async fn get_build(
         outputs.insert(output.name, path);
     }
 
-    let worker = latest_attempt_worker(&state.web_db, anchor.id)
+    let attempt = latest_attempt(&state.web_db, anchor.id)
         .await
         .ok()
         .flatten();
+    let worker = match &attempt {
+        Some(a) => gradient_entity::dispatched_job::Entity::find_by_id(a.dispatched_job)
+            .one(&state.web_db)
+            .await?
+            .map(|j| j.worker_id),
+        None => None,
+    };
 
     let build_with_outputs = BuildWithOutputs {
         id: build_job.id,
@@ -81,6 +91,7 @@ pub async fn get_build(
         derivation_path: derivation.drv_path(),
         architecture: derivation.architecture,
         worker,
+        dispatched_job: attempt.map(|a| a.dispatched_job),
         output: outputs,
         created_at: build_job.created_at,
         updated_at: anchor.updated_at,

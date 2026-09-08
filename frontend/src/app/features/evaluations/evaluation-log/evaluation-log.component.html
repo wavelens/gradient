@@ -56,6 +56,8 @@
 
       <div class="builds-list-header">Builds</div>
 
+      <gr-menu #buildMenu [model]="buildMenuModel()" />
+
       @if (scopeBuildId()) {
         <div class="builds-scope-note">
           <span>Only this package's builds</span>
@@ -97,6 +99,7 @@
                   (keydown.space)="$event.preventDefault(); selectBuild(item.build, true)"
                   (keydown.arrowdown)="$event.preventDefault(); selectAdjacentBuild(item.index + 1)"
                   (keydown.arrowup)="$event.preventDefault(); selectAdjacentBuild(item.index - 1)"
+                  (contextmenu)="openBuildMenu($event, item.build, buildMenu)"
                   [title]="item.build.name"
                   tabindex="0"
                   role="option"
@@ -107,26 +110,6 @@
                   @if (getBuildElapsed(item.build)) {
                     <span class="build-elapsed" [class.build-elapsed--running]="item.build.status === 'Building'">{{ getBuildElapsed(item.build) }}</span>
                   }
-                  @if ((item.build.status === 'Completed' || item.build.status === 'Substituted') && item.build.has_artefacts) {
-                    <a
-                      class="build-dl-link"
-                      [routerLink]="['/project', projectName, 'artefacts', item.build.id]"
-                      [queryParams]="{ evalId: evaluationId }"
-                      (click)="$event.stopPropagation()"
-                      title="View build artefacts"
-                    >
-                      <gr-icon name="download" size="sm" />
-                    </a>
-                  }
-                  <a
-                    class="graph-link"
-                    [routerLink]="['/project', projectName, 'graph', item.build.id]"
-                    [queryParams]="{ evalId: evaluationId }"
-                    (click)="$event.stopPropagation()"
-                    title="View dependency graph"
-                  >
-                    <gr-icon name="account_tree" size="sm" />
-                  </a>
                 </div>
               }
             </div>
