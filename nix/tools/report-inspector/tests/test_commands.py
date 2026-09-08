@@ -11,12 +11,12 @@ import sqlite3
 import pytest
 
 from gradient_report import commands
-from gradient_report.db import NotAReport, UnsupportedSchema, open_report
+from gradient_report.db import SUPPORTED_SCHEMA, NotAReport, UnsupportedSchema, open_report
 
 EVAL_ID = "01a05a38-3276-7252-bc05-c139d9c8a015"
 
 
-def build_report(path, *, schema_version: int = 7, with_instance: bool = True) -> None:
+def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance: bool = True) -> None:
     conn = sqlite3.connect(path)
     conn.executescript(
         """
@@ -90,10 +90,19 @@ def report(tmp_path):
     return open_report(path)
 
 
-def test_refuses_a_schema_it_does_not_understand(tmp_path):
+def test_refuses_a_report_newer_than_the_schema_it_reads(tmp_path):
     path = tmp_path / "future.db"
     build_report(path, schema_version=999)
-    with pytest.raises(UnsupportedSchema):
+    with pytest.raises(UnsupportedSchema, match="newer"):
+        open_report(path)
+
+
+# A dropped column is as fatal as an added one: schema 6 has no
+# `derivation.walked`, so opening it would only defer the crash to a command.
+def test_refuses_a_report_older_than_the_schema_it_reads(tmp_path):
+    path = tmp_path / "past.db"
+    build_report(path, schema_version=SUPPORTED_SCHEMA - 1)
+    with pytest.raises(UnsupportedSchema, match="older"):
         open_report(path)
 
 

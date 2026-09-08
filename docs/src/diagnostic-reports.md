@@ -162,6 +162,8 @@ that never reached a terminal state it names which of `walked`,
 `closure_complete` and `drv_closure_cached` is false, and lists the dependencies
 still unfinished underneath it.
 
-The inspector refuses a report whose schema version it does not recognise rather
-than answering from whichever columns still happen to line up. If that happens,
-the report came from a newer Gradient than the tool.
+The inspector reads exactly one report schema version and refuses every other,
+rather than answering from whichever columns still happen to line up. The export
+has both added and dropped columns over its life, so this cuts both ways: a
+refusal means the report is newer than the tool (upgrade the tool) or older than
+it (use the gradient-report of the report's own version). The message says which.
