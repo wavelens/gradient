@@ -9,6 +9,12 @@
 //! `cached_path_reference` when a path becomes or stops being whole, never
 //! re-derived by a sweep. `whole_predicate` is the one definition every gate
 //! reads.
+//!
+//! Because nothing re-derives the counter, every mutation here is a TRANSITION,
+//! never a state: a statement reports a row only when this statement is the one
+//! that flipped it. Seeding an already-whole row or rippling a frontier twice
+//! would decrement referrers past zero, and a negative counter never satisfies
+//! `= 0` again.
 
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
 
@@ -24,8 +30,10 @@ const SEED: &str = r#"
         WHERE r.referrer = cp.hash
           AND r.reference_hash <> cp.hash
           AND NOT (dep.file_hash IS NOT NULL AND dep.missing_references = 0))
-    WHERE cp.hash = $1
-    RETURNING cp.file_hash IS NOT NULL AND cp.missing_references = 0 AS whole
+    FROM cached_path old
+    WHERE old.id = cp.id AND cp.hash = $1
+    RETURNING NOT (old.file_hash IS NOT NULL AND old.missing_references = 0)
+          AND (cp.file_hash IS NOT NULL AND cp.missing_references = 0) AS became_whole
 "#;
 
 const FORWARD: &str = r#"
@@ -35,7 +43,7 @@ const FORWARD: &str = r#"
           WHERE r.reference_hash = ANY($1) AND r.referrer <> r.reference_hash
           GROUP BY r.referrer) c
     WHERE cp.hash = c.referrer
-    RETURNING cp.hash, cp.file_hash IS NOT NULL AND cp.missing_references = 0 AS whole
+    RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = 0) AS whole
 "#;
 
 const REVERSE: &str = r#"
@@ -45,33 +53,45 @@ const REVERSE: &str = r#"
           WHERE r.reference_hash = ANY($1) AND r.referrer <> r.reference_hash
           GROUP BY r.referrer) c
     WHERE cp.hash = c.referrer
-    RETURNING cp.hash, cp.file_hash IS NOT NULL AND cp.missing_references = c.n AS was_whole
+    RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = c.n) AS was_whole
 "#;
 
 const DELETE: &str = r#"
     DELETE FROM cached_path cp WHERE cp.hash = ANY($1)
-    RETURNING cp.hash, cp.file_hash IS NOT NULL AND cp.missing_references = 0 AS was_whole
+    RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = 0) AS was_whole
 "#;
 
-/// Compute the counter of a just-committed row from its references. Returns
-/// whether the row is whole, which is what the caller ripples forward.
+/// Compute the counter of a just-committed row from its references and report
+/// the TRANSITION: `true` only when the row was not whole before this statement
+/// and is whole after it, which is exactly what may be rippled forward. A
+/// re-committed NAR that was already whole returns `false`, so its referrers are
+/// not decremented a second time. `false` too when no such row exists.
+///
+/// The pre-update value comes from a `FROM cached_path old` self-join on the
+/// primary key; Postgres evaluates `old` against the statement's snapshot.
 pub async fn seed_references<C: ConnectionTrait>(db: &C, hash: &str) -> Result<bool, DbErr> {
-    let row = db
+    let Some(row) = db
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             SEED,
             [hash.into()],
         ))
-        .await?;
+        .await?
+    else {
+        return Ok(false);
+    };
 
-    Ok(row
-        .and_then(|r| r.try_get::<bool>("", "whole").ok())
-        .unwrap_or(false))
+    row.try_get::<bool>("", "became_whole")
 }
 
 /// One level per statement: decrement the referrers of the frontier and
 /// continue from those that reached zero. Returns every hash that became
 /// whole, the seeds included.
+///
+/// Every seed must be a row that JUST became whole (see [`seed_references`]),
+/// and no seed may reference another seed: the statement decrements a referrer
+/// once per edge into the batch, so a seed that was already whole, or one whose
+/// referrer is itself a seed, drives that referrer's counter below zero.
 pub async fn ripple_whole<C: ConnectionTrait>(
     db: &C,
     became_whole: Vec<String>,
@@ -82,6 +102,10 @@ pub async fn ripple_whole<C: ConnectionTrait>(
 /// The reverse: increment the referrers of the frontier and continue from
 /// those that were whole before. Returns every hash that stopped being whole,
 /// the seeds included.
+///
+/// The mirror precondition holds: every seed must be a row that JUST stopped
+/// being whole, and no seed may reference another seed, or a referrer is
+/// incremented twice for one loss.
 pub async fn ripple_unwhole<C: ConnectionTrait>(
     db: &C,
     stopped_being_whole: Vec<String>,
@@ -106,12 +130,15 @@ async fn ripple<C: ConnectionTrait>(
             ))
             .await?;
 
-        frontier = rows
-            .iter()
-            .filter(|r| r.try_get::<bool>("", flag).unwrap_or(false))
-            .filter_map(|r| r.try_get::<String>("", "hash").ok())
-            .collect();
-        all.extend(frontier.iter().cloned());
+        let mut next = Vec::new();
+        for row in rows {
+            if row.try_get::<bool>("", flag)? {
+                next.push(row.try_get::<String>("", "hash")?);
+            }
+        }
+
+        all.extend(next.iter().cloned());
+        frontier = next;
     }
 
     Ok(all)
@@ -129,6 +156,13 @@ pub struct Retired {
 /// were whole, `is_cached` off the outputs, and the anchor flags the rows
 /// backed (`drv_closure_cached` on the owners of a deleted `.drv`,
 /// `closure_complete` on the producers of every hash that stopped being whole).
+///
+/// The delete is unconditional and `cached_path_signature.cached_path` is
+/// `ON DELETE CASCADE`, so every cache's signature on a retired path goes with
+/// it. Deciding which paths MAY be dropped is the caller's: an eviction serving
+/// one cache must first exclude the paths another cache still signs (the TTL
+/// sweep filters on `NOT EXISTS (SELECT 1 FROM cached_path_signature ...)`),
+/// and pass only the survivors here.
 pub async fn retire_paths<C: ConnectionTrait>(db: &C, hashes: &[String]) -> Result<Retired, DbErr> {
     if hashes.is_empty() {
         return Ok(Retired::default());
@@ -142,15 +176,16 @@ pub async fn retire_paths<C: ConnectionTrait>(db: &C, hashes: &[String]) -> Resu
         ))
         .await?;
 
-    let deleted: Vec<String> = rows
-        .iter()
-        .filter_map(|r| r.try_get::<String>("", "hash").ok())
-        .collect();
-    let were_whole: Vec<String> = rows
-        .iter()
-        .filter(|r| r.try_get::<bool>("", "was_whole").unwrap_or(false))
-        .filter_map(|r| r.try_get::<String>("", "hash").ok())
-        .collect();
+    let mut deleted = Vec::with_capacity(rows.len());
+    let mut were_whole = Vec::new();
+    for row in rows {
+        let hash = row.try_get::<String>("", "hash")?;
+        if row.try_get::<bool>("", "was_whole")? {
+            were_whole.push(hash.clone());
+        }
+
+        deleted.push(hash);
+    }
 
     let unwhole = ripple_unwhole(db, were_whole).await?;
 
@@ -203,6 +238,10 @@ mod tests {
         ])
     }
 
+    fn flag_row(flag: &str, value: bool) -> BTreeMap<String, Value> {
+        BTreeMap::from([(flag.to_owned(), Value::from(value))])
+    }
+
     fn statements(db: sea_orm::DatabaseConnection) -> Vec<String> {
         db.into_transaction_log()
             .iter()
@@ -218,16 +257,85 @@ mod tests {
         let sql = norm(SEED);
         assert!(sql.contains("LEFT JOIN cached_path dep ON dep.hash = r.reference_hash"));
         assert!(sql.contains("r.reference_hash <> cp.hash"));
-        assert!(sql.contains("NOT (dep.file_hash IS NOT NULL AND dep.missing_references = 0)"));
         assert!(
-            sql.contains(
-                "RETURNING cp.file_hash IS NOT NULL AND cp.missing_references = 0 AS whole"
-            )
+            sql.contains(&format!("AND NOT {}", whole_predicate("dep"))),
+            "{sql}"
         );
         assert_eq!(
             norm(&whole_predicate("cp")),
             "(cp.file_hash IS NOT NULL AND cp.missing_references = 0)"
         );
+    }
+
+    /// The seed reports a transition, not a state: re-committing an already-whole
+    /// path must not be rippled, or every referrer is decremented a second time
+    /// and lands below zero, where no gate can ever see it as whole again.
+    #[tokio::test]
+    async fn the_seed_reports_the_transition_not_the_state() {
+        let sql = norm(SEED);
+        assert!(sql.contains("FROM cached_path old"));
+        assert!(sql.contains("WHERE old.id = cp.id AND cp.hash = $1"));
+        assert!(
+            sql.contains(&format!(
+                "RETURNING NOT {} AND {} AS became_whole",
+                whole_predicate("old"),
+                whole_predicate("cp")
+            )),
+            "{sql}"
+        );
+
+        for (became_whole, expected) in [(true, true), (false, false)] {
+            let db = MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([vec![flag_row("became_whole", became_whole)]])
+                .into_connection();
+
+            assert_eq!(seed_references(&db, "h").await.unwrap(), expected);
+        }
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .into_connection();
+
+        assert!(!seed_references(&db, "absent").await.unwrap());
+    }
+
+    /// Both ripples move a referrer once per edge into the frontier, so the
+    /// per-referrer edge count and the self-exclusion are what keeps the counter
+    /// sound.
+    #[test]
+    fn both_ripples_count_edges_per_referrer_and_exclude_self_references() {
+        for sql in [norm(FORWARD), norm(REVERSE)] {
+            assert!(
+                sql.contains("count(*) AS n FROM cached_path_reference r"),
+                "{sql}"
+            );
+            assert!(sql.contains("r.reference_hash = ANY($1)"), "{sql}");
+            assert!(sql.contains("r.referrer <> r.reference_hash"), "{sql}");
+            assert!(sql.contains("GROUP BY r.referrer"), "{sql}");
+            assert!(sql.contains("WHERE cp.hash = c.referrer"), "{sql}");
+        }
+
+        assert!(norm(FORWARD).contains("SET missing_references = cp.missing_references - c.n"));
+        assert!(norm(REVERSE).contains("SET missing_references = cp.missing_references + c.n"));
+    }
+
+    /// `RETURNING` sees the row after the update, so the forward ripple and the
+    /// delete return the wholeness predicate itself, while the reverse ripple
+    /// compares against `c.n`: the counter equals what was just added exactly
+    /// when it was zero before, i.e. when the row was whole.
+    #[test]
+    fn every_returning_predicate_reads_the_one_wholeness_definition() {
+        assert!(norm(FORWARD).contains(&format!(
+            "RETURNING cp.hash, {} AS whole",
+            whole_predicate("cp")
+        )));
+        assert!(norm(DELETE).contains(&format!(
+            "RETURNING cp.hash, {} AS was_whole",
+            whole_predicate("cp")
+        )));
+        assert!(norm(REVERSE).contains(
+            "RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = c.n) AS was_whole"
+        ));
     }
 
     /// The forward ripple decrements every referrer of the frontier once per
@@ -267,6 +375,7 @@ mod tests {
 
         assert_eq!(unwhole, vec!["gone".to_owned(), "r1".to_owned()]);
         let log = statements(db);
+        assert_eq!(log.len(), 2, "one statement per level: {log:?}");
         assert!(log[0].contains("missing_references + c.n") && log[0].contains("\"gone\""));
         assert!(
             log[1].contains("\"r1\"") && !log[1].contains("\"r2\""),
@@ -274,9 +383,22 @@ mod tests {
         );
     }
 
+    /// A decode failure must not read as "not whole": that would truncate the
+    /// ripple and leave referrers unwhole forever, with no sweep behind it.
+    #[tokio::test]
+    async fn a_ripple_row_that_does_not_decode_is_an_error_not_a_dead_end() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![row("r1", "misspelled", true)]])
+            .into_connection();
+
+        assert!(ripple_whole(&db, vec!["seed".to_owned()]).await.is_err());
+    }
+
     /// Retiring seeds the reverse ripple only from rows that were whole: a
     /// referrer of a row that was already incomplete counted it as missing
-    /// already, so it must not be incremented twice.
+    /// already, so it must not be incremented twice. The flag clears then split:
+    /// `is_cached` follows what was deleted, the anchor flags follow what stopped
+    /// being whole.
     #[tokio::test]
     async fn retire_ripples_only_from_rows_that_were_whole() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -301,12 +423,32 @@ mod tests {
         assert_eq!(retired.deleted, vec!["a".to_owned(), "b".to_owned()]);
         assert_eq!(retired.unwhole, vec!["a".to_owned()]);
         let log = statements(db);
+        assert_eq!(
+            log.len(),
+            5,
+            "delete, one ripple level, three flag clears: {log:?}"
+        );
         assert!(log[0].contains("DELETE FROM cached_path") && log[0].contains("RETURNING"));
         assert!(
             log[1].contains("missing_references + c.n")
                 && log[1].contains("\"a\"")
                 && !log[1].contains("\"b\"")
         );
+        assert!(
+            log[2].contains("is_cached = false")
+                && log[2].contains("\"a\"")
+                && log[2].contains("\"b\""),
+            "is_cached follows every deleted hash: {log:?}"
+        );
+        for clear in &log[3..] {
+            assert!(
+                clear.contains("\"a\"") && !clear.contains("\"b\""),
+                "the anchor flags follow only what stopped being whole: {log:?}"
+            );
+        }
+
+        assert!(log[3].contains("drv_closure_cached = false"));
+        assert!(log[4].contains("closure_complete = false"));
     }
 
     /// Nothing to retire is a no-op: no statement at all.
