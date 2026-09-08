@@ -5,8 +5,9 @@
  */
 
 //! Writing one worker batch of discovered derivations into the graph: a stub
-//! row for every dependency it names, the walked records, their edges, the
-//! anchors and this evaluation's jobs, all inside the actor's transaction.
+//! row for every dependency it names, the walked records, the outputs and edges
+//! of every derivation it reports, the anchors and this evaluation's jobs, all
+//! inside the actor's transaction.
 
 use std::collections::{HashMap, HashSet};
 
@@ -93,9 +94,12 @@ impl BatchWriter<'_> {
         let mut fixed_output: Vec<bool> = Vec::new();
         let mut allow_substitutes: Vec<bool> = Vec::new();
         for d in derivations {
-            let Some((hash, name)) = drv_hash_name(&d.drv_path) else {
-                continue;
-            };
+            let (hash, name) = drv_hash_name(&d.drv_path).ok_or_else(|| {
+                anyhow!(
+                    "reported derivation is not a derivation path: {}",
+                    d.drv_path
+                )
+            })?;
             if !seen.insert(hash.clone()) {
                 continue;
             }
@@ -140,27 +144,36 @@ impl BatchWriter<'_> {
             .collect())
     }
 
+    /// A stub for every dependency the batch names and does not itself carry.
+    /// An unparseable dependency path fails the batch: the source would
+    /// otherwise commit `walked = true` with an edge missing, and `walked`
+    /// never regresses, so no later walk would repair it.
     async fn insert_stubs(&self, derivations: &[DiscoveredDerivation]) -> Result<()> {
         let walked: HashSet<&str> = derivations.iter().map(|d| d.drv_path.as_str()).collect();
         let mut seen = HashSet::new();
         let mut ids: Vec<uuid::Uuid> = Vec::new();
         let mut hashes: Vec<String> = Vec::new();
         let mut names: Vec<String> = Vec::new();
-        for dep in derivations.iter().flat_map(|d| d.dependencies.iter()) {
-            if walked.contains(dep.as_str()) {
-                continue;
-            }
+        for d in derivations {
+            for dep in &d.dependencies {
+                if walked.contains(dep.as_str()) {
+                    continue;
+                }
 
-            let Some((hash, name)) = drv_hash_name(dep) else {
-                continue;
-            };
-            if !seen.insert(hash.clone()) {
-                continue;
-            }
+                let (hash, name) = drv_hash_name(dep).ok_or_else(|| {
+                    anyhow!(
+                        "derivation {} depends on {dep}, which is not a derivation path",
+                        d.drv_path
+                    )
+                })?;
+                if !seen.insert(hash.clone()) {
+                    continue;
+                }
 
-            ids.push(DerivationId::now_v7().into_inner());
-            hashes.push(hash);
-            names.push(name);
+                ids.push(DerivationId::now_v7().into_inner());
+                hashes.push(hash);
+                names.push(name);
+            }
         }
 
         if hashes.is_empty() {
@@ -233,25 +246,20 @@ impl BatchWriter<'_> {
             .collect())
     }
 
-    /// Outputs and edges of the derivations this batch flipped to walked.
+    /// Outputs and edges of every derivation the batch reports, not only the
+    /// ones it flipped to walked. Both inserts are conflict-guarded no-ops on a
+    /// record already written, and re-asserting the full declared set on every
+    /// walk is the only repair a graph that lost an edge ever gets.
     async fn insert_records(
         &self,
         derivations: &[DiscoveredDerivation],
         ids: &HashMap<String, DerivationId>,
-        newly_walked: &HashSet<String>,
     ) -> Result<()> {
         let now = gradient_types::now();
         let mut outputs: Vec<ADerivationOutput> = Vec::new();
         let mut edge_from: Vec<uuid::Uuid> = Vec::new();
         let mut edge_to: Vec<uuid::Uuid> = Vec::new();
         for d in derivations {
-            let Some((hash, _)) = drv_hash_name(&d.drv_path) else {
-                continue;
-            };
-            if !newly_walked.contains(&hash) {
-                continue;
-            }
-
             let Some(&id) = ids.get(&d.drv_path) else {
                 continue;
             };
@@ -743,9 +751,7 @@ pub(crate) async fn apply_batch(ctx: &DbContext, batch: &IngestBatch) -> Result<
         let newly_walked = writer.upsert_walked(&batch.derivations).await?;
         writer.insert_stubs(&batch.derivations).await?;
         let ids = writer.resolve_ids(&batch.derivations).await?;
-        writer
-            .insert_records(&batch.derivations, &ids, &newly_walked)
-            .await?;
+        writer.insert_records(&batch.derivations, &ids).await?;
         writer.persist_input_sources(&batch.derivations, &ids).await;
         writer.persist_upstream_hits(&batch.upstream_hits).await;
         writer
@@ -910,7 +916,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
-            .append_exec_results(vec![ok(1); 8])
+            .append_exec_results(vec![ok(1); 2])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
 
@@ -951,6 +957,94 @@ mod tests {
         assert!(
             log[stub].contains(&b.hash) && !log[walked].contains(&b.hash),
             "the dependency is a stub, not a walked row: {log:?}"
+        );
+    }
+
+    /// A batch delivered a second time flips nothing: the walked upsert's
+    /// `WHERE NOT derivation.walked` predicate returns no row, so `RETURNING`
+    /// still means "this batch flipped it" and the report counts none. The
+    /// batch does re-assert its records, which is the repair path for a lost
+    /// edge, so every write it repeats has to be conflict-guarded.
+    #[tokio::test]
+    async fn a_redelivered_batch_flips_nothing_and_only_repeats_guarded_writes() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([Vec::<MDerivation>::new()])
+            .append_query_results([vec![a.clone(), b.clone()]])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_exec_results(vec![ok(0); 2])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        let report = apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            report.walked, 0,
+            "an already walked derivation is not a flip"
+        );
+        drop(ctx);
+        let log: Vec<String> = pool
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        let writes: Vec<&String> = log
+            .iter()
+            .filter(|s| s.contains("INSERT INTO derivation"))
+            .collect();
+        assert!(
+            writes
+                .iter()
+                .any(|s| s.contains("INSERT INTO derivation_dependency")),
+            "the batch re-asserts its edges even though it flipped nothing: {log:?}"
+        );
+        assert!(
+            writes.iter().all(|s| s.contains("ON CONFLICT")),
+            "every graph write a re-delivered batch repeats lands on no row: {writes:?}"
+        );
+    }
+
+    /// A dependency path that is not a derivation path fails the batch instead
+    /// of dropping the edge: the source would otherwise commit `walked = true`
+    /// dependency-blind, and `walked` never regresses.
+    #[tokio::test]
+    async fn an_unparseable_dependency_fails_the_batch() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, _) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .into_connection();
+        let (ctx, _pool) = ctx(db).await;
+
+        let err = apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &["not-a-store-path"])],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("an unparseable dependency fails the batch");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains(A) && msg.contains("not-a-store-path"),
+            "the failure names the derivation and the offending path: {msg}"
         );
     }
 
