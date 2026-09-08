@@ -1423,9 +1423,10 @@ When the server restarts (deploy, crash, maintenance), workers experience a WebS
 **Server behavior on startup:** `recover_interrupted_work` runs once, before any session opens.
 
  1. Abort every orphaned `Running` build attempt - the worker that owned it is gone.
- 2. Re-queue `Building` anchors (`Building` to `Queued`) for re-dispatch.
- 3. Abort pre-build in-flight evaluations (`Fetching`/`EvaluatingFlake`/`EvaluatingDerivation`) and their anchors, and force a fresh evaluation: a partly-walked graph is never merged with a new walk's.
- 4. Send `RequestAllScores` to each reconnected worker (once, at handshake completion) to rebuild the in-memory score table.
+ 2. Reset every `Building` anchor to `Queued` - the worker that was building it is gone.
+ 3. Abort every active evaluation a restart loses (every `ACTIVE` status except `Queued`, re-offered by the eval dispatcher, and `Waiting`, picked up by build reconcile) and set `ForceEvaluation` on its task: a partly-walked graph is never merged with a new walk's, and a `Building` evaluation is re-evaluated too rather than resumed.
+ 4. Abort the anchors those evaluations drove (`Created`/`Queued`/`Building`), the ones step 2 just re-queued included, unless a still-live evaluation needs them as well. The forced re-evaluation resets them to `Created` and they promote again once their derivations are walked.
+ 5. Send `RequestAllScores` to each reconnected worker (once, at handshake completion) to rebuild the in-memory score table.
 
 ```mermaid
 sequenceDiagram
