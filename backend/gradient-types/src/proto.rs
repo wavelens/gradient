@@ -288,8 +288,7 @@ pub enum EvalCachePushMode {
 #[rkyv(derive(Debug, PartialEq))]
 pub enum QueryMode {
     /// Return only paths that are already in the cache (`cached: true`).
-    /// No presigned URLs are generated.  This is the default and is used
-    /// during evaluation to determine which derivations are substituted.
+    /// No presigned URLs are generated. This is the default.
     #[default]
     Normal,
     /// Return cached paths with a presigned S3 GET URL in `url`.
@@ -417,7 +416,6 @@ pub struct DiscoveredDerivation {
     pub is_fixed_output: bool,
     pub allow_substitutes: bool,
     pub pname: Option<String>,
-    pub substituted: bool,
 }
 
 #[derive(Archive, Serialize, Deserialize, Debug, Clone, PartialEq)]

@@ -153,7 +153,6 @@ pub fn load_store(dir: &Path) -> StoreFixture {
                     .map(String::as_str)
                     .unwrap_or(""),
             ),
-            substituted: false,
         });
     }
 
