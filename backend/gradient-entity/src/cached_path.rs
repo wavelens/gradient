@@ -17,9 +17,8 @@ use crate::ids::CachedPathId;
 /// `hash`). Association with specific caches and their signatures is via
 /// `cached_path_signature`. This row is the AUTHORITATIVE narinfo source for
 /// anything in our cache; `derivation_output`'s narinfo fields are only an
-/// upstream-resolution snapshot for paths not yet pulled. `closure_complete`
-/// is derived (references ground truth) and maintained by
-/// `reconcile_cached_path_closure_complete`.
+/// upstream-resolution snapshot for paths not yet pulled.
+/// `missing_references` is maintained by `gradient_db::nar_closure`.
 #[derive(Clone, Debug, Default, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "cached_path")]
 pub struct Model {
@@ -42,6 +41,10 @@ pub struct Model {
     /// present and closure-complete - i.e. the whole runtime closure is in our
     /// cache. Maintained inductively on ingest; cleared when a member is purged.
     pub closure_complete: bool,
+    /// References (self excluded) whose row is absent, unbacked or itself not
+    /// whole. Seeded at commit, moved by the reference ripple; `0` on a backed
+    /// row means the whole runtime closure is in our cache.
+    pub missing_references: i32,
     /// Content-address field, if the path is content-addressed.
     pub ca: Option<String>,
     /// Full `.drv` path that produced this output, if known.
@@ -76,5 +79,10 @@ impl Model {
     /// absent `file_hash` means the upload is pending or failed.
     pub fn is_fully_cached(&self) -> bool {
         self.file_hash.is_some()
+    }
+
+    /// The NAR is stored and every reference resolves to a whole row.
+    pub fn is_whole(&self) -> bool {
+        self.file_hash.is_some() && self.missing_references == 0
     }
 }

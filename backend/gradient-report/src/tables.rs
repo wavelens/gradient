@@ -356,8 +356,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "cached_path",
-            "CREATE TABLE cached_path (id TEXT, hash TEXT, package TEXT, file_hash TEXT, file_size INTEGER, nar_size INTEGER, nar_hash TEXT, ca TEXT, created_at TEXT, deriver TEXT, closure_complete INTEGER)",
-            "SELECT c.id::text, c.hash::text, c.package::text, c.file_hash::text, c.file_size::text, c.nar_size::text, c.nar_hash::text, c.ca::text, c.created_at::text, c.deriver::text, c.closure_complete::int::text FROM cached_path c WHERE c.hash IN (SELECT o.hash FROM derivation_output o WHERE o.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1))",
+            "CREATE TABLE cached_path (id TEXT, hash TEXT, package TEXT, file_hash TEXT, file_size INTEGER, nar_size INTEGER, nar_hash TEXT, ca TEXT, created_at TEXT, deriver TEXT, missing_references INTEGER)",
+            "SELECT c.id::text, c.hash::text, c.package::text, c.file_hash::text, c.file_size::text, c.nar_size::text, c.nar_hash::text, c.ca::text, c.created_at::text, c.deriver::text, c.missing_references::text FROM cached_path c WHERE c.hash IN (SELECT o.hash FROM derivation_output o WHERE o.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1))",
             "the evaluation's output hashes, shared with every other evaluation that produced them",
             [
                 "id",
@@ -370,7 +370,7 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "ca",
                 "created_at",
                 "deriver",
-                "closure_complete"
+                "missing_references"
             ]
         ),
         spec!(

@@ -44,6 +44,7 @@ mod m20260905_000000_invites;
 mod m20260907_000000_dispatched_job_job_id;
 mod m20260907_000001_base_worker_auto_enable;
 mod m20260908_000000_derivation_walked;
+mod m20260908_000001_cached_path_missing_references;
 
 pub struct Migrator;
 
@@ -89,6 +90,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260907_000000_dispatched_job_job_id::Migration),
             Box::new(m20260907_000001_base_worker_auto_enable::Migration),
             Box::new(m20260908_000000_derivation_walked::Migration),
+            Box::new(m20260908_000001_cached_path_missing_references::Migration),
         ]
     }
 }
