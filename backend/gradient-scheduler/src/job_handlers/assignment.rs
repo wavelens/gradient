@@ -136,7 +136,7 @@ impl Scheduler {
 /// can't break dispatch.
 async fn persist_dispatched_job(state: &Arc<ServerState>, worker_id: &str, rec: DispatchRecord) {
     let now = now();
-    let dispatched_job_id = gradient_entity::ids::DispatchedJobId::now_v7();
+    let dispatched_job_id = rec.dispatch;
     let row = gradient_entity::dispatched_job::Model {
         id: dispatched_job_id,
         kind: rec.kind,

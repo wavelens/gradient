@@ -76,7 +76,12 @@ pub enum ServerMessage {
     /// Assign a job to this worker.  Worker must respond with
     /// [`super::client::ClientMessage::AssignJobResponse`] before starting
     /// work.
-    AssignJob { job_id: String, job: Job },
+    /// `dispatch` is the `dispatched_job` id; every report for this job echoes it.
+    AssignJob {
+        job_id: String,
+        dispatch: String,
+        job: Job,
+    },
 
     /// Cancel an in-progress job.  Worker stops, cleans up, and responds
     /// with [`super::client::ClientMessage::JobFailed`].

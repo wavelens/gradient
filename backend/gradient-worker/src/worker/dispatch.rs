@@ -113,6 +113,8 @@ pub(super) async fn run_dispatch_loop(
 struct JobRegistry {
     abort_senders: HashMap<String, watch::Sender<bool>>,
     job_kinds: HashMap<String, JobKind>,
+    /// The `dispatch` id each `AssignJob` carried, echoed on every report.
+    dispatches: HashMap<String, String>,
     /// Shared with the job task, so the terminal message can report the
     /// timeline once the task itself is gone.
     timelines: HashMap<String, Arc<JobTimeline>>,
@@ -181,6 +183,7 @@ impl DispatchState {
             jobs: JobRegistry {
                 abort_senders: HashMap::new(),
                 job_kinds: HashMap::new(),
+                dispatches: HashMap::new(),
                 timelines: HashMap::new(),
                 done_tx,
             },
@@ -220,8 +223,12 @@ impl DispatchState {
             ServerMessage::RevokeJob { job_ids } => {
                 self.on_revoke_job(job_ids);
             }
-            ServerMessage::AssignJob { job_id, job } => {
-                self.on_assign_job(job_id, job).await?;
+            ServerMessage::AssignJob {
+                job_id,
+                dispatch,
+                job,
+            } => {
+                self.on_assign_job(job_id, dispatch, job).await?;
             }
             ServerMessage::AbortJob { job_id, reason } => {
                 self.on_abort_job(job_id, reason);
@@ -342,6 +349,7 @@ impl DispatchState {
         self.credentials.clear();
 
         let completed_kind = self.jobs.job_kinds.remove(&job_id);
+        let dispatch = self.jobs.dispatches.remove(&job_id).unwrap_or_default();
         let timeline = self.jobs.timelines.remove(&job_id);
         let dropped_spans = timeline.as_ref().map(|t| t.dropped()).unwrap_or_default();
         let spans = timeline.map(|t| t.snapshot()).unwrap_or_default();
@@ -353,7 +361,11 @@ impl DispatchState {
             Ok(()) => {
                 info!(%job_id, phases = spans.len(), "job completed");
                 self.writer
-                    .send(ClientMessage::JobCompleted { job_id, spans })
+                    .send(ClientMessage::JobCompleted {
+                        job_id,
+                        dispatch,
+                        spans,
+                    })
                     .await?;
             }
             Err(e) => {
@@ -363,6 +375,7 @@ impl DispatchState {
                 self.writer
                     .send(ClientMessage::JobFailed {
                         job_id,
+                        dispatch,
                         error: error_chain,
                         kind,
                         missing_paths,
@@ -538,7 +551,7 @@ impl DispatchState {
         self.last_scores.lock().remove(job_id);
     }
 
-    async fn on_assign_job(&mut self, job_id: String, job: Job) -> Result<()> {
+    async fn on_assign_job(&mut self, job_id: String, dispatch: String, job: Job) -> Result<()> {
         // Drop the cached candidate + score on any reject too (not just accept):
         // the server re-queues a rejected job and re-offers it, but our delta
         // filter would skip an unchanged cached entry, so it would never be
@@ -586,6 +599,9 @@ impl DispatchState {
             .await?;
 
         self.jobs.job_kinds.insert(job_id.clone(), kind.clone());
+        self.jobs
+            .dispatches
+            .insert(job_id.clone(), dispatch.clone());
         self.forget_candidate(&job_id);
 
         let (abort_tx, abort_rx) = watch::channel(false);
@@ -609,6 +625,7 @@ impl DispatchState {
         tokio::spawn(async move {
             let mut updater = JobUpdater::new(
                 jid.clone(),
+                dispatch,
                 job_writer,
                 job_cache_waiters,
                 job_known_derivation_waiters,

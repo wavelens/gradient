@@ -848,7 +848,7 @@ enum ServerMessage {
     // Job dispatch
     JobOffer { candidates: Vec<JobCandidate> },  // delta-only: only new candidates; paginated at 1 000
     RevokeJob { job_ids: Vec<Uuid> },            // remove candidates assigned to another worker
-    AssignJob { job_id: Uuid, job: Job },
+    AssignJob { job_id: Uuid, dispatch: Uuid, job: Job },  // dispatch is the dispatched_job id the server minted for this hand-out; the server drops a report whose dispatch is not the one it assigned
     AbortJob { job_id: Uuid, reason: String },
     RequestAllScores,                           // startup-only: ask worker to re-send all scores once
     Draining,                                   // server shutting down; finish work, buffer results, delay reconnect
@@ -898,9 +898,9 @@ enum ClientMessage {
     },
     RequestJob { kind: JobKind },               // "I have capacity for one job" - re-sent every 10s as heartbeat
     RequestAllCandidates,                       // startup-only: ask server to re-send all active candidates once
-    JobUpdate { job_id: Uuid, update: JobUpdateKind },
-    JobCompleted { job_id: Uuid, spans: Vec<JobPhaseSpan> },  // all steps done; results already sent via JobUpdate. Per-build metrics travel on JobUpdate::BuildOutput
-    JobFailed { job_id: Uuid, error: String, kind: BuildFailureKind, missing_paths: Vec<String>, spans: Vec<JobPhaseSpan> }, // missing_paths set only for kind=InputsUnavailable
+    JobUpdate { job_id: Uuid, dispatch: Uuid, update: JobUpdateKind },  // dispatch echoes the AssignJob id
+    JobCompleted { job_id: Uuid, dispatch: Uuid, spans: Vec<JobPhaseSpan> },  // all steps done; results already sent via JobUpdate. Per-build metrics travel on JobUpdate::BuildOutput
+    JobFailed { job_id: Uuid, dispatch: Uuid, error: String, kind: BuildFailureKind, missing_paths: Vec<String>, spans: Vec<JobPhaseSpan> }, // missing_paths set only for kind=InputsUnavailable
     Draining,                                   // no more jobs; finishing in-flight work then disconnecting
 
     // Streaming
@@ -1412,7 +1412,7 @@ When the server restarts (deploy, crash, maintenance), workers experience a WebS
  3. **Keep candidate cache and scores in memory** - do not discard.
  4. Reconnect with exponential backoff: 1s → 2s → 4s → ... → 60s max, with jitter.
  5. On reconnect, send `InitConnection` + `WorkerCapabilities` (full re-handshake).
- 6. Send `JobUpdate`/`JobCompleted`/`JobFailed` for any jobs that progressed or finished during the outage. The server matches these by `job_id`.
+ 6. Send `JobUpdate`/`JobCompleted`/`JobFailed` for any jobs that progressed or finished during the outage. The server matches these by `job_id` **and** the `dispatch` id it assigned, and only within the session that handed the job out - a report for another dispatch (a worker declared dead whose job has since been re-dispatched) is dropped.
  7. Send `RequestAllCandidates` (startup-only) to resync the candidate cache (server may have revoked or added candidates during the outage).
  8. Respond to `RequestAllScores` (startup-only, sent by server at handshake) with all cached scores so the server can rebuild its in-memory score table.
 
@@ -1498,7 +1498,7 @@ interrupted, so a restart loses no job.
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `10`) is incremented on breaking wire changes.
+ - `PROTO_VERSION` (currently `11`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`; the check lives once, in
    `session::handshake::on_init_connection`, and every session flavor (worker,
    cache-scoped, outbound) goes through it.
@@ -1508,6 +1508,9 @@ interrupted, so a restart loses no job.
  - v7 gave `CacheQuery`/`CacheStatus`/`CacheError` a per-query `query_id` and
    `NarUploaded` the path's content address (`ca`).
  - v8 added `BuildFailureKind::Aborted`.
+ - v11 put the `dispatched_job` id on `AssignJob` and made `JobUpdate`,
+   `JobCompleted` and `JobFailed` echo it, so a report from a dispatch the
+   session did not hand out is dropped.
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
 ---
