@@ -1416,7 +1416,7 @@ When the server restarts (deploy, crash, maintenance), workers experience a WebS
  3. **Keep candidate cache and scores in memory** - do not discard.
  4. Reconnect with exponential backoff: 1s → 2s → 4s → ... → 60s max, with jitter.
  5. On reconnect, send `InitConnection` + `WorkerCapabilities` (full re-handshake).
- 6. Report nothing from the previous connection. The server matches every report by `job_id` **and** the `dispatch` id it assigned, and only within the session that handed the job out, so a report a worker buffered across the outage - its job has since been re-dispatched - is dropped.
+ 6. Report nothing from the previous connection. The server matches every report by `job_id` **and** the `dispatch` id it assigned, and only within the session that handed the job out, so a report a worker buffered across the outage - its job has since been re-dispatched - is dropped. The check reads only the session's own map, so it does not yet cover a worker the heartbeat or zombie sweep evicted while its socket is still up; that comparison needs the dispatch id on the tracker's active entry and lands with the scheduler work in the next PR.
  7. Send `RequestAllCandidates` (startup-only) to resync the candidate cache (server may have revoked or added candidates during the outage).
  8. Respond to `RequestAllScores` (startup-only, sent by server at handshake) with all cached scores so the server can rebuild its in-memory score table.
 
