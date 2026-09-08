@@ -660,6 +660,8 @@ CachedPath {
 
 **Off-loop dispatch.** Both ends process a connection's frames serially, so a slow handler would head-of-line-block every other message on that connection. `CacheQuery` is a request/response RPC with a worker-side deadline (`CACHE_QUERY_TIMEOUT`, 75 s), so the order-independent handlers run off the dispatch loop: the server spawns `CacheQuery` (whose `Pull` mode may probe upstream narinfo inline), `QueryKnownDerivations`, and `WorkerMetrics`; Replies travel the cloneable writer, so out-of-order completion is safe. Order-sensitive handlers (NAR push stream chunks, log appends) stay inline.
 
+**Pipelined chunks.** A worker keeps up to `CACHE_QUERY_WINDOW` (4) chunks of a `CacheQuery` or `QueryKnownDerivations` in flight and concatenates the answers in request order; replies correlate by `query_id`, so completion order is free. One chunk at a time was the pre-`query_id` rule from when both peers could wedge mid-write; the per-chunk bound, not serialisation, is what keeps the socket drainable.
+
 **Indeterminate is not absent (`CacheError`).** A DB error while answering a `CacheQuery` must never be reported as `cached: false` - a fully-cached input would then be taken as a missing one and the build would fail terminally (`InputsUnavailable`), failing the whole eval. So the local-cache lookups propagate their error rather than swallowing it into an empty result, and the handler replies `CacheError { job_id, message }` instead of a `CacheStatus`. The worker resolves that as a transport failure and retries the prefetch transiently. The same `CacheError` is sent if the handler exceeds its server-side budget (`CACHE_QUERY_BUDGET`, 45 s): the reads are index-backed and the upstream probe is itself bounded, so no query of any size legitimately runs that long - exceeding it means the server is pathologically slow and a retry is the right answer, rather than letting the worker burn its full deadline.
 
 **Dedicated cache-query pool.** The `CacheQuery` read path runs on its own DB connection pool (`cache_db`, `GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS`), separate from the scheduler/worker pool. A large eval puts one `CacheQuery` per in-flight build through the server concurrently; on a shared pool that storm exhausted connections (8 s acquire timeout), which both surfaced as the swallowed-error false-miss above and stalled the scheduler's own dispatch queries. Isolating the pool keeps a cache-query flood from starving dispatch - a saturated cache pool then only slows cache queries, which degrade to retryable `CacheError`s.
@@ -760,8 +762,8 @@ sequenceDiagram
     participant S as Server
 
     Note over W: BFS wave - discovers deps [A, B, C, D]
-    W->>S: QueryKnownDerivations { drv_paths: [A, B, C, D] }
-    S->>W: KnownDerivations { known: [A, C] }
+    W->>S: QueryKnownDerivations { query_id, drv_paths: [A, B, C, D] }
+    S->>W: KnownDerivations { query_id, known: [A, C] }
     Note over W: A, C stay named in their parents' dependencies<br/>B, D are enqueued for full BFS traversal
 ```
 
@@ -875,7 +877,7 @@ enum ServerMessage {
     /// Response to `QueryKnownDerivations`.  `known` is the subset of the
     /// requested `.drv` paths that are already in the server's derivation table
     /// for the owning project.
-    KnownDerivations { job_id: String, known: Vec<String> },
+    KnownDerivations { query_id: String, known: Vec<String> },
 }
 
 struct FailedPeer { peer_id: Uuid, reason: String }
@@ -934,7 +936,7 @@ enum ClientMessage {
     /// its derivation table for the project that owns `job_id`.  The server responds
     /// with `KnownDerivations`.  The worker uses this to skip re-traversing
     /// subtrees that were fully recorded during a previous evaluation.
-    QueryKnownDerivations { job_id: String, drv_paths: Vec<String> },
+    QueryKnownDerivations { job_id: String, query_id: String, drv_paths: Vec<String> },
 
     /// Surface an infrastructure-level message on the evaluation that owns
     /// the given `job_id`.  The server resolves the active job → evaluation
@@ -1509,7 +1511,7 @@ decommission a worker it does not own.
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `11`) is incremented on breaking wire changes.
+ - `PROTO_VERSION` (currently `12`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`; the check lives once, in
    `session::handshake::on_init_connection`, and every session flavor (worker,
    cache-scoped, outbound) goes through it.
@@ -1522,6 +1524,9 @@ decommission a worker it does not own.
  - v11 put the `dispatched_job` id on `AssignJob` and made `JobUpdate`,
    `JobCompleted` and `JobFailed` echo it, so a report from a dispatch the
    session did not hand out is dropped.
+ - v12 reads rkyv archives unaligned and in place, gave `QueryKnownDerivations` a
+   `query_id` that `KnownDerivations` echoes, and made bulk chunks 512 KiB with a
+   byte-capped bulk write batch.
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
 ---

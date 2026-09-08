@@ -192,7 +192,12 @@ pub enum ServerMessage {
     /// Contains the subset of the queried `.drv` paths that are already
     /// recorded in the server's derivation table for the owning project.
     /// The worker skips subtree traversal for these paths during BFS.
-    KnownDerivations { job_id: String, known: Vec<String> },
+    KnownDerivations {
+        /// Echoes the query's `query_id`; the sole correlator, so a worker can
+        /// keep several `QueryKnownDerivations` in flight under one `job_id`.
+        query_id: String,
+        known: Vec<String>,
+    },
 
     /// The server could not *determine* cache state for a
     /// [`super::client::ClientMessage::CacheQuery`] (a transient DB error or an

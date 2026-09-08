@@ -285,6 +285,9 @@ pub enum ClientMessage {
     /// `inputDrvs` again.
     QueryKnownDerivations {
         job_id: String,
+        /// Echoed by [`super::server::ServerMessage::KnownDerivations`]; the
+        /// sole correlator.
+        query_id: String,
         drv_paths: Vec<String>,
     },
 }
