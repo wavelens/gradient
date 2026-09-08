@@ -22,6 +22,9 @@ pub struct Model {
     pub prefer_local_build: bool,
     pub is_fixed_output: bool,
     pub allow_substitutes: bool,
+    /// The full record is in: outputs, every declared dependency edge and
+    /// input source. A row a batch only named (a stub) is `false` until walked.
+    pub walked: bool,
     pub closure_size: Option<i64>,
     pub dep_closure_count: Option<i64>,
     pub created_at: NaiveDateTime,
