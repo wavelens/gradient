@@ -264,6 +264,9 @@ impl BatchWriter<'_> {
                 continue;
             };
             for output in &d.outputs {
+                // Unlike an unparseable dependency path, this one may stay a fallback: an
+                // unknown hash matches no `cached_path` and no upstream, so the derivation
+                // is never pruned nor counted cached, and simply gets built.
                 let (hash, package) = output_hash_name(&output.path).unwrap_or_else(|| {
                     (
                         gradient_entity::derivation_output::UNKNOWN_OUTPUT_HASH.to_owned(),
