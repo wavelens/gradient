@@ -243,6 +243,7 @@ mod tests {
         assert!(
             reject_reason(&ClientMessage::JobFailed {
                 job_id: "job".into(),
+                dispatch: "d".into(),
                 error: "x".into(),
                 kind: crate::messages::BuildFailureKind::Permanent,
                 missing_paths: vec![],

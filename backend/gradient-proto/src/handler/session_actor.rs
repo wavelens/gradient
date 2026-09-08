@@ -16,7 +16,6 @@ use std::time::Duration;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::actor::{SessionPort, SessionSignal};
-use gradient_scheduler::jobs::PendingJob;
 use gradient_types::ids::ProjectId;
 use ractor::rpc::CallResult;
 use ractor::{Actor, ActorProcessingErr, ActorRef, RpcReplyPort};
@@ -24,7 +23,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-use super::dispatch::DispatchContext;
+use super::dispatch::{ActiveJob, DispatchContext};
 use super::eval_cache::EvalCacheReceiveStore;
 use super::nar_transfer::NarReceiveStore;
 use super::session::on_reauth_notify;
@@ -75,7 +74,7 @@ pub struct SessionState {
     nar_serve_semaphore: Arc<Semaphore>,
     last_seen: Arc<AtomicI64>,
     offers_seen: u64,
-    active: HashMap<String, PendingJob>,
+    active: HashMap<String, ActiveJob>,
     draining: bool,
     reader: JoinHandle<()>,
 }
@@ -239,7 +238,7 @@ impl Actor for SessionActor {
                 let active = st
                     .active
                     .iter()
-                    .map(|(id, job)| (id.clone(), job.clone()))
+                    .map(|(id, job)| (id.clone(), job.pending.clone()))
                     .collect();
                 if let Err(e) = st
                     .scheduler

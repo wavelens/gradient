@@ -8,9 +8,7 @@
 
 use std::sync::Arc;
 
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, QueryOrder, Set,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, Set};
 use tracing::warn;
 
 use gradient_entity::dispatched_job::{
@@ -86,53 +84,46 @@ impl Scheduler {
     /// report that arrives after the tracker has dropped the job still lands.
     pub fn record_job_timeline(
         self: &Arc<Self>,
-        job_id: &str,
+        dispatch: DispatchedJobId,
         outcome: DispatchedJobOutcome,
         spans: Vec<JobPhaseSpan>,
     ) {
         let scheduler = Arc::clone(self);
-        let job_id = job_id.to_owned();
         self.state.shutdown.spawn(async move {
             scheduler
-                .persist_job_timeline(&job_id, outcome, spans)
+                .persist_job_timeline(dispatch, outcome, spans)
                 .await;
         });
     }
 
     async fn persist_job_timeline(
         &self,
-        job_id: &str,
+        dispatch: DispatchedJobId,
         outcome: DispatchedJobOutcome,
         spans: Vec<JobPhaseSpan>,
     ) {
-        // Keyed on the job itself: one worker commonly runs several jobs of the
-        // same evaluation at once, and matching on (worker, evaluation) closed
-        // whichever row was newest instead of this job's own.
-        let row = match EDispatchedJob::find()
-            .filter(CDispatchedJob::JobId.eq(job_id))
+        let row = match EDispatchedJob::find_by_id(dispatch)
             .filter(CDispatchedJob::FinishedAt.is_null())
-            .order_by_desc(CDispatchedJob::DispatchedAt)
             .one(&self.state.worker_db)
             .await
         {
             Ok(Some(row)) => row,
             Ok(None) => return,
             Err(e) => {
-                warn!(%job_id, error = %e, "dispatched_job lookup for the timeline failed");
+                warn!(%dispatch, error = %e, "dispatched_job lookup for the timeline failed");
                 return;
             }
         };
 
-        let dispatched_job = row.id;
         let evaluation_id = row.evaluation_id;
         let mut active = row.into_active_model();
         active.finished_at = Set(Some(now()));
         active.outcome = Set(Some(outcome));
         if let Err(e) = active.update(&self.state.worker_db).await {
-            warn!(%job_id, error = %e, "failed to close the dispatched_job row");
+            warn!(%dispatch, error = %e, "failed to close the dispatched_job row");
         }
 
-        let rows = phase_rows(dispatched_job, &spans);
+        let rows = phase_rows(dispatch, &spans);
         if !rows.is_empty()
             && let Err(e) = gradient_entity::dispatched_job_phase::Entity::insert_many(
                 rows.into_iter().map(IntoActiveModel::into_active_model),
@@ -140,7 +131,7 @@ impl Scheduler {
             .exec(&self.state.worker_db)
             .await
         {
-            warn!(%job_id, error = %e, "failed to insert dispatched_job_phase rows");
+            warn!(%dispatch, error = %e, "failed to insert dispatched_job_phase rows");
         }
 
         let totals = eval_phase_totals(&spans);

@@ -123,6 +123,7 @@ fn server_draining_roundtrip() {
 fn assign_job_roundtrip() {
     let original = ServerMessage::AssignJob {
         job_id: "550e8400-e29b-41d4-a716-446655440000".into(),
+        dispatch: "0192b7c0-0000-7000-8000-000000000001".into(),
         job: Job::Flake(FlakeJob {
             steps: vec![FlakeStep::FetchFlake, FlakeStep::EvaluateFlake],
             source: FlakeSource::Repository {
@@ -286,6 +287,7 @@ fn cached_path_not_cached_no_url() {
 fn job_completed_roundtrip() {
     let original = ClientMessage::JobCompleted {
         job_id: "job-123".to_string(),
+        dispatch: "0192b7c0-0000-7000-8000-000000000001".into(),
         spans: vec![],
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
@@ -297,6 +299,7 @@ fn job_completed_roundtrip() {
 fn build_output_with_metrics_roundtrip() {
     let original = ClientMessage::JobUpdate {
         job_id: "job-123".to_string(),
+        dispatch: "0192b7c0-0000-7000-8000-000000000001".into(),
         update: JobUpdateKind::BuildOutput {
             build_id: "build-1".to_string(),
             outputs: vec![BuildOutput {
@@ -329,6 +332,7 @@ fn build_output_with_metrics_roundtrip() {
 fn build_output_no_metrics_roundtrip() {
     let original = ClientMessage::JobUpdate {
         job_id: "job-456".to_string(),
+        dispatch: "0192b7c0-0000-7000-8000-000000000001".into(),
         update: JobUpdateKind::BuildOutput {
             build_id: "build-2".to_string(),
             outputs: vec![],
@@ -579,6 +583,7 @@ fn eval_cache_push_grant_inline_roundtrip() {
 fn job_completed_timeline_roundtrip() {
     let original = ClientMessage::JobCompleted {
         job_id: "job-1".into(),
+        dispatch: "0192b7c0-0000-7000-8000-000000000001".into(),
         spans: vec![
             JobPhaseSpan {
                 phase: JobPhase::Compress,
@@ -608,6 +613,7 @@ fn job_completed_timeline_roundtrip() {
 fn job_failed_partial_timeline_roundtrip() {
     let original = ClientMessage::JobFailed {
         job_id: "job-2".into(),
+        dispatch: "0192b7c0-0000-7000-8000-000000000001".into(),
         error: "boom".into(),
         kind: BuildFailureKind::Permanent,
         missing_paths: vec![],
@@ -618,6 +624,20 @@ fn job_failed_partial_timeline_roundtrip() {
             parent: None,
             ..Default::default()
         }],
+    };
+    let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
+    let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();
+    assert_eq!(decoded, original);
+}
+
+/// A report that names a dispatch other than the one it was assigned under
+/// is what the server drops; the id has to survive the wire byte for byte.
+#[test]
+fn job_update_roundtrip_keeps_the_dispatch_id() {
+    let original = ClientMessage::JobUpdate {
+        job_id: "eval:0192b7c0-0000-7000-8000-000000000002".into(),
+        dispatch: "0192b7c0-0000-7000-8000-000000000003".into(),
+        update: JobUpdateKind::EvaluatingFlake,
     };
     let bytes = rkyv::to_bytes::<RkyvError>(&original).unwrap();
     let decoded = rkyv::from_bytes::<ClientMessage, RkyvError>(&bytes).unwrap();

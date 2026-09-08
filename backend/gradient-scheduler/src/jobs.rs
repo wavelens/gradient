@@ -156,7 +156,7 @@ pub enum PendingJob {
 
 /// The tracker's key for an evaluation job. The single definition: it is also
 /// persisted on `dispatched_job.job_id`, and a copy that drifts would silently
-/// stop terminal reports from closing their own row.
+/// stop the abandoned-job sweep from finding the row it has to close.
 pub fn eval_job_key(evaluation: EvaluationId) -> String {
     format!("eval:{evaluation}")
 }
@@ -276,6 +276,8 @@ impl PendingJob {
 
 pub struct Assignment {
     pub job_id: String,
+    /// The `dispatched_job` id of this hand-out; the worker echoes it on every report.
+    pub dispatch: DispatchedJobId,
     pub job: Job,
     /// Project UUID that owns this job - used for credential lookup.
     pub project_id: ProjectId,
@@ -290,9 +292,9 @@ pub struct Assignment {
 /// Owned snapshot of a dispatch decision for the `dispatched_job` table.
 #[derive(Clone)]
 pub struct DispatchRecord {
-    /// The tracker's key for this job; persisted so the terminal report can
-    /// close its own `dispatched_job` row.
+    /// The tracker's key for this job, persisted on `dispatched_job.job_id`.
     pub job_id: String,
+    pub dispatch: DispatchedJobId,
     pub kind: DispatchedJobKind,
     pub derivation_build: Option<DerivationBuildId>,
     pub evaluation_id: EvaluationId,
@@ -651,9 +653,15 @@ impl JobTracker {
             .into_iter()
             .next()
             .expect("a winner implies a first candidate");
-        let dispatch_record =
-            self.dispatch_record_for(&job_id, &winner_sc, worker_context, instance_context);
-        let mut assignment = self.assign_pending(worker_id, &job_id)?;
+        let dispatch = DispatchedJobId::now_v7();
+        let dispatch_record = self.dispatch_record_for(
+            &job_id,
+            dispatch,
+            &winner_sc,
+            worker_context,
+            instance_context,
+        );
+        let mut assignment = self.assign_pending(worker_id, &job_id, dispatch)?;
         assignment.dispatch_record = dispatch_record;
         Some(assignment)
     }
@@ -824,6 +832,7 @@ impl JobTracker {
     fn dispatch_record_for(
         &self,
         job_id: &str,
+        dispatch: DispatchedJobId,
         sc: &ScoredCandidate,
         worker_context: serde_json::Value,
         instance_context: serde_json::Value,
@@ -835,6 +844,7 @@ impl JobTracker {
         };
         Some(DispatchRecord {
             job_id: job_id.to_owned(),
+            dispatch,
             kind: kind_disc,
             derivation_build,
             evaluation_id: job.evaluation_id(),
@@ -863,13 +873,19 @@ impl JobTracker {
         })
     }
 
-    fn assign_pending(&mut self, worker_id: &str, job_id: &str) -> Option<Assignment> {
+    fn assign_pending(
+        &mut self,
+        worker_id: &str,
+        job_id: &str,
+        dispatch: DispatchedJobId,
+    ) -> Option<Assignment> {
         let job = self.pending.remove(job_id)?;
         if let Some(ws) = self.scores.get_mut(worker_id) {
             ws.remove(job_id);
         }
         let assignment = Assignment {
             job_id: job_id.to_owned(),
+            dispatch,
             job: job.clone().into_job(),
             project_id: job.project_id(),
             dispatch_record: None,
@@ -1119,8 +1135,8 @@ mod tests {
         BuildJob, BuildSpec, FlakeJob, FlakeSource, FlakeStep, GradientCapabilities,
     };
 
-    // `dispatched_job.job_id` stores this key, and a terminal report closes its
-    // row by matching on it. If the key stopped agreeing with what the
+    // `dispatched_job.job_id` stores this key, and the abandoned-job sweep
+    // closes rows by matching on it. If the key stopped agreeing with what the
     // dispatchers enqueue, close-out would find no row and fail silently, which
     // is how dispatches came to sit "running" forever.
     #[test]
@@ -1347,7 +1363,9 @@ mod tests {
         let peer = ProjectId::now_v7();
         tracker.add_pending("build:1".into(), build_job(peer, vec![]));
         assert!(
-            tracker.assign_pending("worker", "build:1").is_some(),
+            tracker
+                .assign_pending("worker", "build:1", DispatchedJobId::now_v7())
+                .is_some(),
             "job should assign"
         );
         assert_eq!(tracker.pending_count(), 0);
@@ -2195,7 +2213,7 @@ mod tests {
         tracker.bump_rescore_counts();
         assert_eq!(tracker.rescore_count_of("build:1"), 2);
 
-        tracker.assign_pending("worker", "build:1");
+        tracker.assign_pending("worker", "build:1", DispatchedJobId::now_v7());
         tracker.bump_rescore_counts();
         assert_eq!(
             tracker.rescore_count_of("build:1"),

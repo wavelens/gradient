@@ -90,6 +90,8 @@ pub enum ClientMessage {
     /// The server maps these directly to `EvaluationStatus` / `BuildStatus`.
     JobUpdate {
         job_id: String,
+        /// The `dispatch` the `AssignJob` carried.
+        dispatch: String,
         update: JobUpdateKind,
     },
 
@@ -98,6 +100,8 @@ pub enum ClientMessage {
     /// Per-build resource metrics travel inline on each `JobUpdate::BuildOutput`.
     JobCompleted {
         job_id: String,
+        /// The `dispatch` the `AssignJob` carried.
+        dispatch: String,
         /// The worker's phase timeline; empty when the job recorded no phase.
         spans: Vec<JobPhaseSpan>,
     },
@@ -105,6 +109,8 @@ pub enum ClientMessage {
     /// A step in the job failed; remaining steps are skipped.
     JobFailed {
         job_id: String,
+        /// The `dispatch` the `AssignJob` carried.
+        dispatch: String,
         error: String,
         kind: BuildFailureKind,
         /// For `BuildFailureKind::InputsUnavailable`: the required input store
