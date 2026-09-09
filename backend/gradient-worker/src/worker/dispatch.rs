@@ -425,14 +425,9 @@ impl DispatchState {
                     bytes = data.len(),
                     "received NAR chunk from server"
                 );
+                let (job_id, store_path) = (job_id.to_string(), store_path.to_string());
                 self.nar_recv
-                    .accept_chunk(
-                        job_id.as_str(),
-                        store_path.as_str(),
-                        data.as_slice(),
-                        offset.to_native(),
-                        *is_final,
-                    )
+                    .accept_chunk(&job_id, &store_path, frame)
                     .await;
             }
             ArchivedServerMessage::EvalCacheChunk {
