@@ -24,7 +24,7 @@
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
+use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement, TransactionTrait};
 
 /// Counts of graph-invariant violations at one instant.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -87,7 +87,7 @@ async fn count<C: ConnectionTrait>(db: &C, sql: String) -> Result<i64, DbErr> {
 /// construction. `gating_paths` reports the size of that bounded set, which is an
 /// unbounded select today (#591 rewrites what the sweep reads, so it is measured
 /// now and bounded there rather than with a rotation scheme thrown away next PR).
-pub async fn graph_consistency_report<C: ConnectionTrait>(
+pub async fn graph_consistency_report<C: ConnectionTrait + TransactionTrait>(
     db: &C,
 ) -> Result<ConsistencyReport, DbErr> {
     let closure_gate = crate::promotion::closure_complete_gate();
@@ -196,10 +196,16 @@ mod tests {
                 Value::from("h".to_owned()),
             )])]])
             .append_query_results([n(), n(), n(), n(), n(), n()])
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 2,
-            }])
+            .append_exec_results([
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 0,
+                },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 2,
+                },
+            ])
             .into_connection();
 
         let report = graph_consistency_report(&db).await.unwrap();
@@ -216,11 +222,12 @@ mod tests {
             "the gating select comes first: {log:?}"
         );
         assert!(
-            log[1].contains("UPDATE cached_path cp SET missing_references"),
-            "the repair runs before any count reads the counter: {log:?}"
+            log[1].contains("FOR UPDATE")
+                && log[2].contains("UPDATE cached_path cp SET missing_references"),
+            "the repair locks, recounts, and runs before any count reads the counter: {log:?}"
         );
         assert!(
-            log[2].contains("missing_references < 0"),
+            log[3].contains("missing_references < 0"),
             "a counter below zero is unrecoverable, so it must be counted: {log:?}"
         );
     }

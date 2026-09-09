@@ -21,6 +21,15 @@
 //! driven negative while no anchor gates on it stays unwhole until something
 //! does, holding every referrer unwhole with it.
 //!
+//! The repair is one level per sweep, not a fixpoint. A chunk recounts every
+//! row from one snapshot and ripples nothing: two rows in one chunk may reference
+//! each other, so a row's new value is computed against its reference's
+//! PRE-repair counter, and rippling such a flip would drive the referrer past
+//! zero. A repaired row's referrers therefore see the flip only by being recounted
+//! themselves, so a chain of drifted rows converges one level per sweep interval,
+//! and a referrer outside [`gating_paths`] never converges at all. Widening that
+//! is #591's business.
+//!
 //! # Who writes it
 //!
 //! The graph actor handles one message at a time, so a commit never overlaps
@@ -49,14 +58,18 @@
 //! consequences this module is built on: a decision that must see what committed
 //! during the wait needs its own statement after it ([`retire_paths_where`]); a
 //! counter moved relative to the row's own value is re-evaluated and so composes
-//! with a concurrent move (both ripples); and an absolute recount computed from a
-//! snapshot has to compare-and-swap on the pre-image ([`repair_counters_for`]).
+//! with a concurrent move (both ripples); and an absolute recount has to hold its
+//! rows BEFORE its snapshot opens ([`repair_counters_for`]), because a
+//! compare-and-swap on the pre-image compares the fresh row against a snapshot
+//! value that a concurrent seed can reproduce.
 //!
 //! # Lock order, and where it stops
 //!
 //! Every writer that takes row locks here takes them in ONE hash-ordered
 //! statement before it decides anything: [`lock_reference_endpoints`] for a
-//! commit, [`LOCK`] for either retire. The `ORDER BY hash` is not decoration.
+//! commit, [`LOCK`] for either retire and for each chunk of the repair, which is
+//! the third writer inside this discipline and not an exception to it. The
+//! `ORDER BY hash` is not decoration.
 //! With acquisition monotone in `hash`, a wait-for cycle would need some
 //! transaction to wait on a lower hash than one it already holds; a single
 //! unordered locker - a lock set that skips the row it is about to update, or a
@@ -73,7 +86,10 @@
 //! retries. That is the accepted price of `FOR SHARE` below - a detected, retried
 //! deadlock instead of a permanently false-whole row.
 
-use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement};
+use sea_orm::{
+    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement, TransactionSession,
+    TransactionTrait,
+};
 
 /// The row `{alias}` is stored and every reference resolves to a whole row.
 pub fn whole_predicate(alias: &str) -> String {
@@ -449,22 +465,35 @@ fn repair_statement() -> String {
 /// rather than derive it, so this is the bounded backstop against a move that
 /// was lost (a crashed transaction, a hand-edited row), never a sweep.
 ///
-/// The write is a compare-and-swap on the pre-image (`x.old`). The count comes
-/// from the statement's own snapshot, so a ripple that commits while the UPDATE
-/// waits on a row lock would otherwise be discarded - and discarding an increment
-/// marks a path whole with a reference already gone, which the dispatch gate reads
-/// within one 5s tick and turns into a terminal `InputsUnavailable`. A row that
-/// moved under us is skipped and re-derived by the next pass. Chunked so each
-/// chunk commits on its own: as one statement over a fleet evaluation's gating set
-/// the sweep's budget cancels it in place and rolls back every repair, silently.
-pub async fn repair_counters_for<C: ConnectionTrait>(
+/// Each chunk is one transaction that runs the [`LOCK`] pass first and recounts
+/// second, so the recount's snapshot opens only after every in-flight commit of
+/// those rows has finished. Recounting first and comparing-and-swapping on the
+/// pre-image is not enough: the CAS reads the fresh row, but `x.old` and `x.n`
+/// come from the statement's snapshot, so a commit that reseeds the row
+/// absolutely onto the drifted value passes it and is overwritten with a count
+/// over the pre-commit edge set - a false-whole row for one sweep interval,
+/// reproduced on Postgres 18. The CAS stays anyway: under the lock it compares
+/// the row to itself, but a caller that loses the lock degrades to a skipped row
+/// instead of an unconditional overwrite of a counter nothing else re-derives,
+/// and `x.old <> x.n` is the drift filter behind the returned count. Chunked so
+/// each chunk commits on its own: as one statement over a fleet evaluation's
+/// gating set the sweep's budget cancels it in place and rolls back every repair,
+/// silently.
+pub async fn repair_counters_for<C: ConnectionTrait + TransactionTrait>(
     db: &C,
     hashes: &[String],
 ) -> Result<u64, DbErr> {
     let statement = repair_statement();
     let mut repaired = 0u64;
     for chunk in hashes.chunks(crate::IN_CHUNK_SIZE) {
-        repaired += db
+        let txn = db.begin().await?;
+        txn.execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            LOCK,
+            [chunk.to_vec().into()],
+        ))
+        .await?;
+        repaired += txn
             .execute_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
                 &statement,
@@ -472,6 +501,7 @@ pub async fn repair_counters_for<C: ConnectionTrait>(
             ))
             .await?
             .rows_affected();
+        txn.commit().await?;
     }
 
     Ok(repaired)
@@ -921,11 +951,10 @@ mod tests {
         }
     }
 
-    /// The repair writes an absolute count derived from its own snapshot, so it
-    /// must compare-and-swap on the pre-image: a ripple that commits while the
-    /// UPDATE waits on the row lock would otherwise be discarded, and a discarded
-    /// increment marks a path whole with a reference already gone - the dispatch
-    /// gate reads that within one tick and the build dies `InputsUnavailable`.
+    /// The compare-and-swap is the degradation guard, not the correctness
+    /// argument (the lock is): a caller that loses the lock must skip a row that
+    /// moved rather than overwrite a counter nothing else re-derives, and
+    /// `x.old <> x.n` is the drift filter behind the returned count.
     #[test]
     fn the_repair_compares_and_swaps_on_the_pre_image() {
         let sql = norm(&repair_statement());
@@ -938,9 +967,55 @@ mod tests {
         );
     }
 
+    /// The recount's snapshot must open after the rows are held: recounting
+    /// first and comparing-and-swapping on the pre-image lets a commit that
+    /// reseeds the row onto the drifted value slip through, and the stale count
+    /// then overwrites the seed. So each chunk is one transaction whose first
+    /// statement is the hash-ordered lock pass and whose second is the recount.
+    #[tokio::test]
+    async fn the_repair_locks_the_chunk_before_it_recounts() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 0,
+                },
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                },
+            ])
+            .into_connection();
+
+        assert_eq!(
+            repair_counters_for(&db, &["b".to_owned(), "a".to_owned()])
+                .await
+                .unwrap(),
+            1
+        );
+        let raw = db.into_transaction_log();
+        assert_eq!(raw.len(), 1, "one transaction per chunk: {raw:?}");
+        let log = crate::pool::statements(raw);
+        assert_eq!(log.len(), 2, "lock, then recount: {log:?}");
+        assert!(
+            log[0].contains("ORDER BY hash FOR UPDATE") && !log[0].contains("missing_references"),
+            "the lock pass decides nothing: {log:?}"
+        );
+        assert!(
+            log[1].contains("SET missing_references = x.n"),
+            "the recount runs under the lock: {log:?}"
+        );
+        for statement in &log {
+            assert!(
+                statement.contains("\"a\"") && statement.contains("\"b\""),
+                "both statements cover the whole chunk: {log:?}"
+            );
+        }
+    }
+
     /// Unchunked over a fleet evaluation's gating set the sweep's budget cancels
     /// the statement in place, rolls back every repair and makes zero progress,
-    /// silently, forever. One statement per chunk means each chunk commits.
+    /// silently, forever. One transaction per chunk means each chunk commits.
     #[tokio::test]
     async fn the_repair_commits_one_chunk_at_a_time() {
         let hashes: Vec<String> = (0..crate::IN_CHUNK_SIZE + 1)
@@ -952,15 +1027,17 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 3,
                 };
-                2
+                4
             ])
             .into_connection();
 
         assert_eq!(repair_counters_for(&db, &hashes).await.unwrap(), 6);
+        let raw = db.into_transaction_log();
+        assert_eq!(raw.len(), 2, "one transaction per chunk: {raw:?}");
         assert_eq!(
-            crate::pool::statements(db.into_transaction_log()).len(),
-            2,
-            "one statement per chunk"
+            crate::pool::statements(raw).len(),
+            4,
+            "a lock pass and a recount per chunk"
         );
     }
 

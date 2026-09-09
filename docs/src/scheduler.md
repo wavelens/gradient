@@ -173,12 +173,17 @@ than derived, so the sweep recomputes it over the paths the pending anchors gate
 and reports how many rows disagreed (`nar_counter_drift`). That repair runs *before*
 the counts, because
 two of them embed gates that read the counter and a drifted row would otherwise
-inflate a count this very pass fixes. It writes each row under a compare-and-swap on
-the value it counted from, so a ripple that commits while the update waits on the
-row lock is left alone rather than overwritten by a stale recount, and it is chunked
-so each chunk commits on its own instead of the sweep's budget rolling every repair
-back. Setting the interval to 0 disables the sweep, and with it the counter's only
-backstop.
+inflate a count this very pass fixes. Each chunk is its own transaction that first
+takes the same hash-ordered `FOR UPDATE` pass a retire takes and only then recounts,
+so the recount's snapshot opens after any commit of those rows has finished; a
+compare-and-swap on the counted value alone is not enough, because a commit that
+reseeds a row onto the drifted value passes it and is overwritten with a stale count.
+Chunking means each chunk commits on its own instead of the sweep's budget rolling
+every repair back. The repair is one level per sweep and not a fixpoint: a chunk
+recounts every row from one snapshot and ripples nothing, so a chain of drifted rows
+converges one level per interval and a referrer outside the gating set never does;
+widening that rides with #591. Setting the interval to 0 disables the sweep, and
+with it the counter's only backstop.
 
 Two numbers on that line are not violations. `nar_counter_drift` counts rows the
 same pass already fixed, so a warning naming only that is a successful self-repair,
