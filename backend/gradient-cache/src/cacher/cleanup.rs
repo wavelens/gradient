@@ -203,14 +203,14 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             .await
             .context("TTL GC: failed to delete cache_derivation row")?;
 
-        // Drop THIS cache's signatures on the outputs' cached paths, then retire
-        // any cached_path no cache signs anymore, in the same transaction. The
-        // "still signed" test rides in the retiring DELETE, which `retire_paths`
-        // serialises behind a lock pass of its own so the DELETE's snapshot sees a
-        // signature another cache committed while we waited; neither half is
-        // sufficient alone (see `retire_paths`). Without the signature cleanup the
-        // "compressed stored" metric (SUM(file_size) via cached_path_signature)
-        // would stay inflated after TTL eviction even though the NAR file is gone.
+        // Drop THIS cache's signatures on the outputs' cached paths, then retire any
+        // cached_path no cache signs anymore, in the same transaction: the
+        // "still signed" test rides in the retiring DELETE, behind the lock pass
+        // that makes its snapshot see a signature another cache committed while we
+        // waited (neither half is sufficient alone; see `retire_paths_where`).
+        // Without the signature cleanup the "compressed stored" metric
+        // (SUM(file_size) via cached_path_signature) would stay inflated after TTL
+        // eviction even though the NAR file is gone.
         if !output_hashes.is_empty() {
             use sea_orm::TransactionTrait;
             let txn = state.worker_db.begin().await?;

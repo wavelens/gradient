@@ -8,7 +8,7 @@
 //! whole. Seeded when the NAR is committed and moved by a frontier ripple over
 //! `cached_path_reference` when a path becomes or stops being whole; nothing
 //! re-derives it full-table, and [`repair_counters_for`] recomputes it only
-//! over the paths a pending anchor gates on ([`GATING_PATHS`]).
+//! over the paths a pending anchor gates on ([`gating_paths`]).
 //! `whole_predicate` is the one definition every gate reads.
 //!
 //! Because the counter is moved and not recomputed, every ripple must be driven
@@ -17,7 +17,7 @@
 //! counter never satisfies `= 0` again. The ripples read that transition from
 //! their own `RETURNING`; the seed cannot (see [`seed_references`]), so its
 //! caller holds the pre-commit endpoint. Only [`repair_counters_for`] can
-//! rescue a row driven negative, and it visits [`GATING_PATHS`] alone: a path
+//! rescue a row driven negative, and it visits [`gating_paths`] alone: a path
 //! driven negative while no anchor gates on it stays unwhole until something
 //! does, holding every referrer unwhole with it.
 //!
@@ -30,7 +30,27 @@
 //! `gradient_cache::cacher::cleanup`, and the orphan GC in [`crate::gc`]. Nothing
 //! serialises those against a commit except the locks below, and
 //! [`repair_counters_for`] is no backstop for them either - it visits
-//! [`GATING_PATHS`] alone.
+//! [`gating_paths`] alone.
+//!
+//! The ripple carries no visited set and no depth cap. Nix runtime references are
+//! acyclic and both statements exclude self-references, so it terminates having
+//! visited each row once. A cycle between two DISTINCT paths would also terminate
+//! (the second visit fails the `= 0` / `= c.n` test) but leaves both counters
+//! negative, which is the unrecoverable state above - the reference graph being a
+//! DAG is a precondition, not an optimisation.
+//!
+//! # READ COMMITTED
+//!
+//! Every statement here runs under READ COMMITTED: its snapshot is taken at
+//! statement start, BEFORE any lock wait, and EvalPlanQual re-checks the qual only
+//! against the row version it is updating - it never re-evaluates a subquery over
+//! another table. A statement that waited on a lock therefore still decides from
+//! the world as it was before the wait, for everything except that one row. Three
+//! consequences this module is built on: a decision that must see what committed
+//! during the wait needs its own statement after it ([`retire_paths_where`]); a
+//! counter moved relative to the row's own value is re-evaluated and so composes
+//! with a concurrent move (both ripples); and an absolute recount computed from a
+//! snapshot has to compare-and-swap on the pre-image ([`repair_counters_for`]).
 //!
 //! # One hash-ordered lock per writer
 //!
@@ -56,6 +76,15 @@ pub fn whole_predicate(alias: &str) -> String {
 /// the repair are the two halves of one invariant - if their counts ever
 /// disagree, every sweep rewrites correct rows into incorrect ones - so both
 /// compose this, and this composes [`whole_predicate`].
+///
+/// The count is per EDGE (`cached_path_reference` rows), not per distinct
+/// reference hash, and both ripples move a referrer by `count(*)` over the same
+/// edge rows. So two reference tokens sharing a store-path hash - which a
+/// well-formed worker report cannot produce, but a hand-written narinfo on the
+/// cache-upload endpoint could - are counted twice and cancelled twice, and
+/// nothing here assumes hash-to-token injectivity. Counting distinct hashes here
+/// would desynchronise the seed from the ripples, which is the one thing that
+/// makes a sweep rewrite correct rows.
 fn unwhole_reference_count(alias: &str) -> String {
     format!(
         "(SELECT count(*) FROM cached_path_reference r \
@@ -75,12 +104,12 @@ fn seed_statement() -> String {
     )
 }
 
-/// Serialising pass ahead of every delete, guarded or not: it is the retire's
-/// half of the module doc's one hash-ordered acquisition, and `FOR UPDATE`
-/// conflicts with the RI `FOR KEY SHARE` a concurrent `cached_path_signature`
-/// insert holds on the parent row, so the wait for that insert is absorbed here
-/// instead of inside the DELETE. It reads nothing and decides nothing; see
-/// [`retire_paths`].
+/// Serialising pass ahead of every delete, guarded or not: it is the retire's half
+/// of the module doc's one hash-ordered acquisition, and `FOR UPDATE` conflicts
+/// with the RI `FOR KEY SHARE` a concurrent `cached_path_signature` insert holds
+/// on the parent row, so the wait for that insert is absorbed here and the DELETE
+/// opens its snapshot after it (see the module doc on READ COMMITTED). It reads
+/// nothing and decides nothing; see [`retire_paths`].
 const LOCK: &str = "SELECT 1 FROM cached_path WHERE hash = ANY($1) ORDER BY hash FOR UPDATE";
 
 /// The rows a commit's seed can count from: the references it reports (tokens,
@@ -292,16 +321,14 @@ pub async fn retire_paths<C: ConnectionTrait>(db: &C, hashes: &[String]) -> Resu
 /// every cache's signature with it.
 ///
 /// Two statements, and neither is sufficient alone. The guard has to be evaluated
-/// by the DELETE, because a preceding statement would decide from its own
-/// snapshot; and the DELETE has to start after the wait for an in-flight signature
-/// insert is over, because under READ COMMITTED its snapshot is taken at statement
-/// start, before any lock wait, and EvalPlanQual re-checks the qual only against
-/// the row version it is updating - it never re-evaluates a subquery over another
-/// table. Guard alone: the DELETE blocks on the insert's RI `FOR KEY SHARE` lock,
-/// proceeds without ever seeing the signature that committed meanwhile, and
-/// cascades it away, 404ing a narinfo committed seconds earlier. [`LOCK`] alone:
-/// nothing decides. Together the wait is absorbed in its own statement and the
-/// DELETE opens a fresh snapshot that sees the signature its guard then tests.
+/// by the DELETE, because a preceding statement would decide from its own snapshot;
+/// and the DELETE has to start only once the wait for an in-flight signature insert
+/// is over, which is the module doc's READ COMMITTED argument. Guard alone: the
+/// DELETE blocks on the insert's RI `FOR KEY SHARE` lock, proceeds without ever
+/// seeing the signature that committed meanwhile, and cascades it away, 404ing a
+/// narinfo committed seconds earlier. [`LOCK`] alone: nothing decides. Together the
+/// wait is absorbed in its own statement and the DELETE opens a fresh snapshot that
+/// sees the signature its guard then tests.
 ///
 /// That is why this takes a `&DatabaseTransaction` and not a connection: the locks
 /// [`LOCK`] takes have to still be held when the DELETE runs, and on a pooled
@@ -443,16 +470,24 @@ pub async fn repair_counters_for<C: ConnectionTrait>(
 /// walked candidates are whole, and most of those have no pending anchor. A
 /// false-whole there prunes a subtree that is then never walked, recorded or
 /// built - a permanent dead end, not a stall a later build clears.
-pub const GATING_PATHS: &str = r#"
+pub fn gating_paths() -> String {
+    let pending = crate::status_sql::build_in(&[
+        gradient_entity::build::BuildStatus::Created,
+        gradient_entity::build::BuildStatus::Queued,
+    ]);
+    format!(
+        r#"
     SELECT d.hash FROM derivation d
     JOIN derivation_build db ON db.derivation = d.id
-    WHERE db.status IN (0, 1)
+    WHERE db.status IN ({pending})
   UNION
     SELECT o.hash FROM derivation_output o
     JOIN derivation_dependency e ON e.dependency = o.derivation
     JOIN derivation_build db ON db.derivation = e.derivation
-    WHERE db.status IN (0, 1)
-"#;
+    WHERE db.status IN ({pending})
+"#
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -662,15 +697,56 @@ mod tests {
         );
     }
 
-    /// A decode failure must not read as "not whole": that would truncate the
-    /// ripple and leave referrers unwhole forever, with no sweep behind it.
+    /// A decode failure must not read as "not whole" or as "nothing here": that
+    /// would truncate the ripple and leave referrers unwhole forever, with no sweep
+    /// behind it. Every row this module reads propagates - the ripple's flag and its
+    /// hash, the seed's flag, and the delete's two.
     #[tokio::test]
-    async fn a_ripple_row_that_does_not_decode_is_an_error_not_a_dead_end() {
-        let db = MockDatabase::new(DatabaseBackend::Postgres)
+    async fn a_row_that_does_not_decode_is_an_error_not_a_dead_end() {
+        let ripple_flag = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![row("r1", "misspelled", true)]])
             .into_connection();
+        assert!(
+            ripple_whole(&ripple_flag, vec!["seed".to_owned()])
+                .await
+                .is_err()
+        );
 
-        assert!(ripple_whole(&db, vec!["seed".to_owned()]).await.is_err());
+        let ripple_hash = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![BTreeMap::from([
+                ("misspelled".to_owned(), Value::from("r1".to_owned())),
+                ("whole".to_owned(), Value::from(true)),
+            ])]])
+            .into_connection();
+        assert!(
+            ripple_whole(&ripple_hash, vec!["seed".to_owned()])
+                .await
+                .is_err(),
+            "the frontier's next level must not silently lose a row"
+        );
+
+        let seed_flag = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![flag_row("misspelled", true)]])
+            .into_connection();
+        assert!(
+            seed_references(&seed_flag, "h").await.is_err(),
+            "an undecodable seed must not report the row as unwhole"
+        );
+
+        let delete_flag = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![BTreeMap::from([(
+                "hash".to_owned(),
+                Value::from("a".to_owned()),
+            )])]])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .into_connection();
+        assert!(
+            retire_paths(&delete_flag, &["a".to_owned()]).await.is_err(),
+            "a delete whose wholeness flag does not decode must not skip the ripple"
+        );
     }
 
     /// Retiring seeds the reverse ripple only from rows that were whole: a
@@ -746,13 +822,10 @@ mod tests {
         assert!(crate::pool::statements(db.into_transaction_log()).is_empty());
     }
 
-    /// Both halves of a guarded retire are load-bearing. The guard must be
-    /// evaluated by the DELETE, since a preceding statement would decide from its
-    /// own snapshot; and the DELETE must start after the wait for an in-flight
-    /// signature insert, since under READ COMMITTED its snapshot predates the lock
-    /// wait and EvalPlanQual never re-evaluates a subquery over another table - so
-    /// the guard alone still deletes a row whose signature committed while the
-    /// DELETE was blocked on that insert's RI key lock, and cascades it away.
+    /// Both halves of a guarded retire are load-bearing, for the reason the module
+    /// doc gives once: the guard must be evaluated by the DELETE, and the DELETE
+    /// must open its snapshot only after the wait for an in-flight signature insert
+    /// is over, or it cascades away a signature that committed while it waited.
     ///
     /// The lock has to outlive its own statement for that to hold, which is why
     /// this drives a transaction: `retire_paths_where` takes a
@@ -881,7 +954,7 @@ mod tests {
     /// path some dispatch gate still reads.
     #[test]
     fn gating_paths_cover_pending_drvs_and_their_dependencies_outputs() {
-        let sql = norm(GATING_PATHS);
+        let sql = norm(&gating_paths());
         let pending = format!(
             "db.status IN ({})",
             crate::status_sql::build_in(&[

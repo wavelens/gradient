@@ -8,6 +8,12 @@
 //! a path's references that are absent, unbacked or themselves not whole. The
 //! old flag is converged one last time so the seed reads a sound value, then
 //! dropped. On a large cache this runs for minutes and blocks the first start.
+//!
+//! Runs exactly once. The `IF NOT EXISTS` / `IF EXISTS` guards are for a run that
+//! died partway through, not for a re-run: a second `up` finds `closure_complete`
+//! already dropped and `converge()` fails on the missing column. The seed skips
+//! every row with no reference at all, so the transaction that then takes ACCESS
+//! EXCLUSIVE for the `DROP COLUMN` does not first rewrite the whole table.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
@@ -52,6 +58,7 @@ const SEED: &str = r#"
         WHERE r.referrer = cp.hash
           AND r.reference_hash <> cp.hash
           AND NOT (dep.file_hash IS NOT NULL AND dep.closure_complete))
+    WHERE EXISTS (SELECT 1 FROM cached_path_reference r WHERE r.referrer = cp.hash)
 "#;
 
 #[derive(DeriveMigrationName)]

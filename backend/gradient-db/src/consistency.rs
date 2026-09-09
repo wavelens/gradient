@@ -99,7 +99,7 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
     let gating = db
         .query_all_raw(Statement::from_string(
             DatabaseBackend::Postgres,
-            crate::nar_closure::GATING_PATHS.to_owned(),
+            crate::nar_closure::gating_paths(),
         ))
         .await?
         .into_iter()
@@ -211,7 +211,8 @@ mod tests {
         assert_eq!(report.gating_paths, 1, "the repair's scope is measured");
         let log = crate::pool::statements(db.into_transaction_log());
         assert!(
-            log[0].contains("FROM derivation_build db") && log[0].contains("derivation_dependency"),
+            log[0].contains("SELECT d.hash FROM derivation d")
+                && log[0].contains("JOIN derivation_dependency e ON e.dependency = o.derivation"),
             "the gating select comes first: {log:?}"
         );
         assert!(
