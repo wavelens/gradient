@@ -144,10 +144,11 @@ async fn run_cache_maintenance(state: Arc<ServerState>) -> anyhow::Result<()> {
     {
         error!(error = ?e, "NAR TTL GC failed");
     }
-    // The GC passes above delete `cached_path` rows whose NAR is gone without
-    // touching the producer's trust flags; demote any anchor the dispatch gate
-    // would trust whose output is no longer fetchable, so its dependents stop
-    // failing `InputsUnavailable` and the next eval rebuilds it.
+    // The GC passes above retire the `cached_path` rows they drop, so the counters
+    // and trust flags those rows backed move in the deleting transaction. This
+    // stays the backstop for an anchor a retire cannot reach - one trusted with no
+    // backing NAR at all - so its dependents stop failing `InputsUnavailable` and
+    // the next eval rebuilds it.
     match state.graph.demote(Demotion::UnbackedTrustedOutputs).await {
         Ok(report) if report.demoted > 0 => info!(
             reset = report.demoted,
