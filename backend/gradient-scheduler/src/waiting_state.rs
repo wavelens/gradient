@@ -572,8 +572,11 @@ mod tests {
             assert!(sql.contains(frag), "missing `{frag}`: {sql}");
         }
         assert!(
-            sql.contains(&norm(gradient_db::graph_sql::drv_whole_predicate("db"))),
-            "must require the .drv's own NAR closure to be absent: {sql}"
+            sql.contains(&format!(
+                "NOT {}",
+                norm(gradient_db::graph_sql::drv_whole_predicate("db"))
+            )),
+            "must require the .drv not to be whole, through the shared predicate: {sql}"
         );
         assert!(
             sql.contains("cached_path cp") && sql.contains("derivation_input_source"),

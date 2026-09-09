@@ -43,10 +43,11 @@ still run as tracked tasks off the session. When the core actor is respawned,
 the sessions supervisor re-registers every live session together with the
 jobs it still runs.
 
-The graph actor (`gradient-graph`) is the only code that writes `derivation`,
+The graph actor (`gradient-graph`) owns the graph: every write to `derivation`,
 `derivation_build`, `derivation_dependency`, `derivation_output`,
 `derivation_input_source`, `build_job`, `build_attempt`, `cached_path` and
-`cached_path_reference`. Sessions, the scheduler, the web handlers and the
+`cached_path_reference` that a request path makes goes through it, one message at a
+time. Sessions, the scheduler, the web handlers and the
 cache sweeps reach it through `state.graph`: an evaluation batch, a NAR commit,
 an anchor transition, a requeue or a demotion is one message and one
 transaction, so two workers walking overlapping graphs can no longer race each
@@ -58,6 +59,15 @@ ordering (`CacheQuery`, board and API queries) stay on the pools. Effects that
 leave the process (forge reports, notifications) are still spawned after the
 write; #597 moves them into an outbox. Startup recovery, the maintenance
 deletions (`Gc`, #597) and the debug indexer's flag stay outside the actor.
+
+The maintenance deletions are the exception that matters for the cache index. TTL
+eviction, the zombie purge and the orphan GC retire `cached_path` rows in their own
+transactions, so `cached_path.missing_references` - the reference counter every
+dispatch gate and eval prune reads - is moved inside the actor's transaction on a
+commit and inside the deletion's own transaction on a retire. Nothing serialises the
+two but row locks: a commit locks its reference endpoints, and both retires the rows
+they delete, in one hash-ordered statement before either decides anything, so a
+retire and a commit can never disagree about an edge (`gradient_db::nar_closure`).
 
 A child that panics or exits unexpectedly is respawned
 after an exponential backoff (1s doubling to 60s, reset after five healthy
