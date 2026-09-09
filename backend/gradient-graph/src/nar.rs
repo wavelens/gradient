@@ -593,7 +593,7 @@ mod tests {
         let log = recommit_log(vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()]).await;
         let endpoints = log
             .iter()
-            .position(|s| s.contains("FOR KEY SHARE"))
+            .position(|s| s.contains("FOR SHARE"))
             .expect("the reference endpoints are locked");
         let referrer = log
             .iter()

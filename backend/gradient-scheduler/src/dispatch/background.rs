@@ -13,7 +13,7 @@ use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_graph::Transition;
 use gradient_types::EvaluationId;
 use gradient_types::proto::BuildFailureKind;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::Scheduler;
 
@@ -45,8 +45,8 @@ pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
 /// anchors gate on. Transient non-zero counts right after a transition are normal;
 /// persistent ones are not - except `nar_counter_drift`, which counts rows this
 /// pass already repaired, so the warning can be a successful self-repair. `gating`
-/// is the size of the repair's scope, logged either way because it is what the
-/// pass costs.
+/// is the size of the repair's scope, logged at `info` on both branches because a
+/// healthy instance is exactly the case whose cost is unmeasured.
 pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let report = gradient_db::graph_consistency_report(&scheduler.state.worker_db).await?;
     if report.total() > 0 {
@@ -62,7 +62,7 @@ pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow:
             "graph consistency sweep found invariant violations"
         );
     } else {
-        debug!(
+        info!(
             gating = report.gating_paths,
             "graph consistency sweep clean"
         );

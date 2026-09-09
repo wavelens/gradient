@@ -52,17 +52,26 @@
 //! with a concurrent move (both ripples); and an absolute recount computed from a
 //! snapshot has to compare-and-swap on the pre-image ([`repair_counters_for`]).
 //!
-//! # One hash-ordered lock per writer
+//! # Lock order, and where it stops
 //!
-//! Every writer that touches a path together with its references locks all of
-//! those rows in ONE hash-ordered statement before it decides anything:
-//! [`lock_reference_endpoints`] for a commit, [`LOCK`] for either retire. The
-//! `ORDER BY hash` is not decoration. With acquisition monotone in `hash` on
-//! every side, a wait-for cycle would need some transaction to wait on a lower
-//! hash than one it already holds; a single unordered locker - a lock set that
-//! skips the row it is about to update, or a `DELETE` taking its locks in scan
-//! order - deadlocks against however careful the other side is, measured on the
-//! shape where a referrer's hash sorts after its reference's.
+//! Every writer that takes row locks here takes them in ONE hash-ordered
+//! statement before it decides anything: [`lock_reference_endpoints`] for a
+//! commit, [`LOCK`] for either retire. The `ORDER BY hash` is not decoration.
+//! With acquisition monotone in `hash`, a wait-for cycle would need some
+//! transaction to wait on a lower hash than one it already holds; a single
+//! unordered locker - a lock set that skips the row it is about to update, or a
+//! `DELETE` taking its locks in scan order - deadlocks against however careful
+//! the other side is, measured on the shape where a referrer's hash sorts after
+//! its reference's.
+//!
+//! The ripples are outside that, and it is not closed. `FORWARD` and `REVERSE`
+//! compute their referrer set inside the statement, so each takes
+//! `FOR NO KEY UPDATE` on rows no ordered lock set covers, in whatever order its
+//! plan produces. A commit and a concurrent maintenance retire can therefore
+//! still deadlock. Postgres detects it rather than hanging: the retire logs and
+//! retries on its next pass, and a killed commit fails a `NarUploaded` the worker
+//! retries. That is the accepted price of `FOR SHARE` below - a detected, retried
+//! deadlock instead of a permanently false-whole row.
 
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement};
 
@@ -122,7 +131,7 @@ const LOCK_REFERENCES: &str = "\
                    SELECT reference_hash FROM cached_path_reference WHERE referrer = $2 \
                    UNION \
                    SELECT $2::text) \
-    ORDER BY hash FOR KEY SHARE";
+    ORDER BY hash FOR SHARE";
 
 /// Lock every row a commit's counter will be counted from, before the commit
 /// decides anything.
@@ -136,11 +145,17 @@ const LOCK_REFERENCES: &str = "\
 /// more. The dispatch gate reads that as a complete closure and sends a build
 /// against a missing input.
 ///
-/// `FOR KEY SHARE` is the right strength. It conflicts with the `DELETE` in
-/// [`retire_paths`], so the retire waits for this transaction and its reverse
+/// `FOR SHARE` is the weakest strength that works. It conflicts with the `DELETE`
+/// in [`retire_paths`], so the retire waits for this transaction and its reverse
 /// ripple - a separate statement, hence a fresh snapshot - then sees the new
-/// edge; and it conflicts with nothing a commit needs, neither another commit's
-/// share lock nor the RI locks a `cached_path_signature` insert takes.
+/// edge. It also conflicts with the ripples' `FOR NO KEY UPDATE`, which
+/// `FOR KEY SHARE` does not: without that, a retire deeper in the closure can
+/// unwhole one of these references between this seed's read and its commit, and
+/// the ripple that should have carried the loss up to this path runs before the
+/// edge exists. Measured on a three-level chain: `FOR KEY SHARE` leaves this row
+/// whole with an unwhole reference, `FOR SHARE` does not. It still conflicts with
+/// nothing a commit needs - another commit's share lock and the RI locks a
+/// `cached_path_signature` insert takes are both compatible.
 ///
 /// Runs BEFORE `upsert_cached_path`'s `FOR UPDATE` and includes the referrer's
 /// own row, so this is the single hash-ordered acquisition the module doc
@@ -565,8 +580,9 @@ mod tests {
     /// - in one hash-ordered statement. Self is included on purpose: a referrer
     /// that locked its references but not itself acquires out of hash order when
     /// its own hash sorts higher, and deadlocks against a bulk retire that reached
-    /// it first. `FOR KEY SHARE` conflicts with the retiring DELETE and with
-    /// nothing a concurrent commit or signature insert needs.
+    /// it first. `FOR SHARE` conflicts with the retiring DELETE and with the
+    /// ripples' non-key UPDATE, and with nothing a concurrent commit or
+    /// signature insert needs.
     #[tokio::test]
     async fn the_commit_locks_every_reference_endpoint_in_hash_order() {
         let sql = norm(LOCK_REFERENCES);
@@ -582,7 +598,7 @@ mod tests {
             sql.contains("UNION SELECT $2::text"),
             "the referrer's own row: {sql}"
         );
-        assert!(sql.ends_with("ORDER BY hash FOR KEY SHARE"), "{sql}");
+        assert!(sql.ends_with("ORDER BY hash FOR SHARE"), "{sql}");
         assert!(
             !sql.contains("FOR UPDATE"),
             "a commit must not block another commit: {sql}"
