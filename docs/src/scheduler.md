@@ -165,7 +165,10 @@ invariants those gates trust - stale-true `closure_complete` /
 `drv_closure_cached`, promotable-but-unpromoted anchors, unbacked
 terminal-success outputs, Building evaluations with no active anchors - and
 logs them as warnings, so a non-converging heal surfaces as an alert instead of
-a user-reported stuck evaluation.
+a user-reported stuck evaluation. One dimension it also repairs: the NAR
+reference counter is moved rather than derived, so the sweep recomputes it over
+the paths the pending anchors gate on and reports how many rows disagreed
+(`nar_counter_drift`).
 
 An evaluation in `EvaluatingFlake` or `EvaluatingDerivation` has one exit: the
 `EvalStreamCompleted` / `EvalFailed` transition the scheduler sends once, when
@@ -318,10 +321,15 @@ intervention.
 
 GC deletion also maintains the dispatch-gate invariant inline instead of leaving
 it to the next reconcile tick: every pass that deletes `cached_path` rows
-(orphan-derivation GC, zombie purge, TTL eviction, path invalidation) clears the
-`drv_closure_cached` / `closure_complete` flags those rows backed **in the same
-transaction** (`clear_gate_flags_for_hashes`), so there is no window in which the
-gate trusts an artifact GC just removed. Path invalidation goes further and
+(orphan-derivation GC, zombie purge, TTL eviction, path invalidation) goes through
+`nar_closure::retire_paths`, which in the **same transaction** raises the
+`missing_references` counter of every referrer that trusted the deleted rows and
+clears the `drv_closure_cached` / `closure_complete` flags those rows backed, so
+there is no window in which the gate trusts an artifact GC just removed. A caller
+that may only drop a path under a condition (the TTL eviction drops one no cache
+signs any more) hands that condition to the retiring DELETE rather than checking it
+in a statement of its own, which would re-check it against its own snapshot once it
+blocked on a concurrent commit and cascade away a signature just written. Path invalidation goes further and
 demotes the producer itself (`demote_cached_output`), so an invalidated output
 rebuilds instead of staying trusted-but-gone. And because the per-task
 evaluation GC refuses to run while any evaluation is active, a wedged `Building`
@@ -452,10 +460,10 @@ The eval closure walk prunes the same way. As the worker walks the graph it
 asks the server which dependency derivations it already knows
 (`QueryKnownDerivations`); the server prunes a subtree only when **every** output
 is on a real upstream cache (`external_url`), or when every output is whole in our
-own cache (a `closure_complete` `cached_path`) behind a terminal-success anchor. An
-upstream binary cache serves a *complete closure*, so a build worker can fetch the
-pruned subtree's outputs on demand, and `closure_complete` carries the same
-guarantee for our own. A bare `is_cached` hit is deliberately not accepted for
+own cache (a `cached_path` with its NAR stored and `missing_references = 0`) behind
+a terminal-success anchor. An upstream binary cache serves a *complete closure*, so
+a build worker can fetch the pruned subtree's outputs on demand, and a whole
+`cached_path` carries the same guarantee for our own. A bare `is_cached` hit is deliberately not accepted for
 pruning: the cache is populated output-only (substitution relays just the output NAR,
 and a config-specific node's subtree may never have been pushed), so pruning on it
 would strand that subtree - never walked, recorded, or built, and off-upstream so
@@ -517,9 +525,9 @@ dependency regressed, or a newly recorded dependency not itself complete) before
 SET fixpoint re-marks the genuinely satisfied. Both ripple over
 `derivation_dependency` and converge in O(longest affected chain); it runs at eval
 completion, graph-unstick, and the 5s dispatch tick so the gate below never reads a
-stale flag. The reactive `clear_closure_complete_for_referrers` (below) still fires
-on demote, but the periodic reconcile is the backstop that does not depend on the
-demote walk finding a not-yet-recorded edge.
+stale flag. A demote raises the reference counters of the deleted path's referrers
+inline (below), but the periodic reconcile is the backstop that does not depend on
+that ripple finding a not-yet-recorded edge.
 
 `promote_ready`, `promote_dependents`, and `dispatch_ready_builds` therefore gate
 each dependency on `(status IN (Completed, Substituted) AND closure_complete)`
@@ -532,10 +540,9 @@ keyed by `status = Queued` and `status = Created` keep the per-tick scans off th
 full anchor table.
 
 When a build still reports a path missing, `reconcile_missing_inputs` self-heals:
-a missing leaf with a producer is purged + rebuilt (`demote_cached_output`) and
-`closure_complete` is cleared up the referrer chain
-(`clear_closure_complete_for_referrers`) so dependents re-block until the leaf
-re-pushes closure-complete; a producerless source (no producer to rebuild)
+a missing leaf with a producer is purged + rebuilt (`demote_cached_output`), whose
+retire raises `missing_references` up the referrer chain so dependents re-block
+until the leaf re-pushes whole; a producerless source (no producer to rebuild)
 demotes its direct **referrers** (`demote_referrers_of`) so a referrer rebuild
 re-pushes it. The migration backfills the flag to a fixpoint over the existing
 cache and resets any closure-incomplete terminal anchor so it rebuilds.

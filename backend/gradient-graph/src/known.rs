@@ -60,7 +60,7 @@ pub(crate) async fn prunable(
         .all(db)
         .await?
         .into_iter()
-        .filter(|cp| cp.is_fully_cached() && cp.closure_complete)
+        .filter(|cp| cp.is_whole())
         .map(|cp| cp.hash)
         .collect();
 
@@ -84,10 +84,9 @@ pub(crate) async fn prunable(
 /// recorded. Upstream arm: every output is on a real upstream (`external_url`),
 /// which serves a complete closure, so a build worker fetches the pruned subtree
 /// on demand. Local arm: the anchor is terminal-success and every output has a
-/// fully-cached `cached_path` with `closure_complete`; bare `is_cached` is not
-/// enough, because our own cache is populated output-only and pruning on it
-/// stranded never-pushed closure members as permanent `InputsUnavailable`
-/// dead-ends.
+/// whole `cached_path` row; bare `is_cached` is not enough, because our own
+/// cache is populated output-only and pruning on it stranded never-pushed
+/// closure members as permanent `InputsUnavailable` dead-ends.
 fn prunable_known_derivations(
     candidates: Vec<(DerivationId, String)>,
     outputs: &[MDerivationOutput],
@@ -190,11 +189,11 @@ mod tests {
         assert_eq!(prunable, vec!["/nix/store/bbb-upstream".to_string()]);
     }
 
-    /// Both local-arm preconditions are load-bearing: a closure-complete output
-    /// without the recorded-graph anchor, or a complete anchor with one output
-    /// lacking `closure_complete`, must keep walking.
+    /// Both local-arm preconditions are load-bearing: a whole output without
+    /// the recorded-graph anchor, or a complete anchor with one output that is
+    /// not whole, must keep walking.
     #[test]
-    fn locally_closure_complete_anchor_prunes() {
+    fn a_locally_whole_anchor_prunes() {
         let complete = DerivationId::now_v7(); // anchor complete + output closure-cached
         let no_anchor = DerivationId::now_v7(); // output closure-cached, no complete anchor
         let half_cached = DerivationId::now_v7(); // anchor complete, one output not closure-cached

@@ -30,10 +30,6 @@ use super::{DISPATCH_BUDGET, DISPATCH_TICK};
 /// Full-backstop (Global) reconcile cadence, in dispatch ticks: 6 x 5s = 30s.
 const GLOBAL_RECONCILE_TICKS: u64 = 6;
 
-/// Deep reconcile cadence (Global plus the cached_path closure re-derivation,
-/// tens of seconds on a large cache): 720 x 5s = 1h.
-const DEEP_RECONCILE_TICKS: u64 = 720;
-
 /// One dispatch pass. A timer tick also advances the rescore clock and runs
 /// the reconcile scope for `tick_count`; a kick runs only the dispatch half.
 pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool, tick_count: u64) {
@@ -47,13 +43,11 @@ pub(crate) async fn build_dispatch_pass(scheduler: &Scheduler, timer_tick: bool,
 
         // Every timer tick runs promotion (Tick); the anchor-side flag
         // fixpoints, unbacked-output demote, and failure sweep (Global) run
-        // every GLOBAL_RECONCILE_TICKS, and the cached_path-side fixpoint
-        // (Deep) hourly - their full-table scans saturated Postgres when
-        // re-run every 5s on a large graph. Active evals keep their flags
-        // fresh via reactive completion propagation and per-flush Eval passes.
-        let scope = if tick_count.is_multiple_of(DEEP_RECONCILE_TICKS) {
-            gradient_db::ReconcileScope::Deep
-        } else if tick_count.is_multiple_of(GLOBAL_RECONCILE_TICKS) {
+        // every GLOBAL_RECONCILE_TICKS - their full-table scans saturated
+        // Postgres when re-run every 5s on a large graph. Active evals keep
+        // their flags fresh via reactive completion propagation and per-flush
+        // Eval passes.
+        let scope = if tick_count.is_multiple_of(GLOBAL_RECONCILE_TICKS) {
             gradient_db::ReconcileScope::Global
         } else {
             gradient_db::ReconcileScope::Tick

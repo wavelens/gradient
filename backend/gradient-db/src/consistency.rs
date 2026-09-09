@@ -11,6 +11,11 @@
 //! pipeline is not converging", never "the checker disagrees with the gates".
 //! Transient non-zero counts between a transition and the next reconcile tick
 //! are expected; persistent counts are the alert.
+//!
+//! One dimension is not read-only: the NAR reference counter is moved rather
+//! than derived, so nothing else would ever notice a lost move. This pass
+//! repairs it in place over the paths that gate pending anchors, and reports
+//! how many rows it had to correct.
 
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
@@ -30,8 +35,8 @@ pub struct ConsistencyReport {
     pub unbacked_trusted_outputs: i64,
     /// `Building` evaluations with zero non-terminal anchors left.
     pub wedged_building_evals: i64,
-    /// `cached_path` rows whose `closure_complete` disagrees with its gate.
-    pub stale_cached_path_closure: i64,
+    /// `cached_path` rows whose reference counter this pass had to repair.
+    pub nar_counter_drift: i64,
 }
 
 impl ConsistencyReport {
@@ -41,7 +46,7 @@ impl ConsistencyReport {
             + self.unpromoted_ready
             + self.unbacked_trusted_outputs
             + self.wedged_building_evals
-            + self.stale_cached_path_closure
+            + self.nar_counter_drift
     }
 }
 
@@ -54,7 +59,8 @@ async fn count<C: ConnectionTrait>(db: &C, sql: String) -> Result<i64, DbErr> {
         .unwrap_or(0))
 }
 
-/// Count every invariant violation the gates could act on right now.
+/// Count every invariant violation the gates could act on right now, and repair
+/// the NAR reference counter over the paths the pending anchors gate on.
 pub async fn graph_consistency_report<C: ConnectionTrait>(
     db: &C,
 ) -> Result<ConsistencyReport, DbErr> {
@@ -118,15 +124,16 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
     )
     .await?;
 
-    let cached_path_gate = crate::cache_storage::CACHED_PATH_CLOSURE_COMPLETE_GATE;
-    let stale_cached_path_closure = count(
-        db,
-        format!(
-            "SELECT count(*) AS n FROM cached_path cp \
-             WHERE cp.closure_complete <> ({cached_path_gate})"
-        ),
-    )
-    .await?;
+    let gating: Vec<String> = db
+        .query_all_raw(Statement::from_string(
+            DatabaseBackend::Postgres,
+            crate::nar_closure::GATING_PATHS.to_owned(),
+        ))
+        .await?
+        .into_iter()
+        .filter_map(|r| r.try_get::<String>("", "hash").ok())
+        .collect();
+    let nar_counter_drift = crate::nar_closure::repair_counters_for(db, &gating).await? as i64;
 
     Ok(ConsistencyReport {
         stale_closure_complete,
@@ -134,7 +141,7 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
         unpromoted_ready,
         unbacked_trusted_outputs,
         wedged_building_evals,
-        stale_cached_path_closure,
+        nar_counter_drift,
     })
 }
 
@@ -150,7 +157,7 @@ mod tests {
             unpromoted_ready: 3,
             unbacked_trusted_outputs: 4,
             wedged_building_evals: 5,
-            stale_cached_path_closure: 6,
+            nar_counter_drift: 6,
         };
         assert_eq!(r.total(), 21);
         assert_eq!(ConsistencyReport::default().total(), 0);
