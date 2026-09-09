@@ -16,8 +16,9 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use gradient_proto::messages::{
-    CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage,
+    ArchivedServerMessage, CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage,
 };
+use gradient_proto::session::frame::{Frame, Inbound};
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
@@ -96,14 +97,17 @@ pub(super) async fn run_dispatch_loop(
                 state.on_heartbeat().await?;
             }
 
-            msg = reader.recv() => {
-                let Some(msg) = msg else {
+            inbound = reader.recv() => {
+                let Some(inbound) = inbound else {
                     info!("server closed connection");
                     break;
                 };
                 let started = std::time::Instant::now();
-                let kind = msg.variant_name();
-                let result = state.dispatch(msg).await;
+                let kind = inbound.variant_name();
+                let result = match inbound {
+                    Inbound::Bulk(frame) => state.dispatch_bulk(frame).await,
+                    Inbound::Control(msg) => state.dispatch(msg).await,
+                };
                 let elapsed_ms = started.elapsed().as_millis();
                 if elapsed_ms > 1_000 {
                     warn!(kind, elapsed_ms, "slow message dispatch - loop was blocked");
@@ -335,16 +339,6 @@ impl DispatchState {
                 self.nar_recv
                     .resolve_push(&job_id, &store_path, received_bytes);
             }
-            ServerMessage::NarPush {
-                job_id,
-                store_path,
-                data,
-                offset,
-                is_final,
-            } => {
-                self.on_nar_push(job_id, store_path, data, offset, is_final)
-                    .await;
-            }
             ServerMessage::NarUnavailable {
                 job_id,
                 store_path,
@@ -401,18 +395,60 @@ impl DispatchState {
             ServerMessage::EvalCachePullResult { job_id, outcome } => {
                 self.eval_cache_recv.deliver_pull_result(&job_id, outcome);
             }
-            ServerMessage::EvalCacheChunk {
+            ServerMessage::EvalCachePushGrant { job_id, mode } => {
+                self.eval_cache_recv.deliver_push_grant(&job_id, mode);
+            }
+            // Unreachable: `decode` routes these to `dispatch_bulk` still archived.
+            ServerMessage::NarPush { .. } | ServerMessage::EvalCacheChunk { .. } => {
+                warn!("bulk variant deserialised into the control lane");
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle a payload-bearing frame without deserialising it: the chunk is
+    /// written straight from the buffer the socket delivered.
+    async fn dispatch_bulk(&mut self, frame: Frame<ServerMessage>) -> Result<()> {
+        match frame.archived() {
+            ArchivedServerMessage::NarPush {
+                job_id,
+                store_path,
+                data,
+                offset,
+                is_final,
+            } => {
+                debug!(
+                    job_id = job_id.as_str(),
+                    store_path = store_path.as_str(),
+                    offset = offset.to_native(),
+                    is_final = *is_final,
+                    bytes = data.len(),
+                    "received NAR chunk from server"
+                );
+                self.nar_recv
+                    .accept_chunk(
+                        job_id.as_str(),
+                        store_path.as_str(),
+                        data.as_slice(),
+                        offset.to_native(),
+                        *is_final,
+                    )
+                    .await;
+            }
+            ArchivedServerMessage::EvalCacheChunk {
                 job_id,
                 data,
                 offset,
                 is_final,
             } => {
-                self.eval_cache_recv
-                    .deliver_pull_chunk(&job_id, data, offset, is_final);
+                self.eval_cache_recv.deliver_pull_chunk(
+                    job_id.as_str(),
+                    data.as_slice(),
+                    offset.to_native(),
+                    *is_final,
+                );
             }
-            ServerMessage::EvalCachePushGrant { job_id, mode } => {
-                self.eval_cache_recv.deliver_push_grant(&job_id, mode);
-            }
+            _ => warn!("non-bulk variant routed to the bulk lane"),
         }
         Ok(())
     }
@@ -753,20 +789,6 @@ impl DispatchState {
     }
 
     // ── NAR transfer ──────────────────────────────────────────────────────────
-
-    async fn on_nar_push(
-        &mut self,
-        job_id: String,
-        store_path: String,
-        data: Vec<u8>,
-        offset: u64,
-        is_final: bool,
-    ) {
-        debug!(%job_id, %store_path, offset, is_final, bytes = data.len(), "received NAR chunk from server");
-        self.nar_recv
-            .accept_chunk(&job_id, &store_path, data, offset, is_final)
-            .await;
-    }
 
     fn on_cache_status(&mut self, query_id: String, cached: Vec<CachedPath>) {
         let count = cached.len();

@@ -25,6 +25,8 @@ The first message on every connection is `InitConnection`. The server responds w
 
 One handshake implementation drives every session: the pure FSM in `gradient-proto/src/session/handshake.rs`. The server runs `as_authority` with a `PeerAuthority` impl wrapping its registration tables and the `decide_auth` policy; the worker runs `as_peer` with its `PeerIdentity`/`CapabilitiesProvider` impls; the read-only cache session reuses the same `on_init_connection` transition for its version gate. Framing is likewise shared: both roles split one `ProtoSocket` into a typed reader plus a bounded, batch-draining writer (`session/frame.rs`).
 
+Frames are read in place: rkyv archives are unaligned (`PROTO_VERSION` 12), so a received frame is validated where the socket put it and payload-bearing messages (`NarPush`, `EvalCacheChunk`, `LogChunk`) hand their bytes to the handler as a slice of the frame. No copy of a chunk is made between the socket and the file it lands in. Control messages deserialise from the same view.
+
 The writer drains the control lane first and fills a bulk batch only up to `BULK_BATCH_BYTES` (256 KiB), so a control reply never waits behind more than one 512 KiB chunk. Bulk and control queues have independent depth; a stalled transfer cannot fill the control lane.
 
 ```mermaid
