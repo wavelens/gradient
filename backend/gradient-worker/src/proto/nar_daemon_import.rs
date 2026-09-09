@@ -6,13 +6,15 @@
 
 //! Stream a server-supplied NAR straight into the local nix-daemon.
 //!
-//! Receives the (still zstd-compressed) NAR bytes plus the cache metadata
-//! that came back in `CacheStatus`, decompresses in-memory, constructs a
-//! [`ValidPathInfo`], and calls harmonia's `add_to_store_nar` over the
-//! daemon socket. No on-disk staging, no `nix copy` subprocess, no
-//! signature/key configuration on the worker - the WS transport itself is
-//! authenticated, so we pass `dont_check_sigs: true`.
+//! Receives the (still zstd-compressed) NAR - staged on disk by the pull, or
+//! in memory when it came from a presigned download - plus the cache metadata
+//! that came back in `CacheStatus`, decompresses it, constructs a
+//! [`ValidPathInfo`], and calls harmonia's `add_to_store_nar` over the daemon
+//! socket. No `nix copy` subprocess, no signature/key configuration on the
+//! worker - the WS transport itself is authenticated, so we pass
+//! `dont_check_sigs: true`.
 
+use std::io::{Read as _, Seek as _};
 use std::pin::pin;
 
 use anyhow::{Context, Result};
@@ -22,12 +24,14 @@ use harmonia_protocol::valid_path_info::ValidPathInfo;
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
 use sha2::{Digest as _, Sha256};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::nix::store::LocalNixStore;
 use crate::proto::compression::{
-    build_unkeyed_path_info, decompress, parse_nar_hash_to_bytes, resolve_compression,
+    SNIFF_BYTES, build_unkeyed_path_info, decompress, decompress_reader, parse_nar_hash_to_bytes,
+    resolve_compression,
 };
+use crate::proto::nar_recv::NarPayload;
 use crate::proto::prefetch::CorruptCachedNar;
 
 // ── NarImporter ───────────────────────────────────────────────────────────────
@@ -88,22 +92,47 @@ impl<'a> NarImporter<'a> {
             })
     }
 
-    async fn import(&self, compressed_nar: Vec<u8>) -> Result<()> {
+    async fn import(&self, payload: NarPayload) -> Result<()> {
         // Compression comes from the payload's own magic bytes, falling back to
         // the `URL:` field the narinfo was rewritten into and finally to zstd -
         // the only format our own cache produces, and all a `NarRequest` over
         // the WebSocket carries. Decompress + digest are multi-MB CPU work, so
-        // both run on the blocking pool.
-        let kind = resolve_compression(&compressed_nar, self.meta.url.as_deref());
+        // both run on the blocking pool, and a staged NAR is read straight off
+        // disk so the compressed bytes never sit in memory as well.
         let store_path = self.store_path.to_owned();
         let expected_size = self.meta.nar_size;
         let claimed_hash = self.meta.nar_hash.clone();
-        let compressed_len = compressed_nar.len();
-        let decompressed = tokio::task::spawn_blocking(move || {
-            let raw = decompress(&compressed_nar, kind)
-                .with_context(|| format!("{kind:?} decompress failed for {store_path}"))?;
+        let url = self.meta.url.clone();
+        let (decompressed, compressed_len) = tokio::task::spawn_blocking(move || {
+            let (raw, compressed_len) = match payload {
+                NarPayload::Bytes(compressed) => {
+                    let kind = resolve_compression(&compressed, url.as_deref());
+                    let raw = decompress(&compressed, kind)
+                        .with_context(|| format!("{kind:?} decompress failed for {store_path}"))?;
+                    (raw, compressed.len() as u64)
+                }
+                NarPayload::File(path) => {
+                    let mut file = std::fs::File::open(&path)
+                        .with_context(|| format!("open staged NAR {}", path.display()))?;
+                    let mut magic = Vec::with_capacity(SNIFF_BYTES);
+                    file.by_ref()
+                        .take(SNIFF_BYTES as u64)
+                        .read_to_end(&mut magic)
+                        .with_context(|| format!("read staged NAR {}", path.display()))?;
+                    let kind = resolve_compression(&magic, url.as_deref());
+                    file.rewind().context("rewind staged NAR")?;
+                    let compressed_len = file.metadata().context("stat staged NAR")?.len();
+                    let raw = decompress_reader(&mut file, kind)
+                        .with_context(|| format!("{kind:?} decompress failed for {store_path}"))?;
+                    drop(file);
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        warn!(path = %path.display(), error = %e, "could not remove staged NAR");
+                    }
+                    (raw, compressed_len)
+                }
+            };
             verify_nar(&store_path, &raw, expected_size, claimed_hash.as_deref())?;
-            Ok::<_, anyhow::Error>(raw)
+            Ok::<_, anyhow::Error>((raw, compressed_len))
         })
         .await
         .context("decompress task panicked")??;
@@ -163,10 +192,10 @@ fn verify_nar(
 pub async fn import_received_nar(
     store: &LocalNixStore,
     store_path: &str,
-    compressed_nar: Vec<u8>,
+    payload: NarPayload,
     meta: &CachedPath,
 ) -> Result<()> {
     NarImporter::new(store, store_path, meta)
-        .import(compressed_nar)
+        .import(payload)
         .await
 }

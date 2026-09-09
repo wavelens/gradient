@@ -11,12 +11,17 @@
 //! [`NarReceiver::await_pending`] to await the assembled compressed NAR for
 //! each path. The dispatch loop records the leading
 //! [`gradient_proto::messages::ServerMessage::NarStreamHeader`] via
-//! [`NarReceiver::note_header`] and calls [`NarReceiver::accept_chunk`] for
-//! each arriving `ServerMessage::NarPush`. When a [`gradient_storage::PartialStore`]
-//! is configured, chunks are staged to disk keyed by the NAR hash so an
-//! interrupted download can resume (issue #225); otherwise they accumulate in
-//! memory (used by tests). On `is_final` the assembled buffer is delivered to
-//! the waiting task via a `oneshot`.
+//! [`NarReceiver::note_header`] and hands every arriving
+//! `ServerMessage::NarPush` frame to [`NarReceiver::accept_chunk`].
+//!
+//! A transfer is drained by its own staging task: the dispatch loop only moves
+//! the frame onto a bounded channel, so no disk write ever runs on the loop.
+//! When a [`gradient_storage::PartialStore`] is configured the task holds one
+//! open [`gradient_storage::PartialWriter`] for the whole stream (keyed by job
+//! and NAR hash) so an interrupted download can resume (issue #225) and the
+//! compressed NAR is delivered as a file; otherwise it accumulates in memory
+//! (used by tests). On `is_final` the [`NarPayload`] is delivered to the
+//! waiting task via a `oneshot`.
 //!
 //! `NarUnavailable` / `NarAbort` are routed through [`NarReceiver::fail`] so
 //! the waiter resolves with the reason immediately. The on-disk partial is
@@ -29,36 +34,120 @@
 
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use gradient_proto::messages::TRANSFER_TIMEOUT;
-use tokio::sync::oneshot;
+use gradient_proto::messages::{ArchivedServerMessage, ServerMessage, TRANSFER_TIMEOUT};
+use gradient_proto::session::frame::Frame;
+use gradient_storage::{PartialStore, PartialWriter};
+use tokio::sync::{mpsc, oneshot};
+use tokio_util::task::TaskTracker;
 use tracing::{debug, warn};
 
 /// Ceiling on the push-resume handshake. A server that never answers a
 /// `NarStreamHeader` falls back to a fresh upload from offset 0.
 const PUSH_RESUME_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Frames a staging task may queue before the dispatch loop has to wait. Deep
+/// enough to absorb a burst, shallow enough that a stalled disk becomes
+/// backpressure on the socket rather than unbounded memory.
+const STAGE_QUEUE_DEPTH: usize = 8;
+
 type Key = (String, String); // (job_id, store_path)
 
-/// Metadata from a `NarStreamHeader` preceding the chunks for a pull.
-struct HeaderInfo {
-    total_bytes: u64,
-    token: String,
+/// A received compressed NAR: staged on disk, or in memory when no partial
+/// store is configured.
+pub enum NarPayload {
+    File(PathBuf),
+    Bytes(Vec<u8>),
+}
+
+/// Never prints the payload itself: a NAR body in a log line is both useless
+/// and unbounded.
+impl std::fmt::Debug for NarPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NarPayload::File(path) => write!(f, "NarPayload::File({})", path.display()),
+            NarPayload::Bytes(bytes) => write!(f, "NarPayload::Bytes({} bytes)", bytes.len()),
+        }
+    }
+}
+
+impl NarPayload {
+    /// The compressed bytes, reading the staged file back when the transfer
+    /// went to disk. Only for the small `.drv` payloads the closure walk mines;
+    /// the import path decompresses straight from the file instead.
+    pub(crate) async fn read_bytes(&self) -> Result<std::borrow::Cow<'_, [u8]>> {
+        match self {
+            NarPayload::Bytes(bytes) => Ok(std::borrow::Cow::Borrowed(bytes)),
+            NarPayload::File(path) => Ok(std::borrow::Cow::Owned(
+                tokio::fs::read(path)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("read staged NAR {}: {e}", path.display()))?,
+            )),
+        }
+    }
+}
+
+/// Where a staging task puts the bytes of one transfer.
+enum Sink {
+    /// Open writer plus the partial key it was opened under, so the finished
+    /// file can be claimed away from anything that might resume it. Boxed: the
+    /// writer dwarfs the in-memory variant and every stream would carry it.
+    Disk {
+        writer: Box<PartialWriter>,
+        key: String,
+    },
+    Memory(Vec<u8>),
+}
+
+impl Sink {
+    async fn append(&mut self, offset: u64, data: &[u8]) -> Result<()> {
+        match self {
+            Sink::Disk { writer, .. } => writer.append(offset, data).await,
+            Sink::Memory(buf) => {
+                buf.extend_from_slice(data);
+                Ok(())
+            }
+        }
+    }
+
+    fn len(&self) -> u64 {
+        match self {
+            Sink::Disk { writer, .. } => writer.len(),
+            Sink::Memory(buf) => buf.len() as u64,
+        }
+    }
+
+    /// Close the sink and hand back what the importer should read. A disk sink
+    /// claims its finished partial: the rename drops the resume token with it,
+    /// so a repeat header for the same path cannot truncate the file the
+    /// importer is about to read.
+    async fn finish(self, partial: Option<&PartialStore>) -> Result<NarPayload> {
+        match self {
+            Sink::Memory(buf) => Ok(NarPayload::Bytes(buf)),
+            Sink::Disk { writer, key } => {
+                let staged = writer.finish().await?;
+                let Some(store) = partial else {
+                    return Ok(NarPayload::File(staged.path));
+                };
+                match store.detach(&key).await? {
+                    Some(claim) => Ok(NarPayload::File(store.path(&claim))),
+                    None => Ok(NarPayload::File(staged.path)),
+                }
+            }
+        }
+    }
 }
 
 #[derive(Default)]
 struct Inner {
-    /// In-memory NAR bytes, used only when no `PartialStore` is configured.
-    buffers: HashMap<Key, Vec<u8>>,
-    /// Server-advertised size + token for the in-flight pull.
-    headers: HashMap<Key, HeaderInfo>,
+    /// Live transfers: the channel feeding each one's staging task.
+    streams: HashMap<Key, mpsc::Sender<Frame<ServerMessage>>>,
     /// Outstanding pull waiters; resolved on `is_final` or on failure.
-    waiters: HashMap<Key, oneshot::Sender<Result<Vec<u8>, String>>>,
-    /// First-chunk arrival time per key for the throughput EWMA.
-    started: HashMap<Key, std::time::Instant>,
+    waiters: HashMap<Key, oneshot::Sender<Result<NarPayload, String>>>,
     /// Outstanding push-resume gates; resolved on `NarPushResume`.
     push_waiters: HashMap<Key, oneshot::Sender<u64>>,
 }
@@ -68,17 +157,20 @@ struct Inner {
 #[derive(Clone, Default)]
 pub struct NarReceiver {
     inner: Arc<Mutex<Inner>>,
-    /// When set, pull chunks are staged to disk (keyed by NAR hash) so an
-    /// interrupted download survives a reconnect. `None` keeps everything in
+    /// When set, pull chunks are staged to disk (keyed by job and NAR hash) so
+    /// an interrupted download survives a reconnect. `None` keeps everything in
     /// memory (tests).
-    partial: Option<gradient_storage::PartialStore>,
+    partial: Option<PartialStore>,
+    /// Registry for the per-transfer staging tasks, so they are owned by the
+    /// receiver rather than detached into the runtime.
+    stagers: TaskTracker,
 }
 
 /// Outstanding pull waiter handle returned by [`NarReceiver::register`].
 pub struct PendingNar {
     job_id: String,
     store_path: String,
-    rx: oneshot::Receiver<Result<Vec<u8>, String>>,
+    rx: oneshot::Receiver<Result<NarPayload, String>>,
 }
 
 impl PendingNar {
@@ -122,16 +214,137 @@ fn partial_key(job_id: &str, store_path: &str) -> Option<String> {
     store_hash(store_path).map(|hash| format!("{job_id}/{hash}"))
 }
 
+/// Whether a sink continues from the prefix already on disk or truncates it.
+#[derive(Clone, Copy)]
+enum Resume {
+    Staged,
+    Fresh,
+}
+
+/// One transfer's identity: what a staging task needs to open, and if the
+/// server restarts the stream, reopen, its sink.
+struct StreamSpec {
+    key: Key,
+    /// `Some` in disk mode: the partial-store key this transfer stages under.
+    disk_key: Option<String>,
+    token: String,
+    expected: Option<u64>,
+}
+
+/// Fail one transfer for a reason that makes its staged prefix unusable: drop
+/// the partial so the next attempt starts clean rather than resuming garbage.
+/// A server-signalled failure goes through [`NarReceiver::fail`] instead, which
+/// keeps the prefix.
+async fn abandon_staging(receiver: &NarReceiver, spec: &StreamSpec, reason: String) {
+    if let (Some(store), Some(disk_key)) = (receiver.partial.as_ref(), spec.disk_key.as_deref())
+        && let Err(e) = store.discard(disk_key).await
+    {
+        warn!(job_id = %spec.key.0, store_path = %spec.key.1, error = %e, "could not discard a failed NAR partial");
+    }
+    receiver.deliver(&spec.key, Err(reason));
+}
+
+/// Drain one transfer: every frame the dispatch loop queued is appended to
+/// `sink`, and the final one resolves the waiter with the assembled payload.
+async fn stage_pull(
+    receiver: NarReceiver,
+    spec: StreamSpec,
+    mut sink: Sink,
+    mut rx: mpsc::Receiver<Frame<ServerMessage>>,
+) {
+    let key = &spec.key;
+    let mut started: Option<Instant> = None;
+
+    while let Some(frame) = rx.recv().await {
+        let ArchivedServerMessage::NarPush {
+            data,
+            offset,
+            is_final,
+            ..
+        } = frame.archived()
+        else {
+            warn!(job_id = %key.0, store_path = %key.1, "non-NarPush frame on a NAR stream");
+            continue;
+        };
+
+        let (data, offset, is_final) = (data.as_slice(), offset.to_native(), *is_final);
+
+        // The server restarts from 0 when it decides our resume point is
+        // unusable (a prefix longer than the object it holds), keeping the same
+        // token, so drop the resumed prefix rather than fail on contiguity.
+        // Only ever true before the first append.
+        if offset == 0 && sink.len() != 0 {
+            warn!(job_id = %key.0, store_path = %key.1, "server restarted the NAR transfer from 0");
+            sink = match receiver.open_sink(&spec, Resume::Fresh).await {
+                Ok(fresh) => fresh,
+                Err(e) => {
+                    abandon_staging(&receiver, &spec, format!("could not restage NAR: {e}")).await;
+                    return;
+                }
+            };
+        }
+
+        if !data.is_empty() {
+            started.get_or_insert_with(Instant::now);
+            if let Err(e) = sink.append(offset, data).await {
+                abandon_staging(&receiver, &spec, format!("partial append failed: {e}")).await;
+                return;
+            }
+        }
+
+        if !is_final {
+            continue;
+        }
+
+        let staged = sink.len();
+        if let Some(start) = started {
+            crate::metrics::throughput::NETWORK.observe(
+                staged as f64 * 8.0 / start.elapsed().as_secs_f64().max(1e-6) / 1_000_000.0,
+            );
+        }
+
+        if let Some(total) = spec.expected
+            && staged != total
+        {
+            drop(sink);
+            abandon_staging(
+                &receiver,
+                &spec,
+                format!("assembled NAR {staged} bytes != advertised {total} bytes"),
+            )
+            .await;
+            return;
+        }
+
+        match sink.finish(receiver.partial.as_ref()).await {
+            Ok(payload) => receiver.deliver(key, Ok(payload)),
+            Err(e) => {
+                abandon_staging(&receiver, &spec, format!("staging {} failed: {e}", key.1)).await;
+            }
+        }
+        return;
+    }
+
+    // Retired without a final chunk (`fail`, `forget_job`, a dropped
+    // connection): close the writer so the staged prefix is on disk and the
+    // next attempt resumes from a length the file really holds.
+    if let Sink::Disk { writer, .. } = sink
+        && let Err(e) = writer.finish().await
+    {
+        warn!(job_id = %key.0, store_path = %key.1, error = %e, "flushing an interrupted NAR staging failed");
+    }
+}
+
 impl NarReceiver {
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Receiver that stages pull chunks to `store` for resumable downloads.
-    pub fn with_partial_store(store: gradient_storage::PartialStore) -> Self {
+    pub fn with_partial_store(store: PartialStore) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(Inner::default())),
             partial: Some(store),
+            ..Self::default()
         }
     }
 
@@ -163,7 +376,7 @@ impl NarReceiver {
 
     /// Await a previously [`Self::register`]ed waiter, bounded by
     /// [`gradient_proto::messages::TRANSFER_TIMEOUT`].
-    pub async fn await_pending(&self, pending: PendingNar) -> Result<Vec<u8>> {
+    pub async fn await_pending(&self, pending: PendingNar) -> Result<NarPayload> {
         let PendingNar {
             job_id,
             store_path,
@@ -171,7 +384,7 @@ impl NarReceiver {
         } = pending;
         let key = (job_id.clone(), store_path.clone());
         match tokio::time::timeout(TRANSFER_TIMEOUT, rx).await {
-            Ok(Ok(Ok(bytes))) => Ok(bytes),
+            Ok(Ok(Ok(payload))) => Ok(payload),
             Ok(Ok(Err(reason))) => Err(anyhow::anyhow!(
                 "NAR transfer for {} failed: {}",
                 store_path,
@@ -184,10 +397,8 @@ impl NarReceiver {
             )),
             Err(_) => {
                 let mut g = self.inner.lock();
-                g.buffers.remove(&key);
-                g.headers.remove(&key);
+                g.streams.remove(&key);
                 g.waiters.remove(&key);
-                g.started.remove(&key);
                 Err(anyhow::anyhow!(
                     "NarRequest for {} timed out after {}s waiting for NarPush \
                      (job_id={})",
@@ -201,128 +412,104 @@ impl NarReceiver {
 
     /// Convenience: register + await in one step.
     #[cfg(test)]
-    pub async fn wait_for(&self, job_id: &str, store_path: &str) -> Result<Vec<u8>> {
+    pub async fn wait_for(&self, job_id: &str, store_path: &str) -> Result<NarPayload> {
         let pending = self.register(job_id, store_path);
         self.await_pending(pending).await
     }
 
-    /// Record the `NarStreamHeader` that precedes a pull's chunks.
+    /// Record the `NarStreamHeader` that precedes a pull's chunks and start the
+    /// transfer's staging task. A repeat header for the same path retires the
+    /// stream it supersedes.
     pub fn note_header(&self, job_id: &str, store_path: &str, total_bytes: u64, token: &str) {
-        let key = (job_id.to_owned(), store_path.to_owned());
-        self.inner.lock().headers.insert(
-            key,
-            HeaderInfo {
-                total_bytes,
-                token: token.to_owned(),
-            },
-        );
+        self.open_stream(self.spec(job_id, store_path, token, Some(total_bytes)));
     }
 
-    /// Append a `NarPush` chunk at `offset`. When `is_final` is true the
-    /// assembled buffer is delivered to any registered waiter.
-    pub async fn accept_chunk(
+    /// The staging spec for one transfer. `disk_key` is `None` in memory mode
+    /// and for a path whose store hash cannot be parsed.
+    fn spec(
         &self,
         job_id: &str,
         store_path: &str,
-        data: &[u8],
-        offset: u64,
-        is_final: bool,
-    ) {
+        token: &str,
+        expected: Option<u64>,
+    ) -> StreamSpec {
+        StreamSpec {
+            key: (job_id.to_owned(), store_path.to_owned()),
+            disk_key: self
+                .partial
+                .as_ref()
+                .and_then(|_| partial_key(job_id, store_path)),
+            token: token.to_owned(),
+            expected,
+        }
+    }
+
+    /// Queue one `NarPush` frame onto its transfer's staging task, opening a
+    /// stream first when no header announced it (memory mode, tests). The queue
+    /// is fed outside the lock, so a slow disk becomes backpressure on the
+    /// socket instead of a stalled dispatch loop holding a mutex.
+    pub async fn accept_chunk(&self, job_id: &str, store_path: &str, frame: Frame<ServerMessage>) {
         let key = (job_id.to_owned(), store_path.to_owned());
-
-        // Snapshot the active token and stamp the start time without holding
-        // the lock across disk I/O.
-        let token = {
-            let mut g = self.inner.lock();
-            if !data.is_empty() {
-                g.started
-                    .entry(key.clone())
-                    .or_insert_with(std::time::Instant::now);
-            }
-            g.headers
-                .get(&key)
-                .map(|h| h.token.clone())
-                .unwrap_or_default()
+        let existing = self.inner.lock().streams.get(&key).cloned();
+        let tx = match existing {
+            Some(tx) => tx,
+            None => self.open_stream(self.spec(job_id, store_path, "", None)),
         };
 
-        if !data.is_empty() {
-            match (self.partial.as_ref(), partial_key(job_id, store_path)) {
-                (Some(store), Some(pkey)) => {
-                    if let Err(e) = store.append(&pkey, &token, offset, data).await {
-                        // Non-fatal: drop the partial so a retry restarts cleanly.
-                        let _ = store.discard(&pkey).await;
-                        self.deliver(&key, Err(format!("partial append failed: {e}")));
-                        return;
-                    }
-                }
-                _ => {
-                    self.inner
-                        .lock()
-                        .buffers
-                        .entry(key.clone())
-                        .or_default()
-                        .extend_from_slice(data);
+        if tx.send(frame).await.is_err() {
+            debug!(%job_id, %store_path, "NAR chunk for a finished stream - discarding");
+        }
+    }
+
+    /// Install a stream for `spec.key` and spawn its staging task, returning
+    /// the sender. Any stream already registered under that key is dropped,
+    /// which ends its task.
+    fn open_stream(&self, spec: StreamSpec) -> mpsc::Sender<Frame<ServerMessage>> {
+        let (tx, rx) = mpsc::channel(STAGE_QUEUE_DEPTH);
+        self.inner
+            .lock()
+            .streams
+            .insert(spec.key.clone(), tx.clone());
+
+        let receiver = self.clone();
+        self.stagers.spawn(async move {
+            match receiver.open_sink(&spec, Resume::Staged).await {
+                Ok(sink) => stage_pull(receiver, spec, sink, rx).await,
+                Err(e) => {
+                    receiver.deliver(&spec.key, Err(format!("could not stage NAR: {e}")));
                 }
             }
-        }
+        });
+        tx
+    }
 
-        if !is_final {
-            return;
-        }
-
-        // Take the in-memory state under the lock; read/discard the on-disk
-        // partial off the runtime.
-        let (expected, started, disk_key, mem_buf) = {
-            let mut g = self.inner.lock();
-            let expected = g.headers.remove(&key).map(|h| h.total_bytes);
-            let started = g.started.remove(&key);
-            let disk_key = match (self.partial.as_ref(), partial_key(job_id, store_path)) {
-                (Some(_), Some(pkey)) => Some(pkey),
-                _ => None,
-            };
-            let mem_buf = match &disk_key {
-                Some(_) => None,
-                None => Some(g.buffers.remove(&key).unwrap_or_default()),
-            };
-            (expected, started, disk_key, mem_buf)
+    /// Open the sink a staging task writes into. `Resume::Staged` continues
+    /// from whatever prefix the store already holds under the stream's token,
+    /// which is the offset the requester told the server to continue from.
+    async fn open_sink(&self, spec: &StreamSpec, resume: Resume) -> Result<Sink> {
+        let (Some(store), Some(disk_key)) = (self.partial.as_ref(), spec.disk_key.as_deref())
+        else {
+            return Ok(Sink::Memory(Vec::new()));
         };
 
-        let buf = match (mem_buf, disk_key, self.partial.as_ref()) {
-            (Some(b), _, _) => b,
-            (None, Some(pkey), Some(store)) => {
-                let b = store.read_all(&pkey).await.unwrap_or_default();
-                let _ = store.discard(&pkey).await;
-                b
-            }
-            _ => Vec::new(),
+        let resume_from = match resume {
+            Resume::Staged => store.received_len(disk_key, &spec.token).await.unwrap_or(0),
+            Resume::Fresh => 0,
         };
-
-        if let Some(start) = started {
-            crate::metrics::throughput::NETWORK.observe(
-                buf.len() as f64 * 8.0 / start.elapsed().as_secs_f64().max(1e-6) / 1_000_000.0,
-            );
-        }
-
-        if let Some(total) = expected
-            && buf.len() as u64 != total
-        {
-            self.deliver(
-                &key,
-                Err(format!(
-                    "assembled NAR {} bytes != advertised {} bytes",
-                    buf.len(),
-                    total
-                )),
-            );
-            return;
-        }
-
-        self.deliver(&key, Ok(buf));
+        let writer = store
+            .open_writer(disk_key, &spec.token, resume_from)
+            .await?;
+        debug!(job_id = %spec.key.0, store_path = %spec.key.1, resume_from, "staging pulled NAR to disk");
+        Ok(Sink::Disk {
+            writer: Box::new(writer),
+            key: disk_key.to_owned(),
+        })
     }
 
     /// Resolve the waiter for `key`, warning if none is registered.
-    fn deliver(&self, key: &Key, result: Result<Vec<u8>, String>) {
+    fn deliver(&self, key: &Key, result: Result<NarPayload, String>) {
         let mut g = self.inner.lock();
+        g.streams.remove(key);
         match g.waiters.remove(key) {
             Some(tx) => {
                 if tx.send(result).is_err() {
@@ -341,9 +528,7 @@ impl NarReceiver {
     pub fn fail(&self, job_id: &str, store_path: &str, reason: String) {
         let key = (job_id.to_owned(), store_path.to_owned());
         let mut g = self.inner.lock();
-        g.buffers.remove(&key);
-        g.headers.remove(&key);
-        g.started.remove(&key);
+        g.streams.remove(&key);
         match g.waiters.remove(&key) {
             Some(tx) => {
                 if tx.send(Err(reason)).is_err() {
@@ -374,14 +559,13 @@ impl NarReceiver {
         }
     }
 
-    /// Drop in-memory state for a job. On-disk partials (keyed by hash) are
-    /// left for the GC sweep so a later attempt can still resume.
+    /// Drop in-memory state for a job, ending its staging tasks. On-disk
+    /// partials (keyed by job and hash) are left for the GC sweep so a later
+    /// attempt can still resume.
     pub fn forget_job(&self, job_id: &str) {
         let mut g = self.inner.lock();
-        g.buffers.retain(|(j, _), _| j != job_id);
-        g.headers.retain(|(j, _), _| j != job_id);
+        g.streams.retain(|(j, _), _| j != job_id);
         g.waiters.retain(|(j, _), _| j != job_id);
-        g.started.retain(|(j, _), _| j != job_id);
         g.push_waiters.retain(|(j, _), _| j != job_id);
     }
 }
@@ -394,10 +578,54 @@ mod tests {
     )]
 
     use super::*;
+    use gradient_proto::session::frame::{Inbound, WireMessage};
     use tempfile::TempDir;
 
+    fn frame(
+        job: &str,
+        path: &str,
+        offset: u64,
+        data: &[u8],
+        is_final: bool,
+    ) -> Frame<ServerMessage> {
+        let msg = ServerMessage::NarPush {
+            job_id: job.into(),
+            store_path: path.into(),
+            data: data.to_vec(),
+            offset,
+            is_final,
+        };
+        match ServerMessage::decode(msg.encode().expect("encodes")).expect("decodes") {
+            Inbound::Bulk(f) => f,
+            Inbound::Control(_) => panic!("NarPush is bulk"),
+        }
+    }
+
     async fn final_chunk(r: &NarReceiver, job: &str, path: &str, data: &[u8]) {
-        r.accept_chunk(job, path, data, 0, true).await;
+        r.accept_chunk(job, path, frame(job, path, 0, data, true))
+            .await;
+    }
+
+    fn bytes(payload: NarPayload) -> Vec<u8> {
+        match payload {
+            NarPayload::Bytes(b) => b,
+            NarPayload::File(p) => panic!("memory mode yields bytes, got {}", p.display()),
+        }
+    }
+
+    /// Let every staging task started so far run to completion. A stager is a
+    /// separate task now, so a delivery is no longer ordered against the
+    /// caller of `accept_chunk`.
+    async fn settle(r: &NarReceiver) {
+        r.stagers.close();
+        r.stagers.wait().await;
+    }
+
+    async fn file_bytes(payload: NarPayload) -> Vec<u8> {
+        match payload {
+            NarPayload::File(p) => tokio::fs::read(&p).await.unwrap(),
+            NarPayload::Bytes(_) => panic!("disk mode yields a file"),
+        }
     }
 
     #[tokio::test]
@@ -407,8 +635,7 @@ mod tests {
         let task = tokio::spawn(async move { r2.wait_for("job1", "/nix/store/aaa").await });
         tokio::task::yield_now().await;
         final_chunk(&r, "job1", "/nix/store/aaa", b"hello world").await;
-        let bytes = task.await.unwrap().unwrap();
-        assert_eq!(bytes, b"hello world");
+        assert_eq!(bytes(task.await.unwrap().unwrap()), b"hello world");
     }
 
     #[tokio::test]
@@ -417,22 +644,57 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
         tokio::task::yield_now().await;
-        r.accept_chunk("j", "/nix/store/x", b"abc", 0, false).await;
-        r.accept_chunk("j", "/nix/store/x", b"def", 3, false).await;
-        r.accept_chunk("j", "/nix/store/x", b"ghi", 6, true).await;
-        let bytes = task.await.unwrap().unwrap();
-        assert_eq!(bytes, b"abcdefghi");
+        r.accept_chunk(
+            "j",
+            "/nix/store/x",
+            frame("j", "/nix/store/x", 0, b"abc", false),
+        )
+        .await;
+        r.accept_chunk(
+            "j",
+            "/nix/store/x",
+            frame("j", "/nix/store/x", 3, b"def", false),
+        )
+        .await;
+        r.accept_chunk(
+            "j",
+            "/nix/store/x",
+            frame("j", "/nix/store/x", 6, b"ghi", true),
+        )
+        .await;
+        assert_eq!(bytes(task.await.unwrap().unwrap()), b"abcdefghi");
+    }
+
+    /// With a partial store the transfer never sits in memory: the waiter is
+    /// handed the staged file, holding exactly the bytes that were pushed.
+    #[tokio::test]
+    async fn disk_mode_delivers_the_staged_file() {
+        let dir = TempDir::new().unwrap();
+        let store = PartialStore::new(dir.path(), Duration::from_secs(60)).unwrap();
+        let r = NarReceiver::with_partial_store(store);
+        let path = format!("/nix/store/{}-x", "a".repeat(32));
+        let r2 = r.clone();
+        let p = path.clone();
+        let task = tokio::spawn(async move { r2.wait_for("j", &p).await });
+        tokio::task::yield_now().await;
+        r.note_header("j", &path, 6, "len-6");
+        r.accept_chunk("j", &path, frame("j", &path, 0, b"abc", false))
+            .await;
+        r.accept_chunk("j", &path, frame("j", &path, 3, b"def", true))
+            .await;
+        assert_eq!(file_bytes(task.await.unwrap().unwrap()).await, b"abcdef");
     }
 
     #[tokio::test]
     async fn final_with_no_waiter_is_discarded() {
         let r = NarReceiver::new();
         final_chunk(&r, "j", "/nix/store/x", b"orphan").await;
+        settle(&r).await;
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
         tokio::task::yield_now().await;
         final_chunk(&r, "j", "/nix/store/x", b"second").await;
-        assert_eq!(task.await.unwrap().unwrap(), b"second");
+        assert_eq!(bytes(task.await.unwrap().unwrap()), b"second");
     }
 
     #[tokio::test]
@@ -470,7 +732,7 @@ mod tests {
 
         let r1 = r.await_pending(p1).await;
         assert!(r1.unwrap_err().to_string().contains("missing"));
-        assert_eq!(r.await_pending(p2).await.unwrap(), b"hello");
+        assert_eq!(bytes(r.await_pending(p2).await.unwrap()), b"hello");
     }
 
     /// A `PartialStore`-backed receiver resumes across a simulated reconnect:
@@ -479,17 +741,19 @@ mod tests {
     #[tokio::test]
     async fn partial_store_resumes_across_reconnect() {
         let dir = TempDir::new().unwrap();
-        let store =
-            gradient_storage::PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let store = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
         let hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let path = format!("/nix/store/{hash}-pkg");
 
         let r1 = NarReceiver::with_partial_store(store.clone());
         r1.note_header("j", &path, 9, "len-9");
-        r1.accept_chunk("j", &path, b"abc", 0, false).await;
-        r1.accept_chunk("j", &path, b"def", 3, false).await;
+        r1.accept_chunk("j", &path, frame("j", &path, 0, b"abc", false))
+            .await;
+        r1.accept_chunk("j", &path, frame("j", &path, 3, b"def", false))
+            .await;
         // Connection drops mid-transfer.
         r1.fail("j", &path, "NarAbort".into());
+        settle(&r1).await;
 
         let (staged, token) = r1.resumable("j", &path).await;
         assert_eq!(staged, 6);
@@ -502,8 +766,9 @@ mod tests {
         let task = tokio::spawn(async move { r2c.wait_for("j", &pathc).await });
         tokio::task::yield_now().await;
         r2.note_header("j", &path, 9, "len-9");
-        r2.accept_chunk("j", &path, b"ghi", 6, true).await;
-        assert_eq!(task.await.unwrap().unwrap(), b"abcdefghi");
+        r2.accept_chunk("j", &path, frame("j", &path, 6, b"ghi", true))
+            .await;
+        assert_eq!(file_bytes(task.await.unwrap().unwrap()).await, b"abcdefghi");
     }
 
     /// Two jobs transferring the SAME store path concurrently must not share a
@@ -513,8 +778,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_jobs_same_path_do_not_collide() {
         let dir = TempDir::new().unwrap();
-        let store =
-            gradient_storage::PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let store = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
         let hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         let path = format!("/nix/store/{hash}-pkg");
 
@@ -527,13 +791,51 @@ mod tests {
         // Interleave both jobs' chunks for the same hash: under a shared key
         // j2's offset-0 chunk would truncate j1's bytes and the offset-3 chunks
         // would then fail the contiguity check.
-        r.accept_chunk("j1", &path, b"aaa", 0, false).await;
-        r.accept_chunk("j2", &path, b"bbb", 0, false).await;
-        r.accept_chunk("j1", &path, b"AAA", 3, true).await;
-        r.accept_chunk("j2", &path, b"BBB", 3, true).await;
+        r.accept_chunk("j1", &path, frame("j1", &path, 0, b"aaa", false))
+            .await;
+        r.accept_chunk("j2", &path, frame("j2", &path, 0, b"bbb", false))
+            .await;
+        r.accept_chunk("j1", &path, frame("j1", &path, 3, b"AAA", true))
+            .await;
+        r.accept_chunk("j2", &path, frame("j2", &path, 3, b"BBB", true))
+            .await;
 
-        assert_eq!(r.await_pending(p1).await.unwrap(), b"aaaAAA");
-        assert_eq!(r.await_pending(p2).await.unwrap(), b"bbbBBB");
+        assert_eq!(
+            file_bytes(r.await_pending(p1).await.unwrap()).await,
+            b"aaaAAA"
+        );
+        assert_eq!(
+            file_bytes(r.await_pending(p2).await.unwrap()).await,
+            b"bbbBBB"
+        );
+    }
+
+    /// The server restarts a transfer from 0 (our staged prefix is longer than
+    /// the object it holds) while echoing the same token. The stale prefix must
+    /// be dropped instead of failing the contiguity check.
+    #[tokio::test]
+    async fn a_restart_from_zero_drops_the_resumed_prefix() {
+        let dir = TempDir::new().unwrap();
+        let store = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let hash = "cccccccccccccccccccccccccccccccc";
+        let path = format!("/nix/store/{hash}-pkg");
+        store
+            .append(&format!("j/{hash}"), "len-4", 0, b"stale!")
+            .await
+            .unwrap();
+
+        let r = NarReceiver::with_partial_store(store);
+        let pending = r.register("j", &path);
+        r.note_header("j", &path, 4, "len-4");
+        r.accept_chunk("j", &path, frame("j", &path, 0, b"abcd", false))
+            .await;
+        r.accept_chunk("j", &path, frame("j", &path, 4, b"", true))
+            .await;
+
+        assert_eq!(
+            file_bytes(r.await_pending(pending).await.unwrap()).await,
+            b"abcd"
+        );
     }
 
     #[tokio::test]

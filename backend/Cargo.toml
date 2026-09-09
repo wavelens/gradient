@@ -95,7 +95,7 @@ bzip2             = { version = "0.6" } # defaults: pure-Rust backend is only re
 flate2            = { version = "1", default-features = false, features = ["rust_backend"] }
 tar               = { version = "0.4", default-features = false }
 xz2               = { version = "0.1", default-features = false }
-zstd              = { version = "0.13", default-features = false }
+zstd              = { version = "0.13", default-features = false, features = ["zstdmt"] }
 
 # Bytes / buffers
 bytes = { version = "1.11", default-features = false, features = ["std"] }

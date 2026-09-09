@@ -1113,6 +1113,8 @@ Two transports, chosen by the server based on `NarStore` configuration and adver
 
 Worker-side, every upload goes through one function: `proto::nar::upload_nar(source, sink)` pairs a `NarSource` (pack a store path on the fly, or relay pre-compressed substitute bytes) with a `NarSink` (`Presigned` HTTP PUT or `Relay` over 512 KiB `NarPush` chunks, `BULK_CHUNK_SIZE`, with the resume handshake). Server-side, staging, serving, and commit live in `handler/nar_transfer.rs`; the relayed commit checks the staged length against the reported `file_size`, and the presigned commit HEADs the object and compares sizes before any `cached_path` metadata is recorded, so a failed or truncated PUT can never mint a zombie cache entry.
 
+A job uploads up to four paths at once, which hides the per-path resume round trip that dominated eval pushes of many small `.drv` and source paths. NARs are compressed with a multithreaded zstd encoder bounded to four threads. Pulled chunks are staged by a per-transfer task on the worker as well; the importer decompresses straight from the staged file, so the compressed NAR never sits in memory.
+
 Inbound chunks never touch disk on the session actor: each push stream has a staging task that owns the open `.partial`, appends every frame as it arrives and hashes as it goes (a resume rehashes the stored prefix once). `NarUploaded` asks the task to finish, compares the hash and length it reports with the message, and on local storage renames the staged file into `nars/`; S3 streams it. A pushed NAR is written to the server's disk once. Reads from local storage go through tokio in 512 KiB chunks rather than `object_store`'s 8 KiB stream.
 
 ### Worker → Server (upload, FetchFlake)

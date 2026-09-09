@@ -29,7 +29,7 @@ use crate::connection::ProtoWriter;
 use crate::executor::timeline::{JobTimeline, PhaseGuard};
 use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
-use crate::proto::nar_recv::NarReceiver;
+use crate::proto::nar_recv::{NarPayload, NarReceiver};
 use gradient_proto::traits::JobReporter;
 
 /// A pending `CacheQuery`: its reply channel plus the owning `job_id` so a
@@ -345,8 +345,9 @@ impl JobUpdater {
 
     /// Send `NarRequest { paths }` and wait for every requested path to
     /// arrive via chunked `NarPush` frames. Returns the assembled (still
-    /// zstd-compressed) NAR bytes per path in the order requested. Each path
-    /// has its own [`gradient_proto::messages::TRANSFER_TIMEOUT`].
+    /// zstd-compressed) NAR per path in the order requested, staged on disk
+    /// when a partial store is configured. Each path has its own
+    /// [`gradient_proto::messages::TRANSFER_TIMEOUT`].
     ///
     /// All waiters are registered **before** the `NarRequest` goes on the
     /// wire so every server response (`NarPush` / `NarUnavailable` /
@@ -359,7 +360,7 @@ impl JobUpdater {
     /// On the first failure all in-flight waiters are dropped (their
     /// receivers report `RecvError` as the dispatcher discards them) and the
     /// error is returned.
-    pub async fn request_nars(&self, paths: Vec<String>) -> Result<Vec<(String, Vec<u8>)>> {
+    pub async fn request_nars(&self, paths: Vec<String>) -> Result<Vec<(String, NarPayload)>> {
         use futures::future::join_all;
 
         if paths.is_empty() {
@@ -416,7 +417,7 @@ impl JobUpdater {
         let mut first_err: Option<anyhow::Error> = None;
         for (path, res) in results {
             match res {
-                Ok(bytes) => out.push((path, bytes)),
+                Ok(payload) => out.push((path, payload)),
                 Err(e) => {
                     if first_err.is_none() {
                         first_err = Some(e);
