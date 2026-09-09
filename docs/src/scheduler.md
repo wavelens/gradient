@@ -180,6 +180,21 @@ so each chunk commits on its own instead of the sweep's budget rolling every rep
 back. Setting the interval to 0 disables the sweep, and with it the counter's only
 backstop.
 
+Two numbers on that line are not violations. `nar_counter_drift` counts rows the
+same pass already fixed, so a warning naming only that is a successful self-repair,
+not a dead zone. `gating` is how many paths the repair visited: the select behind it
+has no bound and its second arm walks every `Created` or `Queued` anchor's direct
+dependencies, so it is logged on every sweep, clean or not, to say what the one
+recurring cost this pass adds actually is on a production graph. Bounding it rides
+with the readiness counters that replace the anchor flags (#591), which rewrite what
+the sweep reads; a rotation scheme built before that would be thrown away, and a
+plain `LIMIT` without one would leave the tail never repaired. What the sweep does
+count table-wide is `negative_reference_counters`, rows whose counter a ripple drove
+below zero: no gate can read such a row as whole again, and the repair only rescues
+one that a pending anchor gates on, so outside that set it is the one state the
+design calls unrecoverable - and `nar_counter_drift` is zero for those rows by
+construction.
+
 An evaluation in `EvaluatingFlake` or `EvaluatingDerivation` has one exit: the
 `EvalStreamCompleted` / `EvalFailed` transition the scheduler sends once, when
 the worker reports its job terminal. That message is droppable - both handlers

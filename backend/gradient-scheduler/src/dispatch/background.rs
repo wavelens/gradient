@@ -39,10 +39,14 @@ pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
 }
 
 /// Invariant check: counts stale gate flags, unpromoted-ready anchors, unbacked
-/// trusted outputs and wedged Building evals so a dead zone becomes a warning
-/// long before a user reports a stuck evaluation, and repairs the NAR reference
-/// counter over the paths the pending anchors gate on. Transient non-zero counts
-/// right after a transition are normal; persistent ones are not.
+/// trusted outputs, wedged Building evals and reference counters driven below
+/// zero, so a dead zone becomes a warning long before a user reports a stuck
+/// evaluation, and repairs the NAR reference counter over the paths the pending
+/// anchors gate on. Transient non-zero counts right after a transition are normal;
+/// persistent ones are not - except `nar_counter_drift`, which counts rows this
+/// pass already repaired, so the warning can be a successful self-repair. `gating`
+/// is the size of the repair's scope, logged either way because it is what the
+/// pass costs.
 pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let report = gradient_db::graph_consistency_report(&scheduler.state.worker_db).await?;
     if report.total() > 0 {
@@ -53,10 +57,15 @@ pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow:
             unbacked_trusted_outputs = report.unbacked_trusted_outputs,
             wedged_building_evals = report.wedged_building_evals,
             nar_counter_drift = report.nar_counter_drift,
+            negative_reference_counters = report.negative_reference_counters,
+            gating = report.gating_paths,
             "graph consistency sweep found invariant violations"
         );
     } else {
-        debug!("graph consistency sweep clean");
+        debug!(
+            gating = report.gating_paths,
+            "graph consistency sweep clean"
+        );
     }
     Ok(())
 }

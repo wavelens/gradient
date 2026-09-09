@@ -139,6 +139,11 @@ sqlite3 gradient-report-01a05a38-2026-09-01.db \
     WHERE missing_references <> 0 ORDER BY missing_references DESC'
 ```
 
+A negative counter is also counted table-wide by the running server, as
+`negative_reference_counters` on the graph-consistency sweep's warning line, next
+to `nar_counter_drift` (rows that sweep repaired, which is bounded to the paths
+pending anchors gate on) and `gating` (how many paths that was).
+
 An evaluation still in `EvaluatingFlake` or `EvaluatingDerivation` whose newest
 eval job carries a `finished_at` is one whose terminal report never landed. The
 scheduler's `eval-completion-watchdog` pass re-drives that transition, so the
