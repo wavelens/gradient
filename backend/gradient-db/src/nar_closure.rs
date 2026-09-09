@@ -6,8 +6,9 @@
 
 //! `cached_path.missing_references`: how many of a path's references are not
 //! whole. Seeded when the NAR is committed and moved by a frontier ripple over
-//! `cached_path_reference` when a path becomes or stops being whole; no sweep
-//! re-derives it here, and #591 recomputes it only over a bounded scope.
+//! `cached_path_reference` when a path becomes or stops being whole; nothing
+//! re-derives it full-table, and [`repair_counters_for`] recomputes it only
+//! over the paths a pending anchor gates on ([`GATING_PATHS`]).
 //! `whole_predicate` is the one definition every gate reads.
 //!
 //! Because the counter is moved and not recomputed, every ripple must be driven
@@ -237,6 +238,52 @@ pub async fn retire_paths<C: ConnectionTrait>(
 
     Ok(Retired { deleted, unwhole })
 }
+
+/// Recompute the counter for `hashes` from their references and write the rows
+/// that disagree. Returns how many were repaired. The ripples move the counter
+/// rather than derive it, so this is the bounded backstop against a move that
+/// was lost (a crashed transaction, a hand-edited row), never a sweep.
+pub async fn repair_counters_for<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+) -> Result<u64, DbErr> {
+    if hashes.is_empty() {
+        return Ok(0);
+    }
+
+    Ok(db
+        .execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            UPDATE cached_path cp SET missing_references = x.n
+            FROM (SELECT c.hash, (
+                      SELECT count(*) FROM cached_path_reference r
+                      LEFT JOIN cached_path dep ON dep.hash = r.reference_hash
+                      WHERE r.referrer = c.hash
+                        AND r.reference_hash <> c.hash
+                        AND NOT (dep.file_hash IS NOT NULL AND dep.missing_references = 0)) AS n
+                  FROM cached_path c WHERE c.hash = ANY($1)) x
+            WHERE cp.hash = x.hash AND cp.missing_references <> x.n
+            "#,
+            [hashes.to_vec().into()],
+        ))
+        .await?
+        .rows_affected())
+}
+
+/// The paths the pending anchors gate on: their own `.drv` rows and the output
+/// rows of their direct dependencies. Drift anywhere else costs nothing until a
+/// build needs the path, so the repair pass is bounded to exactly this set.
+pub const GATING_PATHS: &str = r#"
+    SELECT d.hash FROM derivation d
+    JOIN derivation_build db ON db.derivation = d.id
+    WHERE db.status IN (0, 1)
+  UNION
+    SELECT o.hash FROM derivation_output o
+    JOIN derivation_dependency e ON e.dependency = o.derivation
+    JOIN derivation_build db ON db.derivation = e.derivation
+    WHERE db.status IN (0, 1)
+"#;
 
 #[cfg(test)]
 mod tests {
@@ -515,5 +562,40 @@ mod tests {
             log[0].contains("DELETE FROM cached_path") && log[0].contains("cached_path_signature"),
             "the guard must reach the delete: {log:?}"
         );
+    }
+
+    /// The bounded repair covers exactly the paths a pending anchor gates on:
+    /// its own `.drv` row, and the output rows of the derivations it depends on.
+    /// A drift anywhere else costs nothing until a build needs the path.
+    #[test]
+    fn gating_paths_cover_pending_drvs_and_their_dependencies_outputs() {
+        let sql = norm(GATING_PATHS);
+        let pending = format!(
+            "db.status IN ({})",
+            crate::status_sql::build_in(&[
+                gradient_entity::build::BuildStatus::Created,
+                gradient_entity::build::BuildStatus::Queued,
+            ])
+        );
+        assert_eq!(sql.matches(&pending).count(), 2, "{sql}");
+        assert!(
+            sql.contains(
+                "SELECT d.hash FROM derivation d JOIN derivation_build db ON db.derivation = d.id"
+            ),
+            "the anchor's own .drv row: {sql}"
+        );
+        assert!(
+            sql.contains("JOIN derivation_dependency e ON e.dependency = o.derivation"),
+            "the outputs of its direct dependencies: {sql}"
+        );
+    }
+
+    /// Nothing to repair issues no statement, so the consistency sweep costs one
+    /// query on a graph with no pending anchors.
+    #[tokio::test]
+    async fn repairing_no_hashes_issues_no_statement() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        assert_eq!(repair_counters_for(&db, &[]).await.unwrap(), 0);
+        assert!(statements(db).is_empty());
     }
 }

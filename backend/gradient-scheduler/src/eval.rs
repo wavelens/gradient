@@ -76,7 +76,7 @@ pub async fn assess_substitutability(
             Vec::new()
         })
         .into_iter()
-        .filter(|cp| cp.is_fully_cached() && cp.closure_complete)
+        .filter(|cp| cp.is_whole())
         .map(|cp| cp.hash)
         .collect();
     for (drv, hashes) in &outputs_by_drv {

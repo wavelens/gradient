@@ -37,10 +37,6 @@ pub struct Model {
     pub nar_size: Option<i64>,
     /// NAR hash in `sha256:<nix32>` format.
     pub nar_hash: Option<String>,
-    /// True when this NAR is present AND every non-self reference is itself
-    /// present and closure-complete - i.e. the whole runtime closure is in our
-    /// cache. Maintained inductively on ingest; cleared when a member is purged.
-    pub closure_complete: bool,
     /// References (self excluded) whose row is absent, unbacked or itself not
     /// whole. Seeded at commit, moved by the reference ripple; `0` on a backed
     /// row means the whole runtime closure is in our cache.
