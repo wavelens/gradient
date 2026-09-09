@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use futures::StreamExt;
@@ -55,6 +55,13 @@ const STAGE_QUEUE_DEPTH: usize = 8;
 /// flood, not a throughput limit, and it must stay far above real traffic.
 const MAX_ACTIVE_STREAMS: usize = 256;
 
+/// How long a stream outlives the job it belongs to. `JobCompleted` and
+/// `JobFailed` ride the control lane and overtake the job's own trailing
+/// `NarPush` and `NarUploaded` frames on the bulk lane, so a stream whose job
+/// has just ended may still be receiving; only one that stays silent this long
+/// is treated as abandoned and released.
+const ENDED_STREAM_GRACE: Duration = Duration::from_secs(120);
+
 /// What a stream's staging task accepts: the frames to append, then one request
 /// to flush and report what was staged.
 enum StageCmd {
@@ -68,6 +75,10 @@ struct PathState {
     /// lives in the partial store's sidecar, written when its writer opened.
     staged: u64,
     tx: mpsc::Sender<StageCmd>,
+    /// When this stream's job ended, if it has. Any further frame for the
+    /// stream clears it; [`NarReceiveStore::sweep_ended`] releases it once
+    /// [`ENDED_STREAM_GRACE`] has passed.
+    ended: Option<Instant>,
 }
 
 /// A staged direct-mode upload detached from the session's receive store so a
@@ -144,6 +155,8 @@ pub(super) struct NarReceiveStore {
     shutdown: Shutdown,
     peer_id: String,
     max_bytes: u64,
+    max_streams: usize,
+    ended_grace: Duration,
     active: HashMap<String, PathState>,
     /// Poisoned paths and why, so the abort the caller sends names the real
     /// cause instead of guessing between the budget and the offset.
@@ -170,9 +183,20 @@ impl NarReceiveStore {
             shutdown,
             peer_id: peer_id.to_owned(),
             max_bytes,
+            max_streams: MAX_ACTIVE_STREAMS,
+            ended_grace: ENDED_STREAM_GRACE,
             active: HashMap::new(),
             poisoned: BTreeMap::new(),
         })
+    }
+
+    /// Shrink the limits so a test can reach them without opening hundreds of
+    /// files or waiting out the grace.
+    #[cfg(test)]
+    pub(super) fn with_limits(mut self, max_streams: usize, ended_grace: Duration) -> Self {
+        self.max_streams = max_streams;
+        self.ended_grace = ended_grace;
+        self
     }
 
     fn key(&self, job_id: &str, hash: &str) -> String {
@@ -193,12 +217,64 @@ impl NarReceiveStore {
         }
     }
 
+    /// Mark a job's push streams as ended and forget its poisons. The worker
+    /// drops the uploads still in flight when a job fails or is aborted, so
+    /// without this every such job would strand up to `UPLOAD_CONCURRENCY - 1`
+    /// streams, each holding a descriptor, a staging task and a slot under
+    /// `max_streams`, for the life of the session. The streams are marked rather
+    /// than closed because `JobCompleted` overtakes the job's own trailing bulk
+    /// frames: [`ENDED_STREAM_GRACE`] gives those time to land.
+    pub(super) async fn forget_job(&mut self, job_id: &str) {
+        let prefix = format!("{job_id}\u{1f}");
+        let now = Instant::now();
+        for state in self
+            .active
+            .iter_mut()
+            .filter(|(sk, _)| sk.starts_with(&prefix))
+            .map(|(_, state)| state)
+        {
+            if state.ended.is_none() {
+                state.ended = Some(now);
+            }
+        }
+
+        self.poisoned.retain(|sk, _| !sk.starts_with(&prefix));
+        self.sweep_ended().await;
+    }
+
+    /// Release every stream whose job ended more than [`Self::ended_grace`] ago,
+    /// discarding its partial: nothing can finish a stream whose job is gone.
+    async fn sweep_ended(&mut self) {
+        let now = Instant::now();
+        let expired: Vec<String> = self
+            .active
+            .iter()
+            .filter(|(_, state)| {
+                state
+                    .ended
+                    .is_some_and(|at| now.duration_since(at) >= self.ended_grace)
+            })
+            .map(|(sk, _)| sk.clone())
+            .collect();
+
+        for sk in expired {
+            let Some((job_id, store_path)) = sk.split_once('\u{1f}') else {
+                continue;
+            };
+            let (job_id, store_path) = (job_id.to_owned(), store_path.to_owned());
+            debug!(%job_id, %store_path, "releasing the push stream of an ended job");
+            self.finish(&job_id, &store_path).await;
+        }
+    }
+
     /// Record the push stream's token, open its partial, and return how many
     /// bytes are already staged for it (0 on token mismatch / nothing on disk).
     /// Clears any stale poison so a fresh attempt can proceed. A stream that
     /// cannot be opened, or that would exceed [`MAX_ACTIVE_STREAMS`], poisons
     /// the path with its reason; callers check [`Self::poison_reason`] rather
-    /// than treating the `0` as a fresh start.
+    /// than treating the `0` as a fresh start. The cap is tested after `retire`
+    /// has removed this path's own entry, so re-heading a stream that is already
+    /// open is never rejected for being one over the ceiling.
     pub(super) async fn note_header(&mut self, job_id: &str, store_path: &str, token: &str) -> u64 {
         let sk = state_key(job_id, store_path);
         self.poisoned.remove(&sk);
@@ -208,9 +284,11 @@ impl NarReceiveStore {
             return 0;
         };
 
-        if self.active.len() >= MAX_ACTIVE_STREAMS {
+        self.sweep_ended().await;
+        if self.active.len() >= self.max_streams {
             let reason = format!(
-                "too many open NAR push streams on this session (limit {MAX_ACTIVE_STREAMS})"
+                "too many open NAR push streams on this session (limit {})",
+                self.max_streams,
             );
             warn!(%store_path, "{reason}; poisoning path");
             self.poison(job_id, store_path, hash, reason).await;
@@ -236,6 +314,7 @@ impl NarReceiveStore {
             PathState {
                 staged: received,
                 tx,
+                ended: None,
             },
         );
         received
@@ -243,8 +322,8 @@ impl NarReceiveStore {
 
     /// Hand a chunk to this path's staging task. A push stream is append-only
     /// once opened: `offset` must equal the bytes already staged, so restarting
-    /// a stream at 0 takes a fresh `NarStreamHeader` (which re-opens the writer
-    /// and truncates) rather than a bare chunk. A gap is fatal here rather than
+    /// a stream at 0 takes a fresh `NarStreamHeader` (which re-opens the writer,
+    /// truncating only when the stream token changed) rather than a bare chunk. A gap is fatal here rather than
     /// at commit time so the worker is aborted before it streams the rest of a
     /// NAR that can never be stored. Opens a token-less stream for legacy pushes
     /// that skip the header.
@@ -309,6 +388,7 @@ impl NarReceiveStore {
 
         if let Some(s) = self.active.get_mut(&sk) {
             s.staged += len;
+            s.ended = None;
         }
         AppendOutcome::Ok
     }
@@ -1105,7 +1185,7 @@ async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path
 
 #[cfg(test)]
 mod nar_receive_store_tests {
-    use super::{AppendOutcome, MAX_ACTIVE_STREAMS, NarReceiveStore};
+    use super::{AppendOutcome, ENDED_STREAM_GRACE, MAX_ACTIVE_STREAMS, NarReceiveStore};
     use crate::messages::ClientMessage;
     use crate::session::frame::{Frame, Inbound, WireMessage as _};
     use gradient_util::shutdown::Shutdown;
@@ -1121,7 +1201,11 @@ mod nar_receive_store_tests {
         s.poison_reason(job, store_path).is_some()
     }
 
-    fn store(max_bytes: u64) -> (TempDir, NarReceiveStore) {
+    fn store_with(
+        max_bytes: u64,
+        max_streams: usize,
+        ended_grace: Duration,
+    ) -> (TempDir, NarReceiveStore) {
         let dir = TempDir::new().unwrap();
         let s = NarReceiveStore::new(
             dir.path().to_path_buf(),
@@ -1130,8 +1214,13 @@ mod nar_receive_store_tests {
             max_bytes,
             Shutdown::new(),
         )
-        .unwrap();
+        .unwrap()
+        .with_limits(max_streams, ended_grace);
         (dir, s)
+    }
+
+    fn store(max_bytes: u64) -> (TempDir, NarReceiveStore) {
+        store_with(max_bytes, MAX_ACTIVE_STREAMS, ENDED_STREAM_GRACE)
     }
 
     /// A `NarPush` as it reaches the handler: encoded, then read back in place.
@@ -1353,19 +1442,93 @@ mod nar_receive_store_tests {
     /// file descriptors down with it.
     #[tokio::test]
     async fn a_header_flood_is_capped() {
-        let (_d, mut s) = store(10_000_000);
-        for i in 0..MAX_ACTIVE_STREAMS {
+        const CAP: usize = 4;
+        let (_d, mut s) = store_with(10_000_000, CAP, ENDED_STREAM_GRACE);
+        for i in 0..CAP {
             let p = numbered_path(i);
             s.note_header(JOB, &p, "tok").await;
             assert!(!poisoned(&s, JOB, &p), "stream {i} is within the cap");
         }
 
-        let over = numbered_path(MAX_ACTIVE_STREAMS);
+        let over = numbered_path(CAP);
         assert_eq!(s.note_header(JOB, &over, "tok").await, 0);
         assert!(
             poisoned(&s, JOB, &over),
             "the cap must poison rather than open another descriptor"
         );
+
+        // Re-heading a stream that is already open is not one over the ceiling.
+        let open = numbered_path(0);
+        s.note_header(JOB, &open, "tok").await;
+        assert!(!poisoned(&s, JOB, &open));
+    }
+
+    /// A worker drops the uploads still in flight when a job ends, so the
+    /// streams they opened are only ever released by the job ending.
+    #[tokio::test]
+    async fn forget_job_releases_the_streams_a_job_abandoned() {
+        let (_d, mut s) = store_with(1_000_000, MAX_ACTIVE_STREAMS, Duration::ZERO);
+        let (a1, a2, b) = (path('a'), path('b'), path('c'));
+        for p in [&a1, &a2] {
+            s.note_header("build:job-a", p, "tok").await;
+            assert_ok(
+                s.append(
+                    "build:job-a",
+                    p,
+                    0,
+                    frame("build:job-a", p, 0, &[0u8; 64], false),
+                )
+                .await,
+            );
+        }
+        s.note_header("build:job-b", &b, "tok").await;
+        assert_ok(
+            s.append(
+                "build:job-b",
+                &b,
+                0,
+                frame("build:job-b", &b, 0, &[7u8; 64], true),
+            )
+            .await,
+        );
+
+        s.forget_job("build:job-a").await;
+
+        let staged = s
+            .take_staged("build:job-b", &b)
+            .await
+            .expect("another job's stream is untouched");
+        assert_eq!(staged.finish().await.expect("drained").len, 64);
+
+        assert!(s.take_staged("build:job-a", &a1).await.is_none());
+        assert!(s.take_staged("build:job-a", &a2).await.is_none());
+        assert_eq!(
+            s.note_header("build:job-a", &a1, "tok").await,
+            0,
+            "the abandoned partial must be gone from disk"
+        );
+    }
+
+    /// `JobCompleted` rides the control lane and overtakes the job's own
+    /// trailing `NarUploaded` on the bulk lane, so a stream whose job has just
+    /// ended must still commit.
+    #[tokio::test]
+    async fn a_trailing_nar_uploaded_survives_the_job_ending() {
+        let (_d, mut s) = store(1_000_000);
+        let a = path('a');
+        s.note_header(JOB, &a, "tok").await;
+        assert_ok(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[1u8; 128], true))
+                .await,
+        );
+
+        s.forget_job(JOB).await;
+
+        let staged = s
+            .take_staged(JOB, &a)
+            .await
+            .expect("the stream outlives its job for the grace");
+        assert_eq!(staged.finish().await.expect("drained").len, 128);
     }
 
     /// A staging open that fails (here: a directory sitting where the

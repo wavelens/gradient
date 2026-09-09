@@ -230,6 +230,7 @@ impl<'a> DispatchContext<'a> {
                 dispatch,
                 spans,
             } => {
+                nar.forget_job(&job_id).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     self.on_job_completed(job_id, dispatch, spans).await;
                 }
@@ -243,6 +244,10 @@ impl<'a> DispatchContext<'a> {
                 missing_paths,
                 spans,
             } => {
+                // The worker drops the uploads still running when a job ends,
+                // so this is the only notice the session gets that their push
+                // streams will never be finished.
+                nar.forget_job(&job_id).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     self.on_job_failed(job_id, dispatch, error, kind, missing_paths, spans)
                         .await;
