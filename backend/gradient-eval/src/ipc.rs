@@ -35,7 +35,7 @@ use crate::stats::StatsDelta;
 /// changes. Parent and subprocess are the same re-exec'd binary, so a mismatch
 /// only happens when the binary is replaced mid-run; the handshake turns that
 /// from undecodable frames into one clear error.
-pub const EVAL_IPC_VERSION: u8 = 3;
+pub const EVAL_IPC_VERSION: u8 = 4;
 
 /// Upper bound on a single frame's payload. Far above any real message (a
 /// discovery response for a huge flake is a few MiB); its job is to turn a
