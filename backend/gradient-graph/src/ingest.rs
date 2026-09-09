@@ -1152,26 +1152,27 @@ mod tests {
         .unwrap();
 
         drop(ctx);
-        let log: Vec<String> = pool
+        let log: Vec<Statement> = pool
             .into_transaction_log()
             .iter()
-            .map(|t| format!("{t:?}"))
+            .flat_map(|t| t.statements().to_vec())
             .collect();
         let anchors = log
             .iter()
-            .position(|s| s.contains("INSERT INTO \"derivation_build\""))
+            .position(|s| s.sql.contains("INSERT INTO \"derivation_build\""))
             .expect("the anchor insert runs");
         let limits = log
             .iter()
-            .position(|s| s.contains("UPDATE derivation_build AS db"))
+            .position(|s| s.sql.contains("UPDATE derivation_build AS db"))
             .expect("the limits update runs");
         assert!(
             anchors < limits,
             "limits are written once the anchor exists: {log:?}"
         );
         assert!(
-            log[limits].contains("3600"),
-            "the update carries the record's limits: {log:?}"
+            format!("{:?}", log[limits].values).contains("BigInt(Some(3600))"),
+            "the update carries the record's limits: {:?}",
+            log[limits]
         );
     }
 }
