@@ -46,6 +46,10 @@ pub(super) fn spawn_scoring_task(
     is_final: bool,
     request_after: Vec<JobKind>,
 ) {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "reports through the writer; the connection going away drops it"
+    )]
     tokio::spawn(async move {
         let started = std::time::Instant::now();
         let count = candidates.len();

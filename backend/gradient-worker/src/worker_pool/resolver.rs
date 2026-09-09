@@ -263,6 +263,10 @@ impl WorkerPoolResolver {
         }
 
         let weak = Arc::downgrade(&self.pool);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "holds only a Weak on the pool and ends with it"
+        )]
         tokio::spawn(super::memory::memory_reaper_loop(weak, min_free_bytes));
     }
 

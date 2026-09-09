@@ -4,11 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![allow(
-    clippy::disallowed_methods,
-    reason = "the worker owns its own runtime and shutdown"
-)]
-
 mod config;
 mod connection;
 mod connection_state;
@@ -96,6 +91,7 @@ fn main() -> Result<()> {
         if config.nar_partial_ttl_secs > 0 {
             let gc_config = config.clone();
             let gc_shutdown = shutdown.clone();
+            #[expect(clippy::disallowed_methods, reason = "returns on drain_requested")]
             tokio::spawn(async move {
                 let ttl = std::time::Duration::from_secs(gc_config.nar_partial_ttl_secs);
                 let store = match gradient_storage::PartialStore::new(gc_config.nar_partial_dir(), ttl)
@@ -128,6 +124,7 @@ fn main() -> Result<()> {
             let listener_config = config.clone();
             let listener_shutdown = shutdown.clone();
             let listener_sessions = sessions.clone();
+            #[expect(clippy::disallowed_methods, reason = "returns on drain_requested")]
             tokio::spawn(async move {
                 if let Err(e) = connection::listener::start_listener(
                     listener_config,
@@ -253,21 +250,15 @@ fn main() -> Result<()> {
     })
 }
 
-/// Install the two-stage SIGINT/SIGTERM handler.
-///
-/// The first signal drains: every session tells its server it wants no more
-/// work, finishes and reports the jobs it already has, then the process exits.
-/// The second one abandons them, so an operator is never stuck behind a long
-/// build that the budget has yet to cut off.
+/// Install the two-stage SIGINT/SIGTERM handler: the first signal drains, the
+/// second or the expired drain budget aborts.
 fn install_signal_handler(shutdown: Shutdown, budget: Option<Duration>) {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "outlives every session; the second signal or the budget ends it"
+    )]
     tokio::spawn(async move {
-        next_stop_signal().await;
-        info!("stop requested; draining: no new jobs, finishing the in-flight ones");
-        shutdown.request_drain(budget);
-
-        next_stop_signal().await;
-        warn!("second stop signal; abandoning in-flight jobs");
-        shutdown.request_abort();
+        crate::shutdown::stop_sequence(&shutdown, budget, next_stop_signal).await
     });
 }
 
