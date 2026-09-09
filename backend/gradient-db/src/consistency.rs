@@ -181,7 +181,7 @@ mod tests {
         let log: Vec<String> = db
             .into_transaction_log()
             .iter()
-            .map(|t| format!("{t:?}"))
+            .flat_map(|t| t.statements().iter().map(|s| format!("{s:?}")))
             .collect();
         assert!(
             log[0].contains("FROM derivation_build db") && log[0].contains("derivation_dependency"),
