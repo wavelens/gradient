@@ -601,13 +601,23 @@ commit or one of its own demotes. Three of those deletions do run outside it, ea
 in its own transaction - TTL eviction, the zombie purge and the orphan GC - and
 nothing serialises them against a commit but row locks. A commit therefore locks its
 reference endpoints first: the references it reports, the ones already indexed for
-it, and its own row, in one hash-ordered `FOR KEY SHARE` statement taken before the
-row it is about to write. There is no window in which a retire and a commit disagree
+it, and its own row, in one hash-ordered `FOR SHARE` statement taken before the row
+it is about to write. That leaves no window in which a retire and a commit disagree
 about an edge - the retire's `DELETE` waits for the commit, and its reverse ripple, a
-statement of its own, then counts the new edge. Every writer that touches a path
-together with its references acquires them in one statement ordered by hash, a
+statement of its own, then counts the new edge - and none in which a retire deeper in
+the closure unwholes one of those references between the seed's read and the commit,
+which is why the lock is `FOR SHARE` and not the weaker `FOR KEY SHARE` a foreign-key
+check would take: only `FOR SHARE` conflicts with a ripple's non-key `UPDATE`.
+
+Every writer that takes row locks here takes them in one statement ordered by hash, a
 retiring `DELETE` behind its own `FOR UPDATE` pass included, because a single
-unordered locker deadlocks against however carefully ordered the other side is. Nothing re-derives the counter by a
+unordered locker deadlocks against however carefully ordered the other side is. The
+ripples are the exception and it is deliberate: each computes its referrer set inside
+its own `UPDATE`, so it locks rows no ordered set covers, in plan order. A commit and
+a concurrent maintenance retire can therefore still deadlock; Postgres detects it, the
+retire retries on its next pass and a killed commit fails a `NarUploaded` the worker
+retries. A detected, retried deadlock is the accepted price of never leaving a row
+whole with a reference that is not. Nothing re-derives the counter by a
 sweep; the consistency pass above recomputes it only for the paths pending anchors
 gate on and repairs what disagrees, and is its only backstop.
 The migration converges the old `cached_path.closure_complete` flag one last

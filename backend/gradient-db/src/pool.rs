@@ -84,10 +84,6 @@ impl WorkerDb {
         Self(WorkerConn::Pool(Arc::clone(self.pool())))
     }
 
-    pub fn is_transactional(&self) -> bool {
-        matches!(self.0, WorkerConn::Transaction { .. })
-    }
-
     /// The open transaction this handle stands for, if any. A caller whose
     /// correctness depends on a lock outliving its statement needs this, not the
     /// forwarding `ConnectionTrait`: on a pooled handle every lock is released at
@@ -122,7 +118,10 @@ impl WorkerDb {
 /// records a whole transaction as ONE log entry whose statement list sea-orm
 /// brackets with a synthetic `BEGIN`/`COMMIT`, so an assertion indexed off the
 /// flattened list must not count them, and a `contains` over a formatted entry
-/// must not straddle two statements.
+/// must not straddle two statements. A test that asserts ON transaction control
+/// instead (that a budget overrun rolled back rather than committed, as
+/// `gradient_graph::actor` does) must keep formatting whole entries; this drops
+/// exactly what such a test is looking for.
 pub fn statements(log: Vec<sea_orm::Transaction>) -> Vec<String> {
     log.iter()
         .flat_map(|t| t.statements().iter())
@@ -358,8 +357,8 @@ mod tests {
         let pool = WorkerDb::new(mock);
         let tx = Arc::new(pool.begin().await.expect("begin"));
         let scoped = pool.in_transaction(Arc::clone(&tx));
-        assert!(scoped.is_transactional());
-        assert!(!scoped.detached().is_transactional());
+        assert!(scoped.as_transaction().is_some());
+        assert!(scoped.detached().as_transaction().is_none());
 
         scoped
             .execute_raw(Statement::from_string(

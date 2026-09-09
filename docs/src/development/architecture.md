@@ -64,10 +64,14 @@ The maintenance deletions are the exception that matters for the cache index. TT
 eviction, the zombie purge and the orphan GC retire `cached_path` rows in their own
 transactions, so `cached_path.missing_references` - the reference counter every
 dispatch gate and eval prune reads - is moved inside the actor's transaction on a
-commit and inside the deletion's own transaction on a retire. Nothing serialises the
-two but row locks: a commit locks its reference endpoints, and both retires the rows
-they delete, in one hash-ordered statement before either decides anything, so a
-retire and a commit can never disagree about an edge (`gradient_db::nar_closure`).
+commit and inside the deletion's own transaction on a retire. The consistency sweep's
+bounded repair is a fourth writer, also outside the actor. Nothing serialises them
+against a commit but row locks: a commit takes `FOR SHARE` on its reference endpoints,
+and both retires `FOR UPDATE` on the rows they delete, each in one hash-ordered
+statement before it decides anything, so a retire and a commit cannot disagree about
+an edge. The ripples themselves lock in plan order, so a commit racing a bulk retire
+can deadlock; that is detected and retried, and preferred to a row left whole with a
+reference that is not (`gradient_db::nar_closure`).
 
 A child that panics or exits unexpectedly is respawned
 after an exponential backoff (1s doubling to 60s, reset after five healthy
