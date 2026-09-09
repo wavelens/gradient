@@ -203,7 +203,7 @@ impl EvalCacheReceiver {
 
     /// Append an inline `EvalCacheChunk`; on `is_final` deliver the assembled
     /// blob. A non-contiguous offset fails the waiter, mirroring `nar_recv`.
-    pub fn deliver_pull_chunk(&self, job_id: &str, data: Vec<u8>, offset: u64, is_final: bool) {
+    pub fn deliver_pull_chunk(&self, job_id: &str, data: &[u8], offset: u64, is_final: bool) {
         let mut g = self.inner.lock();
         let Some(Pending::PullStream { buf, .. }) = g.pending.get_mut(job_id) else {
             warn!(%job_id, "EvalCacheChunk with no inline pull stream - discarding");
@@ -225,7 +225,7 @@ impl EvalCacheReceiver {
             return;
         }
 
-        buf.extend_from_slice(&data);
+        buf.extend_from_slice(data);
 
         if is_final
             && let Some(Pending::PullStream { buf, bytes_tx }) = g.pending.remove(job_id)
@@ -284,9 +284,9 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { pull.await_inline(total).await });
         tokio::task::yield_now().await;
-        r2.deliver_pull_chunk("j", b"abc".to_vec(), 0, false);
-        r2.deliver_pull_chunk("j", b"def".to_vec(), 3, false);
-        r2.deliver_pull_chunk("j", b"ghi".to_vec(), 6, true);
+        r2.deliver_pull_chunk("j", b"abc", 0, false);
+        r2.deliver_pull_chunk("j", b"def", 3, false);
+        r2.deliver_pull_chunk("j", b"ghi", 6, true);
         assert_eq!(task.await.unwrap().unwrap(), b"abcdefghi");
     }
 
@@ -306,7 +306,7 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { pull.await_inline(5).await });
         tokio::task::yield_now().await;
-        r2.deliver_pull_chunk("j", b"hello".to_vec(), 0, true);
+        r2.deliver_pull_chunk("j", b"hello", 0, true);
         assert_eq!(task.await.unwrap().unwrap(), b"hello");
     }
 
@@ -326,8 +326,8 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { pull.await_inline(6).await });
         tokio::task::yield_now().await;
-        r2.deliver_pull_chunk("j", b"abc".to_vec(), 0, false);
-        r2.deliver_pull_chunk("j", b"def".to_vec(), 99, true);
+        r2.deliver_pull_chunk("j", b"abc", 0, false);
+        r2.deliver_pull_chunk("j", b"def", 99, true);
         let err = task.await.unwrap().unwrap_err().to_string();
         assert!(err.contains("non-contiguous"), "got: {err}");
     }
@@ -348,7 +348,7 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { pull.await_inline(10).await });
         tokio::task::yield_now().await;
-        r2.deliver_pull_chunk("j", b"short".to_vec(), 0, true);
+        r2.deliver_pull_chunk("j", b"short", 0, true);
         let err = task.await.unwrap().unwrap_err().to_string();
         assert!(err.contains("!= advertised"), "got: {err}");
     }

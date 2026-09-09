@@ -6,11 +6,10 @@
 
 pub mod client;
 pub mod server;
-pub mod wire;
 
 // Job and scheduling types live in gradient_types::proto - re-exported here for
 // backward compatibility so existing `crate::messages::FlakeJob` paths still work.
-pub use client::ClientMessage;
+pub use client::{ArchivedClientMessage, ClientMessage};
 pub use gradient_types::proto::{
     BuildFailureKind, BuildJob, BuildMetrics, BuildOutput, BuildProduct, BuildSpec,
     BumpedInputWire, CacheInfo, CachedPath, CandidateScore, CredentialKind, DerivationOutput,
@@ -19,8 +18,7 @@ pub use gradient_types::proto::{
     GradientCapabilities, InputUpdateSpec, Job, JobCandidate, JobKind, JobPhase, JobPhaseSpan,
     JobUpdateKind, QueryMode, RequiredPath,
 };
-pub use server::{FailedPeer, ServerMessage};
-pub use wire::{decode_client_message, decode_server_message};
+pub use server::{ArchivedServerMessage, FailedPeer, ServerMessage};
 
 /// Wire protocol version implemented by this build.
 /// v5: dropped `PresignedUpload`/`PresignedDownload` and `AssignJob.timeout_secs`.

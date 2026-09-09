@@ -15,7 +15,9 @@ pub mod listener;
 
 use anyhow::{Context, Result};
 use gradient_proto::messages::{ClientMessage, ServerMessage};
-use gradient_proto::session::frame::{ClientWriter, ProtoSocket, ServerReader, accept_tungstenite};
+use gradient_proto::session::frame::{
+    ClientWriter, Inbound, ProtoSocket, ServerReader, accept_tungstenite,
+};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -139,8 +141,8 @@ pub struct ProtoReader {
 }
 
 impl ProtoReader {
-    /// Next inbound [`ServerMessage`]; `None` on close or malformed frame.
-    pub async fn recv(&mut self) -> Option<ServerMessage> {
-        self.inner.recv_msg().await
+    /// Next inbound frame; `None` on close or a malformed frame.
+    pub async fn recv(&mut self) -> Option<Inbound<ServerMessage>> {
+        self.inner.recv().await
     }
 }

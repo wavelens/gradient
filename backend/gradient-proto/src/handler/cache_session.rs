@@ -21,6 +21,7 @@ use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
 use crate::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
+use crate::session::frame::Inbound;
 use crate::session::handshake as handshake_fsm;
 
 use super::socket::{HANDSHAKE_TIMEOUT, ProtoSocket, recv_client_msg, send_server_msg};
@@ -124,7 +125,11 @@ pub async fn handle_cache_socket(
         let msg = tokio::select! {
             _ = cancel.cancelled() => break,
             m = next => match m {
-                Some(m) => m,
+                Some(Inbound::Control(m)) => m,
+                Some(Inbound::Bulk(frame)) => {
+                    warn!(%cache_id, variant = frame.variant_name(), "ignoring bulk frame on a read-only cache session");
+                    continue;
+                }
                 None => break,
             },
         };

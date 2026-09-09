@@ -272,9 +272,9 @@ impl<'a> DispatchContext<'a> {
 
     pub(super) async fn on_nar_push(
         &mut self,
-        job_id: String,
-        store_path: String,
-        data: Vec<u8>,
+        job_id: &str,
+        store_path: &str,
+        data: &[u8],
         offset: u64,
         is_final: bool,
         nar: &mut NarReceiveStore,
@@ -283,7 +283,7 @@ impl<'a> DispatchContext<'a> {
         if data.is_empty() {
             return;
         }
-        match nar.append(&job_id, &store_path, offset, &data).await {
+        match nar.append(job_id, store_path, offset, data).await {
             AppendOutcome::Ok => {}
             AppendOutcome::Overflow => {
                 let reason = format!(
@@ -292,7 +292,7 @@ impl<'a> DispatchContext<'a> {
                     nar.max_bytes(),
                 );
                 warn!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "poisoning NAR path");
-                self.abort_job(&job_id, reason).await;
+                self.abort_job(job_id, reason).await;
             }
             AppendOutcome::Poisoned => {
                 debug!(peer_id = %self.peer_id, %job_id, %store_path, "discarding NarPush chunk for poisoned path");
@@ -1117,7 +1117,8 @@ mod nar_receive_store_tests {
 #[cfg(test)]
 mod serve_nar_tests {
     use super::*;
-    use crate::messages::decode_server_message;
+    use crate::session::frame::WireMessage;
+    use bytes::Bytes;
     use gradient_test_support::state::test_state;
     use sea_orm::{DatabaseBackend, MockDatabase};
     use tokio::sync::mpsc;
@@ -1125,8 +1126,8 @@ mod serve_nar_tests {
     /// Spy writer: records every message the server attempted to send so the
     /// test can assert exactly which protocol frames were emitted (NarPush,
     /// NarUnavailable, NarAbort, …).
-    fn spy_writer(timeout: Duration) -> (ProtoWriter, mpsc::Receiver<Vec<u8>>) {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>(64);
+    fn spy_writer(timeout: Duration) -> (ProtoWriter, mpsc::Receiver<Bytes>) {
+        let (tx, rx) = mpsc::channel::<Bytes>(64);
         (
             ProtoWriter {
                 control_tx: tx.clone(),
@@ -1138,8 +1139,11 @@ mod serve_nar_tests {
         )
     }
 
-    fn decode(bytes: &[u8]) -> ServerMessage {
-        decode_server_message(bytes).expect("decode ServerMessage")
+    fn decode(bytes: Bytes) -> ServerMessage {
+        ServerMessage::decode(bytes)
+            .expect("decode ServerMessage")
+            .into_message()
+            .expect("deserialise ServerMessage")
     }
 
     /// Streamed payload arrives as one or more `NarPush` frames whose
@@ -1167,7 +1171,7 @@ mod serve_nar_tests {
         let mut saw_header = false;
         let mut saw_final = false;
         while let Ok(bytes) = rx.try_recv() {
-            match decode(&bytes) {
+            match decode(bytes) {
                 ServerMessage::NarStreamHeader { total_bytes, .. } => {
                     saw_header = true;
                     assert!(!saw_final, "header must precede chunks");
@@ -1215,7 +1219,7 @@ mod serve_nar_tests {
         assert!(res.is_err(), "missing path must surface as Err");
 
         let bytes = rx.try_recv().expect("expect one frame");
-        let msg = decode(&bytes);
+        let msg = decode(bytes);
         assert_eq!(msg.variant_name(), "NarUnavailable");
         assert!(
             rx.try_recv().is_err(),

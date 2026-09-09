@@ -31,13 +31,13 @@ use super::socket::{
     JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter, recv_client_msg, send_server_msg,
 };
 use crate::messages::{ClientMessage, GradientCapabilities, ServerMessage};
-use crate::session::frame::ProtoReader;
+use crate::session::frame::{Inbound, ProtoReader};
 
 /// How long a draining session waits for its in-flight jobs before closing.
 pub const SESSION_DRAIN_BUDGET: Duration = Duration::from_secs(20);
 
 pub enum SessionMsg {
-    Frame(ClientMessage, RpcReplyPort<bool>),
+    Frame(Inbound<ClientMessage>, RpcReplyPort<bool>),
     Signal(SessionSignal),
     Reattach,
     ReaderClosed,
@@ -165,7 +165,7 @@ impl Actor for SessionActor {
         st: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         match msg {
-            SessionMsg::Frame(frame, reply) => {
+            SessionMsg::Frame(inbound, reply) => {
                 st.last_seen.store(
                     gradient_types::now().and_utc().timestamp_millis(),
                     Ordering::Relaxed,
@@ -180,7 +180,7 @@ impl Actor for SessionActor {
                         active: &mut st.active,
                     };
 
-                    ctx.dispatch(frame, &mut st.nar, &mut st.eval_cache).await
+                    ctx.dispatch(inbound, &mut st.nar, &mut st.eval_cache).await
                 };
                 let _ = reply.send(keep);
 
@@ -299,9 +299,9 @@ async fn offer_jobs(st: &mut SessionState) -> bool {
 }
 
 async fn read_loop(mut reader: ProtoReader, session: ActorRef<SessionMsg>) {
-    while let Some(msg) = recv_client_msg(&mut reader).await {
+    while let Some(inbound) = recv_client_msg(&mut reader).await {
         match session
-            .call(|reply| SessionMsg::Frame(msg, reply), None)
+            .call(|reply| SessionMsg::Frame(inbound, reply), None)
             .await
         {
             Ok(CallResult::Success(true)) => {}
@@ -315,7 +315,7 @@ async fn read_loop(mut reader: ProtoReader, session: ActorRef<SessionMsg>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::decode_server_message;
+    use crate::session::frame::WireMessage;
     use futures::StreamExt;
     use gradient_test_support::prelude::*;
     use sea_orm::{DatabaseBackend, MockDatabase};
@@ -376,7 +376,10 @@ mod tests {
             panic!("expected a binary frame, got {frame:?}");
         };
         assert!(matches!(
-            decode_server_message(&bytes).unwrap(),
+            ServerMessage::decode(bytes)
+                .unwrap()
+                .into_message()
+                .unwrap(),
             ServerMessage::Draining
         ));
         assert!(

@@ -12,9 +12,11 @@
 //! from writes so a slow outbound NAR transfer cannot block inbound message
 //! handling, and lets concurrent NAR-serving tasks share the wire safely.
 
+use std::marker::PhantomData;
 use std::time::Duration;
 
 use axum::extract::ws::{Message as AxumMessage, WebSocket};
+use bytes::Bytes;
 use futures::stream::SplitStream;
 use futures::{SinkExt, StreamExt};
 use rkyv::rancor::Error as RkyvError;
@@ -28,7 +30,7 @@ use tracing::{debug, trace, warn};
 
 use gradient_util::shutdown::Shutdown;
 
-use crate::messages::{ClientMessage, ServerMessage, decode_client_message, decode_server_message};
+use crate::messages::{ArchivedClientMessage, ArchivedServerMessage, ClientMessage, ServerMessage};
 
 type WriterTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
 
@@ -88,8 +90,15 @@ const BULK_BATCH_BYTES: usize = 256 * 1024;
 /// the authority reads `ClientMessage` and writes `ServerMessage`; a peer
 /// reads `ServerMessage` and writes `ClientMessage`.
 pub trait WireMessage: Sized + std::fmt::Debug + Send + 'static {
-    fn encode(&self) -> Option<Vec<u8>>;
-    fn decode(bytes: &[u8]) -> Result<Self, RkyvError>;
+    /// Serialise into the rkyv buffer the writer hands to the socket as is.
+    fn encode(&self) -> Option<Bytes>;
+
+    /// Validate one received frame. Payload-bearing variants stay archived so
+    /// their bytes reach the handler as a slice of `bytes`; everything else
+    /// deserialises into the owned enum.
+    fn decode(bytes: Bytes) -> Result<Inbound<Self>, RkyvError>;
+
+    fn variant_name(&self) -> &'static str;
 
     /// Whether this message belongs to a bulk transfer stream rather than the
     /// control plane. Bulk messages are large and strictly ordered within their
@@ -97,18 +106,73 @@ pub trait WireMessage: Sized + std::fmt::Debug + Send + 'static {
     /// two travel separate lanes so a multi-megabyte transfer cannot delay the
     /// RPC replies a peer is blocked on - see [`WriterLanes`].
     fn is_bulk(&self) -> bool;
+
+    /// Direction hooks so [`Inbound`] serves both roles from one generic impl;
+    /// each forwards to the inherent [`Frame`] method.
+    fn frame_variant_name(frame: &Frame<Self>) -> &'static str;
+    fn frame_into_message(frame: Frame<Self>) -> Result<Self, RkyvError>;
+}
+
+/// One received message: either fully owned, or a payload-bearing frame read
+/// in place.
+pub enum Inbound<M> {
+    Control(M),
+    Bulk(Frame<M>),
+}
+
+/// A validated payload-bearing frame. Its `data` is read as a slice of
+/// `bytes`, so a chunk is never copied out of the buffer the socket filled.
+pub struct Frame<M> {
+    bytes: Bytes,
+    _direction: PhantomData<M>,
+}
+
+impl<M: WireMessage> Inbound<M> {
+    /// Deserialise a bulk frame into the owned enum. Handlers read bulk frames
+    /// in place instead; this exists for tests and probes.
+    pub fn into_message(self) -> Result<M, RkyvError> {
+        match self {
+            Self::Control(msg) => Ok(msg),
+            Self::Bulk(frame) => M::frame_into_message(frame),
+        }
+    }
+
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Self::Control(msg) => msg.variant_name(),
+            Self::Bulk(frame) => M::frame_variant_name(frame),
+        }
+    }
 }
 
 impl WireMessage for ClientMessage {
-    fn encode(&self) -> Option<Vec<u8>> {
+    fn encode(&self) -> Option<Bytes> {
         rkyv::to_bytes::<RkyvError>(self)
-            .map(|b| b.to_vec())
+            .map(Bytes::from_owner)
             .map_err(|e| warn!(error = %e, "failed to serialize client message"))
             .ok()
     }
-    fn decode(bytes: &[u8]) -> Result<Self, RkyvError> {
-        decode_client_message(bytes)
+
+    fn decode(bytes: Bytes) -> Result<Inbound<Self>, RkyvError> {
+        let archived = rkyv::access::<ArchivedClientMessage, RkyvError>(&bytes)?;
+        if matches!(
+            archived,
+            ArchivedClientMessage::NarPush { .. }
+                | ArchivedClientMessage::EvalCacheChunk { .. }
+                | ArchivedClientMessage::LogChunk { .. }
+        ) {
+            return Ok(Inbound::Bulk(Frame {
+                bytes,
+                _direction: PhantomData,
+            }));
+        }
+        rkyv::deserialize::<ClientMessage, RkyvError>(archived).map(Inbound::Control)
     }
+
+    fn variant_name(&self) -> &'static str {
+        ClientMessage::variant_name(self)
+    }
+
     fn is_bulk(&self) -> bool {
         matches!(
             self,
@@ -122,18 +186,63 @@ impl WireMessage for ClientMessage {
                 | ClientMessage::LogChunk { .. }
         )
     }
+
+    fn frame_variant_name(frame: &Frame<Self>) -> &'static str {
+        frame.variant_name()
+    }
+
+    fn frame_into_message(frame: Frame<Self>) -> Result<Self, RkyvError> {
+        frame.into_message()
+    }
+}
+
+impl Frame<ClientMessage> {
+    pub fn archived(&self) -> &ArchivedClientMessage {
+        // SAFETY: `ClientMessage::decode` validated these exact bytes, and
+        // `Bytes` is immutable, so the archive cannot change underneath.
+        unsafe { rkyv::access_unchecked::<ArchivedClientMessage>(&self.bytes) }
+    }
+
+    pub fn into_message(self) -> Result<ClientMessage, RkyvError> {
+        rkyv::deserialize::<ClientMessage, RkyvError>(self.archived())
+    }
+
+    pub fn variant_name(&self) -> &'static str {
+        match self.archived() {
+            ArchivedClientMessage::NarPush { .. } => "NarPush",
+            ArchivedClientMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
+            ArchivedClientMessage::LogChunk { .. } => "LogChunk",
+            _ => "Control",
+        }
+    }
 }
 
 impl WireMessage for ServerMessage {
-    fn encode(&self) -> Option<Vec<u8>> {
+    fn encode(&self) -> Option<Bytes> {
         rkyv::to_bytes::<RkyvError>(self)
-            .map(|b| b.to_vec())
+            .map(Bytes::from_owner)
             .map_err(|e| warn!(error = %e, "failed to serialize server message"))
             .ok()
     }
-    fn decode(bytes: &[u8]) -> Result<Self, RkyvError> {
-        decode_server_message(bytes)
+
+    fn decode(bytes: Bytes) -> Result<Inbound<Self>, RkyvError> {
+        let archived = rkyv::access::<ArchivedServerMessage, RkyvError>(&bytes)?;
+        if matches!(
+            archived,
+            ArchivedServerMessage::NarPush { .. } | ArchivedServerMessage::EvalCacheChunk { .. }
+        ) {
+            return Ok(Inbound::Bulk(Frame {
+                bytes,
+                _direction: PhantomData,
+            }));
+        }
+        rkyv::deserialize::<ServerMessage, RkyvError>(archived).map(Inbound::Control)
     }
+
+    fn variant_name(&self) -> &'static str {
+        ServerMessage::variant_name(self)
+    }
+
     fn is_bulk(&self) -> bool {
         matches!(
             self,
@@ -146,6 +255,34 @@ impl WireMessage for ServerMessage {
                 | ServerMessage::EvalCacheChunk { .. }
                 | ServerMessage::EvalCachePushGrant { .. }
         )
+    }
+
+    fn frame_variant_name(frame: &Frame<Self>) -> &'static str {
+        frame.variant_name()
+    }
+
+    fn frame_into_message(frame: Frame<Self>) -> Result<Self, RkyvError> {
+        frame.into_message()
+    }
+}
+
+impl Frame<ServerMessage> {
+    pub fn archived(&self) -> &ArchivedServerMessage {
+        // SAFETY: `ServerMessage::decode` validated these exact bytes, and
+        // `Bytes` is immutable, so the archive cannot change underneath.
+        unsafe { rkyv::access_unchecked::<ArchivedServerMessage>(&self.bytes) }
+    }
+
+    pub fn into_message(self) -> Result<ServerMessage, RkyvError> {
+        rkyv::deserialize::<ServerMessage, RkyvError>(self.archived())
+    }
+
+    pub fn variant_name(&self) -> &'static str {
+        match self.archived() {
+            ArchivedServerMessage::NarPush { .. } => "NarPush",
+            ArchivedServerMessage::EvalCacheChunk { .. } => "EvalCacheChunk",
+            _ => "Control",
+        }
     }
 }
 
@@ -165,11 +302,11 @@ pub enum ProtoSocket {
 }
 
 impl ProtoSocket {
-    async fn recv_bytes(&mut self) -> Option<Result<Vec<u8>, ()>> {
+    async fn recv_bytes(&mut self) -> Option<Result<Bytes, ()>> {
         match self {
             Self::Axum(ws) => loop {
                 match ws.recv().await? {
-                    Ok(AxumMessage::Binary(bytes)) => return Some(Ok(bytes.to_vec())),
+                    Ok(AxumMessage::Binary(bytes)) => return Some(Ok(bytes)),
                     Ok(AxumMessage::Close(_)) => return None,
                     Ok(_) => continue,
                     Err(e) => {
@@ -180,7 +317,7 @@ impl ProtoSocket {
             },
             Self::Tungstenite(ws) => loop {
                 match ws.next().await? {
-                    Ok(TungsteniteMessage::Binary(bytes)) => return Some(Ok(bytes.to_vec())),
+                    Ok(TungsteniteMessage::Binary(bytes)) => return Some(Ok(bytes)),
                     Ok(TungsteniteMessage::Close(_)) => return None,
                     Ok(TungsteniteMessage::Ping(_) | TungsteniteMessage::Pong(_)) => continue,
                     Ok(_) => continue,
@@ -193,30 +330,39 @@ impl ProtoSocket {
         }
     }
 
-    async fn send_bytes(&mut self, bytes: Vec<u8>) -> Result<(), ()> {
+    async fn send_bytes(&mut self, bytes: Bytes) -> Result<(), ()> {
         match self {
             Self::Axum(ws) => ws
-                .send(AxumMessage::Binary(bytes.into()))
+                .send(AxumMessage::Binary(bytes))
                 .await
                 .map_err(|e| debug!(error = %e, "WebSocket send error")),
             Self::Tungstenite(ws) => ws
-                .send(TungsteniteMessage::Binary(bytes.into()))
+                .send(TungsteniteMessage::Binary(bytes))
                 .await
                 .map_err(|e| debug!(error = %e, "WebSocket send error")),
         }
     }
 
     /// Receive and deserialise the next [`ServerMessage`] (peer-role read).
-    /// Returns `None` on clean close or transport/deserialisation error.
+    /// Only the handshake reads off the socket, so a bulk frame here is a
+    /// protocol error. Returns `None` on clean close or transport/decode error.
     pub async fn recv_server_msg(&mut self) -> Option<ServerMessage> {
         let bytes = match self.recv_bytes().await? {
             Ok(b) => b,
             Err(()) => return None,
         };
-        match decode_server_message(&bytes) {
-            Ok(msg) => {
-                trace!(?msg, bytes = bytes.len(), "recv ServerMessage");
+        let len = bytes.len();
+        match ServerMessage::decode(bytes) {
+            Ok(Inbound::Control(msg)) => {
+                trace!(?msg, bytes = len, "recv ServerMessage");
                 Some(msg)
+            }
+            Ok(Inbound::Bulk(frame)) => {
+                warn!(
+                    variant = frame.variant_name(),
+                    "bulk frame before the connection was split"
+                );
+                None
             }
             Err(e) => {
                 warn!(error = %e, "failed to deserialize server message");
@@ -227,25 +373,32 @@ impl ProtoSocket {
 
     /// Serialise and send a [`ClientMessage`] (peer-role write).
     pub async fn send_client_msg(&mut self, msg: &ClientMessage) -> Result<(), ()> {
-        let bytes = rkyv::to_bytes::<RkyvError>(msg).map_err(|e| {
-            warn!(error = %e, "failed to serialize client message");
-        })?;
+        let bytes = msg.encode().ok_or(())?;
         trace!(?msg, bytes = bytes.len(), "send ClientMessage");
-        self.send_bytes(bytes.to_vec()).await
+        self.send_bytes(bytes).await
     }
 
     /// Receive and deserialise the next [`ClientMessage`]. Returns `None` on
-    /// clean close, deserialisation failure (after replying with an error),
-    /// or transport error.
+    /// clean close, a bulk frame, decode failure (after replying with an
+    /// error), or transport error.
     pub async fn recv_msg(&mut self) -> Option<ClientMessage> {
         let bytes = match self.recv_bytes().await? {
             Ok(b) => b,
             Err(()) => return None,
         };
-        match decode_client_message(&bytes) {
-            Ok(msg) => {
-                trace!(?msg, bytes = bytes.len(), "recv ClientMessage");
+        let len = bytes.len();
+        match ClientMessage::decode(bytes) {
+            Ok(Inbound::Control(msg)) => {
+                trace!(?msg, bytes = len, "recv ClientMessage");
                 Some(msg)
+            }
+            Ok(Inbound::Bulk(frame)) => {
+                warn!(
+                    variant = frame.variant_name(),
+                    "bulk frame before the connection was split"
+                );
+                self.send_error(400, "unexpected bulk frame".into()).await;
+                None
             }
             Err(e) => {
                 warn!(error = %e, "failed to deserialize client message");
@@ -257,11 +410,9 @@ impl ProtoSocket {
 
     /// Serialise and send a [`ServerMessage`].
     pub async fn send_msg(&mut self, msg: &ServerMessage) -> Result<(), ()> {
-        let bytes = rkyv::to_bytes::<RkyvError>(msg).map_err(|e| {
-            warn!(error = %e, "failed to serialize server message");
-        })?;
+        let bytes = msg.encode().ok_or(())?;
         trace!(?msg, bytes = bytes.len(), "send ServerMessage");
-        self.send_bytes(bytes.to_vec()).await
+        self.send_bytes(bytes).await
     }
 
     pub async fn send_error(&mut self, code: u16, message: String) {
@@ -318,13 +469,13 @@ impl ProtoSocket {
         send_chunk_timeout: Duration,
         spawn: impl FnOnce(WriterTask),
     ) -> (MsgReader<In>, MsgWriter<Out>) {
-        let (tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
-        let (control_tx, control_rx) = mpsc::channel::<Vec<u8>>(CONTROL_QUEUE_DEPTH);
+        let (tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
+        let (control_tx, control_rx) = mpsc::channel::<Bytes>(CONTROL_QUEUE_DEPTH);
         let writer = MsgWriter {
             tx,
             control_tx,
             send_chunk_timeout,
-            _direction: std::marker::PhantomData,
+            _direction: PhantomData,
         };
         let lanes = WriterLanes::new(control_rx, bulk_rx);
         let inner = match self {
@@ -342,7 +493,7 @@ impl ProtoSocket {
         (
             MsgReader {
                 inner,
-                _direction: std::marker::PhantomData,
+                _direction: PhantomData,
             },
             writer,
         )
@@ -357,11 +508,11 @@ enum ReaderInner {
 }
 
 impl ReaderInner {
-    async fn recv_bytes(&mut self) -> Option<Vec<u8>> {
+    async fn recv_bytes(&mut self) -> Option<Bytes> {
         loop {
             match self {
                 Self::Axum(s) => match s.next().await? {
-                    Ok(AxumMessage::Binary(bytes)) => return Some(bytes.to_vec()),
+                    Ok(AxumMessage::Binary(bytes)) => return Some(bytes),
                     Ok(AxumMessage::Close(_)) => return None,
                     Ok(_) => continue,
                     Err(e) => {
@@ -370,7 +521,7 @@ impl ReaderInner {
                     }
                 },
                 Self::Tungstenite(s) => match s.next().await? {
-                    Ok(TungsteniteMessage::Binary(bytes)) => return Some(bytes.to_vec()),
+                    Ok(TungsteniteMessage::Binary(bytes)) => return Some(bytes),
                     Ok(TungsteniteMessage::Close(_)) => return None,
                     Ok(TungsteniteMessage::Ping(_) | TungsteniteMessage::Pong(_)) => continue,
                     Ok(_) => continue,
@@ -390,19 +541,19 @@ impl ReaderInner {
 /// treat it as a peer disconnect.
 pub struct MsgReader<M> {
     inner: ReaderInner,
-    _direction: std::marker::PhantomData<M>,
+    _direction: PhantomData<M>,
 }
 
 pub type ProtoReader = MsgReader<ClientMessage>;
 pub type ServerReader = MsgReader<ServerMessage>;
 
 impl<M: WireMessage> MsgReader<M> {
-    pub async fn recv_msg(&mut self) -> Option<M> {
+    pub async fn recv(&mut self) -> Option<Inbound<M>> {
         let bytes = self.inner.recv_bytes().await?;
-        match M::decode(&bytes) {
-            Ok(msg) => {
-                trace!(?msg, bytes = bytes.len(), "recv message");
-                Some(msg)
+        match M::decode(bytes) {
+            Ok(inbound) => {
+                trace!(variant = inbound.variant_name(), "recv message");
+                Some(inbound)
             }
             Err(e) => {
                 warn!(error = %e, "failed to deserialize message");
@@ -421,10 +572,10 @@ impl<M: WireMessage> MsgReader<M> {
 /// queue full for longer than this is treated as a peer stall and surfaced
 /// as an error.
 pub struct MsgWriter<M> {
-    pub(crate) tx: mpsc::Sender<Vec<u8>>,
-    pub(crate) control_tx: mpsc::Sender<Vec<u8>>,
+    pub(crate) tx: mpsc::Sender<Bytes>,
+    pub(crate) control_tx: mpsc::Sender<Bytes>,
     pub(crate) send_chunk_timeout: Duration,
-    pub(crate) _direction: std::marker::PhantomData<M>,
+    pub(crate) _direction: PhantomData<M>,
 }
 
 pub type ProtoWriter = MsgWriter<ServerMessage>;
@@ -436,7 +587,7 @@ impl<M> Clone for MsgWriter<M> {
             tx: self.tx.clone(),
             control_tx: self.control_tx.clone(),
             send_chunk_timeout: self.send_chunk_timeout,
-            _direction: std::marker::PhantomData,
+            _direction: PhantomData,
         }
     }
 }
@@ -472,14 +623,14 @@ impl<M: WireMessage> MsgWriter<M> {
 /// replies independent of bulk progress. Order within each lane is preserved,
 /// which is all a transfer stream requires.
 pub(crate) struct WriterLanes {
-    control: mpsc::Receiver<Vec<u8>>,
-    bulk: mpsc::Receiver<Vec<u8>>,
+    control: mpsc::Receiver<Bytes>,
+    bulk: mpsc::Receiver<Bytes>,
     control_open: bool,
     bulk_open: bool,
 }
 
 impl WriterLanes {
-    pub(crate) fn new(control: mpsc::Receiver<Vec<u8>>, bulk: mpsc::Receiver<Vec<u8>>) -> Self {
+    pub(crate) fn new(control: mpsc::Receiver<Bytes>, bulk: mpsc::Receiver<Bytes>) -> Self {
         Self {
             control,
             bulk,
@@ -494,7 +645,7 @@ impl WriterLanes {
     /// blocks mid-feed would strand a reply sitting in front of it, unflushed -
     /// the very stall this split exists to prevent. Returns false once both
     /// lanes are closed and drained.
-    pub(crate) async fn next_batch(&mut self, batch: &mut Vec<Vec<u8>>) -> bool {
+    pub(crate) async fn next_batch(&mut self, batch: &mut Vec<Bytes>) -> bool {
         loop {
             if !self.control_open && !self.bulk_open {
                 return false;
@@ -530,7 +681,7 @@ impl WriterLanes {
 
     /// Move already-queued messages from one lane into `batch` without awaiting.
     /// Closes the lane when all its senders have dropped.
-    fn drain_ready(&mut self, lane: Lane, batch: &mut Vec<Vec<u8>>) {
+    fn drain_ready(&mut self, lane: Lane, batch: &mut Vec<Bytes>) {
         if !self.is_open(lane) {
             return;
         }
@@ -538,7 +689,7 @@ impl WriterLanes {
             Lane::Control => &mut self.control,
             Lane::Bulk => &mut self.bulk,
         };
-        let mut bytes: usize = batch.iter().map(Vec::len).sum();
+        let mut bytes: usize = batch.iter().map(Bytes::len).sum();
         let mut disconnected = false;
         while !batch_full(lane, batch.len(), bytes) {
             match rx.try_recv() {
@@ -598,7 +749,7 @@ async fn axum_writer_task(
             break;
         }
         for bytes in batch.drain(..) {
-            if let Err(e) = sink.feed(AxumMessage::Binary(bytes.into())).await {
+            if let Err(e) = sink.feed(AxumMessage::Binary(bytes)).await {
                 debug!(error = %e, "axum WS writer task: send failed; exiting");
                 return;
             }
@@ -623,7 +774,7 @@ async fn tungstenite_writer_task(
             break;
         }
         for bytes in batch.drain(..) {
-            if let Err(e) = sink.feed(TungsteniteMessage::Binary(bytes.into())).await {
+            if let Err(e) = sink.feed(TungsteniteMessage::Binary(bytes)).await {
                 debug!(error = %e, "tungstenite WS writer task: send failed; exiting");
                 return;
             }
@@ -637,8 +788,8 @@ async fn tungstenite_writer_task(
 
 // ── Free helpers ──────────────────────────────────────────────────────────────
 
-pub async fn recv_client_msg(reader: &mut ProtoReader) -> Option<ClientMessage> {
-    reader.recv_msg().await
+pub async fn recv_client_msg(reader: &mut ProtoReader) -> Option<Inbound<ClientMessage>> {
+    reader.recv().await
 }
 
 pub async fn send_server_msg(writer: &ProtoWriter, msg: &ServerMessage) -> Result<(), ()> {
@@ -685,25 +836,25 @@ mod tests {
         assert_eq!(MAX_PROTO_MESSAGE_SIZE, 8 * 1024 * 1024);
     }
 
-    fn bulk(bytes: usize) -> Vec<u8> {
-        vec![0xbb; bytes]
+    fn bulk(bytes: usize) -> Bytes {
+        Bytes::from(vec![0xbb; bytes])
     }
 
     /// The window a control reply can wait behind is one bulk chunk, not the
     /// whole queue: a batch stops taking bulk once it holds BULK_BATCH_BYTES.
     #[tokio::test]
     async fn a_bulk_batch_stops_at_the_byte_cap() {
-        let (bulk_tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
-        let (prio_tx, prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
+        let (prio_tx, prio_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
         let mut lanes = WriterLanes::new(prio_rx, bulk_rx);
         for _ in 0..8 {
             bulk_tx.send(bulk(100 * 1024)).await.unwrap();
         }
-        prio_tx.send(vec![0xff]).await.unwrap();
+        prio_tx.send(Bytes::from_static(&[0xff])).await.unwrap();
 
         let mut batch = Vec::new();
         assert!(lanes.next_batch(&mut batch).await);
-        assert_eq!(batch, vec![vec![0xff]]);
+        assert_eq!(batch, vec![Bytes::from_static(&[0xff])]);
 
         batch.clear();
         assert!(lanes.next_batch(&mut batch).await);
@@ -713,12 +864,12 @@ mod tests {
             "100 KiB messages fill a 256 KiB batch at three"
         );
 
-        prio_tx.send(vec![0xee]).await.unwrap();
+        prio_tx.send(Bytes::from_static(&[0xee])).await.unwrap();
         batch.clear();
         assert!(lanes.next_batch(&mut batch).await);
         assert_eq!(
             batch,
-            vec![vec![0xee]],
+            vec![Bytes::from_static(&[0xee])],
             "control overtakes the five bulk messages still queued"
         );
     }
@@ -727,8 +878,8 @@ mod tests {
     /// batch, never the message.
     #[tokio::test]
     async fn an_oversized_bulk_message_is_admitted_alone() {
-        let (bulk_tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
-        let (_prio_tx, prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
+        let (_prio_tx, prio_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
         let mut lanes = WriterLanes::new(prio_rx, bulk_rx);
         bulk_tx.send(bulk(BULK_CHUNK_SIZE)).await.unwrap();
         bulk_tx.send(bulk(BULK_CHUNK_SIZE)).await.unwrap();
@@ -791,20 +942,20 @@ mod tests {
     /// `Transient` while the server logged a clean send.
     #[tokio::test]
     async fn a_cache_reply_overtakes_nar_chunks_already_queued() {
-        let (bulk_tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
-        let (prio_tx, prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
+        let (prio_tx, prio_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
         let mut lanes = WriterLanes::new(prio_rx, bulk_rx);
 
         for i in 0..8u8 {
-            bulk_tx.send(vec![i]).await.unwrap();
+            bulk_tx.send(Bytes::from(vec![i])).await.unwrap();
         }
-        prio_tx.send(vec![0xff]).await.unwrap();
+        prio_tx.send(Bytes::from_static(&[0xff])).await.unwrap();
 
         let mut batch = Vec::new();
         assert!(lanes.next_batch(&mut batch).await);
         assert_eq!(
             batch,
-            vec![vec![0xff]],
+            vec![Bytes::from_static(&[0xff])],
             "the control lane must drain before queued bulk chunks, and must not \
              share a batch with them: the writer flushes only after feeding the \
              whole batch, so a chunk blocking mid-feed would strand the reply"
@@ -814,7 +965,7 @@ mod tests {
         assert!(lanes.next_batch(&mut batch).await);
         assert_eq!(
             batch,
-            (0..8u8).map(|i| vec![i]).collect::<Vec<_>>(),
+            (0..8u8).map(|i| Bytes::from(vec![i])).collect::<Vec<_>>(),
             "the bulk chunks follow in order, none dropped"
         );
     }
@@ -823,18 +974,21 @@ mod tests {
     /// still drains bulk, and the loop ends only once both lanes are closed.
     #[tokio::test]
     async fn bulk_still_drains_and_the_writer_stops_when_both_lanes_close() {
-        let (bulk_tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
-        let (prio_tx, prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
+        let (prio_tx, prio_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
         let mut lanes = WriterLanes::new(prio_rx, bulk_rx);
 
-        bulk_tx.send(vec![1]).await.unwrap();
-        bulk_tx.send(vec![2]).await.unwrap();
+        bulk_tx.send(Bytes::from_static(&[1])).await.unwrap();
+        bulk_tx.send(Bytes::from_static(&[2])).await.unwrap();
         drop(bulk_tx);
         drop(prio_tx);
 
         let mut batch = Vec::new();
         assert!(lanes.next_batch(&mut batch).await);
-        assert_eq!(batch, vec![vec![1], vec![2]]);
+        assert_eq!(
+            batch,
+            vec![Bytes::from_static(&[1]), Bytes::from_static(&[2])]
+        );
 
         batch.clear();
         assert!(
@@ -848,8 +1002,8 @@ mod tests {
     /// `select!` whose branches are all disabled.
     #[tokio::test]
     async fn a_writer_that_never_sent_anything_stops_cleanly() {
-        let (bulk_tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
-        let (prio_tx, prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
+        let (prio_tx, prio_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
         let mut lanes = WriterLanes::new(prio_rx, bulk_rx);
         drop(bulk_tx);
         drop(prio_tx);
@@ -864,15 +1018,20 @@ mod tests {
     /// from taking the cache RPCs down with it.
     #[tokio::test]
     async fn a_full_bulk_lane_does_not_block_the_control_lane() {
-        let (bulk_tx, _bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
-        let (prio_tx, mut prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (bulk_tx, _bulk_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
+        let (prio_tx, mut prio_rx) = mpsc::channel::<Bytes>(WRITER_QUEUE_DEPTH);
         for i in 0..WRITER_QUEUE_DEPTH {
-            bulk_tx.send(vec![i as u8]).await.unwrap();
+            bulk_tx.send(Bytes::from(vec![i as u8])).await.unwrap();
         }
-        assert!(bulk_tx.try_send(vec![0xaa]).is_err(), "bulk lane is full");
+        assert!(
+            bulk_tx.try_send(Bytes::from_static(&[0xaa])).is_err(),
+            "bulk lane is full"
+        );
 
-        prio_tx.try_send(vec![0xff]).expect("control lane is free");
-        assert_eq!(prio_rx.recv().await, Some(vec![0xff]));
+        prio_tx
+            .try_send(Bytes::from_static(&[0xff]))
+            .expect("control lane is free");
+        assert_eq!(prio_rx.recv().await, Some(Bytes::from_static(&[0xff])));
     }
 
     /// The knob that keeps the cache RPC deadlock-free: a full-size
@@ -932,6 +1091,118 @@ mod tests {
 }
 
 #[cfg(test)]
+mod codec_tests {
+    use super::*;
+
+    fn nar_push(data: Vec<u8>) -> ServerMessage {
+        ServerMessage::NarPush {
+            job_id: "build:1".into(),
+            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
+            data,
+            offset: 7,
+            is_final: true,
+        }
+    }
+
+    fn nar_push_client() -> ClientMessage {
+        ClientMessage::NarPush {
+            job_id: "build:1".into(),
+            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-foo".into(),
+            data: vec![9; 4096],
+            offset: 7,
+            is_final: true,
+        }
+    }
+
+    /// A frame decoded from a buffer starting one byte into an allocation must
+    /// still read in place: the payload slice points inside the source bytes.
+    #[test]
+    fn a_misaligned_frame_is_read_in_place() {
+        let payload: Vec<u8> = (0..=255u8).cycle().take(3000).collect();
+        let encoded = nar_push(payload.clone()).encode().expect("encodes");
+        let mut shifted = Vec::with_capacity(encoded.len() + 1);
+        shifted.push(0u8);
+        shifted.extend_from_slice(&encoded);
+        let source = Bytes::from(shifted).slice(1..);
+        assert_ne!(
+            source.as_ptr() as usize % 16,
+            0,
+            "the test must start misaligned"
+        );
+
+        let Ok(Inbound::Bulk(frame)) = ServerMessage::decode(source.clone()) else {
+            panic!("NarPush must decode as a bulk frame");
+        };
+        let ArchivedServerMessage::NarPush { data, offset, .. } = frame.archived() else {
+            panic!("wrong variant");
+        };
+        assert_eq!(data.as_slice(), payload.as_slice());
+        assert_eq!(offset.to_native(), 7);
+        let range = source.as_ptr_range();
+        assert!(
+            range.contains(&data.as_slice().as_ptr()),
+            "payload was copied out of the frame"
+        );
+    }
+
+    #[test]
+    fn a_control_message_decodes_to_the_owned_enum() {
+        let msg = ServerMessage::CacheStatus {
+            query_id: "q".into(),
+            cached: Vec::new(),
+        };
+        let Ok(Inbound::Control(decoded)) = ServerMessage::decode(msg.encode().expect("encodes"))
+        else {
+            panic!("CacheStatus must decode as a control message");
+        };
+        assert_eq!(decoded, msg);
+    }
+
+    #[test]
+    fn a_bulk_frame_round_trips_through_into_message() {
+        let msg = nar_push(vec![1, 2, 3]);
+        let inbound = ServerMessage::decode(msg.encode().expect("encodes")).expect("decodes");
+        assert_eq!(inbound.into_message().expect("deserialises"), msg);
+    }
+
+    /// Encoding hands the rkyv buffer to the writer as is.
+    #[test]
+    fn encode_does_not_copy_the_archive() {
+        let msg = nar_push(vec![9; 4096]);
+        let archive = rkyv::to_bytes::<RkyvError>(&msg).expect("serialises");
+        let ptr = archive.as_ptr();
+        let bytes = Bytes::from_owner(archive);
+        assert_eq!(bytes.as_ptr(), ptr);
+        assert!(ClientMessage::decode(nar_push_client().encode().expect("encodes")).is_ok());
+    }
+
+    #[test]
+    fn garbage_is_rejected() {
+        assert!(ClientMessage::decode(Bytes::from_static(b"not an archive")).is_err());
+    }
+
+    #[test]
+    fn nar_uploaded_round_trips_content_address() {
+        let original = ClientMessage::NarUploaded {
+            job_id: "job-1".into(),
+            store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12".into(),
+            file_hash: "sha256:abc".into(),
+            file_size: 10,
+            nar_size: 20,
+            nar_hash: "sha256:def".into(),
+            references: vec![],
+            deriver: None,
+            ca: Some("text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944".into()),
+        };
+        let decoded = ClientMessage::decode(original.encode().expect("encodes"))
+            .expect("decodes")
+            .into_message()
+            .expect("deserialises");
+        assert_eq!(decoded, original);
+    }
+}
+
+#[cfg(test)]
 mod writer_tests {
     use super::*;
     use std::time::Duration;
@@ -943,19 +1214,15 @@ mod writer_tests {
     fn unwired_writer(
         capacity: usize,
         timeout: Duration,
-    ) -> (
-        ProtoWriter,
-        mpsc::Receiver<Vec<u8>>,
-        mpsc::Receiver<Vec<u8>>,
-    ) {
-        let (tx, bulk_rx) = mpsc::channel::<Vec<u8>>(capacity);
-        let (control_tx, control_rx) = mpsc::channel::<Vec<u8>>(capacity);
+    ) -> (ProtoWriter, mpsc::Receiver<Bytes>, mpsc::Receiver<Bytes>) {
+        let (tx, bulk_rx) = mpsc::channel::<Bytes>(capacity);
+        let (control_tx, control_rx) = mpsc::channel::<Bytes>(capacity);
         (
             ProtoWriter {
                 tx,
                 control_tx,
                 send_chunk_timeout: timeout,
-                _direction: std::marker::PhantomData,
+                _direction: PhantomData,
             },
             control_rx,
             bulk_rx,
@@ -969,7 +1236,11 @@ mod writer_tests {
     #[tokio::test(start_paused = true)]
     async fn send_msg_times_out_when_queue_is_full() {
         let (writer, _control_rx, _bulk_rx) = unwired_writer(1, Duration::from_secs(5));
-        writer.control_tx.send(vec![1, 2, 3]).await.unwrap();
+        writer
+            .control_tx
+            .send(Bytes::from_static(&[1, 2, 3]))
+            .await
+            .unwrap();
 
         let msg = ServerMessage::Reject {
             code: 400,

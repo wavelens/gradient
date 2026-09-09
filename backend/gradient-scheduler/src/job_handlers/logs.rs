@@ -17,9 +17,9 @@ use crate::jobs::PendingJob;
 impl Scheduler {
     // ── Log streaming ─────────────────────────────────────────────────────────
 
-    pub async fn append_log(&self, job_id: &str, task_index: u32, data: Vec<u8>) -> Result<()> {
+    pub async fn append_log(&self, job_id: &str, task_index: u32, data: &[u8]) -> Result<()> {
         let bytes_len = data.len();
-        let text = String::from_utf8_lossy(&data);
+        let text = String::from_utf8_lossy(data);
         let text = text.as_ref();
 
         let build_id_str = match self.active_job(job_id).await {
