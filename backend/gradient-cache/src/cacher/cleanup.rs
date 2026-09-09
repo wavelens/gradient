@@ -199,11 +199,11 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             .await
             .context("TTL GC: failed to delete cache_derivation row")?;
 
-        // Drop THIS cache's signatures on the outputs' cached paths, then any
-        // cached_path no cache signs anymore - clearing the gate flags it backed
-        // in the same transaction. Without the signature cleanup the "compressed
-        // stored" metric (SUM(file_size) via cached_path_signature) would stay
-        // inflated after TTL eviction even though the NAR file is gone.
+        // Drop THIS cache's signatures on the outputs' cached paths, then retire
+        // any cached_path no cache signs anymore, in the same transaction. Without
+        // the signature cleanup the "compressed stored" metric (SUM(file_size) via
+        // cached_path_signature) would stay inflated after TTL eviction even
+        // though the NAR file is gone.
         if !output_hashes.is_empty() {
             use sea_orm::TransactionTrait;
             let txn = state.worker_db.begin().await?;
@@ -219,26 +219,25 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             .await
             .context("TTL GC: failed to delete cached_path_signature rows")?;
 
-            let dropped = txn
+            let unsigned = txn
                 .query_all_raw(Statement::from_sql_and_values(
                     DatabaseBackend::Postgres,
                     r#"
-                    DELETE FROM cached_path cp
+                    SELECT cp.hash FROM cached_path cp
                     WHERE cp.hash = ANY($1)
                       AND NOT EXISTS (
                         SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)
-                    RETURNING cp.hash
                     "#,
                     [output_hashes.clone().into()],
                 ))
                 .await
-                .context("TTL GC: failed to delete unsigned cached_path rows")?
+                .context("TTL GC: failed to select unsigned cached_path rows")?
                 .into_iter()
                 .filter_map(|r| r.try_get::<String>("", "hash").ok())
                 .collect::<Vec<_>>();
-            gradient_db::clear_gate_flags_for_hashes(&txn, &dropped)
+            gradient_db::retire_paths(&txn, &unsigned)
                 .await
-                .context("TTL GC: failed to clear gate flags")?;
+                .context("TTL GC: failed to retire cached paths")?;
             txn.commit().await?;
         }
 
@@ -329,35 +328,29 @@ async fn purge_zombie_cached_paths(
         .await
         .context("Failed to load cached_path rows for zombie purge")?;
 
-    let zombies: Vec<(gradient_types::ids::CachedPathId, String)> = rows
+    let zombies: Vec<String> = rows
         .into_iter()
         .filter(|row| !on_disk.contains(&row.hash))
-        .map(|row| (row.id, row.hash))
+        .map(|row| row.hash)
         .collect();
     if zombies.is_empty() {
         return Ok(0);
     }
 
-    // Batch the deletes: a full fleet eval leaves hundreds of thousands of
+    // Batch the retires: a full fleet eval leaves hundreds of thousands of
     // `cached_path` rows, and per-row round-trips made the hourly pass never
     // finish (and never log). `cached_path_signature` cascades from `cached_path`.
-    // Each batch deletes the rows AND clears the gate flags they backed in one
-    // transaction, so the dispatch gate never trusts a just-purged zombie.
+    // Each batch deletes the rows AND moves the counters and gate flags they
+    // backed in one transaction, so nothing ever trusts a just-purged zombie.
     const ZOMBIE_DELETE_BATCH: usize = 8000;
     let mut purged = 0u64;
     for chunk in zombies.chunks(ZOMBIE_DELETE_BATCH) {
-        let ids: Vec<_> = chunk.iter().map(|(id, _)| *id).collect();
-        let hashes: Vec<String> = chunk.iter().map(|(_, h)| h.clone()).collect();
         let deleted = async {
             use sea_orm::TransactionTrait;
             let txn = state.worker_db.begin().await?;
-            let res = ECachedPath::delete_many()
-                .filter(CCachedPath::Id.is_in(ids))
-                .exec(&txn)
-                .await?;
-            gradient_db::clear_gate_flags_for_hashes(&txn, &hashes).await?;
+            let retired = gradient_db::retire_paths(&txn, chunk).await?;
             txn.commit().await?;
-            Ok::<u64, sea_orm::DbErr>(res.rows_affected)
+            Ok::<u64, sea_orm::DbErr>(retired.deleted.len() as u64)
         }
         .await;
         match deleted {
@@ -653,8 +646,6 @@ mod tests {
     /// the sign sweep stop iterating ghosts.
     #[tokio::test]
     async fn purges_cached_paths_whose_nar_is_missing() {
-        use sea_orm::ActiveValue::Set;
-
         let tmp = tempfile::tempdir().unwrap();
         let live = "aaaa11111111111111111111111111aaaa";
         let zombie_id = CachedPathId::now_v7();
@@ -676,26 +667,34 @@ mod tests {
             nar_hash: Some("sha256:zombie".into()),
             ..Default::default()
         };
+        // The purge retires the row: the DELETE reports what it removed, and the
+        // three flag clears follow (no reverse ripple, the zombie was not whole).
+        let mut retired = BTreeMap::new();
+        retired.insert("hash".to_string(), Value::String(Some(zombie_hash.into())));
+        retired.insert("was_whole".to_string(), Value::Bool(Some(false)));
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![hash_row(live)]])
             .append_query_results([vec![zombie_row.clone()]])
-            .append_exec_results([sea_orm::MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 1,
-            }])
+            .append_query_results([vec![retired]])
+            .append_exec_results(vec![
+                sea_orm::MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                3
+            ])
             .into_connection();
 
         let state = test_server_state(nar_storage, db, |_| {});
 
-        cleanup_orphaned_cache_files(Arc::clone(&state))
+        let report = cleanup_orphaned_cache_files(Arc::clone(&state))
             .await
             .unwrap();
         assert!(nar_file_exists(tmp.path(), live), "live NAR must survive");
-        // The mock executor records the cached_path delete; we can't peek into
-        // it directly, but absence of a panic plus the purge-counter increment
-        // confirms the new branch ran. If the row weren't deleted, the
-        // following `Set` use would dead-code and rustc would flag it.
-        let _ = Set(zombie_id);
+        assert_eq!(
+            report.zombie_cached_paths_purged, 1,
+            "the zombie row must be retired"
+        );
     }
 
     fn state_with_worker_db(base: &Path, db: sea_orm::DatabaseConnection) -> Arc<ServerState> {

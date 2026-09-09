@@ -10,11 +10,12 @@
 //! re-derived by a sweep. `whole_predicate` is the one definition every gate
 //! reads.
 //!
-//! Because nothing re-derives the counter, every mutation here is a TRANSITION,
-//! never a state: a statement reports a row only when this statement is the one
-//! that flipped it. Seeding an already-whole row or rippling a frontier twice
-//! would decrement referrers past zero, and a negative counter never satisfies
-//! `= 0` again.
+//! Because nothing re-derives the counter, every ripple must be driven by a
+//! TRANSITION, never by a state: rippling from a row that did not just flip, or
+//! rippling one frontier twice, moves referrers past zero, and a negative
+//! counter never satisfies `= 0` again. The ripples read that transition from
+//! their own `RETURNING`; the seed cannot (see [`seed_references`]), so its
+//! caller holds the pre-commit endpoint.
 
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
 
@@ -30,10 +31,8 @@ const SEED: &str = r#"
         WHERE r.referrer = cp.hash
           AND r.reference_hash <> cp.hash
           AND NOT (dep.file_hash IS NOT NULL AND dep.missing_references = 0))
-    FROM cached_path old
-    WHERE old.id = cp.id AND cp.hash = $1
-    RETURNING NOT (old.file_hash IS NOT NULL AND old.missing_references = 0)
-          AND (cp.file_hash IS NOT NULL AND cp.missing_references = 0) AS became_whole
+    WHERE cp.hash = $1
+    RETURNING (cp.file_hash IS NOT NULL AND cp.missing_references = 0) AS whole
 "#;
 
 const FORWARD: &str = r#"
@@ -62,13 +61,17 @@ const DELETE: &str = r#"
 "#;
 
 /// Compute the counter of a just-committed row from its references and report
-/// the TRANSITION: `true` only when the row was not whole before this statement
-/// and is whole after it, which is exactly what may be rippled forward. A
-/// re-committed NAR that was already whole returns `false`, so its referrers are
-/// not decremented a second time. `false` too when no such row exists.
+/// whether the row IS whole afterwards (`false` when no such row exists).
 ///
-/// The pre-update value comes from a `FROM cached_path old` self-join on the
-/// primary key; Postgres evaluates `old` against the statement's snapshot.
+/// This is a STATE, and the ripples need a TRANSITION, so the caller owns the
+/// other endpoint: the row's wholeness BEFORE the commit
+/// ([`gradient_entity::cached_path::Model::is_whole`] on the row the commit read
+/// before writing it), and it ripples only when the two differ. The statement
+/// cannot report that endpoint itself - by the time it runs, the commit has
+/// already stored the NAR, so a `FROM cached_path old` self-join sees a row that
+/// is backed and, on a fresh insert, counts zero: whole. Reading the flip from
+/// that would report `false` for exactly the commit that must ripple, and every
+/// referrer of a re-pushed path would count it as missing forever.
 pub async fn seed_references<C: ConnectionTrait>(db: &C, hash: &str) -> Result<bool, DbErr> {
     let Some(row) = db
         .query_one_raw(Statement::from_sql_and_values(
@@ -81,7 +84,7 @@ pub async fn seed_references<C: ConnectionTrait>(db: &C, hash: &str) -> Result<b
         return Ok(false);
     };
 
-    row.try_get::<bool>("", "became_whole")
+    row.try_get::<bool>("", "whole")
 }
 
 /// One level per statement: decrement the referrers of the frontier and
@@ -267,29 +270,29 @@ mod tests {
         );
     }
 
-    /// The seed reports a transition, not a state: re-committing an already-whole
-    /// path must not be rippled, or every referrer is decremented a second time
-    /// and lands below zero, where no gate can ever see it as whole again.
+    /// The seed reports the state after the recount and nothing else: the commit
+    /// has already stored the NAR by then, so no self-join can recover the
+    /// pre-commit endpoint of the flip. Reading the flip from the row itself
+    /// would report "did not become whole" for exactly the commit that must
+    /// ripple (a fresh row is inserted backed, with the counter at its default
+    /// zero), and every referrer of a re-pushed path would count it as missing
+    /// forever. The caller pairs this with the pre-commit `is_whole()`.
     #[tokio::test]
-    async fn the_seed_reports_the_transition_not_the_state() {
+    async fn the_seed_reports_the_state_and_leaves_the_transition_to_its_caller() {
         let sql = norm(SEED);
-        assert!(sql.contains("FROM cached_path old"));
-        assert!(sql.contains("WHERE old.id = cp.id AND cp.hash = $1"));
+        assert!(!sql.contains("cached_path old"), "{sql}");
+        assert!(sql.contains("WHERE cp.hash = $1"), "{sql}");
         assert!(
-            sql.contains(&format!(
-                "RETURNING NOT {} AND {} AS became_whole",
-                whole_predicate("old"),
-                whole_predicate("cp")
-            )),
+            sql.contains(&format!("RETURNING {} AS whole", whole_predicate("cp"))),
             "{sql}"
         );
 
-        for (became_whole, expected) in [(true, true), (false, false)] {
+        for whole in [true, false] {
             let db = MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([vec![flag_row("became_whole", became_whole)]])
+                .append_query_results([vec![flag_row("whole", whole)]])
                 .into_connection();
 
-            assert_eq!(seed_references(&db, "h").await.unwrap(), expected);
+            assert_eq!(seed_references(&db, "h").await.unwrap(), whole);
         }
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -319,12 +322,13 @@ mod tests {
         assert!(norm(REVERSE).contains("SET missing_references = cp.missing_references + c.n"));
     }
 
-    /// `RETURNING` sees the row after the update, so the forward ripple and the
-    /// delete return the wholeness predicate itself, while the reverse ripple
-    /// compares against `c.n`: the counter equals what was just added exactly
-    /// when it was zero before, i.e. when the row was whole.
+    /// `RETURNING` sees the row after the update, so the seed, the forward ripple
+    /// and the delete return the wholeness predicate itself, while the reverse
+    /// ripple compares against `c.n`: the counter equals what was just added
+    /// exactly when it was zero before, i.e. when the row was whole.
     #[test]
     fn every_returning_predicate_reads_the_one_wholeness_definition() {
+        assert!(norm(SEED).contains(&format!("RETURNING {} AS whole", whole_predicate("cp"))));
         assert!(norm(FORWARD).contains(&format!(
             "RETURNING cp.hash, {} AS whole",
             whole_predicate("cp")

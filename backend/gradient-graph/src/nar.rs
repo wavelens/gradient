@@ -26,9 +26,29 @@ pub(crate) async fn commit(db: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCo
         anyhow::bail!("malformed store path: {}", c.store_path);
     }
 
-    let (cached_path, created) = upsert_cached_path(db, sp.hash(), sp.name(), c).await?;
+    let Upserted {
+        cached_path,
+        created,
+        was_whole,
+    } = upsert_cached_path(db, sp.hash(), sp.name(), c).await?;
     if !c.references.is_empty() {
         sync_reference_index(db, sp.hash(), &c.references).await?;
+    }
+
+    // The seed reports the state; this commit's own row read holds the other end
+    // of the flip, so only a real transition is rippled - never an already-whole
+    // re-push (which would decrement every referrer a second time).
+    let whole = gradient_db::seed_references(db, sp.hash()).await?;
+    match (was_whole, whole) {
+        (false, true) => {
+            let moved = gradient_db::ripple_whole(db, vec![sp.hash().to_owned()]).await?;
+            debug!(store_path = %c.store_path, whole = moved.len(), "reference closure ripple");
+        }
+        (true, false) => {
+            let moved = gradient_db::ripple_unwhole(db, vec![sp.hash().to_owned()]).await?;
+            warn!(store_path = %c.store_path, unwhole = moved.len(), "commit added unwhole references");
+        }
+        _ => {}
     }
 
     queue_signature_placeholders(db, cached_path, c.targets).await?;
@@ -71,12 +91,21 @@ pub(crate) fn after_commit(ctx: &DbContext, committed: &NarCommitted, store_path
     });
 }
 
+/// The row the commit wrote, and what it was before: `was_whole` is the
+/// pre-commit endpoint of the wholeness flip, which no statement after this write
+/// can recover (see `gradient_db::seed_references`).
+struct Upserted {
+    cached_path: CachedPathId,
+    created: bool,
+    was_whole: bool,
+}
+
 async fn upsert_cached_path(
     db: &WorkerDb,
     hash: &str,
     package: &str,
     c: &NarCommit,
-) -> anyhow::Result<(CachedPathId, bool)> {
+) -> anyhow::Result<Upserted> {
     match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
         .one(db)
@@ -84,6 +113,7 @@ async fn upsert_cached_path(
     {
         Some(row) => {
             let id = row.id;
+            let was_whole = row.is_whole();
             let file_hash = normalize_nar_hash(&c.file_hash);
             // Different bytes under the same store path: the recorded build-id
             // members no longer describe the NAR, so re-open it to the indexer.
@@ -106,7 +136,11 @@ async fn upsert_cached_path(
             }
 
             active.update(db).await?;
-            Ok((id, false))
+            Ok(Upserted {
+                cached_path: id,
+                created: false,
+                was_whole,
+            })
         }
         None => {
             let am = MCachedPath {
@@ -125,7 +159,11 @@ async fn upsert_cached_path(
             .into_active_model();
 
             match am.insert(db).await {
-                Ok(row) => Ok((row.id, true)),
+                Ok(row) => Ok(Upserted {
+                    cached_path: row.id,
+                    created: true,
+                    was_whole: false,
+                }),
                 Err(e) => {
                     warn!(store_path = %c.store_path, error = %e, "insert cached_path failed (possible race)");
                     match ECachedPath::find()
@@ -133,7 +171,11 @@ async fn upsert_cached_path(
                         .one(db)
                         .await?
                     {
-                        Some(row) => Ok((row.id, false)),
+                        Some(row) => Ok(Upserted {
+                            cached_path: row.id,
+                            created: false,
+                            was_whole: row.is_whole(),
+                        }),
                         None => Err(e.into()),
                     }
                 }
@@ -227,7 +269,8 @@ async fn queue_signature_placeholders(
 mod tests {
     use super::*;
     use gradient_types::ids::ProjectId;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use std::collections::BTreeMap;
     use uuid::Uuid;
 
     const SP: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";
@@ -277,6 +320,11 @@ mod tests {
         }
     }
 
+    /// The seed's reply: whether the path is whole after the recount.
+    fn seed_reply(whole: bool) -> Vec<BTreeMap<String, Value>> {
+        vec![BTreeMap::from([("whole".to_owned(), Value::from(whole))])]
+    }
+
     fn log_has_signature_insert(db: WorkerDb) -> bool {
         db.into_transaction_log()
             .iter()
@@ -294,6 +342,7 @@ mod tests {
             MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([Vec::<MCachedPath>::new()])
                 .append_query_results([vec![returned_cached_path(HASH)]])
+                .append_query_results([seed_reply(false)])
                 .append_query_results([vec![project_cache_row()]])
                 .append_exec_results([
                     MockExecResult {
@@ -331,6 +380,7 @@ mod tests {
             MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([Vec::<MCachedPath>::new()])
                 .append_query_results([vec![returned_cached_path(HASH)]])
+                .append_query_results([seed_reply(false)])
                 .append_exec_results([MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 0,
@@ -363,6 +413,7 @@ mod tests {
             MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([Vec::<MCachedPath>::new()])
                 .append_query_results([vec![returned_cached_path(HASH)]])
+                .append_query_results([seed_reply(false)])
                 .append_exec_results([MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 0,
@@ -378,12 +429,152 @@ mod tests {
         );
     }
 
+    /// A committed path seeds its counter from its references and, when that
+    /// makes a path that was not whole whole, ripples the flip forward to its
+    /// referrers, all before the outputs are marked cached.
+    #[tokio::test]
+    async fn a_whole_commit_seeds_then_ripples_to_its_referrers() {
+        let db = WorkerDb::new(
+            MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([Vec::<MCachedPath>::new()])
+                .append_query_results([vec![returned_cached_path(HASH)]])
+                .append_query_results([seed_reply(true)])
+                .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+                .append_exec_results([
+                    MockExecResult {
+                        last_insert_id: 0,
+                        rows_affected: 1,
+                    },
+                    MockExecResult {
+                        last_insert_id: 0,
+                        rows_affected: 0,
+                    },
+                ])
+                .into_connection(),
+        );
+
+        commit(
+            &db,
+            &NarCommit {
+                references: vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()],
+                ..commit_for(SP)
+            },
+        )
+        .await
+        .expect("commit");
+
+        let log: Vec<String> = db
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        let seed = log
+            .iter()
+            .position(|s| s.contains("SET missing_references = ("))
+            .expect("seed runs");
+        let ripple = log
+            .iter()
+            .position(|s| s.contains("missing_references - c.n"))
+            .expect("ripple runs");
+        let marks = log
+            .iter()
+            .position(|s| s.contains("is_cached"))
+            .expect("outputs are marked");
+        assert!(seed < ripple && ripple < marks, "{log:?}");
+    }
+
+    /// Re-pushing a path that was already whole must ripple nothing: the seed
+    /// still reports "whole", but its referrers were decremented when it first
+    /// became whole, and a second pass would drive them below zero, where no gate
+    /// can ever see them as whole again.
+    #[tokio::test]
+    async fn a_recommit_of_an_already_whole_path_ripples_nothing() {
+        let db = WorkerDb::new(
+            MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([
+                    vec![returned_cached_path(HASH)],
+                    vec![returned_cached_path(HASH)],
+                ])
+                .append_query_results([seed_reply(true)])
+                .append_exec_results([MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                }])
+                .into_connection(),
+        );
+
+        commit(&db, &commit_for(SP)).await.expect("commit");
+
+        let log: Vec<String> = db
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        assert!(
+            !log.iter().any(|s| s.contains("missing_references - c.n")),
+            "an already-whole path must not be rippled again: {log:?}"
+        );
+    }
+
+    /// A commit that adds a reference to a path we do not have takes the row out
+    /// of wholeness, so the loss ripples backward: nothing else reports it, and a
+    /// referrer left counting one missing reference too few would claim a closure
+    /// with a hole in it.
+    #[tokio::test]
+    async fn a_commit_that_loses_wholeness_ripples_backward() {
+        let db = WorkerDb::new(
+            MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([
+                    vec![returned_cached_path(HASH)],
+                    vec![returned_cached_path(HASH)],
+                ])
+                .append_query_results([seed_reply(false)])
+                .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+                .append_exec_results([
+                    MockExecResult {
+                        last_insert_id: 0,
+                        rows_affected: 1,
+                    },
+                    MockExecResult {
+                        last_insert_id: 0,
+                        rows_affected: 1,
+                    },
+                ])
+                .into_connection(),
+        );
+
+        commit(
+            &db,
+            &NarCommit {
+                references: vec!["cccccccccccccccccccccccccccccccc-gone".to_owned()],
+                ..commit_for(SP)
+            },
+        )
+        .await
+        .expect("commit");
+
+        let log: Vec<String> = db
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        assert!(
+            log.iter().any(|s| s.contains("missing_references + c.n")),
+            "losing wholeness must ripple backward: {log:?}"
+        );
+        assert!(
+            !log.iter().any(|s| s.contains("missing_references - c.n")),
+            "{log:?}"
+        );
+    }
+
     #[tokio::test]
     async fn a_committed_path_backs_every_output_with_its_hash() {
         let db = WorkerDb::new(
             MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([Vec::<MCachedPath>::new()])
                 .append_query_results([vec![returned_cached_path(HASH)]])
+                .append_query_results([seed_reply(false)])
                 .append_exec_results([MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 2,

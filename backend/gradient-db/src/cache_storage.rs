@@ -254,9 +254,12 @@ fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
 /// Purge a cached output proven unfetchable, so the next evaluation rebuilds it
 /// from scratch as if it had never been cached. Clears `is_cached` /
 /// `cached_path` on every `derivation_output` with this store-path `hash`,
-/// deletes the `cached_path` row itself (its `cached_path_signature` rows
-/// cascade; the `derivation_output` FK is `ON DELETE SET NULL`), and removes the
-/// NAR object from storage so the row⟺object invariant holds. The derivation
+/// retires the `cached_path` row itself
+/// ([`crate::nar_closure::retire_paths`]: the row goes, its
+/// `cached_path_signature` rows cascade, the `derivation_output` FK is
+/// `ON DELETE SET NULL`, and every referrer's reference counter and gate flag
+/// moves back), and removes the NAR object from storage so the row and the object
+/// stay in step. The derivation
 /// graph is left intact - only the cache artifact is removed. Returns the
 /// producing derivations for logging. A producerless input (`.drv`/source) is
 /// only purged when its NAR is genuinely gone: a still-present one is preserved
@@ -266,7 +269,6 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     nar_storage: &gradient_storage::NarStore,
     hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
-    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
     use gradient_entity::derivation_output::{Column as CDO, Entity as EDO};
     use sea_orm::ActiveModelTrait;
 
@@ -319,10 +321,7 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
         .await?;
     }
 
-    ECP::delete_many()
-        .filter(CCP::Hash.eq(hash))
-        .exec(db)
-        .await?;
+    crate::nar_closure::retire_paths(db, &[hash.to_owned()]).await?;
 
     if let Err(e) = nar_storage.delete(hash).await {
         warn!(%hash, error = %e, "demote: failed to delete NAR object from storage");
@@ -338,9 +337,9 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
 /// (no producer rebuilds) and would strand the `.drv`'s own live dependents behind
 /// the `drv_closure_cached` dispatch gate, a permanent dead zone, since a genuinely
 /// missing input `.drv`/source is re-supplied only by a full re-eval. The
-/// transitive completeness invariant is handled separately by
-/// [`clear_closure_complete_for_referrers`], which only flips the flag and
-/// leaves healthy NARs in place. Returns the producers reset to `Created`.
+/// transitive completeness invariant is handled by the reverse ripple inside
+/// [`crate::nar_closure::retire_paths`], which raises the referrers' counters and
+/// leaves their healthy NARs in place. Returns the producers reset to `Created`.
 pub async fn demote_referrers_of<C: ConnectionTrait>(
     db: &C,
     nar_storage: &gradient_storage::NarStore,
@@ -411,8 +410,8 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
 /// `closure_complete` is - correctly - false), so they never dispatch, so no build
 /// ever reports the path missing and the reactive `reconcile_missing_inputs` heal
 /// never fires: a permanent dead zone. Demote each unbacked output - reset its
-/// producer to `Created`, drop the stale flags, and clear `closure_complete` up the
-/// referrer chain - so the next build rebuilds it. Returns the producers reset.
+/// producer to `Created`, drop the stale flags, and raise the reference counters
+/// of its referrers - so the next build rebuilds it. Returns the producers reset.
 ///
 /// Keyed on the **ground truth** (a backing `cached_path` NAR), NOT the derived
 /// `is_cached` flag: that flag is `false` for exactly the never-cached-output dead
@@ -459,7 +458,6 @@ pub async fn demote_unbacked_trusted_outputs<C: ConnectionTrait>(
     let mut reset = 0u64;
     for h in hashes {
         reset += demote_cached_output(db, nar_storage, &h.hash).await?.len() as u64;
-        clear_closure_complete_for_referrers(db, &h.hash).await?;
     }
 
     Ok(reset)
@@ -814,7 +812,8 @@ mod tests {
     #[tokio::test]
     async fn demote_deletes_a_present_output_object() {
         use gradient_types::ids::{DerivationId, DerivationOutputId};
-        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use std::collections::BTreeMap;
 
         let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
         let (_tmp, nar_storage, file) = present_nar(hash);
@@ -826,19 +825,22 @@ mod tests {
             ..Default::default()
         };
 
-        // Find the output, RETURNING the demoted row, reset its producer, delete
-        // the `cached_path` row; then the object is removed from storage.
+        // Find the output, RETURNING the demoted row, reset its producer, retire
+        // the `cached_path` row (no reverse ripple: it was not whole) and clear
+        // the three flags; then the object is removed from storage.
+        let retired = BTreeMap::from([
+            ("hash".to_owned(), Value::from(hash.to_owned())),
+            ("was_whole".to_owned(), Value::from(false)),
+        ]);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
-            .append_exec_results([
+            .append_query_results([vec![retired]])
+            .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 1,
-                },
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                },
+                };
+                4
             ])
             .into_connection();
 
@@ -846,6 +848,16 @@ mod tests {
 
         assert_eq!(producers.len(), 1, "the output's producer is returned");
         assert!(!file.exists(), "demote must delete the output's NAR object");
+        let log: Vec<String> = db
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        assert!(
+            log.iter()
+                .any(|s| s.contains("DELETE FROM cached_path") && s.contains("was_whole")),
+            "the row must be retired, so the counters it backed move with it: {log:?}"
+        );
     }
 
     /// Demote must clear `external_url` too, not just `is_cached` - otherwise the
