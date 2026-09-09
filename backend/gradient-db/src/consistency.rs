@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Read-only build-graph invariant assertions. Counts violations of the
-//! invariants the dispatch/promotion gates trust, so a dead zone surfaces as a
-//! warning metric instead of a user-reported stuck evaluation. Reuses the very
+//! Build-graph invariant assertions: one repair pass, then counts. Counts
+//! violations of the invariants the dispatch/promotion gates trust, so a dead zone
+//! surfaces as a warning metric instead of a user-reported stuck evaluation. Reuses the very
 //! gate SQL the reconciler maintains, so a non-zero count means "the healing
 //! pipeline is not converging", never "the checker disagrees with the gates".
 //! Transient non-zero counts between a transition and the next reconcile tick
