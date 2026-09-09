@@ -82,6 +82,14 @@ event. That keeps the VM free of Postgres and a builder, so the test asserts on
 the module's own behaviour: what it waits for, what it never requests, and how
 many times it asks.
 
+**A VM test can assert on the database's own accounting.** Nothing in the type
+system notices a lost `OFFSET 0` fence or a counter that is re-derived instead of
+moved, so the cache test asserts the plan shape (`EXPLAIN`: a nested loop, no merge
+join) and bills the run through `pg_stat_statements` (`shared_preload_libraries` on
+the test's Postgres, statements filtered to the server's role). Keep the thresholds
+loose enough to be pathology detectors on a slow shared VM, and print the top
+statements so a human reads the numbers the assertion cannot.
+
 **CLI tests drive the real binary.** `assert_cmd` runs `gradient` with `HOME`
 and `XDG_CONFIG_HOME` pointed at a `TempDir` holding a seeded `config.toml`, and
 `wiremock` stands in for the server. That covers argument parsing, config
