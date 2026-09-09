@@ -115,6 +115,11 @@ struct Upserted {
     was_whole: bool,
 }
 
+/// Insert or refresh the row under its `FOR UPDATE` lock. A duplicate-key error
+/// on the insert propagates: the actor serialises commits and
+/// `lock_reference_endpoints` holds this row `FOR SHARE` before this runs, so
+/// there is no race to recover from, and inside a transaction a re-select after
+/// a failed INSERT would only replace the real error with 25P02.
 async fn upsert_cached_path(
     db: &WorkerDb,
     hash: &str,
@@ -174,29 +179,12 @@ async fn upsert_cached_path(
             }
             .into_active_model();
 
-            match am.insert(db).await {
-                Ok(row) => Ok(Upserted {
-                    cached_path: row.id,
-                    created: true,
-                    was_whole: false,
-                }),
-                Err(e) => {
-                    warn!(store_path = %c.store_path, error = %e, "insert cached_path failed (possible race)");
-                    match ECachedPath::find()
-                        .filter(CCachedPath::Hash.eq(hash))
-                        .lock_exclusive()
-                        .one(db)
-                        .await?
-                    {
-                        Some(row) => Ok(Upserted {
-                            cached_path: row.id,
-                            created: false,
-                            was_whole: row.is_whole(),
-                        }),
-                        None => Err(e.into()),
-                    }
-                }
-            }
+            let row = am.insert(db).await?;
+            Ok(Upserted {
+                cached_path: row.id,
+                created: true,
+                was_whole: false,
+            })
         }
     }
 }
