@@ -224,7 +224,7 @@ impl NarReceiver {
         &self,
         job_id: &str,
         store_path: &str,
-        data: Vec<u8>,
+        data: &[u8],
         offset: u64,
         is_final: bool,
     ) {
@@ -248,7 +248,7 @@ impl NarReceiver {
         if !data.is_empty() {
             match (self.partial.as_ref(), partial_key(job_id, store_path)) {
                 (Some(store), Some(pkey)) => {
-                    if let Err(e) = store.append(&pkey, &token, offset, &data).await {
+                    if let Err(e) = store.append(&pkey, &token, offset, data).await {
                         // Non-fatal: drop the partial so a retry restarts cleanly.
                         let _ = store.discard(&pkey).await;
                         self.deliver(&key, Err(format!("partial append failed: {e}")));
@@ -261,7 +261,7 @@ impl NarReceiver {
                         .buffers
                         .entry(key.clone())
                         .or_default()
-                        .extend_from_slice(&data);
+                        .extend_from_slice(data);
                 }
             }
         }
@@ -392,7 +392,7 @@ mod tests {
     use tempfile::TempDir;
 
     async fn final_chunk(r: &NarReceiver, job: &str, path: &str, data: &[u8]) {
-        r.accept_chunk(job, path, data.to_vec(), 0, true).await;
+        r.accept_chunk(job, path, data, 0, true).await;
     }
 
     #[tokio::test]
@@ -412,12 +412,9 @@ mod tests {
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
         tokio::task::yield_now().await;
-        r.accept_chunk("j", "/nix/store/x", b"abc".to_vec(), 0, false)
-            .await;
-        r.accept_chunk("j", "/nix/store/x", b"def".to_vec(), 3, false)
-            .await;
-        r.accept_chunk("j", "/nix/store/x", b"ghi".to_vec(), 6, true)
-            .await;
+        r.accept_chunk("j", "/nix/store/x", b"abc", 0, false).await;
+        r.accept_chunk("j", "/nix/store/x", b"def", 3, false).await;
+        r.accept_chunk("j", "/nix/store/x", b"ghi", 6, true).await;
         let bytes = task.await.unwrap().unwrap();
         assert_eq!(bytes, b"abcdefghi");
     }
@@ -484,8 +481,8 @@ mod tests {
 
         let r1 = NarReceiver::with_partial_store(store.clone());
         r1.note_header("j", &path, 9, "len-9");
-        r1.accept_chunk("j", &path, b"abc".to_vec(), 0, false).await;
-        r1.accept_chunk("j", &path, b"def".to_vec(), 3, false).await;
+        r1.accept_chunk("j", &path, b"abc", 0, false).await;
+        r1.accept_chunk("j", &path, b"def", 3, false).await;
         // Connection drops mid-transfer.
         r1.fail("j", &path, "NarAbort".into());
 
@@ -500,7 +497,7 @@ mod tests {
         let task = tokio::spawn(async move { r2c.wait_for("j", &pathc).await });
         tokio::task::yield_now().await;
         r2.note_header("j", &path, 9, "len-9");
-        r2.accept_chunk("j", &path, b"ghi".to_vec(), 6, true).await;
+        r2.accept_chunk("j", &path, b"ghi", 6, true).await;
         assert_eq!(task.await.unwrap().unwrap(), b"abcdefghi");
     }
 
@@ -525,10 +522,10 @@ mod tests {
         // Interleave both jobs' chunks for the same hash: under a shared key
         // j2's offset-0 chunk would truncate j1's bytes and the offset-3 chunks
         // would then fail the contiguity check.
-        r.accept_chunk("j1", &path, b"aaa".to_vec(), 0, false).await;
-        r.accept_chunk("j2", &path, b"bbb".to_vec(), 0, false).await;
-        r.accept_chunk("j1", &path, b"AAA".to_vec(), 3, true).await;
-        r.accept_chunk("j2", &path, b"BBB".to_vec(), 3, true).await;
+        r.accept_chunk("j1", &path, b"aaa", 0, false).await;
+        r.accept_chunk("j2", &path, b"bbb", 0, false).await;
+        r.accept_chunk("j1", &path, b"AAA", 3, true).await;
+        r.accept_chunk("j2", &path, b"BBB", 3, true).await;
 
         assert_eq!(r.await_pending(p1).await.unwrap(), b"aaaAAA");
         assert_eq!(r.await_pending(p2).await.unwrap(), b"bbbBBB");

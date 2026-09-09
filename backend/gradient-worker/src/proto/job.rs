@@ -1013,15 +1013,19 @@ mod tests {
         known_waiters: KnownDerivationWaiters,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            while let Some(msg) = reader.recv().await {
-                match msg {
-                    gradient_proto::messages::ServerMessage::CacheStatus { query_id, cached } => {
+            while let Some(inbound) = reader.recv().await {
+                match inbound {
+                    gradient_proto::Inbound::Control(
+                        gradient_proto::messages::ServerMessage::CacheStatus { query_id, cached },
+                    ) => {
                         deliver_cache_reply(&cache_waiters, &query_id, Ok(cached));
                     }
-                    gradient_proto::messages::ServerMessage::KnownDerivations {
-                        query_id,
-                        known,
-                    } => {
+                    gradient_proto::Inbound::Control(
+                        gradient_proto::messages::ServerMessage::KnownDerivations {
+                            query_id,
+                            known,
+                        },
+                    ) => {
                         deliver_known_derivations(&known_waiters, &query_id, known);
                     }
                     _ => {}

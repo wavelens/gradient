@@ -45,6 +45,7 @@ mod tests;
 
 pub use handler::{ProtoLimiter, SessionsHandle, proto_router};
 pub use messages::{ClientMessage, PROTO_VERSION, ServerMessage};
+pub use session::frame::{Frame, Inbound, WireMessage};
 
 pub use gradient_scheduler::Scheduler;
 pub use gradient_scheduler::WorkerInfo;

@@ -223,7 +223,7 @@ pub(super) async fn handle_eval_cache_chunk(
     state: &ServerState,
     eval_cache: &mut EvalCacheReceiveStore,
     job_id: &str,
-    data: Vec<u8>,
+    data: &[u8],
     offset: u64,
     is_final: bool,
 ) {
@@ -232,7 +232,7 @@ pub(super) async fn handle_eval_cache_chunk(
         return;
     };
 
-    if !eval_cache.append(&fingerprint, offset, &data) {
+    if !eval_cache.append(&fingerprint, offset, data) {
         warn!(%job_id, %fingerprint, offset, "eval-cache chunk rejected (non-contiguous or over budget)");
         return;
     }
