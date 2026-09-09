@@ -193,8 +193,6 @@ pub(crate) async fn upload_one_nar(
             Ok(())
         }
         CachedPathInfo::Uncached { path, upload_url } => {
-            let mut guard = updater.phase(JobPhase::NarPush);
-            guard.record(1, 0);
             nar::upload_nar(
                 &updater.job_id,
                 path,
@@ -217,6 +215,17 @@ pub(crate) async fn upload_all(
     abort: Option<&watch::Receiver<bool>>,
 ) -> Result<()> {
     use futures::stream::{FuturesUnordered, StreamExt as _};
+
+    let uploads = entries.iter().filter(|cp| !cp.cached).count();
+    if uploads == 0 {
+        return Ok(());
+    }
+
+    // One span for the batch: the uploads overlap, and the timeline parents a
+    // span to the innermost open one, so per-path spans would chart as nested
+    // and count their durations twice.
+    let mut guard = updater.phase(JobPhase::NarPush);
+    guard.record(uploads as u32, 0);
 
     let mut queued = entries.iter();
     let mut running = FuturesUnordered::new();
@@ -242,7 +251,16 @@ async fn upload_unless_aborted(
     if let Some(abort) = abort {
         check_abort(abort)?;
     }
-    upload_one_nar(updater, cp, store).await
+
+    let result = upload_one_nar(updater, cp, store).await;
+    if result.is_err()
+        && let Some(abort) = abort
+    {
+        // An abort cancels the push-resume gate mid-upload, so re-check before
+        // blaming the path: the failure is the abort, and it must stay typed.
+        check_abort(abort)?;
+    }
+    result
 }
 
 /// Executes jobs dispatched by the server.
