@@ -13,7 +13,9 @@
 //! died partway through, not for a re-run: a second `up` finds `closure_complete`
 //! already dropped and `converge()` fails on the missing column. The seed skips
 //! every row with no reference at all, so the transaction that then takes ACCESS
-//! EXCLUSIVE for the `DROP COLUMN` does not first rewrite the whole table.
+//! EXCLUSIVE for the `DROP COLUMN` does not first rewrite the whole table. The
+//! partial index over the rows below zero keeps the consistency sweep's
+//! negative-counter count off a full scan; it is empty on a healthy cache.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
@@ -78,6 +80,7 @@ impl MigrationTrait for Migration {
             "DROP INDEX IF EXISTS \"idx-cached_path-closure_complete\"",
             "DROP INDEX IF EXISTS \"idx-cached_path-closure_pending\"",
             "ALTER TABLE cached_path DROP COLUMN IF EXISTS closure_complete",
+            "CREATE INDEX IF NOT EXISTS \"idx-cached_path-negative_references\" ON cached_path (hash) WHERE missing_references < 0",
         ] {
             conn.execute_unprepared(stmt).await?;
         }
@@ -92,6 +95,7 @@ impl MigrationTrait for Migration {
             "UPDATE cached_path SET closure_complete = (file_hash IS NOT NULL AND missing_references = 0)",
             "CREATE INDEX IF NOT EXISTS \"idx-cached_path-closure_complete\" ON cached_path (hash) WHERE closure_complete",
             "CREATE INDEX IF NOT EXISTS \"idx-cached_path-closure_pending\" ON cached_path (hash) WHERE NOT closure_complete AND file_hash IS NOT NULL",
+            "DROP INDEX IF EXISTS \"idx-cached_path-negative_references\"",
             "ALTER TABLE cached_path DROP COLUMN IF EXISTS missing_references",
         ] {
             conn.execute_unprepared(stmt).await?;
