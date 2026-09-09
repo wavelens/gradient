@@ -9,20 +9,41 @@
 //! `edges_unresolved`: a stub row now exists for every named dependency, so an
 //! edge is never deferred and never unresolvable.
 //!
-//! The backfill is one unbatched full-table `UPDATE derivation` followed by
-//! three non-concurrent `CREATE INDEX`, so it holds startup for as long as a
-//! production-sized graph takes. Dropping the two columns also makes this a
-//! stop-migrate-start deploy rather than a rolling one: an old server process
-//! still selecting `derivation_build.edges_complete` fails the moment the
-//! column goes.
+//! There is deliberately no backfill. `walked` seeds false everywhere and the
+//! graph is re-derived, because the only value to seed it from is
+//! `edges_complete`, the flag being retired for being wrong, and `walked` is
+//! monotonic with exactly one writer (`WALKED_UPSERT`, reached only through an
+//! evaluation's batch ingest), so an inherited error is permanent and no sweep
+//! would ever repair it. Seeding false trades a rebuild for a graph that is
+//! true.
+//!
+//! Re-derivation needs an evaluation, so this requeues the active ones. The
+//! four parks left alone are owned elsewhere: `approval` IS the fork-PR
+//! approval gate and requeueing it would bypass it, and `no_cache`,
+//! `cache_storage_full` and `aborting` have their own hooks. A legacy
+//! `waiting_reason` carries no `kind` key and means `workers`, hence the
+//! coalesce. Targets `Queued` rather than `Waiting`: this runs before the
+//! scheduler starts, and a `Building` evaluation parked to `Waiting` would go
+//! straight back to `Building` without ever re-evaluating.
+//!
+//! Cost at first start: one full evaluation per active row plus a full closure
+//! re-walk each, unpruned, in one burst, since the worker-side prune requires
+//! `walked`. Dropping the two columns makes this a stop-migrate-start deploy
+//! rather than a rolling one: an old server process still selecting
+//! `derivation_build.edges_complete` fails the moment the column goes. `DOWN`
+//! seeds `edges_complete` from an all-false `walked`, so a rollback inherits an
+//! ungated graph and needs the same re-evaluation.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
 
 const UP: &[&str] = &[
     "ALTER TABLE derivation ADD COLUMN IF NOT EXISTS walked boolean NOT NULL DEFAULT false",
-    "UPDATE derivation d SET walked = true FROM derivation_build db \
-     WHERE db.derivation = d.id AND db.edges_complete AND NOT db.edges_unresolved",
+    "UPDATE evaluation SET status = 0, waiting_reason = NULL, \
+     updated_at = (now() AT TIME ZONE 'UTC') \
+     WHERE status IN (1, 2, 3, 8) \
+        OR (status = 4 AND coalesce(waiting_reason->>'kind', 'workers') \
+            NOT IN ('approval', 'no_cache', 'cache_storage_full', 'aborting'))",
     "DROP INDEX IF EXISTS \"idx-derivation_build-dispatch-ready\"",
     "DROP INDEX IF EXISTS \"idx-derivation_build-promote-ready\"",
     "DROP INDEX IF EXISTS \"idx-derivation_build-drv_closure_pending\"",
