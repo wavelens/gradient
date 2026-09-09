@@ -172,9 +172,12 @@ pub(super) struct NarReceiveStore {
     max_streams: usize,
     ended_grace: Duration,
     active: HashMap<String, PathState>,
-    /// How long a stream may receive nothing at all before it is released
-    /// regardless of any mark. Zero disables the backstop, as it does for
-    /// [`gradient_storage::PartialStore::gc`], whose TTL this is.
+    /// How long a stream may receive nothing at all before a sweep releases it
+    /// regardless of any mark. Sweeps run from [`Self::note_header`] and
+    /// [`Self::forget_job`] only, with no timer behind them, so a silent stream
+    /// outlives this on a session that sees no further header or job end. Zero
+    /// disables the backstop, as it does for [`gradient_storage::PartialStore::gc`],
+    /// whose TTL this is.
     idle_timeout: Duration,
     poisoned: BTreeMap<String, Poison>,
 }
@@ -272,6 +275,7 @@ impl NarReceiveStore {
 
     /// Release every stream that is past its grace or has simply gone silent,
     /// discarding its partial: nothing can finish a stream whose job is gone.
+    /// Driven by the next header or job end on this session, never by a timer.
     /// The `Finish` round-trip per stream is a task wake-up, not a transfer: a
     /// stream selected here has had no frame for at least the grace, so its
     /// queue is empty and the read loop is not held up.
