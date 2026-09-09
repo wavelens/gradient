@@ -10,7 +10,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
-use crate::session::frame::{MAX_PROTO_MESSAGE_SIZE, ProtoSocket};
+use crate::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE, ProtoSocket};
 
 /// Open a WebSocket connection to `url` and wrap it in the unified
 /// `ProtoSocket` type. The caller then runs the handshake of their choice
@@ -50,7 +50,8 @@ pub async fn dial_with_auth(url: &str, api_key: Option<&str>) -> Result<ProtoSoc
 async fn connect(request: http::Request<()>, url: &str) -> Result<ProtoSocket> {
     let config = WebSocketConfig::default()
         .max_message_size(Some(MAX_PROTO_MESSAGE_SIZE))
-        .max_frame_size(Some(MAX_PROTO_MESSAGE_SIZE));
+        .max_frame_size(Some(MAX_PROTO_MESSAGE_SIZE))
+        .read_buffer_size(BULK_CHUNK_SIZE);
 
     // `disable_nagle` is tungstenite's name for `set_nodelay(true)`; see
     // `gradient_util::net::disable_nagle` for why every proto socket wants it.

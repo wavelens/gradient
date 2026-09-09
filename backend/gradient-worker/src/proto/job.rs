@@ -21,6 +21,7 @@ use gradient_proto::messages::{
     CachedPath, ClientMessage, DiscoveredDerivation, EvalCachePullOutcome, EvalCachePushMode,
     EvalMessageLevel, EvalStatsReport, JobPhase, JobUpdateKind, QueryMode,
 };
+use gradient_proto::session::frame::BULK_CHUNK_SIZE;
 use tokio::sync::oneshot;
 use tracing::debug;
 
@@ -30,9 +31,6 @@ use crate::nix::store::LocalNixStore;
 use crate::proto::eval_cache_recv::EvalCacheReceiver;
 use crate::proto::nar_recv::NarReceiver;
 use gradient_proto::traits::JobReporter;
-
-/// Chunk size for an inline eval-cache push (mirrors the NAR push chunk size).
-const EVAL_CACHE_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
 /// A pending `CacheQuery`: its reply channel plus the owning `job_id` so a
 /// finished or aborted job can drop any query it left in flight.
@@ -285,7 +283,7 @@ impl JobUpdater {
             }
             EvalCachePushMode::Inline { .. } => {
                 let mut offset: u64 = 0;
-                let mut chunks = bytes.chunks(EVAL_CACHE_CHUNK_SIZE).peekable();
+                let mut chunks = bytes.chunks(BULK_CHUNK_SIZE).peekable();
                 if chunks.peek().is_none() {
                     self.writer
                         .send(ClientMessage::EvalCacheChunk {

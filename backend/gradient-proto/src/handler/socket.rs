@@ -22,7 +22,7 @@ use crate::messages::ServerMessage;
 use gradient_scheduler::Scheduler;
 
 pub use crate::session::frame::{
-    HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, NAR_PUSH_CHUNK_SIZE, ProtoSocket, ProtoWriter,
+    BULK_CHUNK_SIZE, HANDSHAKE_TIMEOUT, JOB_OFFER_CHUNK_SIZE, ProtoSocket, ProtoWriter,
     recv_client_msg, send_error, send_server_msg,
 };
 

@@ -35,11 +35,11 @@ type WriterTask = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 pub const JOB_OFFER_CHUNK_SIZE: usize = 1_000;
-pub const NAR_PUSH_CHUNK_SIZE: usize = 4 * 1024 * 1024;
+pub use gradient_types::constants::BULK_CHUNK_SIZE;
 
 /// Hard upper bound on any single inbound or outbound `/proto` WebSocket
-/// frame/message. Comfortably above the largest legitimate frame
-/// (`NarPush` carries 4 MiB chunks plus rkyv overhead and metadata) while
+/// frame/message. It bounds the control plane - a full `CacheStatus` is the
+/// largest such message, and bulk chunks sit far below it - while
 /// preventing a peer from pinning gigabytes of memory with a single send.
 /// Applied to both the inbound axum upgrade and the outbound tungstenite
 /// connect.
@@ -62,11 +62,10 @@ pub const SAFE_INFLIGHT_MESSAGE_SIZE: usize = 2 * 1024 * 1024;
 /// this deadline so it cannot pin a tokio task and FD indefinitely.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Bounded queue depth for the bulk lane of [`ProtoWriter`]. With a 4 MiB NAR
-/// chunk ceiling (`NAR_PUSH_CHUNK_SIZE`) this caps the per-connection outbound
-/// buffer at roughly `WRITER_QUEUE_DEPTH * NAR_PUSH_CHUNK_SIZE` ≈ 64 MiB.
-/// Producers observe back-pressure as `tx.send().await` blocking, which is then
-/// capped by the per-message send timeout passed to [`ProtoSocket::split`].
+/// Bounded queue depth for the bulk lane of [`ProtoWriter`]: 16 x 512 KiB,
+/// 8 MiB per connection. Producers observe back-pressure as `tx.send().await`
+/// blocking, which is then capped by the per-message send timeout passed to
+/// [`ProtoSocket::split`].
 const WRITER_QUEUE_DEPTH: usize = 16;
 
 /// Bounded queue depth for the control lane. Control-plane messages are small,
@@ -77,6 +76,10 @@ const CONTROL_QUEUE_DEPTH: usize = 256;
 /// How many queued messages the writer task drains per `feed`+`flush` cycle,
 /// coalescing bursts (e.g. consecutive `NarPush` chunks) into fewer TCP writes.
 const WRITE_BATCH: usize = 32;
+
+/// A bulk batch stops filling once it holds this many bytes, so the writer
+/// flushes and re-checks the control lane at least every BULK_BATCH_BYTES.
+const BULK_BATCH_BYTES: usize = 256 * 1024;
 
 // ── Direction-generic codec ───────────────────────────────────────────────────
 
@@ -485,11 +488,12 @@ impl WriterLanes {
         }
     }
 
-    /// Fill `batch` from the control lane when it has anything, else from bulk.
-    /// A batch never mixes lanes: the writer task flushes only once it has fed
-    /// the whole batch, so a 4 MiB chunk that blocks mid-feed would strand a
-    /// reply sitting in front of it, unflushed - the very stall this split
-    /// exists to prevent. Returns false once both lanes are closed and drained.
+    /// Fill `batch` from the control lane when it has anything, else from bulk
+    /// up to [`BULK_BATCH_BYTES`]. A batch never mixes lanes: the writer task
+    /// flushes only once it has fed the whole batch, so a bulk chunk that
+    /// blocks mid-feed would strand a reply sitting in front of it, unflushed -
+    /// the very stall this split exists to prevent. Returns false once both
+    /// lanes are closed and drained.
     pub(crate) async fn next_batch(&mut self, batch: &mut Vec<Vec<u8>>) -> bool {
         loop {
             if !self.control_open && !self.bulk_open {
@@ -534,10 +538,14 @@ impl WriterLanes {
             Lane::Control => &mut self.control,
             Lane::Bulk => &mut self.bulk,
         };
+        let mut bytes: usize = batch.iter().map(Vec::len).sum();
         let mut disconnected = false;
-        while batch.len() < WRITE_BATCH {
+        while !batch_full(lane, batch.len(), bytes) {
             match rx.try_recv() {
-                Ok(bytes) => batch.push(bytes),
+                Ok(msg) => {
+                    bytes += msg.len();
+                    batch.push(msg);
+                }
                 Err(mpsc::error::TryRecvError::Empty) => break,
                 Err(mpsc::error::TryRecvError::Disconnected) => {
                     disconnected = true;
@@ -562,6 +570,15 @@ impl WriterLanes {
             Lane::Control => self.control_open = false,
             Lane::Bulk => self.bulk_open = false,
         }
+    }
+}
+
+/// `next_batch` pushes the woken message before draining, so a message larger
+/// than the cap is always admitted: the cap bounds the batch, not the message.
+fn batch_full(lane: Lane, count: usize, bytes: usize) -> bool {
+    match lane {
+        Lane::Control => count >= WRITE_BATCH,
+        Lane::Bulk => count >= WRITE_BATCH || bytes >= BULK_BATCH_BYTES,
     }
 }
 
@@ -668,9 +685,63 @@ mod tests {
         assert_eq!(MAX_PROTO_MESSAGE_SIZE, 8 * 1024 * 1024);
     }
 
+    fn bulk(bytes: usize) -> Vec<u8> {
+        vec![0xbb; bytes]
+    }
+
+    /// The window a control reply can wait behind is one bulk chunk, not the
+    /// whole queue: a batch stops taking bulk once it holds BULK_BATCH_BYTES.
+    #[tokio::test]
+    async fn a_bulk_batch_stops_at_the_byte_cap() {
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (prio_tx, prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let mut lanes = WriterLanes::new(prio_rx, bulk_rx);
+        for _ in 0..8 {
+            bulk_tx.send(bulk(100 * 1024)).await.unwrap();
+        }
+        prio_tx.send(vec![0xff]).await.unwrap();
+
+        let mut batch = Vec::new();
+        assert!(lanes.next_batch(&mut batch).await);
+        assert_eq!(batch, vec![vec![0xff]]);
+
+        batch.clear();
+        assert!(lanes.next_batch(&mut batch).await);
+        assert_eq!(
+            batch.len(),
+            3,
+            "100 KiB messages fill a 256 KiB batch at three"
+        );
+
+        prio_tx.send(vec![0xee]).await.unwrap();
+        batch.clear();
+        assert!(lanes.next_batch(&mut batch).await);
+        assert_eq!(
+            batch,
+            vec![vec![0xee]],
+            "control overtakes the five bulk messages still queued"
+        );
+    }
+
+    /// A single message larger than the cap still goes out; the cap bounds the
+    /// batch, never the message.
+    #[tokio::test]
+    async fn an_oversized_bulk_message_is_admitted_alone() {
+        let (bulk_tx, bulk_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let (_prio_tx, prio_rx) = mpsc::channel::<Vec<u8>>(WRITER_QUEUE_DEPTH);
+        let mut lanes = WriterLanes::new(prio_rx, bulk_rx);
+        bulk_tx.send(bulk(BULK_CHUNK_SIZE)).await.unwrap();
+        bulk_tx.send(bulk(BULK_CHUNK_SIZE)).await.unwrap();
+
+        let mut batch = Vec::new();
+        assert!(lanes.next_batch(&mut batch).await);
+        assert_eq!(batch.len(), 1);
+    }
+
     #[test]
-    fn nar_push_chunk_size_is_four_mib() {
-        assert_eq!(NAR_PUSH_CHUNK_SIZE, 4 * 1024 * 1024);
+    fn bulk_chunk_is_half_a_mebibyte_and_the_batch_cap_is_smaller() {
+        assert_eq!(BULK_CHUNK_SIZE, 512 * 1024);
+        const { assert!(BULK_BATCH_BYTES <= BULK_CHUNK_SIZE) };
     }
 
     fn nar_chunk(offset: u64) -> ServerMessage {
@@ -715,7 +786,7 @@ mod tests {
     }
 
     /// The bug this split fixes: a 1-path `CacheStatus` used to sit behind up
-    /// to `WRITER_QUEUE_DEPTH * NAR_PUSH_CHUNK_SIZE` of NAR data on one shared
+    /// to `WRITER_QUEUE_DEPTH * BULK_CHUNK_SIZE` of NAR data on one shared
     /// FIFO and miss the worker's 75 s deadline, failing the build as
     /// `Transient` while the server logged a clean send.
     #[tokio::test]
