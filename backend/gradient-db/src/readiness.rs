@@ -44,9 +44,9 @@
 //! the ripple, the dependency already fetchable when the seed counted it - leaves
 //! the dependent one below its true value.
 //!
-//! # No row locks, and why the drift is recoverable anyway
+//! # Locks: the flips take none, the repair must
 //!
-//! Nothing here locks `derivation_build`. The marks are exact by the EvalPlanQual
+//! No flip locks `derivation_build`. The marks are exact by the EvalPlanQual
 //! re-check above, and both ripples move the counter relative to the row's own
 //! value, so they compose with a concurrent move exactly as `nar_closure`'s do.
 //! What stays unserialised is a concurrent edge insert: a ripple's edge set and a
@@ -60,14 +60,50 @@
 //! `Queued` rows, and `fetchable` is read only one edge away from such a row. So no
 //! value a gate can act on has an unrecoverable state, negative counters included -
 //! unlike `nar_closure::repair_counters_for`, whose bound leaves a path outside the
-//! gating set unwhole forever. Two drifted levels still take two sweeps: the repair
-//! recounts from one snapshot and ripples nothing, or it would drive the dependents
-//! of a row it just corrected past zero.
+//! gating set unwhole forever.
+//!
+//! That argument closes only because the repair holds an ordered [`LOCK_PENDING`]
+//! pass before it recounts, so the whole flip discipline rests on that lock. An
+//! UNLOCKED absolute recount reads its new value from the statement's snapshot while
+//! its compare-and-swap reads the stored one from the fresh row version, because
+//! EvalPlanQual re-checks only the target row's own columns and never re-evaluates
+//! the predicate's subqueries; a concurrent change that leaves the stored value
+//! equal to the snapshot's passes the swap and writes a value that was already
+//! false. Measured on Postgres 18: an anchor stored `fetchable = false` whose outputs
+//! the recount's snapshot saw whole, racing a retire of the only output, ends stored
+//! `true` with a true value of `false`. That is not a stall - `fetchable = true` is
+//! exactly what stops the anchor counting toward its dependents' `unready_deps`, so
+//! they promote and dispatch against an input nothing can provide, for a whole sweep
+//! interval. Reading the flips' safety as lock-independent is therefore wrong: the
+//! repair's lock is what makes the recount converge, and the recount is what makes an
+//! unlocked flip recoverable.
+//!
+//! The flips stay outside that discipline, and it is not closed. A mark and both
+//! ripples take their implicit row locks in plan order, so one can deadlock against
+//! the repair's ordered pass or against another ripple over an overlapping dependent
+//! set. Postgres detects it rather than hanging: the sweep retries on its next pass,
+//! and a killed flip fails the event its caller was handling, which the caller
+//! retries. Two drifted levels still take two sweeps, because the repair recounts
+//! from one snapshot and ripples nothing - rippling a row it just corrected would
+//! drive that row's dependents past zero.
+//!
+//! # What this module deliberately leaves to its callers
 //!
 //! An anchor's own queue membership is not a function of its own `fetchable`, so
-//! neither flip touches it. The one event that moves both is `substitutable` being
-//! cleared on a `Queued` anchor, and [`repair_pending`]'s un-promote pass is what
-//! settles that.
+//! neither flip touches it: [`lost_fetchability`] moves the DEPENDENTS of the anchors
+//! it flipped and never the anchors themselves. The one event that moves both is
+//! `substitutable` being cleared on a `Queued` anchor, whose own gate can then fail.
+//! The caller that clears it owes that anchor a re-check of its own gate; until it
+//! does, [`repair_pending`]'s un-promote pass is what settles it, one sweep later.
+//!
+//! `m20260908_000002` carries a frozen copy of
+//! [`crate::graph_sql::fetchable_predicate`] and of the gates, and there is
+//! deliberately NO test asserting the two are equal. `gradient-db` depends on
+//! `gradient-migration`, so such a test would compile; it would also be correct only
+//! until the live predicate legitimately evolves, and would then fail for a good
+//! reason while pressuring someone into editing a shipped migration, which must never
+//! happen. That agreement is verified once, by review, at the commit that introduces
+//! both.
 
 use crate::graph_sql::{
     drv_whole_predicate, eval_closure_cte, fetchable_predicate, gates_predicate,
@@ -78,7 +114,9 @@ use crate::status::TransitionChange;
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
 use gradient_types::{DerivationId, EvaluationId};
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement, Value};
+use sea_orm::{
+    ConnectionTrait, DatabaseBackend, DbErr, Statement, TransactionSession, TransactionTrait, Value,
+};
 use std::sync::LazyLock;
 
 /// The statuses whose readiness any gate can act on. A terminal anchor's counter
@@ -220,6 +258,23 @@ fn repair_scope() -> String {
          WHERE q.status IN ({pending})"
     )
 }
+
+/// Every row either recount writes, in ONE `derivation`-ordered statement taken
+/// before either of them decides anything. It reads nothing and decides nothing;
+/// see [`repair_pending`] for what an unlocked recount does instead.
+///
+/// [`REPAIR_UNREADY`]'s write set is the pending anchors, which is this scope's
+/// first arm, and [`REPAIR_FETCHABLE`]'s is the scope entire, so one pass covers
+/// both. With acquisition monotone in `derivation` a wait-for cycle would need some
+/// transaction to wait on a lower id than one it already holds; the flips acquire in
+/// plan order and are outside that, which the module doc accounts for.
+static LOCK_PENDING: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "SELECT 1 FROM derivation_build WHERE derivation IN ({scope}) \
+         ORDER BY derivation FOR UPDATE",
+        scope = repair_scope(),
+    )
+});
 
 static REPAIR_FETCHABLE: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -450,32 +505,53 @@ pub struct Repaired {
 /// then `unready_deps` over the pending anchors, write only what differs, and settle
 /// the queue against the gates.
 ///
-/// `fetchable` first, so the recount reads repaired inputs; the counter recompute is
-/// a separate statement and therefore a fresh snapshot. Each write is a
-/// compare-and-swap on the pre-image: without a row lock the fresh row is compared
-/// against a value the statement's own snapshot produced, so a caller racing a mark
-/// degrades to a skipped row instead of overwriting a counter nothing else
-/// re-derives, and `old <> new` is the drift filter behind the returned counts.
+/// One transaction: [`LOCK_PENDING`] first, then both recounts, then commit, so each
+/// recount's snapshot opens only after every in-flight flip of those rows has
+/// finished. `fetchable` precedes the counter that reads it, and a separate statement
+/// means a separate snapshot, so the recount sees the repaired inputs. Rows that
+/// enter the scope between the lock and a recount are simply not protected this pass
+/// and converge on the next one.
 ///
-/// The un-promote runs before the promote, and they cannot both move a row because
-/// [`gates_predicate`] never reads `status`. Bounded by the pending set: drift on a
-/// terminal anchor surfaces only through a pending dependent, which is exactly as
-/// far as any gate reads.
-pub async fn repair_pending<C: ConnectionTrait>(db: &C) -> Result<Repaired, DbErr> {
-    let fetchable = db
+/// The compare-and-swap on the pre-image (`db.fetchable = x.old AND x.old <> x.f`)
+/// stays. Under the lock it compares the row to itself, but a future caller that
+/// loses the lock degrades to a skipped row rather than to an unconditional overwrite
+/// of a value nothing else re-derives, and `old <> new` is the drift filter behind
+/// the returned counts. Without the lock it is not sufficient on its own: see the
+/// module doc for what a snapshot-versus-fresh-row swap writes.
+///
+/// The queue settles after the commit, on the caller's handle. Both statements
+/// re-check the target row's own `status` and `unready_deps`, which EvalPlanQual
+/// re-evaluates, so they are exactly as safe as the live promotion path. The
+/// un-promote runs before the promote, and they cannot both move a row because
+/// [`crate::graph_sql::gates_predicate`] never reads `status`. Bounded by the pending
+/// set: drift on a terminal anchor surfaces only through a pending dependent, which
+/// is exactly as far as any gate reads.
+pub async fn repair_pending<C: ConnectionTrait + TransactionTrait>(
+    db: &C,
+) -> Result<Repaired, DbErr> {
+    let txn = db.begin().await?;
+    txn.execute_raw(Statement::from_string(
+        DatabaseBackend::Postgres,
+        LOCK_PENDING.as_str().to_owned(),
+    ))
+    .await?;
+
+    let fetchable = txn
         .execute_raw(Statement::from_string(
             DatabaseBackend::Postgres,
             REPAIR_FETCHABLE.as_str().to_owned(),
         ))
         .await?
         .rows_affected();
-    let unready_deps = db
+    let unready_deps = txn
         .execute_raw(Statement::from_string(
             DatabaseBackend::Postgres,
             REPAIR_UNREADY.as_str().to_owned(),
         ))
         .await?
         .rows_affected();
+    txn.commit().await?;
+
     let unpromoted = returned_transitions(
         db.query_all_raw(Statement::from_string(
             DatabaseBackend::Postgres,
@@ -748,15 +824,17 @@ mod tests {
         );
     }
 
-    /// The repair order is load-bearing: fetchable, then the counter that reads it,
-    /// then the queue. The un-promote may run before the promote only because the
-    /// gates never read `status`.
+    /// The repair's absolute recount is only sound under a lock: without it the swap
+    /// compares the fresh row against a snapshot value a concurrent change can
+    /// reproduce, and the recount writes a `fetchable` that was already false, which
+    /// dispatches the anchor's dependents against a missing input for a whole sweep.
+    /// So the ordered lock and both recounts must share ONE transaction, lock first.
     #[tokio::test]
-    async fn the_repair_fixes_fetchable_before_it_recounts_then_settles_the_queue() {
+    async fn the_repair_locks_before_it_recounts_in_one_transaction() {
         let demoted = DerivationId::now_v7();
         let promoted = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            .append_exec_results([exec(2), exec(3)])
+            .append_exec_results([exec(0), exec(2), exec(3)])
             .append_query_results([vec![transition_row(demoted, 1, 0)]])
             .append_query_results([vec![drv(promoted)]])
             .into_connection();
@@ -769,11 +847,33 @@ mod tests {
         assert_eq!(repaired.promoted.len(), 1);
         assert_eq!(repaired.promoted[0].derivation, promoted);
 
-        let log = statements(db.into_transaction_log());
-        assert_eq!(log.len(), 4, "{log:?}");
-        assert!(log[0].contains("SET fetchable = x.f"), "{log:?}");
-        assert!(log[1].contains("SET unready_deps = x.n"), "{log:?}");
-        assert!(log[2].contains("SET status = 0"), "{log:?}");
-        assert!(log[3].contains("SET status = 1"), "{log:?}");
+        let raw = db.into_transaction_log();
+        assert_eq!(
+            raw.len(),
+            3,
+            "the lock and both recounts share one transaction, then the queue settles"
+        );
+
+        let inside: Vec<&str> = raw[0].statements().iter().map(|s| s.sql.as_str()).collect();
+        let lock = inside.iter().position(|s| s.contains("FOR UPDATE"));
+        let fetchable = inside
+            .iter()
+            .position(|s| s.contains("SET fetchable = x.f"));
+        let unready = inside
+            .iter()
+            .position(|s| s.contains("SET unready_deps = x.n"));
+        assert!(
+            lock.is_some() && lock < fetchable && fetchable < unready,
+            "lock, then fetchable, then the counter that reads it: {inside:?}"
+        );
+        assert!(
+            inside[lock.expect("the lock statement is present")].contains("ORDER BY derivation"),
+            "an unordered locker deadlocks against every ordered one: {inside:?}"
+        );
+
+        let log = statements(raw);
+        assert_eq!(log.len(), 5, "{log:?}");
+        assert!(log[3].contains("SET status = 0"), "{log:?}");
+        assert!(log[4].contains("SET status = 1"), "{log:?}");
     }
 }
