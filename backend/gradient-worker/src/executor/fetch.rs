@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-#![deny(clippy::disallowed_methods)]
-
 //! Fetch task - clone the repository, archive it into the Nix store, and
 //! upload the source + all flake inputs to the Gradient cache.
 //!
@@ -385,7 +383,7 @@ async fn run_nix_subprocess(
         .spawn()
         .with_context(|| format!("failed to spawn {label}"))?;
 
-    #[allow(
+    #[expect(
         clippy::disallowed_methods,
         reason = "reaping a kill_on_drop child, aborted by the select below rather than by shutdown"
     )]

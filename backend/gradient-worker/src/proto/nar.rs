@@ -577,6 +577,11 @@ async fn gather_path_meta(store: &LocalNixStore, store_path: &str) -> Option<Pat
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::disallowed_methods,
+        reason = "tests stand in for their peers by hand"
+    )]
+
     use super::*;
     use gradient_test_support::prelude::MockProtoServer;
 

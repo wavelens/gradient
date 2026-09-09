@@ -145,6 +145,10 @@ impl NetworkPeakSampler {
         let peak = Arc::new(AtomicU64::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let (p, s) = (peak.clone(), stop.clone());
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "stopped through the flag when the build ends"
+        )]
         let handle = tokio::spawn(async move {
             while !s.load(Ordering::Relaxed) {
                 if let Some(v) = crate::metrics::throughput::NETWORK.current() {
@@ -196,6 +200,10 @@ impl CgroupSampler {
         let stop = Arc::new(AtomicBool::new(false));
         let since = std::time::SystemTime::now();
         let s = stop.clone();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "stopped through the flag when the build ends"
+        )]
         let handle = tokio::spawn(async move {
             let mut cgroup: Option<PathBuf> = None;
             let mut last: Option<BuildMetricsRaw> = None;

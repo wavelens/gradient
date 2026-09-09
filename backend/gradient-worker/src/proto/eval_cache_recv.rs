@@ -257,6 +257,11 @@ impl EvalCacheReceiver {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::disallowed_methods,
+        reason = "tests stand in for their peers by hand"
+    )]
+
     use super::*;
 
     #[tokio::test]
