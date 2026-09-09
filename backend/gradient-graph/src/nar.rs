@@ -35,7 +35,7 @@ pub(crate) async fn commit(db: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCo
         anyhow::bail!("malformed store path: {}", c.store_path);
     }
 
-    let txn = db.transaction().context(
+    let txn = db.as_transaction().context(
         "NarCommit must run inside a transaction: the pre-commit wholeness endpoint and the reference locks are only held under one",
     )?;
     gradient_db::lock_reference_endpoints(txn, sp.hash(), &c.references).await?;
