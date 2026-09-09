@@ -17,6 +17,9 @@
 //! repairs it in place over the paths that gate pending anchors, and reports
 //! how many rows it had to correct. That makes the sweep the counter's only
 //! backstop, so `GRADIENT_GRAPH_CONSISTENCY_INTERVAL = 0` leaves it with none.
+//! The counters BELOW zero are counted separately and table-wide: the repair is
+//! bounded to the gating paths, so a row driven negative outside them is exactly
+//! the state the design calls unrecoverable and the drift count cannot see it.
 
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
@@ -38,9 +41,22 @@ pub struct ConsistencyReport {
     pub wedged_building_evals: i64,
     /// `cached_path` rows whose reference counter this pass had to repair.
     pub nar_counter_drift: i64,
+    /// `cached_path` rows whose counter sits below zero: a ripple that ran twice.
+    /// No gate can read such a row as whole again, and only a repair pass over a
+    /// path a pending anchor gates on rescues one, so a persistent count here is
+    /// the one state the counter's design calls unrecoverable.
+    pub negative_reference_counters: i64,
+    /// How many paths the repair visited this pass. A measurement, not a
+    /// violation: it is the size of an unbounded select, reported so the cost of
+    /// the one recurring scan this pass adds is visible before it is bounded.
+    pub gating_paths: i64,
 }
 
 impl ConsistencyReport {
+    /// Every dimension that warrants a look, summed. `nar_counter_drift` counts
+    /// rows this pass already repaired rather than rows still wrong, so a
+    /// non-zero total can be a successful self-repair; `gating_paths` is a
+    /// measurement and is deliberately not summed.
     pub fn total(&self) -> i64 {
         self.stale_closure_complete
             + self.stale_drv_closure_cached
@@ -48,6 +64,7 @@ impl ConsistencyReport {
             + self.unbacked_trusted_outputs
             + self.wedged_building_evals
             + self.nar_counter_drift
+            + self.negative_reference_counters
     }
 }
 
@@ -64,6 +81,12 @@ async fn count<C: ConnectionTrait>(db: &C, sql: String) -> Result<i64, DbErr> {
 /// then count every invariant violation the gates could act on right now. The
 /// repair runs first because two of those counts embed gates that read the
 /// counter, so a drifted row would otherwise inflate a count this very pass fixes.
+///
+/// The negative-counter count is table-wide on purpose: the repair is bounded to
+/// the gating paths, so drift outside them is invisible to `nar_counter_drift` by
+/// construction. `gating_paths` reports the size of that bounded set, which is an
+/// unbounded select today (#591 rewrites what the sweep reads, so it is measured
+/// now and bounded there rather than with a rotation scheme thrown away next PR).
 pub async fn graph_consistency_report<C: ConnectionTrait>(
     db: &C,
 ) -> Result<ConsistencyReport, DbErr> {
@@ -83,6 +106,11 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
         .map(|r| r.try_get::<String>("", "hash"))
         .collect::<Result<Vec<_>, _>>()?;
     let nar_counter_drift = crate::nar_closure::repair_counters_for(db, &gating).await? as i64;
+    let negative_reference_counters = count(
+        db,
+        "SELECT count(*) AS n FROM cached_path WHERE missing_references < 0".to_owned(),
+    )
+    .await?;
 
     let stale_closure_complete = count(
         db,
@@ -145,6 +173,8 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
         unbacked_trusted_outputs,
         wedged_building_evals,
         nar_counter_drift,
+        negative_reference_counters,
+        gating_paths: gating.len() as i64,
     })
 }
 
@@ -165,7 +195,7 @@ mod tests {
                 "hash".to_owned(),
                 Value::from("h".to_owned()),
             )])]])
-            .append_query_results([n(), n(), n(), n(), n()])
+            .append_query_results([n(), n(), n(), n(), n(), n()])
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 2,
@@ -178,6 +208,7 @@ mod tests {
             report.nar_counter_drift, 2,
             "the repaired rows are reported"
         );
+        assert_eq!(report.gating_paths, 1, "the repair's scope is measured");
         let log = crate::pool::statements(db.into_transaction_log());
         assert!(
             log[0].contains("FROM derivation_build db") && log[0].contains("derivation_dependency"),
@@ -187,8 +218,14 @@ mod tests {
             log[1].contains("UPDATE cached_path cp SET missing_references"),
             "the repair runs before any count reads the counter: {log:?}"
         );
+        assert!(
+            log[2].contains("missing_references < 0"),
+            "a counter below zero is unrecoverable, so it must be counted: {log:?}"
+        );
     }
 
+    /// Every violation counts toward the warning, and the one measurement does
+    /// not: `gating_paths` is how much work the repair did, not something wrong.
     #[test]
     fn total_sums_every_dimension() {
         let r = ConsistencyReport {
@@ -198,8 +235,10 @@ mod tests {
             unbacked_trusted_outputs: 4,
             wedged_building_evals: 5,
             nar_counter_drift: 6,
+            negative_reference_counters: 7,
+            gating_paths: 1000,
         };
-        assert_eq!(r.total(), 21);
+        assert_eq!(r.total(), 28);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }
