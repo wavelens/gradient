@@ -61,6 +61,11 @@ pub async fn compress_and_push_paths(
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::disallowed_methods,
+        reason = "tests stand in for their peers by hand"
+    )]
+
     use crate::executor::check_abort;
     use tokio::sync::watch;
 
@@ -76,7 +81,7 @@ mod tests {
     use crate::executor::UPLOAD_CONCURRENCY;
     use crate::executor::timeline::JobTimeline;
     use crate::proto::eval_cache_recv::EvalCacheReceiver;
-    use crate::proto::job::JobUpdater;
+    use crate::proto::job::{DispatchHandle, JobUpdater};
     use crate::proto::nar_recv::NarReceiver;
 
     fn uncached(path: &str) -> CachedPath {
@@ -181,7 +186,7 @@ mod tests {
         let nar_recv = NarReceiver::new();
         let updater = JobUpdater::new(
             JOB.to_owned(),
-            "dispatch-1".to_owned(),
+            DispatchHandle::new("dispatch-1".to_owned()),
             writer,
             Arc::new(Mutex::new(HashMap::new())),
             Arc::new(Mutex::new(HashMap::new())),
