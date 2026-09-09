@@ -255,9 +255,11 @@ impl PartialStore {
 
     /// Append `data` at `offset`. `offset` must equal the current partial
     /// length (contiguous); a gap or overlap is an error. `offset == 0` always
-    /// truncates any stale prefix and starts fresh under `token` - so a sender
-    /// that restarts a transfer from the beginning (e.g. a reconnect without a
-    /// resume handshake) never trips the contiguity check.
+    /// truncates any stale prefix and starts fresh under `token` - so an HTTP
+    /// uploader that restarts a transfer from the beginning never trips the
+    /// contiguity check. That tolerance is this call's alone: a `/proto` push
+    /// stream goes through [`Self::open_writer`] and is append-only once open,
+    /// so it restarts by re-opening the writer, not by re-sending offset 0.
     pub async fn append(&self, key: &str, token: &str, offset: u64, data: &[u8]) -> Result<()> {
         self.ensure_parent(key).await?;
         let path = self.partial_path(key);
@@ -355,6 +357,19 @@ impl PartialStore {
             Err(e) => return Err(e).context("drop claimed partial token"),
         }
         Ok(Some(claim))
+    }
+
+    /// Remove the token sidecar, leaving the partial in place (idempotent).
+    /// Used when a partial is committed under its own name: the sweep in
+    /// [`Self::gc`] enumerates `*.partial` only, so a token left beside a file
+    /// that is about to be renamed away would never be reclaimed.
+    pub async fn discard_token(&self, key: &str) -> Result<()> {
+        let path = self.token_path(key);
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e).with_context(|| format!("remove {}", path.display())),
+        }
     }
 
     /// Remove the partial and its token sidecar (idempotent).
