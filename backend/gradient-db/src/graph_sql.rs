@@ -156,9 +156,9 @@ pub fn deps_ready_predicate(alias: &str) -> String {
 /// this is the authoritative "the worker can fetch and import the whole
 /// input-`.drv` closure" signal - computed over the actual `.drv` NAR references,
 /// not the eval-time build graph. The build-graph `drv_closure_cached` flag
-/// mirrors it but diverges when eval pruning leaves dependency edges unrecorded
-/// (`edges_complete = false` with no edges), dead-zoning a build whose `.drv`
-/// closure is in fact fully cached; the dispatch gate accepts either signal.
+/// mirrors it but diverges when eval pruning leaves a dependency unwalked,
+/// dead-zoning a build whose `.drv` closure is in fact fully cached; the
+/// dispatch gate accepts either signal.
 pub fn drv_nar_closure_complete_predicate(alias: &str) -> String {
     format!(
         r#"EXISTS (
@@ -183,6 +183,13 @@ pub fn drv_nar_absent_predicate(alias: &str) -> String {
         JOIN cached_path cp ON cp.hash = d.hash
         WHERE d.id = {alias}.derivation AND cp.file_hash IS NOT NULL)"#
     )
+}
+
+/// The anchor `{alias}`'s derivation has its full record in. Promotion and
+/// dispatch require it: an anchor whose edges are not all recorded would
+/// otherwise be queued as dependency-free.
+pub fn walked_predicate(alias: &str) -> String {
+    format!("EXISTS (SELECT 1 FROM derivation w WHERE w.id = {alias}.derivation AND w.walked)")
 }
 
 /// Closure of the derivations an evaluation directly references (its
@@ -289,7 +296,7 @@ mod tests {
     /// can import the whole input-`.drv` closure" signal is the `.drv`'s own
     /// `cached_path.closure_complete` (computed over real NAR references), not the
     /// eval-build-graph `drv_closure_cached` flag that diverges when pruning
-    /// leaves edges unrecorded. The predicate must key on that.
+    /// leaves a dependency unwalked. The predicate must key on that.
     #[test]
     fn drv_nar_closure_predicate_keys_on_cached_path_closure_complete() {
         let p = norm(&drv_nar_closure_complete_predicate("db"));
@@ -298,6 +305,17 @@ mod tests {
                 && p.contains("d.id = db.derivation")
                 && p.contains("cp.closure_complete"),
             "must assert the build target's own .drv NAR-closure is complete: {p}"
+        );
+    }
+
+    /// Every promotion and dispatch gate reads the derivation's `walked` bit
+    /// through this one predicate.
+    #[test]
+    fn walked_predicate_reads_the_derivation_row() {
+        let p = norm(&walked_predicate("db"));
+        assert_eq!(
+            p,
+            "EXISTS (SELECT 1 FROM derivation w WHERE w.id = db.derivation AND w.walked)"
         );
     }
 

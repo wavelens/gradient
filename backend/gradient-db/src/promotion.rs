@@ -25,7 +25,6 @@
 //! |---------------------------------|---------------------------|---------------------------------------------------------------|
 //! | `closure_complete`              | bidirectional (CLEAR+SET) | [`reconcile_closure_complete`]                                |
 //! | `drv_closure_cached`            | bidirectional (CLEAR+SET) | [`reconcile_drv_closure_cached`]                              |
-//! | `edges_complete`                | monotonic (set-only)      | none needed - see below                                       |
 //! | `derivation_output.is_cached`   | event-driven (set on NAR ingest, cleared by demote) | [`crate::cache_storage::demote_unbacked_trusted_outputs`] keys on ground truth, not this flag |
 //! | `cached_path.closure_complete`  | bidirectional (CLEAR+SET) | [`crate::cache_storage::reconcile_cached_path_closure_complete`] |
 //!
@@ -34,13 +33,11 @@
 //! well as set - a stale-true flag dispatches a build whose inputs are gone,
 //! the terminal-`InputsUnavailable` poison class.
 //!
-//! `edges_complete` is different: it records that the anchor's dependency EDGE
-//! SET has been fully flushed by some evaluation, and that knowledge never
-//! regresses - edges are only ever added, anchors die only by `derivation`
-//! cascade, and nothing anywhere writes `edges_complete = false`. The one case
-//! where a flushed edge set is UNTRUSTWORTHY (a declared dependency
-//! `flush_deferred_deps` could not record) is held off promotion by the
-//! separate `edges_unresolved` flag instead of a clear.
+//! The gates additionally require `derivation.walked` (via
+//! [`crate::graph_sql::walked_predicate`]): an anchor's edge set is only
+//! trustworthy once the ingest wrote the derivation's whole record. That bit is
+//! an immutable ingest fact, written in the same transaction as the edges and
+//! never cleared, so it needs no heal of its own.
 
 use crate::graph_sql::{
     ClosureDirection, bounded_dependency_closure_cte_body, dependency_closure_cte,
@@ -148,6 +145,7 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     );
 
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");
+    let walked = crate::graph_sql::walked_predicate("db");
     affected.extend(transitions_from(
         returned_derivations(
             db.query_all_raw(Statement::from_sql_and_values(
@@ -158,7 +156,7 @@ pub async fn promote_dependents<C: ConnectionTrait>(
             SET status = {queued}, queued_at = (now() AT TIME ZONE 'UTC'),
                 updated_at = (now() AT TIME ZONE 'UTC')
             WHERE db.status = {created}
-              AND db.edges_complete
+              AND {walked}
               AND db.derivation IN (
                 SELECT dd.derivation FROM derivation_dependency dd WHERE dd.dependency = $1)
               AND EXISTS (
@@ -180,10 +178,45 @@ pub async fn promote_dependents<C: ConnectionTrait>(
     Ok(affected)
 }
 
+/// Anchors an evaluation found whole in our cache move from `Created` to
+/// `Substituted`; a new anchor is inserted that way, this catches the ones a
+/// prior evaluation left pending. Returns the transitions for the effects
+/// emitter.
+pub async fn substitute_created_anchors<C: ConnectionTrait>(
+    db: &C,
+    derivations: &[DerivationId],
+) -> Result<Vec<TransitionChange>, DbErr> {
+    let ids: Vec<uuid::Uuid> = derivations.iter().map(|d| d.into_inner()).collect();
+    let rows = db
+        .query_all_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            substitute_created_anchors_sql(),
+            [ids.into()],
+        ))
+        .await?;
+
+    Ok(returned_transitions(rows))
+}
+
+fn substitute_created_anchors_sql() -> String {
+    format!(
+        r#"
+        UPDATE derivation_build AS db
+        SET status = {substituted}, substituted = true, closure_complete = true,
+            updated_at = (now() AT TIME ZONE 'UTC')
+        FROM derivation_build old
+        WHERE old.id = db.id AND db.status = {created} AND db.derivation = ANY($1::uuid[])
+        RETURNING db.derivation, old.status AS from_status, db.status AS to_status
+        "#,
+        substituted = status_sql::build(BuildStatus::Substituted),
+        created = status_sql::build(BuildStatus::Created),
+    )
+}
+
 /// Closure-complete gate for a terminal-success anchor `db`, shared verbatim by
 /// the targeted up-ripple (`propagate_closure_complete`) and the global
 /// self-heal fixpoint (`reconcile_closure_complete`). Completed arm: outputs
-/// cached, edges flushed, and every build dependency itself `closure_complete`
+/// cached, derivation walked, and every build dependency itself `closure_complete`
 /// **or** `substitutable`. Substituted arm: we never held the build closure, so
 /// key on the runtime-closure ground truth instead - every output's
 /// `cached_path` is fully cached AND `closure_complete`, the same check
@@ -194,10 +227,11 @@ pub async fn promote_dependents<C: ConnectionTrait>(
 /// dependents stall Queued forever. Self-parenthesized: callers embed it as
 /// `AND {gate}`.
 pub(crate) fn closure_complete_gate() -> String {
+    let walked = crate::graph_sql::walked_predicate("db");
     format!(
         r#"
     ((db.status = {completed}
-    AND db.edges_complete
+    AND {walked}
     AND NOT EXISTS (
         SELECT 1 FROM derivation_output o
         LEFT JOIN cached_path cp ON cp.hash = o.hash
@@ -221,7 +255,7 @@ pub(crate) fn closure_complete_gate() -> String {
 
 /// Recompute closure-completeness up the build-dependency graph from a just-
 /// finished `completed` derivation. A built (`Completed`) anchor becomes
-/// `closure_complete` once its outputs are cached, its edges are flushed, and
+/// `closure_complete` once its outputs are cached, its derivation is walked, and
 /// every build dependency is itself `closure_complete` **or** `substitutable`
 /// (its closure is fetchable from upstream on demand). A Substituted anchor is
 /// marked through the gate's substituted arm - its outputs' `cached_path` rows
@@ -379,13 +413,16 @@ fn closure_complete_statements(scope: Option<gradient_types::EvaluationId>) -> (
 
 /// `.drv`-closure gate for anchor `db`: its own `.drv` is cached (a `.drv`'s
 /// store-path hash is the derivation hash) and every build dependency is itself
-/// `drv_closure_cached`. The recursion mirrors `CLOSURE_COMPLETE_GATE` but tracks
+/// `drv_closure_cached`. The recursion mirrors [`closure_complete_gate`] but tracks
 /// the build-INPUT `.drv` closure instead of the OUTPUT closure, and is
 /// independent of build/substitute status: a substitutable dependency's `.drv`
 /// is still a structural reference of any dependent's `.drv` and so must be
 /// cached for the dependent's import to succeed.
-pub(crate) const DRV_CLOSURE_CACHED_GATE: &str = r#"
-    db.edges_complete
+pub(crate) fn drv_closure_cached_gate() -> String {
+    let walked = crate::graph_sql::walked_predicate("db");
+    format!(
+        r#"
+    {walked}
     AND EXISTS (
         SELECT 1 FROM derivation d
         JOIN cached_path cp ON cp.hash = d.hash
@@ -395,21 +432,24 @@ pub(crate) const DRV_CLOSURE_CACHED_GATE: &str = r#"
         LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
         WHERE e.derivation = db.derivation
           AND (dep.derivation IS NULL OR NOT dep.drv_closure_cached))
-"#;
+"#
+    )
+}
 
 /// CLEAR + SET statements for the `drv_closure_cached` fixpoint, sharing
-/// `DRV_CLOSURE_CACHED_GATE` (so both passes key on the same `.drv`-cached ground
-/// truth and can never drift from each other or from the test that pins them)
-/// and `eval_scope_fragments(scope)` (so both see the same closure bound).
+/// `drv_closure_cached_gate()` (so both passes key on the same `.drv`-cached
+/// ground truth and can never drift from each other or from the test that pins
+/// them) and `eval_scope_fragments(scope)` (so both see the same closure bound).
 fn drv_closure_cached_statements(scope: Option<gradient_types::EvaluationId>) -> (String, String) {
+    let gate = drv_closure_cached_gate();
     let (prelude, filter) = eval_scope_fragments(scope);
     let clear = format!(
         "{prelude}UPDATE derivation_build db SET drv_closure_cached = false \
-         WHERE db.drv_closure_cached{filter} AND NOT ({DRV_CLOSURE_CACHED_GATE})"
+         WHERE db.drv_closure_cached{filter} AND NOT ({gate})"
     );
     let set = format!(
         "{prelude}UPDATE derivation_build db SET drv_closure_cached = true \
-         WHERE NOT db.drv_closure_cached{filter} AND {DRV_CLOSURE_CACHED_GATE}"
+         WHERE NOT db.drv_closure_cached{filter} AND {gate}"
     );
     (clear, set)
 }
@@ -561,12 +601,13 @@ fn dependency_failed_reconcile_sql(scope: Option<gradient_types::EvaluationId>) 
 }
 
 /// Promote every `Created` anchor whose dependency anchors are all terminal-
-/// success (`Completed`/`Substituted`) to `Queued`. Run once an evaluation's
-/// full dependency graph is written (edges are deferred to stream completion):
-/// this seeds the graph from its leaves and from anchors whose deps were already
-/// cached/substituted at resolve time (for which no completion event ever
-/// fires). Subsequent completions cascade via [`promote_dependents`]. Returns
-/// the changes it made so the caller can feed the effects emitter.
+/// success (`Completed`/`Substituted`) to `Queued`. Only a `walked` derivation
+/// qualifies, so an anchor is weighed no earlier than the batch that wrote its
+/// declared edges: this seeds the graph from its leaves and from anchors whose
+/// deps were already cached/substituted at resolve time (for which no
+/// completion event ever fires). Subsequent completions cascade via
+/// [`promote_dependents`]. Returns the changes it made so the caller can feed
+/// the effects emitter.
 pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<TransitionChange>, DbErr> {
     let rows = db
         .query_all_raw(Statement::from_string(
@@ -584,13 +625,14 @@ pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<TransitionC
 
 fn promote_ready_sql() -> String {
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");
+    let walked = crate::graph_sql::walked_predicate("db");
     format!(
         r#"
         UPDATE derivation_build AS db
         SET status = {queued}, queued_at = (now() AT TIME ZONE 'UTC'),
             updated_at = (now() AT TIME ZONE 'UTC')
         WHERE db.status = {created}
-          AND db.edges_complete
+          AND {walked}
           AND EXISTS (
             SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
           AND (db.substitutable OR ({deps_ready}))
@@ -609,10 +651,10 @@ fn promote_ready_sql() -> String {
 /// importable, satisfied by either the build-graph `drv_closure_cached` flag or the
 /// `.drv`'s own NAR-closure (`cached_path.closure_complete`, via
 /// [`crate::graph_sql::drv_nar_closure_complete_predicate`]). The flag diverges from
-/// that NAR ground truth when eval pruning leaves a substitutable dep's edges
-/// unrecorded, so keying on it alone stalls a build whose `.drv` closure is in fact
-/// fully cached. Ordered by dependency count desc (integration builds first), then
-/// age. This is [`promote_ready`]'s predicate applied one step later - both embed
+/// that NAR ground truth when eval pruning leaves a dependency unwalked, so keying
+/// on it alone stalls a build whose `.drv` closure is in fact fully cached.
+/// Ordered by dependency count desc (integration builds first), then age. This is
+/// [`promote_ready`]'s predicate applied one step later - both embed
 /// [`crate::graph_sql::deps_ready_predicate`].
 pub async fn find_ready_anchors<C: ConnectionTrait>(
     db: &C,
@@ -630,12 +672,13 @@ pub async fn find_ready_anchors<C: ConnectionTrait>(
 fn find_ready_anchors_sql() -> String {
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");
     let drv_nar_closure = crate::graph_sql::drv_nar_closure_complete_predicate("db");
+    let walked = crate::graph_sql::walked_predicate("db");
     format!(
         r#"
         SELECT db.*
         FROM derivation_build db
         WHERE db.status = {queued}
-          AND db.edges_complete
+          AND {walked}
           AND EXISTS (
             SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
           AND (db.substitutable OR ((db.drv_closure_cached OR {drv_nar_closure}) AND {deps_ready}))
@@ -647,50 +690,6 @@ fn find_ready_anchors_sql() -> String {
         "#,
         queued = status_sql::build(BuildStatus::Queued),
     )
-}
-
-/// Mark `edges_complete` across `evaluation`'s full build-dependency closure, not
-/// just its directly-reported `build_job` rows. Called once the eval's dependency
-/// edges are flushed. A transitive dep reached only via global edges (pruned or
-/// substituted in this eval, so it has no `build_job` here) would otherwise never
-/// get its flag maintained: if the eval that owned it never completed its edge
-/// flush (failed, interrupted, superseded), the dep sits `edges_complete = false`
-/// forever - unpromotable behind the dispatch gate even though its edge set is by
-/// now complete and satisfied. A closure node is marked when it
-/// has recorded build edges (its edge set is known) or is one of this eval's own
-/// `build_job` leaves (0-dep); ambiguous 0-edge transitive nodes stay gated.
-/// Anchors flagged `edges_unresolved` (a declared dependency `flush_deferred_deps`
-/// could not record) are never marked, so a build_job whose edges were dropped is
-/// held instead of dispatched as dependency-free. Idempotent and never clears it.
-pub async fn mark_edges_complete_for_eval<C: ConnectionTrait>(
-    db: &C,
-    evaluation: gradient_types::EvaluationId,
-) -> Result<u64, DbErr> {
-    let cte = eval_closure_cte();
-    let affected = db
-        .execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            format!(
-                r#"
-            {cte}
-            UPDATE derivation_build db
-            SET edges_complete = true
-            WHERE db.edges_complete = false
-              AND NOT db.edges_unresolved
-              AND db.derivation IN (SELECT derivation FROM closure)
-              AND (
-                EXISTS (SELECT 1 FROM derivation_dependency e WHERE e.derivation = db.derivation)
-                OR EXISTS (SELECT 1 FROM build_job bj
-                           WHERE bj.derivation = db.derivation AND bj.evaluation = $1)
-              )
-            "#
-            ),
-            [Value::Uuid(Some(evaluation.into_inner()))],
-        ))
-        .await?
-        .rows_affected();
-
-    Ok(affected)
 }
 
 /// SQL predicate: the `derivation_build` aliased `alias` has a recorded
@@ -852,7 +851,6 @@ pub async fn reconcile_cached_anchors_for_eval<C: ConnectionTrait>(
             UPDATE derivation_build db
             SET status = CASE WHEN db.status IN ({terminal_success}) THEN db.status ELSE {completed} END,
                 closure_complete = true,
-                edges_complete = true,
                 updated_at = (now() AT TIME ZONE 'UTC')
             FROM derivation_build old
             WHERE old.id = db.id
@@ -1109,9 +1107,9 @@ mod tests {
     /// gate adds the `.drv`-importability arm. That arm accepts either the
     /// build-graph `drv_closure_cached` flag OR the `.drv`'s own NAR-closure
     /// (`cached_path.closure_complete`, the ground truth) - the flag diverges when
-    /// eval pruning leaves edges unrecorded, so keying on it alone dead-zones a
-    /// build whose `.drv` closure is in fact fully cached. A drift between the two
-    /// statements is a latent dead zone.
+    /// eval pruning leaves a dependency unwalked, so keying on it alone dead-zones
+    /// a build whose `.drv` closure is in fact fully cached. A drift between the
+    /// two statements is a latent dead zone.
     #[test]
     fn promotion_and_dispatch_share_the_readiness_predicate() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1135,6 +1133,12 @@ mod tests {
             promote.contains("db.substitutable OR (NOT EXISTS"),
             "promotion must not gate on drv_closure_cached (the eval pushes .drvs progressively): {promote}"
         );
+
+        let walked = norm(crate::graph_sql::walked_predicate("db"));
+        assert!(
+            promote.contains(&walked) && dispatch.contains(&walked),
+            "both gates must require the derivation's walked bit: {promote} | {dispatch}"
+        );
     }
 
     /// Truly-substituted anchors are inserted `Substituted + closure_complete`
@@ -1157,8 +1161,10 @@ mod tests {
             "gate must be self-parenthesized (callers embed it as AND {{gate}}): {gate}"
         );
         assert!(
-            gate.contains(&format!("((db.status = {completed} AND db.edges_complete")),
-            "completed arm keeps edges + dependency recursion: {gate}"
+            gate.contains(&format!(
+                "((db.status = {completed} AND EXISTS (SELECT 1 FROM derivation w WHERE w.id = db.derivation AND w.walked)"
+            )),
+            "completed arm keeps the walked bit + dependency recursion: {gate}"
         );
         assert!(
             gate.contains(&format!("OR (db.status = {substituted}")),
@@ -1196,5 +1202,28 @@ mod tests {
             clear.contains("JOIN cached_path cp") && set.contains("JOIN cached_path cp"),
             "both passes must key on real .drv NAR backing (ground truth): {clear} | {set}"
         );
+    }
+
+    /// Cache presence is the ground truth for "built": a pending anchor whose
+    /// outputs are whole in our cache is settled `Substituted` without a
+    /// dispatch. Only `Created` moves, so a `Queued` anchor already in the
+    /// tracker is not pulled out from under the dispatcher.
+    #[test]
+    fn substitute_created_anchors_moves_only_created_rows() {
+        let sql = substitute_created_anchors_sql()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(sql.contains(&format!(
+            "SET status = {}",
+            status_sql::build(BuildStatus::Substituted)
+        )));
+        assert!(sql.contains(&format!(
+            "db.status = {}",
+            status_sql::build(BuildStatus::Created)
+        )));
+        assert!(sql.contains(
+            "RETURNING db.derivation, old.status AS from_status, db.status AS to_status"
+        ));
     }
 }

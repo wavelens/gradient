@@ -8,11 +8,11 @@ import sqlite3
 from pathlib import Path
 
 # Must track SCHEMA_VERSION in backend/gradient-report/src/schema.rs.
-SUPPORTED_SCHEMA = 1
+SUPPORTED_SCHEMA = 7
 
 
 class UnsupportedSchema(Exception):
-    """The report was written by a Gradient newer than this inspector."""
+    """The report was written against a different schema than this inspector reads."""
 
 
 class NotAReport(Exception):
@@ -20,11 +20,13 @@ class NotAReport(Exception):
 
 
 def open_report(path: str | Path) -> sqlite3.Connection:
-    """Open a report read-only, checking its schema version first.
+    """Open a report read-only, accepting exactly one schema version.
 
-    Refusing an unknown version matters more than it looks: every command here
-    reads columns by name, so a newer report would not error, it would quietly
-    answer from the columns that happen to still match.
+    Refusing anything else matters more than it looks: every command here reads
+    columns by name, and the export has both added and dropped columns over its
+    life, so a report of any other version does not error at open time - it
+    answers from whichever columns still happen to line up, or dies mid-command
+    on one that does not. There is no compatibility shim to soften either side.
     """
     conn = sqlite3.connect(f"file:{Path(path)}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
@@ -38,10 +40,12 @@ def open_report(path: str | Path) -> sqlite3.Connection:
         raise NotAReport(f"{path} has no report_meta row")
 
     version = row["schema_version"]
-    if version > SUPPORTED_SCHEMA:
+    if version != SUPPORTED_SCHEMA:
+        direction = "newer" if version > SUPPORTED_SCHEMA else "older"
         raise UnsupportedSchema(
-            f"report schema {version} is newer than this inspector understands "
-            f"({SUPPORTED_SCHEMA}); upgrade gradient-report"
+            f"report schema {version} is {direction} than the one this inspector "
+            f"reads ({SUPPORTED_SCHEMA}); use the gradient-report of the report's "
+            f"own version"
         )
 
     return conn

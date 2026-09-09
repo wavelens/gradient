@@ -83,6 +83,11 @@ pub async fn perform_handshake(
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::disallowed_methods,
+        reason = "tests stand in for their peers by hand"
+    )]
+
     use super::*;
     use gradient_proto::messages::{ClientMessage, ServerMessage};
     use gradient_test_support::prelude::{MockProtoServer, MockServerConn};

@@ -198,8 +198,6 @@ fn total_memory_bytes() -> u64 {
     }
 }
 
-use gradient_proto::messages::QueryMode;
-
 use crate::proto::job::JobUpdater;
 use crate::traits::{DrvReader, FsDrvReader, JobReporter};
 
@@ -308,9 +306,8 @@ const EVAL_BATCH_SIZE: usize = 50;
 /// 2. Resolve attrs to .drv paths (via eval worker pool)
 /// 3. BFS from root .drv paths through `inputDrvs` references
 /// 4. For each .drv: read file, extract outputs/arch/features
-/// 5. Every `EVAL_BATCH_SIZE` derivations: query server cache, mark
-///    substituted, send `EvalResult` so the server can start queuing builds
-///    while the walk continues
+/// 5. Every `EVAL_BATCH_SIZE` derivations: send `EvalResult` so the server can
+///    start queuing builds while the walk continues
 /// 6. Final flush with any remainder + accumulated warnings/errors
 pub async fn evaluate_derivations(
     evaluator: &WorkerEvaluator,
@@ -446,36 +443,6 @@ async fn write_eval_cache_blob(path: &str, bytes: &[u8]) -> Result<()> {
 
     tokio::fs::write(path, bytes).await?;
     Ok(())
-}
-
-/// Query the server cache for `batch`'s output paths and set `substituted`
-/// on any derivation whose outputs are all present in the cache.
-async fn mark_substituted(batch: &mut [DiscoveredDerivation], updater: &mut dyn JobReporter) {
-    let output_paths: Vec<String> = batch
-        .iter()
-        .flat_map(|d| d.outputs.iter().map(|o| o.path.clone()))
-        .collect();
-    if output_paths.is_empty() {
-        return;
-    }
-    let cached = updater
-        .query_cache(output_paths, QueryMode::Normal)
-        .await
-        .unwrap_or_else(|e| {
-            warn!(error = %e, "cache query failed; treating all paths as uncached");
-            vec![]
-        });
-    let cached_set: HashSet<&str> = cached.iter().map(|c| c.path.as_str()).collect();
-    for drv in batch.iter_mut() {
-        if !drv.outputs.is_empty()
-            && drv
-                .outputs
-                .iter()
-                .all(|o| cached_set.contains(o.path.as_str()))
-        {
-            drv.substituted = true;
-        }
-    }
 }
 
 // ── Pipeline helpers ─────────────────────────────────────────────────────────
@@ -640,7 +607,6 @@ fn build_discovered_derivation(
         is_fixed_output: meta.is_fixed_output,
         allow_substitutes: drv.allow_substitutes(),
         pname,
-        substituted: false,
     }
 }
 
@@ -741,9 +707,6 @@ impl<'a> ClosureWalker<'a> {
             self.visited.insert(dep.clone());
         }
 
-        // Ask the server which deps it already has.  Known deps don't need
-        // subtree traversal; we add them as minimal DiscoveredDerivation
-        // entries so the server can still create build rows for them.
         let known_set: HashSet<String> = if new_deps.is_empty() {
             HashSet::new()
         } else {
@@ -762,28 +725,10 @@ impl<'a> ClosureWalker<'a> {
             debug!(pruned = known_set.len(), "BFS: pruning known subtrees");
         }
 
-        // Enqueue unknown deps; add known deps to the batch directly.
+        // A known dependency stays named in its parent's record; the server
+        // has its subtree and derives this evaluation's job for it from the name.
         for dep in new_deps {
-            if known_set.contains(&dep) {
-                // Server already has the full subtree - report the derivation
-                // (so a build row is created) but skip further traversal.
-                self.batch.push(DiscoveredDerivation {
-                    attr: String::new(),
-                    drv_path: dep,
-                    outputs: vec![],
-                    dependencies: vec![],
-                    input_sources: vec![],
-                    architecture: String::new(),
-                    required_features: vec![],
-                    timeout_secs: None,
-                    max_silent_secs: None,
-                    prefer_local_build: false,
-                    is_fixed_output: false,
-                    allow_substitutes: true,
-                    pname: None,
-                    substituted: true, // already built - skip dispatch
-                });
-            } else {
+            if !known_set.contains(&dep) {
                 self.queue.push_back((None, dep));
             }
         }
@@ -811,7 +756,6 @@ impl<'a> ClosureWalker<'a> {
             if self.batch.len() >= EVAL_BATCH_SIZE {
                 updater.push_drv_closure(&self.produced_drvs).await?;
                 self.produced_drvs.clear();
-                mark_substituted(&mut self.batch, updater).await;
                 debug!(
                     count = self.batch.len(),
                     remaining = self.queue.len(),
@@ -1037,7 +981,7 @@ pub async fn evaluate_derivations_with(
 
     // ── Step 3+4+5: BFS closure walk with incremental flushes ────────────────
     let mut walker = ClosureWalker::new(drv_reader, &root_drvs);
-    let mut remaining = walker.walk(updater, abort).await?;
+    let remaining = walker.walk(updater, abort).await?;
     let remaining_drvs = std::mem::take(&mut walker.produced_drvs);
 
     // ── Final flush: remaining derivations + deduplicated warnings/errors ─────
@@ -1049,7 +993,6 @@ pub async fn evaluate_derivations_with(
     // Push the trailing batch's closure before its report, same as the mid-walk
     // flushes, so the last builds' sources are cached before dispatch.
     updater.push_drv_closure(&remaining_drvs).await?;
-    mark_substituted(&mut remaining, updater).await;
     debug!(
         count = remaining.len(),
         warnings = warnings.len(),
@@ -1340,8 +1283,6 @@ mod tests {
         let all = reporter.all_eval_derivations();
         // All derivations from the fixture should be discovered across all batches.
         assert_eq!(all.len(), fixture.derivations.len());
-        // Nothing is built → nothing substituted.
-        assert!(all.iter().all(|d| !d.substituted));
         // Entry point should have the attr set.
         let entry = all
             .iter()
@@ -1386,10 +1327,8 @@ mod tests {
                 }
                 ReportedEvent::EvalResult { derivations, .. } => {
                     for d in derivations {
-                        // Known/substituted entries are already cached server-side
-                        // and carry no closure to push; only parsed drvs matter.
                         assert!(
-                            d.substituted || pushed.contains(d.drv_path.as_str()),
+                            pushed.contains(d.drv_path.as_str()),
                             "reported {} before pushing its source closure",
                             d.drv_path
                         );
@@ -1402,19 +1341,23 @@ mod tests {
         assert!(!pushed.is_empty(), "expected at least one closure push");
     }
 
+    /// A dependency the server already knows is neither walked nor reported:
+    /// the server records its stub, edge and build job from the parent's
+    /// dependency list. Here every derivation but the entry point is known,
+    /// so exactly one record is reported and it still names its dependencies.
     #[tokio::test]
-    async fn test_eval_partial_substitution() {
-        let mut fixture = load_store(&fixture_dir());
-        // Build ~50% of derivations.
-        fixture.mark_all_built();
-        fixture.remove_random_subtrees(0.5, 42);
-
+    async fn a_known_dependency_is_neither_reported_nor_walked() {
+        let fixture = load_store(&fixture_dir());
         let repo = "https://example.com/repo";
         let (resolver, drv_reader) = setup_from_fixture(&fixture, repo, "hello");
         let job = make_flake_job(repo);
-        // Simulate the same subset being cached on the server.
-        let cached: Vec<String> = fixture.store.present_paths().into_iter().collect();
-        let mut reporter = RecordingJobReporter::new().with_cached_paths(cached);
+        let known: Vec<String> = fixture
+            .derivations
+            .iter()
+            .map(|d| d.drv_path.clone())
+            .filter(|p| *p != fixture.entry_point)
+            .collect();
+        let mut reporter = RecordingJobReporter::new().with_known_drv_paths(known);
 
         evaluate_derivations_with(
             &resolver,
@@ -1428,49 +1371,17 @@ mod tests {
         .unwrap();
 
         let all = reporter.all_eval_derivations();
-        let substituted_count = all.iter().filter(|d| d.substituted).count();
-        let not_substituted = all.iter().filter(|d| !d.substituted).count();
-        assert!(substituted_count > 0, "some should be substituted");
-        assert!(not_substituted > 0, "some should not be substituted");
-
-        // Verify substituted flags match the fixture's built state.
-        for drv in &all {
-            let is_built = fixture.built().iter().any(|b| b.drv_path == drv.drv_path);
-            assert_eq!(
-                drv.substituted, is_built,
-                "substituted mismatch for {}: got {} expected {}",
-                drv.drv_path, drv.substituted, is_built
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_eval_all_substituted() {
-        let mut fixture = load_store(&fixture_dir());
-        fixture.mark_all_built();
-
-        let repo = "https://example.com/repo";
-        let (resolver, drv_reader) = setup_from_fixture(&fixture, repo, "hello");
-        let job = make_flake_job(repo);
-        // Simulate all output paths being present in the server's cache.
-        let cached: Vec<String> = fixture.store.present_paths().into_iter().collect();
-        let mut reporter = RecordingJobReporter::new().with_cached_paths(cached);
-
-        evaluate_derivations_with(
-            &resolver,
-            &drv_reader,
-            &job,
-            None,
-            &mut reporter,
-            &mut never_abort(),
-        )
-        .await
-        .unwrap();
-
-        let all = reporter.all_eval_derivations();
+        assert_eq!(all.len(), 1, "only the entry point is walked: {all:?}");
+        assert_eq!(all[0].drv_path, fixture.entry_point);
         assert!(
-            all.iter().all(|d| d.substituted),
-            "all should be substituted when everything is cached"
+            !all[0].dependencies.is_empty(),
+            "the pruned deps stay named"
+        );
+        let pushed = reporter.all_pushed_drv_paths();
+        assert_eq!(
+            pushed,
+            vec![&fixture.entry_point],
+            "only the walked drv is pushed"
         );
     }
 

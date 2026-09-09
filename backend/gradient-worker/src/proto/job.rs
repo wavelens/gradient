@@ -96,6 +96,26 @@ pub(crate) fn forget_cache_waiters_for_job(waiters: &CacheWaiters, job_id: &str)
 /// responses back to the waiting job task.
 pub(crate) type KnownDerivationWaiters = Arc<Mutex<HashMap<String, oneshot::Sender<Vec<String>>>>>;
 
+/// The dispatch id a job reports under, shared between the job task and the
+/// dispatch loop, which replaces it when the server hands the same job out
+/// again while it is still running here.
+#[derive(Clone, Debug)]
+pub struct DispatchHandle(Arc<Mutex<String>>);
+
+impl DispatchHandle {
+    pub fn new(dispatch: String) -> Self {
+        Self(Arc::new(Mutex::new(dispatch)))
+    }
+
+    pub fn get(&self) -> String {
+        self.0.lock().clone()
+    }
+
+    pub fn set(&self, dispatch: String) {
+        *self.0.lock() = dispatch;
+    }
+}
+
 /// Typed sender for reporting job progress back to the server.
 ///
 /// Uses a cloneable [`ProtoWriter`] (mpsc channel) instead of `&mut ProtoConnection`,
@@ -103,6 +123,8 @@ pub(crate) type KnownDerivationWaiters = Arc<Mutex<HashMap<String, oneshot::Send
 /// to receive messages.
 pub struct JobUpdater {
     pub(crate) job_id: String,
+    /// Echoed on every report so the server can drop a stale worker's messages.
+    pub(crate) dispatch: DispatchHandle,
     pub(crate) writer: ProtoWriter,
     /// Shared with the dispatch loop: when a `CacheQuery` is sent, a oneshot
     /// sender is registered here; the dispatch loop routes the `CacheStatus`
@@ -133,6 +155,7 @@ impl JobUpdater {
     )]
     pub fn new(
         job_id: String,
+        dispatch: DispatchHandle,
         writer: ProtoWriter,
         cache_waiters: CacheWaiters,
         known_derivation_waiters: KnownDerivationWaiters,
@@ -143,6 +166,7 @@ impl JobUpdater {
     ) -> Self {
         Self {
             job_id,
+            dispatch,
             writer,
             cache_waiters,
             known_derivation_waiters,
@@ -431,6 +455,7 @@ impl JobUpdater {
         self.writer
             .send(ClientMessage::JobUpdate {
                 job_id: self.job_id.clone(),
+                dispatch: self.dispatch.get(),
                 update,
             })
             .await
@@ -690,6 +715,11 @@ impl JobReporter for JobUpdater {
 
 #[cfg(test)]
 mod tests {
+    #![allow(
+        clippy::disallowed_methods,
+        reason = "tests stand in for their peers by hand"
+    )]
+
     use super::*;
     use gradient_test_support::prelude::MockProtoServer;
 
@@ -717,13 +747,14 @@ mod tests {
         job_id: String,
         conn: crate::connection::ProtoConnection,
     ) -> (JobUpdater, crate::connection::ProtoReader) {
-        let (writer, reader) = conn.split();
+        let (writer, reader, _flush) = conn.split();
         let cache_waiters = Arc::new(Mutex::new(HashMap::new()));
         let known_derivation_waiters = Arc::new(Mutex::new(HashMap::new()));
         let nar_recv = NarReceiver::new();
         let eval_cache_recv = EvalCacheReceiver::new();
         let updater = JobUpdater::new(
             job_id,
+            DispatchHandle::new("dispatch-1".to_owned()),
             writer,
             cache_waiters,
             known_derivation_waiters,
@@ -760,7 +791,7 @@ mod tests {
     async fn updater_report_fetching() {
         let (conn, server_task, job_id) = server_then_client!("job-fetch", |sc| {
             let msg = sc.recv().await.unwrap();
-            if let ClientMessage::JobUpdate { job_id, update } = msg {
+            if let ClientMessage::JobUpdate { job_id, update, .. } = msg {
                 assert_eq!(job_id, "job-fetch");
                 assert!(matches!(update, JobUpdateKind::Fetching));
             } else {
@@ -773,6 +804,7 @@ mod tests {
             .writer
             .send(ClientMessage::JobUpdate {
                 job_id: updater.job_id.clone(),
+                dispatch: updater.dispatch.get(),
                 update: JobUpdateKind::Fetching,
             })
             .await
@@ -807,6 +839,7 @@ mod tests {
             .writer
             .send(ClientMessage::JobUpdate {
                 job_id: updater.job_id.clone(),
+                dispatch: updater.dispatch.get(),
                 update: JobUpdateKind::EvalResult {
                     derivations: vec![],
                     warnings: vec!["warn1".to_owned()],
@@ -865,6 +898,7 @@ mod tests {
             .writer
             .send(ClientMessage::JobCompleted {
                 job_id: updater.job_id.clone(),
+                dispatch: updater.dispatch.get(),
                 spans: vec![],
             })
             .await
@@ -889,6 +923,7 @@ mod tests {
             .writer
             .send(ClientMessage::JobFailed {
                 job_id: updater.job_id.clone(),
+                dispatch: updater.dispatch.get(),
                 error: "something went wrong".to_owned(),
                 kind: gradient_proto::messages::BuildFailureKind::Permanent,
                 missing_paths: vec![],

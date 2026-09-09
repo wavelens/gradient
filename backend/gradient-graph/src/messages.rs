@@ -52,7 +52,8 @@ pub struct IngestReport {
     pub task: Option<TaskId>,
     /// The batch arrived after the evaluation was aborted and was dropped.
     pub skipped: bool,
-    pub new_derivations: usize,
+    /// Derivations whose full record this batch put in.
+    pub walked: usize,
     pub entry_points: Vec<DerivationId>,
 }
 

@@ -9424,7 +9424,7 @@ components:
 
     BuildItem:
       type: object
-      required: [id, name, status, updated_at, depth]
+      required: [id, name, status, has_artefacts, updated_at, build_time_ms, dispatched_job, depth]
       properties:
         id:
           type: string
@@ -9435,6 +9435,9 @@ components:
         status:
           type: string
           description: Build status string (e.g. `"Queued"`, `"Building"`, `"Completed"`, `"Substituted"`)
+        has_artefacts:
+          type: boolean
+          description: Whether the build published any `hydra-build-products` artefact
         updated_at:
           type: string
           format: date-time
@@ -9443,6 +9446,14 @@ components:
           type: integer
           nullable: true
           description: Measured build duration in milliseconds (null if not yet recorded)
+        dispatched_job:
+          type: string
+          format: uuid
+          nullable: true
+          description: |-
+            The dispatched job behind the build's latest attempt, i.e. its Job
+            Board entry (`GET /board/jobs/{id}`). Null until the build has been
+            dispatched at least once.
         depth:
           type: integer
           minimum: 0
@@ -9721,6 +9732,14 @@ components:
             `InitConnection`) that executed this build's anchor. `null` if the
             build has not yet reached a worker (still queued, aborted
             before dispatch, or never dispatched in this evaluation).
+        dispatched_job:
+          type: string
+          format: uuid
+          nullable: true
+          description: |-
+            The dispatched job behind the build's latest attempt, i.e. its Job
+            Board entry (`GET /board/jobs/{id}`). Null until the build has been
+            dispatched at least once.
         output:
           type: object
           additionalProperties:

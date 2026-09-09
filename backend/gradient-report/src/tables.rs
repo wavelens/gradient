@@ -202,8 +202,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_build",
-            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, edges_complete INTEGER, closure_complete INTEGER, edges_unresolved INTEGER, drv_closure_cached INTEGER)",
-            "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.edges_complete::int::text, db.closure_complete::int::text, db.edges_unresolved::int::text, db.drv_closure_cached::int::text FROM derivation_build db WHERE db.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
+            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, closure_complete INTEGER, drv_closure_cached INTEGER)",
+            "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.closure_complete::int::text, db.drv_closure_cached::int::text FROM derivation_build db WHERE db.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
             "the evaluation's derivations, shared with every other evaluation that built them",
             [
                 "id",
@@ -219,16 +219,14 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "queued_at",
                 "ready_at",
                 "dispatched_at",
-                "edges_complete",
                 "closure_complete",
-                "edges_unresolved",
                 "drv_closure_cached"
             ]
         ),
         spec!(
             "derivation",
-            "CREATE TABLE derivation (id TEXT, created_at TEXT, architecture TEXT, hash TEXT, name TEXT, pname TEXT, prefer_local_build INTEGER, allow_substitutes INTEGER, closure_size INTEGER, is_fixed_output INTEGER, dep_closure_count INTEGER)",
-            "SELECT d.id::text, d.created_at::text, d.architecture::text, d.hash::text, d.name::text, d.pname::text, d.prefer_local_build::int::text, d.allow_substitutes::int::text, d.closure_size::text, d.is_fixed_output::int::text, d.dep_closure_count::text FROM derivation d WHERE d.id IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
+            "CREATE TABLE derivation (id TEXT, created_at TEXT, architecture TEXT, hash TEXT, name TEXT, pname TEXT, prefer_local_build INTEGER, allow_substitutes INTEGER, closure_size INTEGER, is_fixed_output INTEGER, dep_closure_count INTEGER, walked INTEGER)",
+            "SELECT d.id::text, d.created_at::text, d.architecture::text, d.hash::text, d.name::text, d.pname::text, d.prefer_local_build::int::text, d.allow_substitutes::int::text, d.closure_size::text, d.is_fixed_output::int::text, d.dep_closure_count::text, d.walked::int::text FROM derivation d WHERE d.id IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
             "the evaluation's derivations, shared with every other evaluation that built them",
             [
                 "id",
@@ -241,7 +239,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "allow_substitutes",
                 "closure_size",
                 "is_fixed_output",
-                "dep_closure_count"
+                "dep_closure_count",
+                "walked"
             ]
         ),
         spec!(

@@ -211,6 +211,20 @@ in {
         default = 86400;
       };
 
+      drainTimeoutSecs = lib.mkOption {
+        description = ''
+          How long a SIGINT/SIGTERM drain waits for in-flight jobs. The worker
+          stops accepting work at once, finishes and reports what is running,
+          then exits; jobs still running at the deadline are aborted and
+          re-queued server-side. `TimeoutStopSec` is derived from this. Set to
+          0 to wait without limit: `TimeoutStopSec` is then infinity, so a
+          wedged build holds `systemctl stop` until a second signal
+          (`systemctl kill -s TERM gradient-worker`) aborts it.
+        '';
+        type = lib.types.ints.unsigned;
+        default = 600;
+      };
+
       evalWorkers = lib.mkOption {
         description = "Number of Nix evaluator subprocesses";
         type = lib.types.ints.positive;
@@ -426,6 +440,14 @@ in {
           ReadOnlyPaths = lib.optionals cfg.settings.buildMetrics [ "-${cfg.settings.buildCgroupStateDir}" ];
           Restart = "on-failure";
           RestartSec = 10;
+          # SIGTERM drains: the worker finishes its in-flight jobs before it
+          # exits, so systemd must outwait the drain budget rather than
+          # SIGKILL a build that is about to finish.
+          TimeoutStopSec =
+            if cfg.settings.drainTimeoutSecs == 0 then
+              "infinity"
+            else
+              cfg.settings.drainTimeoutSecs + 30;
           KillMode = "mixed";
           LimitNOFILE = 65535;
           # Secrets are mlock'd to keep them off swap; without this the lock
@@ -461,6 +483,7 @@ in {
           GRADIENT_MAX_CONCURRENT_BUILDS              = toString cfg.settings.maxConcurrentBuilds;
           GRADIENT_MAX_NIXDAEMON_CONNECTIONS          = toString cfg.settings.maxNixdaemonConnections;
           GRADIENT_NAR_PARTIAL_TTL_SECS               = toString cfg.settings.narPartialTtlSecs;
+          GRADIENT_WORKER_DRAIN_TIMEOUT_SECS          = toString cfg.settings.drainTimeoutSecs;
           GRADIENT_WORKER_EVAL_WORKERS                = toString cfg.settings.evalWorkers;
           GRADIENT_MAX_EVAL_RSS                       = toString cfg.settings.maxEvalRss;
           GRADIENT_MIN_FREE_RAM_MB                    = toString cfg.settings.minFreeRamMb;

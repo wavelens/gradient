@@ -32,7 +32,11 @@ pub use wire::{decode_client_message, decode_server_message};
 ///     `EvalStatsReport` drops the three phase-millisecond fields it never set.
 /// v10: `QueryMode::PullClosure` asks the server to answer for a path's whole
 ///      reference closure, not just the path.
-pub const PROTO_VERSION: u16 = 10;
+/// v11: `AssignJob` carries the `dispatched_job` id; `JobUpdate`, `JobCompleted`
+///      and `JobFailed` echo it and a report from another dispatch is dropped.
+///      `DiscoveredDerivation` drops `substituted`; a pruned dependency is no
+///      longer reported as an entry of its own.
+pub const PROTO_VERSION: u16 = 11;
 
 pub use gradient_types::constants::{NAR_ZSTD_LEVEL, PRESIGN_TTL};
 

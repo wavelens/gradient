@@ -272,8 +272,9 @@ async fn run_input_update(
         return updater.report_input_expansion(matched).await;
     }
 
-    let resolver = gradient_flake_lock::HttpRevisionResolver::new(reqwest::Client::new())
-        .with_ssh_key(ssh_key.map(str::to_owned));
+    let resolver =
+        gradient_flake_lock::HttpRevisionResolver::new(crate::http::download_client().clone())
+            .with_ssh_key(ssh_key.map(str::to_owned));
     let generator = gradient_flake_lock::FlakeLockGenerator::new(resolver);
     let tracked: Vec<gradient_flake_lock::InputName> =
         spec.inputs.iter().cloned().map(Into::into).collect();
@@ -382,6 +383,10 @@ async fn run_nix_subprocess(
         .spawn()
         .with_context(|| format!("failed to spawn {label}"))?;
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "reaping a kill_on_drop child, aborted by the select below rather than by shutdown"
+    )]
     let task = tokio::spawn(async move { child.wait_with_output().await });
     let abort_handle = task.abort_handle();
 

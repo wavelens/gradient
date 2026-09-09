@@ -12,7 +12,7 @@ use std::sync::Arc;
 use gradient_core::ServerState;
 use gradient_entity::dispatched_job::DispatchedJobOutcome;
 use gradient_exec::strip_nix_store_prefix;
-use gradient_types::ids::ProjectId;
+use gradient_types::ids::{DispatchedJobId, ProjectId};
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
@@ -40,6 +40,34 @@ use super::socket::{
 
 // ── Dispatch context ──────────────────────────────────────────────────────────
 
+/// A job this session runs: the dispatch the worker was handed, and the
+/// tracker's record for re-registration after a core restart.
+#[derive(Clone)]
+pub(crate) struct ActiveJob {
+    pub dispatch: DispatchedJobId,
+    pub pending: PendingJob,
+}
+
+/// A report is accepted only when it names the dispatch this session handed
+/// out: `current` is the session's own entry for the job. That covers the
+/// motivating case, a worker declared dead that reconnects, because its fresh
+/// session holds no job at all while the id it buffered names a dispatch the
+/// scheduler has long since re-issued.
+///
+/// It consults no scheduler state, so one hole stays open: a worker the
+/// heartbeat or zombie sweep evicted while its socket is still up keeps its
+/// session map, and a report it sends after the job was re-dispatched to
+/// another worker still matches here. Closing it needs the `DispatchedJobId`
+/// on `JobTracker`'s active entry and the comparison made inside the core
+/// actor that owns the tracker, which belongs with the scheduler work in the
+/// next PR rather than an actor round-trip per report from here.
+pub(super) fn dispatch_matches(current: Option<DispatchedJobId>, reported: &str) -> bool {
+    match (current, reported.parse::<DispatchedJobId>()) {
+        (Some(current), Ok(reported)) => current == reported,
+        _ => false,
+    }
+}
+
 /// Holds the per-connection references needed to handle a single client message.
 pub(super) struct DispatchContext<'a> {
     pub writer: &'a ProtoWriter,
@@ -51,7 +79,7 @@ pub(super) struct DispatchContext<'a> {
     pub nar_serve_semaphore: &'a Arc<Semaphore>,
     /// Jobs this session currently runs, kept so a core restart can re-register
     /// them without a DB round-trip.
-    pub active: &'a mut HashMap<String, PendingJob>,
+    pub active: &'a mut HashMap<String, ActiveJob>,
 }
 
 impl<'a> DispatchContext<'a> {
@@ -128,23 +156,38 @@ impl<'a> DispatchContext<'a> {
                 self.on_assign_job_response(job_id, accepted, reason).await;
                 true
             }
-            ClientMessage::JobUpdate { job_id, update } => {
-                self.on_job_update(job_id, update).await;
+            ClientMessage::JobUpdate {
+                job_id,
+                dispatch,
+                update,
+            } => {
+                if self.owns(&job_id, &dispatch) {
+                    self.on_job_update(job_id, update).await;
+                }
                 true
             }
-            ClientMessage::JobCompleted { job_id, spans } => {
-                self.on_job_completed(job_id, spans).await;
+            ClientMessage::JobCompleted {
+                job_id,
+                dispatch,
+                spans,
+            } => {
+                if let Some(dispatch) = self.owned(&job_id, &dispatch) {
+                    self.on_job_completed(job_id, dispatch, spans).await;
+                }
                 true
             }
             ClientMessage::JobFailed {
                 job_id,
+                dispatch,
                 error,
                 kind,
                 missing_paths,
                 spans,
             } => {
-                self.on_job_failed(job_id, error, kind, missing_paths, spans)
-                    .await;
+                if let Some(dispatch) = self.owned(&job_id, &dispatch) {
+                    self.on_job_failed(job_id, dispatch, error, kind, missing_paths, spans)
+                        .await;
+                }
                 true
             }
             ClientMessage::Draining => {
@@ -269,6 +312,23 @@ impl<'a> DispatchContext<'a> {
                 true
             }
         }
+    }
+
+    /// The dispatch id of `job_id` when this session runs it under `reported`.
+    /// Session-local by construction: [`dispatch_matches`] states what that
+    /// guarantees and what it leaves to the scheduler.
+    fn owned(&self, job_id: &str, reported: &str) -> Option<DispatchedJobId> {
+        let current = self.active.get(job_id).map(|a| a.dispatch);
+        if dispatch_matches(current, reported) {
+            return current;
+        }
+
+        warn!(peer_id = %self.peer_id, %job_id, reported, ?current, "report from another dispatch; dropped");
+        None
+    }
+
+    fn owns(&self, job_id: &str, reported: &str) -> bool {
+        self.owned(job_id, reported).is_some()
     }
 
     /// Snapshot the owned handles needed to run an order-independent RPC off the
@@ -528,8 +588,13 @@ impl<'a> DispatchContext<'a> {
     async fn on_request_job(&mut self, kind: JobKind) -> bool {
         debug!(peer_id = %self.peer_id, ?kind, "RequestJob");
         if let Some(assignment) = self.scheduler.request_job(self.peer_id, kind).await {
-            self.active
-                .insert(assignment.job_id.clone(), assignment.pending.clone());
+            self.active.insert(
+                assignment.job_id.clone(),
+                ActiveJob {
+                    dispatch: assignment.dispatch,
+                    pending: assignment.pending.clone(),
+                },
+            );
             send_credentials_for_job(
                 self.writer,
                 self.state,
@@ -543,6 +608,7 @@ impl<'a> DispatchContext<'a> {
                 self.writer,
                 &ServerMessage::AssignJob {
                     job_id: assignment.job_id,
+                    dispatch: assignment.dispatch.to_string(),
                     job: assignment.job,
                 },
             )
@@ -671,11 +737,16 @@ impl<'a> DispatchContext<'a> {
 
     // ── Job terminal states ───────────────────────────────────────────────────
 
-    async fn on_job_completed(&mut self, job_id: String, spans: Vec<JobPhaseSpan>) {
+    async fn on_job_completed(
+        &mut self,
+        job_id: String,
+        dispatch: DispatchedJobId,
+        spans: Vec<JobPhaseSpan>,
+    ) {
         info!(peer_id = %self.peer_id, %job_id, phases = spans.len(), "job completed");
         self.active.remove(&job_id);
         self.scheduler
-            .record_job_timeline(&job_id, DispatchedJobOutcome::Completed, spans);
+            .record_job_timeline(dispatch, DispatchedJobOutcome::Completed, spans);
         if let Err(e) = self
             .scheduler
             .handle_job_completed(self.peer_id, &job_id)
@@ -689,6 +760,7 @@ impl<'a> DispatchContext<'a> {
     async fn on_job_failed(
         &mut self,
         job_id: String,
+        dispatch: DispatchedJobId,
         error: String,
         kind: gradient_types::proto::BuildFailureKind,
         missing_paths: Vec<String>,
@@ -697,7 +769,7 @@ impl<'a> DispatchContext<'a> {
         warn!(peer_id = %self.peer_id, %job_id, %error, ?kind, phases = spans.len(), "job failed");
         self.active.remove(&job_id);
         self.scheduler
-            .record_job_timeline(&job_id, DispatchedJobOutcome::Failed, spans);
+            .record_job_timeline(dispatch, DispatchedJobOutcome::Failed, spans);
         if let Err(e) = self
             .scheduler
             .handle_job_failed(self.peer_id, &job_id, &error, kind, &missing_paths)
@@ -906,5 +978,23 @@ impl RpcContext {
                 },
             )
             .await;
+    }
+}
+
+#[cfg(test)]
+mod dispatch_id_tests {
+    use super::dispatch_matches;
+    use gradient_types::ids::DispatchedJobId;
+
+    /// The stale-worker case: a report carrying another dispatch's id, an
+    /// unknown job, or garbage is dropped; only the exact id is accepted.
+    #[test]
+    fn only_the_current_dispatch_is_accepted() {
+        let current = DispatchedJobId::now_v7();
+        let other = DispatchedJobId::now_v7();
+        assert!(dispatch_matches(Some(current), &current.to_string()));
+        assert!(!dispatch_matches(Some(current), &other.to_string()));
+        assert!(!dispatch_matches(None, &current.to_string()));
+        assert!(!dispatch_matches(Some(current), "not-a-uuid"));
     }
 }

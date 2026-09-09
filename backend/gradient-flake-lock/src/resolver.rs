@@ -21,6 +21,9 @@ use crate::narhash::{nar_hash_of_dir, tarball_source_nar_hash};
 const USER_AGENT: &str = "gradient-flake-lock";
 const GITHUB_API: &str = "https://api.github.com";
 const GITLAB_API: &str = "https://gitlab.com";
+/// GitHub answers a tarball with a 302 to codeload and a large repo streams for
+/// minutes; the shared client's 30 s default is sized for API calls.
+const TARBALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 
 /// The newest revision of an input plus the metadata a `locked` block needs.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,7 +106,8 @@ impl HttpRevisionResolver {
 
         let last_modified = parse_rfc3339(&commit.commit.committer.date)?;
         let tarball = format!("{GITHUB_API}/repos/{owner}/{repo}/tarball/{}", commit.sha);
-        let nar_hash = tarball_source_nar_hash(self.github_get(&tarball)).await?;
+        let nar_hash =
+            tarball_source_nar_hash(self.github_get(&tarball).timeout(TARBALL_TIMEOUT)).await?;
 
         Ok(ResolvedRev {
             rev: commit.sha,
@@ -138,7 +142,8 @@ impl HttpRevisionResolver {
             "{GITLAB_API}/api/v4/tasks/{task}/repository/archive.tar.gz?sha={}",
             commit.id
         );
-        let nar_hash = tarball_source_nar_hash(self.gitlab_get(&tarball)).await?;
+        let nar_hash =
+            tarball_source_nar_hash(self.gitlab_get(&tarball).timeout(TARBALL_TIMEOUT)).await?;
 
         Ok(ResolvedRev {
             rev: commit.id,

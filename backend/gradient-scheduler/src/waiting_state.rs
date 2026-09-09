@@ -261,9 +261,9 @@ async fn attempt_graph_unstick(
 ) -> Result<(EvaluationStatus, Option<WaitingReason>)> {
     info!(%evaluation_id, "graph stuck: pool can build every pending anchor but none is dispatchable; self-healing");
 
-    // The canonical healing pipeline in Unstick scope: edges_complete
-    // restore, terminal-failed thaw, cache-trust reconcile, flag fixpoints,
-    // promotion (see `gradient_db::reconcile`).
+    // The canonical healing pipeline in Unstick scope: terminal-failed thaw,
+    // cache-trust reconcile, flag fixpoints, promotion (see
+    // `gradient_db::reconcile`).
     if let Err(e) = state
         .graph
         .transition(gradient_graph::Transition::Reconcile {
@@ -384,6 +384,7 @@ fn unproducible_drv_block_sql() -> String {
     let deps_ready = gradient_db::graph_sql::deps_ready_predicate("db");
     let drv_nar_closure = gradient_db::graph_sql::drv_nar_closure_complete_predicate("db");
     let drv_nar_absent = gradient_db::graph_sql::drv_nar_absent_predicate("db");
+    let walked = gradient_db::graph_sql::walked_predicate("db");
     format!(
         r#"
         SELECT EXISTS (
@@ -392,7 +393,7 @@ fn unproducible_drv_block_sql() -> String {
             JOIN derivation_build db ON db.id = bj.derivation_build
             WHERE bj.evaluation = $1
               AND db.status IN ({created}, {queued})
-              AND db.edges_complete
+              AND {walked}
               AND NOT db.substitutable
               AND NOT db.drv_closure_cached
               AND NOT {drv_nar_closure}
@@ -547,7 +548,7 @@ mod tests {
     use super::*;
 
     /// The zone-B detection must fire only on an anchor blocked *solely* by its
-    /// own unimportable `.drv`: pending, edges complete, deps satisfied, not
+    /// own unimportable `.drv`: pending, walked, deps satisfied, not
     /// substitutable, and neither `.drv` signal true. Mis-shaping it would either
     /// re-eval healthy evals or miss the lost-`.drv` stall (no live DB in unit
     /// tests, so pin the SQL shape).
@@ -564,7 +565,7 @@ mod tests {
             "only pending anchors: {sql}"
         );
         for frag in [
-            "db.edges_complete",
+            "w.walked",
             "NOT db.substitutable",
             "NOT db.drv_closure_cached",
         ] {

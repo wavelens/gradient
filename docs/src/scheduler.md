@@ -59,14 +59,17 @@ whose batch fails is marked `Failed` rather than left with a hole, because the
 wire carries no acknowledgement a worker could retry on; and a batch for an
 evaluation that is not streaming (terminal, `Building`, parked) is dropped, so a
 worker that died mid-walk cannot merge late batches into the re-dispatched walk
-once it has completed. Still open for #590: the per-evaluation rewrite of the
-global `substitutable` flag, the per-batch thaw of failed anchors, stub rows for
-named dependencies so no edge stays unresolvable, and a dispatch id that tells
-two walks of one evaluation apart while both stream.
+once it has completed. Two walks of the *same* evaluation are told apart by the
+dispatch id the scheduler mints at assignment: the worker echoes it on every
+report, and a report naming a dispatch its session did not hand out is dropped.
+The one fact a batch writes globally is `substitutable`, only ever set, never
+cleared, and only on an anchor that has not yet succeeded, so one evaluation's
+upstream probe can add a substitution for another walk but never take one away.
 
-On a restart nothing is rebuilt: a message being processed fails to its caller
-and the per-evaluation edge accumulator starts empty (its pending pairs are
-re-derived by the completion flush from the rows already written).
+Nothing is deferred between messages, so a restart leaves no pending graph
+state: a batch's stubs, records, edges, anchors and jobs are one transaction
+that either lands whole or fails to its caller, and a batch still queued for the
+next flush fails the same way.
 
 #### Promotion
 
@@ -78,50 +81,38 @@ failed dependency cascades `DependencyFailed` over the global
 `derivation_dependency` graph.
 
 Promotion and dispatch are gated on reachability: an anchor is queued and
-dispatched only while some `build_job` references its derivation. Anchors are
-seeded for every derivation, so without the gate promotion would queue
-derivations no surviving evaluation needs, leaving the dispatcher unable to
-attribute the build to a driving evaluation.
+dispatched only while some `build_job` references its derivation. Every name a
+batch reports gets an anchor and this evaluation's `build_job`, pruned subtrees
+included, so an evaluation stays `Building` until its whole named closure is
+terminal. Without the gate, promotion would queue derivations no surviving
+evaluation needs, leaving the dispatcher unable to attribute the build to a
+driving evaluation.
 
-They are also gated on `derivation_build.edges_complete`. Anchors are created
-per-batch as the evaluation streams, and edges flush incrementally:
-after each persisted batch, `flush_ready_edges` records every declared edge
-whose source and dependencies all have derivation rows and marks those sources
-(plus the batch's zero-dep leaves) `edges_complete`, so the dispatch tick can
-promote and dispatch them while the walk is still running. A pair with an
-unrecorded dependency stays pending - mid-stream that is ambiguous (the dep may
-simply not have streamed yet), so only the completion-time `flush_deferred_deps`
-pass settles the remainder and may flag `edges_unresolved`. An anchor with no
-edges is otherwise ambiguous: a genuine leaf, or a node whose edges are not
-written yet. A failed, aborted, or restart-interrupted eval leaves its anchors
-edge-less; promoting them as if they were dependency-free dispatches builds
-without their inputs (`InputsUnavailable`). So an anchor is promotable only once
-its full declared edge set is recorded - incrementally mid-stream, or at
-completion via `mark_edges_complete_for_eval`, which sets `edges_complete` for
-every anchor that eval's `build_job`s reference. The flag is monotonic and content-addressed:
-edges never change once written, so a later requeue keeps the anchor promotable
+They are also gated on `derivation.walked`. A batch names its dependencies by
+path, and the graph actor inserts a stub row for every name it does not have
+yet, so every declared edge lands in the same transaction as the derivation
+that declares it. A derivation is `walked` once its own record is in: outputs,
+every edge, input sources. A stub is never promoted, dispatched or pruned: its
+subtree is not recorded, and treating it as dependency-free would dispatch a
+build without its inputs. The bit is monotonic and content-addressed: edges
+never change once written, so a later requeue keeps the derivation promotable
 without re-evaluation. `promote_ready`, `promote_dependents`, and the dispatch
 readiness query all require it.
 
-A `build_job` anchor is marked complete even with zero edges, since a genuine leaf
-legitimately has none - which left a hole: if `flush_deferred_deps` could not
-resolve a *declared* dependency edge (the dependency derivation was never recorded,
-e.g. an interrupted or overlapping eval), the edge was silently dropped yet the
-source was still marked `edges_complete` and dispatched as dependency-free, failing
-`InputsUnavailable` on an input the server never had. `flush_deferred_deps` now sets
-`edges_unresolved` on any source whose declared edge it could not resolve, and
-`mark_edges_complete_for_eval` (both the completion and graph-unstick callers)
-refuses to mark those - so a 0-edge anchor that *declared* a dependency is held
-until a later eval records it, while a genuine leaf still promotes. The flag is
-cleared when a complete eval resolves the source's edges.
+The one event that can invalidate the bit is the derivation GC deleting a
+derivation another one still depends on: the FK cascade drops the edge and
+leaves the surviving dependent `walked` over an incomplete edge set. Clearing
+the bit on those survivors, so the next evaluation re-walks them, is the GC's
+own job and lands with its retirement pass.
 
 Promotion is otherwise event-driven (`promote_ready` at eval completion,
 `promote_dependents` at build completion), so a ready anchor whose triggering
-event never fired - a failed eval after its edges were flushed, a dependency that
-completed in a missed window, a restart - would sit in `Created` forever.
-`promote_ready` therefore also runs as a periodic backstop. The `edges_complete`
-gate is what makes this sweep safe: it can only ever promote fully-flushed
-anchors, so it can never dispatch a 0-edge anchor without its inputs.
+event never fired - a failed eval after its derivations were walked, a
+dependency that completed in a missed window, a restart - would sit in `Created`
+forever. `promote_ready` therefore also runs as a periodic backstop. The
+`walked` gate is what makes this sweep safe: it can only ever promote anchors
+whose whole declared edge set is recorded, so it can never dispatch one without
+its inputs.
 
 `reconcile_dependency_failed` is the failure-side counterpart of that backstop.
 The reactive `cascade_dependency_failed` fires only on a fresh terminal-failure
@@ -219,8 +210,8 @@ the cache. A `.drv`'s build-time source paths (`inputSrcs`, e.g.
 check does not cover them; they are recorded per derivation in
 `derivation_input_source` (parsed from the `.drv` at `report_eval_result`) and a
 non-substitutable anchor is promotable only when every one of its sources is
-`fully_cached`. Without this a requeued anchor - reset to `Created` but still
-`edges_complete` with all dependency anchors cached - would re-dispatch the
+`fully_cached`. Without this a requeued anchor - reset to `Created` but with its
+derivation still walked and all dependency anchors cached - would re-dispatch the
 instant the periodic backstop runs, before the new evaluation re-pushed its
 sources, and fail `InputsUnavailable`; with the gate it waits for the walk to
 push them. A substitutable anchor needs no sources, since it fetches its outputs
@@ -248,11 +239,12 @@ still a structural reference of any dependent's `.drv`. A substitutable anchor i
 substitutes its output and never imports its `.drv`, so the gate skips it.
 
 Because the anchor is global and build-once, a new evaluation is treated as a
-fresh build intent: `resolve_anchors` re-queues anchors a previous eval left
-terminal-failed, and the substitute-miss budget is scoped per evaluation. A
-permanent failure (or an exhausted substitute budget) therefore does not poison
-every later evaluation that needs the derivation - the world (upstream cache,
-network) may have changed since it failed.
+fresh build intent: the eval-scoped reconcile thaws every anchor a previous eval
+left terminal-failed across the evaluation's closure
+(`requeue_failed_closure_for_eval`), and the substitute-miss budget is scoped
+per evaluation. A permanent failure (or an exhausted substitute budget)
+therefore does not poison every later evaluation that needs the derivation - the
+world (upstream cache, network) may have changed since it failed.
 
 Only a *genuine* miss counts toward the substitute-miss budget. The worker reports
 `SubstituteUnavailable` (escalation-eligible) only when an output is on no upstream;
@@ -461,10 +453,12 @@ will demand is guaranteed pushed by the evaluation that produced it.
 The eval closure walk prunes the same way. As the worker walks the graph it
 asks the server which dependency derivations it already knows
 (`QueryKnownDerivations`); the server prunes a subtree only when **every** output
-is on a real upstream cache (`external_url`). An upstream binary cache serves a
-*complete closure*, so a build worker can fetch the pruned subtree's outputs on
-demand. Our own cache (`is_cached` / `cached_path`) is deliberately not accepted
-for pruning: it is populated output-only (substitution relays just the output NAR,
+is on a real upstream cache (`external_url`), or when every output is whole in our
+own cache (a `closure_complete` `cached_path`) behind a terminal-success anchor. An
+upstream binary cache serves a *complete closure*, so a build worker can fetch the
+pruned subtree's outputs on demand, and `closure_complete` carries the same
+guarantee for our own. A bare `is_cached` hit is deliberately not accepted for
+pruning: the cache is populated output-only (substitution relays just the output NAR,
 and a config-specific node's subtree may never have been pushed), so pruning on it
 would strand that subtree - never walked, recorded, or built, and off-upstream so
 unfetchable, a permanent `InputsUnavailable` dead-end (e.g. `unit-*.service` ->
@@ -472,12 +466,8 @@ unfetchable, a permanent `InputsUnavailable` dead-end (e.g. `unit-*.service` ->
 persisted `external_url`; the worker re-walking our own (unreliable) cached
 closures is the correctness price of an output-only cache.
 
-An anchor flagged `edges_unresolved` is never pruned either, even with all outputs
-on an upstream: its edge set is known-incomplete (a dependency a prior eval could
-not record - e.g. GC'd from a shared closure), and pruning it would skip the walk
-that rediscovers the dropped edge and clears the flag, stranding it and its
-dependents off promotion forever. Forcing the re-walk is what makes the flag's
-"a later eval resolves it" contract actually hold.
+A stub is never pruned: only a walked derivation whose outputs are on an upstream
+or whole in our cache is.
 
 #### Closure-complete cache
 
@@ -500,9 +490,9 @@ weaker signal fails `InputsUnavailable` on a runtime path the gate never checked
 direct edge). So completeness is tracked explicitly:
 
 `derivation_build.closure_complete` means a **built** anchor's whole build
-closure is fetchable: its outputs are cached, its edges are flushed
-(`edges_complete`), and every build dependency is itself `closure_complete` **or**
-`substitutable` (its closure lives on an upstream cache, fetchable on demand). A
+closure is fetchable: its outputs are cached, its derivation is walked, and every
+build dependency is itself `closure_complete` **or** `substitutable` (its closure
+lives on an upstream cache, fetchable on demand). A
 build's runtime references are a subset of its build inputs, so a fetchable build
 closure guarantees a fetchable runtime closure too - closing the runtime-vs-build
 edge gap without a runtime walk.
@@ -540,8 +530,7 @@ entirely and dispatches out of order (#456); its substitute job carries no
 `required_paths`, so the worker pulls no build deps and the job scores a uniform
 zero. The gate stays O(1) (a flag check), and the propagation touches only the
 completing anchor's dependent sub-tree. Partial indexes on `derivation_build`
-keyed by the dispatch (`status = Queued AND edges_complete`) and promote
-(`status = Created AND edges_complete`) predicates keep the per-tick scans off the
+keyed by `status = Queued` and `status = Created` keep the per-tick scans off the
 full anchor table.
 
 When a build still reports a path missing, `reconcile_missing_inputs` self-heals:
@@ -574,10 +563,10 @@ substitution), so promotion can never queue it and the gentle flag clear leaves
 the referrer cached, pruned, and never re-walked. When `demote_cached_output`'s
 producer is not reachable (`derivation_is_reachable` is false), the referrers are
 demoted (`demote_referrers_of`) so the next eval re-walks them, re-records the
-dropped edge, and schedules the orphan. Demote leaves `edges_complete` intact: it
+dropped edge, and schedules the orphan. Demote leaves `walked` intact: it
 deletes the `cached_path`, so the output is uncached and the next eval re-walks the
-derivation regardless (uncached nodes are never pruned) - clearing the flag would
-only strand a complete-edge node behind the closure gate until that re-walk.
+derivation regardless (uncached nodes are never pruned) - clearing the bit would
+only strand a fully-recorded derivation behind the closure gate until that re-walk.
 
 An **absent orphan** is the fourth case and the one that makes the whole thing
 self-heal without operator surgery: the missing input has *no* producer row and
@@ -700,16 +689,21 @@ A server restart kills every in-flight job, so `recover_interrupted_work` runs
 once at startup to reconcile the durable state the dead process left behind:
 
 - Orphaned `Running` build attempts are marked `Aborted`.
-- `Building` anchors are re-queued to `Queued` for re-dispatch (their evaluation
-  reached the build phase, so their edges are already flushed).
-- Pre-build in-flight evaluations (`Fetching`/`EvaluatingFlake`/
-  `EvaluatingDerivation`) are aborted - their dependency edges were never
-  flushed - and their tasks get `ForceEvaluation` so a fresh evaluation
-  re-walks them and writes a complete graph.
+- Every `Building` anchor is reset to `Queued`: the worker that was building it
+  is gone. This is a blanket reset, not a re-dispatch decision - the eval sweep
+  below still aborts the ones no live evaluation wants.
+- Every active evaluation a restart loses is aborted, and its task gets
+  `ForceEvaluation` so a fresh evaluation re-walks it and writes a complete
+  graph. That set is `EvaluationStatus::ACTIVE` minus the two the scheduler
+  re-drives on its own (`Queued`, re-offered by the eval dispatcher, and
+  `Waiting`, picked up by build reconcile), so `Building` is in it: an
+  evaluation that had finished walking is re-evaluated rather than resumed,
+  because nothing else would drive its remaining builds.
 - The anchors those aborted evaluations drove are aborted too
-  (`Created`/`Queued`/`Building` -> `Aborted`), mirroring the explicit-abort
-  path: the builder aborts the evaluation's builds when the server dies, so the
-  server reflects it. A global build-once anchor a still-live evaluation also
-  needs is left running (shared-anchor safety). The forced re-evaluation
-  re-drives the aborted anchors - `requeue_failed_anchors` resets them to
-  `Created` - and they promote once their edges are flushed.
+  (`Created`/`Queued`/`Building` -> `Aborted`), including the ones the
+  `Building` reset just re-queued. This mirrors the explicit-abort path: the
+  builder aborts the evaluation's builds when the server dies, so the server
+  reflects it. A global build-once anchor a still-live evaluation also needs is
+  left running (shared-anchor safety). The forced re-evaluation re-drives the
+  aborted anchors - `requeue_failed_anchors` resets them to `Created` - and they
+  promote once their derivations are walked.

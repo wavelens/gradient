@@ -83,10 +83,35 @@ impl ProtoConnection {
     }
 
     /// Split into a cloneable [`ProtoWriter`] and a [`ProtoReader`], backed by
-    /// the shared frame layer's bounded, batch-draining writer task.
-    pub fn split(self) -> (ProtoWriter, ProtoReader) {
-        let (reader, writer) = self.socket.split_peer(SEND_TIMEOUT);
-        (ProtoWriter { inner: writer }, ProtoReader { inner: reader })
+    /// the shared frame layer's bounded, batch-draining writer task, plus the
+    /// [`WriterFlush`] handle on that task.
+    pub fn split(self) -> (ProtoWriter, ProtoReader, WriterFlush) {
+        let (reader, writer, task) = self.socket.split_peer(SEND_TIMEOUT);
+        (
+            ProtoWriter { inner: writer },
+            ProtoReader { inner: reader },
+            WriterFlush(task),
+        )
+    }
+}
+
+/// Completion handle for a connection's writer task.
+pub struct WriterFlush(tokio::task::JoinHandle<()>);
+
+impl WriterFlush {
+    /// Wait up to `budget` for every queued frame to reach the socket.
+    ///
+    /// A send only enqueues, so a worker that exits right after reporting its
+    /// last job would drop that report on the floor. The task ends once the
+    /// final writer clone drops; the budget bounds the wait when a background
+    /// task (scoring, a NAR transfer) still holds one.
+    pub async fn flush(self, budget: Duration) {
+        if tokio::time::timeout(budget, self.0).await.is_err() {
+            tracing::warn!(
+                budget_secs = budget.as_secs(),
+                "writer did not flush in time; the server may not have every final report"
+            );
+        }
     }
 }
 
