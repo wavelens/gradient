@@ -226,7 +226,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             .await
             .context("TTL GC: failed to delete cached_path_signature rows")?;
 
-            gradient_db::retire_paths(&txn, &output_hashes, Some(UNSIGNED_GUARD))
+            gradient_db::retire_paths_where(&txn, &output_hashes, UNSIGNED_GUARD)
                 .await
                 .context("TTL GC: failed to retire cached paths")?;
             txn.commit().await?;
@@ -339,7 +339,7 @@ async fn purge_zombie_cached_paths(
         let deleted = async {
             use sea_orm::TransactionTrait;
             let txn = state.worker_db.begin().await?;
-            let retired = gradient_db::retire_paths(&txn, chunk, None).await?;
+            let retired = gradient_db::retire_paths(&txn, chunk).await?;
             txn.commit().await?;
             Ok::<u64, sea_orm::DbErr>(retired.deleted.len() as u64)
         }
@@ -732,8 +732,10 @@ mod tests {
         let log: Vec<String> = db
             .into_transaction_log()
             .iter()
-            .map(|t| format!("{t:?}"))
+            .flat_map(|t| t.statements().iter().map(|s| format!("{s:?}")))
             .collect();
+        // One string per statement: a transaction records as a single log entry,
+        // so formatting entries would let these matches straddle two statements.
         assert!(
             log.iter().any(|s| s.contains("DELETE FROM cached_path cp")
                 && s.contains("FROM cached_path_signature s")),

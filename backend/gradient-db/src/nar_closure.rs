@@ -21,7 +21,7 @@
 //! driven negative while no anchor gates on it stays unwhole until something
 //! does, holding every referrer unwhole with it.
 
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
+use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement};
 
 /// The row `{alias}` is stored and every reference resolves to a whole row.
 pub fn whole_predicate(alias: &str) -> String {
@@ -181,32 +181,49 @@ pub struct Retired {
     pub unwhole: Vec<String>,
 }
 
-/// Delete the `hashes` that satisfy `guard` from the index and move every
-/// counter and flag that trusted them, in the caller's transaction: the reverse
-/// ripple from the rows that were whole, `is_cached` off the outputs, and the
-/// anchor flags the rows backed (`drv_closure_cached` on the owners of a deleted
-/// `.drv`, `closure_complete` on the producers of every hash that stopped being
-/// whole). `Retired::deleted` names the rows that actually went.
-///
-/// `guard` is an extra condition on the row being deleted (aliased `cp`), for a
-/// caller that may drop a path only while something still holds - the TTL
-/// eviction passes `NOT EXISTS (SELECT 1 FROM cached_path_signature ...)`, since
+/// Delete `hashes` from the index and move every counter and flag that trusted
+/// them, in the caller's transaction: the reverse ripple from the rows that were
+/// whole, `is_cached` off the outputs, and the anchor flags the rows backed
+/// (`drv_closure_cached` on the owners of a deleted `.drv`, `closure_complete` on
+/// the producers of every hash that stopped being whole). `Retired::deleted` names
+/// the rows that actually went. Use [`retire_paths_where`] when the caller may
+/// drop a path only while some condition still holds.
+pub async fn retire_paths<C: ConnectionTrait>(db: &C, hashes: &[String]) -> Result<Retired, DbErr> {
+    retire(db, hashes, None).await
+}
+
+/// [`retire_paths`] restricted to the rows that still satisfy `guard`, a
+/// predicate over the row being deleted (aliased `cp`). The TTL eviction passes
+/// `NOT EXISTS (SELECT 1 FROM cached_path_signature ...)`, since
 /// `cached_path_signature.cached_path` is `ON DELETE CASCADE` and a retire takes
 /// every cache's signature with it.
 ///
-/// A guarded retire therefore runs [`LOCK`] first, and both halves are needed.
-/// The guard has to be evaluated by the DELETE, because a preceding statement
-/// would decide from its own snapshot; and the DELETE has to start after the wait
-/// for an in-flight signature insert is over, because under READ COMMITTED its
-/// snapshot is taken at statement start, before any lock wait, and EvalPlanQual
-/// re-checks the qual only against the row version it is updating - it never
-/// re-evaluates a subquery over another table. Guard alone: the DELETE blocks on
-/// the insert's RI `FOR KEY SHARE` lock, proceeds without ever seeing the
-/// signature that committed meanwhile, and cascades it away, 404ing a narinfo
-/// committed seconds earlier. `FOR UPDATE` alone: nothing decides. Together the
-/// wait is absorbed in its own statement and the DELETE opens a fresh snapshot
-/// that sees the signature its guard then tests.
-pub async fn retire_paths<C: ConnectionTrait>(
+/// Two statements, and neither is sufficient alone. The guard has to be evaluated
+/// by the DELETE, because a preceding statement would decide from its own
+/// snapshot; and the DELETE has to start after the wait for an in-flight signature
+/// insert is over, because under READ COMMITTED its snapshot is taken at statement
+/// start, before any lock wait, and EvalPlanQual re-checks the qual only against
+/// the row version it is updating - it never re-evaluates a subquery over another
+/// table. Guard alone: the DELETE blocks on the insert's RI `FOR KEY SHARE` lock,
+/// proceeds without ever seeing the signature that committed meanwhile, and
+/// cascades it away, 404ing a narinfo committed seconds earlier. [`LOCK`] alone:
+/// nothing decides. Together the wait is absorbed in its own statement and the
+/// DELETE opens a fresh snapshot that sees the signature its guard then tests.
+///
+/// That is why this takes a `&DatabaseTransaction` and not a connection: the locks
+/// [`LOCK`] takes have to still be held when the DELETE runs, and on a pooled
+/// connection each statement is its own implicit transaction, so every one of them
+/// would be released first and the race would be back with nothing to notice it.
+/// The type is the enforcement - a pooled guarded retire does not compile.
+pub async fn retire_paths_where(
+    txn: &DatabaseTransaction,
+    hashes: &[String],
+    guard: &str,
+) -> Result<Retired, DbErr> {
+    retire(txn, hashes, Some(guard)).await
+}
+
+async fn retire<C: ConnectionTrait>(
     db: &C,
     hashes: &[String],
     guard: Option<&str>,
@@ -342,7 +359,7 @@ pub const GATING_PATHS: &str = r#"
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, TransactionTrait, Value};
     use std::collections::BTreeMap;
 
     fn norm(s: &str) -> String {
@@ -360,10 +377,13 @@ mod tests {
         BTreeMap::from([(flag.to_owned(), Value::from(value))])
     }
 
+    /// One string per statement. A `MockDatabase` records everything run inside a
+    /// transaction as a single log entry, so formatting entries would merge those
+    /// statements into one string and let a cross-statement match pass.
     fn statements(db: sea_orm::DatabaseConnection) -> Vec<String> {
         db.into_transaction_log()
             .iter()
-            .map(|t| format!("{t:?}"))
+            .flat_map(|t| t.statements().iter().map(|s| format!("{s:?}")))
             .collect()
     }
 
@@ -538,7 +558,7 @@ mod tests {
             ])
             .into_connection();
 
-        let retired = retire_paths(&db, &["a".to_owned(), "b".to_owned()], None)
+        let retired = retire_paths(&db, &["a".to_owned(), "b".to_owned()])
             .await
             .unwrap();
 
@@ -577,7 +597,7 @@ mod tests {
     #[tokio::test]
     async fn retiring_nothing_issues_no_statement() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-        let retired = retire_paths(&db, &[], None).await.unwrap();
+        let retired = retire_paths(&db, &[]).await.unwrap();
         assert!(retired.deleted.is_empty() && retired.unwhole.is_empty());
         assert!(statements(db).is_empty());
     }
@@ -589,6 +609,11 @@ mod tests {
     /// wait and EvalPlanQual never re-evaluates a subquery over another table - so
     /// the guard alone still deletes a row whose signature committed while the
     /// DELETE was blocked on that insert's RI key lock, and cascades it away.
+    ///
+    /// The lock has to outlive its own statement for that to hold, which is why
+    /// this drives a transaction: `retire_paths_where` takes a
+    /// `&DatabaseTransaction`, so the pooled form the mock cannot distinguish is
+    /// rejected by the compiler instead.
     #[tokio::test]
     async fn a_guarded_retire_serialises_first_and_decides_in_the_delete() {
         let guard =
@@ -618,9 +643,11 @@ mod tests {
             ])
             .into_connection();
 
-        retire_paths(&db, &["a".to_owned()], Some(guard))
+        let txn = db.begin().await.unwrap();
+        retire_paths_where(&txn, &["a".to_owned()], guard)
             .await
             .unwrap();
+        txn.commit().await.unwrap();
 
         let log = statements(db);
         assert!(
