@@ -217,7 +217,9 @@ in {
           stops accepting work at once, finishes and reports what is running,
           then exits; jobs still running at the deadline are aborted and
           re-queued server-side. `TimeoutStopSec` is derived from this. Set to
-          0 to wait indefinitely, and raise `TimeoutStopSec` yourself.
+          0 to wait without limit: `TimeoutStopSec` is then infinity, so a
+          wedged build holds `systemctl stop` until a second signal
+          (`systemctl kill -s TERM gradient-worker`) aborts it.
         '';
         type = lib.types.ints.unsigned;
         default = 600;
