@@ -95,7 +95,7 @@ pub enum ServerMessage {
     NarPush {
         job_id: String,
         store_path: String,
-        /// zstd-compressed NAR data, ~4 MiB chunks.
+        /// zstd-compressed NAR data, 512 KiB chunks (`BULK_CHUNK_SIZE`).
         data: Vec<u8>,
         offset: u64,
         is_final: bool,
