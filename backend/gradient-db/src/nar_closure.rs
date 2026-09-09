@@ -20,6 +20,29 @@
 //! rescue a row driven negative, and it visits [`GATING_PATHS`] alone: a path
 //! driven negative while no anchor gates on it stays unwhole until something
 //! does, holding every referrer unwhole with it.
+//!
+//! # Who writes it
+//!
+//! The graph actor handles one message at a time, so a commit never overlaps
+//! another commit or one of the actor's own retires (`demote_cached_output` and
+//! the demote passes around it). Three maintenance deletions run OUTSIDE the
+//! actor, each in a transaction of its own: TTL eviction and the zombie purge in
+//! `gradient_cache::cacher::cleanup`, and the orphan GC in [`crate::gc`]. Nothing
+//! serialises those against a commit except the locks below, and
+//! [`repair_counters_for`] is no backstop for them either - it visits
+//! [`GATING_PATHS`] alone.
+//!
+//! # One hash-ordered lock per writer
+//!
+//! Every writer that touches a path together with its references locks all of
+//! those rows in ONE hash-ordered statement before it decides anything:
+//! [`lock_reference_endpoints`] for a commit, [`LOCK`] for either retire. The
+//! `ORDER BY hash` is not decoration. With acquisition monotone in `hash` on
+//! every side, a wait-for cycle would need some transaction to wait on a lower
+//! hash than one it already holds; a single unordered locker - a lock set that
+//! skips the row it is about to update, or a `DELETE` taking its locks in scan
+//! order - deadlocks against however careful the other side is, measured on the
+//! shape where a referrer's hash sorts after its reference's.
 
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement};
 
@@ -52,11 +75,64 @@ fn seed_statement() -> String {
     )
 }
 
-/// Serialising pass ahead of a guarded delete: `FOR UPDATE` conflicts with the
-/// RI `FOR KEY SHARE` a concurrent `cached_path_signature` insert holds on the
-/// parent row, so the wait for that insert is absorbed here instead of inside the
-/// DELETE. It reads nothing and decides nothing; see [`retire_paths`].
+/// Serialising pass ahead of every delete, guarded or not: it is the retire's
+/// half of the module doc's one hash-ordered acquisition, and `FOR UPDATE`
+/// conflicts with the RI `FOR KEY SHARE` a concurrent `cached_path_signature`
+/// insert holds on the parent row, so the wait for that insert is absorbed here
+/// instead of inside the DELETE. It reads nothing and decides nothing; see
+/// [`retire_paths`].
 const LOCK: &str = "SELECT 1 FROM cached_path WHERE hash = ANY($1) ORDER BY hash FOR UPDATE";
+
+/// The rows a commit's seed can count from: the references it reports (tokens,
+/// so the hash is their prefix), the references currently indexed for it, and its
+/// own row. See [`lock_reference_endpoints`].
+const LOCK_REFERENCES: &str = "\
+    SELECT 1 FROM cached_path \
+    WHERE hash IN (SELECT split_part(t.tok, '-', 1) FROM unnest($1::text[]) AS t(tok) WHERE t.tok <> '' \
+                   UNION \
+                   SELECT reference_hash FROM cached_path_reference WHERE referrer = $2 \
+                   UNION \
+                   SELECT $2::text) \
+    ORDER BY hash FOR KEY SHARE";
+
+/// Lock every row a commit's counter will be counted from, before the commit
+/// decides anything.
+///
+/// [`seed_references`] counts `cached_path` rows under its own READ COMMITTED
+/// snapshot. A maintenance retire deleting one of them from another transaction
+/// computes its referrers from `cached_path_reference` in a snapshot that cannot
+/// see an edge this commit has not committed yet, so it never increments this
+/// path, while the seed counts a reference that is already gone: the row ends
+/// whole with a dangling edge, permanently, and no fixpoint re-derives it any
+/// more. The dispatch gate reads that as a complete closure and sends a build
+/// against a missing input.
+///
+/// `FOR KEY SHARE` is the right strength. It conflicts with the `DELETE` in
+/// [`retire_paths`], so the retire waits for this transaction and its reverse
+/// ripple - a separate statement, hence a fresh snapshot - then sees the new
+/// edge; and it conflicts with nothing a commit needs, neither another commit's
+/// share lock nor the RI locks a `cached_path_signature` insert takes.
+///
+/// Runs BEFORE `upsert_cached_path`'s `FOR UPDATE` and includes the referrer's
+/// own row, so this is the single hash-ordered acquisition the module doc
+/// requires: the later `FOR UPDATE` only strengthens a lock this transaction
+/// already holds, which cannot introduce a wait. It takes the transaction rather
+/// than a `WorkerDb` for the same reason [`retire_paths_where`] does - on a
+/// pooled handle every lock is released at the end of the statement that took it.
+pub async fn lock_reference_endpoints(
+    txn: &DatabaseTransaction,
+    hash: &str,
+    references: &[String],
+) -> Result<(), DbErr> {
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        LOCK_REFERENCES,
+        [references.to_vec().into(), hash.into()],
+    ))
+    .await?;
+
+    Ok(())
+}
 
 const FORWARD: &str = r#"
     UPDATE cached_path cp
@@ -188,6 +264,14 @@ pub struct Retired {
 /// the producers of every hash that stopped being whole). `Retired::deleted` names
 /// the rows that actually went. Use [`retire_paths_where`] when the caller may
 /// drop a path only while some condition still holds.
+///
+/// Every retire opens with the [`LOCK`] pass, so it must run inside a transaction:
+/// a `DELETE` on its own acquires in scan order, and one unordered locker
+/// deadlocks against the hash-ordered acquisition every other writer makes (see
+/// the module doc). Every caller does - the actor's transaction for a demote, a
+/// `begin()` per batch for the zombie purge, per chunk for the orphan GC - and the
+/// connection stays generic only because the unguarded form takes no decision from
+/// the lock; [`retire_paths_where`] does, and its type says so.
 pub async fn retire_paths<C: ConnectionTrait>(db: &C, hashes: &[String]) -> Result<Retired, DbErr> {
     retire(db, hashes, None).await
 }
@@ -232,14 +316,12 @@ async fn retire<C: ConnectionTrait>(
         return Ok(Retired::default());
     }
 
-    if guard.is_some() {
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            LOCK,
-            [hashes.to_vec().into()],
-        ))
-        .await?;
-    }
+    db.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        LOCK,
+        [hashes.to_vec().into()],
+    ))
+    .await?;
 
     let rows = db
         .query_all_raw(Statement::from_sql_and_values(
@@ -427,6 +509,55 @@ mod tests {
         assert!(!seed_references(&db, "absent").await.unwrap());
     }
 
+    /// The commit's lock covers every row its seed can count from - the reported
+    /// tokens' hashes, the currently indexed references, and the referrer's own row
+    /// - in one hash-ordered statement. Self is included on purpose: a referrer
+    /// that locked its references but not itself acquires out of hash order when
+    /// its own hash sorts higher, and deadlocks against a bulk retire that reached
+    /// it first. `FOR KEY SHARE` conflicts with the retiring DELETE and with
+    /// nothing a concurrent commit or signature insert needs.
+    #[tokio::test]
+    async fn the_commit_locks_every_reference_endpoint_in_hash_order() {
+        let sql = norm(LOCK_REFERENCES);
+        assert!(
+            sql.contains("split_part(t.tok, '-', 1) FROM unnest($1::text[])"),
+            "the reported tokens: {sql}"
+        );
+        assert!(
+            sql.contains("SELECT reference_hash FROM cached_path_reference WHERE referrer = $2"),
+            "the currently indexed references: {sql}"
+        );
+        assert!(
+            sql.contains("UNION SELECT $2::text"),
+            "the referrer's own row: {sql}"
+        );
+        assert!(sql.ends_with("ORDER BY hash FOR KEY SHARE"), "{sql}");
+        assert!(
+            !sql.contains("FOR UPDATE"),
+            "a commit must not block another commit: {sql}"
+        );
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
+            .into_connection();
+
+        let txn = db.begin().await.unwrap();
+        lock_reference_endpoints(&txn, "h", &["d-dep".to_owned()])
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+
+        let log = crate::pool::statements(db.into_transaction_log());
+        assert_eq!(log.len(), 1, "one statement, one acquisition: {log:?}");
+        assert!(
+            log[0].contains("\"h\"") && log[0].contains("\"d-dep\""),
+            "{log:?}"
+        );
+    }
+
     /// Both ripples move a referrer once per edge into the frontier, so the
     /// per-referrer edge count and the self-exclusion are what keeps the counter
     /// sound.
@@ -530,7 +661,9 @@ mod tests {
     /// referrer of a row that was already incomplete counted it as missing
     /// already, so it must not be incremented twice. The flag clears then split:
     /// `is_cached` follows what was deleted, the anchor flags follow what stopped
-    /// being whole.
+    /// being whole. The unguarded retire opens with the same hash-ordered lock
+    /// pass as the guarded one: it decides nothing there, but an unordered
+    /// acquisition deadlocks against every other writer's ordered one.
     #[tokio::test]
     async fn retire_ripples_only_from_rows_that_were_whole() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -544,7 +677,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                3
+                4
             ])
             .into_connection();
 
@@ -557,30 +690,31 @@ mod tests {
         let log = crate::pool::statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
-            5,
-            "delete, one ripple level, three flag clears: {log:?}"
+            6,
+            "lock, delete, one ripple level, three flag clears: {log:?}"
         );
-        assert!(log[0].contains("DELETE FROM cached_path") && log[0].contains("RETURNING"));
+        assert!(log[0].contains("FOR UPDATE") && !log[0].contains("DELETE"));
+        assert!(log[1].contains("DELETE FROM cached_path") && log[1].contains("RETURNING"));
         assert!(
-            log[1].contains("missing_references + c.n")
-                && log[1].contains("\"a\"")
-                && !log[1].contains("\"b\"")
-        );
-        assert!(
-            log[2].contains("is_cached = false")
+            log[2].contains("missing_references + c.n")
                 && log[2].contains("\"a\"")
-                && log[2].contains("\"b\""),
+                && !log[2].contains("\"b\"")
+        );
+        assert!(
+            log[3].contains("is_cached = false")
+                && log[3].contains("\"a\"")
+                && log[3].contains("\"b\""),
             "is_cached follows every deleted hash: {log:?}"
         );
-        for clear in &log[3..] {
+        for clear in &log[4..] {
             assert!(
                 clear.contains("\"a\"") && !clear.contains("\"b\""),
                 "the anchor flags follow only what stopped being whole: {log:?}"
             );
         }
 
-        assert!(log[3].contains("drv_closure_cached = false"));
-        assert!(log[4].contains("closure_complete = false"));
+        assert!(log[4].contains("drv_closure_cached = false"));
+        assert!(log[5].contains("closure_complete = false"));
     }
 
     /// Nothing to retire is a no-op: no statement at all.
