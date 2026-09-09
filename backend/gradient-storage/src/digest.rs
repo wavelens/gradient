@@ -18,6 +18,18 @@ pub fn file_hash_sri(bytes: &[u8]) -> String {
     Sha256::digest(bytes).as_sri().to_string()
 }
 
+/// Whether a raw SHA-256 digest satisfies a declared narinfo `file_hash`.
+/// Mirrors [`verify_nar_reader`]: a declared non-sha256 hash is not comparable,
+/// so it passes here and is policed by the size check alone.
+pub fn file_hash_matches(expected: &str, actual: &[u8; 32]) -> bool {
+    let expected_norm = normalize_nar_hash(expected);
+    if !expected_norm.starts_with("sha256:") {
+        return true;
+    }
+
+    normalize_nar_hash(&Sha256::new(actual).as_sri().to_string()) == expected_norm
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum VerifyError {
     #[error("NAR object missing from storage")]
@@ -141,6 +153,29 @@ mod tests {
         *tampered.last_mut().unwrap() ^= 0xff;
         let err = verify_nar_bytes(&tampered, &expected, tampered.len() as u64).unwrap_err();
         assert!(matches!(err, VerifyError::Hash { .. }));
+    }
+
+    #[test]
+    fn file_hash_matches_accepts_the_digest_of_the_same_bytes() {
+        let digest = *Sha256::digest(BYTES).digest_bytes();
+        assert!(file_hash_matches(&file_hash_sri(BYTES), &digest));
+        assert!(file_hash_matches(
+            &normalize_nar_hash(&file_hash_sri(BYTES)),
+            &digest
+        ));
+    }
+
+    #[test]
+    fn file_hash_matches_rejects_a_different_digest() {
+        let mut digest = *Sha256::digest(BYTES).digest_bytes();
+        digest[0] ^= 0xff;
+        assert!(!file_hash_matches(&file_hash_sri(BYTES), &digest));
+    }
+
+    #[test]
+    fn file_hash_matches_passes_a_non_sha256_declaration() {
+        let blake3 = "blake3:11cxppanr71mzl1xnyax8rccaj5milx2fx9vnvzk6la672nb6dv4";
+        assert!(file_hash_matches(blake3, &[0u8; 32]));
     }
 
     #[test]

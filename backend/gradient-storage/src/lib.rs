@@ -18,7 +18,9 @@ pub mod source_nar;
 
 pub use self::context::StorageCtx;
 pub use self::debug_info::{BuildIdEntry, scan_build_ids};
-pub use self::digest::{VerifyError, file_hash_sri, verify_nar_bytes, verify_nar_reader};
+pub use self::digest::{
+    VerifyError, file_hash_matches, file_hash_sri, verify_nar_bytes, verify_nar_reader,
+};
 pub use self::log::*;
 pub use self::nar::*;
-pub use self::partial::PartialStore;
+pub use self::partial::{PartialStore, PartialWriter, StagedFile};

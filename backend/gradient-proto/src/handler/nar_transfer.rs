@@ -11,13 +11,18 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context as _;
 use futures::StreamExt;
 use gradient_core::ServerState;
 use gradient_graph::Demotion;
 use gradient_scheduler::Scheduler;
+use gradient_storage::{PartialWriter, StagedFile};
+use gradient_util::shutdown::Shutdown;
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, warn};
 
-use crate::messages::ServerMessage;
+use crate::messages::{ArchivedClientMessage, ClientMessage, ServerMessage};
+use crate::session::frame::Frame;
 
 use super::dispatch::DispatchContext;
 use super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
@@ -29,29 +34,84 @@ use super::socket::{BULK_CHUNK_SIZE, ProtoWriter, send_server_msg};
 pub(super) enum AppendOutcome {
     /// Chunk was staged.
     Ok,
-    /// Fatal: the chunk exceeded the session budget or arrived at a
-    /// non-contiguous offset. The path is now poisoned and its partial
-    /// discarded - the caller aborts the job and rejects the eventual
-    /// `NarUploaded` for the same path.
+    /// Fatal: the chunk exceeded the session budget, arrived at a
+    /// non-contiguous offset, or could not be staged at all. The path is now
+    /// poisoned and its partial discarded - the caller aborts the job and
+    /// rejects the eventual `NarUploaded` for the same path.
     Overflow,
     /// Chunk arrived for a path the session has already poisoned. Drop it.
     Poisoned,
 }
 
-#[derive(Default)]
+/// Bulk frames one stream may queue before the session actor waits on its
+/// staging task: 8 x 512 KiB.
+const STAGE_QUEUE_DEPTH: usize = 8;
+
+/// What a stream's staging task accepts: the frames to append, then one request
+/// to flush and report what was staged.
+enum StageCmd {
+    Chunk(Frame<ClientMessage>),
+    Finish(oneshot::Sender<anyhow::Result<StagedFile>>),
+}
+
 struct PathState {
-    /// Sender's `stream_token`; empty for legacy pushes that skip the header.
-    token: String,
     /// Bytes staged for this path on this session (resumed prefix + appends).
+    /// Also the offset the next chunk must carry. The stream's `stream_token`
+    /// lives in the partial store's sidecar, written when its writer opened.
     staged: u64,
+    tx: mpsc::Sender<StageCmd>,
 }
 
 /// A staged direct-mode upload detached from the session's receive store so a
-/// spawned task can validate, read, and commit it off the read loop.
+/// spawned task can verify and commit it off the read loop.
 pub(super) struct StagedNar {
-    store: gradient_storage::PartialStore,
-    key: String,
-    token: String,
+    /// The claimed `.partial`. The staging task reports its own (now stale)
+    /// path, because the claim rename happens on the read loop.
+    path: std::path::PathBuf,
+    done: oneshot::Receiver<anyhow::Result<StagedFile>>,
+}
+
+impl StagedNar {
+    /// Wait for the staging task to drain its queue and flush, then report the
+    /// staged file: its claimed path, its length, and the SHA-256 the task
+    /// computed as the bytes arrived.
+    pub(super) async fn finish(self) -> anyhow::Result<StagedFile> {
+        let file = self.done.await.context("NAR staging task vanished")??;
+        Ok(StagedFile {
+            path: self.path,
+            ..file
+        })
+    }
+}
+
+/// Drain one push stream into its `.partial`. Owning the open file keeps every
+/// chunk off the session actor: the actor only hands frames over, so a slow
+/// disk applies back-pressure through the queue instead of blocking dispatch.
+async fn stage_stream(mut writer: PartialWriter, mut rx: mpsc::Receiver<StageCmd>) {
+    let mut failed: Option<anyhow::Error> = None;
+    while let Some(cmd) = rx.recv().await {
+        match cmd {
+            StageCmd::Chunk(frame) => {
+                if failed.is_some() {
+                    continue;
+                }
+                let ArchivedClientMessage::NarPush { data, offset, .. } = frame.archived() else {
+                    continue;
+                };
+                if let Err(e) = writer.append(offset.to_native(), data.as_slice()).await {
+                    failed = Some(e);
+                }
+            }
+            StageCmd::Finish(reply) => {
+                let result = match failed.take() {
+                    Some(e) => Err(e),
+                    None => writer.finish().await,
+                };
+                let _ = reply.send(result);
+                return;
+            }
+        }
+    }
 }
 
 /// Disk-backed receiver for inbound `NarPush` chunks. Each push is staged to a
@@ -66,6 +126,7 @@ pub(super) struct StagedNar {
 /// valid transfer (mirrors the worker-pull `{job_id}/{hash}` namespacing).
 pub(super) struct NarReceiveStore {
     store: gradient_storage::PartialStore,
+    shutdown: Shutdown,
     peer_id: String,
     max_bytes: u64,
     active: HashMap<String, PathState>,
@@ -85,9 +146,11 @@ impl NarReceiveStore {
         peer_id: &str,
         ttl: std::time::Duration,
         max_bytes: u64,
+        shutdown: Shutdown,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             store: gradient_storage::PartialStore::new(root, ttl)?,
+            shutdown,
             peer_id: peer_id.to_owned(),
             max_bytes,
             active: HashMap::new(),
@@ -99,38 +162,65 @@ impl NarReceiveStore {
         format!("{}/{}/{}", self.peer_id, job_id, hash)
     }
 
-    /// Record the push stream's token and return how many bytes are already
-    /// staged for it (0 on token mismatch / nothing on disk). Clears any stale
-    /// poison so a fresh attempt can proceed.
+    /// Stop the staging task for `sk` and wait until it has drained its queue
+    /// and closed the file, so a truncate or unlink of that partial cannot race
+    /// a write from the stream being replaced.
+    async fn retire(&mut self, sk: &str) {
+        let Some(state) = self.active.remove(sk) else {
+            return;
+        };
+
+        let (tx, rx) = oneshot::channel();
+        if state.tx.send(StageCmd::Finish(tx)).await.is_ok() {
+            let _ = rx.await;
+        }
+    }
+
+    /// Record the push stream's token, open its partial, and return how many
+    /// bytes are already staged for it (0 on token mismatch / nothing on disk).
+    /// Clears any stale poison so a fresh attempt can proceed.
     pub(super) async fn note_header(&mut self, job_id: &str, store_path: &str, token: &str) -> u64 {
         let sk = state_key(job_id, store_path);
         self.poisoned.remove(&sk);
-        let received = match store_hash(store_path) {
-            Some(h) => {
-                let key = self.key(job_id, h);
-                self.store.received_len(&key, token).await.unwrap_or(0)
-            }
-            None => 0,
+        self.retire(&sk).await;
+
+        let Some(hash) = store_hash(store_path) else {
+            return 0;
         };
+
+        let key = self.key(job_id, hash);
+        let received = self.store.received_len(&key, token).await.unwrap_or(0);
+        let writer = match self.store.open_writer(&key, token, received).await {
+            Ok(writer) => writer,
+            Err(e) => {
+                warn!(%store_path, error = %e, "failed to open staged partial; poisoning path");
+                self.poison(job_id, store_path, hash).await;
+                return 0;
+            }
+        };
+
+        let (tx, rx) = mpsc::channel(STAGE_QUEUE_DEPTH);
+        self.shutdown.spawn(stage_stream(writer, rx));
         self.active.insert(
             sk,
             PathState {
-                token: token.to_owned(),
                 staged: received,
+                tx,
             },
         );
         received
     }
 
-    /// Stage a chunk at `offset` (must be contiguous). Creates a token-less
-    /// entry for legacy pushes that skip the header. The blocking disk write
-    /// runs on the blocking pool so the async socket task is never stalled.
+    /// Hand a chunk to this path's staging task. `offset` must be contiguous;
+    /// a gap is fatal here rather than at commit time so the worker is aborted
+    /// before it streams the rest of a NAR that can never be stored. Opens a
+    /// token-less stream for legacy pushes that skip the header.
     pub(super) async fn append(
         &mut self,
         job_id: &str,
         store_path: &str,
         offset: u64,
-        data: &[u8],
+        frame: Frame<ClientMessage>,
     ) -> AppendOutcome {
         let sk = state_key(job_id, store_path);
         if self.poisoned.contains(&sk) {
@@ -141,56 +231,72 @@ impl NarReceiveStore {
             return AppendOutcome::Poisoned;
         };
 
-        self.active.entry(sk.clone()).or_default();
-        let total: u64 = self.active.values().map(|s| s.staged).sum();
-        if total.saturating_add(data.len() as u64) > self.max_bytes {
+        let len = {
+            let ArchivedClientMessage::NarPush { data, .. } = frame.archived() else {
+                warn!(%store_path, "non-NarPush frame routed to the NAR receive store");
+                return AppendOutcome::Poisoned;
+            };
+            data.len() as u64
+        };
+
+        if !self.active.contains_key(&sk) {
+            self.note_header(job_id, store_path, "").await;
+        }
+        let Some(state) = self.active.get(&sk) else {
+            return AppendOutcome::Overflow;
+        };
+
+        let tx = state.tx.clone();
+        if offset != state.staged {
+            warn!(%store_path, offset, staged = state.staged, "non-contiguous NarPush; poisoning path");
             self.poison(job_id, store_path, hash).await;
             return AppendOutcome::Overflow;
         }
 
-        let token = self.active[&sk].token.clone();
-        let key = self.key(job_id, hash);
-        let len = data.len() as u64;
-        match self.store.append(&key, &token, offset, data).await {
-            Ok(()) => {
-                if let Some(s) = self.active.get_mut(&sk) {
-                    s.staged += len;
-                }
-                AppendOutcome::Ok
-            }
-            Err(e) => {
-                warn!(%store_path, error = %e, "partial append failed; poisoning path");
-                self.poison(job_id, store_path, hash).await;
-                AppendOutcome::Overflow
-            }
+        let total: u64 = self.active.values().map(|s| s.staged).sum();
+        if total.saturating_add(len) > self.max_bytes {
+            self.poison(job_id, store_path, hash).await;
+            return AppendOutcome::Overflow;
         }
+
+        if tx.send(StageCmd::Chunk(frame)).await.is_err() {
+            warn!(%store_path, "NAR staging task gone; poisoning path");
+            self.poison(job_id, store_path, hash).await;
+            return AppendOutcome::Overflow;
+        }
+
+        if let Some(s) = self.active.get_mut(&sk) {
+            s.staged += len;
+        }
+        AppendOutcome::Ok
     }
 
     async fn poison(&mut self, job_id: &str, store_path: &str, hash: &str) {
+        let sk = state_key(job_id, store_path);
+        self.retire(&sk).await;
         let key = self.key(job_id, hash);
         let _ = self.store.discard(&key).await;
-        let sk = state_key(job_id, store_path);
-        self.active.remove(&sk);
         self.poisoned.insert(sk);
     }
 
     /// Detach the staged stream for `store_path` so a spawned task can commit
     /// it without borrowing the session's receive store. Returns `None` when no
-    /// direct-mode stream is open (a presigned upload). The per-path state is
-    /// removed and the finished partial is *claimed* under a unique key here,
-    /// synchronously on the read loop: the commit runs detached and can lag
+    /// direct-mode stream is open (a presigned upload). The partial is *claimed*
+    /// under a unique key here, synchronously on the read loop, and only then is
+    /// the staging task asked to flush: the commit runs detached and can lag
     /// behind the commit semaphore, and the same content-addressed `.drv` is
     /// pushed repeatedly across an eval's closure walk. A later push of the same
-    /// hash resets the shared `{peer}/{hash}` partial (token-mismatch discard /
-    /// `offset==0` truncate), so a bare shared key would leave the queued commit
-    /// reading 0 bytes ("staged NAR size 0 does not match reported file_size").
+    /// hash resets the shared `{peer}/{job}/{hash}` partial (token-mismatch
+    /// discard / `offset == 0` truncate), so a claim taken off the read loop
+    /// could be raced by the very next header. The rename does not disturb the
+    /// staging task: it writes through an open handle to the same file.
     pub(super) async fn take_staged(
         &mut self,
         job_id: &str,
         store_path: &str,
     ) -> Option<StagedNar> {
-        let state = self.active.remove(&state_key(job_id, store_path))?;
         let hash = store_hash(store_path)?;
+        let state = self.active.remove(&state_key(job_id, store_path))?;
         let base_key = self.key(job_id, hash);
         let key = match self.store.detach(&base_key).await {
             Ok(Some(claim)) => claim,
@@ -200,16 +306,20 @@ impl NarReceiveStore {
                 base_key
             }
         };
+
+        let (tx, done) = oneshot::channel();
+        if state.tx.send(StageCmd::Finish(tx)).await.is_err() {
+            warn!(%store_path, "NAR staging task gone before the stream was finished");
+        }
         Some(StagedNar {
-            store: self.store.clone(),
-            key,
-            token: state.token,
+            path: self.store.path(&key),
+            done,
         })
     }
 
     /// Drop the staged partial and per-path state after a successful commit.
     pub(super) async fn finish(&mut self, job_id: &str, store_path: &str) {
-        self.active.remove(&state_key(job_id, store_path));
+        self.retire(&state_key(job_id, store_path)).await;
         if let Some(hash) = store_hash(store_path) {
             let key = self.key(job_id, hash);
             let _ = self.store.discard(&key).await;
@@ -274,16 +384,27 @@ impl<'a> DispatchContext<'a> {
         &mut self,
         job_id: &str,
         store_path: &str,
-        data: &[u8],
-        offset: u64,
-        is_final: bool,
+        frame: Frame<ClientMessage>,
         nar: &mut NarReceiveStore,
     ) {
-        debug!(peer_id = %self.peer_id, %job_id, %store_path, offset, is_final, bytes = data.len(), "NarPush");
-        if data.is_empty() {
+        let (offset, len, is_final) = {
+            let ArchivedClientMessage::NarPush {
+                data,
+                offset,
+                is_final,
+                ..
+            } = frame.archived()
+            else {
+                return;
+            };
+            (offset.to_native(), data.len(), *is_final)
+        };
+
+        debug!(peer_id = %self.peer_id, %job_id, %store_path, offset, is_final, bytes = len, "NarPush");
+        if len == 0 {
             return;
         }
-        match nar.append(job_id, store_path, offset, data).await {
+        match nar.append(job_id, store_path, offset, frame).await {
             AppendOutcome::Ok => {}
             AppendOutcome::Overflow => {
                 let reason = format!(
@@ -452,7 +573,7 @@ struct CommitUploadedNar {
 /// Detached storage commit plus DB effects for one `NarUploaded`.
 async fn commit_uploaded_nar(c: CommitUploadedNar) {
     let committed = match c.staged {
-        Some(ref staged) => {
+        Some(staged) => {
             commit_relayed(
                 &c.writer,
                 &c.state,
@@ -504,10 +625,10 @@ async fn commit_uploaded_nar(c: CommitUploadedNar) {
     }
 }
 
-/// Commit a direct-mode (relayed) push: validate the staged partial's size
-/// against the reported `file_size`, write it to `nar_storage`, then drop
-/// the partial. Returns `false` (after failing the build transiently) if
-/// any step fails.
+/// Commit a direct-mode (relayed) push: wait for the staging task to flush,
+/// check the length and hash it reports against the ones the worker reported,
+/// then move the staged file into `nar_storage` (a rename on local disk).
+/// Returns `false` (after failing the build transiently) if any step fails.
 #[allow(
     clippy::too_many_arguments,
     reason = "arg-heavy; refactor tracked in #503"
@@ -522,65 +643,69 @@ async fn commit_relayed(
     hash: &str,
     file_hash: &str,
     file_size: u64,
-    staged: &StagedNar,
+    staged: StagedNar,
 ) -> bool {
-    let staged_len = staged
-        .store
-        .received_len(&staged.key, &staged.token)
+    let file = match staged.finish().await {
+        Ok(file) => file,
+        Err(e) => {
+            let reason = format!("failed to stage NAR: {e}");
+            error!(%peer_id, %job_id, %store_path, error = %e, "NAR staging failed");
+            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+            return false;
+        }
+    };
+
+    if file.len != file_size {
+        let reason = format!(
+            "staged NAR size {} does not match reported file_size {file_size}",
+            file.len
+        );
+        error!(%peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
+        fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+        discard_staged(&file.path).await;
+        return false;
+    }
+
+    if !gradient_storage::file_hash_matches(file_hash, &file.sha256) {
+        let reason = format!("NAR content verification failed: staged bytes are not {file_hash}");
+        error!(%peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
+        fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+        discard_staged(&file.path).await;
+        return false;
+    }
+
+    match crate::ingest::nar_write_needed(&state.worker_db, &state.nar_storage, hash, file_hash)
         .await
-        .unwrap_or(0);
-    if staged_len != file_size {
-        let reason =
-            format!("staged NAR size {staged_len} does not match reported file_size {file_size}");
-        error!(%peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
-        fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-        return false;
-    }
-    // Stream-verify then stream-store the staged NAR so a large build output is
-    // never buffered whole in server memory (two sequential reads of the local
-    // `.partial`; verify passes before any object write so a corrupt upload
-    // never commits).
-    let verify_reader = match staged.store.open_read(&staged.key).await {
-        Ok(f) => f,
-        Err(e) => {
-            let reason = format!("failed to read staged NAR: {e}");
-            error!(%peer_id, %job_id, %store_path, error = %e, "read staged NAR failed");
-            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-            return false;
-        }
-    };
-    if let Err(e) = gradient_storage::verify_nar_reader(verify_reader, file_hash, file_size).await {
-        let reason = format!("NAR content verification failed: {e}");
-        error!(%peer_id, %job_id, %store_path, %reason, "NAR upload integrity check failed");
-        fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-        return false;
-    }
-    let put_reader = match staged.store.open_read(&staged.key).await {
-        Ok(f) => f,
-        Err(e) => {
-            let reason = format!("failed to read staged NAR: {e}");
-            error!(%peer_id, %job_id, %store_path, error = %e, "read staged NAR failed");
-            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-            return false;
-        }
-    };
-    if let Err(e) = crate::ingest::put_nar_idempotent_reader(
-        &state.worker_db,
-        &state.nar_storage,
-        hash,
-        file_hash,
-        put_reader,
-    )
-    .await
     {
-        let reason = format!("failed to write NAR to storage: {e}");
-        error!(%peer_id, %job_id, %store_path, error = %e, "nar_storage.put failed");
-        fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
-        return false;
+        Ok(true) => {
+            if let Err(e) = state.nar_storage.adopt_file(hash, &file.path).await {
+                let reason = format!("failed to write NAR to storage: {e}");
+                error!(%peer_id, %job_id, %store_path, error = %e, "nar_storage.adopt_file failed");
+                fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+                return false;
+            }
+        }
+        Ok(false) => discard_staged(&file.path).await,
+        Err(e) => {
+            let reason = format!("failed to check for a stored NAR: {e}");
+            error!(%peer_id, %job_id, %store_path, error = %e, "NAR idempotency check failed");
+            fail_build_transient(writer, scheduler, peer_id, job_id, reason).await;
+            return false;
+        }
     }
-    let _ = staged.store.discard(&staged.key).await;
+
     debug!(%peer_id, %job_id, %store_path, file_size, "NAR stored");
     true
+}
+
+/// Drop a staged file `nar_storage` did not adopt. A leftover is reclaimed by
+/// the partial-store TTL sweep anyway, so a failure here is only logged.
+async fn discard_staged(path: &std::path::Path) {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => debug!(path = %path.display(), error = %e, "failed to remove staged NAR"),
+    }
 }
 
 /// Commit a presigned (S3) upload: the worker already PUT the bytes directly,
@@ -931,6 +1056,10 @@ async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path
 #[cfg(test)]
 mod nar_receive_store_tests {
     use super::{AppendOutcome, NarReceiveStore};
+    use crate::messages::ClientMessage;
+    use crate::session::frame::{Frame, Inbound, WireMessage as _};
+    use gradient_util::shutdown::Shutdown;
+    use sha2::Digest as _;
     use std::time::Duration;
     use tempfile::TempDir;
 
@@ -945,9 +1074,31 @@ mod nar_receive_store_tests {
             "peer-1",
             Duration::from_secs(3600),
             max_bytes,
+            Shutdown::new(),
         )
         .unwrap();
         (dir, s)
+    }
+
+    /// A `NarPush` as it reaches the handler: encoded, then read back in place.
+    fn frame(
+        job: &str,
+        path: &str,
+        offset: u64,
+        data: &[u8],
+        is_final: bool,
+    ) -> Frame<ClientMessage> {
+        let msg = ClientMessage::NarPush {
+            job_id: job.into(),
+            store_path: path.into(),
+            data: data.to_vec(),
+            offset,
+            is_final,
+        };
+        match ClientMessage::decode(msg.encode().expect("encodes")).expect("decodes") {
+            Inbound::Bulk(f) => f,
+            Inbound::Control(_) => panic!("NarPush is bulk"),
+        }
     }
 
     /// A valid 32-char-hash store path keyed by a single repeated char.
@@ -958,58 +1109,92 @@ mod nar_receive_store_tests {
     const JOB: &str = "build:job-1";
 
     #[tokio::test]
-    async fn append_below_budget_stages_and_reads_back() {
+    async fn chunks_are_staged_off_the_caller_and_finish_reports_the_hash() {
         let (_d, mut s) = store(1024);
         let a = path('a');
-        assert_ok(s.append(JOB, &a, 0, &[0u8; 256]).await);
-        assert_ok(s.append(JOB, &a, 256, &[1u8; 256]).await);
-        let staged = s
-            .take_staged(JOB, &a)
-            .await
-            .expect("direct stream is active");
+        s.note_header(JOB, &a, "tok").await;
+        assert_ok(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 256], false))
+                .await,
+        );
+        assert_ok(
+            s.append(JOB, &a, 256, frame(JOB, &a, 256, &[1u8; 256], true))
+                .await,
+        );
+        let staged = s.take_staged(JOB, &a).await.expect("stream is active");
         assert!(
             s.take_staged(JOB, &a).await.is_none(),
             "take_staged must detach the stream"
         );
-        assert_eq!(
-            staged
-                .store
-                .received_len(&staged.key, &staged.token)
-                .await
-                .unwrap(),
-            512
-        );
-        assert_eq!(staged.store.read_all(&staged.key).await.unwrap().len(), 512);
+
+        let file = staged.finish().await.expect("drained");
+        assert_eq!(file.len, 512);
+        let mut want = vec![0u8; 256];
+        want.extend([1u8; 256]);
+        assert_eq!(file.sha256, <[u8; 32]>::from(sha2::Sha256::digest(&want)));
+        assert_eq!(tokio::fs::read(&file.path).await.unwrap(), want);
     }
 
     #[tokio::test]
     async fn non_contiguous_offset_poisons_path() {
         let (_d, mut s) = store(1024);
         let a = path('a');
-        assert_ok(s.append(JOB, &a, 0, &[0u8; 100]).await);
+        s.note_header(JOB, &a, "tok").await;
+        assert_ok(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 100], false))
+                .await,
+        );
         assert!(matches!(
-            s.append(JOB, &a, 999, &[0u8; 10]).await,
+            s.append(JOB, &a, 999, frame(JOB, &a, 999, &[0u8; 10], true))
+                .await,
             AppendOutcome::Overflow
         ));
         assert!(s.is_poisoned(JOB, &a));
         assert!(matches!(
-            s.append(JOB, &a, 0, &[0u8; 10]).await,
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 10], true))
+                .await,
             AppendOutcome::Poisoned
         ));
     }
 
+    /// The stager re-checks the offset the frame itself carries, so a gap the
+    /// session actor could not see still fails the commit instead of silently
+    /// storing a short NAR.
     #[tokio::test]
-    async fn append_overflow_poisons_path() {
+    async fn a_frame_whose_offset_skips_ahead_fails_the_finish() {
         let (_d, mut s) = store(1024);
         let a = path('a');
-        assert_ok(s.append(JOB, &a, 0, &[0u8; 1000]).await);
+        s.note_header(JOB, &a, "tok").await;
+        assert_ok(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 100], false))
+                .await,
+        );
+        assert_ok(
+            s.append(JOB, &a, 100, frame(JOB, &a, 999, &[0u8; 10], true))
+                .await,
+        );
+        let staged = s.take_staged(JOB, &a).await.expect("stream is active");
+        assert!(staged.finish().await.is_err(), "the stager saw the gap");
+    }
+
+    #[tokio::test]
+    async fn append_overflow_poisons_path() {
+        let (_d, mut s) = store(300);
+        let a = path('a');
+        s.note_header(JOB, &a, "tok").await;
+        assert_ok(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 200], false))
+                .await,
+        );
         assert!(matches!(
-            s.append(JOB, &a, 1000, &[0u8; 100]).await,
+            s.append(JOB, &a, 200, frame(JOB, &a, 200, &[0u8; 200], false))
+                .await,
             AppendOutcome::Overflow
         ));
         assert!(s.is_poisoned(JOB, &a));
         assert!(matches!(
-            s.append(JOB, &a, 0, &[0u8; 50]).await,
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 10], true))
+                .await,
             AppendOutcome::Poisoned
         ));
     }
@@ -1017,13 +1202,20 @@ mod nar_receive_store_tests {
     #[tokio::test]
     async fn overflow_across_keys_is_caught() {
         let (_d, mut s) = store(800);
-        assert_ok(s.append(JOB, &path('a'), 0, &[0u8; 400]).await);
-        assert_ok(s.append(JOB, &path('b'), 0, &[0u8; 400]).await);
+        let (a, b, c) = (path('a'), path('b'), path('c'));
+        assert_ok(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 400], true))
+                .await,
+        );
+        assert_ok(
+            s.append(JOB, &b, 0, frame(JOB, &b, 0, &[0u8; 400], true))
+                .await,
+        );
         assert!(matches!(
-            s.append(JOB, &path('c'), 0, &[42u8]).await,
+            s.append(JOB, &c, 0, frame(JOB, &c, 0, &[42u8], true)).await,
             AppendOutcome::Overflow
         ));
-        assert!(s.is_poisoned(JOB, &path('c')));
+        assert!(s.is_poisoned(JOB, &c));
     }
 
     #[tokio::test]
@@ -1031,7 +1223,10 @@ mod nar_receive_store_tests {
         let (_d, mut s) = store(10_000);
         let a = path('a');
         s.note_header(JOB, &a, "tok-v1").await;
-        assert_ok(s.append(JOB, &a, 0, b"hello").await);
+        assert_ok(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, b"hello", false))
+                .await,
+        );
         // Simulated reconnect: same token resumes; a different token restarts.
         assert_eq!(s.note_header(JOB, &a, "tok-v1").await, 5);
         assert_eq!(s.note_header(JOB, &a, "tok-v2").await, 0);
@@ -1047,15 +1242,39 @@ mod nar_receive_store_tests {
         let p = path('a');
 
         s.note_header("build:job-a", &p, "tok-a").await;
-        assert_ok(s.append("build:job-a", &p, 0, &[0u8; 100]).await);
+        assert_ok(
+            s.append(
+                "build:job-a",
+                &p,
+                0,
+                frame("build:job-a", &p, 0, &[0u8; 100], false),
+            )
+            .await,
+        );
 
         // Job B opens the same path with a different token, then writes its own
         // first chunk - this must not touch job A's partial.
         s.note_header("build:job-b", &p, "tok-b").await;
-        assert_ok(s.append("build:job-b", &p, 0, &[1u8; 100]).await);
+        assert_ok(
+            s.append(
+                "build:job-b",
+                &p,
+                0,
+                frame("build:job-b", &p, 0, &[1u8; 100], true),
+            )
+            .await,
+        );
 
         // Job A resumes contiguously from its own 100 bytes.
-        assert_ok(s.append("build:job-a", &p, 100, &[0u8; 100]).await);
+        assert_ok(
+            s.append(
+                "build:job-a",
+                &p,
+                100,
+                frame("build:job-a", &p, 100, &[0u8; 100], true),
+            )
+            .await,
+        );
         assert!(!s.is_poisoned("build:job-a", &p));
 
         let sa = s
@@ -1066,14 +1285,8 @@ mod nar_receive_store_tests {
             .take_staged("build:job-b", &p)
             .await
             .expect("job-b staged");
-        assert_eq!(
-            sa.store.received_len(&sa.key, &sa.token).await.unwrap(),
-            200
-        );
-        assert_eq!(
-            sb.store.received_len(&sb.key, &sb.token).await.unwrap(),
-            100
-        );
+        assert_eq!(sa.finish().await.expect("job-a drained").len, 200);
+        assert_eq!(sb.finish().await.expect("job-b drained").len, 100);
     }
 
     #[tokio::test]
@@ -1090,20 +1303,27 @@ mod nar_receive_store_tests {
         let (_d, mut s) = store(100);
         let a = path('a');
         assert!(matches!(
-            s.append(JOB, &a, 0, &[0u8; 200]).await,
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 200], false))
+                .await,
             AppendOutcome::Overflow
         ));
         assert!(s.is_poisoned(JOB, &a));
         s.clear_poison(JOB, &a).await;
         assert!(!s.is_poisoned(JOB, &a));
-        assert_ok(s.append(JOB, &a, 0, &[0u8; 50]).await);
+        assert_ok(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 50], true))
+                .await,
+        );
     }
 
     #[tokio::test]
     async fn finish_discards_staged_partial() {
         let (_d, mut s) = store(10_000);
         let a = path('a');
-        assert_ok(s.append(JOB, &a, 0, b"hello").await);
+        assert_ok(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, b"hello", true))
+                .await,
+        );
         s.finish(JOB, &a).await;
         assert!(s.take_staged(JOB, &a).await.is_none());
         assert_eq!(
