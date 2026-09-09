@@ -327,11 +327,13 @@ it to the next reconcile tick: every pass that deletes `cached_path` rows
 clears the `drv_closure_cached` / `closure_complete` flags those rows backed, so
 there is no window in which the gate trusts an artifact GC just removed. A caller
 that may only drop a path under a condition (the TTL eviction drops one no cache
-signs any more) hands that condition to the retiring DELETE rather than checking it
-in a statement of its own, which would re-check it against its own snapshot once it
-blocked on a concurrent commit and cascade away a signature just written. Path invalidation goes further and
-demotes the producer itself (`demote_cached_output`), so an invalidated output
-rebuilds instead of staying trusted-but-gone. And because the per-task
+signs any more) hands that condition to the retiring DELETE rather than deciding it
+in a statement of its own, which would decide from its own snapshot and cascade away
+a signature another cache wrote meanwhile; the retire serialises that DELETE behind
+a pure `FOR UPDATE` pass first, since a statement's snapshot predates its own lock
+wait. Path invalidation goes further and demotes the producer itself
+(`demote_cached_output`), so an invalidated output rebuilds instead of staying
+trusted-but-gone. And because the per-task
 evaluation GC refuses to run while any evaluation is active, a wedged `Building`
 evaluation used to freeze a task's GC forever - an "active" evaluation
 untouched for `gc_wedged_eval_hours` (default 24h) now stops blocking, while
@@ -463,8 +465,9 @@ is on a real upstream cache (`external_url`), or when every output is whole in o
 own cache (a `cached_path` with its NAR stored and `missing_references = 0`) behind
 a terminal-success anchor. An upstream binary cache serves a *complete closure*, so
 a build worker can fetch the pruned subtree's outputs on demand, and a whole
-`cached_path` carries the same guarantee for our own. A bare `is_cached` hit is deliberately not accepted for
-pruning: the cache is populated output-only (substitution relays just the output NAR,
+`cached_path` carries the same guarantee for our own. A bare `is_cached` hit is
+deliberately not accepted for pruning: the cache is populated output-only
+(substitution relays just the output NAR,
 and a config-specific node's subtree may never have been pushed), so pruning on it
 would strand that subtree - never walked, recorded, or built, and off-upstream so
 unfetchable, a permanent `InputsUnavailable` dead-end (e.g. `unit-*.service` ->
