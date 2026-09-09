@@ -259,11 +259,20 @@ pub struct Retired {
 
 /// Delete `hashes` from the index and move every counter and flag that trusted
 /// them, in the caller's transaction: the reverse ripple from the rows that were
-/// whole, `is_cached` off the outputs, and the anchor flags the rows backed
-/// (`drv_closure_cached` on the owners of a deleted `.drv`, `closure_complete` on
-/// the producers of every hash that stopped being whole). `Retired::deleted` names
-/// the rows that actually went. Use [`retire_paths_where`] when the caller may
-/// drop a path only while some condition still holds.
+/// whole, `is_cached` off the deleted outputs, and the anchor flags
+/// (`drv_closure_cached` on the owner of a deleted or unwholed `.drv`,
+/// `closure_complete` on its producers) off every hash that was DELETED or that
+/// stopped being whole. `Retired::deleted` names the rows that actually went. Use
+/// [`retire_paths_where`] when the caller may drop a path only while some
+/// condition still holds.
+///
+/// The anchor flags follow the union and not just the unwhole set because neither
+/// reads the counter: `drv_closure_cached` requires the `.drv`'s own row to be
+/// backed plus the dependency recursion, and the Completed arm of
+/// `closure_complete` only that every output has a backed `cached_path`. So a row
+/// that was deleted while it was NOT whole would keep a stale-true gate until the
+/// next `Global` reconcile clears it, and `find_ready_anchors` runs every 5s: six
+/// dispatch passes able to send a build against a `.drv` no longer in the cache.
 ///
 /// Every retire opens with the [`LOCK`] pass, so it must run inside a transaction:
 /// a `DELETE` on its own acquires in scan order, and one unordered locker
@@ -343,35 +352,42 @@ async fn retire<C: ConnectionTrait>(
     }
 
     let unwhole = ripple_unwhole(db, were_whole).await?;
+    let seen: std::collections::HashSet<String> = deleted.iter().cloned().collect();
+    let mut gated = deleted.clone();
+    gated.extend(unwhole.iter().filter(|h| !seen.contains(*h)).cloned());
 
-    db.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
-        [deleted.clone().into()],
-    ))
-    .await?;
+    if !deleted.is_empty() {
+        db.execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
+            [deleted.clone().into()],
+        ))
+        .await?;
+    }
 
-    db.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        r#"
-        UPDATE derivation_build db SET drv_closure_cached = false
-        FROM derivation d
-        WHERE d.id = db.derivation AND db.drv_closure_cached AND d.hash = ANY($1)
-        "#,
-        [unwhole.clone().into()],
-    ))
-    .await?;
+    if !gated.is_empty() {
+        db.execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            UPDATE derivation_build db SET drv_closure_cached = false
+            FROM derivation d
+            WHERE d.id = db.derivation AND db.drv_closure_cached AND d.hash = ANY($1)
+            "#,
+            [gated.clone().into()],
+        ))
+        .await?;
 
-    db.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        r#"
-        UPDATE derivation_build db SET closure_complete = false
-        WHERE db.closure_complete
-          AND db.derivation IN (SELECT o.derivation FROM derivation_output o WHERE o.hash = ANY($1))
-        "#,
-        [unwhole.clone().into()],
-    ))
-    .await?;
+        db.execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            r#"
+            UPDATE derivation_build db SET closure_complete = false
+            WHERE db.closure_complete
+              AND db.derivation IN (SELECT o.derivation FROM derivation_output o WHERE o.hash = ANY($1))
+            "#,
+            [gated.into()],
+        ))
+        .await?;
+    }
 
     Ok(Retired { deleted, unwhole })
 }
@@ -659,13 +675,17 @@ mod tests {
 
     /// Retiring seeds the reverse ripple only from rows that were whole: a
     /// referrer of a row that was already incomplete counted it as missing
-    /// already, so it must not be incremented twice. The flag clears then split:
-    /// `is_cached` follows what was deleted, the anchor flags follow what stopped
-    /// being whole. The unguarded retire opens with the same hash-ordered lock
-    /// pass as the guarded one: it decides nothing there, but an unordered
-    /// acquisition deadlocks against every other writer's ordered one.
+    /// already, so it must not be incremented twice. The flag clears do NOT
+    /// split that way: `is_cached` follows what was deleted, and the anchor flags
+    /// follow the union of what was deleted and what stopped being whole, because
+    /// neither flag reads the counter - a row deleted while it was not whole (`b`
+    /// here) would otherwise keep a stale-true gate until the next `Global`
+    /// reconcile and dispatch a build against a `.drv` that is gone. The unguarded
+    /// retire opens with the same hash-ordered lock pass as the guarded one: it
+    /// decides nothing there, but an unordered acquisition deadlocks against every
+    /// other writer's ordered one.
     #[tokio::test]
-    async fn retire_ripples_only_from_rows_that_were_whole() {
+    async fn retire_clears_the_anchor_flags_for_every_retired_path() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![
                 row("a", "was_whole", true),
@@ -708,8 +728,8 @@ mod tests {
         );
         for clear in &log[4..] {
             assert!(
-                clear.contains("\"a\"") && !clear.contains("\"b\""),
-                "the anchor flags follow only what stopped being whole: {log:?}"
+                clear.contains("\"a\"") && clear.contains("\"b\""),
+                "the anchor flags follow every retired path, whole or not: {log:?}"
             );
         }
 
@@ -781,6 +801,11 @@ mod tests {
         assert!(
             log[1].contains("DELETE FROM cached_path") && log[1].contains("cached_path_signature"),
             "the guard must reach the delete: {log:?}"
+        );
+        assert_eq!(
+            log.len(),
+            2,
+            "a guard that spared every row leaves nothing to clear: {log:?}"
         );
     }
 
