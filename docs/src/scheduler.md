@@ -576,7 +576,20 @@ orphan GC, the zombie purge, TTL eviction, every demote) runs the same ripple in
 reverse from the rows that were whole, and clears the anchor flags those rows backed
 in the same transaction. Every ripple is driven by a **transition**, never by a
 state: rippling from a row that did not just flip moves its referrers past zero, and
-a negative counter never satisfies `= 0` again. Nothing re-derives the counter by a
+a negative counter never satisfies `= 0` again.
+
+The graph actor handles one message at a time, so a commit never overlaps another
+commit or one of its own demotes. Three of those deletions do run outside it, each
+in its own transaction - TTL eviction, the zombie purge and the orphan GC - and
+nothing serialises them against a commit but row locks. A commit therefore locks its
+reference endpoints first: the references it reports, the ones already indexed for
+it, and its own row, in one hash-ordered `FOR KEY SHARE` statement taken before the
+row it is about to write. There is no window in which a retire and a commit disagree
+about an edge - the retire's `DELETE` waits for the commit, and its reverse ripple, a
+statement of its own, then counts the new edge. Every writer that touches a path
+together with its references acquires them in one statement ordered by hash, a
+retiring `DELETE` behind its own `FOR UPDATE` pass included, because a single
+unordered locker deadlocks against however carefully ordered the other side is. Nothing re-derives the counter by a
 sweep; the consistency pass above recomputes it only for the paths pending anchors
 gate on and repairs what disagrees, and is its only backstop.
 The migration converges the old `cached_path.closure_complete` flag one last

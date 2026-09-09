@@ -658,8 +658,9 @@ mod tests {
             nar_hash: Some("sha256:zombie".into()),
             ..Default::default()
         };
-        // The purge retires the row: the DELETE reports what it removed, and the
-        // three flag clears follow (no reverse ripple, the zombie was not whole).
+        // The purge retires the row: the ordered lock pass, then the DELETE that
+        // reports what it removed, then the three flag clears (no reverse ripple,
+        // the zombie was not whole).
         let mut retired = BTreeMap::new();
         retired.insert("hash".to_string(), Value::String(Some(zombie_hash.into())));
         retired.insert("was_whole".to_string(), Value::Bool(Some(false)));
@@ -672,7 +673,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                3
+                4
             ])
             .into_connection();
 

@@ -565,8 +565,8 @@ mod tests {
         };
 
         // Find the output, RETURNING the demoted row, reset its producer, retire
-        // the `cached_path` row (no reverse ripple: it was not whole) and clear
-        // the three flags; then the object is removed from storage.
+        // the `cached_path` row behind its ordered lock pass (no reverse ripple: it
+        // was not whole) and clear the three flags; then the object is removed.
         let retired = BTreeMap::from([
             ("hash".to_owned(), Value::from(hash.to_owned())),
             ("was_whole".to_owned(), Value::from(false)),
@@ -579,7 +579,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                4
+                5
             ])
             .into_connection();
 

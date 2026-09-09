@@ -21,11 +21,24 @@ use tracing::{debug, warn};
 
 use crate::messages::{NarCommit, NarCommitted, SignTargets};
 
+/// Record a stored NAR: the row, its reference index, the counter seeded from it
+/// and the wholeness flip that counter makes.
+///
+/// Runs inside the graph actor's transaction, and only there. Both the reference
+/// endpoints and the pre-commit wholeness endpoint are read under locks that a
+/// pooled handle would release with the statement that took them, which is a race
+/// against the three maintenance retires with no compile error and no runtime
+/// signal (see `gradient_db::nar_closure`), so the handle is checked here instead.
 pub(crate) async fn commit(db: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCommitted> {
     let sp = StorePath::parse(&c.store_path).map_err(|e| anyhow::anyhow!("{e}"))?;
     if !is_nix32_hash(sp.hash()) {
         anyhow::bail!("malformed store path: {}", c.store_path);
     }
+
+    let txn = db.transaction().context(
+        "NarCommit must run inside a transaction: the pre-commit wholeness endpoint and the reference locks are only held under one",
+    )?;
+    gradient_db::lock_reference_endpoints(txn, sp.hash(), &c.references).await?;
 
     let Upserted {
         cached_path,
@@ -298,8 +311,9 @@ async fn queue_signature_placeholders(
 mod tests {
     use super::*;
     use gradient_types::ids::ProjectId;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, TransactionTrait, Value};
     use std::collections::BTreeMap;
+    use std::sync::Arc;
     use uuid::Uuid;
 
     const SP: &str = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-hello-2.12";
@@ -365,6 +379,24 @@ mod tests {
         gradient_db::pool::statements(db.into_transaction_log())
     }
 
+    /// `commit` runs in the graph actor's transaction and rejects a pooled handle,
+    /// so every test drives one. The mock records the whole transaction as a single
+    /// log entry whose synthetic `BEGIN`/`COMMIT` the shared helper drops, so the
+    /// statement indices stay the ones the code issues.
+    async fn commit_in_transaction(pool: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCommitted> {
+        let tx = Arc::new(pool.begin().await.expect("begin"));
+        let scoped = pool.in_transaction(Arc::clone(&tx));
+        let committed = commit(&scoped, c).await;
+        drop(scoped);
+        Arc::try_unwrap(tx)
+            .expect("no handle outlives the commit")
+            .commit()
+            .await
+            .expect("commit the transaction");
+
+        committed
+    }
+
     fn log_has_signature_insert(db: WorkerDb) -> bool {
         statements(db)
             .iter()
@@ -381,11 +413,11 @@ mod tests {
                     vec![returned_cached_path(HASH)],
                 ])
                 .append_query_results([seed_reply(true)])
-                .append_exec_results([exec(1), exec(1)])
+                .append_exec_results([exec(0), exec(1), exec(1)])
                 .into_connection(),
         );
 
-        commit(
+        commit_in_transaction(
             &db,
             &NarCommit {
                 references,
@@ -411,11 +443,11 @@ mod tests {
                 .append_query_results([vec![returned_cached_path(HASH)]])
                 .append_query_results([seed_reply(false)])
                 .append_query_results([vec![project_cache_row()]])
-                .append_exec_results([exec(0), exec(1), exec(1)])
+                .append_exec_results([exec(0), exec(0), exec(1), exec(1)])
                 .into_connection(),
         );
 
-        commit(
+        commit_in_transaction(
             &db,
             &NarCommit {
                 targets: SignTargets::ProjectCaches(project()),
@@ -439,11 +471,11 @@ mod tests {
                 .append_query_results([Vec::<MCachedPath>::new()])
                 .append_query_results([vec![returned_cached_path(HASH)]])
                 .append_query_results([seed_reply(false)])
-                .append_exec_results([exec(0), exec(0)])
+                .append_exec_results([exec(0), exec(0), exec(0)])
                 .into_connection(),
         );
 
-        commit(
+        commit_in_transaction(
             &db,
             &NarCommit {
                 ca: Some(ca.to_owned()),
@@ -466,11 +498,13 @@ mod tests {
                 .append_query_results([Vec::<MCachedPath>::new()])
                 .append_query_results([vec![returned_cached_path(HASH)]])
                 .append_query_results([seed_reply(false)])
-                .append_exec_results([exec(0), exec(0)])
+                .append_exec_results([exec(0), exec(0), exec(0)])
                 .into_connection(),
         );
 
-        commit(&db, &commit_for(SP)).await.expect("commit");
+        commit_in_transaction(&db, &commit_for(SP))
+            .await
+            .expect("commit");
 
         assert!(
             !log_has_signature_insert(db),
@@ -489,11 +523,11 @@ mod tests {
                 .append_query_results([vec![returned_cached_path(HASH)]])
                 .append_query_results([seed_reply(true)])
                 .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-                .append_exec_results([exec(1), exec(0)])
+                .append_exec_results([exec(0), exec(1), exec(0)])
                 .into_connection(),
         );
 
-        commit(
+        commit_in_transaction(
             &db,
             &NarCommit {
                 references: vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()],
@@ -536,13 +570,58 @@ mod tests {
     /// retire ripples the same counters from its own transaction, outside the
     /// graph actor, so an unlocked read lets a reverse ripple land between the
     /// read and the write: the commit would then see `(true, false)` and
-    /// increment a referrer a second time for one loss, permanently.
+    /// increment a referrer a second time for one loss, permanently. The row read
+    /// is the second statement; the reference endpoints are locked before it.
     #[tokio::test]
     async fn the_pre_commit_endpoint_is_read_under_the_row_lock() {
         let log = recommit_log(Vec::new()).await;
         assert!(
-            log[0].contains("FOR UPDATE"),
+            log[1].contains("FOR UPDATE"),
             "the row read that holds the endpoint must lock it: {log:?}"
+        );
+    }
+
+    /// The seed counts the reference rows under its own snapshot holding no lock,
+    /// and three maintenance retires delete those rows from their own transactions
+    /// without ever seeing an edge this commit has not committed yet. So the
+    /// endpoints are locked first, and before the referrer's own `FOR UPDATE`:
+    /// references-before-referrer on both sides is what keeps a commit and a retire
+    /// from an ABBA cycle, and the shared hash order is what keeps two of either
+    /// from one.
+    #[tokio::test]
+    async fn the_reference_endpoints_are_locked_before_the_referrer_row() {
+        let log = recommit_log(vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()]).await;
+        let endpoints = log
+            .iter()
+            .position(|s| s.contains("FOR KEY SHARE"))
+            .expect("the reference endpoints are locked");
+        let referrer = log
+            .iter()
+            .position(|s| s.contains("FOR UPDATE"))
+            .expect("the referrer's row is locked");
+
+        assert!(endpoints < referrer, "{log:?}");
+        assert!(
+            log[endpoints].contains("ORDER BY hash"),
+            "one hash-ordered acquisition: {log:?}"
+        );
+    }
+
+    /// A pooled handle releases every lock at the end of the statement that took
+    /// it, so a commit on one races the maintenance retires with nothing held.
+    /// Neither the compiler nor a `MockDatabase` can tell the two handles apart,
+    /// so the commit refuses the pooled one instead of silently racing.
+    #[tokio::test]
+    async fn a_pooled_commit_is_rejected_instead_of_racing_the_retires() {
+        let db = WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+
+        let err = commit(&db, &commit_for(SP))
+            .await
+            .expect_err("a pooled commit must not run");
+
+        assert!(
+            err.to_string().contains("must run inside a transaction"),
+            "{err}"
         );
     }
 
@@ -560,11 +639,11 @@ mod tests {
                 ])
                 .append_query_results([seed_reply(false)])
                 .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-                .append_exec_results([exec(1), exec(1)])
+                .append_exec_results([exec(0), exec(1), exec(1)])
                 .into_connection(),
         );
 
-        commit(
+        commit_in_transaction(
             &db,
             &NarCommit {
                 references: vec!["cccccccccccccccccccccccccccccccc-gone".to_owned()],
@@ -670,11 +749,11 @@ mod tests {
                 .append_query_results([Vec::<MCachedPath>::new()])
                 .append_query_results([vec![returned_cached_path(HASH)]])
                 .append_query_results([seed_reply(false)])
-                .append_exec_results([exec(0), exec(2)])
+                .append_exec_results([exec(0), exec(0), exec(2)])
                 .into_connection(),
         );
 
-        let committed = commit(&db, &commit_for(SP)).await.unwrap();
+        let committed = commit_in_transaction(&db, &commit_for(SP)).await.unwrap();
         assert!(committed.created);
         assert_eq!(committed.outputs_marked, 2);
     }

@@ -88,6 +88,18 @@ impl WorkerDb {
         matches!(self.0, WorkerConn::Transaction { .. })
     }
 
+    /// The open transaction this handle stands for, if any. A caller whose
+    /// correctness depends on a lock outliving its statement needs this, not the
+    /// forwarding `ConnectionTrait`: on a pooled handle every lock is released at
+    /// the end of the statement that took it, so the wait it was meant to absorb
+    /// happens with nothing held and no compiler or test can tell the difference.
+    pub fn transaction(&self) -> Option<&DatabaseTransaction> {
+        match &self.0 {
+            WorkerConn::Pool(_) => None,
+            WorkerConn::Transaction { tx, .. } => Some(tx.as_ref()),
+        }
+    }
+
     fn pool(&self) -> &Arc<DatabaseConnection> {
         match &self.0 {
             WorkerConn::Pool(pool) | WorkerConn::Transaction { pool, .. } => pool,
