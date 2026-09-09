@@ -67,9 +67,10 @@ dispatch gate and eval prune reads - is moved inside the actor's transaction on 
 commit and inside the deletion's own transaction on a retire. The consistency sweep's
 bounded repair is a fourth writer, also outside the actor. Nothing serialises them
 against a commit but row locks: a commit takes `FOR SHARE` on its reference endpoints,
-and both retires `FOR UPDATE` on the rows they delete, each in one hash-ordered
-statement before it decides anything, so a retire and a commit cannot disagree about
-an edge. The ripples themselves lock in plan order, so a commit racing a bulk retire
+both retires `FOR UPDATE` on the rows they delete and the repair `FOR UPDATE` on the
+chunk it recounts, each in one hash-ordered statement before it decides anything, so
+a retire and a commit cannot disagree about an edge and a repair cannot overwrite a
+commit's seed. The ripples themselves lock in plan order, so a commit racing a bulk retire
 can deadlock; that is detected and retried, and preferred to a row left whole with a
 reference that is not (`gradient_db::nar_closure`).
 
