@@ -774,6 +774,9 @@ impl DispatchState {
         if !self.jobs.abort(&job_id) {
             debug!(%job_id, "abort for a job this session does not run");
         }
+        // An upload parked on its resume handshake would otherwise sit out the
+        // 30 s timeout and then push a NAR the server has already abandoned.
+        self.nar_recv.cancel_pushes(&job_id);
     }
 
     // ── Credentials ───────────────────────────────────────────────────────────
