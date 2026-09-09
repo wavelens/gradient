@@ -81,10 +81,12 @@ failed dependency cascades `DependencyFailed` over the global
 `derivation_dependency` graph.
 
 Promotion and dispatch are gated on reachability: an anchor is queued and
-dispatched only while some `build_job` references its derivation. Anchors are
-seeded for every derivation, so without the gate promotion would queue
-derivations no surviving evaluation needs, leaving the dispatcher unable to
-attribute the build to a driving evaluation.
+dispatched only while some `build_job` references its derivation. Every name a
+batch reports gets an anchor and this evaluation's `build_job`, pruned subtrees
+included, so an evaluation stays `Building` until its whole named closure is
+terminal. Without the gate, promotion would queue derivations no surviving
+evaluation needs, leaving the dispatcher unable to attribute the build to a
+driving evaluation.
 
 They are also gated on `derivation.walked`. A batch names its dependencies by
 path, and the graph actor inserts a stub row for every name it does not have
