@@ -68,8 +68,10 @@
 //! Every writer that takes row locks here takes them in ONE hash-ordered
 //! statement before it decides anything: [`lock_reference_endpoints`] for a
 //! commit, [`LOCK`] for either retire and for each chunk of the repair, which is
-//! the third writer inside this discipline and not an exception to it. The
-//! `ORDER BY hash` is not decoration.
+//! the third writer inside this discipline and not an exception to it. The two
+//! absolute writers cannot skip it: [`seed_references`] runs only on a
+//! [`ReferenceLock`] and the recount only on a `PathLock`, each constructible by
+//! its lock function alone. The `ORDER BY hash` is not decoration.
 //! With acquisition monotone in `hash`, a wait-for cycle would need some
 //! transaction to wait on a lower hash than one it already holds; a single
 //! unordered locker - a lock set that skips the row it is about to update, or a
@@ -87,8 +89,7 @@
 //! deadlock instead of a permanently false-whole row.
 
 use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement, TransactionSession,
-    TransactionTrait,
+    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement, TransactionTrait,
 };
 
 /// The row `{alias}` is stored and every reference resolves to a whole row.
@@ -179,11 +180,11 @@ const LOCK_REFERENCES: &str = "\
 /// already holds, which cannot introduce a wait. It takes the transaction rather
 /// than a `WorkerDb` for the same reason [`retire_paths_where`] does - on a
 /// pooled handle every lock is released at the end of the statement that took it.
-pub async fn lock_reference_endpoints(
-    txn: &DatabaseTransaction,
+pub async fn lock_reference_endpoints<'txn>(
+    txn: &'txn DatabaseTransaction,
     hash: &str,
     references: &[String],
-) -> Result<(), DbErr> {
+) -> Result<ReferenceLock<'txn>, DbErr> {
     txn.execute_raw(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         LOCK_REFERENCES,
@@ -191,7 +192,25 @@ pub async fn lock_reference_endpoints(
     ))
     .await?;
 
-    Ok(())
+    Ok(ReferenceLock {
+        txn,
+        hash: hash.to_owned(),
+    })
+}
+
+/// Proof that a commit holds its reference endpoints: the row it will seed and
+/// every row the seed can count from, `FOR SHARE`, in one hash-ordered statement
+/// on `txn`. Only [`lock_reference_endpoints`] constructs one and
+/// [`seed_references`] accepts nothing else, so a seed cannot run unlocked,
+/// outside the locking transaction, or on a row the lock did not name. What the
+/// type cannot enforce is that the caller locked BEFORE opening the snapshot it
+/// decides from: a writer that ran its own SELECT first still compiles. That gap
+/// is closed only by the seed recounting inside itself, from this proof, which is
+/// why it takes no other input.
+#[must_use = "a lock proves nothing unless the seed runs on it"]
+pub struct ReferenceLock<'txn> {
+    txn: &'txn DatabaseTransaction,
+    hash: String,
 }
 
 const FORWARD: &str = r#"
@@ -223,8 +242,8 @@ fn delete_statement(guard: Option<&str>) -> String {
     )
 }
 
-/// Compute the counter of a just-committed row from its references and report
-/// whether the row IS whole afterwards (`false` when no such row exists).
+/// Recount the row the lock names from its references and report whether the
+/// row IS whole afterwards (`false` when no such row exists).
 ///
 /// This is a STATE, and the ripples need a TRANSITION, so the caller owns the
 /// other endpoint: the row's wholeness BEFORE the commit
@@ -235,12 +254,13 @@ fn delete_statement(guard: Option<&str>) -> String {
 /// is backed and, on a fresh insert, counts zero: whole. Reading the flip from
 /// that would report `false` for exactly the commit that must ripple, and every
 /// referrer of a re-pushed path would count it as missing forever.
-pub async fn seed_references<C: ConnectionTrait>(db: &C, hash: &str) -> Result<bool, DbErr> {
-    let Some(row) = db
+pub async fn seed_references(lock: &ReferenceLock<'_>) -> Result<bool, DbErr> {
+    let Some(row) = lock
+        .txn
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             seed_statement(),
-            [hash.into()],
+            [lock.hash.as_str().into()],
         ))
         .await?
     else {
@@ -479,32 +499,60 @@ fn repair_statement() -> String {
 /// each chunk commits on its own: as one statement over a fleet evaluation's
 /// gating set the sweep's budget cancels it in place and rolls back every repair,
 /// silently.
-pub async fn repair_counters_for<C: ConnectionTrait + TransactionTrait>(
-    db: &C,
-    hashes: &[String],
-) -> Result<u64, DbErr> {
-    let statement = repair_statement();
+pub async fn repair_counters_for<C>(db: &C, hashes: &[String]) -> Result<u64, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let mut repaired = 0u64;
     for chunk in hashes.chunks(crate::IN_CHUNK_SIZE) {
         let txn = db.begin().await?;
-        txn.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            LOCK,
-            [chunk.to_vec().into()],
-        ))
-        .await?;
-        repaired += txn
-            .execute_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                &statement,
-                [chunk.to_vec().into()],
-            ))
-            .await?
-            .rows_affected();
+        let lock = lock_paths(&txn, chunk).await?;
+        repaired += recount(&lock).await?;
         txn.commit().await?;
     }
 
     Ok(repaired)
+}
+
+/// Proof that one repair chunk is held `FOR UPDATE`, hash-ordered, on `txn`.
+/// Only [`lock_paths`] constructs one and [`recount`] writes exactly the rows it
+/// carries, so a recount cannot run unlocked, in another transaction, or over
+/// rows the lock did not cover. The caveat on [`ReferenceLock`] applies here too:
+/// the proof says the write follows the lock, not that no read preceded it.
+#[must_use = "a lock proves nothing unless the recount runs on it"]
+struct PathLock<'txn> {
+    txn: &'txn DatabaseTransaction,
+    hashes: Vec<String>,
+}
+
+async fn lock_paths<'txn>(
+    txn: &'txn DatabaseTransaction,
+    hashes: &[String],
+) -> Result<PathLock<'txn>, DbErr> {
+    txn.execute_raw(Statement::from_sql_and_values(
+        DatabaseBackend::Postgres,
+        LOCK,
+        [hashes.to_vec().into()],
+    ))
+    .await?;
+
+    Ok(PathLock {
+        txn,
+        hashes: hashes.to_vec(),
+    })
+}
+
+/// Recount the locked rows and write the ones that disagree, returning how many.
+async fn recount(lock: &PathLock<'_>) -> Result<u64, DbErr> {
+    Ok(lock
+        .txn
+        .execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            repair_statement(),
+            [lock.hashes.clone().into()],
+        ))
+        .await?
+        .rows_affected())
 }
 
 /// The paths the pending anchors gate on: their own `.drv` rows and the output
@@ -555,6 +603,13 @@ mod tests {
         BTreeMap::from([(flag.to_owned(), Value::from(value))])
     }
 
+    fn exec(rows_affected: u64) -> MockExecResult {
+        MockExecResult {
+            last_insert_id: 0,
+            rows_affected,
+        }
+    }
+
     /// A reference counts as missing when its row is absent, unbacked or not
     /// whole; a self-reference never counts, or a self-referential path could
     /// never be whole.
@@ -593,16 +648,49 @@ mod tests {
         for whole in [true, false] {
             let db = MockDatabase::new(DatabaseBackend::Postgres)
                 .append_query_results([vec![flag_row("whole", whole)]])
+                .append_exec_results([exec(0)])
                 .into_connection();
+            let txn = db.begin().await.unwrap();
+            let lock = lock_reference_endpoints(&txn, "h", &[]).await.unwrap();
 
-            assert_eq!(seed_references(&db, "h").await.unwrap(), whole);
+            assert_eq!(seed_references(&lock).await.unwrap(), whole);
         }
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results([exec(0)])
             .into_connection();
+        let txn = db.begin().await.unwrap();
+        let lock = lock_reference_endpoints(&txn, "absent", &[]).await.unwrap();
 
-        assert!(!seed_references(&db, "absent").await.unwrap());
+        assert!(!seed_references(&lock).await.unwrap());
+    }
+
+    /// The seed takes the proof and nothing else, so the row it recounts is the
+    /// row the lock named and the statement runs on the locking transaction: a
+    /// caller cannot seed a row it did not lock, or seed after the lock is gone.
+    #[tokio::test]
+    async fn the_seed_recounts_only_the_row_its_lock_names() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![flag_row("whole", true)]])
+            .append_exec_results([exec(0)])
+            .into_connection();
+        let txn = db.begin().await.unwrap();
+        let lock = lock_reference_endpoints(&txn, "h", &["d-dep".to_owned()])
+            .await
+            .unwrap();
+        seed_references(&lock).await.unwrap();
+        drop(lock);
+        txn.commit().await.unwrap();
+
+        let raw = db.into_transaction_log();
+        assert_eq!(raw.len(), 1, "lock and seed share one transaction: {raw:?}");
+        let log = crate::pool::statements(raw);
+        assert_eq!(log.len(), 2, "{log:?}");
+        assert!(
+            log[1].contains("SET missing_references = (") && log[1].contains("\"h\""),
+            "the seed recounts the locked row: {log:?}"
+        );
     }
 
     /// The commit's lock covers every row its seed can count from - the reported
@@ -642,9 +730,11 @@ mod tests {
             .into_connection();
 
         let txn = db.begin().await.unwrap();
-        lock_reference_endpoints(&txn, "h", &["d-dep".to_owned()])
+        let lock = lock_reference_endpoints(&txn, "h", &["d-dep".to_owned()])
             .await
             .unwrap();
+        assert_eq!(lock.hash, "h", "the proof names the row the seed may write");
+        drop(lock);
         txn.commit().await.unwrap();
 
         let log = crate::pool::statements(db.into_transaction_log());
@@ -773,9 +863,12 @@ mod tests {
 
         let seed_flag = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![flag_row("misspelled", true)]])
+            .append_exec_results([exec(0)])
             .into_connection();
+        let txn = seed_flag.begin().await.unwrap();
+        let lock = lock_reference_endpoints(&txn, "h", &[]).await.unwrap();
         assert!(
-            seed_references(&seed_flag, "h").await.is_err(),
+            seed_references(&lock).await.is_err(),
             "an undecodable seed must not report the row as unwhole"
         );
 

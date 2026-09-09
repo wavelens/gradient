@@ -24,7 +24,9 @@
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement, TransactionTrait};
+use sea_orm::{
+    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement, TransactionTrait,
+};
 
 /// Counts of graph-invariant violations at one instant.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -87,9 +89,10 @@ async fn count<C: ConnectionTrait>(db: &C, sql: String) -> Result<i64, DbErr> {
 /// construction. `gating_paths` reports the size of that bounded set, which is an
 /// unbounded select today (#591 rewrites what the sweep reads, so it is measured
 /// now and bounded there rather than with a rotation scheme thrown away next PR).
-pub async fn graph_consistency_report<C: ConnectionTrait + TransactionTrait>(
-    db: &C,
-) -> Result<ConsistencyReport, DbErr> {
+pub async fn graph_consistency_report<C>(db: &C) -> Result<ConsistencyReport, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let closure_gate = crate::promotion::closure_complete_gate();
     let drv_gate = crate::promotion::drv_closure_cached_gate();
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");

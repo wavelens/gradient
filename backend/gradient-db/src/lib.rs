@@ -77,8 +77,8 @@ pub use self::graph_sql::{
     ClosureDirection, dependency_closure_cte, eval_closure_cte, reachable_derivations_cte,
 };
 pub use self::nar_closure::{
-    lock_reference_endpoints, retire_paths, retire_paths_where, ripple_unwhole, ripple_whole,
-    seed_references,
+    ReferenceLock, lock_reference_endpoints, retire_paths, retire_paths_where, ripple_unwhole,
+    ripple_whole, seed_references,
 };
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
 pub use self::project_cache::project_has_writable_cache;
