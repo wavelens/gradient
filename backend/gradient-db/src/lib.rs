@@ -32,6 +32,7 @@ pub mod project_derivations;
 pub mod project_workers;
 pub mod promotion;
 pub mod reachability;
+pub mod readiness;
 pub mod reconcile;
 pub mod recovery;
 pub mod retention;
@@ -93,6 +94,10 @@ pub use self::promotion::{
 pub use self::reachability::{
     build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
     eval_anchor_statuses, evals_referencing_derivation,
+};
+pub use self::readiness::{
+    Repaired, became_fetchable, lost_fetchability, promote, promote_closure, repair_pending,
+    seed_unready_deps, unpromote_drv_owners,
 };
 pub use self::reconcile::{ReconcileReport, ReconcileScope, reconcile_build_graph};
 pub use self::recovery::recover_interrupted_work;
