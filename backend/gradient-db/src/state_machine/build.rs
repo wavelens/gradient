@@ -18,7 +18,7 @@ impl fmt::Display for InvalidBuildTransition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "invalid build status transition: {:?} → {:?}",
+            "invalid build status transition: {:?} to {:?}",
             self.from, self.to
         )
     }
@@ -29,12 +29,12 @@ impl std::error::Error for InvalidBuildTransition {}
 /// Validates and enforces [`BuildStatus`] state transitions.
 ///
 /// ```text
-/// Created → Queued
-/// Queued  → Building
-/// Building → Completed | Substituted | FailedPermanent | FailedTransient | FailedTimeout
-/// FailedTransient → Queued | FailedPermanent
-/// * → Aborted          (except terminal states)
-/// * → DependencyFailed (except terminal states)
+/// Created          to  Queued
+/// Queued           to  Building | Created
+/// Building         to  Queued
+/// FailedTransient  to  Queued
+/// any non-terminal to  Completed | Substituted | FailedPermanent | FailedTransient
+///                      | FailedTimeout | Aborted | DependencyFailed
 /// ```
 /// Terminal states (`Completed`, `FailedPermanent`, `FailedTimeout`, `Aborted`,
 /// `DependencyFailed`, `Substituted`) cannot be transitioned away from.
@@ -155,7 +155,7 @@ mod tests {
         ] {
             assert!(
                 BuildStateMachine::validate(from, BuildStatus::Aborted).is_ok(),
-                "{from:?} → Aborted should be valid"
+                "{from:?} to Aborted should be valid"
             );
         }
     }
@@ -169,7 +169,7 @@ mod tests {
         ] {
             assert!(
                 BuildStateMachine::validate(from, BuildStatus::DependencyFailed).is_ok(),
-                "{from:?} → DependencyFailed should be valid"
+                "{from:?} to DependencyFailed should be valid"
             );
         }
     }
@@ -191,7 +191,7 @@ mod tests {
             ] {
                 assert!(
                     BuildStateMachine::validate(*from, to).is_err(),
-                    "{from:?} → {to:?} should be rejected"
+                    "{from:?} to {to:?} should be rejected"
                 );
             }
         }
@@ -233,7 +233,7 @@ mod tests {
             for to in &terminal_states {
                 assert!(
                     BuildStateMachine::validate(*from, *to).is_ok(),
-                    "{from:?} → {to:?} should be valid (terminal shortcut)"
+                    "{from:?} to {to:?} should be valid (terminal shortcut)"
                 );
             }
         }
