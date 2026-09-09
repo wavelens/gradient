@@ -396,7 +396,7 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
         && let Err(e) = crate::for_each_chunk(&to_delete, |chunk| async move {
             use sea_orm::TransactionTrait;
             let txn = db.begin().await?;
-            crate::nar_closure::retire_paths(&txn, &chunk).await?;
+            crate::nar_closure::retire_paths(&txn, &chunk, None).await?;
             txn.commit().await
         })
         .await

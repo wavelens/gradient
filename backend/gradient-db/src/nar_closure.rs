@@ -55,10 +55,14 @@ const REVERSE: &str = r#"
     RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = c.n) AS was_whole
 "#;
 
-const DELETE: &str = r#"
-    DELETE FROM cached_path cp WHERE cp.hash = ANY($1)
-    RETURNING cp.hash, (cp.file_hash IS NOT NULL AND cp.missing_references = 0) AS was_whole
-"#;
+fn delete_statement(guard: Option<&str>) -> String {
+    let guard = guard.map(|g| format!(" AND ({g})")).unwrap_or_default();
+    format!(
+        "DELETE FROM cached_path cp WHERE cp.hash = ANY($1){guard} \
+         RETURNING cp.hash, {whole} AS was_whole",
+        whole = whole_predicate("cp"),
+    )
+}
 
 /// Compute the counter of a just-committed row from its references and report
 /// whether the row IS whole afterwards (`false` when no such row exists).
@@ -154,19 +158,29 @@ pub struct Retired {
     pub unwhole: Vec<String>,
 }
 
-/// Delete `hashes` from the index and move every counter and flag that trusted
-/// them, in the caller's transaction: the reverse ripple from the rows that
-/// were whole, `is_cached` off the outputs, and the anchor flags the rows
-/// backed (`drv_closure_cached` on the owners of a deleted `.drv`,
-/// `closure_complete` on the producers of every hash that stopped being whole).
+/// Delete the `hashes` that satisfy `guard` from the index and move every
+/// counter and flag that trusted them, in the caller's transaction: the reverse
+/// ripple from the rows that were whole, `is_cached` off the outputs, and the
+/// anchor flags the rows backed (`drv_closure_cached` on the owners of a deleted
+/// `.drv`, `closure_complete` on the producers of every hash that stopped being
+/// whole). `Retired::deleted` names the rows that actually went.
 ///
-/// The delete is unconditional and `cached_path_signature.cached_path` is
-/// `ON DELETE CASCADE`, so every cache's signature on a retired path goes with
-/// it. Deciding which paths MAY be dropped is the caller's: an eviction serving
-/// one cache must first exclude the paths another cache still signs (the TTL
-/// sweep filters on `NOT EXISTS (SELECT 1 FROM cached_path_signature ...)`),
-/// and pass only the survivors here.
-pub async fn retire_paths<C: ConnectionTrait>(db: &C, hashes: &[String]) -> Result<Retired, DbErr> {
+/// `guard` is an extra condition on the row being deleted (aliased `cp`), for a
+/// caller that may drop a path only while something still holds - the TTL
+/// eviction passes `NOT EXISTS (SELECT 1 FROM cached_path_signature ...)`, since
+/// `cached_path_signature.cached_path` is `ON DELETE CASCADE` and a retire takes
+/// every cache's signature with it. It belongs in the DELETE and nowhere else: a
+/// separate `SELECT ... FOR UPDATE` that blocks on a concurrent commit's row lock
+/// re-checks its condition through EvalPlanQual against the ORIGINAL statement
+/// snapshot, so a signature that commit inserted for another cache is invisible,
+/// the path is reported unsigned and retired, and the just-committed narinfo
+/// starts 404ing. The DELETE's own snapshot is taken after the lock is granted
+/// and sees it.
+pub async fn retire_paths<C: ConnectionTrait>(
+    db: &C,
+    hashes: &[String],
+    guard: Option<&str>,
+) -> Result<Retired, DbErr> {
     if hashes.is_empty() {
         return Ok(Retired::default());
     }
@@ -174,7 +188,7 @@ pub async fn retire_paths<C: ConnectionTrait>(db: &C, hashes: &[String]) -> Resu
     let rows = db
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            DELETE,
+            delete_statement(guard),
             [hashes.to_vec().into()],
         ))
         .await?;
@@ -333,7 +347,7 @@ mod tests {
             "RETURNING cp.hash, {} AS whole",
             whole_predicate("cp")
         )));
-        assert!(norm(DELETE).contains(&format!(
+        assert!(norm(&delete_statement(None)).contains(&format!(
             "RETURNING cp.hash, {} AS was_whole",
             whole_predicate("cp")
         )));
@@ -420,7 +434,7 @@ mod tests {
             ])
             .into_connection();
 
-        let retired = retire_paths(&db, &["a".to_owned(), "b".to_owned()])
+        let retired = retire_paths(&db, &["a".to_owned(), "b".to_owned()], None)
             .await
             .unwrap();
 
@@ -459,8 +473,47 @@ mod tests {
     #[tokio::test]
     async fn retiring_nothing_issues_no_statement() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
-        let retired = retire_paths(&db, &[]).await.unwrap();
+        let retired = retire_paths(&db, &[], None).await.unwrap();
         assert!(retired.deleted.is_empty() && retired.unwhole.is_empty());
         assert!(statements(db).is_empty());
+    }
+
+    /// A caller's guard has to be ANDed into the DELETE itself. Checking it in a
+    /// separate `SELECT ... FOR UPDATE` re-evaluates the condition through
+    /// EvalPlanQual on the original statement snapshot once it blocks on a
+    /// concurrent commit's row lock, so a `cached_path_signature` that commit
+    /// inserted for another cache is invisible; the path is retired and the
+    /// cascade takes the fresh signature with it, 404ing a narinfo committed
+    /// seconds earlier. The DELETE's own snapshot is taken after the lock.
+    #[tokio::test]
+    async fn the_retire_guard_lands_inside_the_delete_statement() {
+        let guard =
+            "NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)";
+        let sql = norm(&delete_statement(Some(guard)));
+        assert!(
+            sql.contains(&format!("WHERE cp.hash = ANY($1) AND ({guard})")),
+            "{sql}"
+        );
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 0,
+                };
+                3
+            ])
+            .into_connection();
+
+        retire_paths(&db, &["a".to_owned()], Some(guard))
+            .await
+            .unwrap();
+
+        let log = statements(db);
+        assert!(
+            log[0].contains("DELETE FROM cached_path") && log[0].contains("cached_path_signature"),
+            "the guard must reach the delete: {log:?}"
+        );
     }
 }

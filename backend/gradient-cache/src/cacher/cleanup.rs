@@ -144,6 +144,10 @@ const STALE_CACHED_NARS_SELECT: &str = r#"SELECT cd.id, cd.cache, cd.derivation
                        AND dout.ca IS NOT NULL
                  )"#;
 
+/// The TTL eviction's retire guard: a path only goes once no cache signs it.
+const UNSIGNED_GUARD: &str =
+    "NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)";
+
 pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
     let ttl_hours = state.config.storage.nar_ttl_hours;
     if ttl_hours == 0 {
@@ -201,11 +205,13 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
 
         // Drop THIS cache's signatures on the outputs' cached paths, then retire
         // any cached_path no cache signs anymore, in the same transaction. The
-        // survivors are selected FOR UPDATE so a concurrent commit cannot claim one
-        // between the check and the retire, whose delete would cascade that fresh
-        // signature away. Without the signature cleanup the "compressed stored"
-        // metric (SUM(file_size) via cached_path_signature) would stay inflated
-        // after TTL eviction even though the NAR file is gone.
+        // "still signed" test rides in the retiring DELETE itself: checked by a
+        // preceding statement it would be re-evaluated through EvalPlanQual on
+        // that statement's snapshot once it blocks on a concurrent commit's row
+        // lock, missing the signature that commit just took out and cascading it
+        // away with the row. Without the signature cleanup the "compressed
+        // stored" metric (SUM(file_size) via cached_path_signature) would stay
+        // inflated after TTL eviction even though the NAR file is gone.
         if !output_hashes.is_empty() {
             use sea_orm::TransactionTrait;
             let txn = state.worker_db.begin().await?;
@@ -221,24 +227,7 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             .await
             .context("TTL GC: failed to delete cached_path_signature rows")?;
 
-            let unsigned = txn
-                .query_all_raw(Statement::from_sql_and_values(
-                    DatabaseBackend::Postgres,
-                    r#"
-                    SELECT cp.hash FROM cached_path cp
-                    WHERE cp.hash = ANY($1)
-                      AND NOT EXISTS (
-                        SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)
-                    FOR UPDATE
-                    "#,
-                    [output_hashes.clone().into()],
-                ))
-                .await
-                .context("TTL GC: failed to select unsigned cached_path rows")?
-                .into_iter()
-                .filter_map(|r| r.try_get::<String>("", "hash").ok())
-                .collect::<Vec<_>>();
-            gradient_db::retire_paths(&txn, &unsigned)
+            gradient_db::retire_paths(&txn, &output_hashes, Some(UNSIGNED_GUARD))
                 .await
                 .context("TTL GC: failed to retire cached paths")?;
             txn.commit().await?;
@@ -351,7 +340,7 @@ async fn purge_zombie_cached_paths(
         let deleted = async {
             use sea_orm::TransactionTrait;
             let txn = state.worker_db.begin().await?;
-            let retired = gradient_db::retire_paths(&txn, chunk).await?;
+            let retired = gradient_db::retire_paths(&txn, chunk, None).await?;
             txn.commit().await?;
             Ok::<u64, sea_orm::DbErr>(retired.deleted.len() as u64)
         }
@@ -697,6 +686,64 @@ mod tests {
         assert_eq!(
             report.zombie_cached_paths_purged, 1,
             "the zombie row must be retired"
+        );
+    }
+
+    /// The TTL eviction may only drop a path no cache signs any more, and that
+    /// test has to ride in the retiring DELETE. Selecting the survivors first
+    /// re-evaluates the condition through EvalPlanQual on the select's own
+    /// snapshot as soon as it blocks on a concurrent commit's row lock, so a
+    /// `cached_path_signature` that commit inserted for another cache is
+    /// invisible: the path is retired, the cascade takes the fresh signature,
+    /// and a narinfo committed seconds ago starts 404ing.
+    #[tokio::test]
+    async fn ttl_eviction_guards_the_retiring_delete_itself() {
+        let tmp = tempfile::tempdir().unwrap();
+        let drv = DerivationId::now_v7();
+        let stale = BTreeMap::from([
+            ("id".to_string(), Value::Uuid(Some(Uuid::now_v7()))),
+            ("cache".to_string(), Value::Uuid(Some(Uuid::now_v7()))),
+            (
+                "derivation".to_string(),
+                Value::Uuid(Some(drv.into_inner())),
+            ),
+        ]);
+        let output = gradient_entity::derivation_output::Model {
+            derivation: drv,
+            hash: "cccc33333333333333333333333333cccc".into(),
+            ..Default::default()
+        };
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![stale]])
+            .append_query_results([vec![output]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<gradient_entity::cache_derivation::Model>::new()])
+            .append_exec_results(vec![
+                sea_orm::MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                5
+            ])
+            .into_connection();
+        let state = state_with_worker_db(tmp.path(), db.clone());
+
+        cleanup_stale_cached_nars(state).await.unwrap();
+
+        let log: Vec<String> = db
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        assert!(
+            log.iter().any(|s| s.contains("DELETE FROM cached_path cp")
+                && s.contains("FROM cached_path_signature s")),
+            "the still-signed guard belongs inside the retiring delete: {log:?}"
+        );
+        assert!(
+            !log.iter().any(|s| s.contains("FOR UPDATE")),
+            "no survivor pre-select may stand between the check and the delete: {log:?}"
         );
     }
 
