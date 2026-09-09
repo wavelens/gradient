@@ -82,3 +82,34 @@ impl Model {
         self.file_hash.is_some() && self.missing_references == 0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(file_hash: Option<&str>, missing_references: i32) -> Model {
+        Model {
+            file_hash: file_hash.map(str::to_owned),
+            missing_references,
+            ..Default::default()
+        }
+    }
+
+    /// The Rust twin of `gradient_db::nar_closure::whole_predicate`
+    /// (`file_hash IS NOT NULL AND missing_references = 0`), which a NAR commit
+    /// reads for the pre-commit half of the wholeness flip while the SQL form
+    /// reports the post-commit half. The two must mean the same thing on every
+    /// combination, a counter driven below zero included: a negative counter is a
+    /// lost ripple, and reading it as whole would claim a closure with a hole in it.
+    #[test]
+    fn is_whole_matches_the_sql_wholeness_definition() {
+        assert!(row(Some("sha256:abc"), 0).is_whole());
+        assert!(!row(Some("sha256:abc"), 1).is_whole());
+        assert!(!row(None, 0).is_whole());
+        assert!(!row(None, 1).is_whole());
+        assert!(
+            !row(Some("sha256:abc"), -1).is_whole(),
+            "a negative counter is a lost ripple, never wholeness"
+        );
+    }
+}

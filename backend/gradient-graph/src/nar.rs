@@ -678,7 +678,7 @@ mod tests {
         let log = recommit_log(vec![dep.to_owned()]).await;
         let sync = log
             .iter()
-            .find(|s| s.contains("cached_path_reference"))
+            .find(|s| s.contains("INSERT INTO cached_path_reference"))
             .expect("the reference index is written");
 
         assert!(

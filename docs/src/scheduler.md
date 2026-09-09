@@ -361,18 +361,17 @@ one no cache signs any more) hands that condition to the retiring DELETE through
 decide from its own snapshot and cascade away a signature another cache wrote
 meanwhile.
 
-The guard alone is not enough either. Under READ COMMITTED the DELETE's snapshot is
-taken at statement start, before it blocks on the RI `FOR KEY SHARE` lock a
-concurrent `cached_path_signature` insert holds on the parent row, and EvalPlanQual
-re-checks the qual only against the row version it is updating - never a subquery
-over another table - so the DELETE would proceed without ever seeing the signature
-that committed while it waited, and cascade it away. The wait is therefore absorbed
-by a preceding pure `FOR UPDATE` pass, and the DELETE then opens a fresh snapshot
-that sees the signature its guard tests. That is why the guarded entry point takes a
-`&DatabaseTransaction` while the unguarded `retire_paths` takes any connection: the
-lock has to still be held when the DELETE runs, and on a pooled connection every
-statement is its own implicit transaction, so a pooled guarded retire does not
-compile. Path invalidation goes further and demotes the producer itself
+The guard alone is not enough either: a statement's snapshot is taken before it
+blocks on the RI `FOR KEY SHARE` lock a concurrent `cached_path_signature` insert
+holds, so the DELETE would cascade away a signature that committed while it waited
+(the READ COMMITTED / EvalPlanQual argument behind that is written out once, in
+`gradient_db::nar_closure`'s module doc, and three things here depend on it). The
+wait is therefore absorbed by a preceding pure `FOR UPDATE` pass, hash-ordered, and
+the DELETE then opens a fresh snapshot that sees the signature its guard tests. That
+is why the guarded entry point takes a `&DatabaseTransaction` while the unguarded
+`retire_paths` takes any connection: the lock has to still be held when the DELETE
+runs, and on a pooled connection every statement is its own implicit transaction, so
+a pooled guarded retire does not compile. Path invalidation goes further and demotes the producer itself
 (`demote_cached_output`), so an invalidated output rebuilds instead of staying
 trusted-but-gone. And because the per-task
 evaluation GC refuses to run while any evaluation is active, a wedged `Building`

@@ -240,8 +240,10 @@ in {
               logging_collector = true;
               log_destination = lib.mkForce "syslog";
               # Phase 10d bills the server's statements; the extension only
-              # exposes the view, the accounting needs this preload.
+              # exposes the view, the accounting needs this preload, and its
+              # deltas need every entry to survive both samples.
               shared_preload_libraries = "pg_stat_statements";
+              "pg_stat_statements.max" = 10000;
             };
           };
 
