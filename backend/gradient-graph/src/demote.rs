@@ -29,8 +29,6 @@ pub(crate) async fn apply(ctx: &DbContext, demotion: Demotion) -> Result<DemoteR
         }
         Demotion::Path { hash } => {
             let producers = gradient_db::demote_cached_output(db, nar_storage, &hash).await?;
-            gradient_db::clear_gate_flags_for_hashes(db, std::slice::from_ref(&hash)).await?;
-            gradient_db::clear_closure_complete_for_referrers(db, &hash).await?;
             for derivation in &producers {
                 revoke_cache_derivation_closure(db, *derivation).await?;
             }
@@ -100,13 +98,11 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
     let others_remain = remaining > 0;
 
     // Last cache dropped the path: demote through the shared helper so the
-    // producer anchor, gate flags and referrer closures reset symmetrically (a
+    // producer anchor, gate flags and referrer counters reset symmetrically (a
     // bare is_cached clear leaves a Completed producer with no backing NAR).
     if !others_remain {
         let nar_storage = &ctx.storage.nar_storage;
         gradient_db::demote_cached_output(db, nar_storage, hash).await?;
-        gradient_db::clear_gate_flags_for_hashes(db, &[hash.to_string()]).await?;
-        gradient_db::clear_closure_complete_for_referrers(db, hash).await?;
     }
 
     let _ = ctx.board_events.send(BoardEvent::CacheChanged);
