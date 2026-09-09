@@ -564,7 +564,13 @@ writes (`NarUploaded`) are independent. The worker reports the failing path as a
 `CorruptCachedNar`, which the executor classifies as `InputsUnavailable` (not a
 transient retry against poison), so `reconcile_missing_inputs` purges the bad
 object and rebuilds the producer with consistent metadata. Verify-on-read makes
-the cache self-correcting regardless of how a desync arose.
+the cache self-correcting regardless of how a desync arose. The same premise
+governs a path's **reference set**: an input-addressed path rebuilt
+non-deterministically keeps its hash while its closure moves, so the commit
+rewrites `cached_path_reference` to exactly the set the worker reported instead
+of adding to it. An edge an add-only write left behind would stay counted in
+`missing_references` forever, and the consistency sweep's repair recomputes from
+that same table, so it could never disagree with the stale row.
 
 An **orphan producer** is the third case: the missing leaf has a producing
 derivation, but that producer has no `build_job` (it was pruned out of the build
