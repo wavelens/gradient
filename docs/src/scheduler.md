@@ -334,8 +334,12 @@ it to the next reconcile tick: every pass that deletes `cached_path` rows
 (orphan-derivation GC, zombie purge, TTL eviction, path invalidation) goes through
 `nar_closure::retire_paths`, which in the **same transaction** raises the
 `missing_references` counter of every referrer that trusted the deleted rows and
-clears the `drv_closure_cached` / `closure_complete` flags those rows backed, so
-there is no window in which the gate trusts an artifact GC just removed. A caller
+clears the `drv_closure_cached` / `closure_complete` flags of every hash it
+deleted as well as every hash that stopped being whole, so there is no window in
+which the gate trusts an artifact GC just removed. Those two flags read presence
+and not the counter, so binding them to the unwhole set alone would leave a `.drv`
+that was deleted while it was not whole stale-true until the next `Global`
+reconcile, and dispatch runs every 5s. A caller
 that may only drop a path while some condition still holds (the TTL eviction drops
 one no cache signs any more) hands that condition to the retiring DELETE through
 `retire_paths_where` rather than deciding it in a statement of its own, which would
