@@ -50,6 +50,26 @@ fn push_stream_token(level: i32) -> String {
     format!("zstd{level}-fmt1-lib{}", zstd::zstd_safe::version_number())
 }
 
+/// zstd worker threads for one NAR. A few cores shorten a multi-GB output
+/// noticeably; more would starve the build the worker is running alongside.
+fn compression_threads() -> u32 {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(4) as u32
+}
+
+/// The one zstd encoder every NAR upload goes through, so level and thread
+/// count cannot drift between the relay, presigned and substitute-relay paths.
+pub(crate) fn nar_encoder<W: std::io::Write>(sink: W) -> Result<zstd::stream::Encoder<'static, W>> {
+    let mut encoder = zstd::stream::Encoder::new(sink, NAR_ZSTD_LEVEL)
+        .context("failed to create zstd encoder")?;
+    encoder
+        .multithread(compression_threads())
+        .context("enable multithreaded zstd")?;
+    Ok(encoder)
+}
+
 /// Decide what slice of a freshly-produced compressed `part` to send when
 /// resuming from `resume_from`. `produced` is the absolute offset of this
 /// part's first byte. Returns `(absolute_offset, range_within_part)`, or `None`
@@ -67,6 +87,17 @@ fn trim_for_resume(
     } else {
         let skip = (resume_from - produced) as usize;
         Some((resume_from, skip..part_len))
+    }
+}
+
+/// [`trim_for_resume`] applied to an owned part: the untrimmed common case
+/// hands the buffer straight to the frame instead of copying it again.
+fn part_to_send(part: Vec<u8>, produced: u64, resume_from: u64) -> Option<(u64, Vec<u8>)> {
+    let (offset, range) = trim_for_resume(part.len(), produced, resume_from)?;
+    if range.start == 0 && range.end == part.len() {
+        Some((offset, part))
+    } else {
+        Some((offset, part[range].to_vec()))
     }
 }
 
@@ -197,7 +228,7 @@ pub async fn upload_nar(
                     )
                     .await?;
                     for part in bytes.chunks(BULK_CHUNK_SIZE) {
-                        relay.send_part(part).await?;
+                        relay.send_part(part.to_vec()).await?;
                     }
                     relay.finish().await?;
                 }
@@ -259,20 +290,20 @@ impl<'a> RelayStream<'a> {
         })
     }
 
-    async fn send_part(&mut self, part: &[u8]) -> Result<()> {
-        if let Some((offset, range)) = trim_for_resume(part.len(), self.produced, self.resume_from)
-        {
+    async fn send_part(&mut self, part: Vec<u8>) -> Result<()> {
+        let part_len = part.len() as u64;
+        if let Some((offset, data)) = part_to_send(part, self.produced, self.resume_from) {
             self.writer
                 .send(ClientMessage::NarPush {
                     job_id: self.job_id.to_owned(),
                     store_path: self.store_path.to_owned(),
-                    data: part[range].to_vec(),
+                    data,
                     offset,
                     is_final: false,
                 })
                 .await?;
         }
-        self.produced += part.len() as u64;
+        self.produced += part_len;
         Ok(())
     }
 
@@ -303,9 +334,7 @@ async fn stream_path_to_relay(
     let mut relay = RelayStream::open(job_id, store_path, writer, nar_recv, None).await?;
 
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
-    let mut encoder =
-        zstd::stream::Encoder::new(Vec::with_capacity(BULK_CHUNK_SIZE * 2), NAR_ZSTD_LEVEL)
-            .context("failed to create zstd encoder")?;
+    let mut encoder = nar_encoder(Vec::with_capacity(BULK_CHUNK_SIZE * 2))?;
     let mut file_hasher = Sha256::new();
     let mut nar_hasher = Sha256::new();
     let mut nar_size: u64 = 0;
@@ -323,14 +352,14 @@ async fn stream_path_to_relay(
         while buf.len() >= BULK_CHUNK_SIZE {
             let part: Vec<u8> = buf.drain(..BULK_CHUNK_SIZE).collect();
             file_hasher.update(&part);
-            relay.send_part(&part).await?;
+            relay.send_part(part).await?;
         }
     }
 
     let remaining = encoder.finish().context("failed to finish zstd encoder")?;
     if !remaining.is_empty() {
         file_hasher.update(&remaining);
-        relay.send_part(&remaining).await?;
+        relay.send_part(remaining).await?;
     }
 
     let (produced, resume_from) = relay.finish().await?;
@@ -360,8 +389,7 @@ async fn stream_path_to_relay(
 /// Content-Length, so the compressed body cannot stream).
 async fn pack_compress_path(store_path: &str) -> Result<(Vec<u8>, CompressedNarMeta)> {
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
-    let mut encoder = zstd::stream::Encoder::new(Vec::new(), NAR_ZSTD_LEVEL)
-        .context("failed to create zstd encoder")?;
+    let mut encoder = nar_encoder(Vec::new())?;
     let mut nar_hasher = Sha256::new();
     let mut nar_size: u64 = 0;
 
@@ -455,9 +483,7 @@ pub fn compress_nar(raw_nar: &[u8]) -> Result<(Vec<u8>, CompressedNarMeta)> {
     let nar_size = raw_nar.len() as u64;
     let nar_hash = sha256_nix32(raw_nar);
 
-    let mut encoder =
-        zstd::stream::Encoder::new(Vec::with_capacity(raw_nar.len() / 2), NAR_ZSTD_LEVEL)
-            .context("failed to create zstd encoder")?;
+    let mut encoder = nar_encoder(Vec::with_capacity(raw_nar.len() / 2))?;
     encoder
         .write_all(raw_nar)
         .context("zstd compression failed")?;
@@ -732,6 +758,23 @@ mod tests {
         assert_eq!(super::trim_for_resume(100, 200, 150), Some((200, 0..100)));
         // resume_from 0 sends everything from offset 0.
         assert_eq!(super::trim_for_resume(100, 0, 0), Some((0, 0..100)));
+    }
+
+    /// The untrimmed part - every chunk of every fresh upload - must reach the
+    /// frame as the very buffer the encoder produced, with no second copy.
+    #[test]
+    fn part_to_send_moves_an_untrimmed_part() {
+        let part = vec![7u8; 100];
+        let src = part.as_ptr();
+        let (offset, sent) = super::part_to_send(part, 200, 150).expect("part is past the resume");
+        assert_eq!(offset, 200);
+        assert_eq!(sent.as_ptr(), src, "an untrimmed part must not be copied");
+
+        let (offset, sent) =
+            super::part_to_send(vec![7u8; 100], 100, 150).expect("part straddles the resume");
+        assert_eq!((offset, sent.len()), (150, 50));
+
+        assert!(super::part_to_send(vec![7u8; 100], 0, 150).is_none());
     }
 
     /// Minimal HTTP server that accepts one PUT and replies 200.

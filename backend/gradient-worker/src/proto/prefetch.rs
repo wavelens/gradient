@@ -35,6 +35,7 @@ use crate::nix::store::LocalNixStore;
 use crate::proto::compression::{drv_closure_seeds_from_compressed_nar, resolve_compression};
 use crate::proto::job::JobUpdater;
 use crate::proto::nar_daemon_import::import_received_nar;
+use crate::proto::nar_recv::NarPayload;
 
 /// How many missing inputs to download + import in parallel before invoking
 /// the build. Conservative - each one streams a NAR into the local daemon
@@ -428,22 +429,22 @@ impl<'a> InputPrefetcher<'a> {
     async fn fetch_by_request(
         &mut self,
         by_request: Vec<CachedPath>,
-    ) -> Result<Vec<(String, Vec<u8>, CachedPath)>> {
+    ) -> Result<Vec<(String, NarPayload, CachedPath)>> {
         if by_request.is_empty() {
             return Ok(vec![]);
         }
 
         let paths: Vec<String> = by_request.iter().map(|c| c.path.clone()).collect();
-        let bytes_by_path = self.updater.request_nars(paths).await?;
+        let nars_by_path = self.updater.request_nars(paths).await?;
 
         let mut meta_by_path: HashMap<String, CachedPath> = by_request
             .into_iter()
             .map(|c| (c.path.clone(), c))
             .collect();
 
-        let results = bytes_by_path
+        let results = nars_by_path
             .into_iter()
-            .filter_map(|(path, bytes)| meta_by_path.remove(&path).map(|meta| (path, bytes, meta)))
+            .filter_map(|(path, nar)| meta_by_path.remove(&path).map(|meta| (path, nar, meta)))
             .collect();
 
         Ok(results)
@@ -457,7 +458,7 @@ impl<'a> InputPrefetcher<'a> {
     async fn download_by_url(
         &self,
         by_url: Vec<CachedPath>,
-    ) -> Result<Vec<(String, Vec<u8>, CachedPath)>> {
+    ) -> Result<Vec<(String, NarPayload, CachedPath)>> {
         if by_url.is_empty() {
             return Ok(vec![]);
         }
@@ -481,7 +482,7 @@ impl<'a> InputPrefetcher<'a> {
         for outcome in outcomes {
             let (path, fetched) = outcome.context("presigned NAR download failed")?;
             match fetched {
-                Some((bytes, cp)) => results.push((path, bytes, cp)),
+                Some((bytes, cp)) => results.push((path, NarPayload::Bytes(bytes), cp)),
                 None => missing.push(path),
             }
         }
@@ -507,7 +508,7 @@ impl<'a> InputPrefetcher<'a> {
     /// cancelled by dropping the `FuturesUnordered`.
     ///
     /// Returns the total number of imports attempted on success.
-    async fn import_all(&self, results: Vec<(String, Vec<u8>, CachedPath)>) -> Result<usize> {
+    async fn import_all(&self, results: Vec<(String, NarPayload, CachedPath)>) -> Result<usize> {
         let store = self.store;
         let total = results.len();
         if total == 0 {
@@ -516,8 +517,8 @@ impl<'a> InputPrefetcher<'a> {
 
         let download_paths: HashSet<String> = results.iter().map(|(p, _, _)| p.clone()).collect();
 
-        let mut payload: HashMap<String, (Vec<u8>, CachedPath)> =
-            results.into_iter().map(|(p, b, m)| (p, (b, m))).collect();
+        let mut payload: HashMap<String, (NarPayload, CachedPath)> =
+            results.into_iter().map(|(p, n, m)| (p, (n, m))).collect();
 
         // For each path, the subset of its references that are also in the
         // download set - i.e. the deps we must wait for. Refs already in the
@@ -551,12 +552,12 @@ impl<'a> InputPrefetcher<'a> {
         loop {
             while !ready.is_empty() && imports.len() < PREFETCH_CONCURRENCY {
                 let path = ready.pop().expect("ready is non-empty");
-                let (bytes, meta) = payload
+                let (nar, meta) = payload
                     .remove(&path)
                     .expect("payload present for ready path");
                 pending_deps.remove(&path);
                 imports.push(async move {
-                    let result = import_received_nar(store, &path, bytes, &meta)
+                    let result = import_received_nar(store, &path, nar, &meta)
                         .await
                         .with_context(|| format!("import {} into local store", path));
                     (path, result)
@@ -651,7 +652,7 @@ impl<'a> InputPrefetcher<'a> {
             "prefetching missing paths from server cache (closure-expanding)"
         );
 
-        let mut all_results: Vec<(String, Vec<u8>, CachedPath)> = Vec::new();
+        let mut all_results: Vec<(String, NarPayload, CachedPath)> = Vec::new();
         // Every path we've already asked the server about (success or not),
         // so we don't re-query the same one across iterations.
         let mut queried: HashSet<String> = initial_missing.iter().cloned().collect();
@@ -703,13 +704,20 @@ impl<'a> InputPrefetcher<'a> {
             // references when accepting the `.drv` NAR). Relying on
             // `cached_path.references` alone is unsafe: the eval worker
             // silently stores `NULL` when its own metadata query fails.
-            for (path, bytes, meta) in &batch {
+            for (path, nar, meta) in &batch {
                 if !path.ends_with(".drv") {
                     continue;
                 }
-                let compression = resolve_compression(bytes, meta.url.as_deref());
+                let bytes = match nar.read_bytes().await {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        warn!(drv = %path, error = %e, "could not read staged .drv for closure seeds");
+                        continue;
+                    }
+                };
+                let compression = resolve_compression(&bytes, meta.url.as_deref());
                 for seed in
-                    drv_closure_seeds_from_compressed_nar(bytes, compression, path, mode).await
+                    drv_closure_seeds_from_compressed_nar(&bytes, compression, path, mode).await
                 {
                     if !queried.contains(&seed) {
                         tracing::trace!(
