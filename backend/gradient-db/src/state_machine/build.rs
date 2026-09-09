@@ -42,6 +42,10 @@ pub struct BuildStateMachine;
 
 impl BuildStateMachine {
     /// Returns `Ok(to)` if the transition is valid, `Err` otherwise.
+    ///
+    /// `Queued` back to `Created` is un-promotion: a gate regressed under a
+    /// promoted anchor, so it returns to the queue's waiting room instead of
+    /// being dispatched with a missing input. No other state may move there.
     pub fn validate(
         from: BuildStatus,
         to: BuildStatus,
@@ -66,6 +70,7 @@ impl BuildStateMachine {
         match (from, to) {
             (BuildStatus::Created, BuildStatus::Queued) => Ok(to),
             (BuildStatus::Queued, BuildStatus::Building) => Ok(to),
+            (BuildStatus::Queued, BuildStatus::Created) => Ok(to),
 
             // FailedTransient can be retried (back to Queued) or promoted to permanent.
             (BuildStatus::FailedTransient, BuildStatus::Queued) => Ok(to),
@@ -111,6 +116,14 @@ mod tests {
     #[test]
     fn build_sm_queued_to_building() {
         assert!(BuildStateMachine::validate(BuildStatus::Queued, BuildStatus::Building).is_ok());
+    }
+
+    /// Un-promotion: a retired input or a demoted dependency pulls a queued
+    /// anchor back to Created; only Queued may move there.
+    #[test]
+    fn build_sm_queued_to_created_for_unpromotion() {
+        assert!(BuildStateMachine::validate(BuildStatus::Queued, BuildStatus::Created).is_ok());
+        assert!(BuildStateMachine::validate(BuildStatus::Building, BuildStatus::Created).is_err());
     }
 
     #[test]

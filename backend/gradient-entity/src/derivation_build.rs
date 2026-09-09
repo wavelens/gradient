@@ -27,6 +27,12 @@ pub struct Model {
     pub status: BuildStatus,
     pub substitutable: bool,
     pub substituted: bool,
+    /// Dependents can get this anchor's outputs: substitutable, or terminal
+    /// success with every output whole in our cache. Flipped by the event that
+    /// changes it, with the dependents' `unready_deps` moved from that flip.
+    pub fetchable: bool,
+    /// Direct dependencies that are not fetchable. Zero is the readiness gate.
+    pub unready_deps: i32,
     /// True once this anchor reached a terminal-success status (Completed /
     /// Substituted) AND every output's full runtime closure is present in our
     /// cache. Dispatch gates dependents on it: a dep marked done whose closure
