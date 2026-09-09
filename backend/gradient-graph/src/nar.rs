@@ -38,7 +38,7 @@ pub(crate) async fn commit(db: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCo
     let txn = db.as_transaction().context(
         "NarCommit must run inside a transaction: the pre-commit wholeness endpoint and the reference locks are only held under one",
     )?;
-    gradient_db::lock_reference_endpoints(txn, sp.hash(), &c.references).await?;
+    let lock = gradient_db::lock_reference_endpoints(txn, sp.hash(), &c.references).await?;
 
     let Upserted {
         cached_path,
@@ -51,7 +51,7 @@ pub(crate) async fn commit(db: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCo
     // The seed reports the state; this commit's own row read holds the other end
     // of the flip, so only a real transition is rippled - never an already-whole
     // re-push (which would decrement every referrer a second time).
-    let whole = gradient_db::seed_references(db, sp.hash()).await?;
+    let whole = gradient_db::seed_references(&lock).await?;
     match (was_whole, whole) {
         (false, true) => {
             let moved = gradient_db::ripple_whole(db, vec![sp.hash().to_owned()]).await?;
