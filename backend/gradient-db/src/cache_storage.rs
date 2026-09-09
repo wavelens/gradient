@@ -321,7 +321,7 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
         .await?;
     }
 
-    crate::nar_closure::retire_paths(db, &[hash.to_owned()], None).await?;
+    crate::nar_closure::retire_paths(db, &[hash.to_owned()]).await?;
 
     if let Err(e) = nar_storage.delete(hash).await {
         warn!(%hash, error = %e, "demote: failed to delete NAR object from storage");
