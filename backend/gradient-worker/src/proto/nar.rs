@@ -209,8 +209,14 @@ pub async fn upload_nar(
             let meta = match sink {
                 NarSink::Relay { nar_recv } => {
                     debug!(store_path, "NAR direct push");
-                    stream_path_to_relay(job_id, store_path, writer, nar_recv, path_meta.nar_size)
-                        .await?
+                    stream_path_to_relay(
+                        job_id,
+                        store_path,
+                        writer,
+                        nar_recv,
+                        compression_threads(path_meta.nar_size),
+                    )
+                    .await?
                 }
                 NarSink::Presigned {
                     url,
@@ -353,22 +359,23 @@ impl<'a> RelayStream<'a> {
     }
 }
 
-/// Pack + compress `store_path` and stream the compressed parts to the relay,
-/// hashing as they go so nothing is buffered beyond one chunk.
+/// Pack + compress `store_path` on `threads` zstd workers and stream the
+/// compressed parts to the relay, hashing as they go so nothing is buffered
+/// beyond one chunk. The encoder's final flush is split the same way: a
+/// multithreaded encoder holds whole jobs back until `finish`, so that tail runs
+/// to tens of MiB on a large source, and one frame over `MAX_PROTO_MESSAGE_SIZE`
+/// closes the session and fails the job.
 async fn stream_path_to_relay(
     job_id: &str,
     store_path: &str,
     writer: &ProtoWriter,
     nar_recv: &NarReceiver,
-    nar_size_hint: Option<u64>,
+    threads: u32,
 ) -> Result<CompressedNarMeta> {
     let mut relay = RelayStream::open(job_id, store_path, writer, nar_recv, None).await?;
 
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
-    let mut encoder = nar_encoder(
-        Vec::with_capacity(BULK_CHUNK_SIZE * 2),
-        compression_threads(nar_size_hint),
-    )?;
+    let mut encoder = nar_encoder(Vec::with_capacity(BULK_CHUNK_SIZE * 2), threads)?;
     let mut file_hasher = Sha256::new();
     let mut nar_hasher = Sha256::new();
     let mut nar_size: u64 = 0;
@@ -391,9 +398,9 @@ async fn stream_path_to_relay(
     }
 
     let remaining = encoder.finish().context("failed to finish zstd encoder")?;
-    if !remaining.is_empty() {
-        file_hasher.update(&remaining);
-        relay.send_part(remaining).await?;
+    for part in remaining.chunks(BULK_CHUNK_SIZE) {
+        file_hasher.update(part);
+        relay.send_part(part.to_vec()).await?;
     }
 
     let (produced, resume_from) = relay.finish().await?;
@@ -668,6 +675,80 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("hello"), b"gradient nar test data").unwrap();
         dir
+    }
+
+    /// A multithreaded encoder emits nothing for a job until it completes and
+    /// flushes every pending job at `finish`, so the tail of a large source
+    /// arrives in one piece. It must still leave as bulk chunks: the server caps
+    /// a frame at `MAX_PROTO_MESSAGE_SIZE` and closes the session on the first
+    /// one over it, which failed every fetch-only build of a big tarball.
+    #[tokio::test]
+    async fn a_large_final_flush_is_split_into_bulk_chunks() {
+        let dir = make_temp_store_path();
+        let mut noise = vec![0u8; 12 * 1024 * 1024];
+        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+        for byte in noise.iter_mut() {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            *byte = state as u8;
+        }
+        std::fs::write(dir.join("noise"), &noise).unwrap();
+        let store_path_str = dir.to_str().unwrap().to_owned();
+
+        let server = MockProtoServer::bind().await;
+        let url = server.url().to_owned();
+        let server_task = tokio::spawn(async move {
+            let mut sc = server.accept().await;
+            let mut total = 0u64;
+            loop {
+                match sc.recv().await.unwrap() {
+                    ClientMessage::NarStreamHeader { .. } => continue,
+                    ClientMessage::NarPush {
+                        data,
+                        offset,
+                        is_final,
+                        ..
+                    } => {
+                        assert!(
+                            data.len() <= BULK_CHUNK_SIZE,
+                            "a {} byte frame at offset {offset} exceeds the bulk chunk",
+                            data.len()
+                        );
+                        total += data.len() as u64;
+                        if is_final {
+                            assert_eq!(offset, total, "the final offset is the bytes sent");
+                            break;
+                        }
+                    }
+                    msg => panic!("expected NarStreamHeader/NarPush, got {msg:?}"),
+                }
+            }
+
+            total
+        });
+
+        let conn = crate::connection::ProtoConnection::open(&url)
+            .await
+            .unwrap();
+        let (writer, _reader, _flush) = conn.split();
+        let recv = NarReceiver::new();
+        let recv2 = recv.clone();
+        let sp = store_path_str.clone();
+        let push =
+            tokio::spawn(
+                async move { stream_path_to_relay("job-tail", &sp, &writer, &recv2, 2).await },
+            );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        recv.resolve_push("job-tail", &store_path_str, 0);
+        let meta = push.await.unwrap().unwrap();
+
+        assert_eq!(server_task.await.unwrap(), meta.file_size);
+        assert!(
+            meta.file_size > 8 * 1024 * 1024,
+            "the noise must not compress away, or the tail never exceeds a chunk"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]
