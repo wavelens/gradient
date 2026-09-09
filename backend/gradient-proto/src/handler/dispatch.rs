@@ -113,21 +113,10 @@ impl<'a> DispatchContext<'a> {
         debug!(variant = frame.variant_name(), "received bulk frame");
         match frame.archived() {
             ArchivedClientMessage::NarPush {
-                job_id,
-                store_path,
-                data,
-                offset,
-                is_final,
+                job_id, store_path, ..
             } => {
-                self.on_nar_push(
-                    job_id.as_str(),
-                    store_path.as_str(),
-                    data.as_slice(),
-                    offset.to_native(),
-                    *is_final,
-                    nar,
-                )
-                .await;
+                let (job_id, store_path) = (job_id.to_string(), store_path.to_string());
+                self.on_nar_push(&job_id, &store_path, frame, nar).await;
             }
             ArchivedClientMessage::EvalCacheChunk {
                 job_id,
