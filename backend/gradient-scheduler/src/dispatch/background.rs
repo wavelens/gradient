@@ -38,10 +38,11 @@ pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
         .then(|| Duration::from_secs((timeout_secs / LIVENESS_POLLS_PER_DEADLINE).max(5)))
 }
 
-/// Read-only invariant check: counts stale gate flags, unpromoted-ready
-/// anchors, unbacked trusted outputs, and wedged Building evals so a dead zone
-/// becomes a warning long before a user reports a stuck evaluation. Transient
-/// non-zero counts right after a transition are normal; persistent ones are not.
+/// Invariant check: counts stale gate flags, unpromoted-ready anchors, unbacked
+/// trusted outputs and wedged Building evals so a dead zone becomes a warning
+/// long before a user reports a stuck evaluation, and repairs the NAR reference
+/// counter over the paths the pending anchors gate on. Transient non-zero counts
+/// right after a transition are normal; persistent ones are not.
 pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
     let report = gradient_db::graph_consistency_report(&scheduler.state.worker_db).await?;
     if report.total() > 0 {
@@ -51,6 +52,7 @@ pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow:
             unpromoted_ready = report.unpromoted_ready,
             unbacked_trusted_outputs = report.unbacked_trusted_outputs,
             wedged_building_evals = report.wedged_building_evals,
+            nar_counter_drift = report.nar_counter_drift,
             "graph consistency sweep found invariant violations"
         );
     } else {

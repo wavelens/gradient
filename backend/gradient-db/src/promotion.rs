@@ -26,7 +26,7 @@
 //! | `closure_complete`              | bidirectional (CLEAR+SET) | [`reconcile_closure_complete`]                                |
 //! | `drv_closure_cached`            | bidirectional (CLEAR+SET) | [`reconcile_drv_closure_cached`]                              |
 //! | `derivation_output.is_cached`   | event-driven (set on NAR ingest, cleared by demote) | [`crate::cache_storage::demote_unbacked_trusted_outputs`] keys on ground truth, not this flag |
-//! | `cached_path.closure_complete`  | bidirectional (CLEAR+SET) | [`crate::cache_storage::reconcile_cached_path_closure_complete`] |
+//! | `cached_path.missing_references`| moved by the reference ripple (commit / retire) | [`crate::nar_closure::repair_counters_for`] over the gating paths |
 //!
 //! The two closure flags cache ground truth that can REGRESS (GC deletes a NAR,
 //! an output is evicted, an edge is recorded late), so they must be cleared as
@@ -218,16 +218,16 @@ fn substitute_created_anchors_sql() -> String {
 /// self-heal fixpoint (`reconcile_closure_complete`). Completed arm: outputs
 /// cached, derivation walked, and every build dependency itself `closure_complete`
 /// **or** `substitutable`. Substituted arm: we never held the build closure, so
-/// key on the runtime-closure ground truth instead - every output's
-/// `cached_path` is fully cached AND `closure_complete`, the same check
-/// `compute_truly_substituted` makes before inserting such anchors with the
-/// flag already set. Without this arm the CLEAR pass strips the flag from every
-/// truly-substituted anchor (whose `substitutable` is false - a cache hit, not
-/// an upstream offer) and the readiness predicate can never pass either way:
-/// dependents stall Queued forever. Self-parenthesized: callers embed it as
-/// `AND {gate}`.
+/// key on the runtime-closure ground truth instead - every output's `cached_path`
+/// row is whole, the same check `compute_truly_substituted` makes before
+/// inserting such anchors with the flag already set. Without this arm the CLEAR
+/// pass strips the flag from every truly-substituted anchor (whose
+/// `substitutable` is false - a cache hit, not an upstream offer) and the
+/// readiness predicate can never pass either way: dependents stall Queued
+/// forever. Self-parenthesized: callers embed it as `AND {gate}`.
 pub(crate) fn closure_complete_gate() -> String {
     let walked = crate::graph_sql::walked_predicate("db");
+    let whole = crate::nar_closure::whole_predicate("cp");
     format!(
         r#"
     ((db.status = {completed}
@@ -246,7 +246,7 @@ pub(crate) fn closure_complete_gate() -> String {
         SELECT 1 FROM derivation_output o
         LEFT JOIN cached_path cp ON cp.hash = o.hash
         WHERE o.derivation = db.derivation
-          AND (cp.file_hash IS NULL OR NOT cp.closure_complete))))
+          AND NOT {whole})))
 "#,
         completed = status_sql::build(BuildStatus::Completed),
         substituted = status_sql::build(BuildStatus::Substituted),
@@ -649,10 +649,10 @@ fn promote_ready_sql() -> String {
 /// with no dependency wait at all (its NAR is on an upstream cache); otherwise the
 /// shared readiness predicate must hold and the anchor's own `.drv` closure must be
 /// importable, satisfied by either the build-graph `drv_closure_cached` flag or the
-/// `.drv`'s own NAR-closure (`cached_path.closure_complete`, via
-/// [`crate::graph_sql::drv_nar_closure_complete_predicate`]). The flag diverges from
-/// that NAR ground truth when eval pruning leaves a dependency unwalked, so keying
-/// on it alone stalls a build whose `.drv` closure is in fact fully cached.
+/// `.drv` row being whole (via [`crate::graph_sql::drv_whole_predicate`]). The
+/// flag diverges from that NAR ground truth when eval pruning leaves a dependency
+/// unwalked, so keying on it alone stalls a build whose `.drv` closure is in fact
+/// fully cached.
 /// Ordered by dependency count desc (integration builds first), then age. This is
 /// [`promote_ready`]'s predicate applied one step later - both embed
 /// [`crate::graph_sql::deps_ready_predicate`].
@@ -671,7 +671,7 @@ pub async fn find_ready_anchors<C: ConnectionTrait>(
 
 fn find_ready_anchors_sql() -> String {
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");
-    let drv_nar_closure = crate::graph_sql::drv_nar_closure_complete_predicate("db");
+    let drv_whole = crate::graph_sql::drv_whole_predicate("db");
     let walked = crate::graph_sql::walked_predicate("db");
     format!(
         r#"
@@ -681,7 +681,7 @@ fn find_ready_anchors_sql() -> String {
           AND {walked}
           AND EXISTS (
             SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
-          AND (db.substitutable OR ((db.drv_closure_cached OR {drv_nar_closure}) AND {deps_ready}))
+          AND (db.substitutable OR ((db.drv_closure_cached OR {drv_whole}) AND {deps_ready}))
         ORDER BY
             (SELECT count(*)
                FROM derivation_dependency dd
@@ -1105,11 +1105,11 @@ mod tests {
     /// Promotion and the dispatch gate must share one readiness definition: both
     /// statements embed `deps_ready_predicate` verbatim, and only the dispatch
     /// gate adds the `.drv`-importability arm. That arm accepts either the
-    /// build-graph `drv_closure_cached` flag OR the `.drv`'s own NAR-closure
-    /// (`cached_path.closure_complete`, the ground truth) - the flag diverges when
-    /// eval pruning leaves a dependency unwalked, so keying on it alone dead-zones
-    /// a build whose `.drv` closure is in fact fully cached. A drift between the
-    /// two statements is a latent dead zone.
+    /// build-graph `drv_closure_cached` flag OR the `.drv` row being whole (the
+    /// ground truth) - the flag diverges when eval pruning leaves a dependency
+    /// unwalked, so keying on it alone dead-zones a build whose `.drv` closure is
+    /// in fact fully cached. A drift between the two statements is a latent dead
+    /// zone.
     #[test]
     fn promotion_and_dispatch_share_the_readiness_predicate() {
         let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1126,8 +1126,8 @@ mod tests {
         );
         assert!(
             dispatch.contains("db.substitutable OR ((db.drv_closure_cached OR")
-                && dispatch.contains("cp.closure_complete"),
-            "dispatch accepts the build-graph flag OR the .drv's own NAR-closure: {dispatch}"
+                && dispatch.contains("cp.missing_references = 0"),
+            "dispatch accepts the build-graph flag OR the .drv row being whole: {dispatch}"
         );
         assert!(
             promote.contains("db.substitutable OR (NOT EXISTS"),
@@ -1171,8 +1171,8 @@ mod tests {
             "gate must have a substituted arm: {gate}"
         );
         assert!(
-            gate.contains("(cp.file_hash IS NULL OR NOT cp.closure_complete)"),
-            "substituted arm keys on fully-cached + closure-complete cached_path rows: {gate}"
+            gate.contains("NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)"),
+            "substituted arm keys on whole cached_path rows: {gate}"
         );
     }
 
