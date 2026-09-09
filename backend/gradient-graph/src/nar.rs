@@ -14,7 +14,8 @@ use gradient_types::*;
 use gradient_util::nix_hash::{is_nix32_hash, normalize_nar_hash};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel, QueryFilter,
+    QuerySelect, Set,
 };
 use tracing::{debug, warn};
 
@@ -31,6 +32,7 @@ pub(crate) async fn commit(db: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCo
         created,
         was_whole,
     } = upsert_cached_path(db, sp.hash(), sp.name(), c).await?;
+
     if !c.references.is_empty() {
         sync_reference_index(db, sp.hash(), &c.references).await?;
     }
@@ -93,7 +95,9 @@ pub(crate) fn after_commit(ctx: &DbContext, committed: &NarCommitted, store_path
 
 /// The row the commit wrote, and what it was before: `was_whole` is the
 /// pre-commit endpoint of the wholeness flip, which no statement after this write
-/// can recover (see `gradient_db::seed_references`).
+/// can recover (see `gradient_db::seed_references`). It is read under the row
+/// lock, so a maintenance retire rippling the same counter from its own
+/// transaction cannot land between the read and the write.
 struct Upserted {
     cached_path: CachedPathId,
     created: bool,
@@ -108,6 +112,7 @@ async fn upsert_cached_path(
 ) -> anyhow::Result<Upserted> {
     match ECachedPath::find()
         .filter(CCachedPath::Hash.eq(hash))
+        .lock_exclusive()
         .one(db)
         .await?
     {
@@ -168,6 +173,7 @@ async fn upsert_cached_path(
                     warn!(store_path = %c.store_path, error = %e, "insert cached_path failed (possible race)");
                     match ECachedPath::find()
                         .filter(CCachedPath::Hash.eq(hash))
+                        .lock_exclusive()
                         .one(db)
                         .await?
                     {
@@ -513,6 +519,40 @@ mod tests {
         assert!(
             !log.iter().any(|s| s.contains("missing_references - c.n")),
             "an already-whole path must not be rippled again: {log:?}"
+        );
+    }
+
+    /// The pre-commit endpoint must be read under the row lock. A maintenance
+    /// retire ripples the same counters from its own transaction, outside the
+    /// graph actor, so an unlocked read lets a reverse ripple land between the
+    /// read and the write: the commit would then see `(true, false)` and
+    /// increment a referrer a second time for one loss, permanently.
+    #[tokio::test]
+    async fn the_pre_commit_endpoint_is_read_under_the_row_lock() {
+        let db = WorkerDb::new(
+            MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([
+                    vec![returned_cached_path(HASH)],
+                    vec![returned_cached_path(HASH)],
+                ])
+                .append_query_results([seed_reply(true)])
+                .append_exec_results([MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                }])
+                .into_connection(),
+        );
+
+        commit(&db, &commit_for(SP)).await.expect("commit");
+
+        let log: Vec<String> = db
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        assert!(
+            log[0].contains("FOR UPDATE"),
+            "the row read that holds the endpoint must lock it: {log:?}"
         );
     }
 
