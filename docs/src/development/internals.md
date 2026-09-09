@@ -162,7 +162,9 @@ Batching the BFS (one DB round-trip per level) keeps the query count proportiona
 
 ## Recursive Graph Walks
 
-Every unbounded traversal is generated in `gradient-db/src/graph_sql.rs`: the build closure and the failure cascade over `derivation_dependency`, and the NAR reference closure over `cached_path_reference`. Callers pass a seed and a direction and get back a `WITH RECURSIVE` prelude, so no two walkers can disagree about what "reachable" means.
+Every unbounded traversal is generated in `gradient-db/src/graph_sql.rs`: the build closure and the failure cascade over `derivation_dependency`, and the on-demand runtime closure over `cached_path_reference` (the build closure page, the runtime-closure size on the task metrics). Callers pass a seed and a direction and get back a `WITH RECURSIVE` prelude, so no two walkers can disagree about what "reachable" means.
+
+Cache wholeness is deliberately not one of them. `cached_path.missing_references` counts a path's unwhole references and is moved one level per statement as paths become or stop being whole, so no sweep re-derives it; see [the scheduler](../scheduler.md).
 
 The recursive term is always a `LATERAL` probe behind an `OFFSET 0` fence:
 
@@ -181,11 +183,10 @@ The fence is load-bearing, not decoration. Postgres estimates a recursive CTE's 
 |---|---|---|
 | evaluation closure, 43 898 nodes | 5 278 ms | 955 ms |
 | GC keep-set, 315 155 nodes | 40 069 ms | 9 746 ms |
-| `cached_path_reference` closure sweep | over 180 000 ms | 18 425 ms |
 
 The set operator stays `UNION`. It is what deduplicates the frontier on each iteration; the dependents walk emits 940 000 rows for 68 000 distinct nodes, and `UNION ALL` would make the walk exponential in depth on a diamond-shaped graph.
 
-Both edge tables carry a covering index in the direction they are probed, so the walk is index-only rather than one heap fetch per row: `(derivation, dependency)` and `(dependency, derivation)` on `derivation_dependency`, `(referrer, reference_hash)` on `cached_path_reference`. Neither table has a surrogate key; the natural pair is the primary key.
+Both edge tables carry a covering index in the direction they are probed, so the walk is index-only rather than one heap fetch per row: `(derivation, dependency)` and `(dependency, derivation)` on `derivation_dependency`, `(referrer, reference_hash)` on `cached_path_reference`. The counter ripple probes that table the other way round, from a reference to its referrers, which is what the `reference_hash` index is for. Neither table has a surrogate key; the natural pair is the primary key.
 
 ### SQL/PGQ
 
