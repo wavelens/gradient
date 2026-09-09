@@ -15,7 +15,8 @@
 //! One dimension is not read-only: the NAR reference counter is moved rather
 //! than derived, so nothing else would ever notice a lost move. This pass
 //! repairs it in place over the paths that gate pending anchors, and reports
-//! how many rows it had to correct.
+//! how many rows it had to correct. That makes the sweep the counter's only
+//! backstop, so `GRADIENT_GRAPH_CONSISTENCY_INTERVAL = 0` leaves it with none.
 
 use crate::status_sql;
 use gradient_entity::build::BuildStatus;
@@ -59,8 +60,10 @@ async fn count<C: ConnectionTrait>(db: &C, sql: String) -> Result<i64, DbErr> {
         .unwrap_or(0))
 }
 
-/// Count every invariant violation the gates could act on right now, and repair
-/// the NAR reference counter over the paths the pending anchors gate on.
+/// Repair the NAR reference counter over the paths the pending anchors gate on,
+/// then count every invariant violation the gates could act on right now. The
+/// repair runs first because two of those counts embed gates that read the
+/// counter, so a drifted row would otherwise inflate a count this very pass fixes.
 pub async fn graph_consistency_report<C: ConnectionTrait>(
     db: &C,
 ) -> Result<ConsistencyReport, DbErr> {
@@ -69,6 +72,17 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
     let deps_ready = crate::graph_sql::deps_ready_predicate("db");
     let walked = crate::graph_sql::walked_predicate("db");
     let unbacked = crate::cache_storage::unbacked_trusted_outputs_select();
+
+    let gating = db
+        .query_all_raw(Statement::from_string(
+            DatabaseBackend::Postgres,
+            crate::nar_closure::GATING_PATHS.to_owned(),
+        ))
+        .await?
+        .into_iter()
+        .map(|r| r.try_get::<String>("", "hash"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let nar_counter_drift = crate::nar_closure::repair_counters_for(db, &gating).await? as i64;
 
     let stale_closure_complete = count(
         db,
@@ -124,17 +138,6 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
     )
     .await?;
 
-    let gating: Vec<String> = db
-        .query_all_raw(Statement::from_string(
-            DatabaseBackend::Postgres,
-            crate::nar_closure::GATING_PATHS.to_owned(),
-        ))
-        .await?
-        .into_iter()
-        .filter_map(|r| r.try_get::<String>("", "hash").ok())
-        .collect();
-    let nar_counter_drift = crate::nar_closure::repair_counters_for(db, &gating).await? as i64;
-
     Ok(ConsistencyReport {
         stale_closure_complete,
         stale_drv_closure_cached,
@@ -148,6 +151,47 @@ pub async fn graph_consistency_report<C: ConnectionTrait>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{MockDatabase, MockExecResult, Value};
+    use std::collections::BTreeMap;
+
+    /// The repair is the counter's only backstop, so the report has to actually
+    /// run it - and run it before the counts, two of which embed gates that read
+    /// the counter. Without this, deleting those lines leaves the suite green.
+    #[tokio::test]
+    async fn the_report_repairs_the_gating_paths_before_it_counts() {
+        let n = || vec![BTreeMap::from([("n".to_owned(), Value::BigInt(Some(0)))])];
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![BTreeMap::from([(
+                "hash".to_owned(),
+                Value::from("h".to_owned()),
+            )])]])
+            .append_query_results([n(), n(), n(), n(), n()])
+            .append_exec_results([MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 2,
+            }])
+            .into_connection();
+
+        let report = graph_consistency_report(&db).await.unwrap();
+
+        assert_eq!(
+            report.nar_counter_drift, 2,
+            "the repaired rows are reported"
+        );
+        let log: Vec<String> = db
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        assert!(
+            log[0].contains("FROM derivation_build db") && log[0].contains("derivation_dependency"),
+            "the gating select comes first: {log:?}"
+        );
+        assert!(
+            log[1].contains("UPDATE cached_path cp SET missing_references"),
+            "the repair runs before any count reads the counter: {log:?}"
+        );
+    }
 
     #[test]
     fn total_sums_every_dimension() {

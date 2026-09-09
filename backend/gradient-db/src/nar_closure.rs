@@ -16,7 +16,10 @@
 //! rippling one frontier twice, moves referrers past zero, and a negative
 //! counter never satisfies `= 0` again. The ripples read that transition from
 //! their own `RETURNING`; the seed cannot (see [`seed_references`]), so its
-//! caller holds the pre-commit endpoint.
+//! caller holds the pre-commit endpoint. Only [`repair_counters_for`] can
+//! rescue a row driven negative, and it visits [`GATING_PATHS`] alone: a path
+//! driven negative while no anchor gates on it stays unwhole until something
+//! does, holding every referrer unwhole with it.
 
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
 
@@ -25,16 +28,35 @@ pub fn whole_predicate(alias: &str) -> String {
     format!("({alias}.file_hash IS NOT NULL AND {alias}.missing_references = 0)")
 }
 
-const SEED: &str = r#"
-    UPDATE cached_path cp SET missing_references = (
-        SELECT count(*) FROM cached_path_reference r
-        LEFT JOIN cached_path dep ON dep.hash = r.reference_hash
-        WHERE r.referrer = cp.hash
-          AND r.reference_hash <> cp.hash
-          AND NOT (dep.file_hash IS NOT NULL AND dep.missing_references = 0))
-    WHERE cp.hash = $1
-    RETURNING (cp.file_hash IS NOT NULL AND cp.missing_references = 0) AS whole
-"#;
+/// The value `missing_references` holds for referrer `{alias}`: the references,
+/// self excluded, whose row is absent, unbacked or itself not whole. The seed and
+/// the repair are the two halves of one invariant - if their counts ever
+/// disagree, every sweep rewrites correct rows into incorrect ones - so both
+/// compose this, and this composes [`whole_predicate`].
+fn unwhole_reference_count(alias: &str) -> String {
+    format!(
+        "(SELECT count(*) FROM cached_path_reference r \
+         LEFT JOIN cached_path dep ON dep.hash = r.reference_hash \
+         WHERE r.referrer = {alias}.hash AND r.reference_hash <> {alias}.hash \
+           AND NOT {whole})",
+        whole = whole_predicate("dep"),
+    )
+}
+
+fn seed_statement() -> String {
+    format!(
+        "UPDATE cached_path cp SET missing_references = {count} \
+         WHERE cp.hash = $1 RETURNING {whole} AS whole",
+        count = unwhole_reference_count("cp"),
+        whole = whole_predicate("cp"),
+    )
+}
+
+/// Serialising pass ahead of a guarded delete: `FOR UPDATE` conflicts with the
+/// RI `FOR KEY SHARE` a concurrent `cached_path_signature` insert holds on the
+/// parent row, so the wait for that insert is absorbed here instead of inside the
+/// DELETE. It reads nothing and decides nothing; see [`retire_paths`].
+const LOCK: &str = "SELECT 1 FROM cached_path WHERE hash = ANY($1) ORDER BY hash FOR UPDATE";
 
 const FORWARD: &str = r#"
     UPDATE cached_path cp
@@ -81,7 +103,7 @@ pub async fn seed_references<C: ConnectionTrait>(db: &C, hash: &str) -> Result<b
     let Some(row) = db
         .query_one_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            SEED,
+            seed_statement(),
             [hash.into()],
         ))
         .await?
@@ -170,13 +192,20 @@ pub struct Retired {
 /// caller that may drop a path only while something still holds - the TTL
 /// eviction passes `NOT EXISTS (SELECT 1 FROM cached_path_signature ...)`, since
 /// `cached_path_signature.cached_path` is `ON DELETE CASCADE` and a retire takes
-/// every cache's signature with it. It belongs in the DELETE and nowhere else: a
-/// separate `SELECT ... FOR UPDATE` that blocks on a concurrent commit's row lock
-/// re-checks its condition through EvalPlanQual against the ORIGINAL statement
-/// snapshot, so a signature that commit inserted for another cache is invisible,
-/// the path is reported unsigned and retired, and the just-committed narinfo
-/// starts 404ing. The DELETE's own snapshot is taken after the lock is granted
-/// and sees it.
+/// every cache's signature with it.
+///
+/// A guarded retire therefore runs [`LOCK`] first, and both halves are needed.
+/// The guard has to be evaluated by the DELETE, because a preceding statement
+/// would decide from its own snapshot; and the DELETE has to start after the wait
+/// for an in-flight signature insert is over, because under READ COMMITTED its
+/// snapshot is taken at statement start, before any lock wait, and EvalPlanQual
+/// re-checks the qual only against the row version it is updating - it never
+/// re-evaluates a subquery over another table. Guard alone: the DELETE blocks on
+/// the insert's RI `FOR KEY SHARE` lock, proceeds without ever seeing the
+/// signature that committed meanwhile, and cascades it away, 404ing a narinfo
+/// committed seconds earlier. `FOR UPDATE` alone: nothing decides. Together the
+/// wait is absorbed in its own statement and the DELETE opens a fresh snapshot
+/// that sees the signature its guard then tests.
 pub async fn retire_paths<C: ConnectionTrait>(
     db: &C,
     hashes: &[String],
@@ -184,6 +213,15 @@ pub async fn retire_paths<C: ConnectionTrait>(
 ) -> Result<Retired, DbErr> {
     if hashes.is_empty() {
         return Ok(Retired::default());
+    }
+
+    if guard.is_some() {
+        db.execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            LOCK,
+            [hashes.to_vec().into()],
+        ))
+        .await?;
     }
 
     let rows = db
@@ -239,41 +277,57 @@ pub async fn retire_paths<C: ConnectionTrait>(
     Ok(Retired { deleted, unwhole })
 }
 
+fn repair_statement() -> String {
+    format!(
+        "UPDATE cached_path cp SET missing_references = x.n \
+         FROM (SELECT c.hash, c.missing_references AS old, {count} AS n \
+               FROM cached_path c WHERE c.hash = ANY($1)) x \
+         WHERE cp.hash = x.hash AND cp.missing_references = x.old AND x.old <> x.n",
+        count = unwhole_reference_count("c"),
+    )
+}
+
 /// Recompute the counter for `hashes` from their references and write the rows
 /// that disagree. Returns how many were repaired. The ripples move the counter
 /// rather than derive it, so this is the bounded backstop against a move that
 /// was lost (a crashed transaction, a hand-edited row), never a sweep.
+///
+/// The write is a compare-and-swap on the pre-image (`x.old`). The count comes
+/// from the statement's own snapshot, so a ripple that commits while the UPDATE
+/// waits on a row lock would otherwise be discarded - and discarding an increment
+/// marks a path whole with a reference already gone, which the dispatch gate reads
+/// within one 5s tick and turns into a terminal `InputsUnavailable`. A row that
+/// moved under us is skipped and re-derived by the next pass. Chunked so each
+/// chunk commits on its own: as one statement over a fleet evaluation's gating set
+/// the sweep's budget cancels it in place and rolls back every repair, silently.
 pub async fn repair_counters_for<C: ConnectionTrait>(
     db: &C,
     hashes: &[String],
 ) -> Result<u64, DbErr> {
-    if hashes.is_empty() {
-        return Ok(0);
+    let statement = repair_statement();
+    let mut repaired = 0u64;
+    for chunk in hashes.chunks(crate::IN_CHUNK_SIZE) {
+        repaired += db
+            .execute_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                &statement,
+                [chunk.to_vec().into()],
+            ))
+            .await?
+            .rows_affected();
     }
 
-    Ok(db
-        .execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"
-            UPDATE cached_path cp SET missing_references = x.n
-            FROM (SELECT c.hash, (
-                      SELECT count(*) FROM cached_path_reference r
-                      LEFT JOIN cached_path dep ON dep.hash = r.reference_hash
-                      WHERE r.referrer = c.hash
-                        AND r.reference_hash <> c.hash
-                        AND NOT (dep.file_hash IS NOT NULL AND dep.missing_references = 0)) AS n
-                  FROM cached_path c WHERE c.hash = ANY($1)) x
-            WHERE cp.hash = x.hash AND cp.missing_references <> x.n
-            "#,
-            [hashes.to_vec().into()],
-        ))
-        .await?
-        .rows_affected())
+    Ok(repaired)
 }
 
 /// The paths the pending anchors gate on: their own `.drv` rows and the output
-/// rows of their direct dependencies. Drift anywhere else costs nothing until a
-/// build needs the path, so the repair pass is bounded to exactly this set.
+/// rows of their direct dependencies. This is what bounds [`repair_counters_for`],
+/// so every path a DISPATCH gate reads is repaired on each sweep. An eval-time
+/// prune reads a wider set and is NOT repaired: `gradient_graph::known::prunable`
+/// and the scheduler's substitutability pass ask whether the outputs of arbitrary
+/// walked candidates are whole, and most of those have no pending anchor. A
+/// false-whole there prunes a subtree that is then never walked, recorded or
+/// built - a permanent dead end, not a stall a later build clears.
 pub const GATING_PATHS: &str = r#"
     SELECT d.hash FROM derivation d
     JOIN derivation_build db ON db.derivation = d.id
@@ -318,7 +372,7 @@ mod tests {
     /// never be whole.
     #[test]
     fn the_seed_counts_absent_unbacked_and_unwhole_references_but_not_self() {
-        let sql = norm(SEED);
+        let sql = norm(&seed_statement());
         assert!(sql.contains("LEFT JOIN cached_path dep ON dep.hash = r.reference_hash"));
         assert!(sql.contains("r.reference_hash <> cp.hash"));
         assert!(
@@ -340,7 +394,7 @@ mod tests {
     /// forever. The caller pairs this with the pre-commit `is_whole()`.
     #[tokio::test]
     async fn the_seed_reports_the_state_and_leaves_the_transition_to_its_caller() {
-        let sql = norm(SEED);
+        let sql = norm(&seed_statement());
         assert!(!sql.contains("cached_path old"), "{sql}");
         assert!(sql.contains("WHERE cp.hash = $1"), "{sql}");
         assert!(
@@ -389,7 +443,10 @@ mod tests {
     /// exactly when it was zero before, i.e. when the row was whole.
     #[test]
     fn every_returning_predicate_reads_the_one_wholeness_definition() {
-        assert!(norm(SEED).contains(&format!("RETURNING {} AS whole", whole_predicate("cp"))));
+        assert!(
+            norm(&seed_statement())
+                .contains(&format!("RETURNING {} AS whole", whole_predicate("cp")))
+        );
         assert!(norm(FORWARD).contains(&format!(
             "RETURNING cp.hash, {} AS whole",
             whole_predicate("cp")
@@ -525,21 +582,29 @@ mod tests {
         assert!(statements(db).is_empty());
     }
 
-    /// A caller's guard has to be ANDed into the DELETE itself. Checking it in a
-    /// separate `SELECT ... FOR UPDATE` re-evaluates the condition through
-    /// EvalPlanQual on the original statement snapshot once it blocks on a
-    /// concurrent commit's row lock, so a `cached_path_signature` that commit
-    /// inserted for another cache is invisible; the path is retired and the
-    /// cascade takes the fresh signature with it, 404ing a narinfo committed
-    /// seconds earlier. The DELETE's own snapshot is taken after the lock.
+    /// Both halves of a guarded retire are load-bearing. The guard must be
+    /// evaluated by the DELETE, since a preceding statement would decide from its
+    /// own snapshot; and the DELETE must start after the wait for an in-flight
+    /// signature insert, since under READ COMMITTED its snapshot predates the lock
+    /// wait and EvalPlanQual never re-evaluates a subquery over another table - so
+    /// the guard alone still deletes a row whose signature committed while the
+    /// DELETE was blocked on that insert's RI key lock, and cascades it away.
     #[tokio::test]
-    async fn the_retire_guard_lands_inside_the_delete_statement() {
+    async fn a_guarded_retire_serialises_first_and_decides_in_the_delete() {
         let guard =
             "NOT EXISTS (SELECT 1 FROM cached_path_signature s WHERE s.cached_path = cp.id)";
         let sql = norm(&delete_statement(Some(guard)));
         assert!(
             sql.contains(&format!("WHERE cp.hash = ANY($1) AND ({guard})")),
-            "{sql}"
+            "the guard decides inside the delete: {sql}"
+        );
+        assert!(
+            norm(LOCK).contains("ORDER BY hash FOR UPDATE"),
+            "the lock pass serialises, ordered so two evictions cannot deadlock: {LOCK}"
+        );
+        assert!(
+            !norm(LOCK).contains("cached_path_signature"),
+            "the lock pass must decide nothing: {LOCK}"
         );
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
@@ -549,7 +614,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 0,
                 };
-                3
+                4
             ])
             .into_connection();
 
@@ -559,14 +624,81 @@ mod tests {
 
         let log = statements(db);
         assert!(
-            log[0].contains("DELETE FROM cached_path") && log[0].contains("cached_path_signature"),
+            log[0].contains("FOR UPDATE") && !log[0].contains("DELETE"),
+            "the wait is absorbed before the delete: {log:?}"
+        );
+        assert!(
+            log[1].contains("DELETE FROM cached_path") && log[1].contains("cached_path_signature"),
             "the guard must reach the delete: {log:?}"
         );
     }
 
+    /// The seed and the repair are the two halves of one invariant: if their
+    /// counts ever disagree, every sweep rewrites correct rows into incorrect ones
+    /// and reports permanent drift, and nothing else in the system would notice.
+    #[test]
+    fn the_seed_and_the_repair_count_references_identically() {
+        let seed = norm(&seed_statement());
+        let repair = norm(&repair_statement());
+        assert!(
+            seed.contains(&norm(&unwhole_reference_count("cp"))),
+            "{seed}"
+        );
+        assert!(
+            repair.contains(&norm(&unwhole_reference_count("c"))),
+            "{repair}"
+        );
+        for sql in [&seed, &repair] {
+            assert!(
+                sql.contains(&format!("AND NOT {}", whole_predicate("dep"))),
+                "both must count against the one wholeness definition: {sql}"
+            );
+        }
+    }
+
+    /// The repair writes an absolute count derived from its own snapshot, so it
+    /// must compare-and-swap on the pre-image: a ripple that commits while the
+    /// UPDATE waits on the row lock would otherwise be discarded, and a discarded
+    /// increment marks a path whole with a reference already gone - the dispatch
+    /// gate reads that within one tick and the build dies `InputsUnavailable`.
+    #[test]
+    fn the_repair_compares_and_swaps_on_the_pre_image() {
+        let sql = norm(&repair_statement());
+        assert!(sql.contains("c.missing_references AS old"), "{sql}");
+        assert!(
+            sql.contains(
+                "WHERE cp.hash = x.hash AND cp.missing_references = x.old AND x.old <> x.n"
+            ),
+            "a row that moved under us must be skipped, not overwritten: {sql}"
+        );
+    }
+
+    /// Unchunked over a fleet evaluation's gating set the sweep's budget cancels
+    /// the statement in place, rolls back every repair and makes zero progress,
+    /// silently, forever. One statement per chunk means each chunk commits.
+    #[tokio::test]
+    async fn the_repair_commits_one_chunk_at_a_time() {
+        let hashes: Vec<String> = (0..crate::IN_CHUNK_SIZE + 1)
+            .map(|i| format!("h{i}"))
+            .collect();
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 3,
+                };
+                2
+            ])
+            .into_connection();
+
+        assert_eq!(repair_counters_for(&db, &hashes).await.unwrap(), 6);
+        assert_eq!(statements(db).len(), 2, "one statement per chunk");
+    }
+
     /// The bounded repair covers exactly the paths a pending anchor gates on:
     /// its own `.drv` row, and the output rows of the derivations it depends on.
-    /// A drift anywhere else costs nothing until a build needs the path.
+    /// Widening it is PR 3's business; narrowing it silently stops repairing a
+    /// path some dispatch gate still reads.
     #[test]
     fn gating_paths_cover_pending_drvs_and_their_dependencies_outputs() {
         let sql = norm(GATING_PATHS);

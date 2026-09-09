@@ -205,13 +205,12 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
 
         // Drop THIS cache's signatures on the outputs' cached paths, then retire
         // any cached_path no cache signs anymore, in the same transaction. The
-        // "still signed" test rides in the retiring DELETE itself: checked by a
-        // preceding statement it would be re-evaluated through EvalPlanQual on
-        // that statement's snapshot once it blocks on a concurrent commit's row
-        // lock, missing the signature that commit just took out and cascading it
-        // away with the row. Without the signature cleanup the "compressed
-        // stored" metric (SUM(file_size) via cached_path_signature) would stay
-        // inflated after TTL eviction even though the NAR file is gone.
+        // "still signed" test rides in the retiring DELETE, which `retire_paths`
+        // serialises behind a lock pass of its own so the DELETE's snapshot sees a
+        // signature another cache committed while we waited; neither half is
+        // sufficient alone (see `retire_paths`). Without the signature cleanup the
+        // "compressed stored" metric (SUM(file_size) via cached_path_signature)
+        // would stay inflated after TTL eviction even though the NAR file is gone.
         if !output_hashes.is_empty() {
             use sea_orm::TransactionTrait;
             let txn = state.worker_db.begin().await?;
@@ -689,13 +688,12 @@ mod tests {
         );
     }
 
-    /// The TTL eviction may only drop a path no cache signs any more, and that
-    /// test has to ride in the retiring DELETE. Selecting the survivors first
-    /// re-evaluates the condition through EvalPlanQual on the select's own
-    /// snapshot as soon as it blocks on a concurrent commit's row lock, so a
-    /// `cached_path_signature` that commit inserted for another cache is
-    /// invisible: the path is retired, the cascade takes the fresh signature,
-    /// and a narinfo committed seconds ago starts 404ing.
+    /// The TTL eviction may only drop a path no cache signs any more. That test
+    /// has to be made by the retiring DELETE - a statement that decides it earlier
+    /// decides from its own snapshot and misses a signature another cache commits
+    /// meanwhile, cascading it away and 404ing a narinfo committed seconds ago -
+    /// and it has to be preceded by a pure lock pass, or the DELETE blocks on that
+    /// insert's RI key lock and proceeds without ever re-reading the signature.
     #[tokio::test]
     async fn ttl_eviction_guards_the_retiring_delete_itself() {
         let tmp = tempfile::tempdir().unwrap();
@@ -724,7 +722,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                5
+                6
             ])
             .into_connection();
         let state = state_with_worker_db(tmp.path(), db.clone());
@@ -742,8 +740,13 @@ mod tests {
             "the still-signed guard belongs inside the retiring delete: {log:?}"
         );
         assert!(
-            !log.iter().any(|s| s.contains("FOR UPDATE")),
-            "no survivor pre-select may stand between the check and the delete: {log:?}"
+            !log.iter()
+                .any(|s| s.contains("FOR UPDATE") && s.contains("cached_path_signature")),
+            "the still-signed test may not be made by a statement other than the delete: {log:?}"
+        );
+        assert!(
+            log.iter().any(|s| s.contains("FOR UPDATE")),
+            "the delete must be preceded by a pure lock pass: {log:?}"
         );
     }
 
