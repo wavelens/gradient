@@ -126,17 +126,24 @@ impl Actor for SessionActor {
         let max_serves = proto_cfg.max_concurrent_nar_serves;
         let partial_root =
             std::path::PathBuf::from(format!("{}/nar-partial", state.config.storage.base_path));
-        let nar = NarReceiveStore::new(partial_root, &peer_id, partial_ttl, max_partial_bytes)
-            .unwrap_or_else(|e| {
-                error!(%peer_id, error = %e, "failed to init NAR partial dir; falling back to temp");
-                NarReceiveStore::new(
-                    std::env::temp_dir().join("gradient-nar-partial"),
-                    &peer_id,
-                    partial_ttl,
-                    max_partial_bytes,
-                )
-                .expect("temp partial dir must be creatable")
-            });
+        let nar = NarReceiveStore::new(
+            partial_root,
+            &peer_id,
+            partial_ttl,
+            max_partial_bytes,
+            state.shutdown.clone(),
+        )
+        .unwrap_or_else(|e| {
+            error!(%peer_id, error = %e, "failed to init NAR partial dir; falling back to temp");
+            NarReceiveStore::new(
+                std::env::temp_dir().join("gradient-nar-partial"),
+                &peer_id,
+                partial_ttl,
+                max_partial_bytes,
+                state.shutdown.clone(),
+            )
+            .expect("temp partial dir must be creatable")
+        });
         let (reader, writer) = socket.split(send_chunk_timeout, &state.shutdown);
         let reader = state.shutdown.spawn(read_loop(reader, myself));
 

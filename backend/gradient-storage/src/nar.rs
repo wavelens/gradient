@@ -8,10 +8,13 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::StreamExt as _;
 use futures::stream::BoxStream;
+use gradient_types::constants::BULK_CHUNK_SIZE;
 use object_store::{ClientOptions, ObjectStore, ObjectStoreExt as _, PutPayload, path::Path};
 pub use object_store::{MultipartUpload, WriteMultipart};
+use std::io::SeekFrom;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::io::{AsyncRead, AsyncReadExt as _};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeekExt as _};
 
 /// Timeout and retry policy for the S3 client, resolved from configuration.
 #[derive(Clone, Copy, Debug)]
@@ -254,6 +257,14 @@ impl NarStore {
     ) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
         use object_store::{GetOptions, GetRange};
 
+        if let Some(base) = &self.local_base {
+            return local_stream(
+                std::path::Path::new(base).join(path.as_ref()),
+                offset.unwrap_or(0),
+            )
+            .await;
+        }
+
         let Some(offset) = offset else {
             return match self.inner.get(path).await {
                 Ok(result) => {
@@ -438,6 +449,35 @@ impl NarStore {
 
     pub async fn get(&self, hash: &str) -> Result<Option<Vec<u8>>> {
         self.get_object(&self.object_path(hash)).await
+    }
+
+    /// Move an already-staged file into the store under `hash`. On local disk
+    /// this is a rename, so a pushed NAR is written to the server's disk exactly
+    /// once; on S3 (or across devices) it streams the file up and then unlinks
+    /// it. The source is gone either way on success.
+    pub async fn adopt_file(&self, hash: &str, path: &std::path::Path) -> Result<()> {
+        let object = self.object_path(hash);
+        if let Some(base) = &self.local_base {
+            let dest = std::path::Path::new(base).join(object.as_ref());
+            if let Some(parent) = dest.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .context("create NAR shard dir")?;
+            }
+            match tokio::fs::rename(path, &dest).await {
+                Ok(()) => return Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {}
+                Err(e) => return Err(e).context("rename staged NAR into store"),
+            }
+        }
+
+        let file = tokio::fs::File::open(path)
+            .await
+            .context("open staged NAR")?;
+        self.put_reader(hash, file).await?;
+        tokio::fs::remove_file(path)
+            .await
+            .context("remove staged NAR after upload")
     }
 
     /// Streaming counterpart to [`Self::get`].
@@ -669,6 +709,34 @@ impl NarStore {
     }
 }
 
+/// Read a stored object straight off local disk in `BULK_CHUNK_SIZE` reads.
+/// `object_store`'s local backend streams in 8 KiB pieces, which costs one
+/// syscall and one `Bytes` allocation per 8 KiB of a multi-hundred-megabyte NAR
+/// before the serving loop coalesces them back into 512 KiB chunks anyway.
+async fn local_stream(
+    path: PathBuf,
+    offset: u64,
+) -> Result<Option<(u64, BoxStream<'static, Result<Bytes>>)>> {
+    let mut file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e).context("open local NAR"),
+    };
+
+    let size = file.metadata().await.context("stat local NAR")?.len();
+    if offset >= size {
+        return Ok(Some((size, futures::stream::empty().boxed())));
+    }
+
+    file.seek(SeekFrom::Start(offset))
+        .await
+        .context("seek local NAR")?;
+    let stream = tokio_util::io::ReaderStream::with_capacity(file, BULK_CHUNK_SIZE)
+        .map(|c| c.context("local NAR read failed"))
+        .boxed();
+    Ok(Some((size, stream)))
+}
+
 impl std::fmt::Debug for NarStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let backend = if self.local_base.is_some() {
@@ -685,6 +753,7 @@ impl std::fmt::Debug for NarStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::TryStreamExt as _;
     use tempfile::TempDir;
 
     fn local_store() -> (TempDir, NarStore) {
@@ -856,6 +925,40 @@ mod tests {
             buf.extend_from_slice(&c.unwrap());
         }
         assert_eq!(buf, b"abcdef");
+    }
+
+    #[tokio::test]
+    async fn adopt_file_renames_into_a_local_store() {
+        let (dir, store) = local_store();
+        let staged = dir.path().join("staged.partial");
+        tokio::fs::write(&staged, b"zstd bytes").await.unwrap();
+        store.adopt_file(&"a".repeat(32), &staged).await.unwrap();
+        assert!(!staged.exists());
+        assert_eq!(
+            store.get(&"a".repeat(32)).await.unwrap().unwrap(),
+            b"zstd bytes"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_stream_from_reads_in_bulk_chunks_and_honours_offset() {
+        let (_d, store) = local_store();
+        let payload: Vec<u8> = (0..(BULK_CHUNK_SIZE * 2 + 17)).map(|i| i as u8).collect();
+        store.put(&"b".repeat(32), payload.clone()).await.unwrap();
+        let (size, stream) = store
+            .get_stream_from(&"b".repeat(32), 5)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(size as usize, payload.len());
+        let chunks: Vec<Bytes> = stream.try_collect().await.unwrap();
+        assert!(chunks.iter().all(|c| c.len() <= BULK_CHUNK_SIZE));
+        assert_eq!(
+            chunks[0].len(),
+            BULK_CHUNK_SIZE,
+            "reads are chunk-sized, not 8 KiB"
+        );
+        assert_eq!(chunks.concat(), &payload[5..]);
     }
 
     #[tokio::test]
