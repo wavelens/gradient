@@ -33,9 +33,7 @@ pub(crate) async fn commit(db: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCo
         was_whole,
     } = upsert_cached_path(db, sp.hash(), sp.name(), c).await?;
 
-    if !c.references.is_empty() {
-        sync_reference_index(db, sp.hash(), &c.references).await?;
-    }
+    sync_reference_index(db, sp.hash(), &c.references).await?;
 
     // The seed reports the state; this commit's own row read holds the other end
     // of the flip, so only a real transition is rippled - never an already-whole
@@ -193,8 +191,23 @@ async fn upsert_cached_path(
 /// Record a path's hash-name references in the normalized `cached_path_reference`
 /// relation: `reference_hash` indexes referrer lookups, and `position` preserves
 /// the worker's order (nix store-path order) so the narinfo `References:` line and
-/// signature fingerprint reconstruct verbatim. Content-addressed, so re-ingest is
-/// a no-op.
+/// signature fingerprint reconstruct verbatim.
+///
+/// Authoritative, not add-only: afterwards the referrer's rows are exactly
+/// `references`, and an empty report is a report that clears them. The same store
+/// path CAN come back with a different reference set - an input-addressed path
+/// rebuilt non-deterministically keeps its hash while its closure moves - and
+/// `cached_path.missing_references` is counted from this table by both
+/// [`gradient_db::seed_references`] and `gradient_db::repair_counters_for`, so an
+/// edge an add-only write left behind over-counts that path forever: the repair
+/// recomputes from the same stale row and can never disagree with it.
+///
+/// One statement, so the prune and the upsert read one snapshot and touch
+/// disjoint rows. `position` is rewritten only where it moved, so an unchanged
+/// re-ingest writes no row version; dropping one reference shifts every later
+/// one, and a stale position reorders both the `References:` line and the
+/// fingerprint that is signed over it. Duplicate tokens fold first, since
+/// `DO UPDATE` refuses to touch one row twice.
 async fn sync_reference_index(
     db: &WorkerDb,
     hash: &str,
@@ -203,11 +216,21 @@ async fn sync_reference_index(
     db.execute_raw(sea_orm::Statement::from_sql_and_values(
         sea_orm::DatabaseBackend::Postgres,
         r#"
+        WITH reported(reference, ord) AS (
+            SELECT DISTINCT ON (t.tok) t.tok, t.ord
+            FROM unnest($2::text[]) WITH ORDINALITY AS t(tok, ord)
+            WHERE t.tok <> ''
+            ORDER BY t.tok, t.ord
+        ), dropped AS (
+            DELETE FROM cached_path_reference r
+            WHERE r.referrer = $1
+              AND NOT EXISTS (SELECT 1 FROM reported n WHERE n.reference = r.reference)
+        )
         INSERT INTO cached_path_reference (referrer, reference, reference_hash, position)
-        SELECT $1, t.tok, split_part(t.tok, '-', 1), t.ord
-        FROM unnest($2::text[]) WITH ORDINALITY AS t(tok, ord)
-        WHERE t.tok <> ''
-        ON CONFLICT (referrer, reference) DO NOTHING
+        SELECT $1, n.reference, split_part(n.reference, '-', 1), n.ord FROM reported n
+        ON CONFLICT (referrer, reference) DO UPDATE
+        SET position = EXCLUDED.position
+        WHERE cached_path_reference.position IS DISTINCT FROM EXCLUDED.position
         "#,
         [hash.into(), references.to_vec().into()],
     ))
@@ -331,10 +354,54 @@ mod tests {
         vec![BTreeMap::from([("whole".to_owned(), Value::from(whole))])]
     }
 
-    fn log_has_signature_insert(db: WorkerDb) -> bool {
+    fn exec(rows_affected: u64) -> MockExecResult {
+        MockExecResult {
+            last_insert_id: 0,
+            rows_affected,
+        }
+    }
+
+    /// One string per statement. A `MockDatabase` records everything run inside a
+    /// transaction as a single log entry, so formatting entries would merge those
+    /// statements into one string and let a cross-statement match pass.
+    fn statements(db: WorkerDb) -> Vec<String> {
         db.into_transaction_log()
             .iter()
-            .any(|t| format!("{t:?}").contains("cached_path_signature"))
+            .flat_map(|t| t.statements().iter().map(|s| format!("{s:?}")))
+            .collect()
+    }
+
+    fn log_has_signature_insert(db: WorkerDb) -> bool {
+        statements(db)
+            .iter()
+            .any(|s| s.contains("cached_path_signature"))
+    }
+
+    /// An existing whole row re-pushed with `references`, seeded back to whole so
+    /// no ripple runs: the reference index is the only thing under test.
+    async fn recommit_log(references: Vec<String>) -> Vec<String> {
+        let db = WorkerDb::new(
+            MockDatabase::new(DatabaseBackend::Postgres)
+                .append_query_results([
+                    vec![returned_cached_path(HASH)],
+                    vec![returned_cached_path(HASH)],
+                ])
+                .append_query_results([seed_reply(true)])
+                .append_exec_results([exec(1), exec(1)])
+                .into_connection(),
+        );
+
+        commit(
+            &db,
+            &NarCommit {
+                references,
+                ..commit_for(SP)
+            },
+        )
+        .await
+        .expect("commit");
+
+        statements(db)
     }
 
     /// A resolved project enqueues a `cached_path_signature` placeholder for every
@@ -350,16 +417,7 @@ mod tests {
                 .append_query_results([vec![returned_cached_path(HASH)]])
                 .append_query_results([seed_reply(false)])
                 .append_query_results([vec![project_cache_row()]])
-                .append_exec_results([
-                    MockExecResult {
-                        last_insert_id: 0,
-                        rows_affected: 1,
-                    },
-                    MockExecResult {
-                        last_insert_id: 0,
-                        rows_affected: 1,
-                    },
-                ])
+                .append_exec_results([exec(0), exec(1), exec(1)])
                 .into_connection(),
         );
 
@@ -387,10 +445,7 @@ mod tests {
                 .append_query_results([Vec::<MCachedPath>::new()])
                 .append_query_results([vec![returned_cached_path(HASH)]])
                 .append_query_results([seed_reply(false)])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 0,
-                }])
+                .append_exec_results([exec(0), exec(0)])
                 .into_connection(),
         );
 
@@ -404,10 +459,7 @@ mod tests {
         .await
         .expect("commit");
 
-        let logged = db
-            .into_transaction_log()
-            .iter()
-            .any(|t| format!("{t:?}").contains(ca));
+        let logged = statements(db).iter().any(|s| s.contains(ca));
         assert!(logged, "the content address must be written to cached_path");
     }
 
@@ -420,10 +472,7 @@ mod tests {
                 .append_query_results([Vec::<MCachedPath>::new()])
                 .append_query_results([vec![returned_cached_path(HASH)]])
                 .append_query_results([seed_reply(false)])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 0,
-                }])
+                .append_exec_results([exec(0), exec(0)])
                 .into_connection(),
         );
 
@@ -446,16 +495,7 @@ mod tests {
                 .append_query_results([vec![returned_cached_path(HASH)]])
                 .append_query_results([seed_reply(true)])
                 .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-                .append_exec_results([
-                    MockExecResult {
-                        last_insert_id: 0,
-                        rows_affected: 1,
-                    },
-                    MockExecResult {
-                        last_insert_id: 0,
-                        rows_affected: 0,
-                    },
-                ])
+                .append_exec_results([exec(1), exec(0)])
                 .into_connection(),
         );
 
@@ -469,11 +509,7 @@ mod tests {
         .await
         .expect("commit");
 
-        let log: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .map(|t| format!("{t:?}"))
-            .collect();
+        let log = statements(db);
         let seed = log
             .iter()
             .position(|s| s.contains("SET missing_references = ("))
@@ -495,27 +531,7 @@ mod tests {
     /// can ever see them as whole again.
     #[tokio::test]
     async fn a_recommit_of_an_already_whole_path_ripples_nothing() {
-        let db = WorkerDb::new(
-            MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([
-                    vec![returned_cached_path(HASH)],
-                    vec![returned_cached_path(HASH)],
-                ])
-                .append_query_results([seed_reply(true)])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                }])
-                .into_connection(),
-        );
-
-        commit(&db, &commit_for(SP)).await.expect("commit");
-
-        let log: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .map(|t| format!("{t:?}"))
-            .collect();
+        let log = recommit_log(Vec::new()).await;
         assert!(
             !log.iter().any(|s| s.contains("missing_references - c.n")),
             "an already-whole path must not be rippled again: {log:?}"
@@ -529,27 +545,7 @@ mod tests {
     /// increment a referrer a second time for one loss, permanently.
     #[tokio::test]
     async fn the_pre_commit_endpoint_is_read_under_the_row_lock() {
-        let db = WorkerDb::new(
-            MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([
-                    vec![returned_cached_path(HASH)],
-                    vec![returned_cached_path(HASH)],
-                ])
-                .append_query_results([seed_reply(true)])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                }])
-                .into_connection(),
-        );
-
-        commit(&db, &commit_for(SP)).await.expect("commit");
-
-        let log: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .map(|t| format!("{t:?}"))
-            .collect();
+        let log = recommit_log(Vec::new()).await;
         assert!(
             log[0].contains("FOR UPDATE"),
             "the row read that holds the endpoint must lock it: {log:?}"
@@ -570,16 +566,7 @@ mod tests {
                 ])
                 .append_query_results([seed_reply(false)])
                 .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-                .append_exec_results([
-                    MockExecResult {
-                        last_insert_id: 0,
-                        rows_affected: 1,
-                    },
-                    MockExecResult {
-                        last_insert_id: 0,
-                        rows_affected: 1,
-                    },
-                ])
+                .append_exec_results([exec(1), exec(1)])
                 .into_connection(),
         );
 
@@ -593,11 +580,7 @@ mod tests {
         .await
         .expect("commit");
 
-        let log: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .map(|t| format!("{t:?}"))
-            .collect();
+        let log = statements(db);
         assert!(
             log.iter().any(|s| s.contains("missing_references + c.n")),
             "losing wholeness must ripple backward: {log:?}"
@@ -608,6 +591,84 @@ mod tests {
         );
     }
 
+    /// The index write is authoritative, not add-only. The same store path can be
+    /// re-uploaded with a DIFFERENT reference set - an input-addressed path
+    /// rebuilt non-deterministically keeps its hash while its closure moves - so
+    /// a reference the report dropped has to go, and one it kept has to take the
+    /// position the report gives it. `missing_references` is counted from this
+    /// table by both the seed and `repair_counters_for`, so an edge left behind
+    /// over-counts that path forever: the repair recomputes from the same stale
+    /// row and can never disagree with it.
+    #[tokio::test]
+    async fn a_recommit_rewrites_the_index_to_the_reported_set() {
+        let dep = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep";
+        let log = recommit_log(vec![dep.to_owned()]).await;
+        let sync = log
+            .iter()
+            .find(|s| s.contains("cached_path_reference"))
+            .expect("the reference index is written");
+
+        assert!(
+            sync.contains("DELETE FROM cached_path_reference r"),
+            "a reference the report dropped must go: {sync}"
+        );
+        assert!(
+            sync.contains("NOT EXISTS (SELECT 1 FROM reported n"),
+            "the prune must key on the reported set, not on the whole table: {sync}"
+        );
+        assert!(
+            !sync.contains("DO NOTHING") && sync.contains("DO UPDATE"),
+            "add-only leaves a surviving reference at a stale position: {sync}"
+        );
+        assert!(
+            sync.contains("IS DISTINCT FROM EXCLUDED.position"),
+            "an unchanged re-ingest must write no row version: {sync}"
+        );
+        assert!(
+            sync.contains("DISTINCT ON (t.tok)"),
+            "DO UPDATE refuses one row twice, so duplicate tokens fold first: {sync}"
+        );
+        assert!(
+            sync.contains(dep),
+            "the reported set is the parameter: {sync}"
+        );
+    }
+
+    /// A shrink all the way to zero references is the case an add-only write
+    /// cannot express at all, and skipping the write for an empty report would
+    /// keep every stale edge: the seed that follows counts whatever is left in
+    /// the table, so the prune has to run even when there is nothing to insert.
+    #[tokio::test]
+    async fn a_report_with_no_references_still_prunes_the_index() {
+        let log = recommit_log(Vec::new()).await;
+        assert!(
+            log.iter()
+                .any(|s| s.contains("DELETE FROM cached_path_reference r")),
+            "a shrink to zero references must still clear the index: {log:?}"
+        );
+    }
+
+    /// A removed edge is only ever counted by its referrer, which is the path
+    /// being committed, so the prune must precede the seed: the seed recomputes
+    /// this row's counter absolutely from the pruned table, and the caller-held
+    /// pre-commit endpoint turns the resulting flip into the ripple to this row's
+    /// own referrers. Nothing else re-derives the counter, so a prune ordered
+    /// after the seed would leave the dropped edge counted until a repair pass.
+    #[tokio::test]
+    async fn the_prune_precedes_the_seed_that_recounts_the_row() {
+        let log = recommit_log(vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()]).await;
+        let prune = log
+            .iter()
+            .position(|s| s.contains("DELETE FROM cached_path_reference r"))
+            .expect("the index is pruned");
+        let seed = log
+            .iter()
+            .position(|s| s.contains("SET missing_references = ("))
+            .expect("the counter is seeded");
+
+        assert!(prune < seed, "{log:?}");
+    }
+
     #[tokio::test]
     async fn a_committed_path_backs_every_output_with_its_hash() {
         let db = WorkerDb::new(
@@ -615,10 +676,7 @@ mod tests {
                 .append_query_results([Vec::<MCachedPath>::new()])
                 .append_query_results([vec![returned_cached_path(HASH)]])
                 .append_query_results([seed_reply(false)])
-                .append_exec_results([MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 2,
-                }])
+                .append_exec_results([exec(0), exec(2)])
                 .into_connection(),
         );
 
