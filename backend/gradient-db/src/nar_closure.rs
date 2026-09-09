@@ -5,13 +5,13 @@
  */
 
 //! `cached_path.missing_references`: how many of a path's references are not
-//! whole. Seeded when the NAR is committed, moved by a frontier ripple over
-//! `cached_path_reference` when a path becomes or stops being whole, never
-//! re-derived by a sweep. `whole_predicate` is the one definition every gate
-//! reads.
+//! whole. Seeded when the NAR is committed and moved by a frontier ripple over
+//! `cached_path_reference` when a path becomes or stops being whole; no sweep
+//! re-derives it here, and #591 recomputes it only over a bounded scope.
+//! `whole_predicate` is the one definition every gate reads.
 //!
-//! Because nothing re-derives the counter, every ripple must be driven by a
-//! TRANSITION, never by a state: rippling from a row that did not just flip, or
+//! Because the counter is moved and not recomputed, every ripple must be driven
+//! by a TRANSITION, never by a state: rippling from a row that did not just flip, or
 //! rippling one frontier twice, moves referrers past zero, and a negative
 //! counter never satisfies `= 0` again. The ripples read that transition from
 //! their own `RETURNING`; the seed cannot (see [`seed_references`]), so its
