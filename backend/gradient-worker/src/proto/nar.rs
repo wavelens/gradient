@@ -21,7 +21,7 @@ use std::io::Write as _;
 use anyhow::{Context, Result};
 use futures::StreamExt;
 use gradient_proto::messages::{ClientMessage, NAR_ZSTD_LEVEL};
-use gradient_proto::session::frame::NAR_PUSH_CHUNK_SIZE;
+use gradient_proto::session::frame::BULK_CHUNK_SIZE;
 use gradient_util::nix_hash::nix32_encode;
 use harmonia_store_path::StorePath;
 use harmonia_store_remote::DaemonStore as _;
@@ -196,7 +196,7 @@ pub async fn upload_nar(
                         Some(bytes.len() as u64),
                     )
                     .await?;
-                    for part in bytes.chunks(NAR_PUSH_CHUNK_SIZE) {
+                    for part in bytes.chunks(BULK_CHUNK_SIZE) {
                         relay.send_part(part).await?;
                     }
                     relay.finish().await?;
@@ -304,7 +304,7 @@ async fn stream_path_to_relay(
 
     let mut nar_stream = harmonia_file_nar::NarByteStream::new(store_path.to_owned().into());
     let mut encoder =
-        zstd::stream::Encoder::new(Vec::with_capacity(NAR_PUSH_CHUNK_SIZE * 2), NAR_ZSTD_LEVEL)
+        zstd::stream::Encoder::new(Vec::with_capacity(BULK_CHUNK_SIZE * 2), NAR_ZSTD_LEVEL)
             .context("failed to create zstd encoder")?;
     let mut file_hasher = Sha256::new();
     let mut nar_hasher = Sha256::new();
@@ -320,8 +320,8 @@ async fn stream_path_to_relay(
             .context("zstd compression failed")?;
 
         let buf = encoder.get_mut();
-        while buf.len() >= NAR_PUSH_CHUNK_SIZE {
-            let part: Vec<u8> = buf.drain(..NAR_PUSH_CHUNK_SIZE).collect();
+        while buf.len() >= BULK_CHUNK_SIZE {
+            let part: Vec<u8> = buf.drain(..BULK_CHUNK_SIZE).collect();
             file_hasher.update(&part);
             relay.send_part(&part).await?;
         }

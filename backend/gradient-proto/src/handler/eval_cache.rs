@@ -25,7 +25,7 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter};
 use tracing::{debug, warn};
 
-use super::socket::{NAR_PUSH_CHUNK_SIZE, ProtoWriter, send_server_msg};
+use super::socket::{BULK_CHUNK_SIZE, ProtoWriter, send_server_msg};
 use crate::messages::{PRESIGN_TTL, ServerMessage};
 
 /// Storage key for a fingerprint's eval-cache blob. Kept here (not just in
@@ -321,7 +321,7 @@ async fn upsert_eval_cache_row(
 }
 
 /// Stream a stored eval-cache blob inline as `EvalCacheChunk` frames, coalesced
-/// to `NAR_PUSH_CHUNK_SIZE` like the NAR pull path. The final frame carries
+/// to `BULK_CHUNK_SIZE` like the NAR pull path. The final frame carries
 /// `is_final = true`.
 async fn stream_blob_inline(
     state: &ServerState,
@@ -339,18 +339,18 @@ async fn stream_blob_inline(
         ));
     };
 
-    let mut buf: Vec<u8> = Vec::with_capacity(NAR_PUSH_CHUNK_SIZE);
+    let mut buf: Vec<u8> = Vec::with_capacity(BULK_CHUNK_SIZE);
     let mut offset: u64 = 0;
 
     while let Some(item) = stream.next().await {
         let bytes = item?;
         let mut slice = &bytes[..];
         while !slice.is_empty() {
-            let take = slice.len().min(NAR_PUSH_CHUNK_SIZE - buf.len());
+            let take = slice.len().min(BULK_CHUNK_SIZE - buf.len());
             buf.extend_from_slice(&slice[..take]);
             slice = &slice[take..];
-            if buf.len() == NAR_PUSH_CHUNK_SIZE {
-                let chunk = std::mem::replace(&mut buf, Vec::with_capacity(NAR_PUSH_CHUNK_SIZE));
+            if buf.len() == BULK_CHUNK_SIZE {
+                let chunk = std::mem::replace(&mut buf, Vec::with_capacity(BULK_CHUNK_SIZE));
                 let len = chunk.len() as u64;
                 if send_server_msg(
                     writer,

@@ -25,6 +25,8 @@ The first message on every connection is `InitConnection`. The server responds w
 
 One handshake implementation drives every session: the pure FSM in `gradient-proto/src/session/handshake.rs`. The server runs `as_authority` with a `PeerAuthority` impl wrapping its registration tables and the `decide_auth` policy; the worker runs `as_peer` with its `PeerIdentity`/`CapabilitiesProvider` impls; the read-only cache session reuses the same `on_init_connection` transition for its version gate. Framing is likewise shared: both roles split one `ProtoSocket` into a typed reader plus a bounded, batch-draining writer (`session/frame.rs`).
 
+The writer drains the control lane first and fills a bulk batch only up to `BULK_BATCH_BYTES` (256 KiB), so a control reply never waits behind more than one 512 KiB chunk. Bulk and control queues have independent depth; a stalled transfer cannot fill the control lane.
+
 ```mermaid
 sequenceDiagram
     participant W as Worker
@@ -1107,7 +1109,7 @@ The worker captures `BuildMetrics` best-effort from each build's cgroup (require
 
 Two transports, chosen by the server based on `NarStore` configuration and advertised per path in `CacheQuery` replies (`CachedPath.url`). Both support **batched transfers** - the server sends all NARs for a job at once (e.g. all inputs for a build chain), avoiding per-path round trips.
 
-Worker-side, every upload goes through one function: `proto::nar::upload_nar(source, sink)` pairs a `NarSource` (pack a store path on the fly, or relay pre-compressed substitute bytes) with a `NarSink` (`Presigned` HTTP PUT or `Relay` over chunked `NarPush` frames with the resume handshake). Server-side, staging, serving, and commit live in `handler/nar_transfer.rs`; the relayed commit checks the staged length against the reported `file_size`, and the presigned commit HEADs the object and compares sizes before any `cached_path` metadata is recorded, so a failed or truncated PUT can never mint a zombie cache entry.
+Worker-side, every upload goes through one function: `proto::nar::upload_nar(source, sink)` pairs a `NarSource` (pack a store path on the fly, or relay pre-compressed substitute bytes) with a `NarSink` (`Presigned` HTTP PUT or `Relay` over 512 KiB `NarPush` chunks, `BULK_CHUNK_SIZE`, with the resume handshake). Server-side, staging, serving, and commit live in `handler/nar_transfer.rs`; the relayed commit checks the staged length against the reported `file_size`, and the presigned commit HEADs the object and compares sizes before any `cached_path` metadata is recorded, so a failed or truncated PUT can never mint a zombie cache entry.
 
 ### Worker → Server (upload, FetchFlake)
 

@@ -21,7 +21,7 @@ use crate::messages::ServerMessage;
 
 use super::dispatch::DispatchContext;
 use super::nar::{NarUploadRecord, mark_nar_stored, record_nar_push_metric};
-use super::socket::{NAR_PUSH_CHUNK_SIZE, ProtoWriter, send_server_msg};
+use super::socket::{BULK_CHUNK_SIZE, ProtoWriter, send_server_msg};
 
 // ── Per-session inbound NAR receive store (issue #109, resumable #225) ────────
 
@@ -715,7 +715,7 @@ async fn fail_transfer(
 ///   A stalled peer is detected as `Err(())` from `send_server_msg` and
 ///   triggers a best-effort `NarAbort`.
 /// - The body is read from `object_store`'s streaming API - no full file is
-///   ever held in memory. Chunks are coalesced/split to `NAR_PUSH_CHUNK_SIZE`.
+///   ever held in memory. Chunks are coalesced/split to `BULK_CHUNK_SIZE`.
 /// - Per-chunk read from the storage stream is also bounded so a backend that
 ///   sends the first byte and then hangs cannot pin the task indefinitely.
 pub(super) async fn serve_nar_request(
@@ -813,7 +813,7 @@ pub(super) async fn serve_nar_request(
     .await
     .ok();
 
-    let mut buf: Vec<u8> = Vec::with_capacity(NAR_PUSH_CHUNK_SIZE);
+    let mut buf: Vec<u8> = Vec::with_capacity(BULK_CHUNK_SIZE);
     let mut offset: u64 = start;
     let mut total: u64 = 0;
     let mut chunks_sent: u64 = 0;
@@ -847,12 +847,12 @@ pub(super) async fn serve_nar_request(
 
         let mut slice = &bytes[..];
         while !slice.is_empty() {
-            let want = NAR_PUSH_CHUNK_SIZE - buf.len();
+            let want = BULK_CHUNK_SIZE - buf.len();
             let take = slice.len().min(want);
             buf.extend_from_slice(&slice[..take]);
             slice = &slice[take..];
-            if buf.len() == NAR_PUSH_CHUNK_SIZE {
-                let chunk = std::mem::replace(&mut buf, Vec::with_capacity(NAR_PUSH_CHUNK_SIZE));
+            if buf.len() == BULK_CHUNK_SIZE {
+                let chunk = std::mem::replace(&mut buf, Vec::with_capacity(BULK_CHUNK_SIZE));
                 let chunk_len = chunk.len() as u64;
                 if send_server_msg(
                     writer,
@@ -1186,7 +1186,7 @@ mod serve_nar_tests {
         assert!(saw_header, "a NarStreamHeader must precede the chunks");
         assert!(
             nar_push_frames >= 3,
-            "9 MiB / 4 MiB chunks → at least 3 frames, got {nar_push_frames}"
+            "9 MiB in 512 KiB chunks is at least 3 frames, got {nar_push_frames}"
         );
         assert!(saw_final, "the last frame must be is_final=true");
         assert_eq!(

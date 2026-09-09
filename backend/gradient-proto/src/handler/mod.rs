@@ -29,14 +29,14 @@ use axum::routing::get;
 use gradient_core::ServerState;
 use gradient_scheduler::Scheduler;
 
-pub use crate::session::frame::MAX_PROTO_MESSAGE_SIZE;
+pub use crate::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 pub use cache_session::handle_cache_socket;
 pub use limiter::{PerIpLimiter, ProtoLimiter};
 pub(crate) use session::handle_socket;
 pub use sessions::SessionsHandle;
 
 #[cfg(test)]
-pub(crate) use socket::{HANDSHAKE_TIMEOUT, NAR_PUSH_CHUNK_SIZE};
+pub(crate) use socket::HANDSHAKE_TIMEOUT;
 
 /// `Retry-After` value returned with a 503 when the proto connection cap is
 /// hit - long enough to absorb a brief surge, short enough that a recovered
@@ -72,6 +72,7 @@ async fn ws_upgrade(
     let shutdown = state.shutdown.clone();
     ws.max_message_size(MAX_PROTO_MESSAGE_SIZE)
         .max_frame_size(MAX_PROTO_MESSAGE_SIZE)
+        .read_buffer_size(BULK_CHUNK_SIZE)
         .on_upgrade(move |sock| async move {
             let _ = shutdown
                 .spawn(async move {

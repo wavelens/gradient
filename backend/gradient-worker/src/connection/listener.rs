@@ -12,8 +12,10 @@
 //! identical regardless of who initiated the transport.
 
 use anyhow::{Context, Result};
+use gradient_proto::session::frame::{BULK_CHUNK_SIZE, MAX_PROTO_MESSAGE_SIZE};
 use tokio::net::TcpListener;
-use tokio_tungstenite::accept_async;
+use tokio_tungstenite::accept_async_with_config;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_util::task::TaskTracker;
 use tracing::{error, info, warn};
 
@@ -80,9 +82,16 @@ async fn handle_incoming(
     config: WorkerConfig,
     shutdown: Shutdown,
 ) -> Result<()> {
-    let ws = accept_async(tokio_tungstenite::MaybeTlsStream::Plain(stream))
-        .await
-        .context("WebSocket upgrade failed")?;
+    let ws_config = WebSocketConfig::default()
+        .max_message_size(Some(MAX_PROTO_MESSAGE_SIZE))
+        .max_frame_size(Some(MAX_PROTO_MESSAGE_SIZE))
+        .read_buffer_size(BULK_CHUNK_SIZE);
+    let ws = accept_async_with_config(
+        tokio_tungstenite::MaybeTlsStream::Plain(stream),
+        Some(ws_config),
+    )
+    .await
+    .context("WebSocket upgrade failed")?;
 
     let worker = Worker::from_accepted(ws, config).await?;
     let executor_handle = worker.executor_handle();

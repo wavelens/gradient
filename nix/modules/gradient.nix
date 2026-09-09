@@ -1220,7 +1220,7 @@ in {
               proxyWebsockets = true;
               # An upgraded connection is relayed through a buffer sized by
               # proxy_buffer_size, which defaults to a single page. NAR chunks
-              # are 4 MiB, so the default turns one frame into hundreds of
+              # are 512 KiB, so the default turns one frame into hundreds of
               # read/write pairs inside nginx. proxy_buffers has to move with
               # it: nginx derives proxy_busy_buffers_size as twice the larger
               # of the two and rejects the config unless that still fits in

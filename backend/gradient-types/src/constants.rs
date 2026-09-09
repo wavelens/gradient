@@ -16,6 +16,9 @@ pub const NAR_ZSTD_LEVEL: i32 = 6;
 pub const TAR_ZSTD_LEVEL: i32 = 1;
 /// zstd level for finalized build-log chunks (0 = zstd default).
 pub const LOG_CHUNK_ZSTD_LEVEL: i32 = 0;
+/// Payload size of one bulk frame (NAR and eval-cache chunks, both directions)
+/// and the unit at which a control reply can preempt a transfer.
+pub const BULK_CHUNK_SIZE: usize = 512 * 1024;
 /// Cap on per-file buffer preallocation during NAR extraction (16 MiB).
 pub const NAR_EXTRACT_MAX_PREALLOC: usize = 16 * 1024 * 1024;
 /// Lifetime of presigned GET/PUT URLs handed to workers and cache clients.
