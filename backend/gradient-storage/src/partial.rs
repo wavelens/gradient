@@ -259,7 +259,8 @@ impl PartialStore {
     /// uploader that restarts a transfer from the beginning never trips the
     /// contiguity check. That tolerance is this call's alone: a `/proto` push
     /// stream goes through [`Self::open_writer`] and is append-only once open,
-    /// so it restarts by re-opening the writer, not by re-sending offset 0.
+    /// so it restarts by re-opening the writer, which keeps whatever prefix the
+    /// stored token still validates and truncates only when that token changed.
     pub async fn append(&self, key: &str, token: &str, offset: u64, data: &[u8]) -> Result<()> {
         self.ensure_parent(key).await?;
         let path = self.partial_path(key);
