@@ -93,7 +93,7 @@ impl WorkerDb {
     /// forwarding `ConnectionTrait`: on a pooled handle every lock is released at
     /// the end of the statement that took it, so the wait it was meant to absorb
     /// happens with nothing held and no compiler or test can tell the difference.
-    pub fn transaction(&self) -> Option<&DatabaseTransaction> {
+    pub fn as_transaction(&self) -> Option<&DatabaseTransaction> {
         match &self.0 {
             WorkerConn::Pool(_) => None,
             WorkerConn::Transaction { tx, .. } => Some(tx.as_ref()),
