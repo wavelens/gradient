@@ -614,7 +614,7 @@ in {
         };
 
         graphConsistencyIntervalSecs = lib.mkOption {
-          description = "Interval in seconds between read-only build-graph consistency sweeps (0 disables).";
+          description = "Interval in seconds between build-graph consistency sweeps, which also repair the NAR reference counter over the paths pending anchors gate on and are that counter's only backstop (0 disables both).";
           type = lib.types.ints.unsigned;
           default = 300;
         };
