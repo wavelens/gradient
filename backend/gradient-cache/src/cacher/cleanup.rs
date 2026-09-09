@@ -729,13 +729,7 @@ mod tests {
 
         cleanup_stale_cached_nars(state).await.unwrap();
 
-        let log: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().iter().map(|s| format!("{s:?}")))
-            .collect();
-        // One string per statement: a transaction records as a single log entry,
-        // so formatting entries would let these matches straddle two statements.
+        let log = gradient_db::pool::statements(db.into_transaction_log());
         assert!(
             log.iter().any(|s| s.contains("DELETE FROM cached_path cp")
                 && s.contains("FROM cached_path_signature s")),

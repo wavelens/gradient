@@ -361,14 +361,8 @@ mod tests {
         }
     }
 
-    /// One string per statement. A `MockDatabase` records everything run inside a
-    /// transaction as a single log entry, so formatting entries would merge those
-    /// statements into one string and let a cross-statement match pass.
     fn statements(db: WorkerDb) -> Vec<String> {
-        db.into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().iter().map(|s| format!("{s:?}")))
-            .collect()
+        gradient_db::pool::statements(db.into_transaction_log())
     }
 
     fn log_has_signature_insert(db: WorkerDb) -> bool {

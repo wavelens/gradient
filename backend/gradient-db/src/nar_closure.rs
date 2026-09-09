@@ -377,16 +377,6 @@ mod tests {
         BTreeMap::from([(flag.to_owned(), Value::from(value))])
     }
 
-    /// One string per statement. A `MockDatabase` records everything run inside a
-    /// transaction as a single log entry, so formatting entries would merge those
-    /// statements into one string and let a cross-statement match pass.
-    fn statements(db: sea_orm::DatabaseConnection) -> Vec<String> {
-        db.into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().iter().map(|s| format!("{s:?}")))
-            .collect()
-    }
-
     /// A reference counts as missing when its row is absent, unbacked or not
     /// whole; a self-reference never counts, or a self-referential path could
     /// never be whole.
@@ -492,7 +482,7 @@ mod tests {
         let whole = ripple_whole(&db, vec!["seed".to_owned()]).await.unwrap();
 
         assert_eq!(whole, vec!["seed".to_owned(), "r1".to_owned()]);
-        let log = statements(db);
+        let log = crate::pool::statements(db.into_transaction_log());
         assert_eq!(log.len(), 2, "one statement per level: {log:?}");
         assert!(log[0].contains("missing_references - c.n") && log[0].contains("\"seed\""));
         assert!(
@@ -516,7 +506,7 @@ mod tests {
         let unwhole = ripple_unwhole(&db, vec!["gone".to_owned()]).await.unwrap();
 
         assert_eq!(unwhole, vec!["gone".to_owned(), "r1".to_owned()]);
-        let log = statements(db);
+        let log = crate::pool::statements(db.into_transaction_log());
         assert_eq!(log.len(), 2, "one statement per level: {log:?}");
         assert!(log[0].contains("missing_references + c.n") && log[0].contains("\"gone\""));
         assert!(
@@ -564,7 +554,7 @@ mod tests {
 
         assert_eq!(retired.deleted, vec!["a".to_owned(), "b".to_owned()]);
         assert_eq!(retired.unwhole, vec!["a".to_owned()]);
-        let log = statements(db);
+        let log = crate::pool::statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
             5,
@@ -599,7 +589,7 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         let retired = retire_paths(&db, &[]).await.unwrap();
         assert!(retired.deleted.is_empty() && retired.unwhole.is_empty());
-        assert!(statements(db).is_empty());
+        assert!(crate::pool::statements(db.into_transaction_log()).is_empty());
     }
 
     /// Both halves of a guarded retire are load-bearing. The guard must be
@@ -649,7 +639,7 @@ mod tests {
             .unwrap();
         txn.commit().await.unwrap();
 
-        let log = statements(db);
+        let log = crate::pool::statements(db.into_transaction_log());
         assert!(
             log[0].contains("FOR UPDATE") && !log[0].contains("DELETE"),
             "the wait is absorbed before the delete: {log:?}"
@@ -719,7 +709,11 @@ mod tests {
             .into_connection();
 
         assert_eq!(repair_counters_for(&db, &hashes).await.unwrap(), 6);
-        assert_eq!(statements(db).len(), 2, "one statement per chunk");
+        assert_eq!(
+            crate::pool::statements(db.into_transaction_log()).len(),
+            2,
+            "one statement per chunk"
+        );
     }
 
     /// The bounded repair covers exactly the paths a pending anchor gates on:
@@ -755,6 +749,6 @@ mod tests {
     async fn repairing_no_hashes_issues_no_statement() {
         let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
         assert_eq!(repair_counters_for(&db, &[]).await.unwrap(), 0);
-        assert!(statements(db).is_empty());
+        assert!(crate::pool::statements(db.into_transaction_log()).is_empty());
     }
 }

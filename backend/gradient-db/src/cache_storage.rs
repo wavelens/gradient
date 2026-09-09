@@ -587,11 +587,7 @@ mod tests {
 
         assert_eq!(producers.len(), 1, "the output's producer is returned");
         assert!(!file.exists(), "demote must delete the output's NAR object");
-        let log: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .map(|t| format!("{t:?}"))
-            .collect();
+        let log = crate::pool::statements(db.into_transaction_log());
         assert!(
             log.iter()
                 .any(|s| s.contains("DELETE FROM cached_path") && s.contains("was_whole")),
