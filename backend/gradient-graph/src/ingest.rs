@@ -69,6 +69,17 @@ SELECT e.derivation, e.dependency FROM unnest($1::uuid[], $2::uuid[]) AS e(deriv
 ON CONFLICT DO NOTHING
 "#;
 
+/// A stub's anchor exists before the record that carries the derivation's
+/// limits, so they land here; `0` stands in for an unset limit in the arrays.
+const ANCHOR_LIMITS_UPDATE: &str = r#"
+UPDATE derivation_build AS db
+SET timeout_secs = NULLIF(l.timeout_secs, 0), max_silent_secs = NULLIF(l.max_silent_secs, 0)
+FROM unnest($1::uuid[], $2::bigint[], $3::bigint[]) AS l(derivation, timeout_secs, max_silent_secs)
+WHERE db.derivation = l.derivation
+  AND (db.timeout_secs, db.max_silent_secs)
+      IS DISTINCT FROM (NULLIF(l.timeout_secs, 0), NULLIF(l.max_silent_secs, 0))
+"#;
+
 /// Writes a single batch of discovered derivations, inside the actor's
 /// transaction. Holds what every step shares: the scoped context and the
 /// evaluation the batch belongs to.
@@ -328,6 +339,37 @@ impl BatchWriter<'_> {
         Ok(())
     }
 
+    async fn set_anchor_limits(
+        &self,
+        limits: &HashMap<DerivationId, (Option<i64>, Option<i64>)>,
+    ) -> Result<()> {
+        let mut ids: Vec<uuid::Uuid> = Vec::new();
+        let mut timeouts: Vec<i64> = Vec::new();
+        let mut silents: Vec<i64> = Vec::new();
+        for (id, (timeout_secs, max_silent_secs)) in limits {
+            if timeout_secs.is_none() && max_silent_secs.is_none() {
+                continue;
+            }
+            ids.push(id.into_inner());
+            timeouts.push(timeout_secs.unwrap_or(0));
+            silents.push(max_silent_secs.unwrap_or(0));
+        }
+        if ids.is_empty() {
+            return Ok(());
+        }
+
+        self.db()
+            .execute_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                ANCHOR_LIMITS_UPDATE,
+                [ids.into(), timeouts.into(), silents.into()],
+            ))
+            .await
+            .context("set anchor limits")?;
+
+        Ok(())
+    }
+
     /// Build-once anchors for every named derivation, `ON CONFLICT DO NOTHING`
     /// so an anchor from a prior evaluation is untouched, then this
     /// evaluation's `build_job` rows, then the idempotent substitution facts:
@@ -414,6 +456,7 @@ impl BatchWriter<'_> {
                 return Err(anyhow!("failed to upsert anchors: {e}"));
             }
         }
+        self.set_anchor_limits(&limits).await?;
 
         let db = self.db();
         let anchor_by_drv: HashMap<DerivationId, DerivationBuildId> =
@@ -1075,5 +1118,60 @@ mod tests {
         assert_eq!(report.walked, 0);
         drop(ctx);
         assert_eq!(pool.into_transaction_log().len(), 1);
+    }
+
+    /// An anchor inserted for a name arrives before the record that carries
+    /// the derivation's limits, and the anchor insert lands on no row once it
+    /// exists, so a walked record writes its limits by their own statement.
+    #[tokio::test]
+    async fn a_walked_record_writes_its_limits_onto_an_existing_anchor() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, _) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone()]])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_exec_results(vec![ok(1)])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        let mut record = drv(A, &[]);
+        record.timeout_secs = Some(3600);
+        apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![record],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        drop(ctx);
+        let log: Vec<String> = pool
+            .into_transaction_log()
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect();
+        let anchors = log
+            .iter()
+            .position(|s| s.contains("INSERT INTO \"derivation_build\""))
+            .expect("the anchor insert runs");
+        let limits = log
+            .iter()
+            .position(|s| s.contains("UPDATE derivation_build AS db"))
+            .expect("the limits update runs");
+        assert!(
+            anchors < limits,
+            "limits are written once the anchor exists: {log:?}"
+        );
+        assert!(
+            log[limits].contains("3600"),
+            "the update carries the record's limits: {log:?}"
+        );
     }
 }
