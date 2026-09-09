@@ -7,7 +7,7 @@
 //! NAR transfer: inbound push staging, outbound serving, and the
 //! `DispatchContext` handlers that commit an upload once it is complete.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -47,6 +47,14 @@ pub(super) enum AppendOutcome {
 /// staging task: 8 x 512 KiB.
 const STAGE_QUEUE_DEPTH: usize = 8;
 
+/// Push streams one session may hold open at once. Every open stream costs a
+/// file descriptor, a staging task and up to `STAGE_QUEUE_DEPTH` queued frames,
+/// none of which the byte budget sees until a chunk actually arrives. A worker
+/// uploads `UPLOAD_CONCURRENCY` (4) paths per job at once, so a busy many-core
+/// builder legitimately holds dozens: this is a backstop against an unbounded
+/// flood, not a throughput limit, and it must stay far above real traffic.
+const MAX_ACTIVE_STREAMS: usize = 256;
+
 /// What a stream's staging task accepts: the frames to append, then one request
 /// to flush and report what was staged.
 enum StageCmd {
@@ -76,11 +84,16 @@ impl StagedNar {
     /// staged file: its claimed path, its length, and the SHA-256 the task
     /// computed as the bytes arrived.
     pub(super) async fn finish(self) -> anyhow::Result<StagedFile> {
-        let file = self.done.await.context("NAR staging task vanished")??;
-        Ok(StagedFile {
-            path: self.path,
-            ..file
-        })
+        match self.done.await.context("NAR staging task vanished") {
+            Ok(Ok(file)) => Ok(StagedFile {
+                path: self.path,
+                ..file
+            }),
+            Ok(Err(e)) | Err(e) => {
+                discard_staged(&self.path).await;
+                Err(e)
+            }
+        }
     }
 }
 
@@ -117,9 +130,11 @@ async fn stage_stream(mut writer: PartialWriter, mut rx: mpsc::Receiver<StageCmd
 /// Disk-backed receiver for inbound `NarPush` chunks. Each push is staged to a
 /// `*.partial` file under `<base_path>/nar-partial/<peer_id>/<job_id>/<hash>` so
 /// an interrupted upload can resume from a byte offset (issue #225) and a large
-/// NAR no longer pins RAM. A per-session byte budget plus a poison set preserve
-/// the #109 protection against a rogue worker opening many un-finalized streams
-/// (the budget now bounds staged **disk**, not RAM). Keying by `peer_id` isolates
+/// NAR no longer pins RAM. Two per-session limits preserve the #109 protection
+/// against a rogue worker: `max_bytes` bounds the bytes staged on **disk**, and
+/// [`MAX_ACTIVE_STREAMS`] bounds the descriptors, staging tasks and queued
+/// frames that open streams hold before a single chunk is counted against the
+/// budget. Either limit poisons the offending path. Keying by `peer_id` isolates
 /// workers; keying by `job_id` isolates two jobs on one worker that push the
 /// *same* content-addressed path concurrently - without it their interleaved
 /// appends to a shared hash-keyed partial trip the contiguity check and poison a
@@ -130,7 +145,9 @@ pub(super) struct NarReceiveStore {
     peer_id: String,
     max_bytes: u64,
     active: HashMap<String, PathState>,
-    poisoned: BTreeSet<String>,
+    /// Poisoned paths and why, so the abort the caller sends names the real
+    /// cause instead of guessing between the budget and the offset.
+    poisoned: BTreeMap<String, String>,
 }
 
 /// In-memory key isolating a path's staging state per job, so two jobs pushing
@@ -154,7 +171,7 @@ impl NarReceiveStore {
             peer_id: peer_id.to_owned(),
             max_bytes,
             active: HashMap::new(),
-            poisoned: BTreeSet::new(),
+            poisoned: BTreeMap::new(),
         })
     }
 
@@ -178,7 +195,10 @@ impl NarReceiveStore {
 
     /// Record the push stream's token, open its partial, and return how many
     /// bytes are already staged for it (0 on token mismatch / nothing on disk).
-    /// Clears any stale poison so a fresh attempt can proceed.
+    /// Clears any stale poison so a fresh attempt can proceed. A stream that
+    /// cannot be opened, or that would exceed [`MAX_ACTIVE_STREAMS`], poisons
+    /// the path with its reason; callers check [`Self::poison_reason`] rather
+    /// than treating the `0` as a fresh start.
     pub(super) async fn note_header(&mut self, job_id: &str, store_path: &str, token: &str) -> u64 {
         let sk = state_key(job_id, store_path);
         self.poisoned.remove(&sk);
@@ -188,13 +208,23 @@ impl NarReceiveStore {
             return 0;
         };
 
+        if self.active.len() >= MAX_ACTIVE_STREAMS {
+            let reason = format!(
+                "too many open NAR push streams on this session (limit {MAX_ACTIVE_STREAMS})"
+            );
+            warn!(%store_path, "{reason}; poisoning path");
+            self.poison(job_id, store_path, hash, reason).await;
+            return 0;
+        }
+
         let key = self.key(job_id, hash);
         let received = self.store.received_len(&key, token).await.unwrap_or(0);
         let writer = match self.store.open_writer(&key, token, received).await {
             Ok(writer) => writer,
             Err(e) => {
+                let reason = format!("failed to open the staged partial for {store_path}: {e}");
                 warn!(%store_path, error = %e, "failed to open staged partial; poisoning path");
-                self.poison(job_id, store_path, hash).await;
+                self.poison(job_id, store_path, hash, reason).await;
                 return 0;
             }
         };
@@ -211,10 +241,13 @@ impl NarReceiveStore {
         received
     }
 
-    /// Hand a chunk to this path's staging task. `offset` must be contiguous;
-    /// a gap is fatal here rather than at commit time so the worker is aborted
-    /// before it streams the rest of a NAR that can never be stored. Opens a
-    /// token-less stream for legacy pushes that skip the header.
+    /// Hand a chunk to this path's staging task. A push stream is append-only
+    /// once opened: `offset` must equal the bytes already staged, so restarting
+    /// a stream at 0 takes a fresh `NarStreamHeader` (which re-opens the writer
+    /// and truncates) rather than a bare chunk. A gap is fatal here rather than
+    /// at commit time so the worker is aborted before it streams the rest of a
+    /// NAR that can never be stored. Opens a token-less stream for legacy pushes
+    /// that skip the header.
     pub(super) async fn append(
         &mut self,
         job_id: &str,
@@ -223,7 +256,7 @@ impl NarReceiveStore {
         frame: Frame<ClientMessage>,
     ) -> AppendOutcome {
         let sk = state_key(job_id, store_path);
-        if self.poisoned.contains(&sk) {
+        if self.poisoned.contains_key(&sk) {
             return AppendOutcome::Poisoned;
         }
 
@@ -247,21 +280,30 @@ impl NarReceiveStore {
         };
 
         let tx = state.tx.clone();
-        if offset != state.staged {
-            warn!(%store_path, offset, staged = state.staged, "non-contiguous NarPush; poisoning path");
-            self.poison(job_id, store_path, hash).await;
+        let staged = state.staged;
+        if offset != staged {
+            let reason = format!(
+                "NarPush for {store_path} at offset {offset} follows {staged} staged bytes"
+            );
+            warn!(%store_path, offset, staged, "non-contiguous NarPush; poisoning path");
+            self.poison(job_id, store_path, hash, reason).await;
             return AppendOutcome::Overflow;
         }
 
         let total: u64 = self.active.values().map(|s| s.staged).sum();
         if total.saturating_add(len) > self.max_bytes {
-            self.poison(job_id, store_path, hash).await;
+            let reason = format!(
+                "NAR upload for {store_path} exceeds the staged-partial budget ({} bytes)",
+                self.max_bytes,
+            );
+            self.poison(job_id, store_path, hash, reason).await;
             return AppendOutcome::Overflow;
         }
 
         if tx.send(StageCmd::Chunk(frame)).await.is_err() {
+            let reason = format!("the staging task for {store_path} is gone");
             warn!(%store_path, "NAR staging task gone; poisoning path");
-            self.poison(job_id, store_path, hash).await;
+            self.poison(job_id, store_path, hash, reason).await;
             return AppendOutcome::Overflow;
         }
 
@@ -271,12 +313,12 @@ impl NarReceiveStore {
         AppendOutcome::Ok
     }
 
-    async fn poison(&mut self, job_id: &str, store_path: &str, hash: &str) {
+    async fn poison(&mut self, job_id: &str, store_path: &str, hash: &str, reason: String) {
         let sk = state_key(job_id, store_path);
         self.retire(&sk).await;
         let key = self.key(job_id, hash);
         let _ = self.store.discard(&key).await;
-        self.poisoned.insert(sk);
+        self.poisoned.insert(sk, reason);
     }
 
     /// Detach the staged stream for `store_path` so a spawned task can commit
@@ -303,6 +345,10 @@ impl NarReceiveStore {
             Ok(None) => base_key,
             Err(e) => {
                 warn!(%store_path, error = %e, "failed to claim staged partial; using shared key");
+                // The commit adopts (renames away) the shared partial, and the
+                // TTL sweep only ever sees a `.partial`, so drop the sidecar now
+                // or it is orphaned for good.
+                let _ = self.store.discard_token(&base_key).await;
                 base_key
             }
         };
@@ -326,9 +372,11 @@ impl NarReceiveStore {
         }
     }
 
-    /// Has this path been poisoned by a prior overflow on the same session?
-    pub(super) fn is_poisoned(&self, job_id: &str, store_path: &str) -> bool {
-        self.poisoned.contains(&state_key(job_id, store_path))
+    /// Why this path was poisoned, if it was, for the abort the worker is sent.
+    pub(super) fn poison_reason(&self, job_id: &str, store_path: &str) -> Option<&str> {
+        self.poisoned
+            .get(&state_key(job_id, store_path))
+            .map(String::as_str)
     }
 
     /// Forget the poison flag and discard any partial for `store_path` so a
@@ -336,10 +384,6 @@ impl NarReceiveStore {
     pub(super) async fn clear_poison(&mut self, job_id: &str, store_path: &str) {
         self.poisoned.remove(&state_key(job_id, store_path));
         self.finish(job_id, store_path).await;
-    }
-
-    pub(super) fn max_bytes(&self) -> u64 {
-        self.max_bytes
     }
 }
 
@@ -368,6 +412,16 @@ impl<'a> DispatchContext<'a> {
         nar: &mut NarReceiveStore,
     ) {
         let received = nar.note_header(&job_id, &store_path, &stream_token).await;
+        if let Some(reason) = nar.poison_reason(&job_id, &store_path) {
+            // Answering with `received_bytes: 0` here would have the worker
+            // stream the whole NAR into the poisoned arm, to be rejected only at
+            // `NarUploaded` with a reason naming neither cause.
+            let reason = format!("NAR upload for {store_path} cannot be staged: {reason}");
+            error!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "refusing push stream");
+            self.abort_job(&job_id, reason).await;
+            return;
+        }
+
         debug!(peer_id = %self.peer_id, %job_id, %store_path, received, "NarStreamHeader (push)");
         let _ = send_server_msg(
             self.writer,
@@ -407,10 +461,9 @@ impl<'a> DispatchContext<'a> {
         match nar.append(job_id, store_path, offset, frame).await {
             AppendOutcome::Ok => {}
             AppendOutcome::Overflow => {
-                let reason = format!(
-                    "NAR upload for {store_path} rejected: staged-partial budget ({} bytes) \
-                     exceeded or non-contiguous offset {offset}",
-                    nar.max_bytes(),
+                let reason = nar.poison_reason(job_id, store_path).map_or_else(
+                    || format!("NAR upload for {store_path} rejected at offset {offset}"),
+                    |reason| format!("NAR upload for {store_path} rejected: {reason}"),
                 );
                 warn!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "poisoning NAR path");
                 self.abort_job(job_id, reason).await;
@@ -464,12 +517,9 @@ impl<'a> DispatchContext<'a> {
         // mid-stream. Without this guard `mark_nar_stored` would record a
         // `cached_path` row whose bytes never reached `nar_storage` - leaving
         // the path "cached" in the DB and undeliverable on the next download.
-        if nar.is_poisoned(&job_id, &store_path) {
+        if let Some(poisoned) = nar.poison_reason(&job_id, &store_path) {
+            let reason = format!("NarUploaded for {store_path} rejected: {poisoned}");
             nar.clear_poison(&job_id, &store_path).await;
-            let reason = format!(
-                "NarUploaded for {store_path} rejected: prior NarPush chunk \
-                 exceeded the staged-partial budget or arrived out of order"
-            );
             warn!(peer_id = %self.peer_id, %job_id, %store_path, %reason, "rejecting NarUploaded for poisoned path");
             self.abort_job(&job_id, reason).await;
             return;
@@ -1055,7 +1105,7 @@ async fn invalidate_cached_path(state: &Arc<ServerState>, hash: &str, store_path
 
 #[cfg(test)]
 mod nar_receive_store_tests {
-    use super::{AppendOutcome, NarReceiveStore};
+    use super::{AppendOutcome, MAX_ACTIVE_STREAMS, NarReceiveStore};
     use crate::messages::ClientMessage;
     use crate::session::frame::{Frame, Inbound, WireMessage as _};
     use gradient_util::shutdown::Shutdown;
@@ -1065,6 +1115,10 @@ mod nar_receive_store_tests {
 
     fn assert_ok(o: AppendOutcome) {
         assert!(matches!(o, AppendOutcome::Ok), "expected Ok");
+    }
+
+    fn poisoned(s: &NarReceiveStore, job: &str, store_path: &str) -> bool {
+        s.poison_reason(job, store_path).is_some()
     }
 
     fn store(max_bytes: u64) -> (TempDir, NarReceiveStore) {
@@ -1104,6 +1158,11 @@ mod nar_receive_store_tests {
     /// A valid 32-char-hash store path keyed by a single repeated char.
     fn path(c: char) -> String {
         format!("/nix/store/{}-name", c.to_string().repeat(32))
+    }
+
+    /// A valid store path per index, for opening many streams at once.
+    fn numbered_path(i: usize) -> String {
+        format!("/nix/store/{i:032}-name")
     }
 
     const JOB: &str = "build:job-1";
@@ -1149,7 +1208,7 @@ mod nar_receive_store_tests {
                 .await,
             AppendOutcome::Overflow
         ));
-        assert!(s.is_poisoned(JOB, &a));
+        assert!(poisoned(&s, JOB, &a));
         assert!(matches!(
             s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 10], true))
                 .await,
@@ -1191,7 +1250,7 @@ mod nar_receive_store_tests {
                 .await,
             AppendOutcome::Overflow
         ));
-        assert!(s.is_poisoned(JOB, &a));
+        assert!(poisoned(&s, JOB, &a));
         assert!(matches!(
             s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 10], true))
                 .await,
@@ -1215,7 +1274,7 @@ mod nar_receive_store_tests {
             s.append(JOB, &c, 0, frame(JOB, &c, 0, &[42u8], true)).await,
             AppendOutcome::Overflow
         ));
-        assert!(s.is_poisoned(JOB, &c));
+        assert!(poisoned(&s, JOB, &c));
     }
 
     #[tokio::test]
@@ -1275,7 +1334,7 @@ mod nar_receive_store_tests {
             )
             .await,
         );
-        assert!(!s.is_poisoned("build:job-a", &p));
+        assert!(!poisoned(&s, "build:job-a", &p));
 
         let sa = s
             .take_staged("build:job-a", &p)
@@ -1287,6 +1346,76 @@ mod nar_receive_store_tests {
             .expect("job-b staged");
         assert_eq!(sa.finish().await.expect("job-a drained").len, 200);
         assert_eq!(sb.finish().await.expect("job-b drained").len, 100);
+    }
+
+    /// A peer that opens streams and never pushes a byte is invisible to the
+    /// byte budget, so the stream count is what stops it taking the process's
+    /// file descriptors down with it.
+    #[tokio::test]
+    async fn a_header_flood_is_capped() {
+        let (_d, mut s) = store(10_000_000);
+        for i in 0..MAX_ACTIVE_STREAMS {
+            let p = numbered_path(i);
+            s.note_header(JOB, &p, "tok").await;
+            assert!(!poisoned(&s, JOB, &p), "stream {i} is within the cap");
+        }
+
+        let over = numbered_path(MAX_ACTIVE_STREAMS);
+        assert_eq!(s.note_header(JOB, &over, "tok").await, 0);
+        assert!(
+            poisoned(&s, JOB, &over),
+            "the cap must poison rather than open another descriptor"
+        );
+    }
+
+    /// A staging open that fails (here: a directory sitting where the
+    /// `.partial` must go) has to poison with its own error, so the header can
+    /// abort the job instead of inviting the whole NAR and blaming the budget.
+    #[tokio::test]
+    async fn a_staging_open_failure_poisons_with_its_own_reason() {
+        let dir = TempDir::new().unwrap();
+        let blocked = dir
+            .path()
+            .join(format!("peer-1/{JOB}/{}.partial", "a".repeat(32)));
+        tokio::fs::create_dir_all(&blocked).await.unwrap();
+
+        let mut s = NarReceiveStore::new(
+            dir.path().to_path_buf(),
+            "peer-1",
+            Duration::from_secs(3600),
+            1024,
+            Shutdown::new(),
+        )
+        .unwrap();
+
+        let a = path('a');
+        assert_eq!(s.note_header(JOB, &a, "tok").await, 0);
+        assert!(poisoned(&s, JOB, &a));
+        let reason = s.poison_reason(JOB, &a).expect("a reason is recorded");
+        assert!(
+            reason.contains("open the staged partial"),
+            "the reason must name the staging failure, got: {reason}"
+        );
+    }
+
+    /// A push stream is append-only once open: a sender that restarts at 0
+    /// mid-stream is rejected here rather than silently truncating a partial
+    /// the session still believes in.
+    #[tokio::test]
+    async fn a_restart_at_offset_zero_is_fatal_for_an_open_stream() {
+        let (_d, mut s) = store(10_000);
+        let a = path('a');
+        s.note_header(JOB, &a, "tok").await;
+        assert_ok(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 100], false))
+                .await,
+        );
+        assert!(matches!(
+            s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 100], false))
+                .await,
+            AppendOutcome::Overflow
+        ));
+        assert!(poisoned(&s, JOB, &a));
     }
 
     #[tokio::test]
@@ -1307,9 +1436,9 @@ mod nar_receive_store_tests {
                 .await,
             AppendOutcome::Overflow
         ));
-        assert!(s.is_poisoned(JOB, &a));
+        assert!(poisoned(&s, JOB, &a));
         s.clear_poison(JOB, &a).await;
-        assert!(!s.is_poisoned(JOB, &a));
+        assert!(!poisoned(&s, JOB, &a));
         assert_ok(
             s.append(JOB, &a, 0, frame(JOB, &a, 0, &[0u8; 50], true))
                 .await,
