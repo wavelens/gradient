@@ -9424,7 +9424,7 @@ components:
 
     BuildItem:
       type: object
-      required: [id, name, status, has_artefacts, updated_at, depth]
+      required: [id, name, status, has_artefacts, updated_at, build_time_ms, dispatched_job, depth]
       properties:
         id:
           type: string
