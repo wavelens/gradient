@@ -10,7 +10,7 @@
 //! invariant: `Queued` means the gates held.
 //!
 //! The normalisation is not a no-op on the first start. `derivation.walked`
-//! is seeded false for every row by the migration before this one, and
+//! is seeded false for every row by `m20260908_000000`, two migrations back, and
 //! `gates()` requires it, so the demote statement moves every `Queued` anchor
 //! back to `Created` and the promote statement promotes nothing.
 //!
@@ -19,6 +19,17 @@
 //! through the ordinary readiness path. Seeding from the flags being retired is
 //! deliberately not an option, so every value here is re-derived from ground
 //! truth: the NAR counter, the anchor's own status, and `build_job`.
+//!
+//! `fetchable` requires an anchor to HAVE outputs, or the `NOT EXISTS` over
+//! `derivation_output` is vacuously true and a terminal-success anchor with no
+//! output rows reads as fetchable, which is the unbacked-output dead zone this
+//! project has already paid for once. The live predicate in `gradient_db`
+//! carries the same guard.
+//!
+//! Neither backfill is idempotent, and the `IF NOT EXISTS` guards do not make it
+//! so: `SET fetchable = true WHERE ...` never clears a stale true, so a second
+//! `up` over a diverged table would leave one. It runs once, and the guards are
+//! for a run that failed partway.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
@@ -27,7 +38,9 @@ const WHOLE: &str = "(cp.file_hash IS NOT NULL AND cp.missing_references = 0)";
 
 fn fetchable() -> String {
     format!(
-        "(db.substitutable OR (db.status IN (3, 7) AND NOT EXISTS ( \
+        "(db.substitutable OR (db.status IN (3, 7) \
+           AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = db.derivation) \
+           AND NOT EXISTS ( \
            SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash \
            WHERE o.derivation = db.derivation AND NOT {WHOLE})))"
     )
@@ -93,5 +106,30 @@ impl MigrationTrait for Migration {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DOWN, up_statements};
+
+    /// Every value this migration writes is re-derived from ground truth, so no
+    /// statement may READ the two flags it replaces. `down` restores them, so it
+    /// is exempt; Task 5 appends the `DROP COLUMN`s here and must not break this.
+    #[test]
+    fn the_backfill_never_reads_the_flags_it_replaces() {
+        for stmt in up_statements() {
+            for flag in ["closure_complete", "drv_closure_cached"] {
+                assert!(
+                    !stmt.contains(flag) || stmt.contains(&format!("DROP COLUMN IF EXISTS {flag}")),
+                    "up reads {flag}: {stmt}"
+                );
+            }
+        }
+
+        assert!(
+            DOWN.iter().any(|s| s.contains("closure_complete")),
+            "down must restore the flags it dropped"
+        );
     }
 }

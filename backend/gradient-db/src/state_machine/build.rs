@@ -35,6 +35,7 @@ impl std::error::Error for InvalidBuildTransition {}
 /// FailedTransient  to  Queued
 /// any non-terminal to  Completed | Substituted | FailedPermanent | FailedTransient
 ///                      | FailedTimeout | Aborted | DependencyFailed
+/// any state        to  itself            (checked before the terminal guard)
 /// ```
 /// Terminal states (`Completed`, `FailedPermanent`, `FailedTimeout`, `Aborted`,
 /// `DependencyFailed`, `Substituted`) cannot be transitioned away from.
