@@ -149,22 +149,21 @@ pub fn deps_ready_predicate(alias: &str) -> String {
     )
 }
 
-/// The build target `{alias}`'s own `.drv` has its full NAR reference closure
-/// backed in the cache (`cached_path.closure_complete`, whose ground truth is
-/// every recorded `cached_path_reference` resolving to a backed, itself
-/// closure-complete row). A `.drv` is an ordinary compressed-NAR store path, so
-/// this is the authoritative "the worker can fetch and import the whole
-/// input-`.drv` closure" signal - computed over the actual `.drv` NAR references,
-/// not the eval-time build graph. The build-graph `drv_closure_cached` flag
-/// mirrors it but diverges when eval pruning leaves a dependency unwalked,
-/// dead-zoning a build whose `.drv` closure is in fact fully cached; the
-/// dispatch gate accepts either signal.
-pub fn drv_nar_closure_complete_predicate(alias: &str) -> String {
+/// The build target `{alias}`'s own `.drv` is whole: its NAR is stored and every
+/// reference counted by `cached_path.missing_references` resolves. A `.drv` is an
+/// ordinary compressed-NAR store path, so this is the authoritative "the worker
+/// can fetch and import the whole input-`.drv` closure" signal - computed over the
+/// actual `.drv` NAR references, not the eval-time build graph. The build-graph
+/// `drv_closure_cached` flag mirrors it but diverges when eval pruning leaves a
+/// dependency unwalked, dead-zoning a build whose `.drv` closure is in fact fully
+/// cached; the dispatch gate accepts either signal.
+pub fn drv_whole_predicate(alias: &str) -> String {
     format!(
         r#"EXISTS (
         SELECT 1 FROM derivation d
         JOIN cached_path cp ON cp.hash = d.hash
-        WHERE d.id = {alias}.derivation AND cp.closure_complete)"#
+        WHERE d.id = {alias}.derivation AND {whole})"#,
+        whole = crate::nar_closure::whole_predicate("cp"),
     )
 }
 
@@ -172,10 +171,10 @@ pub fn drv_nar_closure_complete_predicate(alias: &str) -> String {
 /// `cached_path` row, or a row with no backing NAR. This is the only `.drv`
 /// state a fresh evaluation repairs - it re-materialises and re-uploads the
 /// `.drv`. Deliberately narrower than
-/// `NOT drv_nar_closure_complete_predicate`, which is also true for a `.drv`
-/// that is present and merely has an unconverged closure flag; re-evaluating
-/// cannot set a flag, so conflating the two burned an evaluation per stall and
-/// then failed it as unrecoverable with the `.drv` cached the whole time.
+/// `NOT drv_whole_predicate`, which is also true for a `.drv` that is present
+/// and merely misses a reference; re-evaluating cannot fetch that reference, so
+/// conflating the two burned an evaluation per stall and then failed it as
+/// unrecoverable with the `.drv` cached the whole time.
 pub fn drv_nar_absent_predicate(alias: &str) -> String {
     format!(
         r#"NOT EXISTS (
@@ -293,18 +292,19 @@ mod tests {
     }
 
     /// A `.drv` is an ordinary NAR store path, so the authoritative "the worker
-    /// can import the whole input-`.drv` closure" signal is the `.drv`'s own
-    /// `cached_path.closure_complete` (computed over real NAR references), not the
+    /// can import the whole input-`.drv` closure" signal is the `.drv` row's own
+    /// reference counter (computed over real NAR references), not the
     /// eval-build-graph `drv_closure_cached` flag that diverges when pruning
     /// leaves a dependency unwalked. The predicate must key on that.
     #[test]
-    fn drv_nar_closure_predicate_keys_on_cached_path_closure_complete() {
-        let p = norm(&drv_nar_closure_complete_predicate("db"));
+    fn drv_whole_predicate_reads_the_reference_counter() {
+        let p = norm(&drv_whole_predicate("db"));
         assert!(
             p.contains("JOIN cached_path cp ON cp.hash = d.hash")
                 && p.contains("d.id = db.derivation")
-                && p.contains("cp.closure_complete"),
-            "must assert the build target's own .drv NAR-closure is complete: {p}"
+                && p.contains("cp.file_hash IS NOT NULL")
+                && p.contains("cp.missing_references = 0"),
+            "must assert the build target's own .drv row is whole: {p}"
         );
     }
 

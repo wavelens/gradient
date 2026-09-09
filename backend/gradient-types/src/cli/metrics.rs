@@ -66,9 +66,11 @@ pub struct MetricsArgs {
     #[arg(long, env = "GRADIENT_INSTANCE_METRICS_INTERVAL", default_value_t = 30)]
     pub instance_metrics_interval_secs: u64,
 
-    /// Interval in seconds between read-only build-graph consistency sweeps
-    /// (stale gate flags, unpromoted-ready anchors, unbacked trusted outputs,
-    /// wedged Building evaluations are logged as warnings). 0 disables.
+    /// Interval in seconds between build-graph consistency sweeps (stale gate
+    /// flags, unpromoted-ready anchors, unbacked trusted outputs, wedged Building
+    /// evaluations are logged as warnings). The sweep also repairs the NAR
+    /// reference counter over the paths pending anchors gate on, and is that
+    /// counter's only backstop, so 0 disables both.
     #[arg(
         long,
         env = "GRADIENT_GRAPH_CONSISTENCY_INTERVAL",

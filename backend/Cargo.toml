@@ -73,7 +73,7 @@ rand   = { version = "0.10", default-features = false, features = ["std", "std_r
 uuid   = { version = "1.23", default-features = false, features = ["std", "v7", "fast-rng", "serde", "macro-diagnostics"] }
 
 # Serialization
-rkyv       = { version = "0.8", default-features = false, features = ["alloc", "bytecheck"] }
+rkyv       = { version = "0.8", default-features = false, features = ["alloc", "bytecheck", "unaligned"] }
 serde      = { version = "1", default-features = false, features = ["std", "derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 
@@ -95,7 +95,7 @@ bzip2             = { version = "0.6" } # defaults: pure-Rust backend is only re
 flate2            = { version = "1", default-features = false, features = ["rust_backend"] }
 tar               = { version = "0.4", default-features = false }
 xz2               = { version = "0.1", default-features = false }
-zstd              = { version = "0.13", default-features = false }
+zstd              = { version = "0.13", default-features = false, features = ["zstdmt"] }
 
 # Bytes / buffers
 bytes = { version = "1.11", default-features = false, features = ["std"] }

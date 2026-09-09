@@ -138,7 +138,7 @@ pub enum ClientMessage {
     NarPush {
         job_id: String,
         store_path: String,
-        /// zstd-compressed NAR data, ~4 MiB chunks.
+        /// zstd-compressed NAR data, 512 KiB chunks (`BULK_CHUNK_SIZE`).
         data: Vec<u8>,
         offset: u64,
         is_final: bool,
@@ -285,6 +285,9 @@ pub enum ClientMessage {
     /// `inputDrvs` again.
     QueryKnownDerivations {
         job_id: String,
+        /// Echoed by [`super::server::ServerMessage::KnownDerivations`]; the
+        /// sole correlator.
+        query_id: String,
         drv_paths: Vec<String>,
     },
 }

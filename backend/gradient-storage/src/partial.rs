@@ -25,6 +25,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail};
+use harmonia_utils_hash::{Algorithm, Context as HashContext, Sha256};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
 /// Process-local sequence giving each [`PartialStore::detach`] claim a unique
@@ -35,6 +36,107 @@ static CLAIM_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 pub struct PartialStore {
     root: PathBuf,
     ttl: Duration,
+}
+
+/// A completed `.partial` file: where it lies, how many bytes it holds and the
+/// SHA-256 the writer computed while staging them, so a commit verifies the
+/// transfer without re-reading the file.
+#[derive(Clone, Debug)]
+pub struct StagedFile {
+    pub path: PathBuf,
+    pub len: u64,
+    pub sha256: [u8; 32],
+}
+
+/// An open append handle on one `.partial`, owned by the task draining a single
+/// transfer. Holding the file open across a stream turns the per-chunk
+/// open/stat/seek/token-rewrite into one syscall per chunk, and hashing as the
+/// bytes go by removes the commit's verification read entirely.
+pub struct PartialWriter {
+    file: tokio::fs::File,
+    path: PathBuf,
+    len: u64,
+    hasher: HashContext,
+    /// Bytes of a resumed prefix still to fold into `hasher`, read on first use
+    /// so a resume's full-file read lands on whoever writes the stream rather
+    /// than on the caller that opened it.
+    pending_prefix: u64,
+}
+
+impl PartialWriter {
+    /// Bytes staged so far, i.e. the offset the next chunk must carry.
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Append `data` at `offset`, which must equal [`Self::len`].
+    pub async fn append(&mut self, offset: u64, data: &[u8]) -> Result<()> {
+        if offset != self.len {
+            bail!(
+                "non-contiguous partial append: offset {offset} != len {}",
+                self.len
+            );
+        }
+
+        self.hash_prefix().await?;
+        self.file
+            .write_all(data)
+            .await
+            .context("write partial chunk")?;
+        self.hasher.update(data);
+        self.len += data.len() as u64;
+        Ok(())
+    }
+
+    /// Flush and close, reporting what was staged.
+    pub async fn finish(mut self) -> Result<StagedFile> {
+        self.hash_prefix().await?;
+        self.file.flush().await.context("flush partial")?;
+        let digest = Sha256::try_from(self.hasher.finish())
+            .map_err(|_| anyhow::anyhow!("sha256 finalize produced a non-sha256 digest"))?;
+        Ok(StagedFile {
+            path: self.path,
+            len: self.len,
+            sha256: *digest.digest_bytes(),
+        })
+    }
+
+    /// Fold a resumed prefix into the hash. Runs at most once, before the first
+    /// byte is written, so the file holds exactly the prefix and reading it to
+    /// end reads all of it.
+    async fn hash_prefix(&mut self) -> Result<()> {
+        if self.pending_prefix == 0 {
+            return Ok(());
+        }
+
+        self.file
+            .seek(SeekFrom::Start(0))
+            .await
+            .context("seek partial start")?;
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            let n = self
+                .file
+                .read(&mut buf)
+                .await
+                .context("rehash partial prefix")?;
+            if n == 0 {
+                break;
+            }
+            self.hasher.update(&buf[..n]);
+        }
+
+        self.file
+            .seek(SeekFrom::End(0))
+            .await
+            .context("seek partial end")?;
+        self.pending_prefix = 0;
+        Ok(())
+    }
 }
 
 impl PartialStore {
@@ -104,11 +206,61 @@ impl PartialStore {
         }
     }
 
+    /// Open `key` for appending under `token`. `resume_from > 0` keeps the
+    /// stored prefix (already validated by [`Self::received_len`]) and hashes it
+    /// on the writer's first use; `0` truncates and records `token` as the
+    /// sidecar. Opening costs a handful of syscalls, so it is safe on a hot loop.
+    pub async fn open_writer(
+        &self,
+        key: &str,
+        token: &str,
+        resume_from: u64,
+    ) -> Result<PartialWriter> {
+        self.ensure_parent(key).await?;
+        let path = self.partial_path(key);
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&path)
+            .await
+            .with_context(|| format!("open partial {}", path.display()))?;
+
+        if resume_from == 0 {
+            file.set_len(0)
+                .await
+                .context("truncate partial for fresh start")?;
+            tokio::fs::write(self.token_path(key), token)
+                .await
+                .context("write partial token")?;
+        } else {
+            let len = file.metadata().await.context("stat partial")?.len();
+            if len != resume_from {
+                bail!("partial {key} holds {len} bytes, resume asked for {resume_from}");
+            }
+        }
+
+        file.seek(SeekFrom::End(0))
+            .await
+            .context("seek partial end")?;
+        Ok(PartialWriter {
+            file,
+            path,
+            len: resume_from,
+            hasher: HashContext::new(Algorithm::SHA256),
+            pending_prefix: resume_from,
+        })
+    }
+
     /// Append `data` at `offset`. `offset` must equal the current partial
     /// length (contiguous); a gap or overlap is an error. `offset == 0` always
-    /// truncates any stale prefix and starts fresh under `token` - so a sender
-    /// that restarts a transfer from the beginning (e.g. a reconnect without a
-    /// resume handshake) never trips the contiguity check.
+    /// truncates any stale prefix and starts fresh under `token` - so an HTTP
+    /// uploader that restarts a transfer from the beginning never trips the
+    /// contiguity check. That tolerance is this call's alone: a `/proto` push
+    /// stream goes through [`Self::open_writer`] and is append-only once open,
+    /// so it restarts by re-opening the writer, which keeps whatever prefix the
+    /// stored token still validates and truncates only when that token changed.
     pub async fn append(&self, key: &str, token: &str, offset: u64, data: &[u8]) -> Result<()> {
         self.ensure_parent(key).await?;
         let path = self.partial_path(key);
@@ -125,6 +277,9 @@ impl PartialStore {
             file.set_len(0)
                 .await
                 .context("truncate partial for fresh start")?;
+            tokio::fs::write(self.token_path(key), token)
+                .await
+                .context("write partial token")?;
         } else {
             let len = file
                 .metadata()
@@ -136,9 +291,6 @@ impl PartialStore {
             }
         }
 
-        tokio::fs::write(self.token_path(key), token)
-            .await
-            .context("write partial token")?;
         file.seek(SeekFrom::End(0))
             .await
             .context("seek partial end")?;
@@ -175,14 +327,17 @@ impl PartialStore {
         Ok(buf)
     }
 
-    /// Atomically claim the completed partial (and its token sidecar) for `key`
-    /// under a fresh, process-unique key, returning that claim key. A detached
-    /// commit reads the claim while a later push of the same content-addressed
-    /// hash resets the shared `{key}` partial - a token mismatch on the next
-    /// header discards it ([`Self::received_len`]) and an `offset == 0` append
-    /// truncates it - so without the claim the queued commit would read 0 bytes.
-    /// Returns `None` when nothing is staged. The rename is O(1) and safe on the
-    /// read loop; only the byte copy/upload stays detached.
+    /// Atomically claim the completed partial for `key` under a fresh,
+    /// process-unique key, returning that claim key. A detached commit reads the
+    /// claim while a later push of the same content-addressed hash resets the
+    /// shared `{key}` partial - a token mismatch on the next header discards it
+    /// ([`Self::received_len`]) and an `offset == 0` open truncates it - so
+    /// without the claim the queued commit would read the wrong bytes. Returns
+    /// `None` when nothing is staged. The rename is O(1) and safe on the read
+    /// loop; only the byte copy/upload stays detached.
+    ///
+    /// The token sidecar is dropped rather than moved: a claim is terminal, so
+    /// nothing can resume it, and only a `.partial` is reachable by [`Self::gc`].
     pub async fn detach(&self, key: &str) -> Result<Option<String>> {
         let src = self.partial_path(key);
         match tokio::fs::metadata(&src).await {
@@ -197,12 +352,25 @@ impl PartialStore {
         tokio::fs::rename(&src, self.partial_path(&claim))
             .await
             .context("claim partial")?;
-        match tokio::fs::rename(self.token_path(key), self.token_path(&claim)).await {
+        match tokio::fs::remove_file(self.token_path(key)).await {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e).context("claim partial token"),
+            Err(e) => return Err(e).context("drop claimed partial token"),
         }
         Ok(Some(claim))
+    }
+
+    /// Remove the token sidecar, leaving the partial in place (idempotent).
+    /// Used when a partial is committed under its own name: the sweep in
+    /// [`Self::gc`] enumerates `*.partial` only, so a token left beside a file
+    /// that is about to be renamed away would never be reclaimed.
+    pub async fn discard_token(&self, key: &str) -> Result<()> {
+        let path = self.token_path(key);
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e).with_context(|| format!("remove {}", path.display())),
+        }
     }
 
     /// Remove the partial and its token sidecar (idempotent).
@@ -368,13 +536,79 @@ mod tests {
             .expect("something staged");
         assert_ne!(claim, "peer/abc");
 
-        // A later same-hash push resets the shared key (new token discards).
+        // A later same-hash push resets the shared key (the claim took its token).
         assert_eq!(s.received_len("peer/abc", "tok2").await.unwrap(), 0);
         s.append("peer/abc", "tok2", 0, b"world!!").await.unwrap();
 
-        // The claim is untouched: original token still validates, bytes intact.
-        assert_eq!(s.received_len(&claim, "tok1").await.unwrap(), 5);
+        // The claim is untouched: its bytes are intact and resume-proof.
+        assert_eq!(s.staged_len(&claim).await, 5);
+        assert!(s.token(&claim).await.is_none());
         assert_eq!(s.read_all(&claim).await.unwrap(), b"hello");
+    }
+
+    #[tokio::test]
+    async fn writer_hashes_what_it_writes_and_finish_reports_it() {
+        let (_d, s) = store(3600);
+        let mut w = s.open_writer("peer/job/hash", "tok", 0).await.unwrap();
+        w.append(0, b"hello ").await.unwrap();
+        w.append(6, b"world").await.unwrap();
+        let staged = w.finish().await.unwrap();
+        assert_eq!(staged.len, 11);
+        assert_eq!(
+            &staged.sha256,
+            Sha256::digest(b"hello world").digest_bytes()
+        );
+        assert_eq!(tokio::fs::read(&staged.path).await.unwrap(), b"hello world");
+    }
+
+    #[tokio::test]
+    async fn resuming_rehashes_the_existing_prefix() {
+        let (_d, s) = store(3600);
+        let mut w = s.open_writer("k", "tok", 0).await.unwrap();
+        w.append(0, b"hello ").await.unwrap();
+        drop(w);
+        let received = s.received_len("k", "tok").await.unwrap();
+        assert_eq!(received, 6);
+        let mut w = s.open_writer("k", "tok", received).await.unwrap();
+        w.append(6, b"world").await.unwrap();
+        let staged = w.finish().await.unwrap();
+        assert_eq!(
+            &staged.sha256,
+            Sha256::digest(b"hello world").digest_bytes()
+        );
+    }
+
+    /// A reconnect that has nothing left to send still has to report the hash
+    /// of what is already on disk, so the deferred prefix rehash must run even
+    /// when no chunk is ever appended.
+    #[tokio::test]
+    async fn a_resume_with_no_new_bytes_still_reports_the_prefix_hash() {
+        let (_d, s) = store(3600);
+        let mut w = s.open_writer("k", "tok", 0).await.unwrap();
+        w.append(0, b"hello world").await.unwrap();
+        w.finish().await.unwrap();
+
+        let received = s.received_len("k", "tok").await.unwrap();
+        let staged = s
+            .open_writer("k", "tok", received)
+            .await
+            .unwrap()
+            .finish()
+            .await
+            .unwrap();
+        assert_eq!(staged.len, 11);
+        assert_eq!(
+            &staged.sha256,
+            Sha256::digest(b"hello world").digest_bytes()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_gap_is_rejected() {
+        let (_d, s) = store(3600);
+        let mut w = s.open_writer("k", "tok", 0).await.unwrap();
+        w.append(0, b"abc").await.unwrap();
+        assert!(w.append(5, b"x").await.is_err());
     }
 
     #[tokio::test]

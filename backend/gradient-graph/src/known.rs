@@ -55,12 +55,12 @@ pub(crate) async fn prunable(
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let closure_cached: HashSet<String> = ECachedPath::find()
+    let whole: HashSet<String> = ECachedPath::find()
         .filter(CCachedPath::Hash.is_in(out_hashes))
         .all(db)
         .await?
         .into_iter()
-        .filter(|cp| cp.is_fully_cached() && cp.closure_complete)
+        .filter(|cp| cp.is_whole())
         .map(|cp| cp.hash)
         .collect();
 
@@ -74,7 +74,7 @@ pub(crate) async fn prunable(
         &outputs,
         &walked,
         &complete_anchors,
-        &closure_cached,
+        &whole,
     ))
 }
 
@@ -84,16 +84,15 @@ pub(crate) async fn prunable(
 /// recorded. Upstream arm: every output is on a real upstream (`external_url`),
 /// which serves a complete closure, so a build worker fetches the pruned subtree
 /// on demand. Local arm: the anchor is terminal-success and every output has a
-/// fully-cached `cached_path` with `closure_complete`; bare `is_cached` is not
-/// enough, because our own cache is populated output-only and pruning on it
-/// stranded never-pushed closure members as permanent `InputsUnavailable`
-/// dead-ends.
+/// whole `cached_path` row; bare `is_cached` is not enough, because our own
+/// cache is populated output-only and pruning on it stranded never-pushed
+/// closure members as permanent `InputsUnavailable` dead-ends.
 fn prunable_known_derivations(
     candidates: Vec<(DerivationId, String)>,
     outputs: &[MDerivationOutput],
     walked: &HashSet<DerivationId>,
     complete_anchors: &HashSet<DerivationId>,
-    closure_cached: &HashSet<String>,
+    whole: &HashSet<String>,
 ) -> Vec<String> {
     let mut counts: HashMap<DerivationId, (usize, usize, usize)> = HashMap::new();
     for o in outputs {
@@ -102,7 +101,7 @@ fn prunable_known_derivations(
         if o.external_url.is_none() {
             entry.1 += 1;
         }
-        if !closure_cached.contains(&o.hash) {
+        if !whole.contains(&o.hash) {
             entry.2 += 1;
         }
     }
@@ -140,15 +139,9 @@ mod tests {
         outputs: &[MDerivationOutput],
         walked: &HashSet<DerivationId>,
         complete_anchors: &HashSet<DerivationId>,
-        closure_cached: &HashSet<String>,
+        whole: &HashSet<String>,
     ) -> Vec<String> {
-        prunable_known_derivations(
-            candidates,
-            outputs,
-            walked,
-            complete_anchors,
-            closure_cached,
-        )
+        prunable_known_derivations(candidates, outputs, walked, complete_anchors, whole)
     }
 
     #[test]
@@ -190,14 +183,14 @@ mod tests {
         assert_eq!(prunable, vec!["/nix/store/bbb-upstream".to_string()]);
     }
 
-    /// Both local-arm preconditions are load-bearing: a closure-complete output
-    /// without the recorded-graph anchor, or a complete anchor with one output
-    /// lacking `closure_complete`, must keep walking.
+    /// Both local-arm preconditions are load-bearing: a whole output without
+    /// the recorded-graph anchor, or a complete anchor with one output that is
+    /// not whole, must keep walking.
     #[test]
-    fn locally_closure_complete_anchor_prunes() {
-        let complete = DerivationId::now_v7(); // anchor complete + output closure-cached
-        let no_anchor = DerivationId::now_v7(); // output closure-cached, no complete anchor
-        let half_cached = DerivationId::now_v7(); // anchor complete, one output not closure-cached
+    fn a_locally_whole_anchor_prunes() {
+        let complete = DerivationId::now_v7(); // anchor complete + output whole
+        let no_anchor = DerivationId::now_v7(); // output whole, no complete anchor
+        let half_cached = DerivationId::now_v7(); // anchor complete, one output not whole
 
         let outputs = vec![
             output(complete, "aaa"),
@@ -212,18 +205,12 @@ mod tests {
         ];
         let walked = HashSet::from([complete, no_anchor, half_cached]);
         let complete_anchors = HashSet::from([complete, half_cached]);
-        let closure_cached: HashSet<String> = ["aaa", "bbb", "ccc"]
+        let whole: HashSet<String> = ["aaa", "bbb", "ccc"]
             .iter()
             .map(|s| s.to_string())
             .collect();
 
-        let prunable = prune(
-            candidates,
-            &outputs,
-            &walked,
-            &complete_anchors,
-            &closure_cached,
-        );
+        let prunable = prune(candidates, &outputs, &walked, &complete_anchors, &whole);
 
         assert_eq!(prunable, vec!["/nix/store/aaa-complete".to_string()]);
     }
@@ -237,17 +224,10 @@ mod tests {
         o.external_url = Some("https://cache.example/bbb.narinfo".to_string());
         let candidates = vec![(upstream, "/nix/store/bbb-upstream".to_string())];
         let complete_anchors = HashSet::from([upstream]);
-        let closure_cached: HashSet<String> = HashSet::from(["bbb".to_string()]);
+        let whole: HashSet<String> = HashSet::from(["bbb".to_string()]);
 
         assert!(
-            prune(
-                candidates,
-                &[o],
-                &HashSet::new(),
-                &complete_anchors,
-                &closure_cached
-            )
-            .is_empty(),
+            prune(candidates, &[o], &HashSet::new(), &complete_anchors, &whole).is_empty(),
             "an unwalked derivation must be walked, not pruned"
         );
     }

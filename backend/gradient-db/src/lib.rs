@@ -24,6 +24,7 @@ pub mod drv_output_spec;
 pub mod eval_watchdog;
 pub mod gc;
 pub mod graph_sql;
+pub mod nar_closure;
 pub mod permissions;
 pub mod pool;
 pub mod project_cache;
@@ -48,8 +49,7 @@ pub(crate) mod test_ctx;
 pub use self::build_attempt::*;
 pub use self::cache_reach::*;
 pub use self::cache_storage::{
-    MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, cache_used_bytes,
-    clear_closure_complete_for_referrers, clear_gate_flags_for_hashes, demote_cached_output,
+    MissingInputDiagnosis, STORAGE_HEADROOM_BYTES, cache_used_bytes, demote_cached_output,
     demote_output_only_cached_deps, demote_referrers_of, demote_unbacked_trusted_outputs,
     diagnose_missing_input, instance_used_bytes, project_caches_all_full, project_writable_caches,
 };
@@ -75,6 +75,10 @@ pub use self::eval_watchdog::{LostCompletion, lost_eval_completions};
 pub use self::gc::*;
 pub use self::graph_sql::{
     ClosureDirection, dependency_closure_cte, eval_closure_cte, reachable_derivations_cte,
+};
+pub use self::nar_closure::{
+    ReferenceLock, lock_reference_endpoints, retire_paths, retire_paths_where, ripple_unwhole,
+    ripple_whole, seed_references,
 };
 pub use self::pool::{CacheDb, WebDb, WorkerDb};
 pub use self::project_cache::project_has_writable_cache;

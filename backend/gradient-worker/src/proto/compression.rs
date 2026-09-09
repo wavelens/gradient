@@ -57,6 +57,10 @@ pub(crate) fn detect_compression(url: &str) -> Compression {
 /// 8-byte little-endian length followed by the string itself.
 const NAR_MAGIC: &[u8] = b"\x0d\x00\x00\x00\x00\x00\x00\x00nix-archive-1";
 
+/// Leading bytes a caller must hand [`sniff_compression`] for it to be able to
+/// identify every container: the uncompressed NAR header is the longest.
+pub(crate) const SNIFF_BYTES: usize = NAR_MAGIC.len();
+
 /// Identify a NAR payload's container from its leading magic bytes, or `None`
 /// when nothing matches (a body too short to classify, or a format we don't
 /// handle).
@@ -90,12 +94,32 @@ pub(crate) fn resolve_compression(bytes: &[u8], url: Option<&str>) -> Compressio
 /// payloads are bounded by `nar_size` from the path info, so memory
 /// pressure is predictable.
 pub(crate) fn decompress(compressed: &[u8], kind: Compression) -> Result<Vec<u8>> {
+    decompress_reader(std::io::Cursor::new(compressed), kind)
+}
+
+/// Decompress a NAR payload straight from `reader`, so a NAR staged on disk is
+/// never held in memory in its compressed form as well as its raw one.
+pub(crate) fn decompress_reader<R: std::io::Read>(reader: R, kind: Compression) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
     match kind {
-        Compression::None => Ok(compressed.to_vec()),
-        Compression::Zstd => decompress_zstd(compressed),
-        Compression::Xz => decompress_xz(compressed),
-        Compression::Bzip2 => decompress_bzip2(compressed),
+        Compression::None => {
+            let mut reader = reader;
+            reader.read_to_end(&mut out).context("read raw NAR")?;
+        }
+        Compression::Zstd => {
+            let mut decoder = zstd::stream::Decoder::new(reader).context("init zstd decoder")?;
+            decoder.read_to_end(&mut out).context("read zstd stream")?;
+        }
+        Compression::Xz => {
+            let mut decoder = xz2::read::XzDecoder::new(reader);
+            decoder.read_to_end(&mut out).context("read xz stream")?;
+        }
+        Compression::Bzip2 => {
+            let mut decoder = bzip2::read::BzDecoder::new(reader);
+            decoder.read_to_end(&mut out).context("read bzip2 stream")?;
+        }
     }
+    Ok(out)
 }
 
 /// zstd window size produced by compression level 6 (`windowLog` 21 = 2 MiB).
@@ -242,30 +266,6 @@ pub(crate) async fn drv_closure_seeds_from_compressed_nar(
         }
     };
     drv_closure_seeds(&drv, mode)
-}
-
-fn decompress_zstd(compressed: &[u8]) -> Result<Vec<u8>> {
-    let mut decoder = zstd::stream::Decoder::new(std::io::Cursor::new(compressed))
-        .context("init zstd decoder")?;
-
-    let mut out = Vec::with_capacity(compressed.len() * 4);
-    decoder.read_to_end(&mut out).context("read zstd stream")?;
-
-    Ok(out)
-}
-
-fn decompress_xz(compressed: &[u8]) -> Result<Vec<u8>> {
-    let mut decoder = xz2::read::XzDecoder::new(std::io::Cursor::new(compressed));
-    let mut out = Vec::with_capacity(compressed.len() * 4);
-    decoder.read_to_end(&mut out).context("read xz stream")?;
-    Ok(out)
-}
-
-fn decompress_bzip2(compressed: &[u8]) -> Result<Vec<u8>> {
-    let mut decoder = bzip2::read::BzDecoder::new(std::io::Cursor::new(compressed));
-    let mut out = Vec::with_capacity(compressed.len() * 4);
-    decoder.read_to_end(&mut out).context("read bzip2 stream")?;
-    Ok(out)
 }
 
 /// Parse a `sha256:<...>` (or `sha256-<base64>` SRI) hash into the raw 32-byte
@@ -472,6 +472,19 @@ mod tests {
         let raw = b"raw NAR bytes".to_vec();
         let out = decompress(&raw, Compression::None).unwrap();
         assert_eq!(out, raw);
+    }
+
+    /// The staged-file import path decompresses through a reader; it must agree
+    /// byte for byte with the in-memory path the presigned download still uses.
+    #[test]
+    fn decompress_reader_matches_decompress_for_zstd() {
+        let payload = b"gradient staged nar payload".repeat(64);
+        let compressed = zstd::encode_all(std::io::Cursor::new(&payload), 6).unwrap();
+        let from_slice = decompress(&compressed, Compression::Zstd).unwrap();
+        let from_reader =
+            decompress_reader(std::io::Cursor::new(&compressed), Compression::Zstd).unwrap();
+        assert_eq!(from_slice, payload);
+        assert_eq!(from_reader, from_slice);
     }
 
     #[test]

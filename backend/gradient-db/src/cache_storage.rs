@@ -254,9 +254,12 @@ fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
 /// Purge a cached output proven unfetchable, so the next evaluation rebuilds it
 /// from scratch as if it had never been cached. Clears `is_cached` /
 /// `cached_path` on every `derivation_output` with this store-path `hash`,
-/// deletes the `cached_path` row itself (its `cached_path_signature` rows
-/// cascade; the `derivation_output` FK is `ON DELETE SET NULL`), and removes the
-/// NAR object from storage so the row⟺object invariant holds. The derivation
+/// retires the `cached_path` row itself
+/// ([`crate::nar_closure::retire_paths`]: the row goes, its
+/// `cached_path_signature` rows cascade, the `derivation_output` FK is
+/// `ON DELETE SET NULL`, and every referrer's reference counter and gate flag
+/// moves back), and removes the NAR object from storage so the row and the object
+/// stay in step. The derivation
 /// graph is left intact - only the cache artifact is removed. Returns the
 /// producing derivations for logging. A producerless input (`.drv`/source) is
 /// only purged when its NAR is genuinely gone: a still-present one is preserved
@@ -266,7 +269,6 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
     nar_storage: &gradient_storage::NarStore,
     hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
-    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
     use gradient_entity::derivation_output::{Column as CDO, Entity as EDO};
     use sea_orm::ActiveModelTrait;
 
@@ -319,10 +321,7 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
         .await?;
     }
 
-    ECP::delete_many()
-        .filter(CCP::Hash.eq(hash))
-        .exec(db)
-        .await?;
+    crate::nar_closure::retire_paths(db, &[hash.to_owned()]).await?;
 
     if let Err(e) = nar_storage.delete(hash).await {
         warn!(%hash, error = %e, "demote: failed to delete NAR object from storage");
@@ -338,9 +337,9 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
 /// (no producer rebuilds) and would strand the `.drv`'s own live dependents behind
 /// the `drv_closure_cached` dispatch gate, a permanent dead zone, since a genuinely
 /// missing input `.drv`/source is re-supplied only by a full re-eval. The
-/// transitive completeness invariant is handled separately by
-/// [`clear_closure_complete_for_referrers`], which only flips the flag and
-/// leaves healthy NARs in place. Returns the producers reset to `Created`.
+/// transitive completeness invariant is handled by the reverse ripple inside
+/// [`crate::nar_closure::retire_paths`], which raises the referrers' counters and
+/// leaves their healthy NARs in place. Returns the producers reset to `Created`.
 pub async fn demote_referrers_of<C: ConnectionTrait>(
     db: &C,
     nar_storage: &gradient_storage::NarStore,
@@ -411,8 +410,8 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
 /// `closure_complete` is - correctly - false), so they never dispatch, so no build
 /// ever reports the path missing and the reactive `reconcile_missing_inputs` heal
 /// never fires: a permanent dead zone. Demote each unbacked output - reset its
-/// producer to `Created`, drop the stale flags, and clear `closure_complete` up the
-/// referrer chain - so the next build rebuilds it. Returns the producers reset.
+/// producer to `Created`, drop the stale flags, and raise the reference counters
+/// of its referrers - so the next build rebuilds it. Returns the producers reset.
 ///
 /// Keyed on the **ground truth** (a backing `cached_path` NAR), NOT the derived
 /// `is_cached` flag: that flag is `false` for exactly the never-cached-output dead
@@ -459,263 +458,9 @@ pub async fn demote_unbacked_trusted_outputs<C: ConnectionTrait>(
     let mut reset = 0u64;
     for h in hashes {
         reset += demote_cached_output(db, nar_storage, &h.hash).await?.len() as u64;
-        clear_closure_complete_for_referrers(db, &h.hash).await?;
     }
 
     Ok(reset)
-}
-
-/// Ground truth for `cached_path.closure_complete` on row `cp`: its own NAR is
-/// backed and every recorded reference resolves to a backed, itself
-/// closure-complete `cached_path` row (self-references excluded). References
-/// are recorded at every ingest (`sync_reference_index`), so an empty
-/// reference set genuinely means "no references".
-pub(crate) const CACHED_PATH_CLOSURE_COMPLETE_GATE: &str = r#"
-    cp.file_hash IS NOT NULL
-    AND NOT EXISTS (
-        SELECT 1 FROM cached_path_reference r
-        LEFT JOIN cached_path dep ON dep.hash = r.reference_hash
-        WHERE r.referrer = cp.hash
-          AND r.reference_hash <> cp.hash
-          AND (dep.hash IS NULL OR dep.file_hash IS NULL OR NOT dep.closure_complete))
-"#;
-
-/// Prelude CTE and `cp` membership filter bounding the `cached_path` fixpoint to
-/// one eval's NAR-reference closure. `None` yields empty fragments (the global
-/// full-table `Deep` backstop); `Some` seeds `eval_paths` from the eval's
-/// `build_job` output hashes **and its targets' own `.drv` hashes** - a `.drv` is
-/// keyed by `derivation.hash` and is never a `derivation_output.hash`, so
-/// seeding from outputs alone put every `.drv` row outside the bound, leaving the
-/// flag the dispatch gate reads settable only by the rare `Deep` pass - and walks
-/// `cached_path_reference` toward references,
-/// so the bound is closed under the reference relation and the SET pass still
-/// converges leaves-first within it. Eval id binds as `$1`.
-fn cached_path_eval_scope_fragments(
-    scope: Option<gradient_types::EvaluationId>,
-) -> (String, String) {
-    match scope {
-        None => (String::new(), String::new()),
-        Some(_) => (
-            format!(
-                "{} ",
-                crate::graph_sql::reference_closure_cte(
-                    "eval_paths",
-                    "SELECT DISTINCT o.hash FROM derivation_output o \
-                     JOIN build_job bj ON bj.derivation = o.derivation \
-                     WHERE bj.evaluation = $1 \
-                   UNION \
-                     SELECT DISTINCT d.hash FROM derivation d \
-                     JOIN build_job bj ON bj.derivation = d.id \
-                     WHERE bj.evaluation = $1",
-                )
-            ),
-            " AND cp.hash IN (SELECT hash FROM eval_paths)".to_string(),
-        ),
-    }
-}
-
-/// CLEAR + SET statements for the `cached_path.closure_complete` fixpoint,
-/// sharing `CACHED_PATH_CLOSURE_COMPLETE_GATE` (so both passes key on the same
-/// ground truth) and `cached_path_eval_scope_fragments(scope)` (so both see the
-/// same closure bound).
-fn cached_path_closure_statements(scope: Option<gradient_types::EvaluationId>) -> (String, String) {
-    let (prelude, filter) = cached_path_eval_scope_fragments(scope);
-    let clear = format!(
-        "{prelude}UPDATE cached_path cp SET closure_complete = false \
-         WHERE cp.closure_complete AND NOT ({CACHED_PATH_CLOSURE_COMPLETE_GATE}){filter}"
-    );
-    let set = format!(
-        "{prelude}UPDATE cached_path cp SET closure_complete = true \
-         WHERE NOT cp.closure_complete AND ({CACHED_PATH_CLOSURE_COMPLETE_GATE}){filter}"
-    );
-    (clear, set)
-}
-
-/// Bidirectional CLEAR+SET fixpoint over `cached_path.closure_complete`,
-/// mirroring the anchor-side fixpoints. Before this the flag had no forward
-/// maintainer at all: only the m20260624 backfill ever set it, ingest inserts
-/// rows at `false`, and `clear_closure_complete_for_referrers` only clears - so
-/// every post-migration row could never satisfy the eval-time substituted
-/// gate (`compute_truly_substituted`). CLEAR removes stale-true rows whose
-/// closure regressed (GC, purge), SET marks rows whose full reference closure
-/// is backed, one layer per pass. A converged cache costs two zero-row
-/// statements.
-///
-/// `scope` bounds the sweep: `None` is the full-table `Deep` backstop, while
-/// `Some(eval)` walks only that eval's output closure so it can run cheaply on
-/// every `Eval`/`Unstick` worker event - the flag then converges as an eval
-/// pushes its closures instead of lagging up to a full `Deep` interval, which
-/// is what keeps the BFS prune gate (`prunable_known_derivations`) able to skip
-/// an already-built subtree on the next evaluation.
-pub async fn reconcile_cached_path_closure_complete<C: ConnectionTrait>(
-    db: &C,
-    scope: Option<gradient_types::EvaluationId>,
-) -> Result<(), sea_orm::DbErr> {
-    let (clear, set) = cached_path_closure_statements(scope);
-    let params: Vec<sea_orm::Value> = scope
-        .map(|id| vec![sea_orm::Value::Uuid(Some(id.into_inner()))])
-        .unwrap_or_default();
-    for stmt in [clear, set] {
-        loop {
-            let changed = db
-                .execute_raw(Statement::from_sql_and_values(
-                    DatabaseBackend::Postgres,
-                    &stmt,
-                    params.clone(),
-                ))
-                .await?
-                .rows_affected();
-            if changed == 0 {
-                break;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Clear the dispatch-gate trust flags invalidated by deleting the cache
-/// artifacts behind `hashes`, in the same transaction as the deletion when the
-/// caller runs one. `drv_closure_cached` is cleared on anchors whose own `.drv`
-/// hash was deleted; `closure_complete` on producers of a deleted output hash;
-/// and `cached_path.closure_complete` on every transitive referrer of a deleted
-/// hash (set-based recursive walk, pruned at already-false rows). The anchor
-/// fixpoints on the reconcile tick ripple the anchor clears up the graph; the
-/// referrer clear here is what lets the expensive `cached_path` fixpoint run as
-/// a rare backstop instead of on every pass.
-pub async fn clear_gate_flags_for_hashes<C: ConnectionTrait>(
-    db: &C,
-    hashes: &[String],
-) -> Result<(), sea_orm::DbErr> {
-    for chunk in hashes.chunks(crate::IN_CHUNK_SIZE) {
-        let chunk: Vec<String> = chunk.to_vec();
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"
-            UPDATE derivation_build db SET drv_closure_cached = false
-            FROM derivation d
-            WHERE d.id = db.derivation AND db.drv_closure_cached AND d.hash = ANY($1)
-            "#,
-            [chunk.clone().into()],
-        ))
-        .await?;
-
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"
-            UPDATE derivation_build db SET closure_complete = false
-            WHERE db.closure_complete
-              AND db.derivation IN (
-                SELECT o.derivation FROM derivation_output o WHERE o.hash = ANY($1))
-            "#,
-            [chunk.clone().into()],
-        ))
-        .await?;
-
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"
-            WITH RECURSIVE dirty(hash) AS (
-                SELECT unnest($1::text[])
-                UNION
-                SELECT r.referrer
-                FROM cached_path_reference r
-                JOIN dirty d ON r.reference_hash = d.hash
-                JOIN cached_path cp ON cp.hash = r.referrer
-                WHERE cp.closure_complete
-            )
-            UPDATE cached_path cp SET closure_complete = false
-            FROM dirty
-            WHERE cp.hash = dirty.hash AND cp.closure_complete
-            "#,
-            [chunk.into()],
-        ))
-        .await?;
-    }
-
-    Ok(())
-}
-
-/// Self-heal flag clear: a proven-missing path leaves every (transitive)
-/// referrer closure-incomplete, so drop `closure_complete` up the chain - on the
-/// cached NARs and the anchors that produced them - without deleting the healthy
-/// NARs themselves. The missing leaf rebuilds + re-pushes; the next completion
-/// re-marks the chain via `propagate_closure_complete`. The walk stops at
-/// already-false referrers: by the invariant their ancestors are false too.
-pub async fn clear_closure_complete_for_referrers<C: ConnectionTrait>(
-    db: &C,
-    missing_hash: &str,
-) -> Result<u64, sea_orm::DbErr> {
-    use gradient_entity::cached_path::{Column as CCP, Entity as ECP};
-
-    let mut cleared = 0u64;
-    let mut worklist = vec![missing_hash.to_owned()];
-    let mut seen = std::collections::HashSet::new();
-    while let Some(hash) = worklist.pop() {
-        if !seen.insert(hash.clone()) {
-            continue;
-        }
-
-        for referrer_hash in referrers_of_hash(db, &hash).await? {
-            let Some(cp) = ECP::find()
-                .filter(CCP::Hash.eq(&referrer_hash))
-                .one(db)
-                .await?
-            else {
-                continue;
-            };
-            if !cp.closure_complete {
-                continue;
-            }
-
-            ECP::update_many()
-                .col_expr(CCP::ClosureComplete, sea_orm::sea_query::Expr::value(false))
-                .filter(CCP::Hash.eq(&cp.hash))
-                .exec(db)
-                .await?;
-            clear_anchor_closure_complete_for_output(db, &cp.hash).await?;
-            cleared += 1;
-            worklist.push(cp.hash);
-        }
-    }
-
-    Ok(cleared)
-}
-
-/// Clear `closure_complete` on every anchor producing `output_hash`.
-async fn clear_anchor_closure_complete_for_output<C: ConnectionTrait>(
-    db: &C,
-    output_hash: &str,
-) -> Result<(), sea_orm::DbErr> {
-    db.execute_raw(Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        r#"
-        UPDATE derivation_build db SET closure_complete = false
-        WHERE db.closure_complete
-          AND db.derivation IN (SELECT o.derivation FROM derivation_output o WHERE o.hash = $1)
-        "#,
-        [output_hash.into()],
-    ))
-    .await?;
-
-    Ok(())
-}
-
-/// Every cached path whose runtime references name `hash`, via the
-/// `cached_path_reference` reverse index (exact `reference_hash` match, no
-/// full-table scan), `.drv`s and sources included. Used by the closure-complete
-/// flag clear, which may touch any referrer harmlessly; demotion uses the narrower
-/// [`output_referrers_of_hash`].
-async fn referrers_of_hash<C: ConnectionTrait>(
-    db: &C,
-    hash: &str,
-) -> Result<Vec<String>, sea_orm::DbErr> {
-    referrers_by_select(
-        db,
-        "SELECT DISTINCT referrer FROM cached_path_reference WHERE reference_hash = $1",
-        hash,
-    )
-    .await
 }
 
 /// Referrers of `missing_hash` that are **rebuildable outputs**: a
@@ -735,14 +480,6 @@ async fn output_referrers_of_hash<C: ConnectionTrait>(
     db: &C,
     hash: &str,
 ) -> Result<Vec<String>, sea_orm::DbErr> {
-    referrers_by_select(db, OUTPUT_REFERRERS_SELECT, hash).await
-}
-
-async fn referrers_by_select<C: ConnectionTrait>(
-    db: &C,
-    select: &str,
-    hash: &str,
-) -> Result<Vec<String>, sea_orm::DbErr> {
     use sea_orm::FromQueryResult;
 
     #[derive(sea_orm::FromQueryResult)]
@@ -752,7 +489,7 @@ async fn referrers_by_select<C: ConnectionTrait>(
 
     Ok(Referrer::find_by_statement(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
-        select,
+        OUTPUT_REFERRERS_SELECT,
         [hash.into()],
     ))
     .all(db)
@@ -814,7 +551,8 @@ mod tests {
     #[tokio::test]
     async fn demote_deletes_a_present_output_object() {
         use gradient_types::ids::{DerivationId, DerivationOutputId};
-        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use std::collections::BTreeMap;
 
         let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
         let (_tmp, nar_storage, file) = present_nar(hash);
@@ -826,19 +564,22 @@ mod tests {
             ..Default::default()
         };
 
-        // Find the output, RETURNING the demoted row, reset its producer, delete
-        // the `cached_path` row; then the object is removed from storage.
+        // Find the output, RETURNING the demoted row, reset its producer, retire
+        // the `cached_path` row behind its ordered lock pass (no reverse ripple: it
+        // was not whole) and clear the three flags; then the object is removed.
+        let retired = BTreeMap::from([
+            ("hash".to_owned(), Value::from(hash.to_owned())),
+            ("was_whole".to_owned(), Value::from(false)),
+        ]);
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
-            .append_exec_results([
+            .append_query_results([vec![retired]])
+            .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 1,
-                },
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 1,
-                },
+                };
+                5
             ])
             .into_connection();
 
@@ -846,6 +587,12 @@ mod tests {
 
         assert_eq!(producers.len(), 1, "the output's producer is returned");
         assert!(!file.exists(), "demote must delete the output's NAR object");
+        let log = crate::pool::statements(db.into_transaction_log());
+        assert!(
+            log.iter()
+                .any(|s| s.contains("DELETE FROM cached_path") && s.contains("was_whole")),
+            "the row must be retired, so the counters it backed move with it: {log:?}"
+        );
     }
 
     /// Demote must clear `external_url` too, not just `is_cached` - otherwise the
@@ -929,36 +676,6 @@ mod tests {
         );
     }
 
-    /// `cached_path.closure_complete` must key on real ground truth: the row's
-    /// own NAR backing plus every recorded reference resolving to a backed,
-    /// itself-complete row, with self-references excluded (or a self-referential
-    /// path could never converge). The eval-time substituted gate trusts this
-    /// flag, so a drift here silently disables output-only substitution.
-    #[test]
-    fn cached_path_closure_gate_keys_on_reference_ground_truth() {
-        let sql = CACHED_PATH_CLOSURE_COMPLETE_GATE
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        assert!(
-            sql.starts_with("cp.file_hash IS NOT NULL"),
-            "the row's own NAR must be backed: {sql}"
-        );
-        assert!(
-            sql.contains("FROM cached_path_reference r")
-                && sql.contains("dep.hash = r.reference_hash"),
-            "must resolve every recorded reference: {sql}"
-        );
-        assert!(
-            sql.contains("r.reference_hash <> cp.hash"),
-            "self-references must be excluded: {sql}"
-        );
-        assert!(
-            sql.contains("dep.hash IS NULL OR dep.file_hash IS NULL OR NOT dep.closure_complete"),
-            "a missing, unbacked, or incomplete reference must fail the gate: {sql}"
-        );
-    }
-
     /// A producerless input (source / `.drv`) whose NAR is still present must be
     /// PRESERVED by `demote_cached_output`: nothing rebuilds it, so deleting the
     /// only copy dead-ends every dependent on `InputsUnavailable`. An output (has
@@ -979,81 +696,6 @@ mod tests {
             "an output is demoted so its producer rebuilds it"
         );
         assert!(!preserve_missing_artifact(true, false));
-    }
-
-    /// The `cached_path.closure_complete` fixpoint must offer a per-eval bounded
-    /// form so it can converge on every worker event (like the anchor fixpoints)
-    /// without the full-table scan that made it a `Deep`-only backstop. `None` is
-    /// the global full-table pass; `Some(eval)` bounds CLEAR/SET to that eval's
-    /// output NAR-reference closure, seeded from its `build_job` outputs.
-    #[test]
-    fn cached_path_closure_fixpoint_scopes_to_one_eval() {
-        let (clear_global, set_global) = cached_path_closure_statements(None);
-        assert!(
-            !clear_global.contains("eval_paths") && !set_global.contains("eval_paths"),
-            "the global pass stays full-table: {clear_global} / {set_global}"
-        );
-
-        let eval = gradient_types::EvaluationId::now_v7();
-        let (clear, set) = cached_path_closure_statements(Some(eval));
-        for stmt in [&clear, &set] {
-            assert!(
-                stmt.contains("WITH RECURSIVE eval_paths(hash)"),
-                "scoped pass bounds to the eval's paths: {stmt}"
-            );
-            assert!(
-                stmt.contains("bj.evaluation = $1"),
-                "seeded from the eval's build_job outputs: {stmt}"
-            );
-            assert!(
-                stmt.contains(
-                    "SELECT r.reference_hash AS next FROM cached_path_reference r WHERE r.referrer = c.hash"
-                ),
-                "walks the NAR reference closure so leaves converge first: {stmt}"
-            );
-            assert!(
-                stmt.contains("cp.hash IN (SELECT hash FROM eval_paths)"),
-                "restricts the UPDATE to that closure: {stmt}"
-            );
-        }
-    }
-
-    /// The scope must also seed the eval's own `.drv` paths. A build target's
-    /// `.drv` is keyed by `derivation.hash` and is never a
-    /// `derivation_output.hash`, so seeding from outputs alone left every `.drv`
-    /// row outside the filter - unreachable by `Eval`/`Unstick`, and settable
-    /// only by the rare global `Deep` pass. The dispatch gate
-    /// (`drv_nar_closure_complete_predicate`) reads exactly those rows, so the
-    /// flag it depends on never converged: anchors stayed undispatchable, the
-    /// graph-stuck heal called `Unstick` forever, and `DrvRecovery` eventually
-    /// failed the evaluation outright.
-    #[test]
-    fn cached_path_closure_scope_seeds_the_evals_own_drv_paths() {
-        let norm = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let eval = gradient_types::EvaluationId::now_v7();
-        let (clear, set) = cached_path_closure_statements(Some(eval));
-        for stmt in [&clear, &set] {
-            let sql = norm(stmt);
-            assert!(
-                sql.contains(
-                    "SELECT DISTINCT d.hash FROM derivation d \
-                     JOIN build_job bj ON bj.derivation = d.id WHERE bj.evaluation = $1"
-                ),
-                "seeds the eval's .drv hashes alongside its output hashes: {sql}"
-            );
-            // PostgreSQL accepts exactly one self-reference, in the last arm of
-            // the UNION chain: `(non_recursive UNION non_recursive) UNION
-            // recursive`. Seeding .drv paths after the reference walk would be
-            // rejected at runtime, which no type or compile check would catch.
-            let drv_seed = sql.find("FROM derivation d").expect("drv seed present");
-            let walk = sql
-                .find("FROM eval_paths c")
-                .expect("recursive walk present");
-            assert!(
-                drv_seed < walk,
-                "the self-referencing term must stay last in the UNION chain: {sql}"
-            );
-        }
     }
 
     /// `demote_referrers_of` may only demote referrers that are rebuildable

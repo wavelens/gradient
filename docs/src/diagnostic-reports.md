@@ -127,6 +127,23 @@ sqlite3 gradient-report-01a05a38-2026-09-01.db \
 
 The raw signature is never exported, only whether one exists.
 
+`cached_path` carries `missing_references`, the number of the path's references
+that are absent, unbacked or themselves not whole. A path is *whole* - what the
+dispatch gate and the eval prune read - when `file_hash IS NOT NULL AND
+missing_references = 0`, so a non-zero counter is a path no dispatch or eval prune
+will trust, and a negative one is a ripple that was lost:
+
+```sh
+sqlite3 gradient-report-01a05a38-2026-09-01.db \
+  'SELECT package, missing_references FROM cached_path
+    WHERE missing_references <> 0 ORDER BY missing_references DESC'
+```
+
+A negative counter is also counted table-wide by the running server, as
+`negative_reference_counters` on the graph-consistency sweep's warning line, next
+to `nar_counter_drift` (rows that sweep repaired, which is bounded to the paths
+pending anchors gate on) and `gating` (how many paths that was).
+
 An evaluation still in `EvaluatingFlake` or `EvaluatingDerivation` whose newest
 eval job carries a `finished_at` is one whose terminal report never landed. The
 scheduler's `eval-completion-watchdog` pass re-drives that transition, so the

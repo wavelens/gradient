@@ -161,13 +161,44 @@ gate `find_ready_anchors`, so promotion and dispatch can never disagree on what
 `graph_sql::dependency_closure_cte` and shared by the failure cascades, the
 per-eval closure sweeps, and the GC keep-set.
 
-A read-only consistency sweep (`graph_consistency_report`, interval
+A consistency sweep (`graph_consistency_report`, interval
 `GRADIENT_GRAPH_CONSISTENCY_INTERVAL`, default 300s) counts violations of the
 invariants those gates trust - stale-true `closure_complete` /
 `drv_closure_cached`, promotable-but-unpromoted anchors, unbacked
 terminal-success outputs, Building evaluations with no active anchors - and
 logs them as warnings, so a non-converging heal surfaces as an alert instead of
-a user-reported stuck evaluation.
+a user-reported stuck evaluation. One dimension it does not merely count but
+repairs, and it is the only pass that does: the NAR reference counter is moved rather
+than derived, so the sweep recomputes it over the paths the pending anchors gate on
+and reports how many rows disagreed (`nar_counter_drift`). That repair runs *before*
+the counts, because
+two of them embed gates that read the counter and a drifted row would otherwise
+inflate a count this very pass fixes. Each chunk is its own transaction that first
+takes the same hash-ordered `FOR UPDATE` pass a retire takes and only then recounts,
+so the recount's snapshot opens after any commit of those rows has finished; a
+compare-and-swap on the counted value alone is not enough, because a commit that
+reseeds a row onto the drifted value passes it and is overwritten with a stale count.
+Chunking means each chunk commits on its own instead of the sweep's budget rolling
+every repair back. The repair is one level per sweep and not a fixpoint: a chunk
+recounts every row from one snapshot and ripples nothing, so a chain of drifted rows
+converges one level per interval and a referrer outside the gating set never does;
+widening that rides with #591. Setting the interval to 0 disables the sweep, and
+with it the counter's only backstop.
+
+Two numbers on that line are not violations. `nar_counter_drift` counts rows the
+same pass already fixed, so a warning naming only that is a successful self-repair,
+not a dead zone. `gating` is how many paths the repair visited: the select behind it
+has no bound and its second arm walks every `Created` or `Queued` anchor's direct
+dependencies, so it is logged on every sweep, clean or not, to say what the one
+recurring cost this pass adds actually is on a production graph. Bounding it rides
+with the readiness counters that replace the anchor flags (#591), which rewrite what
+the sweep reads; a rotation scheme built before that would be thrown away, and a
+plain `LIMIT` without one would leave the tail never repaired. What the sweep does
+count table-wide is `negative_reference_counters`, rows whose counter a ripple drove
+below zero: no gate can read such a row as whole again, and the repair only rescues
+one that a pending anchor gates on, so outside that set it is the one state the
+design calls unrecoverable - and `nar_counter_drift` is zero for those rows by
+construction.
 
 An evaluation in `EvaluatingFlake` or `EvaluatingDerivation` has one exit: the
 `EvalStreamCompleted` / `EvalFailed` transition the scheduler sends once, when
@@ -320,12 +351,34 @@ intervention.
 
 GC deletion also maintains the dispatch-gate invariant inline instead of leaving
 it to the next reconcile tick: every pass that deletes `cached_path` rows
-(orphan-derivation GC, zombie purge, TTL eviction, path invalidation) clears the
-`drv_closure_cached` / `closure_complete` flags those rows backed **in the same
-transaction** (`clear_gate_flags_for_hashes`), so there is no window in which the
-gate trusts an artifact GC just removed. Path invalidation goes further and
-demotes the producer itself (`demote_cached_output`), so an invalidated output
-rebuilds instead of staying trusted-but-gone. And because the per-task
+(orphan-derivation GC, zombie purge, TTL eviction, path invalidation) goes through
+`nar_closure::retire_paths`, which in the **same transaction** raises the
+`missing_references` counter of every referrer that trusted the deleted rows and
+clears the `drv_closure_cached` / `closure_complete` flags of every hash it
+deleted as well as every hash that stopped being whole, so there is no window in
+which the gate trusts an artifact GC just removed. Those two flags read presence
+and not the counter, so binding them to the unwhole set alone would leave a `.drv`
+that was deleted while it was not whole stale-true until the next `Global`
+reconcile, and dispatch runs every 5s. A caller
+that may only drop a path while some condition still holds (the TTL eviction drops
+one no cache signs any more) hands that condition to the retiring DELETE through
+`retire_paths_where` rather than deciding it in a statement of its own, which would
+decide from its own snapshot and cascade away a signature another cache wrote
+meanwhile.
+
+The guard alone is not enough either: a statement's snapshot is taken before it
+blocks on the RI `FOR KEY SHARE` lock a concurrent `cached_path_signature` insert
+holds, so the DELETE would cascade away a signature that committed while it waited
+(the READ COMMITTED / EvalPlanQual argument behind that is written out once, in
+`gradient_db::nar_closure`'s module doc, and three things here depend on it). The
+wait is therefore absorbed by a preceding pure `FOR UPDATE` pass, hash-ordered, and
+the DELETE then opens a fresh snapshot that sees the signature its guard tests. That
+is why the guarded entry point takes a `&DatabaseTransaction` while the unguarded
+`retire_paths` takes any connection: the lock has to still be held when the DELETE
+runs, and on a pooled connection every statement is its own implicit transaction, so
+a pooled guarded retire does not compile. Path invalidation goes further and demotes the producer itself
+(`demote_cached_output`), so an invalidated output rebuilds instead of staying
+trusted-but-gone. And because the per-task
 evaluation GC refuses to run while any evaluation is active, a wedged `Building`
 evaluation used to freeze a task's GC forever - an "active" evaluation
 untouched for `gc_wedged_eval_hours` (default 24h) now stops blocking, while
@@ -454,11 +507,12 @@ The eval closure walk prunes the same way. As the worker walks the graph it
 asks the server which dependency derivations it already knows
 (`QueryKnownDerivations`); the server prunes a subtree only when **every** output
 is on a real upstream cache (`external_url`), or when every output is whole in our
-own cache (a `closure_complete` `cached_path`) behind a terminal-success anchor. An
-upstream binary cache serves a *complete closure*, so a build worker can fetch the
-pruned subtree's outputs on demand, and `closure_complete` carries the same
-guarantee for our own. A bare `is_cached` hit is deliberately not accepted for
-pruning: the cache is populated output-only (substitution relays just the output NAR,
+own cache (a `cached_path` with its NAR stored and `missing_references = 0`) behind
+a terminal-success anchor. An upstream binary cache serves a *complete closure*, so
+a build worker can fetch the pruned subtree's outputs on demand, and a whole
+`cached_path` carries the same guarantee for our own. A bare `is_cached` hit is
+deliberately not accepted for pruning: the cache is populated output-only
+(substitution relays just the output NAR,
 and a config-specific node's subtree may never have been pushed), so pruning on it
 would strand that subtree - never walked, recorded, or built, and off-upstream so
 unfetchable, a permanent `InputsUnavailable` dead-end (e.g. `unit-*.service` ->
@@ -519,9 +573,9 @@ dependency regressed, or a newly recorded dependency not itself complete) before
 SET fixpoint re-marks the genuinely satisfied. Both ripple over
 `derivation_dependency` and converge in O(longest affected chain); it runs at eval
 completion, graph-unstick, and the 5s dispatch tick so the gate below never reads a
-stale flag. The reactive `clear_closure_complete_for_referrers` (below) still fires
-on demote, but the periodic reconcile is the backstop that does not depend on the
-demote walk finding a not-yet-recorded edge.
+stale flag. A demote raises the reference counters of the deleted path's referrers
+inline (below), but the periodic reconcile is the backstop that does not depend on
+that ripple finding a not-yet-recorded edge.
 
 `promote_ready`, `promote_dependents`, and `dispatch_ready_builds` therefore gate
 each dependency on `(status IN (Completed, Substituted) AND closure_complete)`
@@ -533,14 +587,67 @@ completing anchor's dependent sub-tree. Partial indexes on `derivation_build`
 keyed by `status = Queued` and `status = Created` keep the per-tick scans off the
 full anchor table.
 
-When a build still reports a path missing, `reconcile_missing_inputs` self-heals:
-a missing leaf with a producer is purged + rebuilt (`demote_cached_output`) and
-`closure_complete` is cleared up the referrer chain
-(`clear_closure_complete_for_referrers`) so dependents re-block until the leaf
-re-pushes closure-complete; a producerless source (no producer to rebuild)
-demotes its direct **referrers** (`demote_referrers_of`) so a referrer rebuild
-re-pushes it. The migration backfills the flag to a fixpoint over the existing
-cache and resets any closure-incomplete terminal anchor so it rebuilds.
+The NAR side of that invariant is a counter, not a flag.
+`cached_path.missing_references` is the number of a path's references (self
+excluded) whose row is absent, unbacked or itself not whole; a backed row with
+`missing_references = 0` is *whole*, and `gradient_db::nar_closure::whole_predicate`
+is the one definition every gate reads. The graph actor seeds the counter when it
+commits a NAR, from the references the worker reported, and when that flips the path
+to whole it decrements every referrer, then every referrer of the referrers that
+just reached zero, one statement per level. Deleting a row (`retire_paths`: the
+orphan GC, the zombie purge, TTL eviction, every demote) runs the same ripple in
+reverse from the rows that were whole, and clears the anchor flags those rows backed
+in the same transaction. Every ripple is driven by a **transition**, never by a
+state: rippling from a row that did not just flip moves its referrers past zero, and
+a negative counter never satisfies `= 0` again.
+
+The graph actor handles one message at a time, so a commit never overlaps another
+commit or one of its own demotes. Three of those deletions do run outside it, each
+in its own transaction - TTL eviction, the zombie purge and the orphan GC - and
+nothing serialises them against a commit but row locks. A commit therefore locks its
+reference endpoints first: the references it reports, the ones already indexed for
+it, and its own row, in one hash-ordered `FOR SHARE` statement taken before the row
+it is about to write. That leaves no window in which a retire and a commit disagree
+about an edge - the retire's `DELETE` waits for the commit, and its reverse ripple, a
+statement of its own, then counts the new edge - and none in which a retire deeper in
+the closure unwholes one of those references between the seed's read and the commit,
+which is why the lock is `FOR SHARE` and not the weaker `FOR KEY SHARE` a foreign-key
+check would take: only `FOR SHARE` conflicts with a ripple's non-key `UPDATE`.
+
+Every writer that takes row locks here takes them in one statement ordered by hash, a
+retiring `DELETE` behind its own `FOR UPDATE` pass included, because a single
+unordered locker deadlocks against however carefully ordered the other side is. The
+ripples are the exception and it is deliberate: each computes its referrer set inside
+its own `UPDATE`, so it locks rows no ordered set covers, in plan order. A commit and
+a concurrent maintenance retire can therefore still deadlock; Postgres detects it, the
+retire retries on its next pass and a killed commit fails a `NarUploaded` the worker
+retries. A detected, retried deadlock is the accepted price of never leaving a row
+whole with a reference that is not. Nothing re-derives the counter by a
+sweep; the consistency pass above recomputes it only for the paths pending anchors
+gate on and repairs what disagrees, and is its only backstop.
+The migration converges the old `cached_path.closure_complete` flag one last
+time, seeds the counter from it and drops it, so the first start after the upgrade
+reads a sound value - on a large cache that runs for minutes.
+
+A build's runtime references are a subset of its build inputs, so a whole output
+closure is what a dependent's dispatch needs from that output, and a whole `.drv`
+row (its references are exactly the input `.drv`s and input sources) is what a
+build target's import needs. The dispatch gate reads both through `whole`.
+
+The repair is bounded to the gating paths, and that is narrower than the readers.
+The eval-time prune (`gradient_graph::known::prunable`) and the substitutability
+pass ask whether the outputs of arbitrary walked candidates are whole, and most of
+those have no pending anchor, so a ripple lost there is never recomputed. It is also
+the worse failure: a false-whole prune drops a subtree that is then never walked,
+recorded or built - a permanent dead end rather than a stall a later build clears.
+Widening the recompute past the gating set rides with the readiness counters that
+replace the anchor flags (#591).
+
+When a build still reports a path missing, `reconcile_missing_inputs` self-heals: a
+missing leaf with a producer is purged and rebuilt (`demote_cached_output`, which
+retires the row and ripples the loss to every referrer so dependents re-block until
+the leaf re-pushes whole); a producerless source demotes its direct **referrers**
+(`demote_referrers_of`) so a referrer rebuild re-pushes it.
 
 A **corrupt cached NAR** feeds the same self-heal. The worker verifies every
 fetched input NAR against its recorded `nar_hash`/`nar_size` before importing it.
@@ -554,7 +661,16 @@ writes (`NarUploaded`) are independent. The worker reports the failing path as a
 `CorruptCachedNar`, which the executor classifies as `InputsUnavailable` (not a
 transient retry against poison), so `reconcile_missing_inputs` purges the bad
 object and rebuilds the producer with consistent metadata. Verify-on-read makes
-the cache self-correcting regardless of how a desync arose.
+the cache self-correcting regardless of how a desync arose. The same premise
+governs a path's **reference set**: an input-addressed path rebuilt
+non-deterministically keeps its hash while its closure moves, so the commit
+rewrites `cached_path_reference` to exactly the set the worker reported instead
+of adding to it: one statement that prunes the edges the report no longer carries
+and re-positions the survivors, since dropping one reference shifts every later
+one and `position` is what the narinfo `References:` line and the signature
+fingerprint are reconstructed from. An edge an add-only write left behind would
+stay counted in `missing_references` forever, and the consistency sweep's repair
+recomputes from that same table, so it could never disagree with the stale row.
 
 An **orphan producer** is the third case: the missing leaf has a producing
 derivation, but that producer has no `build_job` (it was pruned out of the build

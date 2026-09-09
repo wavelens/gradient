@@ -2531,6 +2531,7 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "axum",
+ "bytes",
  "chrono",
  "futures",
  "gradient-core",

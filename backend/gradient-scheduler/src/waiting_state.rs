@@ -382,7 +382,7 @@ async fn eval_blocked_on_unproducible_drv(
 
 fn unproducible_drv_block_sql() -> String {
     let deps_ready = gradient_db::graph_sql::deps_ready_predicate("db");
-    let drv_nar_closure = gradient_db::graph_sql::drv_nar_closure_complete_predicate("db");
+    let drv_whole = gradient_db::graph_sql::drv_whole_predicate("db");
     let drv_nar_absent = gradient_db::graph_sql::drv_nar_absent_predicate("db");
     let walked = gradient_db::graph_sql::walked_predicate("db");
     format!(
@@ -396,7 +396,7 @@ fn unproducible_drv_block_sql() -> String {
               AND {walked}
               AND NOT db.substitutable
               AND NOT db.drv_closure_cached
-              AND NOT {drv_nar_closure}
+              AND NOT {drv_whole}
               AND {drv_nar_absent}
               AND ({deps_ready})
         ) AS blocked
@@ -572,10 +572,11 @@ mod tests {
             assert!(sql.contains(frag), "missing `{frag}`: {sql}");
         }
         assert!(
-            sql.contains(&norm(
-                gradient_db::graph_sql::drv_nar_closure_complete_predicate("db")
+            sql.contains(&format!(
+                "NOT {}",
+                norm(gradient_db::graph_sql::drv_whole_predicate("db"))
             )),
-            "must require the .drv's own NAR closure to be absent: {sql}"
+            "must require the .drv not to be whole, through the shared predicate: {sql}"
         );
         assert!(
             sql.contains("cached_path cp") && sql.contains("derivation_input_source"),

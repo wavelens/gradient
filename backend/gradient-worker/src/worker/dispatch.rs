@@ -16,8 +16,9 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use gradient_proto::messages::{
-    CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage,
+    ArchivedServerMessage, CachedPath, ClientMessage, Job, JobCandidate, JobKind, ServerMessage,
 };
+use gradient_proto::session::frame::{Frame, Inbound};
 use tokio::sync::{mpsc, watch};
 use tracing::{debug, error, info, warn};
 
@@ -96,14 +97,17 @@ pub(super) async fn run_dispatch_loop(
                 state.on_heartbeat().await?;
             }
 
-            msg = reader.recv() => {
-                let Some(msg) = msg else {
+            inbound = reader.recv() => {
+                let Some(inbound) = inbound else {
                     info!("server closed connection");
                     break;
                 };
                 let started = std::time::Instant::now();
-                let kind = msg.variant_name();
-                let result = state.dispatch(msg).await;
+                let kind = inbound.variant_name();
+                let result = match inbound {
+                    Inbound::Bulk(frame) => state.dispatch_bulk(frame).await,
+                    Inbound::Control(msg) => state.dispatch(msg).await,
+                };
                 let elapsed_ms = started.elapsed().as_millis();
                 if elapsed_ms > 1_000 {
                     warn!(kind, elapsed_ms, "slow message dispatch - loop was blocked");
@@ -335,16 +339,6 @@ impl DispatchState {
                 self.nar_recv
                     .resolve_push(&job_id, &store_path, received_bytes);
             }
-            ServerMessage::NarPush {
-                job_id,
-                store_path,
-                data,
-                offset,
-                is_final,
-            } => {
-                self.on_nar_push(job_id, store_path, data, offset, is_final)
-                    .await;
-            }
             ServerMessage::NarUnavailable {
                 job_id,
                 store_path,
@@ -395,24 +389,61 @@ impl DispatchState {
             ServerMessage::CacheError { query_id, message } => {
                 self.on_cache_error(query_id, message);
             }
-            ServerMessage::KnownDerivations { job_id, known } => {
-                self.on_known_derivations(job_id, known);
+            ServerMessage::KnownDerivations { query_id, known } => {
+                self.on_known_derivations(query_id, known);
             }
             ServerMessage::EvalCachePullResult { job_id, outcome } => {
                 self.eval_cache_recv.deliver_pull_result(&job_id, outcome);
             }
-            ServerMessage::EvalCacheChunk {
+            ServerMessage::EvalCachePushGrant { job_id, mode } => {
+                self.eval_cache_recv.deliver_push_grant(&job_id, mode);
+            }
+            // Unreachable: `decode` routes these to `dispatch_bulk` still archived.
+            ServerMessage::NarPush { .. } | ServerMessage::EvalCacheChunk { .. } => {
+                warn!("bulk variant deserialised into the control lane");
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle a payload-bearing frame without deserialising it: the chunk is
+    /// written straight from the buffer the socket delivered.
+    async fn dispatch_bulk(&mut self, frame: Frame<ServerMessage>) -> Result<()> {
+        match frame.archived() {
+            ArchivedServerMessage::NarPush {
+                job_id,
+                store_path,
+                data,
+                offset,
+                is_final,
+            } => {
+                debug!(
+                    job_id = job_id.as_str(),
+                    store_path = store_path.as_str(),
+                    offset = offset.to_native(),
+                    is_final = *is_final,
+                    bytes = data.len(),
+                    "received NAR chunk from server"
+                );
+                let (job_id, store_path) = (job_id.to_string(), store_path.to_string());
+                self.nar_recv
+                    .accept_chunk(&job_id, &store_path, frame)
+                    .await;
+            }
+            ArchivedServerMessage::EvalCacheChunk {
                 job_id,
                 data,
                 offset,
                 is_final,
             } => {
-                self.eval_cache_recv
-                    .deliver_pull_chunk(&job_id, data, offset, is_final);
+                self.eval_cache_recv.deliver_pull_chunk(
+                    job_id.as_str(),
+                    data.as_slice(),
+                    offset.to_native(),
+                    *is_final,
+                );
             }
-            ServerMessage::EvalCachePushGrant { job_id, mode } => {
-                self.eval_cache_recv.deliver_push_grant(&job_id, mode);
-            }
+            _ => warn!("non-bulk variant routed to the bulk lane"),
         }
         Ok(())
     }
@@ -428,7 +459,10 @@ impl DispatchState {
             .finish(&job_id)
             .expect("a job task is registered before it is spawned");
         crate::proto::job::forget_cache_waiters_for_job(&self.cache_waiters, &job_id);
-        self.known_derivation_waiters.lock().remove(&job_id);
+        crate::proto::job::forget_known_derivation_waiters_for_job(
+            &self.known_derivation_waiters,
+            &job_id,
+        );
         self.nar_recv.forget_job(&job_id);
         self.eval_cache_recv.forget_job(&job_id);
         self.credentials.clear();
@@ -740,6 +774,9 @@ impl DispatchState {
         if !self.jobs.abort(&job_id) {
             debug!(%job_id, "abort for a job this session does not run");
         }
+        // An upload parked on its resume handshake would otherwise sit out the
+        // 30 s timeout and then push a NAR the server has already abandoned.
+        self.nar_recv.cancel_pushes(&job_id);
     }
 
     // ── Credentials ───────────────────────────────────────────────────────────
@@ -750,20 +787,6 @@ impl DispatchState {
     }
 
     // ── NAR transfer ──────────────────────────────────────────────────────────
-
-    async fn on_nar_push(
-        &mut self,
-        job_id: String,
-        store_path: String,
-        data: Vec<u8>,
-        offset: u64,
-        is_final: bool,
-    ) {
-        debug!(%job_id, %store_path, offset, is_final, bytes = data.len(), "received NAR chunk from server");
-        self.nar_recv
-            .accept_chunk(&job_id, &store_path, data, offset, is_final)
-            .await;
-    }
 
     fn on_cache_status(&mut self, query_id: String, cached: Vec<CachedPath>) {
         let count = cached.len();
@@ -778,11 +801,14 @@ impl DispatchState {
         }
     }
 
-    fn on_known_derivations(&mut self, job_id: String, known: Vec<String>) {
-        if let Some(tx) = self.known_derivation_waiters.lock().remove(&job_id) {
-            let _ = tx.send(known);
-        } else {
-            debug!(%job_id, count = known.len(), "KnownDerivations arrived after waiter cleared");
+    fn on_known_derivations(&mut self, query_id: String, known: Vec<String>) {
+        let count = known.len();
+        if !crate::proto::job::deliver_known_derivations(
+            &self.known_derivation_waiters,
+            &query_id,
+            known,
+        ) {
+            debug!(%query_id, count, "KnownDerivations arrived after waiter cleared");
         }
     }
 

@@ -17,9 +17,10 @@ use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
 use crate::messages::{
-    CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind, JobPhaseSpan, JobUpdateKind,
-    QueryMode, ServerMessage,
+    ArchivedClientMessage, CACHE_QUERY_BUDGET, CandidateScore, ClientMessage, JobKind,
+    JobPhaseSpan, JobUpdateKind, QueryMode, ServerMessage,
 };
+use crate::session::frame::{Frame, Inbound};
 use gradient_scheduler::Scheduler;
 use gradient_scheduler::actor::{WorkerCapabilities, WorkerMetrics};
 use gradient_scheduler::jobs::PendingJob;
@@ -83,19 +84,77 @@ pub(super) struct DispatchContext<'a> {
 }
 
 impl<'a> DispatchContext<'a> {
-    /// Route a single `ClientMessage` to the appropriate handler.
+    /// Route one received frame to the appropriate handler.
     ///
     /// Returns `true` to continue the loop, `false` to break.
     pub async fn dispatch(
+        &mut self,
+        inbound: Inbound<ClientMessage>,
+        nar: &mut NarReceiveStore,
+        eval_cache: &mut EvalCacheReceiveStore,
+    ) -> bool {
+        match inbound {
+            Inbound::Bulk(frame) => {
+                self.dispatch_bulk(frame, nar, eval_cache).await;
+                true
+            }
+            Inbound::Control(msg) => self.dispatch_control(msg, nar, eval_cache).await,
+        }
+    }
+
+    /// Handle a payload-bearing frame without deserialising it: the chunk is
+    /// read as a slice of the buffer the socket delivered.
+    async fn dispatch_bulk(
+        &mut self,
+        frame: Frame<ClientMessage>,
+        nar: &mut NarReceiveStore,
+        eval_cache: &mut EvalCacheReceiveStore,
+    ) {
+        debug!(variant = frame.variant_name(), "received bulk frame");
+        match frame.archived() {
+            ArchivedClientMessage::NarPush {
+                job_id, store_path, ..
+            } => {
+                let (job_id, store_path) = (job_id.to_string(), store_path.to_string());
+                self.on_nar_push(&job_id, &store_path, frame, nar).await;
+            }
+            ArchivedClientMessage::EvalCacheChunk {
+                job_id,
+                data,
+                offset,
+                is_final,
+            } => {
+                handle_eval_cache_chunk(
+                    self.state,
+                    eval_cache,
+                    job_id.as_str(),
+                    data.as_slice(),
+                    offset.to_native(),
+                    *is_final,
+                )
+                .await;
+            }
+            ArchivedClientMessage::LogChunk {
+                job_id,
+                task_index,
+                data,
+            } => {
+                self.on_log_chunk(job_id.as_str(), task_index.to_native(), data.as_slice())
+                    .await;
+            }
+            _ => warn!("non-bulk variant routed to the bulk lane"),
+        }
+    }
+
+    /// Route a control-plane `ClientMessage` to the appropriate handler.
+    async fn dispatch_control(
         &mut self,
         msg: ClientMessage,
         nar: &mut NarReceiveStore,
         eval_cache: &mut EvalCacheReceiveStore,
     ) -> bool {
-        // Avoid Debug-printing the entire `msg` here: variants like `NarPush`
-        // carry up to 64 KiB of binary chunk data which would flood the log
-        // (and the test VM's serial console). Each match arm logs the
-        // semantically interesting fields itself.
+        // Log the variant, never the message: `NarUploaded` carries long path
+        // lists that would flood the test VM's serial console.
         debug!(variant = msg.variant_name(), "received client message");
         match msg {
             ClientMessage::InitConnection { .. } => {
@@ -171,6 +230,7 @@ impl<'a> DispatchContext<'a> {
                 dispatch,
                 spans,
             } => {
+                nar.forget_job(&job_id).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     self.on_job_completed(job_id, dispatch, spans).await;
                 }
@@ -184,6 +244,10 @@ impl<'a> DispatchContext<'a> {
                 missing_paths,
                 spans,
             } => {
+                // The worker drops the uploads still running when a job ends,
+                // so this is the only notice the session gets that their push
+                // streams will never be finished.
+                nar.forget_job(&job_id).await;
                 if let Some(dispatch) = self.owned(&job_id, &dispatch) {
                     self.on_job_failed(job_id, dispatch, error, kind, missing_paths, spans)
                         .await;
@@ -192,14 +256,6 @@ impl<'a> DispatchContext<'a> {
             }
             ClientMessage::Draining => {
                 self.on_draining().await;
-                true
-            }
-            ClientMessage::LogChunk {
-                job_id,
-                task_index,
-                data,
-            } => {
-                self.on_log_chunk(job_id, task_index, data).await;
                 true
             }
             ClientMessage::NarRequest { job_id, paths } => {
@@ -223,17 +279,6 @@ impl<'a> DispatchContext<'a> {
                 stream_token,
             } => {
                 self.on_push_stream_header(job_id, store_path, total_bytes, stream_token, nar)
-                    .await;
-                true
-            }
-            ClientMessage::NarPush {
-                job_id,
-                store_path,
-                data,
-                offset,
-                is_final,
-            } => {
-                self.on_nar_push(job_id, store_path, data, offset, is_final, nar)
                     .await;
                 true
             }
@@ -271,16 +316,6 @@ impl<'a> DispatchContext<'a> {
                     .await;
                 true
             }
-            ClientMessage::EvalCacheChunk {
-                job_id,
-                data,
-                offset,
-                is_final,
-            } => {
-                self.on_eval_cache_chunk(job_id, data, offset, is_final, eval_cache)
-                    .await;
-                true
-            }
             ClientMessage::EvalCachePushDone {
                 job_id: _,
                 fingerprint,
@@ -298,8 +333,12 @@ impl<'a> DispatchContext<'a> {
                 self.spawn_cache_query(job_id, query_id, paths, mode);
                 true
             }
-            ClientMessage::QueryKnownDerivations { job_id, drv_paths } => {
-                self.spawn_query_known_derivations(job_id, drv_paths);
+            ClientMessage::QueryKnownDerivations {
+                job_id,
+                query_id,
+                drv_paths,
+            } => {
+                self.spawn_query_known_derivations(job_id, query_id, drv_paths);
                 true
             }
             ClientMessage::EvalMessage {
@@ -309,6 +348,13 @@ impl<'a> DispatchContext<'a> {
                 message,
             } => {
                 self.on_eval_message(job_id, level, source, message).await;
+                true
+            }
+            // Unreachable: `decode` routes these to `dispatch_bulk` still archived.
+            ClientMessage::NarPush { .. }
+            | ClientMessage::EvalCacheChunk { .. }
+            | ClientMessage::LogChunk { .. } => {
+                warn!("bulk variant deserialised into the control lane");
                 true
             }
         }
@@ -376,11 +422,17 @@ impl<'a> DispatchContext<'a> {
             .spawn(async move { rpc.on_cache_query(job_id, query_id, paths, mode).await });
     }
 
-    fn spawn_query_known_derivations(&self, job_id: String, drv_paths: Vec<String>) {
+    fn spawn_query_known_derivations(
+        &self,
+        job_id: String,
+        query_id: String,
+        drv_paths: Vec<String>,
+    ) {
         let rpc = self.rpc();
-        self.state
-            .shutdown
-            .spawn(async move { rpc.on_query_known_derivations(job_id, drv_paths).await });
+        self.state.shutdown.spawn(async move {
+            rpc.on_query_known_derivations(job_id, query_id, drv_paths)
+                .await
+        });
     }
 
     // ── Eval cache ────────────────────────────────────────────────────────────
@@ -405,17 +457,6 @@ impl<'a> DispatchContext<'a> {
             size_bytes,
         )
         .await;
-    }
-
-    async fn on_eval_cache_chunk(
-        &mut self,
-        job_id: String,
-        data: Vec<u8>,
-        offset: u64,
-        is_final: bool,
-        eval_cache: &mut EvalCacheReceiveStore,
-    ) {
-        handle_eval_cache_chunk(self.state, eval_cache, &job_id, data, offset, is_final).await;
     }
 
     async fn on_eval_cache_push_done(&mut self, fingerprint: String, size_bytes: u64) {
@@ -789,9 +830,9 @@ impl<'a> DispatchContext<'a> {
 
     // ── Log streaming ─────────────────────────────────────────────────────────
 
-    async fn on_log_chunk(&mut self, job_id: String, task_index: u32, data: Vec<u8>) {
+    async fn on_log_chunk(&mut self, job_id: &str, task_index: u32, data: &[u8]) {
         debug!(peer_id = %self.peer_id, %job_id, task_index, bytes = data.len(), "LogChunk");
-        if let Err(e) = self.scheduler.append_log(&job_id, task_index, data).await {
+        if let Err(e) = self.scheduler.append_log(job_id, task_index, data).await {
             debug!(peer_id = %self.peer_id, %job_id, error = %e, "log append failed");
         }
     }
@@ -919,8 +960,13 @@ impl RpcContext {
         }
     }
 
-    async fn on_query_known_derivations(&self, job_id: String, drv_paths: Vec<String>) {
-        debug!(peer_id = %self.peer_id, %job_id, count = drv_paths.len(), "QueryKnownDerivations");
+    async fn on_query_known_derivations(
+        &self,
+        job_id: String,
+        query_id: String,
+        drv_paths: Vec<String>,
+    ) {
+        debug!(peer_id = %self.peer_id, %job_id, %query_id, count = drv_paths.len(), "QueryKnownDerivations");
         // Our own cache is output-only, so only `external_url` upstreams (which
         // serve a complete closure) gate pruning - see `gradient_graph::known`.
         let hashes: Vec<String> = drv_paths
@@ -947,10 +993,10 @@ impl RpcContext {
                 vec![]
             }
         };
-        debug!(peer_id = %self.peer_id, %job_id, known = known.len(), "KnownDerivations");
+        debug!(peer_id = %self.peer_id, %job_id, %query_id, known = known.len(), "KnownDerivations");
         if send_server_msg(
             &self.writer,
-            &ServerMessage::KnownDerivations { job_id, known },
+            &ServerMessage::KnownDerivations { query_id, known },
         )
         .await
         .is_err()

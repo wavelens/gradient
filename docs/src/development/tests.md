@@ -60,6 +60,14 @@ the returned row and an `append_exec_results` with `rows_affected: 1`, otherwise
 SeaORM treats the insert as a no-op. State that sequence in the module doc
 comment; it is what makes the test readable a year later.
 
+**Assert on one statement, never on a formatted transaction.** A `MockDatabase`
+records everything a transaction ran as ONE log entry, and sea-orm brackets that
+entry's statement list with a synthetic `BEGIN`/`COMMIT` (and `SAVEPOINT` for a
+nested one). Formatting entries lets a `contains` straddle two statements, and
+counting them shifts every index by one. `gradient_db::pool::statements(log)`
+flattens the log to one string per statement with the transaction control
+removed; use it instead of mapping `into_transaction_log()` by hand.
+
 **A spawned task races the result buffer.** The buffer is ordered and shared, so
 a handler that spawns database work pops results out from under the request path.
 Assert on what the response says, not on how many queries were consumed.
@@ -81,6 +89,14 @@ endpoint that swaps the scripted state and pushes the matching live-WebSocket
 event. That keeps the VM free of Postgres and a builder, so the test asserts on
 the module's own behaviour: what it waits for, what it never requests, and how
 many times it asks.
+
+**A VM test can assert on the database's own accounting.** Nothing in the type
+system notices a lost `OFFSET 0` fence or a counter that is re-derived instead of
+moved, so the cache test asserts the plan shape (`EXPLAIN`: a nested loop, no merge
+join) and bills the run through `pg_stat_statements` (`shared_preload_libraries` on
+the test's Postgres, statements filtered to the server's role). Keep the thresholds
+loose enough to be pathology detectors on a slow shared VM, and print the top
+statements so a human reads the numbers the assertion cannot.
 
 **CLI tests drive the real binary.** `assert_cmd` runs `gradient` with `HOME`
 and `XDG_CONFIG_HOME` pointed at a `TempDir` holding a seeded `config.toml`, and

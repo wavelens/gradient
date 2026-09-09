@@ -614,7 +614,7 @@ in {
         };
 
         graphConsistencyIntervalSecs = lib.mkOption {
-          description = "Interval in seconds between read-only build-graph consistency sweeps (0 disables).";
+          description = "Interval in seconds between build-graph consistency sweeps, which also repair the NAR reference counter over the paths pending anchors gate on and are that counter's only backstop (0 disables both).";
           type = lib.types.ints.unsigned;
           default = 300;
         };
@@ -1220,7 +1220,7 @@ in {
               proxyWebsockets = true;
               # An upgraded connection is relayed through a buffer sized by
               # proxy_buffer_size, which defaults to a single page. NAR chunks
-              # are 4 MiB, so the default turns one frame into hundreds of
+              # are 512 KiB, so the default turns one frame into hundreds of
               # read/write pairs inside nginx. proxy_buffers has to move with
               # it: nginx derives proxy_busy_buffers_size as twice the larger
               # of the two and rejects the config unless that still fits in

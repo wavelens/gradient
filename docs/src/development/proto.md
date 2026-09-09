@@ -25,6 +25,10 @@ The first message on every connection is `InitConnection`. The server responds w
 
 One handshake implementation drives every session: the pure FSM in `gradient-proto/src/session/handshake.rs`. The server runs `as_authority` with a `PeerAuthority` impl wrapping its registration tables and the `decide_auth` policy; the worker runs `as_peer` with its `PeerIdentity`/`CapabilitiesProvider` impls; the read-only cache session reuses the same `on_init_connection` transition for its version gate. Framing is likewise shared: both roles split one `ProtoSocket` into a typed reader plus a bounded, batch-draining writer (`session/frame.rs`).
 
+Frames are read in place: rkyv archives are unaligned (`PROTO_VERSION` 12), so a received frame is validated where the socket put it and payload-bearing messages (`NarPush`, `EvalCacheChunk`, `LogChunk`) hand their bytes to the handler as a slice of the frame. No copy of a chunk is made between the socket and the file it lands in. Control messages deserialise from the same view.
+
+The writer drains the control lane first and fills a bulk batch only up to `BULK_BATCH_BYTES` (256 KiB), so a control reply never waits behind more than one 512 KiB chunk. Bulk and control queues have independent depth; a stalled transfer cannot fill the control lane.
+
 ```mermaid
 sequenceDiagram
     participant W as Worker
@@ -660,6 +664,8 @@ CachedPath {
 
 **Off-loop dispatch.** Both ends process a connection's frames serially, so a slow handler would head-of-line-block every other message on that connection. `CacheQuery` is a request/response RPC with a worker-side deadline (`CACHE_QUERY_TIMEOUT`, 75 s), so the order-independent handlers run off the dispatch loop: the server spawns `CacheQuery` (whose `Pull` mode may probe upstream narinfo inline), `QueryKnownDerivations`, and `WorkerMetrics`; Replies travel the cloneable writer, so out-of-order completion is safe. Order-sensitive handlers (NAR push stream chunks, log appends) stay inline.
 
+**Pipelined chunks.** A worker keeps up to `CACHE_QUERY_WINDOW` (4) chunks of a `CacheQuery` or `QueryKnownDerivations` in flight and concatenates the answers in request order; replies correlate by `query_id`, so completion order is free. One chunk at a time was the pre-`query_id` rule from when both peers could wedge mid-write; the per-chunk bound, not serialisation, is what keeps the socket drainable.
+
 **Indeterminate is not absent (`CacheError`).** A DB error while answering a `CacheQuery` must never be reported as `cached: false` - a fully-cached input would then be taken as a missing one and the build would fail terminally (`InputsUnavailable`), failing the whole eval. So the local-cache lookups propagate their error rather than swallowing it into an empty result, and the handler replies `CacheError { job_id, message }` instead of a `CacheStatus`. The worker resolves that as a transport failure and retries the prefetch transiently. The same `CacheError` is sent if the handler exceeds its server-side budget (`CACHE_QUERY_BUDGET`, 45 s): the reads are index-backed and the upstream probe is itself bounded, so no query of any size legitimately runs that long - exceeding it means the server is pathologically slow and a retry is the right answer, rather than letting the worker burn its full deadline.
 
 **Dedicated cache-query pool.** The `CacheQuery` read path runs on its own DB connection pool (`cache_db`, `GRADIENT_DATABASE_CACHE_MAX_CONNECTIONS`), separate from the scheduler/worker pool. A large eval puts one `CacheQuery` per in-flight build through the server concurrently; on a shared pool that storm exhausted connections (8 s acquire timeout), which both surfaced as the swallowed-error false-miss above and stalled the scheduler's own dispatch queries. Isolating the pool keeps a cache-query flood from starving dispatch - a saturated cache pool then only slows cache queries, which degrade to retryable `CacheError`s.
@@ -760,8 +766,8 @@ sequenceDiagram
     participant S as Server
 
     Note over W: BFS wave - discovers deps [A, B, C, D]
-    W->>S: QueryKnownDerivations { drv_paths: [A, B, C, D] }
-    S->>W: KnownDerivations { known: [A, C] }
+    W->>S: QueryKnownDerivations { query_id, drv_paths: [A, B, C, D] }
+    S->>W: KnownDerivations { query_id, known: [A, C] }
     Note over W: A, C stay named in their parents' dependencies<br/>B, D are enqueued for full BFS traversal
 ```
 
@@ -875,7 +881,7 @@ enum ServerMessage {
     /// Response to `QueryKnownDerivations`.  `known` is the subset of the
     /// requested `.drv` paths that are already in the server's derivation table
     /// for the owning project.
-    KnownDerivations { job_id: String, known: Vec<String> },
+    KnownDerivations { query_id: String, known: Vec<String> },
 }
 
 struct FailedPeer { peer_id: Uuid, reason: String }
@@ -934,7 +940,7 @@ enum ClientMessage {
     /// its derivation table for the project that owns `job_id`.  The server responds
     /// with `KnownDerivations`.  The worker uses this to skip re-traversing
     /// subtrees that were fully recorded during a previous evaluation.
-    QueryKnownDerivations { job_id: String, drv_paths: Vec<String> },
+    QueryKnownDerivations { job_id: String, query_id: String, drv_paths: Vec<String> },
 
     /// Surface an infrastructure-level message on the evaluation that owns
     /// the given `job_id`.  The server resolves the active job → evaluation
@@ -1105,7 +1111,11 @@ The worker captures `BuildMetrics` best-effort from each build's cgroup (require
 
 Two transports, chosen by the server based on `NarStore` configuration and advertised per path in `CacheQuery` replies (`CachedPath.url`). Both support **batched transfers** - the server sends all NARs for a job at once (e.g. all inputs for a build chain), avoiding per-path round trips.
 
-Worker-side, every upload goes through one function: `proto::nar::upload_nar(source, sink)` pairs a `NarSource` (pack a store path on the fly, or relay pre-compressed substitute bytes) with a `NarSink` (`Presigned` HTTP PUT or `Relay` over chunked `NarPush` frames with the resume handshake). Server-side, staging, serving, and commit live in `handler/nar_transfer.rs`; the relayed commit checks the staged length against the reported `file_size`, and the presigned commit HEADs the object and compares sizes before any `cached_path` metadata is recorded, so a failed or truncated PUT can never mint a zombie cache entry.
+Worker-side, every upload goes through one function: `proto::nar::upload_nar(source, sink)` pairs a `NarSource` (pack a store path on the fly, or relay pre-compressed substitute bytes) with a `NarSink` (`Presigned` HTTP PUT or `Relay` over 512 KiB `NarPush` chunks, `BULK_CHUNK_SIZE`, with the resume handshake). Server-side, staging, serving, and commit live in `handler/nar_transfer.rs`; the relayed commit checks both the length and the SHA-256 its staging task reports against the `file_size` and `file_hash` in the message, and the presigned commit HEADs the object and compares sizes before any `cached_path` metadata is recorded, so a failed or truncated PUT can never mint a zombie cache entry.
+
+A job uploads up to four paths at once, which hides the per-path resume round trip that dominated eval pushes of many small `.drv` and source paths; four concurrent streams also count four times against the session's `max_nar_buffer_bytes` staging budget, which a sequential loop never approached. A NAR above 8 MiB is compressed with a multithreaded zstd encoder bounded to four threads, smaller ones single-threaded, and the push resume token carries that thread count because the two encoders do not produce identical bytes. Pulled chunks are staged by a per-transfer task on the worker as well; the importer decompresses straight from the staged file, so the compressed NAR never sits in memory.
+
+Inbound chunks never touch disk on the session actor: each push stream has a staging task that owns the open `.partial`, appends every frame as it arrives and hashes as it goes (a resume rehashes the stored prefix once). `NarUploaded` asks the task to finish, compares the hash and length it reports with the message, and on local storage renames the staged file into `nars/`; S3 streams it. A pushed NAR is written to the server's disk once. `JobCompleted` and `JobFailed` release the push streams that job left open, after a grace period so a `NarUploaded` the control lane overtook still commits; a session holds at most 256 open at a time. That release happens when a later header or job end on the same session sweeps, not on a timer, so a stream abandoned on a session that then goes quiet is held until one arrives. Reads from local storage go through tokio in 512 KiB chunks rather than `object_store`'s 8 KiB stream.
 
 ### Worker → Server (upload, FetchFlake)
 
@@ -1509,7 +1519,7 @@ decommission a worker it does not own.
 
 ## Versioning
 
- - `PROTO_VERSION` (currently `11`) is incremented on breaking wire changes.
+ - `PROTO_VERSION` (currently `12`) is incremented on breaking wire changes.
  - Server accepts any `client_version == PROTO_VERSION`; the check lives once, in
    `session::handshake::on_init_connection`, and every session flavor (worker,
    cache-scoped, outbound) goes through it.
@@ -1522,6 +1532,9 @@ decommission a worker it does not own.
  - v11 put the `dispatched_job` id on `AssignJob` and made `JobUpdate`,
    `JobCompleted` and `JobFailed` echo it, so a report from a dispatch the
    session did not hand out is dropped.
+ - v12 reads rkyv archives unaligned and in place, gave `QueryKnownDerivations` a
+   `query_id` that `KnownDerivations` echoes, and made bulk chunks 512 KiB with a
+   byte-capped bulk write batch.
  - New capabilities are gated by `GradientCapabilities` flags, not version numbers.
 
 ---

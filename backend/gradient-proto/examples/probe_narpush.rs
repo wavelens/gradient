@@ -27,10 +27,8 @@
 use std::time::Duration;
 
 use futures::{SinkExt, StreamExt};
-use gradient_proto::messages::{
-    ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage, decode_server_message,
-};
-use rkyv::rancor::Error as RkyvError;
+use gradient_proto::messages::{ClientMessage, GradientCapabilities, PROTO_VERSION, ServerMessage};
+use gradient_proto::session::frame::WireMessage;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use uuid::Uuid;
 
@@ -184,10 +182,8 @@ async fn main() {
 }
 
 async fn send(ws: &mut Ws, msg: &ClientMessage) {
-    let bytes = rkyv::to_bytes::<RkyvError>(msg).expect("rkyv serialize");
-    ws.send(Message::Binary(bytes.to_vec().into()))
-        .await
-        .expect("ws send");
+    let bytes = msg.encode().expect("rkyv serialize");
+    ws.send(Message::Binary(bytes)).await.expect("ws send");
 }
 
 async fn recv(ws: &mut Ws) -> Option<ServerMessage> {
@@ -195,7 +191,9 @@ async fn recv(ws: &mut Ws) -> Option<ServerMessage> {
         match ws.next().await {
             Some(Ok(Message::Binary(bytes))) => {
                 return Some(
-                    decode_server_message(&bytes).expect("rkyv deserialize ServerMessage"),
+                    ServerMessage::decode(bytes)
+                        .and_then(|inbound| inbound.into_message())
+                        .expect("rkyv deserialize ServerMessage"),
                 );
             }
             Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,

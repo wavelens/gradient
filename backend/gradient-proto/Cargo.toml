@@ -29,6 +29,7 @@ gradient-graph = { workspace = true }
 anyhow            = { workspace = true }
 arc-swap          = { workspace = true }
 async-trait       = { workspace = true }
+bytes             = { workspace = true }
 chrono            = { workspace = true }
 futures           = { workspace = true }
 hex               = { workspace = true }
@@ -40,7 +41,7 @@ sea-orm           = { workspace = true }
 serde             = { workspace = true }
 sha2              = { workspace = true }
 subtle            = { workspace = true }
-tokio             = { workspace = true, features = ["macros", "sync"] }
+tokio             = { workspace = true, features = ["fs", "macros", "sync"] }
 tokio-tungstenite = { workspace = true }
 tracing           = { workspace = true }
 uuid              = { workspace = true }

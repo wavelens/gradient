@@ -144,7 +144,7 @@ where
 /// propagate: it would abort the commit and terminally fail an eval whose
 /// evaluation actually succeeded. Degrade to "must write", which is always safe
 /// (re-storing identical bytes is a no-op on the store side).
-async fn nar_write_needed<C: ConnectionTrait>(
+pub async fn nar_write_needed<C: ConnectionTrait>(
     db: &C,
     nar_storage: &NarStore,
     hash: &str,

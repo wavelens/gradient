@@ -89,13 +89,6 @@ pub(crate) async fn reconcile_missing_inputs(
         match gradient_db::demote_cached_output(db, nar_storage, hash).await {
             Ok(drvs) if !drvs.is_empty() => {
                 purged += 1;
-                // The leaf rebuilds + re-pushes closure-complete; meanwhile drop
-                // the now-stale `closure_complete` up the chain so the dispatch
-                // gate re-blocks dependents until the closure is whole again.
-                if let Err(e) = gradient_db::clear_closure_complete_for_referrers(db, hash).await {
-                    warn!(%path, error = %e, "reconcile: clear closure_complete failed");
-                }
-
                 // An orphan producer (no `build_job`) can never be queued, so the
                 // flag clear is not enough: demote the referrers instead, and the
                 // next eval re-walks them, re-records the edge and schedules it.

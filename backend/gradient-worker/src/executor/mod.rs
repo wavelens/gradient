@@ -130,11 +130,7 @@ pub(crate) async fn push_drv_closure(
     let paths: Vec<String> = closure.into_iter().collect();
     guard.record(paths.len() as u32, 0);
     let cache_entries = query_fetched_paths(updater, paths).await;
-    for cp in &cache_entries {
-        upload_one_nar(updater, cp, store).await?;
-    }
-
-    Ok(())
+    upload_all(updater, &cache_entries, Some(store), None).await
 }
 
 /// The `inputSrcs` declared by each `.drv`, read by parsing the file directly
@@ -173,15 +169,23 @@ async fn drv_input_sources(drv_paths: &[String]) -> std::collections::HashSet<St
         .collect()
 }
 
+/// Paths one job uploads at once. The per-path resume round trip dominates a
+/// push of many small `.drv` and source NARs, and the server stages by
+/// `(peer, job, hash)`, so overlapping streams cannot collide.
+pub(crate) const UPLOAD_CONCURRENCY: usize = 4;
+
 /// Upload one path's NAR using the method the server advertised in its
 /// `CacheQuery {Push}` response: a presigned S3 PUT straight to object storage
 /// when available, else the chunked WS `NarPush` fallback (local stores).
 /// Already-cached paths are skipped. Errors are returned so the caller decides
 /// whether they are fatal.
+///
+/// `store` is `None` only where there is no local daemon to ask for references
+/// (eval-internal pushes, tests); see [`nar::NarSource::Path`].
 pub(crate) async fn upload_one_nar(
     updater: &JobUpdater,
     cp: &CachedPath,
-    store: &LocalNixStore,
+    store: Option<&LocalNixStore>,
 ) -> Result<()> {
     match cp.as_info() {
         CachedPathInfo::Cached { .. } => {
@@ -189,18 +193,74 @@ pub(crate) async fn upload_one_nar(
             Ok(())
         }
         CachedPathInfo::Uncached { path, upload_url } => {
-            let mut guard = updater.phase(JobPhase::NarPush);
-            guard.record(1, 0);
             nar::upload_nar(
                 &updater.job_id,
                 path,
-                nar::NarSource::Path { store: Some(store) },
+                nar::NarSource::Path { store },
                 nar::NarSink::from_upload_url(upload_url, &updater.nar_recv),
                 &updater.writer,
             )
             .await
         }
     }
+}
+
+/// Upload every uncached entry, at most [`UPLOAD_CONCURRENCY`] at once, failing
+/// the whole set on the first error. `abort` is re-checked before each path so a
+/// server-side `AbortJob` stops the remaining uploads.
+pub(crate) async fn upload_all(
+    updater: &JobUpdater,
+    entries: &[CachedPath],
+    store: Option<&LocalNixStore>,
+    abort: Option<&watch::Receiver<bool>>,
+) -> Result<()> {
+    use futures::stream::{FuturesUnordered, StreamExt as _};
+
+    let uploads = entries.iter().filter(|cp| !cp.cached).count();
+    if uploads == 0 {
+        return Ok(());
+    }
+
+    // One span for the batch: the uploads overlap, and the timeline parents a
+    // span to the innermost open one, so per-path spans would chart as nested
+    // and count their durations twice.
+    let mut guard = updater.phase(JobPhase::NarPush);
+    guard.record(uploads as u32, 0);
+
+    let mut queued = entries.iter();
+    let mut running = FuturesUnordered::new();
+    loop {
+        while running.len() < UPLOAD_CONCURRENCY {
+            let Some(cp) = queued.next() else { break };
+            running.push(upload_unless_aborted(updater, cp, store, abort));
+        }
+
+        match running.next().await {
+            Some(result) => result?,
+            None => return Ok(()),
+        }
+    }
+}
+
+async fn upload_unless_aborted(
+    updater: &JobUpdater,
+    cp: &CachedPath,
+    store: Option<&LocalNixStore>,
+    abort: Option<&watch::Receiver<bool>>,
+) -> Result<()> {
+    if let Some(abort) = abort {
+        check_abort(abort)?;
+    }
+
+    let result = upload_one_nar(updater, cp, store).await;
+    if result.is_err()
+        && let Some(abort) = abort
+    {
+        // An abort cancels the push-resume gate mid-upload, so re-check before
+        // blaming the path: the failure is the abort, and it must stay typed.
+        check_abort(abort)?;
+    }
+    result
 }
 
 /// Executes jobs dispatched by the server.
@@ -309,9 +369,7 @@ impl JobExecutor {
                     {
                         let mut push = updater.phase(JobPhase::PushInputs);
                         push.record(cache_entries.len() as u32, 0);
-                        for cp in &cache_entries {
-                            upload_one_nar(updater, cp, &self.store).await?;
-                        }
+                        upload_all(updater, &cache_entries, Some(&self.store), None).await?;
                     }
 
                     updater
@@ -374,7 +432,7 @@ impl JobExecutor {
         let mut all_output_paths: Vec<String> = Vec::new();
         let mut gc_handles: Vec<GcRootHandle> = Vec::new();
         for (index, build_task) in job.builds.iter().enumerate() {
-            check_abort(&mut abort)?;
+            check_abort(&abort)?;
             // Move the build to `Building` on the server *before* anything
             // that can fail. The state machine only allows
             // `Building → Failed`; if we let prefetch (or anything before
@@ -473,7 +531,7 @@ impl JobExecutor {
         {
             let mut compress = updater.phase(JobPhase::Compress);
             compress.record(all_output_paths.len() as u32, 0);
-            compress::compress_and_push_paths(&self.store, &all_output_paths, updater, &mut abort)
+            compress::compress_and_push_paths(&self.store, &all_output_paths, updater, &abort)
                 .await
                 .map_err(failure::BuildError::transient)?;
         }
@@ -489,7 +547,7 @@ impl JobExecutor {
 /// resolves to `JobFailed` instead of `JobCompleted`. Typed so the failure
 /// classifier reports `BuildFailureKind::Aborted` rather than treating it as an
 /// unclassified `Permanent` failure.
-pub(crate) fn check_abort(abort: &mut watch::Receiver<bool>) -> Result<()> {
+pub(crate) fn check_abort(abort: &watch::Receiver<bool>) -> Result<()> {
     if *abort.borrow() {
         return Err(failure::JobAborted("job aborted by server".to_owned()).into());
     }

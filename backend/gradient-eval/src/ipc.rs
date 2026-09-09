@@ -7,10 +7,11 @@
 //! Wire protocol between the worker parent and its eval-worker subprocesses.
 //!
 //! Frames are `u32` little-endian payload length + rkyv bytes, following the
-//! main gradient protocol's rkyv conventions (rancor errors, 16-byte realign
-//! before decode) over a pipe instead of WebSocket message boundaries. The
-//! subprocess announces [`EVAL_IPC_VERSION`] as a single raw byte before its
-//! first frame so a parent never talks a stale binary's dialect.
+//! main gradient protocol's rkyv conventions (rancor errors, unaligned
+//! archives decoded wherever the reader's buffer landed) over a pipe instead
+//! of WebSocket message boundaries. The subprocess announces
+//! [`EVAL_IPC_VERSION`] as a single raw byte before its first frame so a
+//! parent never talks a stale binary's dialect.
 //!
 //! `Resolve` streams: the subprocess answers with one [`EvalResponse::ResolveItem`]
 //! per attr as soon as it is resolved, terminated by [`EvalResponse::ResolveEnd`].
@@ -34,7 +35,7 @@ use crate::stats::StatsDelta;
 /// changes. Parent and subprocess are the same re-exec'd binary, so a mismatch
 /// only happens when the binary is replaced mid-run; the handshake turns that
 /// from undecodable frames into one clear error.
-pub const EVAL_IPC_VERSION: u8 = 3;
+pub const EVAL_IPC_VERSION: u8 = 4;
 
 /// Upper bound on a single frame's payload. Far above any real message (a
 /// discovery response for a huge flake is a few MiB); its job is to turn a
@@ -147,20 +148,11 @@ pub fn encode_response(resp: &EvalResponse) -> Result<AlignedVec, RkyvError> {
 }
 
 pub fn decode_request(bytes: &[u8]) -> Result<EvalRequest, RkyvError> {
-    rkyv::from_bytes::<EvalRequest, RkyvError>(&realign(bytes))
+    rkyv::from_bytes::<EvalRequest, RkyvError>(bytes)
 }
 
 pub fn decode_response(bytes: &[u8]) -> Result<EvalResponse, RkyvError> {
-    rkyv::from_bytes::<EvalResponse, RkyvError>(&realign(bytes))
-}
-
-/// rkyv validation requires its archive-aligned input; bytes that crossed the
-/// pipe land at whatever alignment the reader's buffer had, so copy them into
-/// an [`AlignedVec`] first (same rule as the main protocol's wire decode).
-fn realign(bytes: &[u8]) -> AlignedVec {
-    let mut aligned = AlignedVec::with_capacity(bytes.len());
-    aligned.extend_from_slice(bytes);
-    aligned
+    rkyv::from_bytes::<EvalResponse, RkyvError>(bytes)
 }
 
 /// Write one length-prefixed frame and flush, so a streamed item is visible to

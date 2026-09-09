@@ -239,6 +239,11 @@ in {
             settings = {
               logging_collector = true;
               log_destination = lib.mkForce "syslog";
+              # Phase 10d bills the server's statements; the extension only
+              # exposes the view, the accounting needs this preload, and its
+              # deltas need every entry to survive both samples.
+              shared_preload_libraries = "pg_stat_statements";
+              "pg_stat_statements.max" = 10000;
             };
           };
 
@@ -755,7 +760,6 @@ in {
       # has no such cache. Used to be a 400, which crashed the client.
       assert status(f"http://server/cache/debuginfo/{build_id}.debug") == "404"
 
-      # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       # ── Phase 10b: the worker reported a phase timeline for the build ────
       # Regression guard (#589): the timeline rides inside JobCompleted, so a
       # protocol or handler mistake shows up as a job with zero phases rather
@@ -786,6 +790,156 @@ in {
       )
       assert eval_ms and int(eval_ms) > 0, f"eval phase columns not derived from the timeline: {eval_ms!r}"
 
+      # ── Phase 10c: the reference counter moves with the cache (#592) ──────
+      # Retire one of hello's runtime references: the zombie purge deletes the
+      # row and ripples the loss up to every referrer, a re-upload seeds it
+      # whole again and ripples that back. `missing_references` is moved, never
+      # re-derived, so the recompute has to agree at every step.
+      banner("Phase 10c: missing_references moves on retire and re-upload")
+
+      retired_flag = int(sql(
+          "SELECT count(*) FROM information_schema.columns "
+          "WHERE table_name = 'cached_path' AND column_name = 'closure_complete';"
+      ))
+      assert retired_flag == 0, "cached_path still carries the retired closure_complete flag"
+
+      # Phase 10d bills this cycle, so open the accounting before it runs. The
+      # library counts from server start; the extension only exposes the view.
+      sql("CREATE EXTENSION IF NOT EXISTS pg_stat_statements;")
+      COUNTER_WRITES = "s.query ILIKE '%update cached_path%missing_references%'"
+      counter_rows_before = int(sql(
+          f"SELECT coalesce(sum(s.rows), 0) FROM pg_stat_statements s WHERE {COUNTER_WRITES};"
+      ))
+
+      def counter(path_hash):
+          return int(sql(
+              f"SELECT missing_references FROM cached_path WHERE hash = '{path_hash}';"
+          ))
+
+      def drift():
+          return int(sql(
+              "SELECT count(*) FROM cached_path cp WHERE cp.missing_references <> ("
+              "  SELECT count(*) FROM cached_path_reference r "
+              "  LEFT JOIN cached_path dep ON dep.hash = r.reference_hash "
+              "  WHERE r.referrer = cp.hash AND r.reference_hash <> cp.hash "
+              "    AND NOT (dep.file_hash IS NOT NULL AND dep.missing_references = 0));"
+          ))
+
+      def poll(query, want, what, timeout=180):
+          for _ in range(timeout):
+              if sql(query) == want:
+                  return
+              server.sleep(1)
+          raise Exception(f"{what} (still {sql(query)!r}, want {want!r})")
+
+      assert drift() == 0, "counters disagree with their recompute before the retire"
+      assert counter(store_hash) == 0, "hello's own output is not whole to start with"
+
+      # glibc first, since hello links against it. The path has to be in the
+      # server's own store as well: the re-upload below runs the CLI there.
+      refs = sql(
+          f"SELECT cp.hash || '-' || cp.package FROM cached_path_reference r "
+          f"JOIN cached_path cp ON cp.hash = r.reference_hash "
+          f"WHERE r.referrer = '{store_hash}' AND r.reference_hash <> '{store_hash}' "
+          f"  AND cp.file_hash IS NOT NULL AND cp.missing_references = 0 "
+          f"ORDER BY (cp.package LIKE 'glibc-%') DESC, cp.package;"
+      ).splitlines()
+      dep_path = next(
+          (p for p in (f"/nix/store/{name.strip()}" for name in refs if name.strip())
+           if server.execute(f"test -e {p}")[0] == 0),
+          None,
+      )
+      assert dep_path, f"none of hello's {len(refs)} whole references is in the server store"
+      dep_hash = dep_path.split("/")[-1].split("-")[0]
+      print(f"retiring {dep_path}")
+
+      # `NarStore` shards its objects by the store hash, under the module's baseDir.
+      dep_object = f"/var/lib/gradient/nars/{dep_hash[:2]}/{dep_hash[2:]}.nar.zst"
+      server.succeed(f"test -f {dep_object}")
+      server.succeed(f"rm {dep_object}")
+
+      # The zombie purge is the retiring caller here. The deep GC runs that same
+      # pass now instead of waiting out cacheMaintenanceIntervalSecs.
+      server.succeed(
+          f"{CURL} -sf -X POST -H 'Authorization: Bearer {token}' "
+          f"{API}/admin/maintenance/deep-gc"
+      )
+      poll(f"SELECT count(*) FROM cached_path WHERE hash = '{dep_hash}';", "0",
+           "the zombie purge kept a row whose NAR is gone")
+
+      missing = counter(store_hash)
+      assert missing >= 1, f"hello's output should miss the retired path, has {missing}"
+      assert drift() == 0, "counters disagree with their recompute after the retire"
+      producer = sql(
+          f"SELECT db.closure_complete FROM derivation_build db "
+          f"JOIN derivation_output o ON o.derivation = db.derivation "
+          f"WHERE o.hash = '{dep_hash}' LIMIT 1;"
+      )
+      assert producer in ("", "f"), f"the retired output's producer still trusts its closure: {producer!r}"
+
+      print(server.succeed(f"{CLI} cache upload main {dep_path}"))
+      poll(f"SELECT missing_references FROM cached_path WHERE hash = '{store_hash}';", "0",
+           "the re-upload did not ripple hello's output back to whole")
+      assert drift() == 0, "counters disagree with their recompute after the re-upload"
+
+      # The retire demoted the producer too, so the graph may rebuild and re-push
+      # the path; phase 12b measures the drain of an *idle* worker, so wait that
+      # self-heal out and re-check the counters it moved.
+      poll("SELECT count(*) FROM dispatched_job WHERE finished_at IS NULL "
+           "AND dispatched_at > (now() AT TIME ZONE 'UTC') - interval '10 minutes';",
+           "0", "a re-dispatched build is still running", timeout=300)
+      assert drift() == 0, "counters disagree with their recompute after the self-heal"
+
+      # ── Phase 10d: the database-time bill (#592, #629) ────────────────────
+      # The retired fixpoint was 67% of production database time, and nothing in
+      # the type system notices a counter that is re-derived instead of moved: it
+      # simply climbs this list. So print what the whole run cost, per statement,
+      # and hold the counter's own writes to the referrers they touched.
+      banner("Phase 10d: pg_stat_statements bills the run")
+
+      def psql_table(query):
+          server.succeed(f"cat > /tmp/q.sql <<'EOF'\n{query}\nEOF")
+          return server.succeed("su postgres -c 'psql -d gradient -f /tmp/q.sql'")
+
+      # The test's own psql connects as postgres; only the server's statements are
+      # Gradient's bill, and excluding ours also keeps these polls out of the shares.
+      server_statements = (
+          "FROM pg_stat_statements s JOIN pg_roles r ON r.oid = s.userid "
+          "WHERE r.rolname <> 'postgres' "
+      )
+      print(psql_table(
+          "SELECT regexp_replace(substring(s.query, 1, 250), '[[:space:]]+', ' ', 'g') AS query, "
+          "s.calls, round(s.total_exec_time::numeric, 2) AS total_time, "
+          "round(s.mean_exec_time::numeric, 2) AS mean_time, "
+          "round((100 * s.total_exec_time / sum(s.total_exec_time) OVER ())::numeric, 2) AS percentage "
+          + server_statements +
+          "ORDER BY s.total_exec_time DESC LIMIT 10;"
+      ))
+
+      counter_rows = int(sql(
+          f"SELECT coalesce(sum(s.rows), 0) FROM pg_stat_statements s WHERE {COUNTER_WRITES};"
+      )) - counter_rows_before
+      cached_paths = int(sql("SELECT count(*) FROM cached_path;"))
+      assert 0 < counter_rows <= cached_paths, (
+          f"one retire and one re-upload wrote {counter_rows} counter rows over a "
+          f"{cached_paths}-row cache; a moved counter touches referrers, a derived one the table"
+      )
+
+      # Loose on purpose: these are pathology detectors on a slow shared VM, not
+      # benchmarks. A per-tick fixpoint over the cache breaks both by an order of
+      # magnitude, and the printout above is what a human reads.
+      total_ms = float(sql(
+          f"SELECT round(coalesce(sum(s.total_exec_time), 0)::numeric, 2) {server_statements};"
+      ))
+      counter_share = float(sql(
+          f"SELECT round(coalesce(100 * sum(s.total_exec_time) FILTER (WHERE {COUNTER_WRITES}) "
+          f"/ nullif(sum(s.total_exec_time), 0), 0)::numeric, 2) {server_statements};"
+      ))
+      print(f"server database time: {total_ms} ms, reference counter writes: {counter_share}%")
+      assert total_ms < 300000, f"the run burned {total_ms} ms of database time"
+      assert counter_share < 50, f"maintaining the counter is {counter_share}% of database time"
+
+      # ── Phase 11: the supervision tree is healthy and shutdown drains ─────
       banner("Phase 11: every supervised loop is running; SIGTERM drains")
       health = json.loads(api_get(token, "board/health"))["message"]
       names = sorted(l["name"] for l in health["supervised"])

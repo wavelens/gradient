@@ -14,8 +14,8 @@
 
 use anyhow::{Context, Result};
 use futures::{SinkExt, StreamExt};
-use gradient_proto::messages::{ClientMessage, ServerMessage, decode_client_message};
-use rkyv::rancor::Error as RkyvError;
+use gradient_proto::messages::{ClientMessage, ServerMessage};
+use gradient_proto::session::frame::WireMessage;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{WebSocketStream, accept_async};
@@ -60,10 +60,9 @@ pub struct MockServerConn {
 impl MockServerConn {
     /// Send a [`ServerMessage`] to the connected client.
     pub async fn send(&mut self, msg: ServerMessage) -> Result<()> {
-        let bytes =
-            rkyv::to_bytes::<RkyvError>(&msg).context("failed to serialise ServerMessage")?;
+        let bytes = msg.encode().context("failed to serialise ServerMessage")?;
         self.socket
-            .send(Message::Binary(bytes.to_vec().into()))
+            .send(Message::Binary(bytes))
             .await
             .context("mock server WebSocket send failed")
     }
@@ -74,7 +73,8 @@ impl MockServerConn {
         loop {
             match self.socket.next().await {
                 Some(Ok(Message::Binary(bytes))) => {
-                    return decode_client_message(&bytes)
+                    return ClientMessage::decode(bytes)
+                        .and_then(|inbound| inbound.into_message())
                         .context("failed to deserialise ClientMessage");
                 }
                 Some(Ok(Message::Ping(_))) | Some(Ok(Message::Pong(_))) => continue,
