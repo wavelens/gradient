@@ -63,7 +63,7 @@ const CASCADE_TARGET: [BuildStatus; 3] = [
 /// Collect the `derivation` column of a `RETURNING derivation` result set. The
 /// bulk transitions return the anchors they actually moved so the caller can fan
 /// the CI status reactor out over exactly those (and only those) builds.
-fn returned_derivations(rows: Vec<QueryResult>) -> Vec<DerivationId> {
+pub(crate) fn returned_derivations(rows: Vec<QueryResult>) -> Vec<DerivationId> {
     rows.into_iter()
         .filter_map(|r| r.try_get::<uuid::Uuid>("", "derivation").ok())
         .map(DerivationId::new)
@@ -74,7 +74,7 @@ fn returned_derivations(rows: Vec<QueryResult>) -> Vec<DerivationId> {
 /// to_status` rows into the typed changes the effects emitter consumes. Bulk
 /// statements capture the pre-update status via a `FROM derivation_build old`
 /// self-join on the primary key (Postgres evaluates `old` against the snapshot).
-fn returned_transitions(rows: Vec<QueryResult>) -> Vec<TransitionChange> {
+pub(crate) fn returned_transitions(rows: Vec<QueryResult>) -> Vec<TransitionChange> {
     rows.into_iter()
         .filter_map(|r| {
             let derivation = r.try_get::<uuid::Uuid>("", "derivation").ok()?;
@@ -91,7 +91,7 @@ fn returned_transitions(rows: Vec<QueryResult>) -> Vec<TransitionChange> {
 
 /// Changes for rows a statement moved from a statically-known status (e.g. a
 /// `WHERE status = Created` promote): no self-join needed, the predicate is the proof.
-fn transitions_from(
+pub(crate) fn transitions_from(
     derivations: Vec<DerivationId>,
     from: BuildStatus,
     to: BuildStatus,
