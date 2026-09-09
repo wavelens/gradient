@@ -26,7 +26,7 @@ use crate::connection::{ProtoReader, ProtoWriter};
 use crate::executor::JobExecutor;
 use crate::executor::timeline::JobTimeline;
 use crate::proto::credentials::CredentialStore;
-use crate::proto::job::{CacheWaiters, JobUpdater, KnownDerivationWaiters};
+use crate::proto::job::{CacheWaiters, DispatchHandle, JobUpdater, KnownDerivationWaiters};
 use crate::proto::scorer::JobScorer;
 use crate::shutdown::Shutdown;
 
@@ -117,8 +117,8 @@ pub(super) async fn run_dispatch_loop(
     // and can never report its result over the dead writer. Abort them so they
     // stop instead of double-executing after we reconnect - the server
     // re-queues the orphaned jobs on its side.
-    for (_job_id, abort_tx) in state.jobs.abort_senders.drain() {
-        let _ = abort_tx.send(true);
+    for (_job_id, job) in state.jobs.running.drain() {
+        let _ = job.abort.send(true);
     }
 
     Ok(LoopEnd {
@@ -131,30 +131,77 @@ pub(super) async fn run_dispatch_loop(
 
 // ── Per-job bookkeeping ───────────────────────────────────────────────────────
 
-/// Registry of in-flight jobs: abort channels, kinds for capacity accounting,
-/// phase timelines, and the completion channel every spawned job reports back on.
+/// One in-flight job: its kind for capacity accounting, the dispatch id every
+/// report echoes, its abort channel and the timeline the terminal report carries.
+struct ActiveJob {
+    kind: JobKind,
+    dispatch: DispatchHandle,
+    abort: watch::Sender<bool>,
+    timeline: Arc<JobTimeline>,
+}
+
+/// Registry of in-flight jobs and the completion channel each task reports on.
 struct JobRegistry {
-    abort_senders: HashMap<String, watch::Sender<bool>>,
-    job_kinds: HashMap<String, JobKind>,
-    /// The `dispatch` id each `AssignJob` carried, echoed on every report.
-    dispatches: HashMap<String, String>,
-    /// Shared with the job task, so the terminal message can report the
-    /// timeline once the task itself is gone.
-    timelines: HashMap<String, Arc<JobTimeline>>,
+    running: HashMap<String, ActiveJob>,
     done_tx: mpsc::UnboundedSender<(String, Result<()>)>,
 }
 
 impl JobRegistry {
     fn active(&self, kind: JobKind) -> u32 {
-        self.job_kinds.values().filter(|k| **k == kind).count() as u32
+        self.running.values().filter(|j| j.kind == kind).count() as u32
     }
 
     fn len(&self) -> usize {
-        self.job_kinds.len()
+        self.running.len()
     }
 
     fn is_idle(&self) -> bool {
-        self.job_kinds.is_empty()
+        self.running.is_empty()
+    }
+
+    fn register(
+        &mut self,
+        job_id: String,
+        kind: JobKind,
+        dispatch: String,
+    ) -> (DispatchHandle, watch::Receiver<bool>, Arc<JobTimeline>) {
+        let dispatch = DispatchHandle::new(dispatch);
+        let (abort, abort_rx) = watch::channel(false);
+        let timeline = JobTimeline::new();
+        self.running.insert(
+            job_id,
+            ActiveJob {
+                kind,
+                dispatch: dispatch.clone(),
+                abort,
+                timeline: Arc::clone(&timeline),
+            },
+        );
+        (dispatch, abort_rx, timeline)
+    }
+
+    /// A job the server hands out again while it still runs here keeps its
+    /// task and reports under the new dispatch id; a second task would build
+    /// the same job twice. False for a job this session does not run.
+    fn readopt(&self, job_id: &str, dispatch: &str) -> bool {
+        match self.running.get(job_id) {
+            Some(job) => {
+                job.dispatch.set(dispatch.to_owned());
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn abort(&self, job_id: &str) -> bool {
+        match self.running.get(job_id) {
+            Some(job) => job.abort.send(true).is_ok(),
+            None => false,
+        }
+    }
+
+    fn finish(&mut self, job_id: &str) -> Option<ActiveJob> {
+        self.running.remove(job_id)
     }
 }
 
@@ -212,10 +259,7 @@ impl DispatchState {
             nar_recv,
             eval_cache_recv: crate::proto::eval_cache_recv::EvalCacheReceiver::new(),
             jobs: JobRegistry {
-                abort_senders: HashMap::new(),
-                job_kinds: HashMap::new(),
-                dispatches: HashMap::new(),
-                timelines: HashMap::new(),
+                running: HashMap::new(),
                 done_tx,
             },
             done_rx: Some(done_rx),
@@ -379,18 +423,20 @@ impl DispatchState {
     /// state, report the result to the server, and request a new job if the
     /// worker still has capacity.
     async fn on_job_done(&mut self, job_id: String, result: Result<()>) -> Result<()> {
-        self.jobs.abort_senders.remove(&job_id);
+        let job = self
+            .jobs
+            .finish(&job_id)
+            .expect("a job task is registered before it is spawned");
         crate::proto::job::forget_cache_waiters_for_job(&self.cache_waiters, &job_id);
         self.known_derivation_waiters.lock().remove(&job_id);
         self.nar_recv.forget_job(&job_id);
         self.eval_cache_recv.forget_job(&job_id);
         self.credentials.clear();
 
-        let completed_kind = self.jobs.job_kinds.remove(&job_id);
-        let dispatch = self.jobs.dispatches.remove(&job_id).unwrap_or_default();
-        let timeline = self.jobs.timelines.remove(&job_id);
-        let dropped_spans = timeline.as_ref().map(|t| t.dropped()).unwrap_or_default();
-        let spans = timeline.map(|t| t.snapshot()).unwrap_or_default();
+        let completed_kind = job.kind;
+        let dispatch = job.dispatch.get();
+        let dropped_spans = job.timeline.dropped();
+        let spans = job.timeline.snapshot();
         if dropped_spans > 0 {
             debug!(%job_id, dropped_spans, "phase timeline hit its span cap");
         }
@@ -424,7 +470,7 @@ impl DispatchState {
         }
 
         if !self.draining {
-            let kind = completed_kind.unwrap_or(JobKind::Build);
+            let kind = completed_kind;
             if self.jobs.active(kind.clone()) < self.max_for(kind.clone()) {
                 self.writer.send(ClientMessage::RequestJob { kind }).await?;
             }
@@ -590,10 +636,21 @@ impl DispatchState {
     }
 
     async fn on_assign_job(&mut self, job_id: String, dispatch: String, job: Job) -> Result<()> {
-        // Drop the cached candidate + score on any reject too (not just accept):
-        // the server re-queues a rejected job and re-offers it, but our delta
-        // filter would skip an unchanged cached entry, so it would never be
-        // re-scored and would sit unassigned despite free capacity.
+        if self.jobs.readopt(&job_id, &dispatch) {
+            warn!(%job_id, %dispatch, "job assigned again while still running; reporting under the new dispatch id");
+            self.forget_candidate(&job_id);
+            self.writer
+                .send(ClientMessage::AssignJobResponse {
+                    job_id,
+                    accepted: true,
+                    reason: None,
+                })
+                .await?;
+            return Ok(());
+        }
+
+        // The candidate cache is dropped on a reject too: the server re-offers
+        // a rejected job and the delta filter would otherwise never re-score it.
         if self.draining {
             warn!(%job_id, "rejecting assigned job - draining");
             self.forget_candidate(&job_id);
@@ -636,14 +693,9 @@ impl DispatchState {
             })
             .await?;
 
-        self.jobs.job_kinds.insert(job_id.clone(), kind.clone());
-        self.jobs
-            .dispatches
-            .insert(job_id.clone(), dispatch.clone());
+        let (dispatch, abort_rx, timeline) =
+            self.jobs.register(job_id.clone(), kind.clone(), dispatch);
         self.forget_candidate(&job_id);
-
-        let (abort_tx, abort_rx) = watch::channel(false);
-        self.jobs.abort_senders.insert(job_id.clone(), abort_tx);
 
         let executor = self.executor.clone();
         let job_store = Arc::clone(&executor.store);
@@ -655,11 +707,11 @@ impl DispatchState {
         let job_eval_cache_recv = self.eval_cache_recv.clone();
         let job_done_tx = self.jobs.done_tx.clone();
         let jid = job_id.clone();
-        let timeline = JobTimeline::new();
-        self.jobs
-            .timelines
-            .insert(job_id.clone(), Arc::clone(&timeline));
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "reports back on done_tx and aborts through the registry"
+        )]
         tokio::spawn(async move {
             let mut updater = JobUpdater::new(
                 jid.clone(),
@@ -685,8 +737,8 @@ impl DispatchState {
 
     fn on_abort_job(&mut self, job_id: String, reason: String) {
         warn!(%job_id, %reason, "job aborted by server");
-        if let Some(tx) = self.jobs.abort_senders.get(&job_id) {
-            let _ = tx.send(true);
+        if !self.jobs.abort(&job_id) {
+            debug!(%job_id, "abort for a job this session does not run");
         }
     }
 
@@ -773,6 +825,10 @@ impl DispatchState {
 /// `spawn_blocking`, then the async send runs on the runtime once it finishes.
 fn send_live_metrics(writer: &ProtoWriter) {
     let writer = writer.clone();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "one sample per heartbeat, never awaited"
+    )]
     tokio::spawn(async move {
         let m = match tokio::task::spawn_blocking(crate::metrics::host_dynamic).await {
             Ok(m) => m,
@@ -815,5 +871,65 @@ async fn run_job(
                 .execute_build_job(build_job, updater, credentials, abort)
                 .await
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn registry() -> (JobRegistry, mpsc::UnboundedReceiver<(String, Result<()>)>) {
+        let (done_tx, done_rx) = mpsc::unbounded_channel();
+        (
+            JobRegistry {
+                running: HashMap::new(),
+                done_tx,
+            },
+            done_rx,
+        )
+    }
+
+    /// A job the server assigns again while it still runs here (its session
+    /// was unregistered and the job re-offered) keeps the one task and reports
+    /// under the new dispatch id; a second task would build it twice and the
+    /// first would be left with no abort channel.
+    #[test]
+    fn a_reassigned_running_job_keeps_its_task_and_takes_the_new_dispatch_id() {
+        let (mut jobs, _done_rx) = registry();
+        let (dispatch, abort_rx, _timeline) =
+            jobs.register("job-1".to_owned(), JobKind::Build, "dispatch-1".to_owned());
+
+        assert!(jobs.readopt("job-1", "dispatch-2"));
+
+        assert_eq!(
+            dispatch.get(),
+            "dispatch-2",
+            "the task reports under the new id"
+        );
+        assert_eq!(
+            jobs.active(JobKind::Build),
+            1,
+            "no second task is registered"
+        );
+        assert!(jobs.abort("job-1"));
+        assert!(*abort_rx.borrow(), "the first task still hears the abort");
+        assert!(
+            !jobs.readopt("job-9", "dispatch-3"),
+            "an unknown job is a fresh assignment"
+        );
+    }
+
+    /// The terminal report carries whatever id the job runs under at the end.
+    #[test]
+    fn finishing_a_job_hands_back_its_current_dispatch_id() {
+        let (mut jobs, _done_rx) = registry();
+        jobs.register("job-1".to_owned(), JobKind::Flake, "dispatch-1".to_owned());
+        jobs.readopt("job-1", "dispatch-2");
+
+        let job = jobs.finish("job-1").expect("the job was running");
+
+        assert_eq!(job.dispatch.get(), "dispatch-2");
+        assert!(jobs.is_idle());
+        assert!(jobs.finish("job-1").is_none());
     }
 }
