@@ -60,6 +60,14 @@ the returned row and an `append_exec_results` with `rows_affected: 1`, otherwise
 SeaORM treats the insert as a no-op. State that sequence in the module doc
 comment; it is what makes the test readable a year later.
 
+**Assert on one statement, never on a formatted transaction.** A `MockDatabase`
+records everything a transaction ran as ONE log entry, and sea-orm brackets that
+entry's statement list with a synthetic `BEGIN`/`COMMIT` (and `SAVEPOINT` for a
+nested one). Formatting entries lets a `contains` straddle two statements, and
+counting them shifts every index by one. `gradient_db::pool::statements(log)`
+flattens the log to one string per statement with the transaction control
+removed; use it instead of mapping `into_transaction_log()` by hand.
+
 **A spawned task races the result buffer.** The buffer is ordered and shared, so
 a handler that spawns database work pops results out from under the request path.
 Assert on what the response says, not on how many queries were consumed.

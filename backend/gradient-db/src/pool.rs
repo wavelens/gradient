@@ -106,6 +106,27 @@ impl WorkerDb {
     }
 }
 
+/// One string per statement, transaction control removed: a `MockDatabase`
+/// records a whole transaction as ONE log entry whose statement list sea-orm
+/// brackets with a synthetic `BEGIN`/`COMMIT`, so an assertion indexed off the
+/// flattened list must not count them, and a `contains` over a formatted entry
+/// must not straddle two statements.
+pub fn statements(log: Vec<sea_orm::Transaction>) -> Vec<String> {
+    log.iter()
+        .flat_map(|t| t.statements().iter())
+        .filter(|s| !is_transaction_control(&s.sql))
+        .map(|s| format!("{s:?}"))
+        .collect()
+}
+
+fn is_transaction_control(sql: &str) -> bool {
+    let sql = sql.trim().to_uppercase();
+    matches!(sql.as_str(), "BEGIN" | "COMMIT" | "ROLLBACK")
+        || sql.starts_with("SAVEPOINT ")
+        || sql.starts_with("RELEASE SAVEPOINT ")
+        || sql.starts_with("ROLLBACK TO SAVEPOINT ")
+}
+
 impl CacheDb {
     pub fn new(conn: DatabaseConnection) -> Self {
         Self(Arc::new(conn))
@@ -342,6 +363,13 @@ mod tests {
 
         let log = pool.into_transaction_log();
         assert_eq!(log.len(), 1, "one transaction: {log:?}");
+        let stmts = statements(log);
+        assert_eq!(
+            stmts.len(),
+            1,
+            "the synthetic BEGIN/COMMIT must not be counted: {stmts:?}"
+        );
+        assert!(stmts[0].contains("UPDATE derivation_build"), "{stmts:?}");
     }
 
     #[tokio::test]
@@ -357,5 +385,11 @@ mod tests {
             .commit()
             .await
             .expect("commit");
+
+        let stmts = statements(pool.into_transaction_log());
+        assert!(
+            stmts.is_empty(),
+            "savepoint control is transaction control: {stmts:?}"
+        );
     }
 }

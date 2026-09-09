@@ -178,11 +178,7 @@ mod tests {
             report.nar_counter_drift, 2,
             "the repaired rows are reported"
         );
-        let log: Vec<String> = db
-            .into_transaction_log()
-            .iter()
-            .flat_map(|t| t.statements().iter().map(|s| format!("{s:?}")))
-            .collect();
+        let log = crate::pool::statements(db.into_transaction_log());
         assert!(
             log[0].contains("FROM derivation_build db") && log[0].contains("derivation_dependency"),
             "the gating select comes first: {log:?}"
