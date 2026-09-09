@@ -35,7 +35,7 @@
 use gradient_util::sync::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -93,11 +93,13 @@ impl NarPayload {
 
 /// Where a staging task puts the bytes of one transfer.
 enum Sink {
-    /// Open writer plus the partial key it was opened under, so the finished
-    /// file can be claimed away from anything that might resume it. Boxed: the
-    /// writer dwarfs the in-memory variant and every stream would carry it.
+    /// Open writer plus the store and partial key it was opened under, so the
+    /// finished file can be claimed away from anything that might resume it.
+    /// Boxed: the writer dwarfs the in-memory variant and every stream would
+    /// otherwise carry it.
     Disk {
         writer: Box<PartialWriter>,
+        store: PartialStore,
         key: String,
     },
     Memory(Vec<u8>),
@@ -125,14 +127,11 @@ impl Sink {
     /// claims its finished partial: the rename drops the resume token with it,
     /// so a repeat header for the same path cannot truncate the file the
     /// importer is about to read.
-    async fn finish(self, partial: Option<&PartialStore>) -> Result<NarPayload> {
+    async fn finish(self) -> Result<NarPayload> {
         match self {
             Sink::Memory(buf) => Ok(NarPayload::Bytes(buf)),
-            Sink::Disk { writer, key } => {
+            Sink::Disk { writer, store, key } => {
                 let staged = writer.finish().await?;
-                let Some(store) = partial else {
-                    return Ok(NarPayload::File(staged.path));
-                };
                 match store.detach(&key).await? {
                     Some(claim) => Ok(NarPayload::File(store.path(&claim))),
                     None => Ok(NarPayload::File(staged.path)),
@@ -185,12 +184,17 @@ pub struct PushResumeGate {
 }
 
 impl PushResumeGate {
-    /// Await the server's resume offset, defaulting to 0 (fresh upload) on
-    /// timeout or a dropped connection.
-    pub async fn await_resume(self) -> u64 {
+    /// Await the server's resume offset. A server that never answers falls back
+    /// to a fresh upload from 0; a gate that is *cancelled* (the job was
+    /// aborted, or the connection went away) fails instead, so the uploader
+    /// stops rather than pushing a NAR that has nowhere to land.
+    pub async fn await_resume(self) -> Result<u64> {
         match tokio::time::timeout(PUSH_RESUME_TIMEOUT, self.rx).await {
-            Ok(Ok(offset)) => offset,
-            _ => 0,
+            Ok(Ok(offset)) => Ok(offset),
+            Ok(Err(_)) => Err(anyhow::anyhow!(
+                "NAR push cancelled before the server answered the stream header"
+            )),
+            Err(_) => Ok(0),
         }
     }
 }
@@ -231,23 +235,86 @@ struct StreamSpec {
     expected: Option<u64>,
 }
 
-/// Fail one transfer for a reason that makes its staged prefix unusable: drop
-/// the partial so the next attempt starts clean rather than resuming garbage.
-/// A server-signalled failure goes through [`NarReceiver::fail`] instead, which
-/// keeps the prefix.
-async fn abandon_staging(receiver: &NarReceiver, spec: &StreamSpec, reason: String) {
-    if let (Some(store), Some(disk_key)) = (receiver.partial.as_ref(), spec.disk_key.as_deref())
-        && let Err(e) = store.discard(disk_key).await
-    {
-        warn!(job_id = %spec.key.0, store_path = %spec.key.1, error = %e, "could not discard a failed NAR partial");
+/// The half of a [`NarReceiver`] a staging task is allowed to hold. The link
+/// back is weak on purpose: a task owning a full clone would keep `Inner` - and
+/// therefore its own sender - alive, so its channel could never close by drop
+/// and a lost connection would leak the task and its open `.partial` forever.
+struct Stager {
+    inner: Weak<Mutex<Inner>>,
+    partial: Option<PartialStore>,
+}
+
+impl Stager {
+    /// Resolve the waiter for `key`. A payload nobody is waiting for is
+    /// unlinked here: nothing else knows the claim's name, so the alternative
+    /// is a file only the 24 h sweep can find.
+    async fn deliver(&self, key: &Key, result: Result<NarPayload, String>) {
+        let undelivered = match self.inner.upgrade() {
+            None => Some(result),
+            Some(inner) => {
+                let mut g = inner.lock();
+                g.streams.remove(key);
+                match g.waiters.remove(key) {
+                    Some(tx) => tx.send(result).err().inspect(|_| {
+                        debug!(job_id = %key.0, store_path = %key.1, "NAR waiter went away before delivery");
+                    }),
+                    None => {
+                        warn!(job_id = %key.0, store_path = %key.1, "NAR delivery with no waiter - discarding");
+                        Some(result)
+                    }
+                }
+            }
+        };
+
+        if let Some(Ok(NarPayload::File(path))) = undelivered
+            && let Err(e) = tokio::fs::remove_file(&path).await
+        {
+            warn!(path = %path.display(), error = %e, "could not remove an undeliverable staged NAR");
+        }
     }
-    receiver.deliver(&spec.key, Err(reason));
+
+    /// Fail one transfer for a reason that makes its staged prefix unusable:
+    /// drop the partial so the next attempt starts clean rather than resuming
+    /// garbage. A server-signalled failure goes through [`NarReceiver::fail`]
+    /// instead, which keeps the prefix.
+    async fn abandon(&self, spec: &StreamSpec, reason: String) {
+        if let (Some(store), Some(disk_key)) = (self.partial.as_ref(), spec.disk_key.as_deref())
+            && let Err(e) = store.discard(disk_key).await
+        {
+            warn!(job_id = %spec.key.0, store_path = %spec.key.1, error = %e, "could not discard a failed NAR partial");
+        }
+        self.deliver(&spec.key, Err(reason)).await;
+    }
+
+    /// Open the sink a staging task writes into. `Resume::Staged` continues
+    /// from whatever prefix the store already holds under the stream's token,
+    /// which is the offset the requester told the server to continue from.
+    async fn open_sink(&self, spec: &StreamSpec, resume: Resume) -> Result<Sink> {
+        let (Some(store), Some(disk_key)) = (self.partial.as_ref(), spec.disk_key.as_deref())
+        else {
+            return Ok(Sink::Memory(Vec::new()));
+        };
+
+        let resume_from = match resume {
+            Resume::Staged => store.received_len(disk_key, &spec.token).await.unwrap_or(0),
+            Resume::Fresh => 0,
+        };
+        let writer = store
+            .open_writer(disk_key, &spec.token, resume_from)
+            .await?;
+        debug!(job_id = %spec.key.0, store_path = %spec.key.1, resume_from, "staging pulled NAR to disk");
+        Ok(Sink::Disk {
+            writer: Box::new(writer),
+            store: store.clone(),
+            key: disk_key.to_owned(),
+        })
+    }
 }
 
 /// Drain one transfer: every frame the dispatch loop queued is appended to
 /// `sink`, and the final one resolves the waiter with the assembled payload.
 async fn stage_pull(
-    receiver: NarReceiver,
+    stager: Stager,
     spec: StreamSpec,
     mut sink: Sink,
     mut rx: mpsc::Receiver<Frame<ServerMessage>>,
@@ -275,10 +342,12 @@ async fn stage_pull(
         // Only ever true before the first append.
         if offset == 0 && sink.len() != 0 {
             warn!(job_id = %key.0, store_path = %key.1, "server restarted the NAR transfer from 0");
-            sink = match receiver.open_sink(&spec, Resume::Fresh).await {
+            sink = match stager.open_sink(&spec, Resume::Fresh).await {
                 Ok(fresh) => fresh,
                 Err(e) => {
-                    abandon_staging(&receiver, &spec, format!("could not restage NAR: {e}")).await;
+                    stager
+                        .abandon(&spec, format!("could not restage NAR: {e}"))
+                        .await;
                     return;
                 }
             };
@@ -287,7 +356,9 @@ async fn stage_pull(
         if !data.is_empty() {
             started.get_or_insert_with(Instant::now);
             if let Err(e) = sink.append(offset, data).await {
-                abandon_staging(&receiver, &spec, format!("partial append failed: {e}")).await;
+                stager
+                    .abandon(&spec, format!("partial append failed: {e}"))
+                    .await;
                 return;
             }
         }
@@ -307,19 +378,21 @@ async fn stage_pull(
             && staged != total
         {
             drop(sink);
-            abandon_staging(
-                &receiver,
-                &spec,
-                format!("assembled NAR {staged} bytes != advertised {total} bytes"),
-            )
-            .await;
+            stager
+                .abandon(
+                    &spec,
+                    format!("assembled NAR {staged} bytes != advertised {total} bytes"),
+                )
+                .await;
             return;
         }
 
-        match sink.finish(receiver.partial.as_ref()).await {
-            Ok(payload) => receiver.deliver(key, Ok(payload)),
+        match sink.finish().await {
+            Ok(payload) => stager.deliver(key, Ok(payload)).await,
             Err(e) => {
-                abandon_staging(&receiver, &spec, format!("staging {} failed: {e}", key.1)).await;
+                stager
+                    .abandon(&spec, format!("staging {} failed: {e}", key.1))
+                    .await;
             }
         }
         return;
@@ -450,10 +523,24 @@ impl NarReceiver {
     /// socket instead of a stalled dispatch loop holding a mutex.
     pub async fn accept_chunk(&self, job_id: &str, store_path: &str, frame: Frame<ServerMessage>) {
         let key = (job_id.to_owned(), store_path.to_owned());
-        let existing = self.inner.lock().streams.get(&key).cloned();
-        let tx = match existing {
-            Some(tx) => tx,
-            None => self.open_stream(self.spec(job_id, store_path, "", None)),
+        let tx = {
+            let g = self.inner.lock();
+            match g.streams.get(&key).cloned() {
+                Some(tx) => Some(tx),
+                None => {
+                    // No header and no stream: open one only when a request is
+                    // actually waiting. A late push for a finished job would
+                    // otherwise stage a `.partial` and a task nothing closes.
+                    let requested = g.waiters.contains_key(&key);
+                    drop(g);
+                    requested.then(|| self.open_stream(self.spec(job_id, store_path, "", None)))
+                }
+            }
+        };
+
+        let Some(tx) = tx else {
+            warn!(%job_id, %store_path, "NarPush for a path nothing requested - discarding");
+            return;
         };
 
         if tx.send(frame).await.is_err() {
@@ -471,55 +558,21 @@ impl NarReceiver {
             .streams
             .insert(spec.key.clone(), tx.clone());
 
-        let receiver = self.clone();
+        let stager = Stager {
+            inner: Arc::downgrade(&self.inner),
+            partial: self.partial.clone(),
+        };
         self.stagers.spawn(async move {
-            match receiver.open_sink(&spec, Resume::Staged).await {
-                Ok(sink) => stage_pull(receiver, spec, sink, rx).await,
+            match stager.open_sink(&spec, Resume::Staged).await {
+                Ok(sink) => stage_pull(stager, spec, sink, rx).await,
                 Err(e) => {
-                    receiver.deliver(&spec.key, Err(format!("could not stage NAR: {e}")));
+                    stager
+                        .deliver(&spec.key, Err(format!("could not stage NAR: {e}")))
+                        .await;
                 }
             }
         });
         tx
-    }
-
-    /// Open the sink a staging task writes into. `Resume::Staged` continues
-    /// from whatever prefix the store already holds under the stream's token,
-    /// which is the offset the requester told the server to continue from.
-    async fn open_sink(&self, spec: &StreamSpec, resume: Resume) -> Result<Sink> {
-        let (Some(store), Some(disk_key)) = (self.partial.as_ref(), spec.disk_key.as_deref())
-        else {
-            return Ok(Sink::Memory(Vec::new()));
-        };
-
-        let resume_from = match resume {
-            Resume::Staged => store.received_len(disk_key, &spec.token).await.unwrap_or(0),
-            Resume::Fresh => 0,
-        };
-        let writer = store
-            .open_writer(disk_key, &spec.token, resume_from)
-            .await?;
-        debug!(job_id = %spec.key.0, store_path = %spec.key.1, resume_from, "staging pulled NAR to disk");
-        Ok(Sink::Disk {
-            writer: Box::new(writer),
-            key: disk_key.to_owned(),
-        })
-    }
-
-    /// Resolve the waiter for `key`, warning if none is registered.
-    fn deliver(&self, key: &Key, result: Result<NarPayload, String>) {
-        let mut g = self.inner.lock();
-        g.streams.remove(key);
-        match g.waiters.remove(key) {
-            Some(tx) => {
-                if tx.send(result).is_err() {
-                    debug!(job_id = %key.0, store_path = %key.1, "NAR waiter went away before delivery");
-                }
-            }
-            None => {
-                warn!(job_id = %key.0, store_path = %key.1, "NAR delivery with no waiter - discarding");
-            }
-        }
     }
 
     /// Resolve the waiter for `(job_id, store_path)` with an error. Called for
@@ -547,6 +600,15 @@ impl NarReceiver {
         let (tx, rx) = oneshot::channel();
         self.inner.lock().push_waiters.insert(key, tx);
         PushResumeGate { rx }
+    }
+
+    /// Cancel every push-resume gate of `job_id`. An aborted job's uploads have
+    /// nowhere to land, so they must not sit out the handshake timeout first.
+    pub fn cancel_pushes(&self, job_id: &str) {
+        self.inner
+            .lock()
+            .push_waiters
+            .retain(|(j, _), _| j != job_id);
     }
 
     /// Resolve a push-resume gate with the server's `received_bytes`.
@@ -666,6 +728,7 @@ mod tests {
     async fn disk_mode_delivers_the_staged_file() {
         let dir = TempDir::new().unwrap();
         let store = PartialStore::new(dir.path(), Duration::from_secs(60)).unwrap();
+        let store_for_key = store.clone();
         let r = NarReceiver::with_partial_store(store);
         let path = format!("/nix/store/{}-x", "a".repeat(32));
         let r2 = r.clone();
@@ -677,14 +740,26 @@ mod tests {
             .await;
         r.accept_chunk("j", &path, frame("j", &path, 3, b"def", true))
             .await;
-        assert_eq!(file_bytes(task.await.unwrap().unwrap()).await, b"abcdef");
+
+        let payload = task.await.unwrap().unwrap();
+        let NarPayload::File(delivered) = &payload else {
+            panic!("disk mode yields a file");
+        };
+        // The delivered file is the claim, not the shared `{job}/{hash}.partial`
+        // a later header could truncate under the importer.
+        assert_ne!(
+            delivered,
+            &store_for_key.path(&format!("j/{}", "a".repeat(32)))
+        );
+        assert_eq!(r.resumable("j", &path).await.0, 0);
+        assert_eq!(file_bytes(payload).await, b"abcdef");
     }
 
     #[tokio::test]
     async fn final_with_no_waiter_is_discarded() {
         let r = NarReceiver::new();
         final_chunk(&r, "j", "/nix/store/x", b"orphan").await;
-        settle(&r).await;
+        assert!(r.inner.lock().streams.is_empty(), "no waiter, no stream");
         let r2 = r.clone();
         let task = tokio::spawn(async move { r2.wait_for("j", "/nix/store/x").await });
         tokio::task::yield_now().await;
@@ -833,19 +908,76 @@ mod tests {
         );
     }
 
+    /// A dropped connection takes the whole `DispatchState` with it, and every
+    /// staging task must observe its channel close rather than sit on an open
+    /// `.partial` for the life of the process. The staged prefix itself stays,
+    /// which is what lets the reconnect resume it (#225).
+    #[tokio::test]
+    async fn dropping_the_receiver_ends_every_stager() {
+        let dir = TempDir::new().unwrap();
+        let store = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let hash = "dddddddddddddddddddddddddddddddd";
+        let path = format!("/nix/store/{hash}-pkg");
+
+        let r = NarReceiver::with_partial_store(store.clone());
+        let stagers = r.stagers.clone();
+        let _pending = r.register("j", &path);
+        r.note_header("j", &path, 9, "len-9");
+        r.accept_chunk("j", &path, frame("j", &path, 0, b"abc", false))
+            .await;
+
+        drop(r);
+        stagers.close();
+        tokio::time::timeout(Duration::from_secs(5), stagers.wait())
+            .await
+            .expect("a stager must end when the last receiver is dropped");
+
+        assert_eq!(store.staged_len(&format!("j/{hash}")).await, 3);
+    }
+
+    /// A `NarPush` for a path nothing requested - the late push for a job that
+    /// already finished - must be dropped, not staged: staging it would open a
+    /// `.partial` and a task no waiter, failure or job cleanup can ever close.
+    #[tokio::test]
+    async fn a_chunk_nothing_requested_is_not_staged() {
+        let dir = TempDir::new().unwrap();
+        let store = PartialStore::new(dir.path(), Duration::from_secs(3600)).unwrap();
+        let hash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+        let path = format!("/nix/store/{hash}-pkg");
+
+        let r = NarReceiver::with_partial_store(store.clone());
+        r.accept_chunk("gone", &path, frame("gone", &path, 0, b"abc", false))
+            .await;
+
+        assert!(r.inner.lock().streams.is_empty());
+        assert_eq!(store.staged_len(&format!("gone/{hash}")).await, 0);
+    }
+
     #[tokio::test]
     async fn push_resume_gate_resolves() {
         let r = NarReceiver::new();
         let gate = r.register_push("j", "/nix/store/x");
         r.resolve_push("j", "/nix/store/x", 4096);
-        assert_eq!(gate.await_resume().await, 4096);
+        assert_eq!(gate.await_resume().await.unwrap(), 4096);
     }
 
-    #[tokio::test]
+    /// A silent server falls back to a fresh upload. `r` stays alive, so the
+    /// gate can only end by timing out; the paused clock skips the wait.
+    #[tokio::test(start_paused = true)]
     async fn push_resume_gate_defaults_to_zero_without_answer() {
         let r = NarReceiver::new();
         let gate = r.register_push("j", "/nix/store/x");
-        drop(r); // server never answers
-        assert_eq!(gate.await_resume().await, 0);
+        assert_eq!(gate.await_resume().await.unwrap(), 0);
+        drop(r);
+    }
+
+    /// An aborted job releases its gates: the uploader has to fail now, not
+    /// wait out the handshake timeout and then push into a dead session.
+    #[tokio::test]
+    async fn push_resume_gate_fails_when_the_job_is_aborted() {
+        let r = NarReceiver::new();
+        let gate = r.register_push("j", "/nix/store/x");
+        r.cancel_pushes("j");
+        assert!(gate.await_resume().await.is_err());
     }
 }

@@ -722,6 +722,9 @@ impl DispatchState {
         if let Some(tx) = self.jobs.abort_senders.get(&job_id) {
             let _ = tx.send(true);
         }
+        // An upload parked on its resume handshake would otherwise sit out the
+        // 30 s timeout and then push a NAR the server has already abandoned.
+        self.nar_recv.cancel_pushes(&job_id);
     }
 
     // ── Credentials ───────────────────────────────────────────────────────────
