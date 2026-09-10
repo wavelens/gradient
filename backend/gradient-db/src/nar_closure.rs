@@ -358,22 +358,28 @@ pub struct Retired {
 
 /// Delete `hashes` from the index and move every counter, flag and anchor that
 /// trusted them, in the caller's transaction: the reverse ripple from the rows that
-/// were whole, `is_cached` off the deleted outputs, and then the
-/// readiness side - the producers lose `fetchable` and a terminal-success producer
-/// left with nothing to serve resets to `Created`, while the owner of a `.drv` that
-/// is gone leaves the queue. `Retired::deleted` names the rows that actually went
+/// were whole, `is_cached` off the deleted outputs, and then the readiness side -
+/// every affected producer loses `fetchable`, a terminal-success producer whose
+/// artifact is GONE resets to `Created`, and the owner of a `.drv` that is gone
+/// leaves the queue. `Retired::deleted` names the rows that actually went
 /// and `Retired::transitions` the anchor moves the caller must emit after its
 /// commit. Use [`retire_paths_where`] when the caller may drop a path only while
 /// some condition still holds.
 ///
-/// The anchor side follows the union of DELETED and newly-unwhole, not just the
-/// unwhole set, because none of it reads the counter: [`crate::graph_sql`]'s
+/// The MARK follows the union of DELETED and newly-unwhole, not just the unwhole
+/// set, because it does not read the counter: [`crate::graph_sql`]'s
 /// `fetchable_predicate` requires every output to have a whole `cached_path` row
 /// and a deleted row is not whole, so a path dropped while it was ALREADY unwhole
-/// still takes its producer's stale-true `fetchable` - and the terminal-success
-/// status that goes with it - down with it. Restricting the union to the ripple's
-/// output would leave exactly that row unrepaired, with a gate reading true against
-/// a path no longer in the cache.
+/// still takes its producer's stale-true `fetchable` down with it. Restricting the
+/// union to the ripple's output would leave exactly that row unrepaired, with a gate
+/// reading true against a path no longer in the cache.
+///
+/// The RESET is narrower: only the producers of what is actually GONE, the rows this
+/// call deleted plus the hashes it was asked about that had none. A referrer that
+/// merely lost wholeness still has its own output, so it needs `fetchable` to drop
+/// and nothing else; the forward ripple marks it fetchable again when the missing
+/// path returns, which requires the terminal status a reset would have taken away.
+/// See [`retire_anchors`] for what resetting the closure cost when it did.
 ///
 /// A producer an upstream still serves keeps `fetchable` and is not reset: the
 /// predicate holds through `substitutable`, so the mark passes it over and the
@@ -467,10 +473,17 @@ async fn retire(
         .await?;
     }
 
+    // `gone` is what has no artifact any more: the rows this call deleted, plus the
+    // hashes it was asked about that had none to begin with. The wider `anchor_scope`
+    // adds the referrers the ripple un-wholed, whose own outputs are untouched.
+    let mut gone = deleted.clone();
+    let deleted_set: HashSet<String> = deleted.iter().cloned().collect();
+    gone.extend(hashes.iter().filter(|h| !deleted_set.contains(*h)).cloned());
+
     let mut anchor_scope = gated;
     let moved: HashSet<String> = anchor_scope.iter().cloned().collect();
     anchor_scope.extend(hashes.iter().filter(|h| !moved.contains(*h)).cloned());
-    let transitions = retire_anchors(db, &anchor_scope).await?;
+    let transitions = retire_anchors(db, &anchor_scope, &gone).await?;
 
     Ok(Retired {
         deleted,
@@ -479,32 +492,44 @@ async fn retire(
     })
 }
 
-/// The readiness half of a retire, over every hash the caller ASKED to retire plus
-/// everything the retire moved: the producers stop being fetchable and their
-/// dependents' counters rise, a terminal-success producer with nothing left to
-/// serve becomes a fresh build intent, and the owner of a `.drv` that is gone
-/// leaves the queue.
+/// The readiness half of a retire. `scope` is every hash the caller ASKED to retire
+/// plus everything the retire moved; `gone` is the subset whose artifact is actually
+/// absent (deleted, or asked for and never there). The producers of everything in
+/// `scope` stop being fetchable and their dependents' counters rise, the owner of a
+/// `.drv` that is gone leaves the queue, and only the producers of `gone` become a
+/// fresh build intent.
 ///
-/// The asked-for hashes have to be in the scope, not just the ones that moved. A
-/// hash with no `cached_path` row at all deletes nothing and ripples nothing, yet
-/// it is exactly half of what `unbacked_trusted_outputs_select` matches
-/// (`NOT EXISTS (... cp.file_hash IS NOT NULL)` is true for a missing row and for
-/// an unbacked one alike), and `REQUEUEABLE` excludes terminal success, so nothing
-/// else would ever recover such a producer. Widening costs one lookup and one lock
-/// on a retire that changed nothing, and moves nothing extra: every statement below
-/// is keyed on ground truth and self-limiting, so a path that is still there and
-/// still whole fails all three.
+/// That split is the whole point. Losing wholeness ripples up the reference graph, so
+/// `scope` is the transitive referrer closure of the missing path: on production the
+/// `glibc-2.42` output has 278 direct referrers and the closure above them is most of
+/// the cache. A referrer's OWN output is still on disk, so it needs `fetchable` to
+/// drop until the missing path returns and nothing more; when it returns,
+/// `gradient_graph::nar`'s forward ripple marks its producer fetchable again through
+/// [`crate::readiness::became_fetchable`], which requires the terminal status this
+/// reset would have taken away. Resetting a referrer therefore restores nothing and
+/// rebuilds an artifact that was never missing. Measured on the cache VM test: 107
+/// derivations re-queued and 139 dispatches inside 30 s from deleting ONE NAR.
+///
+/// The asked-for hashes have to be in `gone`, not just the deleted ones. A hash with
+/// no `cached_path` row at all deletes nothing and ripples nothing, yet it is exactly
+/// half of what `unbacked_trusted_outputs_select` matches (`NOT EXISTS (...
+/// cp.file_hash IS NOT NULL)` is true for a missing row and for an unbacked one
+/// alike), and `REQUEUEABLE` excludes terminal success, so nothing else would ever
+/// recover such a producer.
 ///
 /// The reset is keyed on `NOT db.fetchable` rather than on the hash list so it
 /// reads the flag the mark just wrote: a producer an upstream still serves stays
 /// fetchable and keeps its terminal status, and a producer that was already stale
 /// (fetchable false under a terminal status, so the mark moved nothing) is repaired
-/// here rather than waiting for a sweep. A reset row re-enters the pending
-/// population, and nothing else recounts a row that does, so it is re-seeded here
-/// on a lock this transaction already holds.
+/// here rather than waiting for a sweep. That key is also what makes a hash the TTL
+/// guard spared safe to leave in `gone`: its row is still there and still whole, so
+/// its producer is still fetchable and the statement passes it over. A reset row
+/// re-enters the pending population, and nothing else recounts a row that does, so it
+/// is re-seeded here on a lock this transaction already holds.
 async fn retire_anchors(
     txn: &DatabaseTransaction,
     scope: &[String],
+    gone: &[String],
 ) -> Result<Vec<crate::status::TransitionChange>, DbErr> {
     if scope.is_empty() {
         return Ok(Vec::new());
@@ -513,7 +538,11 @@ async fn retire_anchors(
     let producers = crate::reachability::producers_of_hashes(txn, scope).await?;
     let lock = crate::readiness::lock_anchors(txn, &producers).await?;
     let mut transitions = crate::readiness::lost_fetchability(&lock).await?;
-    if !producers.is_empty() {
+
+    // Every row the reset writes produces a hash in `gone`, a subset of `scope`, so
+    // the lock above already covers it.
+    let rebuildable = crate::reachability::producers_of_hashes(txn, gone).await?;
+    if !rebuildable.is_empty() {
         let reset = crate::promotion::returned_transitions(
             txn.query_all_raw(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
@@ -528,7 +557,7 @@ async fn retire_anchors(
                     created = crate::status_sql::build(BuildStatus::Created),
                     terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
                 ),
-                [crate::readiness::ids(&producers)],
+                [crate::readiness::ids(&rebuildable)],
             ))
             .await?,
         );
@@ -974,11 +1003,13 @@ mod tests {
     /// Retiring seeds the reverse ripple only from rows that were whole: a
     /// referrer of a row that was already incomplete counted it as missing
     /// already, so it must not be incremented twice. The anchor side does NOT
-    /// split that way: `is_cached` follows what was deleted, and the
-    /// producer/owner pass follows the union of deleted and newly-unwhole plus
-    /// every hash the caller asked for, because neither statement reads the
-    /// counter - a row deleted while it was not whole (`b` here) would otherwise
-    /// keep a stale-true gate and dispatch a build against a `.drv` that is gone.
+    /// split that way: `is_cached` follows what was deleted, and the mark/owner
+    /// pass follows the union of deleted and newly-unwhole plus every hash the
+    /// caller asked for, because neither statement reads the counter - a row
+    /// deleted while it was not whole (`b` here) would otherwise keep a stale-true
+    /// gate and dispatch a build against a `.drv` that is gone. The RESET is the
+    /// one statement narrower than that union, so the producers are looked up
+    /// twice: once for the union, once for what is actually gone.
     /// The unguarded retire opens with the same hash-ordered lock pass as the
     /// guarded one: it decides nothing there, but an unordered acquisition
     /// deadlocks against every other writer's ordered one.
@@ -989,6 +1020,7 @@ mod tests {
                 row("a", "was_whole", true),
                 row("b", "was_whole", false),
             ]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -1012,8 +1044,9 @@ mod tests {
         let log = crate::pool::statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
-            6,
-            "lock, delete, one ripple level, is_cached, producers, owners: {log:?}"
+            7,
+            "lock, delete, one ripple level, is_cached, producers of the union, \
+             producers of what is gone, owners: {log:?}"
         );
         assert!(log[0].contains("FOR UPDATE") && !log[0].contains("DELETE"));
         assert!(log[1].contains("DELETE FROM cached_path") && log[1].contains("RETURNING"));
@@ -1040,10 +1073,10 @@ mod tests {
             "the producers of every retired path are resolved: {log:?}"
         );
         assert!(
-            log[5].contains(&format!(
+            log[6].contains(&format!(
                 "SET status = {created}",
                 created = crate::status_sql::build(BuildStatus::Created)
-            )) && log[5].contains("d.hash = ANY($1::text[])"),
+            )) && log[6].contains("d.hash = ANY($1::text[])"),
             "the owner of a `.drv` that is gone leaves the queue: {log:?}"
         );
     }
@@ -1067,6 +1100,10 @@ mod tests {
                 Value::from(producer.into_inner()),
             )])]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![BTreeMap::from([(
+                "derivation".to_owned(),
+                Value::from(producer.into_inner()),
+            )])]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
@@ -1099,6 +1136,73 @@ mod tests {
         );
     }
 
+    /// Losing wholeness ripples up the reference graph, so the retire's mark covers
+    /// the whole referrer closure of the missing path. The RESET must not: a
+    /// referrer's own output is still on disk, and when the missing path returns the
+    /// forward ripple marks its producer fetchable again through `became_fetchable`,
+    /// which needs the terminal status the reset would have taken away. Resetting it
+    /// restores nothing and rebuilds an artifact that never went missing - measured
+    /// as 107 re-queued derivations and 139 dispatches from deleting one NAR.
+    #[tokio::test]
+    async fn the_reset_spares_the_producer_of_a_referrer_that_only_lost_wholeness() {
+        let gone_producer = gradient_types::DerivationId::now_v7();
+        let referrer_producer = gradient_types::DerivationId::now_v7();
+        let drv = |id: gradient_types::DerivationId| {
+            BTreeMap::from([("derivation".to_owned(), Value::from(id.into_inner()))])
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            // the delete takes the one path that was whole
+            .append_query_results([vec![row("gone", "was_whole", true)]])
+            // the reverse ripple reaches one referrer, then stops
+            .append_query_results([vec![row("referrer", "was_whole", true)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            // producers of the union: both
+            .append_query_results([vec![drv(gone_producer), drv(referrer_producer)]])
+            // the mark reports both as no longer fetchable, and the counter ripple
+            .append_query_results([vec![drv(gone_producer), drv(referrer_producer)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            // producers of what is actually gone: only the deleted path's
+            .append_query_results([vec![drv(gone_producer)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                3
+            ])
+            .into_connection();
+
+        let txn = db.begin().await.unwrap();
+        retire_paths(&txn, &["gone".to_owned()]).await.unwrap();
+        txn.commit().await.unwrap();
+
+        let log = crate::pool::statements(db.into_transaction_log());
+        let mark = log
+            .iter()
+            .find(|s| s.contains("SET fetchable = false"))
+            .expect("the mark runs");
+        assert!(
+            mark.contains("\"referrer\""),
+            "the referrer does lose fetchability: {mark}"
+        );
+
+        let reset = log
+            .iter()
+            .find(|s| s.contains("AND NOT db.fetchable"))
+            .expect("the reset runs");
+        assert!(
+            reset.contains(&gone_producer.into_inner().to_string()),
+            "the deleted path's producer has nothing left to serve: {reset}"
+        );
+        assert!(
+            !reset.contains(&referrer_producer.into_inner().to_string()),
+            "but the referrer's producer keeps its terminal status, or the next \
+             evaluation rebuilds an output that is still in the cache: {reset}"
+        );
+    }
+
     /// A producer the retire thaws back to `Created` re-enters the pending
     /// population, and nothing else recounts a row that does: the ripples only move
     /// a counter, and the sweep is an interval away. So the reset is followed by an
@@ -1115,6 +1219,7 @@ mod tests {
             .append_query_results([vec![drv(producer)]])
             .append_query_results([vec![drv(producer)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![drv(producer)]])
             .append_query_results([vec![BTreeMap::from([
                 ("derivation".to_owned(), Value::from(producer.into_inner())),
                 (
@@ -1145,8 +1250,9 @@ mod tests {
         let log = crate::pool::statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
-            10,
-            "lock, delete, producers, anchor lock, mark, ripple, reset, thawed lock, seed, owners: {log:?}"
+            11,
+            "lock, delete, producers, anchor lock, mark, ripple, producers of what is \
+             gone, reset, thawed lock, seed, owners: {log:?}"
         );
         let reset = log
             .iter()
@@ -1169,6 +1275,7 @@ mod tests {
     async fn a_retire_with_no_producers_marks_and_resets_nothing() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![row("a", "was_whole", false)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
@@ -1240,6 +1347,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
@@ -1263,7 +1371,7 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            4,
+            5,
             "a guard that spared every row leaves nothing to clear, but the anchor \
              side still runs over the hash the caller asked for: lock, delete, \
              producers, owners: {log:?}"

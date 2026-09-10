@@ -595,6 +595,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
@@ -618,9 +619,10 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            11,
+            12,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
-             is_cached, producers, owners, un-promote: {log:?}"
+             is_cached, producers of the union, producers of what is gone, owners, \
+             un-promote: {log:?}"
         );
         let paths = log
             .iter()
@@ -687,8 +689,9 @@ mod tests {
             .append_query_results([vec![output.clone()], vec![output]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![drv_row.clone()]])
-            .append_query_results([vec![drv_row]])
+            .append_query_results([vec![drv_row.clone()]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![drv_row]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
@@ -708,9 +711,10 @@ mod tests {
         let log = crate::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            14,
+            15,
             "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
-             producers, anchor lock, mark, ripple, reset, owners, un-promote: {log:?}"
+             producers of the union, anchor lock, mark, ripple, producers of what is \
+             gone, reset, owners, un-promote: {log:?}"
         );
         assert!(
             !log.iter()

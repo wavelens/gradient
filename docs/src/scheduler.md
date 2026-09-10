@@ -358,10 +358,17 @@ it to a later sweep: every pass that deletes `cached_path` rows
 `nar_closure::retire_paths`, which in the **same transaction** raises the
 `missing_references` counter of every referrer that trusted the deleted rows and
 moves the anchor side of every hash it deleted, every hash that stopped being
-whole, and every hash the caller asked it to retire: the producers lose
-`fetchable` and their dependents' `unready_deps` rises, a terminal-success
-producer with nothing left to serve becomes a fresh build intent (recounted before
-it re-enters the queue), and the owner of a `.drv` that is gone leaves the queue.
+whole, and every hash the caller asked it to retire: those producers lose
+`fetchable` and their dependents' `unready_deps` rises, and the owner of a `.drv`
+that is gone leaves the queue. One statement in that pass is deliberately narrower.
+A terminal-success producer becomes a fresh build intent (recounted before it
+re-enters the queue) only when its artifact is actually GONE - a row this pass
+deleted, or a hash it was asked about that had none. A referrer that merely lost
+wholeness still has its own output in the cache, so it needs `fetchable` to drop
+until the missing path returns and nothing more; the forward ripple marks it
+fetchable again then, which needs the terminal status a reset would have removed.
+Resetting the referrer closure instead rebuilds artifacts that never went missing:
+one deleted NAR re-queued 107 derivations and dispatched 139 builds in 30 s.
 So there is no window in which the gate trusts an artifact GC just removed. None of
 that reads the counter, so binding it to what MOVED would leave two rows behind: a
 `.drv` deleted while it was not whole, and a hash with no `cached_path` row at all,
