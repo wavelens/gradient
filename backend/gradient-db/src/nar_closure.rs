@@ -83,7 +83,13 @@
 //! ([`crate::readiness::lock_anchors`]), always AFTER the `cached_path` pass and
 //! never before it. One class order across both tables is what keeps the two from
 //! an ABBA cycle; the anchor locks are `derivation`-ordered among themselves, which
-//! is the readiness module's own argument.
+//! is the readiness module's own argument. A writer that touches
+//! `derivation_build` BEFORE it reaches a retire therefore has to take the path
+//! lock itself to keep the order: [`crate::cache_storage::demote_cached_output`]
+//! clears `substitutable` before the retire reads it, so it opens with
+//! [`lock_paths`] over the hash it is about to retire. `gc_orphan_derivations`
+//! holds `derivation` before `derivation_build`, which is a third class and has no
+//! counter-ordered writer.
 //!
 //! The ripples are outside that, and it is not closed. `FORWARD` and `REVERSE`
 //! compute their referrer set inside the statement, so each takes
@@ -608,18 +614,27 @@ where
     Ok(repaired)
 }
 
-/// Proof that one repair chunk is held `FOR UPDATE`, hash-ordered, on `txn`.
+/// Proof that a batch of paths is held `FOR UPDATE`, hash-ordered, on `txn`.
 /// Only [`lock_paths`] constructs one and [`recount`] writes exactly the rows it
 /// carries, so a recount cannot run unlocked, in another transaction, or over
 /// rows the lock did not cover. The caveat on [`ReferenceLock`] applies here too:
 /// the proof says the write follows the lock, not that no read preceded it.
-#[must_use = "a lock proves nothing unless the recount runs on it"]
-struct PathLock<'txn> {
+///
+/// It has a second use with no write of its own behind it: a transaction that will
+/// write `derivation_build` and only then reach a retire has to take its
+/// `cached_path` locks FIRST, or it inverts the class order the module doc sets out.
+/// [`crate::cache_storage::demote_cached_output`] holds one for exactly that.
+#[must_use = "a lock proves nothing unless a write follows it in the same transaction"]
+pub struct PathLock<'txn> {
     txn: &'txn DatabaseTransaction,
     hashes: Vec<String>,
 }
 
-async fn lock_paths<'txn>(
+/// Take `hashes` `FOR UPDATE` in one hash-ordered statement, before the caller
+/// decides or writes anything. Re-acquiring a row this transaction already holds is
+/// free, so a caller may take the pass for the ordering alone and let a later
+/// [`retire_paths`] repeat it.
+pub async fn lock_paths<'txn>(
     txn: &'txn DatabaseTransaction,
     hashes: &[String],
 ) -> Result<PathLock<'txn>, DbErr> {
@@ -1111,6 +1126,73 @@ mod tests {
         );
     }
 
+    /// A producer the retire thaws back to `Created` re-enters the pending
+    /// population, and nothing else recounts a row that does: the ripples only move
+    /// a counter, and the sweep is an interval away. So the reset is followed by an
+    /// absolute recount of exactly the rows it moved, on the lock this transaction
+    /// already holds.
+    #[tokio::test]
+    async fn a_thawed_producer_is_recounted_before_it_re_enters_the_queue() {
+        let producer = gradient_types::DerivationId::now_v7();
+        let drv = |id: gradient_types::DerivationId| {
+            BTreeMap::from([("derivation".to_owned(), Value::from(id.into_inner()))])
+        };
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![drv(producer)]])
+            .append_query_results([vec![drv(producer)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![BTreeMap::from([
+                (
+                    "derivation".to_owned(),
+                    Value::from(producer.into_inner()),
+                ),
+                (
+                    "from_status".to_owned(),
+                    Value::from(crate::status_sql::build(BuildStatus::Completed)),
+                ),
+                (
+                    "to_status".to_owned(),
+                    Value::from(crate::status_sql::build(BuildStatus::Created)),
+                ),
+            ])]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                4
+            ])
+            .into_connection();
+
+        let txn = db.begin().await.unwrap();
+        let retired = retire_paths(&txn, &["a".to_owned()]).await.unwrap();
+        txn.commit().await.unwrap();
+
+        assert_eq!(retired.transitions.len(), 1);
+        assert_eq!(retired.transitions[0].derivation, producer);
+        let log = crate::pool::statements(db.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            10,
+            "lock, delete, producers, anchor lock, mark, ripple, reset, thawed lock, seed, owners: {log:?}"
+        );
+        let reset = log
+            .iter()
+            .position(|s| s.contains("AND NOT db.fetchable"))
+            .expect("the reset runs");
+        let seed = log
+            .iter()
+            .position(|s| s.contains("SET unready_deps = (SELECT count(*)"))
+            .expect("the thawed rows are recounted");
+        assert!(reset < seed, "the recount follows the thaw: {log:?}");
+        assert!(
+            log[seed].contains(&producer.into_inner().to_string()),
+            "and covers exactly the rows the reset moved: {log:?}"
+        );
+    }
+
     /// No producer means no readiness statement past the lookup: an empty producer
     /// list locks nothing, marks nothing and resets nothing.
     #[tokio::test]
@@ -1186,13 +1268,12 @@ mod tests {
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            .append_exec_results(vec![
-                MockExecResult {
-                    last_insert_id: 0,
-                    rows_affected: 0,
-                };
-                4
-            ])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![MockExecResult {
+                last_insert_id: 0,
+                rows_affected: 0,
+            }])
             .into_connection();
 
         let txn = db.begin().await.unwrap();
@@ -1212,8 +1293,14 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            2,
-            "a guard that spared every row leaves nothing to clear: {log:?}"
+            4,
+            "a guard that spared every row leaves nothing to clear, but the anchor \
+             side still runs over the hash the caller asked for: lock, delete, \
+             producers, owners: {log:?}"
+        );
+        assert!(
+            !log.iter().any(|s| s.contains("SET fetchable = false")),
+            "and moves nothing, because the path it asked about is still whole: {log:?}"
         );
     }
 

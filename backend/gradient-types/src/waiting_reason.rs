@@ -76,10 +76,11 @@ pub enum WaitingReason {
     /// transitions to `Aborted`. The reconciler never unparks this reason.
     Aborting,
     /// The connected pool can build every pending anchor, but none is
-    /// dispatchable - the whole pending set is `Created` with a non-zero
-    /// `unready_deps` and no in-flight build to drive promotion. Every counter
-    /// move rides an event and none is coming, so the reconciler attempts a
-    /// self-heal each pass; `pending_anchors` is the blocked count.
+    /// dispatchable - the whole pending set is `Created` with one of its promotion
+    /// gates false and no in-flight build to drive promotion. Which gate it is is
+    /// not recorded here; every one of them moves on an event and none is coming,
+    /// so the reconciler attempts a self-heal each pass and `pending_anchors` is
+    /// the blocked count.
     GraphStuck {
         pending_anchors: u32,
     },
