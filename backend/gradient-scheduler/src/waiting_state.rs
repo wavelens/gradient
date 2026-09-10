@@ -198,9 +198,11 @@ pub async fn reconcile_waiting_state(
 ///
 /// A `Waiting` verdict with an empty `unmet` set means the pool *can* build
 /// every pending anchor yet none is dispatchable - the whole set is `Created`
-/// with a non-zero `unready_deps` and no in-flight build to drive a promotion.
-/// Every counter move rides an event, and by definition no event is coming, so
-/// we self-heal here: [`attempt_graph_unstick`].
+/// with some term of `graph_sql::gates_predicate` false (a non-zero
+/// `unready_deps`, an unwalked derivation, a `.drv` that is not importable, or no
+/// `build_job`) and no in-flight build to drive a promotion. Every gate the graph
+/// maintains moves on an event, and by definition no event is coming, so we
+/// self-heal here: [`attempt_graph_unstick`].
 async fn build_phase_decision(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,

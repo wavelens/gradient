@@ -277,6 +277,14 @@ fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
 /// same predicate one status later, so it would never dispatch and nothing would
 /// pull it back. The un-promote that follows is what closes that, and it shares the
 /// retire's transaction so a crash cannot separate the two.
+///
+/// Because the clear has to run inside that transaction AND before the retire reads
+/// `substitutable`, this is the one path that would write `derivation_build` before
+/// touching `cached_path`. It opens with [`crate::nar_closure::lock_paths`] instead,
+/// so the class order every other writer follows (`cached_path`, then
+/// `derivation_build`) holds here too and a concurrent TTL or zombie retire cannot
+/// deadlock against it. The retire's own pass then re-acquires a row this
+/// transaction already holds, which is free.
 pub async fn demote_cached_output(
     ctx: &crate::DbContext,
     hash: &str,
@@ -312,6 +320,7 @@ pub async fn demote_cached_output(
     // next eval re-marks it substitutable if it is genuinely still on an upstream,
     // having re-walked the node because pruning keys on `external_url`.
     let txn = db.begin().await?;
+    let _paths = crate::nar_closure::lock_paths(&txn, &[hash.to_owned()]).await?;
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
         txn.execute_raw(Statement::from_sql_and_values(
@@ -581,7 +590,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                5
+                6
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -597,6 +606,15 @@ mod tests {
                 .any(|s| s.contains("DELETE FROM cached_path") && s.contains("was_whole")),
             "the row must be retired, so the counters it backed move with it: {log:?}"
         );
+        assert_eq!(
+            log.len(),
+            12,
+            "outputs, demote, path lock, trust clear, retire lock, delete, is_cached, two flag clears, producers, owners, un-promote: {log:?}"
+        );
+        let paths = log
+            .iter()
+            .position(|s| s.contains("FROM cached_path WHERE hash = ANY($1)"))
+            .expect("the path lock is taken first");
         let trust = log
             .iter()
             .position(|s| s.contains("SET substitutable = false"))
@@ -605,6 +623,10 @@ mod tests {
             .iter()
             .position(|s| s.contains("DELETE FROM cached_path"))
             .expect("the row is retired");
+        assert!(
+            paths < trust,
+            "this is the one path that writes derivation_build before a retire, so it takes the cached_path lock first or it deadlocks against a concurrent eviction: {log:?}"
+        );
         assert!(
             trust < retire,
             "the retire decides fetchability, so the stale offer must be gone first: {log:?}"
@@ -654,7 +676,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                3
+                4
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -663,6 +685,11 @@ mod tests {
 
         drop(ctx);
         let log = crate::pool::statements(pool.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            13,
+            "outputs, demote, path lock, trust clear, retire lock, delete, producers, anchor lock, mark, ripple, reset, owners, un-promote: {log:?}"
+        );
         assert!(
             !log.iter()
                 .any(|s| s.contains("WHERE is_cached AND hash = ANY($1)")),

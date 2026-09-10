@@ -672,9 +672,9 @@ mod tests {
             nar_hash: Some("sha256:zombie".into()),
             ..Default::default()
         };
-        // The purge retires the row: the ordered lock pass, then the DELETE that
-        // reports what it removed, then the three flag clears (no reverse ripple,
-        // the zombie was not whole).
+        // The purge retires the row: the ordered lock pass, the DELETE that reports
+        // what it removed, the three flag clears (no reverse ripple, the zombie was
+        // not whole), then the anchor side over the hash it asked about.
         let mut retired = BTreeMap::new();
         retired.insert("hash".to_string(), Value::String(Some(zombie_hash.into())));
         retired.insert("was_whole".to_string(), Value::Bool(Some(false)));
@@ -682,6 +682,8 @@ mod tests {
             .append_query_results([vec![hash_row(live)]])
             .append_query_results([vec![zombie_row.clone()]])
             .append_query_results([vec![retired]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
                 sea_orm::MockExecResult {
                     last_insert_id: 0,
@@ -691,7 +693,7 @@ mod tests {
             ])
             .into_connection();
 
-        let state = test_server_state(nar_storage, db, |_| {});
+        let state = test_server_state(nar_storage, db.clone(), |_| {});
 
         let report = cleanup_orphaned_cache_files(Arc::clone(&state))
             .await
@@ -700,6 +702,14 @@ mod tests {
         assert_eq!(
             report.zombie_cached_paths_purged, 1,
             "the zombie row must be retired"
+        );
+
+        drop(state);
+        let log = gradient_db::pool::statements(db.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            9,
+            "keep-set, zombie scan, retire lock, delete, is_cached, two flag clears, producers, owners: {log:?}"
         );
     }
 
@@ -731,13 +741,15 @@ mod tests {
             .append_query_results([vec![stale]])
             .append_query_results([vec![output]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<gradient_entity::cache_derivation::Model>::new()])
             .append_exec_results(vec![
                 sea_orm::MockExecResult {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                6
+                3
             ])
             .into_connection();
         let state = state_with_worker_db(tmp.path(), db.clone());
@@ -745,6 +757,11 @@ mod tests {
         cleanup_stale_cached_nars(state).await.unwrap();
 
         let log = gradient_db::pool::statements(db.into_transaction_log());
+        assert_eq!(
+            log.len(),
+            9,
+            "stale scan, outputs, cache_derivation delete, signature delete, retire lock, guarded delete, producers, owners, still-held check: {log:?}"
+        );
         assert!(
             log.iter().any(|s| s.contains("DELETE FROM cached_path cp")
                 && s.contains("FROM cached_path_signature s")),

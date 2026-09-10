@@ -356,14 +356,17 @@ it to a later sweep: every pass that deletes `cached_path` rows
 (orphan-derivation GC, zombie purge, TTL eviction, path invalidation) goes through
 `nar_closure::retire_paths`, which in the **same transaction** raises the
 `missing_references` counter of every referrer that trusted the deleted rows and
-moves the anchor side of every hash it deleted as well as every hash that stopped
-being whole: the producers lose `fetchable` and their dependents' `unready_deps`
-rises, a terminal-success producer with nothing left to serve becomes a fresh
-build intent, and the owner of a `.drv` that is gone leaves the queue. So there is
-no window in which the gate trusts an artifact GC just removed. None of that reads
-the counter, so binding it to the unwhole set alone would leave a `.drv` that was
-deleted while it was not whole stale-true until the next consistency sweep, and
-dispatch runs every 5s. A caller
+moves the anchor side of every hash it deleted, every hash that stopped being
+whole, and every hash the caller asked it to retire: the producers lose
+`fetchable` and their dependents' `unready_deps` rises, a terminal-success
+producer with nothing left to serve becomes a fresh build intent (recounted before
+it re-enters the queue), and the owner of a `.drv` that is gone leaves the queue.
+So there is no window in which the gate trusts an artifact GC just removed. None of
+that reads the counter, so binding it to what MOVED would leave two rows behind: a
+`.drv` deleted while it was not whole, and a hash with no `cached_path` row at all,
+which deletes nothing and ripples nothing yet is half of what the unbacked-output
+sweep matches. Every statement in that pass is ground-truth keyed, so widening the
+set moves nothing extra. A caller
 that may only drop a path while some condition still holds (the TTL eviction drops
 one no cache signs any more) hands that condition to the retiring DELETE through
 `retire_paths_where` rather than deciding it in a statement of its own, which would
