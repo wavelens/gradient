@@ -153,6 +153,30 @@ in {
 
       configurePostgres = lib.mkEnableOption "PostgreSQL configuration";
 
+      postgresSharedBuffers = lib.mkOption {
+        description = ''
+          `shared_buffers` for the cluster `configurePostgres` sets up. Size it to
+          a quarter of the host's RAM: Gradient's working set is the build graph's
+          indexes, and the stock 128 MB cannot keep the hot set resident. `null`
+          leaves the upstream default alone.
+        '';
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "4GB";
+      };
+
+      postgresEffectiveCacheSize = lib.mkOption {
+        description = ''
+          `effective_cache_size` for the cluster `configurePostgres` sets up.
+          Three quarters of the host's RAM: it is a planner hint about what the
+          kernel is expected to cache, not an allocation. `null` leaves the
+          upstream default alone.
+        '';
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "12GB";
+      };
+
       localWorker = lib.mkOption {
         description = ''
           Provision credentials for a `services.gradient.worker` running on this
@@ -1320,7 +1344,17 @@ in {
       postgresql = lib.mkIf cfg.configurePostgres {
         enable = true;
         ensureDatabases = [ "gradient" ];
-        settings.max_connections = lib.mkDefault 200;
+        settings = {
+          max_connections = lib.mkDefault 200;
+          work_mem = lib.mkDefault "32MB";
+          maintenance_work_mem = lib.mkDefault "1GB";
+          random_page_cost = lib.mkDefault 1.1;
+        } // lib.optionalAttrs (cfg.postgresSharedBuffers != null) {
+          shared_buffers = lib.mkDefault cfg.postgresSharedBuffers;
+        } // lib.optionalAttrs (cfg.postgresEffectiveCacheSize != null) {
+          effective_cache_size = lib.mkDefault cfg.postgresEffectiveCacheSize;
+        };
+
         ensureUsers = [{
           name = "gradient";
           ensureDBOwnership = true;
