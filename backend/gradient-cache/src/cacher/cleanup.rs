@@ -150,14 +150,19 @@ const UNSIGNED_GUARD: &str =
 
 /// Evict the cached NARs of derivations no cache has fetched within the TTL.
 ///
-/// The retire moves the anchor side with the rows it drops, so evicting the output
-/// of a producer some evaluation still wants takes that producer's `fetchable` down
-/// and returns it to `Created`: a TTL pass CAN schedule a rebuild of what it just
-/// evicted. That is the intended consequence of a readiness flag that means "can
-/// serve its outputs right now"; the alternative is a terminal-success anchor whose
-/// dependents are blocked behind an artifact nobody has, which is the dead zone the
-/// counters replace. `STALE_CACHED_NARS_SELECT` keeps it rare by excluding any
-/// derivation with a non-terminal anchor.
+/// The retire moves the anchor side with the rows it drops, and its producer reset
+/// returns a terminal-success anchor with nothing left to serve to `Created`, which
+/// a `build_job` can then re-promote into a rebuild. This pass never triggers that:
+/// `STALE_CACHED_NARS_SELECT` admits a row only when the derivation's anchor is in
+/// the terminal-FAILURE set, and the reset keys on terminal SUCCESS, so an age-based
+/// eviction cannot schedule a rebuild of what it just evicted. The reset belongs to
+/// the paths where the artifact is genuinely gone (a zombie row, a demote), where a
+/// rebuild is the recovery and the alternative is a terminal-success anchor whose
+/// dependents block behind an artifact nobody has.
+///
+/// One case does reach it: a hash a terminal-success derivation ALSO produces, whose
+/// `cached_path` row is shared and goes with this eviction. That producer has really
+/// lost its artifact, so the rebuild is correct rather than churn.
 pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
     let ttl_hours = state.config.storage.nar_ttl_hours;
     if ttl_hours == 0 {
@@ -673,7 +678,7 @@ mod tests {
             ..Default::default()
         };
         // The purge retires the row: the ordered lock pass, the DELETE that reports
-        // what it removed, the three flag clears (no reverse ripple, the zombie was
+        // what it removed, the `is_cached` clear (no reverse ripple, the zombie was
         // not whole), then the anchor side over the hash it asked about.
         let mut retired = BTreeMap::new();
         retired.insert("hash".to_string(), Value::String(Some(zombie_hash.into())));
@@ -708,8 +713,8 @@ mod tests {
         let log = gradient_db::pool::statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
-            9,
-            "keep-set, zombie scan, retire lock, delete, is_cached, two flag clears, producers, owners: {log:?}"
+            7,
+            "keep-set, zombie scan, retire lock, delete, is_cached, producers, owners: {log:?}"
         );
     }
 
