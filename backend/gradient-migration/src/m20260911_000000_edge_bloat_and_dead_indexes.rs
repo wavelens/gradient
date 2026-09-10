@@ -28,6 +28,20 @@
 //! key onto it, so the natural key `(derivation, hash)` becomes the primary key
 //! and the `id` column goes with its index.
 //!
+//! `idx-cached_path_reference-order` is rebuilt as a covering index. It is
+//! `(referrer, "position")`, and its only reader is
+//! `runtime_closure::references_for_hash`, which projects `reference` to
+//! rebuild a narinfo `References:` line: 109 billion index tuples read and
+//! 108.6 billion of them fetched back from the heap, because the column it
+//! selects is the one column the index does not carry. `INCLUDE (reference)`
+//! makes that scan index-only and costs roughly the index's own size again.
+//!
+//! `idx-cached_path_reference-pair` is deliberately left alone despite the same
+//! 97.6% ratio. It is the UNIQUE `(referrer, reference)` the reference upsert
+//! names as its conflict target, so the heap access IS the row being updated and
+//! no payload column can remove it; it reads 30 million tuples against the order
+//! index's 109 billion.
+//!
 //! The statistics object teaches the planner that `status`, `fetchable` and
 //! `unready_deps` are correlated. Every dispatch and promotion predicate filters
 //! on two or three of them at once, and independent selectivity underestimates
@@ -63,6 +77,9 @@ fn up_statements() -> Vec<String> {
     stmts.extend(
         [
             r#"DROP INDEX IF EXISTS "idx-cached_path-hash""#,
+            r#"DROP INDEX IF EXISTS "idx-cached_path_reference-order""#,
+            r#"CREATE INDEX IF NOT EXISTS "idx-cached_path_reference-order"
+               ON cached_path_reference (referrer, "position") INCLUDE (reference)"#,
             "ALTER TABLE derivation_input_source DROP CONSTRAINT IF EXISTS \
              derivation_input_source_pkey",
             "ALTER TABLE derivation_input_source ADD PRIMARY KEY (derivation, hash)",
@@ -93,6 +110,10 @@ fn down_statements() -> Vec<String> {
         "ALTER TABLE derivation_input_source ALTER COLUMN id SET NOT NULL".to_owned(),
         "ALTER TABLE derivation_input_source ADD PRIMARY KEY (id)".to_owned(),
         r#"CREATE INDEX IF NOT EXISTS "idx-cached_path-hash" ON cached_path (hash)"#.to_owned(),
+        r#"DROP INDEX IF EXISTS "idx-cached_path_reference-order""#.to_owned(),
+        r#"CREATE INDEX IF NOT EXISTS "idx-cached_path_reference-order"
+           ON cached_path_reference (referrer, "position")"#
+            .to_owned(),
     ];
 
     stmts.extend(
@@ -129,6 +150,38 @@ impl MigrationTrait for Migration {
 #[cfg(test)]
 mod tests {
     use super::{AUTOVACUUM_DEFAULTS, EDGE_TABLES, down_statements, up_statements};
+
+    /// The narinfo reference read projects the one column the order index does
+    /// not carry, so the rebuild has to add it as a payload and has to drop the
+    /// old definition first, or `IF NOT EXISTS` silently keeps the uncovered one.
+    #[test]
+    fn the_order_index_covers_the_column_its_only_reader_projects() {
+        let up = up_statements();
+        let drop = up
+            .iter()
+            .position(|s| s.contains(r#"DROP INDEX IF EXISTS "idx-cached_path_reference-order""#))
+            .expect("the old definition goes");
+        let create = up
+            .iter()
+            .position(|s| {
+                s.contains(r#"CREATE INDEX IF NOT EXISTS "idx-cached_path_reference-order""#)
+            })
+            .expect("the covering definition lands");
+
+        assert!(drop < create, "{up:?}");
+        assert!(up[create].contains("INCLUDE (reference)"), "{}", up[create]);
+        assert!(
+            up[create].contains(r#"(referrer, "position")"#),
+            "the key columns must not change: {}",
+            up[create]
+        );
+        assert!(
+            !up.iter()
+                .any(|s| s.contains("idx-cached_path_reference-pair")),
+            "the pair index is the upsert's conflict target, so a payload cannot \
+             remove its heap access: {up:?}"
+        );
+    }
 
     /// A dead-tuple threshold alone never fires on an append-only edge table
     /// (`cached_path_reference` carries 58 dead tuples against 7.7M live), so the
