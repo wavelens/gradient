@@ -18,7 +18,10 @@
 
 use crate::graph_sql::{ClosureDirection, dependency_closure_cte};
 use anyhow::{Context, Result};
-use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, FromQueryResult, Statement};
+use sea_orm::{
+    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, FromQueryResult, Statement,
+    TransactionTrait,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use gradient_types::*;
@@ -39,10 +42,13 @@ struct EdgeRow {
 /// edges.
 ///
 /// A start node nothing depends on ⇒ result contains exactly `{start}`.
-pub async fn collect_transitive_dependents<C: ConnectionTrait>(
+pub async fn collect_transitive_dependents<C>(
     db: &C,
     start: DerivationId,
-) -> Result<HashSet<DerivationId>> {
+) -> Result<HashSet<DerivationId>>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let sql = format!(
         "{} SELECT derivation FROM dependents",
         dependency_closure_cte(
@@ -51,14 +57,18 @@ pub async fn collect_transitive_dependents<C: ConnectionTrait>(
             ClosureDirection::Dependents,
         )
     );
+    let walk = crate::graph_sql::begin_walk(db)
+        .await
+        .context("open the reverse-edge walk")?;
     let rows = DerivationRow::find_by_statement(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         sql,
         [start.into_inner().into()],
     ))
-    .all(db)
+    .all(&walk)
     .await
     .context("walk derivation_dependency reverse edges")?;
+    walk.commit().await.context("close the reverse-edge walk")?;
 
     Ok(rows
         .into_iter()

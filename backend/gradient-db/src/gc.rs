@@ -212,7 +212,10 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
          WHERE d.created_at < $1
            AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.derivation = d.id)"
     );
-    let rows = db
+    let walk = crate::graph_sql::begin_walk(db)
+        .await
+        .context("GC: failed to open the keep-set walk")?;
+    let rows = walk
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             &select_sql,
@@ -220,6 +223,9 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
         ))
         .await
         .context("Failed to query orphan derivations")?;
+    walk.commit()
+        .await
+        .context("GC: failed to close the keep-set walk")?;
 
     // Capture each candidate's own `.drv` hash before deletion so the reclaim
     // set can drop the `.drv` NAR + cached_path, not just the outputs.
@@ -323,14 +329,23 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     let mut deleted: HashSet<DerivationId> = HashSet::new();
     for chunk in candidate_ids.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
-        match db
-            .query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                &delete_sql,
-                [ids.into()],
-            ))
-            .await
-        {
+        // The re-check walks the whole keep-set again, so the chunk gets its own
+        // walk transaction; a failed chunk rolls its delete back and is skipped.
+        let outcome = async {
+            let walk = crate::graph_sql::begin_walk(db).await?;
+            let returned = walk
+                .query_all_raw(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    &delete_sql,
+                    [ids.into()],
+                ))
+                .await?;
+            walk.commit().await?;
+            Ok::<Vec<sea_orm::QueryResult>, sea_orm::DbErr>(returned)
+        }
+        .await;
+
+        match outcome {
             Ok(returned) => deleted.extend(
                 returned
                     .iter()
