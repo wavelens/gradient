@@ -202,6 +202,8 @@ Nothing needs to change for that to become an option. `derivation` is already a 
 
 **API keys** - 32 random bytes encoded as hex, stored hashed in `api.key`, prefixed with `GRAD` when returned to the user. The `authorization::authorize` middleware accepts both token types in the `Authorization: Bearer` header.
 
+**Last used.** `api.last_used_at` and `session.last_used_at` are stamped on the request path at most once per minute per key or session (`ServerState::last_used_stamps`, `LAST_USED_STAMP_INTERVAL`). A failed stamp is logged and never fails the request.
+
 **OIDC** - `oidc_login_create` builds the authorization URL with PKCE (S256), storing `state`, `nonce`, and the PKCE verifier in a short-lived signed `oidc_csrf` cookie. `oidc_login_verify` validates `state`, exchanges the code (sending `code_verifier`), verifies the ID token against the provider JWKS, then upserts the user row and returns a JWT. Endpoint discovery is automatic from `GRADIENT_OIDC_DISCOVERY_URL/.well-known/openid-configuration`.
 
 ---
