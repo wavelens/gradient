@@ -182,7 +182,7 @@ The Job Board records build/eval phase timings, dispatch decisions (with scoring
 | `otlpPushIntervalSecs` / `GRADIENT_OTLP_PUSH_INTERVAL` | 30 | OTLP push interval. |
 | `dispatchRecordCandidates` / `GRADIENT_DISPATCH_RECORD_CANDIDATES` | false | Persist runner-up scoring candidates per dispatch. |
 | `instanceMetricsIntervalSecs` / `GRADIENT_INSTANCE_METRICS_INTERVAL` | 30 | InstanceContext window recomputation interval. |
-| `graphConsistencyIntervalSecs` / `GRADIENT_GRAPH_CONSISTENCY_INTERVAL` | 300 | Build-graph consistency sweep interval; violations log as warnings. The sweep is also the only backstop for the moved counters: it repairs `cached_path.missing_references` over the paths pending anchors gate on, recounts `fetchable` and `unready_deps` over the pending anchors, settles the queue against them, and re-heals graph-stuck evaluations. 0 disables all of that. |
+| `graphConsistencyIntervalSecs` / `GRADIENT_GRAPH_CONSISTENCY_INTERVAL` | 300 | Build-graph consistency sweep interval; violations log as warnings. The sweep is also the only backstop for the moved counters: it repairs `cached_path.missing_references` over the paths pending anchors gate on, recounts `fetchable` and `unready_deps` over the pending anchors and their direct dependencies, settles the queue against them, and re-heals graph-stuck evaluations. 0 disables all of that. |
 
 ## OIDC
 
