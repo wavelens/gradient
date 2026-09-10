@@ -164,7 +164,8 @@ def timeline(conn: sqlite3.Connection) -> str:
 
 def why_stuck(conn: sqlite3.Connection) -> str:
     """For each anchor that never reached a terminal state, name the gate that
-    is false and the dependency holding it there."""
+    is false and the dependency holding it there, and say so plainly when the
+    remaining candidates are gates the report does not carry."""
     placeholders = ", ".join("?" for _ in NON_TERMINAL_BUILD_STATUS)
     anchors = conn.execute(
         f"SELECT db.id, db.derivation, db.status, d.name, {', '.join(GATE_COLUMNS)} "
@@ -185,10 +186,18 @@ def why_stuck(conn: sqlite3.Connection) -> str:
             blocked.append(f"unready_deps = {a['unready_deps']}")
 
         label = a["name"] or a["derivation"]
+        status = BUILD_STATUS.get(a["status"], a["status"])
         if blocked:
-            out.append(f"{label}: {BUILD_STATUS.get(a['status'], a['status'])}, waiting on {', '.join(blocked)}")
+            out.append(f"{label}: {status}, waiting on {', '.join(blocked)}")
         else:
-            out.append(f"{label}: {BUILD_STATUS.get(a['status'], a['status'])}, every gate open")
+            # Never "every gate open": an anchor held out of the queue by a missing
+            # `build_job` or by its own `.drv` not being whole reports nothing here,
+            # and reading that as "readiness is fine" sends the operator the wrong way.
+            out.append(
+                f"{label}: {status}, walked and unready_deps are open; "
+                f"the report cannot see the remaining two gates "
+                f"(a build_job referencing it, and its own .drv being whole)"
+            )
 
         # A dependency that is not fetchable is exactly what holds `unready_deps`
         # above zero, terminal-success or not, so it is listed alongside the

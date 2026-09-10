@@ -158,9 +158,9 @@ pub async fn cascade_dependency_failed<C: ConnectionTrait>(
 /// `requeue_failed_closure_for_eval` thaw a dependent back to `Created` without
 /// re-checking its (still-failed) dependency, and a concurrent eval can re-fail a
 /// dependency after the dependent was thawed. Such a dependent can never build, yet
-/// sits `Created`/`Queued`/`FailedTransient` forever - the dispatch gate holds it
-/// (its dep is not terminal-success) and `check_evaluation_done` never finalizes its
-/// evaluation. This walks `derivation_dependency` upward from every terminal-failed
+/// sits `Created`/`Queued`/`FailedTransient` forever - its dependency's failure keeps
+/// `unready_deps` above zero, so it is never promoted (or is un-promoted again if it
+/// was), and `check_evaluation_done` never finalizes its evaluation. This walks `derivation_dependency` upward from every terminal-failed
 /// anchor in the closure and fails each reachable non-terminal anchor in one
 /// statement (the recursive term traverses the graph structurally, so a whole
 /// poisoned subtree converges per pass). Returns the changes it made so the caller

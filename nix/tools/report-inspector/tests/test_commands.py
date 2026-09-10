@@ -53,11 +53,14 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
     conn.execute("INSERT INTO derivation VALUES ('d1', 'vendor-registry', 0)")
     conn.execute("INSERT INTO derivation VALUES ('d2', 'cargo-package-clap_complete-4.6.9', 1)")
     conn.execute("INSERT INTO derivation VALUES ('d3', 'nixos-system-builder-1', 1)")
-    # b1 is blocked on both gates the report carries, b3 only on the count, so
-    # the two are proven separately and neither is named while it is open.
+    conn.execute("INSERT INTO derivation VALUES ('d4', 'openssl-3.7.2', 1)")
+    # b1 is blocked on both gates the report carries, b3 only on the count, so the
+    # two are proven separately and neither is named while it is open. b4 has both
+    # visible gates open, which is the case the report must not call settled.
     conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 1)")
     conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 0, 0)")
     conn.execute("INSERT INTO derivation_build VALUES ('b3', 'd3', 1, 0, 2)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b4', 'd4', 0, 0, 0)")
     conn.execute("INSERT INTO derivation_dependency VALUES ('dd1', 'd1', 'd2')")
     conn.execute("INSERT INTO derivation_dependency VALUES ('dd2', 'd3', 'd1')")
     conn.execute("INSERT INTO derivation_dependency VALUES ('dd3', 'd3', 'd2')")
@@ -151,6 +154,16 @@ def test_why_stuck_names_the_gate_and_the_blocking_dependency(report):
     assert "walked" not in counted
 
     assert "    dep cargo-package-clap_complete-4.6.9 status FailedPermanent not fetchable" in lines
+
+
+def test_why_stuck_never_calls_an_anchor_settled_on_gates_it_cannot_see(report):
+    open_visible = next(
+        line for line in commands.why_stuck(report).splitlines()
+        if line.startswith("openssl-3.7.2")
+    )
+    assert "every gate open" not in open_visible
+    assert "build_job" in open_visible
+    assert ".drv" in open_visible
 
 
 def test_failed_lists_attempts_and_dumps_one_log(report):

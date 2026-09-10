@@ -215,8 +215,12 @@ pub fn gates_predicate(alias: &str) -> String {
     )
 }
 
-/// [`gates_predicate`] on a `Created` anchor: what promotion writes. The dispatch
-/// gate is the same predicate one status later.
+/// [`gates_predicate`] on a `Created` anchor: what promotion writes, and the whole
+/// of what makes `Queued` mean the gates held. Dispatch does not re-derive this; it
+/// reads the status, so the promotion write and the matching un-promote
+/// ([`crate::readiness::unpromote_ungated`]) are the only two things maintaining the
+/// invariant, with [`crate::readiness::repair_pending`] as the backstop for a counter
+/// that drifted.
 pub fn promotable_predicate(alias: &str) -> String {
     format!(
         "({alias}.status = {created} AND {gates})",
