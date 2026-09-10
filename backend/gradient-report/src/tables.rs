@@ -577,6 +577,26 @@ mod tests {
         }
     }
 
+    /// The report inspector's `why_stuck` tells an operator that the `build_job`
+    /// promotion gate is open for every anchor it carries, which is only true
+    /// because this spec selects its anchors BY their `build_job`. Nothing else
+    /// ties the two, so a rewrite that scopes `derivation_build` some other way
+    /// would silently make that claim wrong.
+    #[test]
+    fn the_anchor_spec_is_scoped_by_build_job_so_that_gate_is_always_open() {
+        let specs = eval_scope_tables();
+        let spec = specs
+            .iter()
+            .find(|s| s.name == "derivation_build")
+            .expect("the report exports derivation_build");
+        assert!(
+            spec.sql
+                .contains("SELECT derivation FROM build_job WHERE evaluation = $1"),
+            "why_stuck reports the build_job gate as open by construction: {}",
+            spec.sql
+        );
+    }
+
     #[test]
     fn every_spec_is_scoped_and_internally_consistent() {
         for spec in eval_scope_tables().iter().chain(instance_tables()) {
