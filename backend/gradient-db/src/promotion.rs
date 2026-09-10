@@ -175,17 +175,22 @@ where
 /// statement (the recursive term traverses the graph structurally, so a whole
 /// poisoned subtree converges per pass). Returns the changes it made so the caller
 /// can fan out the effects and finalize the now-settled evaluations.
-pub async fn reconcile_dependency_failed<C: ConnectionTrait>(
+pub async fn reconcile_dependency_failed<C>(
     db: &C,
     evaluation: gradient_types::EvaluationId,
-) -> Result<Vec<TransitionChange>, DbErr> {
-    let rows = db
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let rows = walk
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             dependency_failed_reconcile_sql(),
             [Value::Uuid(Some(evaluation.into_inner()))],
         ))
         .await?;
+    walk.commit().await?;
 
     Ok(returned_transitions(rows))
 }

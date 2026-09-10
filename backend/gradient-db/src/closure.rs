@@ -15,8 +15,8 @@
 
 use crate::graph_sql::{ClosureDirection, dependency_closure_cte};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DbErr, EntityTrait, FromQueryResult,
-    QueryFilter, Statement,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, EntityTrait,
+    FromQueryResult, QueryFilter, Statement, TransactionTrait,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -46,27 +46,33 @@ fn roots_closure_cte() -> String {
 
 /// Forward `derivation_dependency` closure of `roots`; returns every reachable
 /// derivation id (roots included).
-pub async fn transitive_closure_reachable<C: ConnectionTrait>(
+pub async fn transitive_closure_reachable<C>(
     db: &C,
     roots: &[DerivationId],
-) -> Result<HashSet<DerivationId>, DbErr> {
+) -> Result<HashSet<DerivationId>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     if roots.is_empty() {
         return Ok(HashSet::new());
     }
 
     let ids: Vec<uuid::Uuid> = roots.iter().map(|d| d.into_inner()).collect();
-    Ok(
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let reached: HashSet<DerivationId> =
         DerivationRow::find_by_statement(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             format!("{} SELECT derivation FROM closure", roots_closure_cte()),
             [ids.into()],
         ))
-        .all(db)
+        .all(&walk)
         .await?
         .into_iter()
         .map(|r| DerivationId::new(r.derivation))
-        .collect(),
-    )
+        .collect();
+    walk.commit().await?;
+
+    Ok(reached)
 }
 
 /// Map each derivation id to its coalesced output NAR size
@@ -120,10 +126,10 @@ pub async fn output_sizes_by_drv<C: ConnectionTrait>(
 
 /// Total coalesced output NAR size of the full build closure seeded at `roots`.
 /// Returns `0` for an empty closure or one with no known sizes.
-pub async fn transitive_closure_size<C: ConnectionTrait>(
-    db: &C,
-    roots: &[DerivationId],
-) -> Result<i64, DbErr> {
+pub async fn transitive_closure_size<C>(db: &C, roots: &[DerivationId]) -> Result<i64, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let closure = transitive_closure_reachable(db, roots).await?;
     let all_ids: Vec<DerivationId> = closure.into_iter().collect();
     let by_drv = output_sizes_by_drv(db, &all_ids).await?;
@@ -136,15 +142,19 @@ pub async fn transitive_closure_size<C: ConnectionTrait>(
 /// visited set). Two round trips for the whole batch instead of one full DB walk
 /// per root, which matters when a dispatch round backfills many derivations that
 /// share most of their closure.
-pub async fn transitive_closure_sizes<C: ConnectionTrait>(
+pub async fn transitive_closure_sizes<C>(
     db: &C,
     roots: &[DerivationId],
-) -> Result<HashMap<DerivationId, i64>, DbErr> {
+) -> Result<HashMap<DerivationId, i64>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     if roots.is_empty() {
         return Ok(HashMap::new());
     }
 
     let ids: Vec<uuid::Uuid> = roots.iter().map(|d| d.into_inner()).collect();
+    let walk = crate::graph_sql::begin_walk(db).await?;
     let edges = EdgeRow::find_by_statement(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         format!(
@@ -154,8 +164,9 @@ pub async fn transitive_closure_sizes<C: ConnectionTrait>(
         ),
         [ids.into()],
     ))
-    .all(db)
+    .all(&walk)
     .await?;
+    walk.commit().await?;
 
     let mut adjacency: HashMap<DerivationId, Vec<DerivationId>> = HashMap::new();
     let mut reachable: HashSet<DerivationId> = roots.iter().copied().collect();
@@ -231,12 +242,21 @@ mod tests {
         dep(derivation, derivation)
     }
 
+    /// Every walk opens with `SET LOCAL work_mem`, which draws an exec result.
+    fn raise() -> sea_orm::MockExecResult {
+        sea_orm::MockExecResult {
+            last_insert_id: 0,
+            rows_affected: 0,
+        }
+    }
+
     #[tokio::test]
     async fn sums_closure_output_sizes() {
         let root = DerivationId::now_v7();
         let child = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
-            // the whole closure walk is now one statement
+            // the whole closure walk is one statement, preceded by the work_mem raise
+            .append_exec_results([raise()])
             .append_query_results([vec![node(root), node(child)]])
             // output_sizes_by_drv: outputs for [root, child]
             .append_query_results([vec![out(root, "r", Some(100)), out(child, "c", Some(40))]])
@@ -261,6 +281,7 @@ mod tests {
         let b = DerivationId::now_v7();
         let c = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_exec_results([raise()])
             // one statement returns every edge inside the closure
             .append_query_results([vec![dep(root, a), dep(root, b), dep(a, c), dep(b, c)]])
             .append_query_results([vec![
