@@ -50,6 +50,19 @@ pub async fn eval_anchor_statuses<C: ConnectionTrait>(
         .collect())
 }
 
+/// The anchor's current status, for the dispatcher's last look before a
+/// hand-out: a queued job whose gate regressed since it was enqueued reads
+/// `Created` here and is dropped instead of dispatched with a missing input.
+pub async fn anchor_status<C: ConnectionTrait>(
+    db: &C,
+    anchor: DerivationBuildId,
+) -> Result<Option<BuildStatus>, DbErr> {
+    Ok(EDerivationBuild::find_by_id(anchor)
+        .one(db)
+        .await?
+        .map(|a| a.status))
+}
+
 /// Evaluations that reference `derivation` (via a `build_job`). Drives status
 /// fan-out: a single anchor transition updates every referencing eval's view.
 pub async fn evals_referencing_derivation<C: ConnectionTrait>(

@@ -27,10 +27,10 @@
 //!   evaluations are parked so the server can be stopped safely. Cleared on the
 //!   next startup or when draining is disabled.
 //! - `GraphStuck` - workers can satisfy every pending build, yet none is
-//!   dispatchable: all anchors are `Created`, blocked behind the
-//!   `closure_complete` gate with no in-flight build to fire a promotion. The
-//!   reconciler self-heals the gate and re-promotes; this reason surfaces the
-//!   stall while recovery is attempted.
+//!   dispatchable: all anchors are `Created` with one of their promotion gates
+//!   false and no in-flight build to fire a promotion. The reconciler heals once
+//!   on entry and again when `pending_anchors` changes; otherwise the counters
+//!   promote the set the moment whatever it waits on arrives.
 
 use serde::{Deserialize, Serialize};
 
@@ -78,9 +78,9 @@ pub enum WaitingReason {
     /// The connected pool can build every pending anchor, but none is
     /// dispatchable - the whole pending set is `Created` with one of its promotion
     /// gates false and no in-flight build to drive promotion. Which gate it is is
-    /// not recorded here; every one of them moves on an event and none is coming,
-    /// so the reconciler attempts a self-heal each pass and `pending_anchors` is
-    /// the blocked count.
+    /// not recorded here; `pending_anchors` is the blocked count. The reconciler
+    /// heals once on entry and again when that count changes, and the counters
+    /// promote the set reactively otherwise.
     GraphStuck {
         pending_anchors: u32,
     },
