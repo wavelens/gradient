@@ -21,15 +21,18 @@ use tracing::{debug, warn};
 
 use crate::messages::{NarCommit, NarCommitted, SignTargets};
 
-/// Record a stored NAR: the row, its reference index, the counter seeded from it
-/// and the wholeness flip that counter makes.
+/// Record a stored NAR: the row, its reference index, the counter seeded from it,
+/// the wholeness flip that counter makes, and the anchor side of that flip.
 ///
 /// Runs inside the graph actor's transaction, and only there. Both the reference
 /// endpoints and the pre-commit wholeness endpoint are read under locks that a
 /// pooled handle would release with the statement that took them, which is a race
 /// against the three maintenance retires with no compile error and no runtime
 /// signal (see `gradient_db::nar_closure`), so the handle is checked here instead.
-pub(crate) async fn commit(db: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCommitted> {
+/// The anchor locks are taken on that same transaction, always after the
+/// `cached_path` ones and never before.
+pub(crate) async fn commit(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<NarCommitted> {
+    let db = &ctx.worker_db;
     let sp = StorePath::parse(&c.store_path).map_err(|e| anyhow::anyhow!("{e}"))?;
     if !is_nix32_hash(sp.hash()) {
         anyhow::bail!("malformed store path: {}", c.store_path);
@@ -56,10 +59,12 @@ pub(crate) async fn commit(db: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCo
         (false, true) => {
             let moved = gradient_db::ripple_whole(db, vec![sp.hash().to_owned()]).await?;
             debug!(store_path = %c.store_path, whole = moved.len(), "reference closure ripple");
+            advance_anchors(ctx, txn, &moved).await?;
         }
         (true, false) => {
             let moved = gradient_db::ripple_unwhole(db, vec![sp.hash().to_owned()]).await?;
             warn!(store_path = %c.store_path, unwhole = moved.len(), "commit added unwhole references");
+            retract_anchors(ctx, txn, &moved).await?;
         }
         _ => {}
     }
@@ -80,6 +85,55 @@ pub(crate) async fn commit(db: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCo
         created,
         outputs_marked,
     })
+}
+
+/// The anchor side of a forward wholeness flip: the derivations whose outputs
+/// `whole` now covers can serve them, and the derivations whose own `.drv` is in
+/// `whole` are importable, so their gates may have opened.
+///
+/// One ordered lock over both sets, on the commit's own transaction: the mark is a
+/// bound and not a claim, so an anchor whose predicate does not hold is passed over,
+/// and `promote` runs under the same lock that produced its candidates.
+async fn advance_anchors(
+    ctx: &DbContext,
+    txn: &sea_orm::DatabaseTransaction,
+    whole: &[String],
+) -> anyhow::Result<()> {
+    let producers = gradient_db::producers_of_hashes(txn, whole).await?;
+    let owners = gradient_db::derivations_with_hashes(txn, whole).await?;
+    let lock = gradient_db::lock_anchors(txn, &union(&producers, &owners)).await?;
+    let mut changes = gradient_db::became_fetchable(&lock).await?;
+    changes.extend(gradient_db::promote(txn, &owners).await?);
+    gradient_db::emit_transition_effects(ctx, &changes).await;
+
+    Ok(())
+}
+
+/// The symmetric loss. A commit that reports a reference we do not have takes paths
+/// OUT of wholeness, and an anchor left fetchable against one of them dispatches a
+/// build whose input nothing can provide - the forward-only half of this pair is the
+/// dead zone this project has paid for repeatedly.
+async fn retract_anchors(
+    ctx: &DbContext,
+    txn: &sea_orm::DatabaseTransaction,
+    unwhole: &[String],
+) -> anyhow::Result<()> {
+    let producers = gradient_db::producers_of_hashes(txn, unwhole).await?;
+    let lock = gradient_db::lock_anchors(txn, &producers).await?;
+    let mut changes = gradient_db::lost_fetchability(&lock).await?;
+    changes.extend(gradient_db::unpromote_drv_owners(txn, unwhole).await?);
+    gradient_db::emit_transition_effects(ctx, &changes).await;
+
+    Ok(())
+}
+
+fn union(a: &[DerivationId], b: &[DerivationId]) -> Vec<DerivationId> {
+    let mut all = a.to_vec();
+    all.extend_from_slice(b);
+    all.sort_unstable();
+    all.dedup();
+
+    all
 }
 
 /// The debug-info walk decompresses the whole NAR, so it runs detached.
@@ -298,8 +352,11 @@ async fn queue_signature_placeholders(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_ctx::ctx;
     use gradient_types::ids::ProjectId;
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, TransactionTrait, Value};
+    use sea_orm::{
+        DatabaseBackend, DatabaseConnection, MockDatabase, MockExecResult, TransactionTrait, Value,
+    };
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use uuid::Uuid;
@@ -371,9 +428,9 @@ mod tests {
     /// so every test drives one. The mock records the whole transaction as a single
     /// log entry whose synthetic `BEGIN`/`COMMIT` the shared helper drops, so the
     /// statement indices stay the ones the code issues.
-    async fn commit_in_transaction(pool: &WorkerDb, c: &NarCommit) -> anyhow::Result<NarCommitted> {
-        let tx = Arc::new(pool.begin().await.expect("begin"));
-        let scoped = pool.in_transaction(Arc::clone(&tx));
+    async fn commit_in_transaction(ctx: &DbContext, c: &NarCommit) -> anyhow::Result<NarCommitted> {
+        let tx = Arc::new(ctx.worker_db.begin().await.expect("begin"));
+        let scoped = ctx.in_transaction(Arc::clone(&tx));
         let committed = commit(&scoped, c).await;
         drop(scoped);
         Arc::try_unwrap(tx)
@@ -385,37 +442,36 @@ mod tests {
         committed
     }
 
-    fn log_has_signature_insert(db: WorkerDb) -> bool {
-        statements(db)
-            .iter()
-            .any(|s| s.contains("cached_path_signature"))
+    /// The scripted commit, its context dropped so the pool handle the log is read
+    /// from is the last one alive.
+    async fn commit_and_log(db: DatabaseConnection, c: &NarCommit) -> Vec<String> {
+        let (ctx, pool) = ctx(db).await;
+        commit_in_transaction(&ctx, c).await.expect("commit");
+        drop(ctx);
+
+        statements(pool)
     }
 
     /// An existing whole row re-pushed with `references`, seeded back to whole so
     /// no ripple runs: the reference index is the only thing under test.
     async fn recommit_log(references: Vec<String>) -> Vec<String> {
-        let db = WorkerDb::new(
-            MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([
-                    vec![returned_cached_path(HASH)],
-                    vec![returned_cached_path(HASH)],
-                ])
-                .append_query_results([seed_reply(true)])
-                .append_exec_results([exec(0), exec(1), exec(1)])
-                .into_connection(),
-        );
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([
+                vec![returned_cached_path(HASH)],
+                vec![returned_cached_path(HASH)],
+            ])
+            .append_query_results([seed_reply(true)])
+            .append_exec_results([exec(0), exec(1), exec(1)])
+            .into_connection();
 
-        commit_in_transaction(
-            &db,
+        commit_and_log(
+            db,
             &NarCommit {
                 references,
                 ..commit_for(SP)
             },
         )
         .await
-        .expect("commit");
-
-        statements(db)
     }
 
     /// A resolved project enqueues a `cached_path_signature` placeholder for every
@@ -425,28 +481,25 @@ mod tests {
     /// the sign sweep has nothing to sign, and the narinfo 404s forever.
     #[tokio::test]
     async fn project_target_enqueues_signature_placeholder() {
-        let db = WorkerDb::new(
-            MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([Vec::<MCachedPath>::new()])
-                .append_query_results([vec![returned_cached_path(HASH)]])
-                .append_query_results([seed_reply(false)])
-                .append_query_results([vec![project_cache_row()]])
-                .append_exec_results([exec(0), exec(0), exec(1), exec(1)])
-                .into_connection(),
-        );
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([seed_reply(false)])
+            .append_query_results([vec![project_cache_row()]])
+            .append_exec_results([exec(0), exec(0), exec(1), exec(1)])
+            .into_connection();
 
-        commit_in_transaction(
-            &db,
+        let log = commit_and_log(
+            db,
             &NarCommit {
                 targets: SignTargets::ProjectCaches(project()),
                 ..commit_for(SP)
             },
         )
-        .await
-        .expect("commit");
+        .await;
 
         assert!(
-            log_has_signature_insert(db),
+            log.iter().any(|s| s.contains("cached_path_signature")),
             "ProjectCaches target must insert a cached_path_signature placeholder"
         );
     }
@@ -454,48 +507,43 @@ mod tests {
     #[tokio::test]
     async fn ingest_records_content_address() {
         let ca = "text:sha256:006vc8gixyrcynsx4lz1qxingl0mdja3l0xw1nl0j73isg37x944";
-        let db = WorkerDb::new(
-            MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([Vec::<MCachedPath>::new()])
-                .append_query_results([vec![returned_cached_path(HASH)]])
-                .append_query_results([seed_reply(false)])
-                .append_exec_results([exec(0), exec(0), exec(0)])
-                .into_connection(),
-        );
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([seed_reply(false)])
+            .append_exec_results([exec(0), exec(0), exec(0)])
+            .into_connection();
 
-        commit_in_transaction(
-            &db,
+        let log = commit_and_log(
+            db,
             &NarCommit {
                 ca: Some(ca.to_owned()),
                 ..commit_for(SP)
             },
         )
-        .await
-        .expect("commit");
+        .await;
 
-        let logged = statements(db).iter().any(|s| s.contains(ca));
-        assert!(logged, "the content address must be written to cached_path");
+        assert!(
+            log.iter().any(|s| s.contains(ca)),
+            "the content address must be written to cached_path"
+        );
     }
 
     /// No resolvable project records the path but enqueues no signature, so the
     /// endpoint can distinguish "not yet signed" from "will never be signed".
     #[tokio::test]
     async fn none_target_enqueues_no_signature() {
-        let db = WorkerDb::new(
-            MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([Vec::<MCachedPath>::new()])
-                .append_query_results([vec![returned_cached_path(HASH)]])
-                .append_query_results([seed_reply(false)])
-                .append_exec_results([exec(0), exec(0), exec(0)])
-                .into_connection(),
-        );
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([seed_reply(false)])
+            .append_exec_results([exec(0), exec(0), exec(0)])
+            .into_connection();
 
-        commit_in_transaction(&db, &commit_for(SP))
-            .await
-            .expect("commit");
+        let log = commit_and_log(db, &commit_for(SP)).await;
 
         assert!(
-            !log_has_signature_insert(db),
+            !log.iter().any(|s| s.contains("cached_path_signature")),
             "None target must not touch cached_path_signature"
         );
     }
@@ -505,27 +553,25 @@ mod tests {
     /// referrers, all before the outputs are marked cached.
     #[tokio::test]
     async fn a_whole_commit_seeds_then_ripples_to_its_referrers() {
-        let db = WorkerDb::new(
-            MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([Vec::<MCachedPath>::new()])
-                .append_query_results([vec![returned_cached_path(HASH)]])
-                .append_query_results([seed_reply(true)])
-                .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-                .append_exec_results([exec(0), exec(1), exec(0)])
-                .into_connection(),
-        );
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([seed_reply(true)])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results([exec(0), exec(1), exec(0)])
+            .into_connection();
 
-        commit_in_transaction(
-            &db,
+        let log = commit_and_log(
+            db,
             &NarCommit {
                 references: vec!["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-dep".to_owned()],
                 ..commit_for(SP)
             },
         )
-        .await
-        .expect("commit");
+        .await;
 
-        let log = statements(db);
         let seed = log
             .iter()
             .position(|s| s.contains("SET missing_references = ("))
@@ -539,6 +585,47 @@ mod tests {
             .position(|s| s.contains("is_cached"))
             .expect("outputs are marked");
         assert!(seed < ripple && ripple < marks, "{log:?}");
+    }
+
+    /// A path that just became whole advances the anchor side in the SAME
+    /// transaction as the reference ripple: the derivations whose outputs it backs
+    /// are offered to the fetchable mark, and the derivations whose own `.drv` it
+    /// is are offered to promotion. Without this the counters only move on the next
+    /// sweep, and a dependent waits a sweep interval for an input it already has.
+    #[tokio::test]
+    async fn a_whole_commit_advances_the_anchors_behind_the_paths_it_completed() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([seed_reply(true)])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results([exec(0), exec(1), exec(0)])
+            .into_connection();
+
+        let log = commit_and_log(db, &commit_for(SP)).await;
+
+        let ripple = log
+            .iter()
+            .position(|s| s.contains("missing_references - c.n"))
+            .expect("ripple runs");
+        let producers = log
+            .iter()
+            .position(|s| s.contains("FROM derivation_output o WHERE o.hash = ANY($1)"))
+            .expect("the producers of the completed paths are resolved");
+        let owners = log
+            .iter()
+            .position(|s| s.contains("FROM derivation d WHERE d.hash = ANY($1)"))
+            .expect("the owners of the completed .drv paths are resolved");
+        assert!(
+            ripple < producers && producers < owners,
+            "the anchor side follows the ripple that produced its set: {log:?}"
+        );
+        assert!(
+            log[producers].contains(HASH),
+            "the anchor side reads the paths the ripple moved: {log:?}"
+        );
     }
 
     /// Re-pushing a path that was already whole must ripple nothing: the seed
@@ -601,9 +688,10 @@ mod tests {
     /// so the commit refuses the pooled one instead of silently racing.
     #[tokio::test]
     async fn a_pooled_commit_is_rejected_instead_of_racing_the_retires() {
-        let db = WorkerDb::new(MockDatabase::new(DatabaseBackend::Postgres).into_connection());
+        let (pooled, _pool) =
+            ctx(MockDatabase::new(DatabaseBackend::Postgres).into_connection()).await;
 
-        let err = commit(&db, &commit_for(SP))
+        let err = commit(&pooled, &commit_for(SP))
             .await
             .expect_err("a pooled commit must not run");
 
@@ -619,29 +707,27 @@ mod tests {
     /// with a hole in it.
     #[tokio::test]
     async fn a_commit_that_loses_wholeness_ripples_backward() {
-        let db = WorkerDb::new(
-            MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([
-                    vec![returned_cached_path(HASH)],
-                    vec![returned_cached_path(HASH)],
-                ])
-                .append_query_results([seed_reply(false)])
-                .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-                .append_exec_results([exec(0), exec(1), exec(1)])
-                .into_connection(),
-        );
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([
+                vec![returned_cached_path(HASH)],
+                vec![returned_cached_path(HASH)],
+            ])
+            .append_query_results([seed_reply(false)])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results([exec(0), exec(1), exec(1)])
+            .into_connection();
 
-        commit_in_transaction(
-            &db,
+        let log = commit_and_log(
+            db,
             &NarCommit {
                 references: vec!["cccccccccccccccccccccccccccccccc-gone".to_owned()],
                 ..commit_for(SP)
             },
         )
-        .await
-        .expect("commit");
+        .await;
 
-        let log = statements(db);
         assert!(
             log.iter().any(|s| s.contains("missing_references + c.n")),
             "losing wholeness must ripple backward: {log:?}"
@@ -649,6 +735,15 @@ mod tests {
         assert!(
             !log.iter().any(|s| s.contains("missing_references - c.n")),
             "{log:?}"
+        );
+        assert!(
+            log.iter()
+                .any(|s| s.contains("FROM derivation_output o WHERE o.hash = ANY($1)")),
+            "the producers of the paths that stopped being whole must be resolved: {log:?}"
+        );
+        assert!(
+            log.iter().any(|s| s.contains("d.hash = ANY($1::text[])")),
+            "the owner of a .drv that stopped being whole must leave the queue: {log:?}"
         );
     }
 
@@ -732,16 +827,15 @@ mod tests {
 
     #[tokio::test]
     async fn a_committed_path_backs_every_output_with_its_hash() {
-        let db = WorkerDb::new(
-            MockDatabase::new(DatabaseBackend::Postgres)
-                .append_query_results([Vec::<MCachedPath>::new()])
-                .append_query_results([vec![returned_cached_path(HASH)]])
-                .append_query_results([seed_reply(false)])
-                .append_exec_results([exec(0), exec(0), exec(2)])
-                .into_connection(),
-        );
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<MCachedPath>::new()])
+            .append_query_results([vec![returned_cached_path(HASH)]])
+            .append_query_results([seed_reply(false)])
+            .append_exec_results([exec(0), exec(0), exec(2)])
+            .into_connection();
+        let (ctx, _pool) = ctx(db).await;
 
-        let committed = commit_in_transaction(&db, &commit_for(SP)).await.unwrap();
+        let committed = commit_in_transaction(&ctx, &commit_for(SP)).await.unwrap();
         assert!(committed.created);
         assert_eq!(committed.outputs_marked, 2);
     }

@@ -226,10 +226,11 @@ pub async fn cleanup_stale_cached_nars(state: Arc<ServerState>) -> Result<()> {
             .await
             .context("TTL GC: failed to delete cached_path_signature rows")?;
 
-            gradient_db::retire_paths_where(&txn, &output_hashes, UNSIGNED_GUARD)
+            let retired = gradient_db::retire_paths_where(&txn, &output_hashes, UNSIGNED_GUARD)
                 .await
                 .context("TTL GC: failed to retire cached paths")?;
             txn.commit().await?;
+            gradient_db::emit_transition_effects(&state.db(), &retired.transitions).await;
         }
 
         // NAR file is shared by every cache for this output, so only delete when
@@ -341,11 +342,14 @@ async fn purge_zombie_cached_paths(
             let txn = state.worker_db.begin().await?;
             let retired = gradient_db::retire_paths(&txn, chunk).await?;
             txn.commit().await?;
-            Ok::<u64, sea_orm::DbErr>(retired.deleted.len() as u64)
+            Ok::<_, sea_orm::DbErr>(retired)
         }
         .await;
         match deleted {
-            Ok(n) => purged += n,
+            Ok(retired) => {
+                purged += retired.deleted.len() as u64;
+                gradient_db::emit_transition_effects(&state.db(), &retired.transitions).await;
+            }
             Err(e) => {
                 warn!(error = %e, batch = chunk.len(), "failed to purge zombie cached_path batch")
             }

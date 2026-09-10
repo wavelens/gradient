@@ -257,21 +257,28 @@ fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
 /// retires the `cached_path` row itself
 /// ([`crate::nar_closure::retire_paths`]: the row goes, its
 /// `cached_path_signature` rows cascade, the `derivation_output` FK is
-/// `ON DELETE SET NULL`, and every referrer's reference counter and gate flag
-/// moves back), and removes the NAR object from storage so the row and the object
-/// stay in step. The derivation
+/// `ON DELETE SET NULL`, and every referrer's reference counter, gate flag and
+/// anchor moves back), and removes the NAR object from storage so the row and the
+/// object stay in step. The derivation
 /// graph is left intact - only the cache artifact is removed. Returns the
 /// producing derivations for logging. A producerless input (`.drv`/source) is
 /// only purged when its NAR is genuinely gone: a still-present one is preserved
 /// (see [`preserve_missing_artifact`]) since nothing else can restore it.
-pub async fn demote_cached_output<C: ConnectionTrait>(
-    db: &C,
-    nar_storage: &gradient_storage::NarStore,
+///
+/// The producer reset lives in the retire, which decides it from the `fetchable`
+/// flag it has just written rather than from this hash: what this does here is
+/// drop the upstream trust the demoted output carried, since an anchor an upstream
+/// still offers is fetchable through `substitutable` and would otherwise keep a
+/// terminal status against an artifact nothing serves.
+pub async fn demote_cached_output(
+    ctx: &crate::DbContext,
     hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
     use gradient_entity::derivation_output::{Column as CDO, Entity as EDO};
-    use sea_orm::ActiveModelTrait;
+    use sea_orm::{ActiveModelTrait, TransactionTrait};
 
+    let db = &ctx.worker_db;
+    let nar_storage = &ctx.storage.nar_storage;
     let outputs = EDO::find().filter(CDO::Hash.eq(hash)).all(db).await?;
     let mut producers = Vec::with_capacity(outputs.len());
     for o in outputs {
@@ -292,36 +299,26 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
         return Ok(producers);
     }
 
-    // The artifact is gone, so a producer the graph trusts as build-once success
-    // (Completed=3 / Substituted=7) is no longer fetchable. `resolve_anchors`
-    // only re-queues terminal-failure anchors, so without this such a producer
-    // would stay "succeeded" forever and every dependent fail `InputsUnavailable`
-    // indefinitely. Reset it to a fresh build intent (Created, real build - not a
-    // re-substitute of the deleted artifact); the next eval re-marks it
-    // substitutable if it is genuinely still on an upstream, having re-walked it
-    // because `demoted_output` cleared `external_url` (not just `is_cached`) and
-    // pruning keys on that.
+    // The artifact is gone, so the upstream offer that was recorded with it is not
+    // evidence any more: `demoted_output` cleared `external_url`, and this clears
+    // the anchor's `substitutable` so the retire's `fetchable` mark sees the truth.
+    // The next eval re-marks it substitutable if it is genuinely still on an
+    // upstream, having re-walked the node because pruning keys on `external_url`.
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
         db.execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            format!(
-                r#"
-            UPDATE derivation_build
-            SET status = {created}, substitutable = false, substituted = false,
-                attempt = 0, closure_complete = false,
-                updated_at = (now() AT TIME ZONE 'UTC')
-            WHERE derivation = ANY($1) AND status IN ({terminal_success})
-            "#,
-                created = crate::status_sql::build(BuildStatus::Created),
-                terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS),
-            ),
+            "UPDATE derivation_build SET substitutable = false \
+             WHERE derivation = ANY($1) AND substitutable",
             [ids.into()],
         ))
         .await?;
     }
 
-    crate::nar_closure::retire_paths(db, &[hash.to_owned()]).await?;
+    let txn = db.begin().await?;
+    let retired = crate::nar_closure::retire_paths(&txn, &[hash.to_owned()]).await?;
+    txn.commit().await?;
+    crate::status::emit_transition_effects(ctx, &retired.transitions).await;
 
     if let Err(e) = nar_storage.delete(hash).await {
         warn!(%hash, error = %e, "demote: failed to delete NAR object from storage");
@@ -340,14 +337,13 @@ pub async fn demote_cached_output<C: ConnectionTrait>(
 /// transitive completeness invariant is handled by the reverse ripple inside
 /// [`crate::nar_closure::retire_paths`], which raises the referrers' counters and
 /// leaves their healthy NARs in place. Returns the producers reset to `Created`.
-pub async fn demote_referrers_of<C: ConnectionTrait>(
-    db: &C,
-    nar_storage: &gradient_storage::NarStore,
+pub async fn demote_referrers_of(
+    ctx: &crate::DbContext,
     missing_hash: &str,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
     let mut producers = Vec::new();
-    for referrer_hash in output_referrers_of_hash(db, missing_hash).await? {
-        producers.extend(demote_cached_output(db, nar_storage, &referrer_hash).await?);
+    for referrer_hash in output_referrers_of_hash(&ctx.worker_db, missing_hash).await? {
+        producers.extend(demote_cached_output(ctx, &referrer_hash).await?);
     }
 
     Ok(producers)
@@ -363,9 +359,8 @@ pub async fn demote_referrers_of<C: ConnectionTrait>(
 /// schedule the orphan. Upstream-fetchable deps (`external_url`) are left intact -
 /// their closure is served whole by the upstream. Returns producers reset to
 /// `Created`.
-pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
-    db: &C,
-    nar_storage: &gradient_storage::NarStore,
+pub async fn demote_output_only_cached_deps(
+    ctx: &crate::DbContext,
     derivation: DerivationId,
 ) -> Result<Vec<DerivationId>, sea_orm::DbErr> {
     use sea_orm::FromQueryResult;
@@ -375,6 +370,7 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
         hash: String,
     }
 
+    let db = &ctx.worker_db;
     let hashes = OutputHash::find_by_statement(Statement::from_sql_and_values(
         DatabaseBackend::Postgres,
         r#"
@@ -391,7 +387,7 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
 
     let mut producers = Vec::new();
     for h in hashes {
-        producers.extend(demote_cached_output(db, nar_storage, &h.hash).await?);
+        producers.extend(demote_cached_output(ctx, &h.hash).await?);
     }
 
     Ok(producers)
@@ -407,7 +403,8 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
 /// `Completed` with an output that was never cached at all (`is_cached = false`, no
 /// build attempt - observed on multi-output CUDA derivations whose `out` was never
 /// pushed). Such an anchor's dependents are blocked at promotion (its
-/// `closure_complete` is - correctly - false), so they never dispatch, so no build
+/// `fetchable` is - correctly - false, so it counts toward their `unready_deps`),
+/// so they never dispatch, so no build
 /// ever reports the path missing and the reactive `reconcile_missing_inputs` heal
 /// never fires: a permanent dead zone. Demote each unbacked output - reset its
 /// producer to `Created`, drop the stale flags, and raise the reference counters
@@ -416,8 +413,8 @@ pub async fn demote_output_only_cached_deps<C: ConnectionTrait>(
 /// Keyed on the **ground truth** (a backing `cached_path` NAR), NOT the derived
 /// `is_cached` flag: that flag is `false` for exactly the never-cached-output dead
 /// zone above, so an `is_cached`-gated predicate would skip the anchors this sweep
-/// exists to rescue. Nor `closure_complete`, which is - correctly - already false
-/// for every dead-zone anchor. `external_url IS NULL` excludes outputs fetched
+/// exists to rescue. Nor the readiness flags, which are - correctly - already
+/// closed for every dead-zone anchor. `external_url IS NULL` excludes outputs fetched
 /// straight from an upstream (not from our cache). The completion path records each
 /// output's `cached_path` before flipping the anchor terminal (#303/#399), so a
 /// genuinely-complete anchor is never selected mid-completion.
@@ -437,9 +434,8 @@ pub(crate) fn unbacked_trusted_outputs_select() -> String {
     )
 }
 
-pub async fn demote_unbacked_trusted_outputs<C: ConnectionTrait>(
-    db: &C,
-    nar_storage: &gradient_storage::NarStore,
+pub async fn demote_unbacked_trusted_outputs(
+    ctx: &crate::DbContext,
 ) -> Result<u64, sea_orm::DbErr> {
     use sea_orm::FromQueryResult;
 
@@ -452,12 +448,12 @@ pub async fn demote_unbacked_trusted_outputs<C: ConnectionTrait>(
         DatabaseBackend::Postgres,
         unbacked_trusted_outputs_select(),
     ))
-    .all(db)
+    .all(&ctx.worker_db)
     .await?;
 
     let mut reset = 0u64;
     for h in hashes {
-        reset += demote_cached_output(db, nar_storage, &h.hash).await?.len() as u64;
+        reset += demote_cached_output(ctx, &h.hash).await?.len() as u64;
     }
 
     Ok(reset)
@@ -503,22 +499,13 @@ async fn output_referrers_of_hash<C: ConnectionTrait>(
 mod tests {
     use super::*;
 
-    fn present_nar(
-        hash: &str,
-    ) -> (
-        tempfile::TempDir,
-        gradient_storage::NarStore,
-        std::path::PathBuf,
-    ) {
-        use gradient_storage::NarStore;
-
+    fn present_nar(hash: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("nars").join(&hash[..2]);
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join(format!("{}.nar.zst", &hash[2..]));
         std::fs::write(&file, b"x").unwrap();
-        let nar_storage = NarStore::local(tmp.path().to_str().unwrap()).unwrap();
-        (tmp, nar_storage, file)
+        (tmp, file)
     }
 
     /// A producerless input (`.drv` / source) whose NAR is still present must be
@@ -530,13 +517,14 @@ mod tests {
         use sea_orm::{DatabaseBackend, MockDatabase};
 
         let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
-        let (_tmp, nar_storage, file) = present_nar(hash);
+        let (tmp, file) = present_nar(hash);
 
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([Vec::<gradient_entity::derivation_output::Model>::new()])
             .into_connection();
+        let (ctx, _pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
 
-        let producers = demote_cached_output(&db, &nar_storage, hash).await.unwrap();
+        let producers = demote_cached_output(&ctx, hash).await.unwrap();
 
         assert!(producers.is_empty(), "a producerless input has no producer");
         assert!(
@@ -555,7 +543,7 @@ mod tests {
         use std::collections::BTreeMap;
 
         let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
-        let (_tmp, nar_storage, file) = present_nar(hash);
+        let (tmp, file) = present_nar(hash);
 
         let output = gradient_entity::derivation_output::Model {
             id: DerivationOutputId::now_v7(),
@@ -564,9 +552,10 @@ mod tests {
             ..Default::default()
         };
 
-        // Find the output, RETURNING the demoted row, reset its producer, retire
-        // the `cached_path` row behind its ordered lock pass (no reverse ripple: it
-        // was not whole) and clear the three flags; then the object is removed.
+        // Find the output, RETURNING the demoted row, drop its producer's upstream
+        // trust, retire the `cached_path` row behind its ordered lock pass (no
+        // reverse ripple: it was not whole), clear the three flags and run the
+        // readiness pass; then the object is removed.
         let retired = BTreeMap::from([
             ("hash".to_owned(), Value::from(hash.to_owned())),
             ("was_whole".to_owned(), Value::from(false)),
@@ -574,6 +563,8 @@ mod tests {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![output.clone()], vec![output]])
             .append_query_results([vec![retired]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
@@ -582,16 +573,36 @@ mod tests {
                 5
             ])
             .into_connection();
+        let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
 
-        let producers = demote_cached_output(&db, &nar_storage, hash).await.unwrap();
+        let producers = demote_cached_output(&ctx, hash).await.unwrap();
 
         assert_eq!(producers.len(), 1, "the output's producer is returned");
         assert!(!file.exists(), "demote must delete the output's NAR object");
-        let log = crate::pool::statements(db.into_transaction_log());
+        drop(ctx);
+        let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
             log.iter()
                 .any(|s| s.contains("DELETE FROM cached_path") && s.contains("was_whole")),
             "the row must be retired, so the counters it backed move with it: {log:?}"
+        );
+        let trust = log
+            .iter()
+            .position(|s| s.contains("SET substitutable = false"))
+            .expect("the upstream trust is dropped");
+        let retire = log
+            .iter()
+            .position(|s| s.contains("DELETE FROM cached_path"))
+            .expect("the row is retired");
+        assert!(
+            trust < retire,
+            "the retire decides fetchability, so the stale offer must be gone first: {log:?}"
+        );
+        let terminal_success = crate::status_sql::build_in(&BuildStatus::TERMINAL_SUCCESS);
+        assert!(
+            !log.iter()
+                .any(|s| s.contains(&format!("status IN ({terminal_success})"))),
+            "the producer reset belongs to the retire, which decides it from the flag it just wrote: {log:?}"
         );
     }
 
