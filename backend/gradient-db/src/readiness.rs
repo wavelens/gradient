@@ -569,17 +569,22 @@ pub async fn promote<C: ConnectionTrait>(
 /// finished walk runs once, so anchors whose dependencies were already fetchable at
 /// resolve time - for which no completion event ever fires - are seeded from the
 /// closure instead of waiting for one.
-pub async fn promote_closure<C: ConnectionTrait>(
+pub async fn promote_closure<C>(
     db: &C,
     evaluation: EvaluationId,
-) -> Result<Vec<TransitionChange>, DbErr> {
-    let rows = db
+) -> Result<Vec<TransitionChange>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let rows = walk
         .query_all_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             PROMOTE_CLOSURE.as_str(),
             [Value::Uuid(Some(evaluation.into_inner()))],
         ))
         .await?;
+    walk.commit().await?;
 
     Ok(transitions_from(
         returned_derivations(rows),

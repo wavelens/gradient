@@ -148,10 +148,13 @@ pub async fn references_for_hashes<C: ConnectionTrait>(
 /// Reference closure of `seed_hashes` as one recursive statement; returns every
 /// reached `cached_path` row keyed by hash. Seeds and references without a
 /// `cached_path` row (NAR not yet uploaded) are simply absent from the result.
-pub async fn runtime_closure_reachable<C: ConnectionTrait>(
+pub async fn runtime_closure_reachable<C>(
     db: &C,
     seed_hashes: &[String],
-) -> Result<HashMap<String, gradient_entity::cached_path::Model>, DbErr> {
+) -> Result<HashMap<String, gradient_entity::cached_path::Model>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     if seed_hashes.is_empty() {
         return Ok(HashMap::new());
     }
@@ -160,17 +163,21 @@ pub async fn runtime_closure_reachable<C: ConnectionTrait>(
         "{} SELECT cp.* FROM cached_path cp JOIN refs r ON cp.hash = r.hash",
         crate::graph_sql::reference_closure_cte("refs", "SELECT unnest($1::text[])")
     );
-    Ok(ECachedPath::find()
+    let walk = crate::graph_sql::begin_walk(db).await?;
+    let reached: HashMap<String, gradient_entity::cached_path::Model> = ECachedPath::find()
         .from_raw_sql(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             sql,
             [seed_hashes.to_vec().into()],
         ))
-        .all(db)
+        .all(&walk)
         .await?
         .into_iter()
         .map(|row| (row.hash.clone(), row))
-        .collect())
+        .collect();
+    walk.commit().await?;
+
+    Ok(reached)
 }
 
 /// Store paths in the reference closure of `seed_hashes` that this cache can
@@ -214,10 +221,10 @@ where
 }
 
 /// Total NAR size of the runtime closure seeded at `seed_hashes`.
-pub async fn runtime_closure_size<C: ConnectionTrait>(
-    db: &C,
-    seed_hashes: &[String],
-) -> Result<i64, DbErr> {
+pub async fn runtime_closure_size<C>(db: &C, seed_hashes: &[String]) -> Result<i64, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let reached = runtime_closure_reachable(db, seed_hashes).await?;
     Ok(reached.values().filter_map(|r| r.nar_size).sum())
 }

@@ -12,7 +12,10 @@ use crate::fetch_in_chunks;
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation_message::MessageLevel;
 use gradient_entity::ids::{EntryPointId, EvaluationId, TaskId};
-use sea_orm::{ActiveEnum, ConnectionTrait, DbBackend, DbErr, FromQueryResult, Statement};
+use sea_orm::{
+    ActiveEnum, ConnectionTrait, DatabaseTransaction, DbBackend, DbErr, FromQueryResult, Statement,
+    TransactionTrait,
+};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -160,11 +163,14 @@ struct DepCountRow {
 /// to derivations that have a build in this evaluation, so it stays bounded by
 /// the evaluation's build graph rather than the full Nix closure. Returns
 /// `entry_point -> status -> count`.
-pub async fn entry_point_dep_counts<C: ConnectionTrait>(
+pub async fn entry_point_dep_counts<C>(
     db: &C,
     evaluation: EvaluationId,
     seeds: &[(EntryPointId, Uuid)],
-) -> Result<HashMap<EntryPointId, HashMap<BuildStatus, i64>>, DbErr> {
+) -> Result<HashMap<EntryPointId, HashMap<BuildStatus, i64>>, DbErr>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     if seeds.is_empty() {
         return Ok(HashMap::new());
     }
@@ -173,6 +179,7 @@ pub async fn entry_point_dep_counts<C: ConnectionTrait>(
         .iter()
         .map(|(ep, drv)| (ep.into_inner(), *drv))
         .unzip();
+    let walk = crate::graph_sql::begin_walk(db).await?;
     let rows = DepCountRow::find_by_statement(Statement::from_sql_and_values(
         DbBackend::Postgres,
         "WITH RECURSIVE seeds(ep, root_drv) AS (SELECT * FROM unnest($1::uuid[], $2::uuid[])), \
@@ -193,8 +200,9 @@ pub async fn entry_point_dep_counts<C: ConnectionTrait>(
          GROUP BY c.ep, b.status",
         [eps.into(), drvs.into(), evaluation.into_inner().into()],
     ))
-    .all(db)
+    .all(&walk)
     .await?;
+    walk.commit().await?;
 
     let mut out: HashMap<EntryPointId, HashMap<BuildStatus, i64>> = HashMap::new();
     for r in rows {
