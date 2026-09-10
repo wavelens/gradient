@@ -27,10 +27,11 @@
 //!   evaluations are parked so the server can be stopped safely. Cleared on the
 //!   next startup or when draining is disabled.
 //! - `GraphStuck` - workers can satisfy every pending build, yet none is
-//!   dispatchable: all anchors are `Created` with one of their promotion gates
-//!   false and no in-flight build to fire a promotion. The reconciler heals once
-//!   on entry and again when `pending_anchors` changes; otherwise the counters
-//!   promote the set the moment whatever it waits on arrives.
+//!   dispatchable: the pending set is non-dispatchable with one of its promotion
+//!   gates false and no in-flight build to fire a promotion. The reconciler heals
+//!   on entry, again when `pending_anchors` changes, and otherwise on the
+//!   consistency sweep's cadence; between those, the counters promote the set as
+//!   soon as its gates open.
 
 use serde::{Deserialize, Serialize};
 
@@ -76,11 +77,12 @@ pub enum WaitingReason {
     /// transitions to `Aborted`. The reconciler never unparks this reason.
     Aborting,
     /// The connected pool can build every pending anchor, but none is
-    /// dispatchable - the whole pending set is `Created` with one of its promotion
-    /// gates false and no in-flight build to drive promotion. Which gate it is is
+    /// dispatchable - the whole pending set has one of its promotion gates false
+    /// and there is no in-flight build to drive promotion. Which gate it is is
     /// not recorded here; `pending_anchors` is the blocked count. The reconciler
-    /// heals once on entry and again when that count changes, and the counters
-    /// promote the set reactively otherwise.
+    /// heals on entry and when that count changes, the consistency sweep re-heals
+    /// a stably stuck evaluation, and the counters promote the set as soon as its
+    /// gates open.
     GraphStuck {
         pending_anchors: u32,
     },

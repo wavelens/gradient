@@ -213,16 +213,18 @@ async fn build_phase_decision(
     worker_caps: &[(Vec<String>, Vec<String>)],
     current: Option<&WaitingReason>,
 ) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
-    let outcome = assess_buildability(state, evaluation_id, worker_caps).await?;
+    let Some(a) = assess_buildability(state, evaluation_id, worker_caps).await? else {
+        return Ok(None);
+    };
 
-    if let Some((EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. }))) = &outcome
+    if let (EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. })) =
+        (a.target, &a.reason)
         && unmet.is_empty()
     {
-        let pending = eval_pending_anchors(state, evaluation_id).await?.len() as u32;
-        if !unstick_due(current, pending) {
+        if !unstick_due(current, a.pending) {
             return Ok(Some((
                 EvaluationStatus::Waiting,
-                Some(WaitingReason::graph_stuck(pending)),
+                Some(WaitingReason::graph_stuck(a.pending)),
             )));
         }
 
@@ -231,7 +233,7 @@ async fn build_phase_decision(
         ));
     }
 
-    Ok(outcome)
+    Ok(Some((a.target, a.reason)))
 }
 
 /// The graph-stuck heal runs when an evaluation first parks, or when its
@@ -241,13 +243,22 @@ pub(crate) fn unstick_due(current: Option<&WaitingReason>, pending: u32) -> bool
     !matches!(current, Some(WaitingReason::GraphStuck { pending_anchors }) if *pending_anchors == pending)
 }
 
+/// One evaluation's build-phase verdict, with the size of the pending set it
+/// was read from: every caller needs both, and re-reading the set costs a
+/// second query per evaluation per pass.
+struct Assessment {
+    target: EvaluationStatus,
+    reason: Option<WaitingReason>,
+    pending: u32,
+}
+
 /// Decide `Building` vs `Waiting` for an eval's current pending anchors.
 /// Returns `None` when nothing is pending (nothing to decide).
 async fn assess_buildability(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
     worker_caps: &[(Vec<String>, Vec<String>)],
-) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
+) -> Result<Option<Assessment>> {
     let pending = eval_pending_anchors(state, evaluation_id).await?;
     if pending.is_empty() {
         return Ok(None);
@@ -269,7 +280,11 @@ async fn assess_buildability(
         None
     };
 
-    Ok(Some((target, reason)))
+    Ok(Some(Assessment {
+        target,
+        reason,
+        pending: pending.len() as u32,
+    }))
 }
 
 /// Self-heal a graph-stuck evaluation: run the `Unstick` pipeline over its
@@ -296,18 +311,66 @@ async fn attempt_graph_unstick(
         error!(error = %e, %evaluation_id, "unstick reconcile did not reach the graph actor");
     }
 
-    if let Some((EvaluationStatus::Building, reason)) =
-        assess_buildability(state, evaluation_id, worker_caps).await?
-    {
-        return Ok((EvaluationStatus::Building, reason));
-    }
-
-    let blocked = eval_pending_anchors(state, evaluation_id).await?.len() as u32;
+    let blocked = match assess_buildability(state, evaluation_id, worker_caps).await? {
+        Some(a) if a.target == EvaluationStatus::Building => {
+            return Ok((EvaluationStatus::Building, a.reason));
+        }
+        Some(a) => a.pending,
+        None => 0,
+    };
 
     Ok((
         EvaluationStatus::Waiting,
         Some(WaitingReason::graph_stuck(blocked)),
     ))
+}
+
+/// The graph-stuck heal's backstop, on the consistency sweep's cadence.
+///
+/// [`reconcile_waiting_state`] runs the heal on entry and again when the pending
+/// set moves, so a stably stuck evaluation would otherwise never re-run the one
+/// repair no counter can do: `reconcile_cached_anchors_for_eval` writes a
+/// non-terminal anchor whose outputs are all cached to `Completed`, and the
+/// readiness recount cannot stand in for it, because `fetchable` reads the very
+/// status that heal exists to fix. Its sibling `reconcile_dependency_failed` has
+/// no other driver either. Both run per evaluation, so this iterates the parked
+/// set rather than the graph.
+pub async fn reheal_graph_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
+    let waiting = EEvaluation::find()
+        .filter(CEvaluation::Status.eq(EvaluationStatus::Waiting))
+        .all(&state.worker_db)
+        .await
+        .context("fetch waiting evaluations")?;
+
+    let mut healed = 0u32;
+    for eval in waiting {
+        let graph_stuck = eval
+            .waiting_reason
+            .as_ref()
+            .and_then(WaitingReason::from_json)
+            .is_some_and(|r| matches!(r, WaitingReason::GraphStuck { .. }));
+        if !graph_stuck {
+            continue;
+        }
+
+        if let Err(e) = state
+            .graph
+            .transition(gradient_graph::Transition::Reconcile {
+                scope: gradient_db::ReconcileScope::Unstick(eval.id),
+            })
+            .await
+        {
+            error!(error = %e, evaluation_id = %eval.id, "graph-stuck re-heal did not reach the graph actor");
+            continue;
+        }
+        healed += 1;
+    }
+
+    if healed > 0 {
+        info!(healed, "re-healed graph-stuck evaluations");
+    }
+
+    Ok(())
 }
 
 /// Re-evaluate evaluations wedged in `graph_stuck` on a `.drv` our cache lost.
