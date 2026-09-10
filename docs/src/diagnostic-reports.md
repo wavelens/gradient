@@ -175,9 +175,10 @@ gradient-report REPORT sql "QUERY"  raw access
 ```
 
 `why-stuck` is the one to reach for first on a hung evaluation: for every anchor
-that never reached a terminal state it names which of `walked`,
-`closure_complete` and `drv_closure_cached` is false, and lists the dependencies
-still unfinished underneath it.
+that never reached a terminal state it names which of `walked` and `unready_deps`
+holds it, lists every dependency underneath it that is not `fetchable`, and says
+plainly when the only gate left is the one the report does not carry, whether the
+anchor's own `.drv` is whole.
 
 The inspector reads exactly one report schema version and refuses every other,
 rather than answering from whichever columns still happen to line up. The export

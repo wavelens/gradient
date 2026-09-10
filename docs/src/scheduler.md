@@ -73,31 +73,58 @@ next flush fails the same way.
 
 #### Promotion
 
-An anchor becomes `Queued` (buildable) the moment all of its dependency
-anchors are terminal-success (`Completed`/`Substituted`), independent of any
-single evaluation's completion (see `gradient_db::promotion`). This decoupling
-is what keeps builds from getting stuck behind a never-completing evaluation. A
-failed dependency cascades `DependencyFailed` over the global
-`derivation_dependency` graph.
+Readiness is two maintained columns on the anchor. `fetchable` says a dependent
+can get this anchor's outputs: an upstream serves them (`substitutable`), or the
+anchor succeeded and every output is whole in our cache
+(`cached_path.missing_references = 0`). `unready_deps` is how many of the
+anchor's direct dependencies are not fetchable. Neither is ever derived by a
+sweep: the event that changes fetchability writes the flip with a `RETURNING`
+that names exactly the anchors that changed, and their direct dependents'
+counter moves from that set in one statement (`gradient_db::readiness`).
+Fetchability of a dependent does not depend on its own dependencies, so nothing
+recurses over `derivation_dependency`; the only recursion left is the reference
+ripple on the NAR side.
 
-Promotion and dispatch are gated on reachability: an anchor is queued and
-dispatched only while some `build_job` references its derivation. Every name a
-batch reports gets an anchor and this evaluation's `build_job`, pruned subtrees
-included, so an evaluation stays `Building` until its whole named closure is
-terminal. Without the gate, promotion would queue derivations no surviving
-evaluation needs, leaving the dispatcher unable to attribute the build to a
-driving evaluation.
+An anchor is promoted `Created` to `Queued` when its derivation is walked, its
+`unready_deps` is zero, some evaluation wants it (a `build_job`), and its own
+`.drv` is whole in the cache unless an upstream serves it. Those four terms are
+`graph_sql::gates_predicate`, generated once. The events that can open one
+promote the anchors they touched: a batch that walked it, a dependency becoming
+fetchable, its `.drv` NAR arriving, an upstream hit, a thaw at stream
+completion.
 
-They are also gated on `derivation.walked`. A batch names its dependencies by
-path, and the graph actor inserts a stub row for every name it does not have
-yet, so every declared edge lands in the same transaction as the derivation
-that declares it. A derivation is `walked` once its own record is in: outputs,
-every edge, input sources. A stub is never promoted, dispatched or pruned: its
-subtree is not recorded, and treating it as dependency-free would dispatch a
-build without its inputs. The bit is monotonic and content-addressed: edges
-never change once written, so a later requeue keeps the derivation promotable
-without re-evaluation. `promote_ready`, `promote_dependents`, and the dispatch
-readiness query all require it.
+The dispatcher does not re-derive the gates - it reads the status - so `Queued`
+carries the claim that they held. That rests on one rule, which every writer of
+`Queued` obeys in one of two ways: embed `graph_sql::promotable_predicate` in
+the write, or settle the rows it just wrote with `readiness::unpromote_ungated`
+in the same call. `readiness::repair_pending` is the backstop for a counter that
+drifted under a lost move, and the only one.
+
+When a gate regresses (an output retired, a producer demoted, a dependency
+deleted by the GC) the same ripple runs in reverse, and the statement that
+raises a dependent's `unready_deps` demotes it to `Created` inline, so no queued
+anchor outlives the counter that gated it. The dispatcher re-reads the anchor's
+status once more at hand-out, so a job the tracker still holds from before the
+regression is dropped instead of dispatched.
+
+Reachability is one of the four gates: an anchor is queued and dispatched only
+while some `build_job` references its derivation. Every name a batch reports
+gets an anchor and this evaluation's `build_job`, pruned subtrees included, so
+an evaluation stays `Building` until its whole named closure is terminal.
+Without the gate, promotion would queue derivations no surviving evaluation
+needs, leaving the dispatcher unable to attribute the build to a driving
+evaluation.
+
+`derivation.walked` is what makes the counters safe on a graph that is still
+being written. A batch names its dependencies by path, and the graph actor
+inserts a stub row for every name it does not have yet, so every declared edge
+lands in the same transaction as the derivation that declares it. A derivation
+is `walked` once its own record is in: outputs, every edge, input sources. A
+stub is never promoted, dispatched or pruned: its subtree is not recorded, and
+treating it as dependency-free would dispatch a build without its inputs. The
+bit is monotonic and content-addressed - edges never change once written - so a
+later requeue keeps the derivation promotable without re-evaluation, and a
+counter seeded over a partial edge set can never be read as zero.
 
 The one event that can invalidate the bit is the derivation GC deleting a
 derivation another one still depends on: the FK cascade drops the edge and
@@ -107,42 +134,36 @@ therefore snapshots the edges into its candidates before the delete and clears
 re-checks the gates and pulls any of them that was `Queued` back to `Created`,
 so the next evaluation re-walks them.
 
-Promotion is otherwise event-driven (`readiness::promote_closure` over the
-evaluation's closure at eval completion, and the readiness flip's own ripple at
-build completion), so a ready anchor whose triggering event never fired - a
-failed eval after its derivations were walked, a dependency that completed in a
-missed window, a restart - would sit in `Created` forever. The consistency
-sweep's `repair_pending` is the backstop that settles those, and it is the only
-one: no promotion runs on the dispatch tick. The `walked` gate is what makes
-that safe: it can only ever promote anchors whose whole declared edge set is
-recorded, so it can never dispatch one without its inputs.
-
-`reconcile_dependency_failed` is the failure-side counterpart of that backstop.
-The reactive `cascade_dependency_failed` fires only on a fresh terminal-failure
-*transition*, so it cannot reach an anchor that becomes non-terminal **after** its
-dependency already failed: `requeue_failed_anchors` / `requeue_failed_closure_for_eval`
-thaw a dependent back to `Created` without re-checking its still-failed dependency,
-and a concurrent evaluation can re-fail a dependency after the dependent was thawed.
-Such a dependent can never build, yet the dispatch gate holds it (its dependency is
-not terminal-success) and `check_evaluation_done` never finalizes its evaluation - a
-permanent dead zone that strands the eval in `Building`. The sweep walks
-`derivation_dependency` upward from every terminal-failed anchor and marks each
-reachable non-terminal anchor `DependencyFailed` in one statement.
+A failed dependency cascades `DependencyFailed` over the global
+`derivation_dependency` graph reactively. That cascade fires only on a fresh
+terminal-failure *transition*, so it cannot reach an anchor that becomes
+non-terminal **after** its dependency already failed: `requeue_failed_anchors` /
+`requeue_failed_closure_for_eval` thaw a dependent back to `Created` without
+re-checking its still-failed dependency, and a concurrent evaluation can re-fail
+a dependency after the dependent was thawed. The closure-bounded
+`reconcile_dependency_failed`, at stream completion and on the graph-stuck heal,
+catches exactly those: it walks `derivation_dependency` upward from every
+terminal-failed anchor in the evaluation's closure and marks each reachable
+non-terminal anchor `DependencyFailed` in one statement.
 
 #### The graph reconciler and transition effects
 
-Every scope below runs inside the graph actor (`Transition::Reconcile`), at
-evaluation completion and on an unstick, so a reconcile never interleaves with an
+Two heals exist for state no event can reach, and both run inside the graph
+actor (`Transition::Reconcile`), so a reconcile never interleaves with an
 ingest. There is no tick-driven scope: the readiness counters are moved by the
 event that changes them, so the dispatch tick dispatches and reconciles nothing.
 
-All of the self-heal sweeps above run through one orchestrator,
+Both run through one orchestrator,
 `gradient_db::reconcile_build_graph(ctx, scope)`, which owns the canonical step
-ordering. Both of its scopes name an evaluation, so every statement it issues is
+ordering, and both scopes name an evaluation, so every statement it issues is
 bounded to that evaluation's dependency closure: `Eval(id)` when an evaluation
 finishes flushing its graph, and `Unstick(id)` when a Building evaluation is
-graph-stuck (adds the unbacked-output demote). Every future dead-zone fix has
-exactly one place to live.
+graph-stuck. Each thaws the terminal-failed anchors in the closure, settles the
+anchors whose outputs are already whole (cache presence is the ground truth for
+"built") and advances their dependents' counters, fails the dependents of a
+deterministic failure, and promotes the closure; `Unstick` also demotes a
+trusted producer whose output is gone. No step here iterates to convergence.
+Every future dead-zone fix has exactly one place to live.
 
 The consequences of moving an anchor are equally centralized. Bulk sweeps
 return the typed `(derivation, from, to)` transitions they made, and both
@@ -155,53 +176,47 @@ any path). It is structurally impossible to move an anchor without its
 consequences firing, which closes the historical "bulk sweep bypassed the
 reactive hook" dead-zone class.
 
-Two more definitions exist exactly once. The dependency-readiness predicate
-("every dep terminal-success + `closure_complete`, or substitutable, and every
-input source cached") is generated by `graph_sql::deps_ready_predicate` and
-embedded verbatim by `promote_ready`, `promote_dependents`, and the dispatch
-gate `find_ready_anchors`, so promotion and dispatch can never disagree on what
-"ready" means. The recursive `derivation_dependency` walk is generated by
-`graph_sql::dependency_closure_cte` and shared by the failure cascades, the
-per-eval closure sweeps, and the GC keep-set.
+The dependency walk is generated once, by
+`graph_sql::dependency_closure_cte`, and shared by the failure cascades, the
+per-evaluation sweeps and the GC keep-set.
 
 A consistency sweep (`graph_consistency_report`, interval
-`GRADIENT_GRAPH_CONSISTENCY_INTERVAL`, default 300s) counts violations of the
-invariants those gates trust - stale-true `closure_complete` /
-`drv_closure_cached`, promotable-but-unpromoted anchors, unbacked
-terminal-success outputs, Building evaluations with no active anchors - and
-logs them as warnings, so a non-converging heal surfaces as an alert instead of
-a user-reported stuck evaluation. One dimension it does not merely count but
-repairs, and it is the only pass that does: the NAR reference counter is moved rather
-than derived, so the sweep recomputes it over the paths the pending anchors gate on
-and reports how many rows disagreed (`nar_counter_drift`). That repair runs *before*
-the counts, because
-two of them embed gates that read the counter and a drifted row would otherwise
-inflate a count this very pass fixes. Each chunk is its own transaction that first
-takes the same hash-ordered `FOR UPDATE` pass a retire takes and only then recounts,
-so the recount's snapshot opens after any commit of those rows has finished; a
-compare-and-swap on the counted value alone is not enough, because a commit that
-reseeds a row onto the drifted value passes it and is overwritten with a stale count.
-Chunking means each chunk commits on its own instead of the sweep's budget rolling
-every repair back. The repair is one level per sweep and not a fixpoint: a chunk
-recounts every row from one snapshot and ripples nothing, so a chain of drifted rows
-converges one level per interval and a referrer outside the gating set never does;
-widening that rides with #591. Setting the interval to 0 disables the sweep, and
-with it the counter's only backstop.
+`GRADIENT_GRAPH_CONSISTENCY_INTERVAL`, default 300s) is the only backstop for the
+counters, because both of them are moved rather than derived and nothing else
+would ever notice a lost move. It repairs `cached_path.missing_references` over
+the paths the pending anchors gate on, then recomputes `fetchable` and
+`unready_deps` over the pending anchors and their direct dependencies, writes
+what differs, settles the queue against the gates in both directions, and logs
+what it repaired next to the two read-only alarms: terminal-success producers
+with an unbacked output, and `Building` evaluations with no non-terminal anchor
+left. The NAR repair runs first because the readiness recount reads wholeness,
+so a drifted path would otherwise teach the anchors a count this very pass fixes.
 
-Two numbers on that line are not violations. `nar_counter_drift` counts rows the
-same pass already fixed, so a warning naming only that is a successful self-repair,
-not a dead zone. `gating` is how many paths the repair visited: the select behind it
-has no bound and its second arm walks every `Created` or `Queued` anchor's direct
-dependencies, so it is logged on every sweep, clean or not, to say what the one
-recurring cost this pass adds actually is on a production graph. Bounding it rides
-with the readiness counters that replace the anchor flags (#591), which rewrite what
-the sweep reads; a rotation scheme built before that would be thrown away, and a
-plain `LIMIT` without one would leave the tail never repaired. What the sweep does
-count table-wide is `negative_reference_counters`, rows whose counter a ripple drove
-below zero: no gate can read such a row as whole again, and the repair only rescues
-one that a pending anchor gates on, so outside that set it is the one state the
-design calls unrecoverable - and `nar_counter_drift` is zero for those rows by
-construction.
+Each chunk of either repair is its own transaction that takes the same ordered
+`FOR UPDATE` pass a retire takes and only then recounts, so the recount's
+snapshot opens after any commit of those rows has finished; a compare-and-swap on
+the counted value alone is not enough, because a commit that reseeds a row onto
+the drifted value passes it and is overwritten with a stale count. Chunking means
+each chunk commits on its own instead of the sweep's budget rolling every repair
+back. Neither repair iterates: a chunk recounts every row from one snapshot
+and ripples nothing, so a chain of drifted rows converges one level per interval
+and a row outside the repaired scope never does. Setting the interval to 0
+disables the sweep, and with it the counters' only backstop and the graph-stuck
+re-heal, which is its own pass on the same interval rather than part of the
+report.
+
+Three numbers on that line are not violations. The two drift counts report rows
+the same pass already repaired, so a warning naming only those is a successful
+self-repair, not a dead zone. `gating` and `repair_scope` are the sizes of the two
+scope selects, neither of them bounded, logged on every sweep - clean or not - to
+say what the recurring cost this pass adds actually is on a production graph: the
+readiness scope is the smaller set and the more expensive one, since every row in
+it is taken `FOR UPDATE` twice against rows every live graph writer also locks.
+What the sweep does count table-wide is `negative_reference_counters`, rows whose
+counter a ripple drove below zero: no gate can read such a row as whole again, and
+the repair only rescues one that a pending anchor gates on, so outside that set it
+is the one state the design calls unrecoverable - and the drift count is zero for
+those rows by construction.
 
 An evaluation in `EvaluatingFlake` or `EvaluatingDerivation` has one exit: the
 `EvalStreamCompleted` / `EvalFailed` transition the scheduler sends once, when
@@ -238,39 +253,27 @@ so the build may well have succeeded before contact was lost; recording it as a
 failure would feed invented failures into the board's rates and into
 history-based scoring.
 
-Promotion and dispatch are finally gated on a derivation's `inputSrcs` being in
-the cache. A `.drv`'s build-time source paths (`inputSrcs`, e.g.
-`builtins.toFile` configs) have no producing derivation, so the dependency-anchor
-check does not cover them; they are recorded per derivation in
-`derivation_input_source` (parsed from the `.drv` at `report_eval_result`) and a
-non-substitutable anchor is promotable only when every one of its sources is
-`fully_cached`. Without this a requeued anchor - reset to `Created` but with its
-derivation still walked and all dependency anchors cached - would re-dispatch the
-instant the periodic backstop runs, before the new evaluation re-pushed its
-sources, and fail `InputsUnavailable`; with the gate it waits for the walk to
-push them. A substitutable anchor needs no sources, since it fetches its outputs
-directly, so the gate skips it.
+The last of the four promotion gates is the anchor's own `.drv` being whole in
+the cache (`graph_sql::drv_whole_predicate`). A build worker cannot import a build target's
+`.drv` until the `.drv`'s full reference closure (every transitive input `.drv`
+plus its input sources) is in the cache - the daemon's `add_to_store_nar` rejects
+a NAR with absent references. The eval pushes those `.drv`s progressively, so
+without this gate a build dispatched mid-push fails terminal `InputsUnavailable`
+on a missing `.drv` (its own or a dependency's), the dominant failure of large
+NixOS system-closure derivations.
 
-Non-substitutable anchors are finally gated on `derivation_build.drv_closure_cached`,
-the `.drv`-closure analogue of `closure_complete`. A build worker cannot import a
-build target's `.drv` until the `.drv`'s full reference closure (every transitive
-input `.drv` plus its input sources) is in the cache - the daemon's
-`add_to_store_nar` rejects a NAR with absent references. The eval pushes those
-`.drv`s progressively, so without this gate a build dispatched mid-push fails
-terminal `InputsUnavailable` on a missing `.drv` (its own or a dependency's) - the
-dominant failure of large NixOS system-closure derivations. `reconcile_drv_closure_cached`
-(run in the dispatch tick, at eval completion, and during graph-unstick) is a
-bidirectional fixpoint like `reconcile_closure_complete`: a CLEAR pass first resets
-any anchor whose `.drv` is no longer backed, then a SET pass marks an anchor once
-its own `.drv` is cached and every build dependency is itself `drv_closure_cached`.
-The CLEAR pass is load-bearing because the flag is not monotonic-safe: GC deletes a
-`.drv`'s `cached_path` row once its NAR object is gone (`purge_zombie_cached_paths`),
-and the post-GC `demote_unbacked_trusted_outputs` backstop only heals OUTPUT trust,
-so a stale-true flag would otherwise dispatch a build whose `.drv` has vanished and
-strand its whole closure in terminal `InputsUnavailable`. The recursion is
-independent of build/substitute status, since a substitutable dependency's `.drv` is
-still a structural reference of any dependent's `.drv`. A substitutable anchor itself
-substitutes its output and never imports its `.drv`, so the gate skips it.
+That gate is one integer on the `.drv`'s own `cached_path` row, not a mirror of it
+on the anchor. A `.drv` is an ordinary store path whose references are exactly its
+input `.drv`s and its `inputSrcs`, so `missing_references = 0` on a backed `.drv`
+row already means the whole importable closure is there, input sources included -
+which is why nothing gates on `derivation_input_source` any more. A build-graph
+mirror of the same fact could only diverge from the NAR ground truth when eval
+pruning leaves a dependency unwalked, and would then dead-zone a build whose
+`.drv` closure is in fact fully cached. A substitutable anchor substitutes its
+output and never imports its `.drv`, so the gate skips it; `inputSrcs` are still
+recorded per derivation in `derivation_input_source` (parsed from the `.drv` at
+`report_eval_result`) because the worker's prefetch pushes them, and because they
+have no producing derivation that could re-push them later.
 
 Because the anchor is global and build-once, a new evaluation is treated as a
 fresh build intent: the eval-scoped reconcile thaws every anchor a previous eval
@@ -317,30 +320,27 @@ The build that reported `InputsUnavailable` retries **in-eval** rather than
 failing permanently. The self-heal above resets its missing input's producer to
 `Created`, so the build itself is marked `FailedTransient` (not `FailedPermanent`)
 and re-queued through the normal transient backoff (`decide_failure_outcome`
-treats `InputsUnavailable` like a transient failure). `dispatch_ready_builds`
-re-checks every dependency at dispatch, so the re-queued build waits in `Queued`
-until the rebuilt input is `Completed`/`closure_complete`, then dispatches and
-succeeds - without the failure leaking onto a sibling evaluation that shares the
+treats `InputsUnavailable` like a transient failure). Demoting the input's
+producer raised the re-queued build's `unready_deps`, so it is pulled out of the
+queue by the same statement and only promoted again once the rebuilt input is
+fetchable - without the failure leaking onto a sibling evaluation that shares the
 global anchor. The self-heal circuit breaker (`inputs_unavailable_max_loops`)
 still caps the loop: once it trips, the input is deemed unrecoverable and the
 build fails `Permanent` (then cascades), so a genuinely missing input can't retry
 forever.
 
-The cache GC can break the invariant from the other direction: the zombie-purge
-(`cached_path` whose NAR vanished) and the TTL eviction delete `cached_path` rows
-without going through `demote_cached_output`, leaving the producer at
-`Completed`/`Substituted` + `closure_complete` with no fetchable output. The gate
+The cache can break the invariant from the other direction: an artifact that goes
+without the retire that would have moved the anchor - a row deleted by hand, an
+output a partial completion never backed at all - leaves the producer at
+`Completed`/`Substituted` with nothing to serve. The gate
 then trusts it, dependents fail `InputsUnavailable` permanently, and - being
 terminal-*success*, not terminal-failed - it is never re-queued, so it never
 rebuilds. `demote_unbacked_trusted_outputs` restores the row-vs-object invariant:
 it finds every terminal-success producer (`status IN (3, 7)`) with **any** output
 that is neither in our cache (a `cached_path` with a NAR) nor on an upstream
 (`external_url`) and demotes it back to `Created`. It keys on the **ground truth**
-(a missing backing NAR), **not** the derived `is_cached` flag nor
-`closure_complete`. Both derived flags are `false` for exactly the dead-zone
-anchors this sweep must rescue: `closure_complete` is cleared by the bidirectional
-`reconcile_closure_complete` once an object vanishes, and `is_cached` is `false`
-whenever an anchor was marked `Completed` with an output that was *never* cached -
+(a missing backing NAR), **not** the derived `is_cached` flag: `is_cached` is
+`false` whenever an anchor was marked `Completed` with an output that was *never* cached -
 a partial cache-hit or substitution that set the anchor done without backing every
 output (observed on multi-output CUDA derivations whose `out` was never pushed, no
 build attempt). An `is_cached`-gated predicate skipped that case, stranding the
@@ -530,7 +530,7 @@ closures is the correctness price of an output-only cache.
 A stub is never pruned: only a walked derivation whose outputs are on an upstream
 or whole in our cache is.
 
-#### Closure-complete cache
+#### The cache closure invariant
 
 The cache holds a binary-cache invariant: *if an output is in our cache, its
 entire runtime closure is too*. A build (and a substitution, which fetches the
@@ -550,49 +550,22 @@ weaker signal fails `InputsUnavailable` on a runtime path the gate never checked
 (e.g. `nixos-system` needs `unit-bird.service` via `system-units`, which has no
 direct edge). So completeness is tracked explicitly:
 
-`derivation_build.closure_complete` means a **built** anchor's whole build
-closure is fetchable: its outputs are cached, its derivation is walked, and every
-build dependency is itself `closure_complete` **or** `substitutable` (its closure
-lives on an upstream cache, fetchable on demand). A
-build's runtime references are a subset of its build inputs, so a fetchable build
-closure guarantees a fetchable runtime closure too - closing the runtime-vs-build
-edge gap without a runtime walk.
+`derivation_build.fetchable` is the anchor-side reading of that invariant (see
+[Promotion](#promotion)): an anchor is fetchable once every one of its outputs is
+whole in our cache, or an upstream serves them. A build's runtime references are a
+subset of its build inputs, so an output whose own reference closure is whole is
+everything a dependent's dispatch needs from it - closing the runtime-vs-build
+edge gap without a runtime walk. Its dependents' `unready_deps` is moved from its
+flips, so a dependent that finished before its dependency did needs no
+re-derivation of its own readiness: the dependency's flip writes it.
 
-`propagate_closure_complete` (no longer called from any event path: terminal
-success now advances `fetchable` instead, and the flag itself goes with #591)
-computes this over `derivation_dependency` and **ripples up**: it marks the just-finished
-anchor complete if its deps are all satisfied, then re-checks that anchor's
-dependents, and so on. The up-ripple is essential - a dependent that finished
-before its dependency did would otherwise never re-evaluate its own completeness.
-A **substituted** anchor is deliberately *not* marked complete (we hold only its
-output NAR, not its build closure); dependents reach it through the `substitutable`
-arm instead.
-
-`propagate_closure_complete` only ever *sets* the flag, which is unsound on its
-own: the flag would then survive a closure member being demoted/evicted, or a
-dependency edge recorded after the anchor was already marked complete (a dependent
-instantiated before its dependency). A stale-true flag dispatches a build whose
-transitive closure is not actually cached - terminal `InputsUnavailable` on a tiny
-transitive output (e.g. `unit-*.service` reached through a direct dep). The
-**bidirectional** `reconcile_closure_complete` keeps the flag honest: a CLEAR
-fixpoint resets any anchor whose gate no longer holds (output uncached, a
-dependency regressed, or a newly recorded dependency not itself complete) before a
-SET fixpoint re-marks the genuinely satisfied. Both ripple over
-`derivation_dependency` and converge in O(longest affected chain); no scope runs
-either of them any more, because the `fetchable` / `unready_deps` pair the events
-maintain has replaced what they healed. A demote raises the reference counters of the deleted path's referrers
-inline (below), but the periodic reconcile is the backstop that does not depend on
-that ripple finding a not-yet-recorded edge.
-
-`promote_ready`, `promote_dependents`, and `dispatch_ready_builds` therefore gate
-each dependency on `(status IN (Completed, Substituted) AND closure_complete)`
-**or** `substitutable`. A `substitutable` anchor skips the dependency gate
-entirely and dispatches out of order (#456); its substitute job carries no
-`required_paths`, so the worker pulls no build deps and the job scores a uniform
-zero. The gate stays O(1) (a flag check), and the propagation touches only the
-completing anchor's dependent sub-tree. Partial indexes on `derivation_build`
-keyed by `status = Queued` and `status = Created` keep the per-tick scans off the
-full anchor table.
+A `substitutable` anchor skips the dependency gate entirely and dispatches out of
+order (#456); its substitute job carries no `required_paths`, so the worker pulls
+no build deps and the job scores a uniform zero. The gate itself stays a single
+integer comparison, and partial indexes on `derivation_build` keep both scans off
+the full anchor table: the dispatch queue matches `status = Queued` in
+`updated_at` order, and the table-wide promote matches
+`status = Created AND unready_deps = 0`.
 
 The NAR side of that invariant is a counter, not a flag.
 `cached_path.missing_references` is the number of a path's references (self
@@ -603,8 +576,8 @@ commits a NAR, from the references the worker reported, and when that flips the 
 to whole it decrements every referrer, then every referrer of the referrers that
 just reached zero, one statement per level. Deleting a row (`retire_paths`: the
 orphan GC, the zombie purge, TTL eviction, every demote) runs the same ripple in
-reverse from the rows that were whole, and clears the anchor flags those rows backed
-in the same transaction. Every ripple is driven by a **transition**, never by a
+reverse from the rows that were whole, and moves the anchor side of what those rows
+backed in the same transaction. Every ripple is driven by a **transition**, never by a
 state: rippling from a row that did not just flip moves its referrers past zero, and
 a negative counter never satisfies `= 0` again.
 
@@ -632,23 +605,24 @@ retries. A detected, retried deadlock is the accepted price of never leaving a r
 whole with a reference that is not. Nothing re-derives the counter by a
 sweep; the consistency pass above recomputes it only for the paths pending anchors
 gate on and repairs what disagrees, and is its only backstop.
-The migration converges the old `cached_path.closure_complete` flag one last
-time, seeds the counter from it and drops it, so the first start after the upgrade
-reads a sound value - on a large cache that runs for minutes.
+The migration that introduced the counter converges the cache's old closure flag
+one last time, seeds the counter from it and drops it, so the first start after
+the upgrade reads a sound value - on a large cache that runs for minutes.
 
 A build's runtime references are a subset of its build inputs, so a whole output
 closure is what a dependent's dispatch needs from that output, and a whole `.drv`
 row (its references are exactly the input `.drv`s and input sources) is what a
 build target's import needs. The dispatch gate reads both through `whole`.
 
-The repair is bounded to the gating paths, and that is narrower than the readers.
-The eval-time prune (`gradient_graph::known::prunable`) and the substitutability
-pass ask whether the outputs of arbitrary walked candidates are whole, and most of
-those have no pending anchor, so a ripple lost there is never recomputed. It is also
-the worse failure: a false-whole prune drops a subtree that is then never walked,
-recorded or built - a permanent dead end rather than a stall a later build clears.
-Widening the recompute past the gating set rides with the readiness counters that
-replace the anchor flags (#591).
+The repair is bounded to the gating paths - the pending anchors' own `.drv` rows
+and the output rows of their direct dependencies - and that is narrower than the
+readers. The eval-time prune (`gradient_graph::known::prunable`) and the
+substitutability pass ask whether the outputs of arbitrary walked candidates are
+whole, and most of those have no pending anchor, so a ripple lost there is never
+recomputed. It is also the worse failure: a false-whole prune drops a subtree that
+is then never walked, recorded or built - a permanent dead end rather than a stall
+a later build clears. Widening the recompute past the gating set is still open; the
+readiness counters narrowed what a dispatch gate reads, not what a prune does.
 
 When a build still reports a path missing, `reconcile_missing_inputs` self-heals: a
 missing leaf with a producer is purged and rebuilt (`demote_cached_output`, which
@@ -771,9 +745,10 @@ cannot make progress, auto-unparking once the blocker clears:
   unmet `(architecture, required_features)` combinations when no connected
   worker can satisfy any pending build.
 - **Graph stuck** - the pool *can* build every pending anchor (so the `workers`
-  reason would carry an empty `unmet` set) yet none is dispatchable: the whole
-  pending set is `Created` with no in-flight build to drive a promotion, so no
-  completion event can reach the deadlock. The reconciler
+  reason would carry an empty `unmet` set) yet none is dispatchable: nothing in
+  the pending set passes the dispatch gate and no in-flight build is left to fire
+  a promotion. What blocks it is not recorded on the reason; `pending_anchors` is
+  the blocked count. The reconciler
   detects it and self-heals in five steps: `requeue_failed_closure_for_eval`
   thaws any terminal-failed anchor in the eval's full dependency closure (a
   transitive dep a prior eval left failed and this eval pruned has no `build_job`
@@ -787,7 +762,11 @@ cannot make progress, auto-unparking once the blocker clears:
   dependents of what it settled; then the dependency-failed sweep over the closure
   and `promote_closure`. It re-assesses: recovers
   to `Building` when the heal frees an anchor, else parks `graph_stuck` (the blocked
-  count) and retries each pass.
+  count). The heal runs on entry, again whenever `pending_anchors` changes, and
+  otherwise on the consistency sweep's cadence, because
+  `reconcile_cached_anchors_for_eval` and `reconcile_dependency_failed` have no
+  other driver; between those the counters promote the evaluation the moment
+  whatever it waits on arrives.
 
 Approval, no-cache and full-cache parks are owned by the webhook and cache hooks
 and are never unparked by the worker reconciler.
