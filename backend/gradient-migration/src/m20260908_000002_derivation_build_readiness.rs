@@ -30,6 +30,12 @@
 //! so: `SET fetchable = true WHERE ...` never clears a stale true, so a second
 //! `up` over a diverged table would leave one. It runs once, and the guards are
 //! for a run that failed partway.
+//!
+//! The `unready_deps` seed `LEFT JOIN`s the dependency's anchor and counts a
+//! missing row as unready, which is what `gradient_db::readiness`'s live count
+//! does. An inner join fails OPEN in a gate whose whole job is to stop a dispatch
+//! against a missing input, and a backfill that disagreed with the counter's own
+//! recompute would report as drift on the first sweep.
 
 use sea_orm_migration::prelude::*;
 use sea_orm_migration::sea_orm::ConnectionTrait;
@@ -64,8 +70,8 @@ fn up_statements() -> Vec<String> {
         format!("UPDATE derivation_build db SET fetchable = true WHERE {}", fetchable()),
         "UPDATE derivation_build db SET unready_deps = c.n FROM ( \
            SELECT e.derivation, count(*) AS n FROM derivation_dependency e \
-           JOIN derivation_build dep ON dep.derivation = e.dependency \
-           WHERE NOT dep.fetchable GROUP BY e.derivation) c \
+           LEFT JOIN derivation_build dep ON dep.derivation = e.dependency \
+           WHERE dep.derivation IS NULL OR NOT dep.fetchable GROUP BY e.derivation) c \
          WHERE db.derivation = c.derivation".into(),
         format!("UPDATE derivation_build db SET status = 0, updated_at = (now() AT TIME ZONE 'UTC') WHERE db.status = 1 AND NOT {}", gates()),
         format!("UPDATE derivation_build db SET status = 1, queued_at = coalesce(db.queued_at, now() AT TIME ZONE 'UTC'), updated_at = (now() AT TIME ZONE 'UTC') WHERE db.status = 0 AND {}", gates()),
@@ -146,6 +152,22 @@ mod tests {
         assert!(
             DOWN.iter().any(|s| s.contains("closure_complete")),
             "down must restore the flags it dropped"
+        );
+    }
+
+    /// The seed and the live recount in `gradient_db::readiness` must agree on the
+    /// one part that fails open: a dependency with no anchor row counts as unready.
+    #[test]
+    fn the_unready_seed_counts_a_dependency_with_no_anchor_row() {
+        let seed = up_statements()
+            .into_iter()
+            .find(|s| s.contains("SET unready_deps = c.n"))
+            .expect("the seed runs");
+
+        assert!(
+            seed.contains("LEFT JOIN derivation_build dep")
+                && seed.contains("dep.derivation IS NULL OR NOT dep.fetchable"),
+            "an inner join here would count a dependency with no anchor as ready: {seed}"
         );
     }
 }
