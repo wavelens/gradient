@@ -98,6 +98,19 @@ the test's Postgres, statements filtered to the server's role). Keep the thresho
 loose enough to be pathology detectors on a slow shared VM, and print the top
 statements so a human reads the numbers the assertion cannot.
 
+**Two database sessions, held against each other, prove a lock is load-bearing.**
+Each `psql` helper is a fresh process, so a phase that replays statements in order
+shows only that nothing bad happened - it still passes once the discipline is
+deleted from the code. The cache test drives two FIFO-fed `psql` sessions from one
+shell script, with a third connection polling `pg_stat_activity` for
+`wait_event_type = 'Lock'` as the handshake, and runs the same interleaving twice:
+once taking the ordered lock in its own statement, once without. Assert the
+contrast - the unlocked arm stores the stale value, the locked arm writes nothing -
+so the phase fails if the two ever agree. Bound every wait and dump
+`pg_stat_activity` into the failure message, tear both backends down on every exit
+path (a leaked one wedges the phases after it), and lock only synthetic rows the
+rest of the test never reads.
+
 **CLI tests drive the real binary.** `assert_cmd` runs `gradient` with `HOME`
 and `XDG_CONFIG_HOME` pointed at a `TempDir` holding a seeded `config.toml`, and
 `wiremock` stands in for the server. That covers argument parsing, config

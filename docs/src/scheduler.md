@@ -122,9 +122,10 @@ lands in the same transaction as the derivation that declares it. A derivation
 is `walked` once its own record is in: outputs, every edge, input sources. A
 stub is never promoted, dispatched or pruned: its subtree is not recorded, and
 treating it as dependency-free would dispatch a build without its inputs. The
-bit is monotonic and content-addressed - edges never change once written - so a
-later requeue keeps the derivation promotable without re-evaluation, and a
-counter seeded over a partial edge set can never be read as zero.
+bit is content-addressed - edges never change once written - so a later requeue
+keeps the derivation promotable without re-evaluation, and a counter seeded over
+a partial edge set can never be read as zero. Exactly one event clears it
+again.
 
 The one event that can invalidate the bit is the derivation GC deleting a
 derivation another one still depends on: the FK cascade drops the edge and
