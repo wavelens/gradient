@@ -579,9 +579,23 @@ impl BatchWriter<'_> {
     ///
     /// Promotion is offered the whole locked set rather than the seeded part: an
     /// anchor this batch just made substitutable passes the gates on its own
-    /// account, and no dependent's flip would ever queue it. Nothing here retracts,
-    /// because a batch only ever ADDS substitution facts, so the symmetric loss
-    /// belongs to the demote and the retire.
+    /// account, and no dependent's flip would ever queue it. Nothing here retracts
+    /// a substitution fact, because a batch only ever adds them, so that symmetric
+    /// loss belongs to the demote and the retire.
+    ///
+    /// The un-promote after the seed is the OTHER symmetric loss, and it is not
+    /// optional. The mark's ripple is a RELATIVE move over a base the seed has not
+    /// corrected yet, so for a row whose edges grew this batch the base is
+    /// stale-low: an anchor at `unready_deps = 1` that gains an edge to something
+    /// unfetchable is taken to 0 by the ripple, reported ready, and queued, and only
+    /// then does the seed put it back to 1. Measured on Postgres 18: the row commits
+    /// `Queued` with `unready_deps = 1` and dispatches against an input that is not
+    /// in the cache. `promote` after the seed covers the row the seed brings DOWN to
+    /// zero; nothing but this covers the row it raises.
+    ///
+    /// The transitions are collapsed for the same reason: such a row accumulates
+    /// `Created` to `Queued` and `Queued` to `Created` in one transaction, and only
+    /// the net move committed, so only the net move may fan out.
     async fn advance_readiness(
         &self,
         batch: &IngestBatch,
@@ -628,10 +642,16 @@ impl BatchWriter<'_> {
                 .await
                 .context("promote the batch's anchors")?,
         );
+        changes.extend(
+            gradient_db::unpromote_ungated(&txn, &locked)
+                .await
+                .context("settle the queue against the seeded counts")?,
+        );
         txn.commit()
             .await
             .context("commit the readiness transaction")?;
-        gradient_db::emit_transition_effects(self.ctx, &changes).await;
+        let net = gradient_db::collapse_transitions(changes);
+        gradient_db::emit_transition_effects(self.ctx, &net).await;
 
         Ok(())
     }
@@ -1028,6 +1048,34 @@ mod tests {
         BTreeMap::from([("hash".to_owned(), Value::from(hash.to_owned()))])
     }
 
+    fn drv_row(derivation: DerivationId) -> BTreeMap<String, Value> {
+        BTreeMap::from([(
+            "derivation".to_owned(),
+            Value::from(derivation.into_inner()),
+        )])
+    }
+
+    fn ripple_row(derivation: DerivationId, ready: bool) -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            (
+                "derivation".to_owned(),
+                Value::from(derivation.into_inner()),
+            ),
+            ("ready".to_owned(), Value::from(ready)),
+        ])
+    }
+
+    fn transition_row(derivation: DerivationId, from: i32, to: i32) -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            (
+                "derivation".to_owned(),
+                Value::from(derivation.into_inner()),
+            ),
+            ("from_status".to_owned(), Value::from(from)),
+            ("to_status".to_owned(), Value::from(to)),
+        ])
+    }
+
     fn ok(n: u64) -> MockExecResult {
         MockExecResult {
             last_insert_id: 0,
@@ -1066,6 +1114,7 @@ mod tests {
             .append_query_results([Vec::<MBuildJob>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 3])
             .into_connection();
         let (ctx, pool) = ctx(db).await;
@@ -1086,8 +1135,8 @@ mod tests {
         let log = gradient_db::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            12,
-            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote: {log:?}"
+            13,
+            "evaluation, walked, stubs, resolve, edges, anchor insert, anchor select, jobs, lock, mark, seed, promote, unpromote: {log:?}"
         );
         let walked = log
             .iter()
@@ -1128,6 +1177,85 @@ mod tests {
         assert!(
             log[edge].contains("RETURNING derivation"),
             "the seed set is the edges that actually landed: {log:?}"
+        );
+    }
+
+    /// The readiness pass has one legal order and the order IS the correctness
+    /// argument, so it is asserted literally: mark, ripple, promote, seed, promote,
+    /// un-promote.
+    ///
+    /// Mark before seed because the seed evaluates the fetchability predicate and
+    /// would otherwise let the ripple decrement a dependency it already counted as
+    /// ready. Un-promote after the seed because the ripple's promote fires on a
+    /// count the seed has not corrected yet: an anchor whose edge set grew this
+    /// batch is taken to zero by a relative move over a stale-low base, queued, and
+    /// only then raised again. Emitting the two halves of that bounce would announce
+    /// a `Queued` that never committed, so the transitions are collapsed to the net
+    /// move, which for this fixture is nothing.
+    #[tokio::test]
+    async fn the_readiness_pass_marks_ripples_promotes_seeds_then_settles_the_queue() {
+        let evaluation = EvaluationId::now_v7();
+        let (eval, a, b) = scripted(evaluation);
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![eval]])
+            .append_query_results([vec![hash_row(&a.hash)]])
+            .append_query_results([vec![a.clone(), b.clone()]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<MDerivationBuild>::new()])
+            .append_query_results([vec![anchor_row(a.id), anchor_row(b.id)]])
+            .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![drv_row(b.id)]])
+            .append_query_results([vec![ripple_row(a.id, true)]])
+            .append_query_results([vec![drv_row(a.id)]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![transition_row(a.id, 1, 0)]])
+            .append_exec_results(vec![ok(1); 3])
+            .into_connection();
+        let (ctx, pool) = ctx(db).await;
+
+        apply_batch(
+            &ctx,
+            &IngestBatch {
+                evaluation,
+                derivations: vec![drv(A, &[B])],
+                truly_substituted: HashSet::from([B.to_owned()]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        drop(ctx);
+        let log = gradient_db::pool::statements(pool.into_transaction_log());
+        let at = |needle: &str| {
+            log.iter()
+                .position(|s| s.contains(needle))
+                .unwrap_or_else(|| panic!("{needle} must run: {log:?}"))
+        };
+        let mark = at("SET fetchable = true");
+        let ripple = at("unready_deps - c.n");
+        let seed = at("SET unready_deps = (SELECT count(*)");
+        let unpromote = at("ANY($1::uuid[]) AND NOT (");
+        let promotes: Vec<usize> = log
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.contains("queued_at = coalesce(db.queued_at"))
+            .map(|(i, _)| i)
+            .collect();
+
+        assert_eq!(
+            promotes.len(),
+            2,
+            "the ripple promotes, then the seed does: {log:?}"
+        );
+        assert!(
+            mark < ripple && ripple < promotes[0] && promotes[0] < seed,
+            "the flip and its ripple settle before the absolute seed: {log:?}"
+        );
+        assert!(
+            seed < promotes[1] && promotes[1] < unpromote,
+            "the seed's own promote and the un-promote that undoes a stale-low queueing come last: {log:?}"
         );
     }
 
@@ -1260,6 +1388,7 @@ mod tests {
             .append_query_results([Vec::<MDerivationBuild>::new()])
             .append_query_results([vec![anchor_row(a.id)]])
             .append_query_results([Vec::<MBuildJob>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![ok(1); 3])

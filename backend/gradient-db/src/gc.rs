@@ -294,9 +294,10 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
            AND NOT EXISTS (SELECT 1 FROM reachable rc WHERE rc.derivation = d.id)
          RETURNING d.id"
     );
-    // Snapshot the edges INTO the candidates before the delete cascades them
-    // away: a surviving dependent of a reclaimed dependency has lost part of its
-    // record and must be re-walked.
+    // Snapshot the edges INTO the candidates before the delete, never after: the
+    // `dependency` FK is ON DELETE CASCADE, so the rows naming a reclaimed
+    // derivation are gone the moment it is, and a dependent that survived it has
+    // lost part of its record and must be re-walked.
     let mut dependents: Vec<(Uuid, Uuid)> = Vec::new();
     for chunk in candidate_ids.chunks(crate::IN_CHUNK_SIZE) {
         let ids: Vec<Uuid> = chunk.iter().map(|d| d.into_inner()).collect();
@@ -349,18 +350,27 @@ pub async fn gc_orphan_derivations(ctx: &DbContext, grace_hours: i64) -> Result<
     // dependent a concurrent eval already re-walked keeps its place in the queue.
     let orphaned = orphaned_survivors(&dependents, &deleted);
     if !orphaned.is_empty() {
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "UPDATE derivation SET walked = false WHERE id = ANY($1)",
-            [orphaned.clone().into()],
-        ))
-        .await
-        .context("GC: failed to clear walked on the survivors")?;
-
-        let survivors: Vec<DerivationId> = orphaned.into_iter().map(DerivationId::new).collect();
-        match crate::readiness::unpromote_ungated(db, &survivors).await {
+        let survivors: Vec<DerivationId> =
+            orphaned.iter().copied().map(DerivationId::new).collect();
+        let settled = async {
+            use sea_orm::TransactionTrait;
+            let txn = db.begin().await?;
+            txn.execute_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                "UPDATE derivation SET walked = false WHERE id = ANY($1)",
+                [orphaned.into()],
+            ))
+            .await?;
+            let changes = crate::readiness::unpromote_ungated(&txn, &survivors).await?;
+            txn.commit().await?;
+            Ok::<_, sea_orm::DbErr>(changes)
+        }
+        .await;
+        match settled {
             Ok(changes) => crate::status::emit_transition_effects(ctx, &changes).await,
-            Err(e) => warn!(error = %e, "GC: failed to unpromote the survivors"),
+            Err(e) => {
+                warn!(error = %e, "GC: failed to re-walk the survivors of a deleted dependency")
+            }
         }
     }
 

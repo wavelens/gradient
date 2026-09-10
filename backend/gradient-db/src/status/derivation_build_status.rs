@@ -82,7 +82,11 @@ pub async fn update_derivation_build_status(
     .await;
 
     // A build-once success is the moment this anchor can serve its outputs: one
-    // locked flip drops its dependents' counters and queues the ones at zero.
+    // locked flip drops its dependents' counters and queues the ones at zero. The
+    // failure half of the `promote_dependents` this replaces is not lost: a
+    // dependent of a terminal-failed dependency is failed by
+    // `cascade_dependency_failed` on that failure's own transition, and by the
+    // eval-scoped `reconcile_dependency_failed` for the ones it could not reach.
     if matches!(status, BuildStatus::Completed | BuildStatus::Substituted) {
         match crate::readiness::advance_fetchable(&ctx.worker_db, &[updated.derivation]).await {
             Ok(changes) => emit_transition_effects(ctx, &changes).await,

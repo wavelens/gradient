@@ -270,6 +270,13 @@ fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
 /// drop the upstream trust the demoted output carried, since an anchor an upstream
 /// still offers is fetchable through `substitutable` and would otherwise keep a
 /// terminal status against an artifact nothing serves.
+///
+/// That clear runs at every status, and `substitutable` is one of the two ways
+/// `gates_predicate` can be satisfied, so a `Queued` anchor whose only satisfier it
+/// was would be left queued with its gates false - and the dispatch gate is the
+/// same predicate one status later, so it would never dispatch and nothing would
+/// pull it back. The un-promote that follows is what closes that, and it shares the
+/// retire's transaction so a crash cannot separate the two.
 pub async fn demote_cached_output(
     ctx: &crate::DbContext,
     hash: &str,
@@ -299,14 +306,15 @@ pub async fn demote_cached_output(
         return Ok(producers);
     }
 
-    // The artifact is gone, so the upstream offer that was recorded with it is not
-    // evidence any more: `demoted_output` cleared `external_url`, and this clears
-    // the anchor's `substitutable` so the retire's `fetchable` mark sees the truth.
-    // The next eval re-marks it substitutable if it is genuinely still on an
-    // upstream, having re-walked the node because pruning keys on `external_url`.
+    // The artifact is gone, so the upstream offer recorded with it is not evidence
+    // any more: `demoted_output` cleared `external_url`, and this clears the
+    // anchor's `substitutable` so the retire's `fetchable` mark sees the truth. The
+    // next eval re-marks it substitutable if it is genuinely still on an upstream,
+    // having re-walked the node because pruning keys on `external_url`.
+    let txn = db.begin().await?;
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
-        db.execute_raw(Statement::from_sql_and_values(
+        txn.execute_raw(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
             "UPDATE derivation_build SET substitutable = false \
              WHERE derivation = ANY($1) AND substitutable",
@@ -315,8 +323,10 @@ pub async fn demote_cached_output(
         .await?;
     }
 
-    let txn = db.begin().await?;
-    let retired = crate::nar_closure::retire_paths(&txn, &[hash.to_owned()]).await?;
+    let mut retired = crate::nar_closure::retire_paths(&txn, &[hash.to_owned()]).await?;
+    retired
+        .transitions
+        .extend(crate::readiness::unpromote_ungated(&txn, &producers).await?);
     txn.commit().await?;
     crate::status::emit_transition_effects(ctx, &retired.transitions).await;
 
@@ -565,6 +575,7 @@ mod tests {
             .append_query_results([vec![retired]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
                 MockExecResult {
                     last_insert_id: 0,
@@ -603,6 +614,72 @@ mod tests {
             !log.iter()
                 .any(|s| s.contains(&format!("status IN ({terminal_success})"))),
             "the producer reset belongs to the retire, which decides it from the flag it just wrote: {log:?}"
+        );
+    }
+
+    /// A hash with NO `cached_path` row is half of what
+    /// [`unbacked_trusted_outputs_select`] matches, and it deletes nothing and
+    /// ripples nothing, so a readiness pass keyed only on what moved would leave its
+    /// producer terminal-success and fetchable against an artifact that does not
+    /// exist. `REQUEUEABLE` excludes terminal success, so no other path recovers it.
+    #[tokio::test]
+    async fn demote_of_a_hash_with_no_row_still_resets_its_producer() {
+        use gradient_types::ids::{DerivationId, DerivationOutputId};
+        use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+        use std::collections::BTreeMap;
+
+        let hash = "bn1sgl0pn88d9dkc10jp0i1a77iadh8w";
+        let (tmp, _file) = present_nar(hash);
+        let producer = DerivationId::now_v7();
+        let output = gradient_entity::derivation_output::Model {
+            id: DerivationOutputId::now_v7(),
+            derivation: producer,
+            hash: hash.to_string(),
+            ..Default::default()
+        };
+        let drv_row =
+            BTreeMap::from([("derivation".to_owned(), Value::from(producer.into_inner()))]);
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([vec![output.clone()], vec![output]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([vec![drv_row.clone()]])
+            .append_query_results([vec![drv_row]])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_exec_results(vec![
+                MockExecResult {
+                    last_insert_id: 0,
+                    rows_affected: 1,
+                };
+                3
+            ])
+            .into_connection();
+        let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
+
+        demote_cached_output(&ctx, hash).await.unwrap();
+
+        drop(ctx);
+        let log = crate::pool::statements(pool.into_transaction_log());
+        assert!(
+            !log.iter()
+                .any(|s| s.contains("WHERE is_cached AND hash = ANY($1)")),
+            "nothing was deleted, so the retire's own clears never run: {log:?}"
+        );
+        assert!(
+            log.iter()
+                .any(|s| s.contains("FROM derivation_output o WHERE o.hash = ANY($1)")),
+            "the producers of the asked-for hash are still resolved: {log:?}"
+        );
+        assert!(
+            log.iter().any(|s| s.contains("SET fetchable = false")),
+            "and offered to the mark, which decides from the predicate: {log:?}"
+        );
+        assert!(
+            log.iter().any(|s| s.contains("AND NOT db.fetchable")),
+            "so the producer with nothing left to serve is reset: {log:?}"
         );
     }
 
