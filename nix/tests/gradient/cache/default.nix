@@ -1056,6 +1056,21 @@ in {
           f"WHERE d.hash = '{drv_hash}';"
       ))
       assert hello_unready >= 1, f"hello must count its unfetchable dependencies as unready: {hello_unready}"
+
+      # The other half of the reset's scope, and the one that costs a fleet when it
+      # is wrong. hello only REFERENCES the retired path; its own output is still on
+      # disk, so it loses fetchability and keeps its terminal status. Resetting the
+      # referrer closure instead re-queued 107 derivations and dispatched 139 builds
+      # in 30 s from this one deleted NAR, and rebuilt nothing that was missing.
+      hello_anchor = sql(
+          f"SELECT db.status::text || ' ' || db.fetchable::int::text FROM derivation_build db "
+          f"JOIN derivation d ON d.id = db.derivation WHERE d.hash = '{drv_hash}';"
+      )
+      h_status, h_fetchable = hello_anchor.split()
+      assert h_fetchable == "0" and h_status in ("3", "7"), (
+          f"a referrer that only lost wholeness must keep its terminal-success status, or "
+          f"the next evaluation rebuilds an output that never left the cache, has "
+          f"(status fetchable) = ({hello_anchor})")
       assert anchor_drift() == 0, "anchor counters disagree with their recompute after the retire"
 
       print(server.succeed(f"{CLI} cache upload main {dep_path}"))
@@ -1126,11 +1141,12 @@ in {
       assert total_ms < 300000, f"the run burned {total_ms} ms of database time"
       assert counter_share < 50, f"maintaining the counter is {counter_share}% of database time"
 
-      # ── Phase 10e: a re-evaluation settles the producers a retire reset ────
-      # The retire reset every producer whose output stopped being whole back to
-      # Created, and a re-upload does not settle one: `fetchable` reads the anchor's
-      # own status, so only an evaluation (the ingest marks a derivation whole in our
-      # cache Substituted) or a rebuild puts it back. This phase drives the
+      # ── Phase 10e: a re-evaluation settles the producer a retire reset ─────
+      # The retire reset the producer of the path it DELETED back to Created, and a
+      # re-upload does not settle it: `fetchable` reads the anchor's own status, so
+      # only an evaluation (the ingest marks a derivation whole in our cache
+      # Substituted) or a rebuild puts it back. Referrers were never reset, so they
+      # need nothing here. This phase drives the
       # evaluation and asserts the graph converges: the producer is fetchable again,
       # hello's counter is back to zero, and neither counter disagrees with its
       # recompute. The polling trigger is configured at 10 s on `task`, so an empty

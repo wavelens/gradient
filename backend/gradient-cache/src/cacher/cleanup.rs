@@ -689,6 +689,7 @@ mod tests {
             .append_query_results([vec![retired]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_exec_results(vec![
                 sea_orm::MockExecResult {
                     last_insert_id: 0,
@@ -713,8 +714,9 @@ mod tests {
         let log = gradient_db::pool::statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
-            7,
-            "keep-set, zombie scan, retire lock, delete, is_cached, producers, owners: {log:?}"
+            8,
+            "keep-set, zombie scan, retire lock, delete, is_cached, producers of the \
+             union, producers of what is gone, owners: {log:?}"
         );
     }
 
@@ -748,6 +750,7 @@ mod tests {
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([Vec::<gradient_entity::cache_derivation::Model>::new()])
             .append_exec_results(vec![
                 sea_orm::MockExecResult {
@@ -764,8 +767,10 @@ mod tests {
         let log = gradient_db::pool::statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
-            9,
-            "stale scan, outputs, cache_derivation delete, signature delete, retire lock, guarded delete, producers, owners, still-held check: {log:?}"
+            10,
+            "stale scan, outputs, cache_derivation delete, signature delete, retire lock, \
+             guarded delete, producers of the union, producers of what is gone, owners, \
+             still-held check: {log:?}"
         );
         assert!(
             log.iter().any(|s| s.contains("DELETE FROM cached_path cp")
