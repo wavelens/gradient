@@ -142,7 +142,9 @@ pub async fn reconcile_waiting_state(
                 // Build-phase park, or a legacy/untagged row: recover from the
                 // pending builds, falling back to eval recovery when the eval
                 // never produced any (a pre-build park predating EvalWorkers).
-                _ => match build_phase_decision(state, eval.id, worker_caps).await? {
+                _ => match build_phase_decision(state, eval.id, worker_caps, reason.as_ref())
+                    .await?
+                {
                     Some(pair) => Some(pair),
                     None => Some(decide_eval_recovery(
                         EvalCapability::Eval,
@@ -161,7 +163,9 @@ pub async fn reconcile_waiting_state(
                 fetch_capable_workers,
                 connected_workers,
             ),
-            EvaluationStatus::Building => build_phase_decision(state, eval.id, worker_caps).await?,
+            EvaluationStatus::Building => {
+                build_phase_decision(state, eval.id, worker_caps, reason.as_ref()).await?
+            }
             _ => None,
         };
 
@@ -202,23 +206,39 @@ pub async fn reconcile_waiting_state(
 /// `unready_deps`, an unwalked derivation, a `.drv` that is not importable, or no
 /// `build_job`) and no in-flight build to drive a promotion. Every gate the graph
 /// maintains moves on an event, and by definition no event is coming, so we
-/// self-heal here: [`attempt_graph_unstick`].
+/// self-heal here: [`attempt_graph_unstick`], gated by [`unstick_due`].
 async fn build_phase_decision(
     state: &Arc<ServerState>,
     evaluation_id: EvaluationId,
     worker_caps: &[(Vec<String>, Vec<String>)],
+    current: Option<&WaitingReason>,
 ) -> Result<Option<(EvaluationStatus, Option<WaitingReason>)>> {
     let outcome = assess_buildability(state, evaluation_id, worker_caps).await?;
 
     if let Some((EvaluationStatus::Waiting, Some(WaitingReason::Workers { unmet, .. }))) = &outcome
         && unmet.is_empty()
     {
+        let pending = eval_pending_anchors(state, evaluation_id).await?.len() as u32;
+        if !unstick_due(current, pending) {
+            return Ok(Some((
+                EvaluationStatus::Waiting,
+                Some(WaitingReason::graph_stuck(pending)),
+            )));
+        }
+
         return Ok(Some(
             attempt_graph_unstick(state, evaluation_id, worker_caps).await?,
         ));
     }
 
     Ok(outcome)
+}
+
+/// The graph-stuck heal runs when an evaluation first parks, or when its
+/// pending set changed since; a stably stuck evaluation is left to the
+/// counters, which promote it the moment whatever it waits on arrives.
+pub(crate) fn unstick_due(current: Option<&WaitingReason>, pending: u32) -> bool {
+    !matches!(current, Some(WaitingReason::GraphStuck { pending_anchors }) if *pending_anchors == pending)
 }
 
 /// Decide `Building` vs `Waiting` for an eval's current pending anchors.
@@ -383,7 +403,6 @@ async fn eval_blocked_on_unproducible_drv(
 }
 
 fn unproducible_drv_block_sql() -> String {
-    let deps_ready = gradient_db::graph_sql::deps_ready_predicate("db");
     let drv_whole = gradient_db::graph_sql::drv_whole_predicate("db");
     let drv_nar_absent = gradient_db::graph_sql::drv_nar_absent_predicate("db");
     let walked = gradient_db::graph_sql::walked_predicate("db");
@@ -397,10 +416,9 @@ fn unproducible_drv_block_sql() -> String {
               AND db.status IN ({created}, {queued})
               AND {walked}
               AND NOT db.substitutable
-              AND NOT db.drv_closure_cached
               AND NOT {drv_whole}
               AND {drv_nar_absent}
-              AND ({deps_ready})
+              AND db.unready_deps = 0
         ) AS blocked
         "#,
         created = BuildStatus::Created as i32,
@@ -566,11 +584,7 @@ mod tests {
             )),
             "only pending anchors: {sql}"
         );
-        for frag in [
-            "w.walked",
-            "NOT db.substitutable",
-            "NOT db.drv_closure_cached",
-        ] {
+        for frag in ["w.walked", "NOT db.substitutable"] {
             assert!(sql.contains(frag), "missing `{frag}`: {sql}");
         }
         assert!(
@@ -581,8 +595,8 @@ mod tests {
             "must require the .drv not to be whole, through the shared predicate: {sql}"
         );
         assert!(
-            sql.contains("cached_path cp") && sql.contains("derivation_input_source"),
-            "must embed the deps-ready predicate (all build deps and sources cached): {sql}"
+            sql.contains("db.unready_deps = 0"),
+            "must require every dependency ready, through the counter: {sql}"
         );
     }
 
@@ -683,5 +697,22 @@ mod tests {
         let (cap, connected) = eval_workers_view(&reason.expect("refresh carries a reason"));
         assert_eq!(cap, EvalCapability::Fetch);
         assert_eq!(connected, 5);
+    }
+
+    /// The heal is not a tick: it runs once per stuck state, and again only
+    /// when the pending set moved.
+    #[test]
+    fn the_graph_stuck_heal_runs_on_entry_and_on_change_only() {
+        assert!(unstick_due(None, 3));
+        assert!(unstick_due(
+            Some(&WaitingReason::Workers {
+                unmet: vec![],
+                connected_workers: 1,
+                available_architectures: vec![],
+            }),
+            3
+        ));
+        assert!(!unstick_due(Some(&WaitingReason::graph_stuck(3)), 3));
+        assert!(unstick_due(Some(&WaitingReason::graph_stuck(3)), 2));
     }
 }

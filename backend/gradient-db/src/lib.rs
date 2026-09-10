@@ -92,7 +92,7 @@ pub use self::promotion::{
     requeue_failed_closure_for_eval, substitute_created_anchors,
 };
 pub use self::reachability::{
-    build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
+    anchor_status, build_jobs_for_derivation, build_jobs_for_derivations, derivation_is_reachable,
     derivations_with_hashes, eval_anchor_statuses, evals_referencing_derivation,
     producers_of_hashes,
 };

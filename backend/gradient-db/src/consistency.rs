@@ -13,30 +13,28 @@
 //! persistent counts are the alert. There is no reconcile tick to wait for: the
 //! event that changes a counter moves it, and this sweep is the only backstop.
 //!
-//! One dimension is not read-only: the NAR reference counter is moved rather
-//! than derived, so nothing else would ever notice a lost move. This pass
-//! repairs it in place over the paths that gate pending anchors, and reports
-//! how many rows it had to correct. That makes the sweep the counter's only
-//! backstop, so `GRADIENT_GRAPH_CONSISTENCY_INTERVAL = 0` leaves it with none.
+//! Two dimensions are not read-only: the readiness counters and the NAR
+//! reference counter are moved rather than derived, so nothing else would ever
+//! notice a lost move. This pass recomputes both over the scope that gates
+//! progress and repairs them in place, so the counts it reports for them are
+//! what was repaired. That makes the sweep those counters' only backstop, so
+//! `GRADIENT_GRAPH_CONSISTENCY_INTERVAL = 0` leaves them with none.
 //! The counters BELOW zero are counted separately and table-wide: the repair is
 //! bounded to the gating paths, so a row driven negative outside them is exactly
 //! the state the design calls unrecoverable and the drift count cannot see it.
 
-use crate::status_sql;
+use crate::{DbContext, status_sql};
 use gradient_entity::build::BuildStatus;
 use gradient_entity::evaluation::EvaluationStatus;
-use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseTransaction, DbErr, Statement, TransactionTrait,
-};
+use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, Statement};
 
 /// Counts of graph-invariant violations at one instant.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct ConsistencyReport {
-    /// Anchors trusted `closure_complete` whose gate no longer holds.
-    pub stale_closure_complete: i64,
-    /// Anchors trusted `drv_closure_cached` whose gate no longer holds.
-    pub stale_drv_closure_cached: i64,
-    /// `Created` anchors that pass the full promotion predicate yet sit unpromoted.
+    /// `fetchable` and `unready_deps` rows rewritten over the pending anchors
+    /// and their direct dependencies.
+    pub counter_drift: i64,
+    /// Promotable anchors found unpromoted, queued by this pass.
     pub unpromoted_ready: i64,
     /// Outputs of terminal-success producers with no backing artifact.
     pub unbacked_trusted_outputs: i64,
@@ -61,8 +59,7 @@ impl ConsistencyReport {
     /// non-zero total can be a successful self-repair; `gating_paths` is a
     /// measurement and is deliberately not summed.
     pub fn total(&self) -> i64 {
-        self.stale_closure_complete
-            + self.stale_drv_closure_cached
+        self.counter_drift
             + self.unpromoted_ready
             + self.unbacked_trusted_outputs
             + self.wedged_building_evals
@@ -80,24 +77,17 @@ async fn count<C: ConnectionTrait>(db: &C, sql: String) -> Result<i64, DbErr> {
         .unwrap_or(0))
 }
 
-/// Repair the NAR reference counter over the paths the pending anchors gate on,
-/// then count every invariant violation the gates could act on right now. The
-/// repair runs first because two of those counts embed gates that read the
-/// counter, so a drifted row would otherwise inflate a count this very pass fixes.
+/// Repair the NAR reference counter over the paths the pending anchors gate on
+/// and the readiness counters over the anchors themselves, then count the
+/// violations no counter can repair. The NAR repair runs first because the
+/// readiness recount reads wholeness, so a drifted path would otherwise teach the
+/// anchors a count this very pass fixes.
 ///
 /// The negative-counter count is table-wide on purpose: the repair is bounded to
 /// the gating paths, so drift outside them is invisible to `nar_counter_drift` by
-/// construction. `gating_paths` reports the size of that bounded set, which is an
-/// unbounded select today (#591 rewrites what the sweep reads, so it is measured
-/// now and bounded there rather than with a rotation scheme thrown away next PR).
-pub async fn graph_consistency_report<C>(db: &C) -> Result<ConsistencyReport, DbErr>
-where
-    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
-{
-    let closure_gate = crate::promotion::closure_complete_gate();
-    let drv_gate = crate::promotion::drv_closure_cached_gate();
-    let deps_ready = crate::graph_sql::deps_ready_predicate("db");
-    let walked = crate::graph_sql::walked_predicate("db");
+/// construction. `gating_paths` reports the size of that bounded set.
+pub async fn graph_consistency_report(ctx: &DbContext) -> Result<ConsistencyReport, DbErr> {
+    let db = &ctx.worker_db;
     let unbacked = crate::cache_storage::unbacked_trusted_outputs_select();
 
     let gating = db
@@ -116,36 +106,9 @@ where
     )
     .await?;
 
-    let stale_closure_complete = count(
-        db,
-        format!(
-            "SELECT count(*) AS n FROM derivation_build db \
-             WHERE db.closure_complete AND NOT ({closure_gate})"
-        ),
-    )
-    .await?;
-
-    let stale_drv_closure_cached = count(
-        db,
-        format!(
-            "SELECT count(*) AS n FROM derivation_build db \
-             WHERE db.drv_closure_cached AND NOT ({drv_gate})"
-        ),
-    )
-    .await?;
-
-    let unpromoted_ready = count(
-        db,
-        format!(
-            "SELECT count(*) AS n FROM derivation_build db \
-             WHERE db.status = {created} \
-               AND {walked} \
-               AND EXISTS (SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation) \
-               AND (db.substitutable OR ({deps_ready}))",
-            created = status_sql::build(BuildStatus::Created),
-        ),
-    )
-    .await?;
+    let repaired = crate::readiness::repair_pending(db).await?;
+    crate::status::emit_transition_effects(ctx, &repaired.promoted).await;
+    crate::status::emit_transition_effects(ctx, &repaired.unpromoted).await;
 
     let unbacked_trusted_outputs =
         count(db, format!("SELECT count(*) AS n FROM ({unbacked}) u")).await?;
@@ -171,9 +134,8 @@ where
     .await?;
 
     Ok(ConsistencyReport {
-        stale_closure_complete,
-        stale_drv_closure_cached,
-        unpromoted_ready,
+        counter_drift: (repaired.fetchable + repaired.unready_deps) as i64,
+        unpromoted_ready: repaired.promoted.len() as i64,
         unbacked_trusted_outputs,
         wedged_building_evals,
         nar_counter_drift,
@@ -188,18 +150,21 @@ mod tests {
     use sea_orm::{MockDatabase, MockExecResult, Value};
     use std::collections::BTreeMap;
 
-    /// The repair is the counter's only backstop, so the report has to actually
-    /// run it - and run it before the counts, two of which embed gates that read
-    /// the counter. Without this, deleting those lines leaves the suite green.
+    /// The repairs are these counters' only backstop, so the report has to
+    /// actually run them - the NAR one first, because the readiness recount
+    /// reads wholeness. Without this, deleting either leaves the suite green.
     #[tokio::test]
-    async fn the_report_repairs_the_gating_paths_before_it_counts() {
+    async fn the_report_repairs_both_counters_before_it_counts() {
         let n = || vec![BTreeMap::from([("n".to_owned(), Value::BigInt(Some(0)))])];
+        let empty = Vec::<BTreeMap<String, Value>>::new();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![BTreeMap::from([(
                 "hash".to_owned(),
                 Value::from("h".to_owned()),
             )])]])
-            .append_query_results([n(), n(), n(), n(), n(), n()])
+            .append_query_results([n()])
+            .append_query_results([empty.clone(), empty.clone(), empty])
+            .append_query_results([n(), n()])
             .append_exec_results([
                 MockExecResult {
                     last_insert_id: 0,
@@ -212,14 +177,16 @@ mod tests {
             ])
             .into_connection();
 
-        let report = graph_consistency_report(&db).await.unwrap();
+        let (ctx, pool) = crate::test_ctx::ctx(db).await;
+        let report = graph_consistency_report(&ctx).await.unwrap();
+        drop(ctx);
 
         assert_eq!(
             report.nar_counter_drift, 2,
             "the repaired rows are reported"
         );
         assert_eq!(report.gating_paths, 1, "the repair's scope is measured");
-        let log = crate::pool::statements(db.into_transaction_log());
+        let log = crate::pool::statements(pool.into_transaction_log());
         assert!(
             log[0].contains("SELECT d.hash FROM derivation d")
                 && log[0].contains("JOIN derivation_dependency e ON e.dependency = o.derivation"),
@@ -228,11 +195,23 @@ mod tests {
         assert!(
             log[1].contains("FOR UPDATE")
                 && log[2].contains("UPDATE cached_path cp SET missing_references"),
-            "the repair locks, recounts, and runs before any count reads the counter: {log:?}"
+            "the NAR repair locks, recounts, and runs before anything reads wholeness: {log:?}"
         );
         assert!(
             log[3].contains("missing_references < 0"),
             "a counter below zero is unrecoverable, so it must be counted: {log:?}"
+        );
+        assert!(
+            log[4].contains("SELECT q.derivation FROM derivation_build q"),
+            "the readiness repair materialises its scope: {log:?}"
+        );
+        assert!(
+            log[5].contains("SET status = 0") && log[6].contains("SET status = 1"),
+            "the queue is settled against the repaired counters: {log:?}"
+        );
+        assert!(
+            log[7].contains("SELECT DISTINCT o.hash") && log[8].contains("FROM evaluation ev"),
+            "the read-only alarms come last: {log:?}"
         );
     }
 
@@ -241,8 +220,7 @@ mod tests {
     #[test]
     fn total_sums_every_dimension() {
         let r = ConsistencyReport {
-            stale_closure_complete: 1,
-            stale_drv_closure_cached: 2,
+            counter_drift: 1,
             unpromoted_ready: 3,
             unbacked_trusted_outputs: 4,
             wedged_building_evals: 5,
@@ -250,7 +228,7 @@ mod tests {
             negative_reference_counters: 7,
             gating_paths: 1000,
         };
-        assert_eq!(r.total(), 28);
+        assert_eq!(r.total(), 26);
         assert_eq!(ConsistencyReport::default().total(), 0);
     }
 }

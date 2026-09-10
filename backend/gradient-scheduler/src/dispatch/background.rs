@@ -38,21 +38,19 @@ pub(super) fn liveness_period(scheduler: &Scheduler) -> Option<Duration> {
         .then(|| Duration::from_secs((timeout_secs / LIVENESS_POLLS_PER_DEADLINE).max(5)))
 }
 
-/// Invariant check: counts stale gate flags, unpromoted-ready anchors, unbacked
+/// Bounded repair of the readiness counters plus the read-only alarms: unbacked
 /// trusted outputs, wedged Building evals and reference counters driven below
 /// zero, so a dead zone becomes a warning long before a user reports a stuck
-/// evaluation, and repairs the NAR reference counter over the paths the pending
-/// anchors gate on. Transient non-zero counts right after a transition are normal;
-/// persistent ones are not - except `nar_counter_drift`, which counts rows this
-/// pass already repaired, so the warning can be a successful self-repair. `gating`
-/// is the size of the repair's scope, logged at `info` on both branches because a
-/// healthy instance is exactly the case whose cost is unmeasured.
+/// evaluation. Transient non-zero counts right after a transition are normal;
+/// persistent ones are not - except the drift counts, which report rows this pass
+/// already repaired, so the warning can be a successful self-repair. `gating`
+/// is the size of the NAR repair's scope, logged at `info` on both branches
+/// because a healthy instance is exactly the case whose cost is unmeasured.
 pub(super) async fn consistency_sweep_pass(scheduler: Arc<Scheduler>) -> anyhow::Result<()> {
-    let report = gradient_db::graph_consistency_report(&scheduler.state.worker_db).await?;
+    let report = gradient_db::graph_consistency_report(&scheduler.state.db()).await?;
     if report.total() > 0 {
         warn!(
-            stale_closure_complete = report.stale_closure_complete,
-            stale_drv_closure_cached = report.stale_drv_closure_cached,
+            counter_drift = report.counter_drift,
             unpromoted_ready = report.unpromoted_ready,
             unbacked_trusted_outputs = report.unbacked_trusted_outputs,
             wedged_building_evals = report.wedged_building_evals,
