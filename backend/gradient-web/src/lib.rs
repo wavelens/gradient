@@ -875,6 +875,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
         Ok(r)
             if r.attempts_aborted > 0
                 || r.builds_requeued > 0
+                || r.builds_unpromoted > 0
                 || r.builds_aborted > 0
                 || r.evals_aborted > 0
                 || r.tasks_forced > 0 =>
@@ -882,6 +883,7 @@ pub async fn serve_web(state: Arc<ServerState>) -> std::io::Result<()> {
             tracing::warn!(
                 attempts_aborted = r.attempts_aborted,
                 builds_requeued = r.builds_requeued,
+                builds_unpromoted = r.builds_unpromoted,
                 builds_aborted = r.builds_aborted,
                 evals_aborted = r.evals_aborted,
                 tasks_forced = r.tasks_forced,

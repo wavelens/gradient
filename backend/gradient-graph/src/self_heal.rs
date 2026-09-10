@@ -42,8 +42,10 @@ async fn any_reachable<C: sea_orm::ConnectionTrait>(db: &C, derivations: &[Deriv
 /// one's stale cache artifact (delete the `cached_path` row + the NAR object,
 /// clear the output's `is_cached` / `cached_path`) and reset its producer to
 /// `Created`, leaving the derivation graph intact. The producer then rebuilds
-/// in-eval and the failed build - marked `FailedTransient`, not permanent -
-/// retries once the input is back (the dispatch gate holds it until then).
+/// in-eval and the failed build - marked `FailedTransient`, not permanent - is
+/// retried by `requeue::transient_retries` once its backoff elapses, and that
+/// requeue's own settle is what holds it out of the queue until the input is back:
+/// the dispatch gate reads the status, so it re-checks nothing.
 ///
 /// A missing input with no producing derivation (a `.drv` file or a source
 /// path) is only purged when its NAR is genuinely gone: `demote_cached_output`

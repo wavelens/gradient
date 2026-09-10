@@ -741,8 +741,10 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     let state = &scheduler.state;
 
-    // The dispatch gate lives in gradient_db next to promotion so both embed the
-    // one shared readiness predicate; see `gradient_db::find_ready_anchors`.
+    // The select reads the queue invariant and re-derives no readiness term:
+    // `Queued` means `graph_sql::gates_predicate` held when the anchor was promoted,
+    // and every writer of that status settles against the gate. See
+    // `gradient_db::find_ready_anchors`.
     let started = std::time::Instant::now();
     let anchors = gradient_db::find_ready_anchors(&state.worker_db).await?;
     if anchors.is_empty() {

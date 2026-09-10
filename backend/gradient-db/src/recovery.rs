@@ -37,6 +37,8 @@ fn lost_eval_statuses() -> Vec<EvaluationStatus> {
 pub struct RecoveryReport {
     pub attempts_aborted: u64,
     pub builds_requeued: u64,
+    /// How many of `builds_requeued` the gate pulled straight back to `Created`.
+    pub builds_unpromoted: usize,
     pub builds_aborted: u64,
     pub evals_aborted: u64,
     pub tasks_forced: u64,
@@ -63,7 +65,21 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         .await?;
     report.attempts_aborted = res.rows_affected;
 
-    // 2. Re-queue anchors that were mid-flight (Building → Queued).
+    // 2. Re-queue anchors that were mid-flight (Building back to Queued). The
+    // requeue itself evaluates no gate, and since #591 nothing downstream re-checks
+    // a `Queued` row, so the ids are read before the write and settled after it: a
+    // mid-flight anchor's dependencies can have regressed while the server was down,
+    // and on the first start after `m20260908_000000` every derivation is unwalked.
+    let mid_flight = crate::promotion::returned_derivations(
+        conn.query_all_raw(Statement::from_string(
+            DatabaseBackend::Postgres,
+            format!(
+                "SELECT derivation FROM derivation_build WHERE status = {building}",
+                building = BuildStatus::Building as i32,
+            ),
+        ))
+        .await?,
+    );
     let res = EDerivationBuild::update_many()
         .col_expr(CDerivationBuild::Status, Expr::value(BuildStatus::Queued))
         .col_expr(CDerivationBuild::UpdatedAt, Expr::value(now))
@@ -71,6 +87,9 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
         .exec(conn)
         .await?;
     report.builds_requeued = res.rows_affected;
+    report.builds_unpromoted = crate::readiness::unpromote_ungated(conn, &mid_flight)
+        .await?
+        .len();
 
     // 3a. Collect the evals a restart lost, `Building` included: their anchors
     // and their terminal transition are this sweep's to finish.
@@ -225,7 +244,32 @@ mod tests {
 
     use gradient_entity::evaluation::Model as MEval;
     use gradient_entity::ids::{CommitId, EvaluationId, TaskId};
-    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult};
+    use sea_orm::{DatabaseBackend, MockDatabase, MockExecResult, Value};
+    use std::collections::BTreeMap;
+
+    fn derivation_row(derivation: DerivationId) -> BTreeMap<String, Value> {
+        BTreeMap::from([(
+            "derivation".to_owned(),
+            Value::from(derivation.into_inner()),
+        )])
+    }
+
+    fn unpromoted_row(derivation: DerivationId) -> BTreeMap<String, Value> {
+        BTreeMap::from([
+            (
+                "derivation".to_owned(),
+                Value::from(derivation.into_inner()),
+            ),
+            (
+                "from_status".to_owned(),
+                Value::from(crate::status_sql::build(BuildStatus::Queued)),
+            ),
+            (
+                "to_status".to_owned(),
+                Value::from(crate::status_sql::build(BuildStatus::Created)),
+            ),
+        ])
+    }
 
     fn eval_row(status: EvaluationStatus, task: Option<TaskId>) -> MEval {
         MEval {
@@ -241,20 +285,32 @@ mod tests {
         }
     }
 
+    /// The mid-flight requeue evaluates no gate, so the settle after it is part of
+    /// the step and not an optimisation: an anchor whose dependencies regressed while
+    /// the server was down must leave the queue again before the first dispatch pass
+    /// reads it. The count is reported rather than folded into `builds_requeued`.
     #[tokio::test]
     async fn all_operations_populate_report() {
         let task_id = TaskId::now_v7();
+        let mid_flight = DerivationId::now_v7();
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             // 1. abort orphaned attempts
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 3,
             }])
+            // 2. the ids about to be requeued, read before the write
+            .append_query_results([vec![
+                derivation_row(mid_flight),
+                derivation_row(DerivationId::now_v7()),
+            ]])
             // 2. re-queue Building builds
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 2,
             }])
+            // 2. the settle pulls one of them straight back
+            .append_query_results([vec![unpromoted_row(mid_flight)]])
             // 3a. SELECT pre-build inflight evals
             .append_query_results([vec![eval_row(EvaluationStatus::Fetching, Some(task_id))]])
             // 3b. abort those evals
@@ -278,6 +334,7 @@ mod tests {
 
         assert_eq!(report.attempts_aborted, 3);
         assert_eq!(report.builds_requeued, 2);
+        assert_eq!(report.builds_unpromoted, 1);
         assert_eq!(report.builds_aborted, 4);
         assert_eq!(report.evals_aborted, 1);
         assert_eq!(report.tasks_forced, 1);
@@ -291,12 +348,14 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 0,
             }])
+            // 2. nothing was mid-flight, so the settle issues no statement at all
+            .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             // 2. re-queue Building builds (none)
             .append_exec_results([MockExecResult {
                 last_insert_id: 0,
                 rows_affected: 0,
             }])
-            // 3a. SELECT pre-build evals → empty (steps 3b/3c/3d are skipped)
+            // 3a. SELECT pre-build evals: empty, so steps 3b/3c/3d are skipped
             .append_query_results([Vec::<MEval>::new()])
             .into_connection();
 
@@ -304,6 +363,7 @@ mod tests {
 
         assert_eq!(report.attempts_aborted, 0);
         assert_eq!(report.builds_requeued, 0);
+        assert_eq!(report.builds_unpromoted, 0);
         assert_eq!(report.builds_aborted, 0);
         assert_eq!(report.evals_aborted, 0);
         assert_eq!(report.tasks_forced, 0);

@@ -273,9 +273,9 @@ fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
 ///
 /// That clear runs at every status, and `substitutable` is one of the two ways
 /// `gates_predicate` can be satisfied, so a `Queued` anchor whose only satisfier it
-/// was would be left queued with its gates false - and the dispatch gate is the
-/// same predicate one status later, so it would never dispatch and nothing would
-/// pull it back. The un-promote that follows is what closes that, and it shares the
+/// was would be left queued with its gates false - and dispatch reads the status
+/// rather than the gates, so it would dispatch that anchor against a `.drv` nothing
+/// can serve. The un-promote that follows is what closes that, and it shares the
 /// retire's transaction so a crash cannot separate the two.
 ///
 /// Because the clear has to run inside that transaction AND before the retire reads
