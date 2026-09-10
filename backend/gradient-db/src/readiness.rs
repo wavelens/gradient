@@ -85,6 +85,17 @@
 //! recount starts. A counter computed from a `fetchable = true` that a later chunk was
 //! about to correct is too LOW, and too low promotes.
 //!
+//! Each chunk locks what it WRITES, not what it READS. The counter recount reads
+//! `dep.fetchable` for dependencies the chunk does not name, so a flip that commits
+//! after the recount's snapshot is invisible to it while the compare-and-swap, which
+//! only guards the target row, still passes: the stale count lands, and if the
+//! dependency LOST fetchability the count is too low, which promotes. The flip's own
+//! ripple writes the same dependent, so whichever of the two commits second wins and
+//! the next sweep converges. Closing it would need the lock to cover the transitive
+//! read set, which is the unchunked pass this shape exists to avoid.
+//! `nar_closure::repair_counters_for` carries the identical residual for the same
+//! reason.
+//!
 //! Repaired: both columns, over the pending anchors and their direct dependencies as
 //! of the scope select. Written: `unready_deps` for every dependent of a flipped
 //! anchor at ANY status and for every anchor a caller seeds, `fetchable` for every
