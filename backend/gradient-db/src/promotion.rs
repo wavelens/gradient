@@ -50,10 +50,6 @@ use gradient_entity::build_attempt::{AttemptFailureReason, AttemptOutcome};
 use gradient_types::DerivationId;
 use sea_orm::{ConnectionTrait, DatabaseBackend, DbErr, QueryResult, Statement, Value};
 
-/// Statuses the dependency-failed transitions overwrite. Never `Building` (a
-/// running build settles on its own) and never a terminal state; the recursive
-/// sweep additionally covers pending-retry anchors.
-const PENDING: [BuildStatus; 2] = [BuildStatus::Created, BuildStatus::Queued];
 const CASCADE_TARGET: [BuildStatus; 3] = [
     BuildStatus::Created,
     BuildStatus::Queued,
@@ -136,7 +132,7 @@ pub async fn promote_dependents<C: ConnectionTrait>(
             RETURNING db.derivation, old.status AS from_status, db.status AS to_status
             "#,
                 dependency_failed = status_sql::build(BuildStatus::DependencyFailed),
-                pending = status_sql::build_in(&PENDING),
+                pending = status_sql::build_in(&BuildStatus::PENDING),
                 terminal_failure = status_sql::build_in(&BuildStatus::TERMINAL_FAILURE),
             ),
             [id()],

@@ -95,6 +95,12 @@ impl BuildStatus {
         matches!(self, Self::Completed | Self::Substituted)
     }
 
+    /// The statuses a readiness or promotion gate can still act on: an anchor is
+    /// weighed while it is `Created` and dispatched while it is `Queued`, and no
+    /// gate reads a `Building` or terminal row. One owner, because three queries
+    /// bound themselves by this pair and a fourth would have made it four.
+    pub const PENDING: [Self; 2] = [Self::Created, Self::Queued];
+
     pub const TERMINAL_SUCCESS: [Self; 2] = [Self::Completed, Self::Substituted];
 
     pub const TERMINAL_FAILURE: [Self; 3] = [
