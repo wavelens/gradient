@@ -64,6 +64,7 @@ fn state_with_metrics(enabled: bool, db: DatabaseConnection) -> Arc<ServerState>
         http: gradient_util::http::build_client().expect("http"),
         shutdown: gradient_util::shutdown::Shutdown::new(),
         last_used_stamps: gradient_core::last_used_stamps(),
+        cache_traffic: gradient_db::cache_metric::CacheTraffic::shared(),
         jwt_secret: SecretString::new("test-jwt-secret".into()),
         started_at: chrono::Utc::now(),
         pending_project_memberships: std::sync::Arc::new(std::collections::HashMap::new()),

@@ -10,14 +10,14 @@ use crate::error::{WebError, WebResult};
 use crate::helpers::ok_json;
 use axum::extract::{Path, State};
 use axum::{Extension, Json};
-use chrono::{NaiveDateTime, Timelike};
+use chrono::NaiveDateTime;
 use gradient_core::ServerState;
+use gradient_db::cache_metric;
 use gradient_entity::metric_rollup::RollupGranularity;
 use gradient_types::*;
 use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 use serde::Serialize;
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[derive(Serialize)]
 pub struct CacheMetricPoint {
@@ -61,44 +61,12 @@ pub struct CacheStatsResponse {
     pub weeks: Vec<CacheMetricPoint>,
 }
 
-/// Record bytes served for a NAR request into the current minute bucket.
-/// Called fire-and-forget from the NAR serving handler.
-pub async fn record_nar_traffic(state: Arc<ServerState>, cache_id: CacheId, bytes: i64) {
-    let now = gradient_types::now();
-    let bucket = match now.with_second(0).and_then(|t| t.with_nanosecond(0)) {
-        Some(t) => t,
-        None => now,
-    };
-
-    let stmt = build_record_nar_traffic_stmt(cache_id, bucket, bytes);
-    if let Err(e) = state.web_db.execute_raw(stmt).await {
-        tracing::warn!(error = %e, "Failed to record cache metric");
-    }
-}
-
-/// Build the atomic UPSERT statement that records one NAR request into the
-/// `(cache, bucket_time)` row. Concurrent calls into the same bucket are
-/// serialised by Postgres on the unique `(cache, bucket_time)` index, so each
-/// caller's `bytes_sent`/`nar_count` increment is preserved (no lost updates).
-fn build_record_nar_traffic_stmt(
-    cache_id: CacheId,
-    bucket: NaiveDateTime,
-    bytes: i64,
-) -> Statement {
-    Statement::from_sql_and_values(
-        DatabaseBackend::Postgres,
-        r#"INSERT INTO cache_metric (id, cache, bucket_time, bytes_sent, nar_count)
-           VALUES ($1, $2, $3, $4, 1)
-           ON CONFLICT (cache, bucket_time)
-           DO UPDATE SET bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent,
-                         nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count"#,
-        [
-            sea_orm::Value::Uuid(Some(Uuid::now_v7())),
-            sea_orm::Value::Uuid(Some(cache_id.into_inner())),
-            sea_orm::Value::ChronoDateTime(Some(bucket)),
-            sea_orm::Value::BigInt(Some(bytes)),
-        ],
-    )
+/// Add bytes served for a NAR request to the current minute bucket of the
+/// per-instance accumulator. `gradient_db::cache_metric` writes it; the request
+/// path never touches the `cache_metric` row (#644).
+pub fn record_nar_traffic(state: &ServerState, cache_id: CacheId, bytes: i64) {
+    let bucket = cache_metric::minute_bucket(gradient_types::now());
+    state.cache_traffic.record(cache_id, bucket, bytes);
 }
 
 /// Zero-filled time-series of a cache rollup metric. `count` and `sum` carry
@@ -283,43 +251,33 @@ pub async fn get_cache_stats(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
+    use chrono::Timelike;
+    use sea_orm::MockDatabase;
 
-    /// Regression for #50: the bucket-update path must be a single atomic
-    /// UPSERT, not a SELECT-then-UPDATE. The previous implementation lost
-    /// updates whenever two NAR fetches landed in the same minute bucket
-    /// concurrently - both reads saw the same `bytes_sent` and the second
-    /// write clobbered the first.
-    #[test]
-    fn record_nar_traffic_stmt_is_atomic_upsert() {
-        let bucket = NaiveDate::from_ymd_opt(2026, 5, 2)
-            .unwrap()
-            .and_hms_opt(12, 34, 0)
-            .unwrap();
-        let cache_id = CacheId::nil();
+    /// The serving path must only add into the accumulator: it takes no
+    /// connection, so the `cache_metric` row cannot be written per NAR (#644).
+    /// That the accumulated bucket becomes one additive upsert is
+    /// `gradient_db::cache_metric`'s test.
+    #[tokio::test]
+    async fn two_serves_accumulate_instead_of_writing() {
+        let db = MockDatabase::new(DatabaseBackend::Postgres).into_connection();
+        let state = gradient_test_support::state::test_state(db);
 
-        let stmt = build_record_nar_traffic_stmt(cache_id, bucket, 4096);
-        let sql = stmt.to_string();
+        record_nar_traffic(&state, CacheId::nil(), 4096);
+        record_nar_traffic(&state, CacheId::nil(), 1024);
 
+        let taken = state.cache_traffic.take();
+        let bytes: i64 = taken.iter().map(|(_, _, t)| t.bytes).sum();
+        let nars: i64 = taken.iter().map(|(_, _, t)| t.nars).sum();
+
+        assert_eq!((bytes, nars), (5120, 2), "both serves counted: {taken:?}");
         assert!(
-            sql.contains("INSERT INTO cache_metric"),
-            "expected INSERT, got: {sql}"
+            taken.iter().all(|(_, bucket, _)| bucket.second() == 0),
+            "a serve is bucketed by its minute: {taken:?}"
         );
         assert!(
-            sql.contains("ON CONFLICT (cache, bucket_time)"),
-            "expected ON CONFLICT clause inferring the unique index, got: {sql}"
-        );
-        assert!(
-            sql.contains("bytes_sent = cache_metric.bytes_sent + EXCLUDED.bytes_sent"),
-            "expected additive update on bytes_sent, got: {sql}"
-        );
-        assert!(
-            sql.contains("nar_count  = cache_metric.nar_count  + EXCLUDED.nar_count"),
-            "expected additive update on nar_count, got: {sql}"
-        );
-        assert!(
-            !sql.to_uppercase().contains("SELECT"),
-            "atomic upsert must not contain a SELECT (would reintroduce the race), got: {sql}"
+            state.cache_traffic.take().is_empty(),
+            "a flush leaves nothing behind"
         );
     }
 }

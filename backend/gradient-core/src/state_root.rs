@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use gradient_ci::CiContext;
 use gradient_ci::manifest_state::{ManifestStateStore, PendingCredentialsStore};
+use gradient_db::cache_metric::CacheTraffic;
 use gradient_db::{CacheDb, DbContext, StatusReactor, WebDb, WorkerDb};
 use gradient_forge::ForgeRegistry;
 use gradient_graph::Graph;
@@ -64,6 +65,9 @@ pub struct AppState {
     pub shutdown: Shutdown,
     /// Auth rows stamped `last_used_at` recently, so a burst of requests writes once.
     pub last_used_stamps: Debounce<Uuid>,
+    /// Served NAR bytes and counts per cache and minute, flushed by
+    /// `gradient_db::cache_metric` instead of written per request.
+    pub cache_traffic: Arc<CacheTraffic>,
     /// JWT signing/verification secret loaded once at startup.
     pub jwt_secret: SecretString,
     /// Wall-clock time the process bootstrapped; drives `gradient_uptime_seconds`.

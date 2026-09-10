@@ -37,7 +37,7 @@ pub async fn nar(
     let (effective_hash, size, stream) =
         super::helpers::fetch_nar_stream(&state, &path_hash).await?;
 
-    spawn_nar_traffic_metric(Arc::clone(&state), ctx.cache.id, size as i64);
+    super::super::stats::record_nar_traffic(&state, ctx.cache.id, size as i64);
     spawn_cache_derivation_fetch_update(Arc::clone(&state), ctx.cache.id, effective_hash);
 
     Response::builder()
@@ -137,13 +137,6 @@ pub(crate) async fn resolve_effective_hash_db<C: ConnectionTrait>(
     }
 
     Ok(path_hash.to_string())
-}
-
-fn spawn_nar_traffic_metric(state: Arc<ServerState>, cache_id: CacheId, bytes_len: i64) {
-    let s = Arc::clone(&state);
-    state.shutdown.spawn(async move {
-        super::super::stats::record_nar_traffic(s, cache_id, bytes_len).await;
-    });
 }
 
 /// Bookkeeping update spawned after every successful NAR fetch. Uses
