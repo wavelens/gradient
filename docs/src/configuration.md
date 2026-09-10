@@ -121,36 +121,32 @@ Per-derivation `.drv` attributes `timeout`, `maxSilent`, and `preferLocalBuild` 
 
 ## Postgres Sizing
 
-The NixOS module does not manage the Postgres instance: `databaseUrl` may point at
-a socket on the same host or at a cluster somewhere else, so the memory settings
-are the host's to own. Gradient's working set is the build graph, and it is
-index-bound rather than table-bound. On the reference deployment a 17 GB database
-carries 8.5 GB of indexes, of which `cached_path_reference` alone holds 3.2 GB, so
-a stock 128 MB `shared_buffers` cannot keep even the hot index set resident and
-every recursive graph walk re-reads it from the page cache.
+Gradient's working set is the build graph, and it is index-bound rather than
+table-bound. On the reference deployment a 17 GB database carries 8.5 GB of
+indexes, of which `cached_path_reference` alone holds 3.2 GB, so a stock 128 MB
+`shared_buffers` cannot keep even the hot index set resident and every recursive
+graph walk re-reads it from the page cache.
 
-Size the cluster against the host's RAM:
+With `configurePostgres = true` the module owns the cluster and sets the sizing
+that does not depend on the host, every value a `mkDefault` you can override:
 
-```nix
-services.postgresql.settings = {
-  # A quarter of RAM resident, three quarters assumed cached by the kernel.
-  shared_buffers = "4GB";
-  effective_cache_size = "12GB";
-  # Per sort or hash node, not per connection. The graph walks raise their own
-  # ceiling for the duration of one statement; this is the floor everything else
-  # gets.
-  work_mem = "32MB";
-  # Index builds and the autovacuum passes on the edge tables.
-  maintenance_work_mem = "1GB";
-  # SSD: a random page costs almost what a sequential one does, and at the
-  # default of 4 the planner picks bitmap heap scans over index-only scans on the
-  # edge tables.
-  random_page_cost = 1.1;
-};
-```
+| setting | module default | why |
+|---|---|---|
+| `work_mem` | `32MB` | Per sort or hash node, not per connection. This is the floor every ordinary query gets; the graph walks raise their own ceiling above it for the duration of one statement. |
+| `maintenance_work_mem` | `1GB` | Index builds, and the autovacuum passes on the edge tables. |
+| `random_page_cost` | `1.1` | SSD: a random page costs almost what a sequential one does. At the default of 4 the planner picks bitmap heap scans over the index-only scans the edge tables are built for. |
+| `max_connections` | `200` | See below. |
 
-The example is for 16 GB of RAM. Scale `shared_buffers` and
-`effective_cache_size` with the host and leave the other three alone.
+The two settings that scale with the host's RAM have no defensible static
+default, so they are options instead:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `postgresSharedBuffers` | `null` | `shared_buffers`: a quarter of the host's RAM, so `"4GB"` on a 16 GB host. `null` leaves the upstream default. |
+| `postgresEffectiveCacheSize` | `null` | `effective_cache_size`: three quarters of the host's RAM, so `"12GB"` on a 16 GB host. A planner hint about what the kernel will cache, not an allocation. |
+
+When `databaseUrl` points at a cluster this module does not configure, set the
+same six values there by hand.
 
 `max_connections` has to cover every server process's three pools at once:
 `databaseMaxConnections` plus `databaseWebMaxConnections` plus
@@ -164,8 +160,8 @@ three edge tables (`cached_path_reference`, `derivation_dependency`,
 three scale factors go to 0.02, because these tables are append-heavy and read
 through index-only scans, and what keeps those scans index-only is a fresh
 visibility map rather than a low dead-tuple count. And the recursive walks raise
-`work_mem` to 32 MB with `SET LOCAL` inside their own transaction, so the frontier
-deduplication does not spill even where the cluster floor is lower.
+`work_mem` to 64 MB with `SET LOCAL` inside their own transaction, which has to
+stay above the floor in the table above or it buys the walk nothing.
 
 ## Reverse Proxies
 
