@@ -227,7 +227,8 @@ static RIPPLE_UP: LazyLock<String> = LazyLock::new(|| {
         "UPDATE derivation_build d \
          SET unready_deps = d.unready_deps + c.n, \
              status = CASE WHEN d.status = {queued} THEN {created} ELSE d.status END, \
-             updated_at = (now() AT TIME ZONE 'UTC') \
+             updated_at = CASE WHEN d.status = {queued} \
+                               THEN (now() AT TIME ZONE 'UTC') ELSE d.updated_at END \
          FROM derivation_build old, \
               (SELECT e.derivation, count(*) AS n FROM derivation_dependency e \
                WHERE e.dependency = ANY($1::uuid[]) GROUP BY e.derivation) c \
@@ -406,9 +407,9 @@ pub(crate) fn ids(derivations: &[DerivationId]) -> Value {
 /// them, which is what the lock proof requires: the count is over
 /// `derivation_dependency`, so an edge inserted after the seed is one a later ripple
 /// can cancel without it ever having been counted. It overwrites rather than adjusts
-/// on purpose - the value it replaces may be the migration's backfill, which
-/// inner-joined the dependency anchor and so counted a dependency with no anchor row
-/// as ready.
+/// on purpose: the value it replaces was counted over an older edge set, or is the
+/// column default on a row a retire has just reset, and an adjustment would carry
+/// that error forward instead of ending it.
 ///
 /// It evaluates [`crate::graph_sql::fetchable_predicate`] on each dependency rather
 /// than reading the `fetchable` column, because this is the first reader of a
@@ -1009,6 +1010,12 @@ mod tests {
             log[2].contains("unready_deps + c.n")
                 && log[2].contains("CASE WHEN d.status = 1 THEN 0"),
             "{log:?}"
+        );
+        assert!(
+            log[2].contains("updated_at = CASE WHEN d.status = 1"),
+            "a dependent that only counted up keeps its updated_at: a FailedTransient \
+             row's retry backoff is measured from that column, so bumping it here \
+             restarts the window a dependency's regression had nothing to do with: {log:?}"
         );
     }
 
