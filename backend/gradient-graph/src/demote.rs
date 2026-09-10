@@ -10,7 +10,10 @@
 use anyhow::Result;
 use gradient_db::{DbContext, collect_transitive_dependents};
 use gradient_types::*;
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, PaginatorTrait, QueryFilter,
+    TransactionTrait,
+};
 use tracing::{info, warn};
 
 use crate::messages::{DemoteReport, Demotion};
@@ -114,10 +117,10 @@ async fn cache_claim(ctx: &DbContext, cache: CacheId, hash: &str) -> Result<Demo
 
 /// Remove every `cache_derivation` row touching `derivation` and any of its
 /// transitive dependents, across every cache.
-async fn revoke_cache_derivation_closure<C: ConnectionTrait>(
-    db: &C,
-    derivation: DerivationId,
-) -> Result<()> {
+async fn revoke_cache_derivation_closure<C>(db: &C, derivation: DerivationId) -> Result<()>
+where
+    C: ConnectionTrait + TransactionTrait<Transaction = DatabaseTransaction>,
+{
     let visited = collect_transitive_dependents(db, derivation).await?;
     let drv_ids: Vec<DerivationId> = visited.into_iter().collect();
     gradient_db::for_each_chunk(&drv_ids, |chunk| async move {
