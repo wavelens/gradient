@@ -221,6 +221,7 @@ The Job Board records build/eval phase timings, dispatch decisions (with scoring
 | Option / env var | Default | Purpose |
 | --- | --- | --- |
 | `metricsRollupIntervalSecs` / `GRADIENT_METRICS_ROLLUP_INTERVAL` | 60 | Rollup-aggregator pass interval. |
+| `cacheMetricFlushIntervalSecs` / `GRADIENT_CACHE_METRIC_FLUSH_INTERVAL` | 10 | How often served NAR bytes and counts, accumulated in memory per cache and minute, are added into `cache_metric`. A serve never writes that row itself, so a failed flush costs at most this much traffic telemetry and never a request. |
 | `metricsRetentionRawDays` / `GRADIENT_METRICS_RETENTION_RAW_DAYS` | 14 | Retention for raw `phase_event` / `worker_sample` rows (0 = forever). |
 | `metricsRetentionRollupDays` / `GRADIENT_METRICS_RETENTION_ROLLUP_DAYS` | 400 | Retention for minute/hour rollups; day/week kept (0 = forever). |
 | `dispatchRetentionDays` / `GRADIENT_DISPATCH_RETENTION_DAYS` | 30 | Retention for `dispatched_job` forensic rows (0 = forever). |

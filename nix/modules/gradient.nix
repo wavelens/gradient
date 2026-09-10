@@ -559,6 +559,12 @@ in {
           default = 60;
         };
 
+        cacheMetricFlushIntervalSecs = lib.mkOption {
+          description = "Interval in seconds between flushes of the in-memory cache-traffic accumulator into cache_metric.";
+          type = lib.types.ints.positive;
+          default = 10;
+        };
+
         metricsRetentionRawDays = lib.mkOption {
           description = "Days to retain raw phase_event / worker_sample rows. 0 = keep forever.";
           type = lib.types.ints.unsigned;
@@ -1079,6 +1085,7 @@ in {
         GRADIENT_EVAL_CACHE_MAX_AGE_DAYS = toString cfg.settings.evalCacheMaxAgeDays;
         GRADIENT_EVAL_CACHE_SWEEP_INTERVAL_SECS = toString cfg.settings.evalCacheSweepIntervalSecs;
         GRADIENT_METRICS_ROLLUP_INTERVAL = toString cfg.settings.metricsRollupIntervalSecs;
+        GRADIENT_CACHE_METRIC_FLUSH_INTERVAL = toString cfg.settings.cacheMetricFlushIntervalSecs;
         GRADIENT_METRICS_RETENTION_RAW_DAYS = toString cfg.settings.metricsRetentionRawDays;
         GRADIENT_METRICS_RETENTION_ROLLUP_DAYS = toString cfg.settings.metricsRetentionRollupDays;
         GRADIENT_DISPATCH_RETENTION_DAYS = toString cfg.settings.dispatchRetentionDays;

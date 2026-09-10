@@ -210,6 +210,7 @@ pub async fn init_state(cli: Cli) -> Result<Arc<ServerState>, InitError> {
         forge: gradient_forge::ForgeRegistry::with_builtin(),
         shutdown: Shutdown::new(),
         last_used_stamps: last_used_stamps(),
+        cache_traffic: gradient_db::cache_metric::CacheTraffic::shared(),
         jwt_secret,
         started_at: chrono::Utc::now(),
         pending_project_memberships,
