@@ -383,7 +383,9 @@ in {
       exec 3> $D/a.in
       exec 4> $D/b.in
 
-      RECOUNT="UPDATE derivation_build db SET fetchable = x.f FROM (SELECT p.derivation, p.fetchable AS old, (p.substitutable OR (p.status IN (3, 7) AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = p.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = p.derivation AND NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)))) AS f FROM derivation_build p WHERE p.derivation = ANY(ARRAY['$LR_DRV']::uuid[])) x WHERE db.derivation = x.derivation AND db.fetchable = x.old AND x.old <> x.f;"
+      recount() {
+        printf '%s\\n' "UPDATE derivation_build db SET fetchable = x.f FROM (SELECT p.derivation, p.fetchable AS old, (p.substitutable OR (p.status IN (3, 7) AND EXISTS (SELECT 1 FROM derivation_output o2 WHERE o2.derivation = p.derivation) AND NOT EXISTS (SELECT 1 FROM derivation_output o LEFT JOIN cached_path cp ON cp.hash = o.hash WHERE o.derivation = p.derivation AND NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)))) AS f FROM derivation_build p WHERE p.derivation = ANY(ARRAY['$1']::uuid[])) x WHERE db.derivation = x.derivation AND db.fetchable = x.old AND x.old <> x.f;"
+      }
 
       # The retire's shape: its opening hash-ordered lock pass, the delete, then the
       # anchor lock its readiness half takes. The `fetchable` mark is deliberately
@@ -405,7 +407,7 @@ in {
       send_a "COMMIT;"
       wait_state "application_name = 'lockrace_a' AND state = 'idle'" "the retire session never committed"
 
-      send_b "$RECOUNT"
+      send_b "$(recount "$LR_DRV")"
       send_b "COMMIT;"
       wait_state "application_name = 'lockrace_b' AND state = 'idle'" "the recount session never committed"
 
@@ -426,6 +428,36 @@ in {
         exit 1
       fi
       echo "lockrace: both sessions committed and the recount was a no-op"
+
+      # The same interleaving with the lock removed, on its own row. Without a
+      # preceding FOR UPDATE the recount's own statement takes the snapshot and THEN
+      # waits, so it reads the output as whole, blocks, and EvalPlanQual re-checks
+      # only the target row's own column before the stale `true` lands on an anchor
+      # whose output is gone. Measured both ways on Postgres 18 before it was written
+      # here: locked writes nothing, unlocked writes true. The CONTRAST is the
+      # assertion. If the two arms ever agree, the lock stopped being what makes the
+      # recount correct and a human needs to know that.
+      send_a "BEGIN;"
+      send_a "SELECT 1 FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT2']) ORDER BY hash FOR UPDATE;"
+      send_a "DELETE FROM cached_path WHERE hash = ANY(ARRAY['$LR_OUT2']);"
+      send_a "SELECT 1 FROM derivation_build WHERE derivation = ANY(ARRAY['$LR_DRV2']::uuid[]) ORDER BY derivation FOR UPDATE;"
+      wait_state "application_name = 'lockrace_a' AND state = 'idle in transaction'" "the retire session never held its second row"
+
+      send_b "BEGIN;"
+      send_b "$(recount "$LR_DRV2")"
+      wait_state "application_name = 'lockrace_b' AND wait_event_type = 'Lock'" "the unlocked recount never blocked on the retire"
+      send_a "COMMIT;"
+      wait_state "application_name = 'lockrace_b' AND state = 'idle in transaction'" "the unlocked recount never resumed after the retire committed"
+      send_b "COMMIT;"
+      wait_state "application_name = 'lockrace_b' AND state = 'idle'" "the unlocked recount session never committed"
+
+      if grep -q ERROR $D/a.out $D/b.out; then
+        echo "LOCKRACE: a session reported an error in the unlocked arm"
+        cat $D/a.out
+        cat $D/b.out
+        exit 1
+      fi
+      echo "lockrace: the unlocked arm committed; the driver checks what it wrote"
       """
 
       start_all()
@@ -1185,51 +1217,78 @@ in {
       # one it created.
       banner("Phase 10f: a retire holds its locks while a readiness recount waits")
       LR_DRV = "aaaaaaaa-0000-4000-8000-00000000fe01"
+      LR_DRV2 = "aaaaaaaa-0000-4000-8000-00000000fe02"
       lr_drv_hash = "lockraced".ljust(32, "0")
       lr_out_hash = "lockraceo".ljust(32, "0")
+      lr_drv2_hash = "lockracee".ljust(32, "0")
+      lr_out2_hash = "lockracep".ljust(32, "0")
+
+      def lockrace_fixture(drv, drv_hash, out_hash, name):
+          sql(
+              f"INSERT INTO derivation (id, created_at, architecture, hash, name, "
+              f"prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES "
+              f"('{drv}', now() AT TIME ZONE 'UTC', 'x86_64-linux', '{drv_hash}', "
+              f"'{name}', false, true, false, false);\n"
+              f"INSERT INTO derivation_build (id, derivation, status, substitutable, substituted, "
+              f"fetchable, unready_deps, attempt, created_at, updated_at) VALUES "
+              f"(uuidv7(), '{drv}', 3, false, false, false, 0, 0, "
+              f"now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');\n"
+              f"INSERT INTO derivation_output (id, derivation, name, hash, package, is_cached, "
+              f"created_at) VALUES (uuidv7(), '{drv}', 'out', '{out_hash}', '{name}-out', "
+              f"true, now() AT TIME ZONE 'UTC');\n"
+              f"INSERT INTO cached_path (id, hash, package, file_hash, file_size, nar_size, nar_hash, "
+              f"missing_references, created_at) VALUES (uuidv7(), '{out_hash}', '{name}-out', "
+              f"'sha256:lockrace', 1, 1, 'sha256:lockrace', 0, now() AT TIME ZONE 'UTC');"
+          )
+          assert sql(
+              f"SELECT db.fetchable::int::text || ' ' || (SELECT count(*)::text FROM cached_path "
+              f"WHERE hash = '{out_hash}' AND file_hash IS NOT NULL AND missing_references = 0) "
+              f"FROM derivation_build db WHERE db.derivation = '{drv}';"
+          ) == "0 1", f"the {name} fixture did not land as a drifted anchor over a whole output"
+
+      def lockrace_cleanup(drv, out_hash):
+          sql(
+              f"DELETE FROM cached_path WHERE hash = '{out_hash}';\n"
+              f"DELETE FROM derivation_output WHERE derivation = '{drv}';\n"
+              f"DELETE FROM derivation_build WHERE derivation = '{drv}';\n"
+              f"DELETE FROM derivation WHERE id = '{drv}';"
+          )
 
       # A terminal-success anchor with one whole output and `fetchable` stored false:
       # drifted by construction, which is what the repair exists to correct and what
-      # makes a stale recount write the wrong value instead of nothing.
-      sql(
-          f"INSERT INTO derivation (id, created_at, architecture, hash, name, "
-          f"prefer_local_build, allow_substitutes, is_fixed_output, walked) VALUES "
-          f"('{LR_DRV}', now() AT TIME ZONE 'UTC', 'x86_64-linux', '{lr_drv_hash}', "
-          f"'lockrace-probe', false, true, false, false);\n"
-          f"INSERT INTO derivation_build (id, derivation, status, substitutable, substituted, "
-          f"fetchable, unready_deps, attempt, created_at, updated_at) VALUES "
-          f"(uuidv7(), '{LR_DRV}', 3, false, false, false, 0, 0, "
-          f"now() AT TIME ZONE 'UTC', now() AT TIME ZONE 'UTC');\n"
-          f"INSERT INTO derivation_output (id, derivation, name, hash, package, is_cached, "
-          f"created_at) VALUES (uuidv7(), '{LR_DRV}', 'out', '{lr_out_hash}', 'lockrace-out', "
-          f"true, now() AT TIME ZONE 'UTC');\n"
-          f"INSERT INTO cached_path (id, hash, package, file_hash, file_size, nar_size, nar_hash, "
-          f"missing_references, created_at) VALUES (uuidv7(), '{lr_out_hash}', 'lockrace-out', "
-          f"'sha256:lockrace', 1, 1, 'sha256:lockrace', 0, now() AT TIME ZONE 'UTC');"
-      )
-      assert sql(
-          f"SELECT db.fetchable::int::text || ' ' || (SELECT count(*)::text FROM cached_path "
-          f"WHERE hash = '{lr_out_hash}' AND file_hash IS NOT NULL AND missing_references = 0) "
-          f"FROM derivation_build db WHERE db.derivation = '{LR_DRV}';"
-      ) == "0 1", "the lock-race fixture did not land as a drifted anchor over a whole output"
+      # makes a stale recount write the wrong value instead of nothing. Two of them,
+      # one per arm, so the arms cannot interfere.
+      lockrace_fixture(LR_DRV, lr_drv_hash, lr_out_hash, "lockrace-probe")
+      lockrace_fixture(LR_DRV2, lr_drv2_hash, lr_out2_hash, "lockrace-unlocked")
 
       server.succeed(f"cat > /tmp/lockrace.sh <<'LOCKRACE'\n{LOCK_RACE_SH}\nLOCKRACE")
-      print(server.succeed(f"LR_DRV={LR_DRV} LR_OUT={lr_out_hash} sh /tmp/lockrace.sh"))
+      print(server.succeed(
+          f"LR_DRV={LR_DRV} LR_OUT={lr_out_hash} "
+          f"LR_DRV2={LR_DRV2} LR_OUT2={lr_out2_hash} sh /tmp/lockrace.sh"
+      ))
 
-      stored = sql(f"SELECT db.fetchable::int FROM derivation_build db WHERE db.derivation = '{LR_DRV}';")
-      rows_left = int(sql(f"SELECT count(*) FROM cached_path WHERE hash = '{lr_out_hash}';"))
+      locked = sql(f"SELECT db.fetchable::int FROM derivation_build db WHERE db.derivation = '{LR_DRV}';")
+      unlocked = sql(f"SELECT db.fetchable::int FROM derivation_build db WHERE db.derivation = '{LR_DRV2}';")
+      rows_left = int(sql(
+          f"SELECT count(*) FROM cached_path WHERE hash IN ('{lr_out_hash}', '{lr_out2_hash}');"
+      ))
+      # The unlocked arm leaves a deliberately wrong `fetchable`, so both fixtures come
+      # out before the drift checks, which would otherwise count the defect we asked for.
+      lockrace_cleanup(LR_DRV, lr_out_hash)
+      lockrace_cleanup(LR_DRV2, lr_out2_hash)
       race_drift = drift()
       race_anchor_drift = anchor_drift()
-      sql(
-          f"DELETE FROM cached_path WHERE hash = '{lr_out_hash}';\n"
-          f"DELETE FROM derivation_output WHERE derivation = '{LR_DRV}';\n"
-          f"DELETE FROM derivation_build WHERE derivation = '{LR_DRV}';\n"
-          f"DELETE FROM derivation WHERE id = '{LR_DRV}';"
+
+      assert rows_left == 0, "a retire session did not commit its delete"
+      assert locked == "0", (
+          f"the locked recount stored fetchable = {locked!r} for an anchor whose only output "
+          f"the retire deleted: its snapshot was not ordered after that commit"
       )
-      assert rows_left == 0, "the retire session did not commit its delete"
-      assert stored == "0", (
-          f"the recount stored fetchable = {stored!r} for an anchor whose only output the "
-          f"retire deleted: its snapshot was not ordered after that commit"
+      assert unlocked == "1", (
+          f"the UNLOCKED recount stored fetchable = {unlocked!r}, so it did not write the stale "
+          f"true this lock exists to prevent. The two arms now agree, which means taking the "
+          f"anchor lock in its own statement is no longer what makes the recount correct: "
+          f"re-derive the discipline in gradient_db::readiness before trusting it"
       )
       assert race_drift == 0 and race_anchor_drift == 0, (
           f"counters disagree with their recompute after the lock race "
