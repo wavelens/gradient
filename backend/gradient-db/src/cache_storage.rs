@@ -285,6 +285,14 @@ fn preserve_missing_artifact(has_producer: bool, object_present: bool) -> bool {
 /// `derivation_build`) holds here too and a concurrent TTL or zombie retire cannot
 /// deadlock against it. The retire's own pass then re-acquires a row this
 /// transaction already holds, which is free.
+///
+/// [`crate::readiness::lock_anchors`] follows it for the same reason one class down.
+/// The clear names its producers in a single UPDATE, so it acquires them in plan
+/// order, and a hash with several producers can then hold one while
+/// [`crate::readiness::repair_pending`]'s ordered chunk holds another. Taking the
+/// ordered pass first means every `derivation_build` row this transaction writes is
+/// already held in `derivation` order, and the retire's own anchor pass re-acquires
+/// them for free.
 pub async fn demote_cached_output(
     ctx: &crate::DbContext,
     hash: &str,
@@ -321,6 +329,7 @@ pub async fn demote_cached_output(
     // having re-walked the node because pruning keys on `external_url`.
     let txn = db.begin().await?;
     let _paths = crate::nar_closure::lock_paths(&txn, &[hash.to_owned()]).await?;
+    let _anchors = crate::readiness::lock_anchors(&txn, &producers).await?;
     if !producers.is_empty() {
         let ids: Vec<uuid::Uuid> = producers.iter().map(|d| d.into_inner()).collect();
         txn.execute_raw(Statement::from_sql_and_values(
@@ -572,9 +581,9 @@ mod tests {
             ..Default::default()
         };
 
-        // Find the output, RETURNING the demoted row, drop its producer's upstream
-        // trust, retire the `cached_path` row behind its ordered lock pass (no
-        // reverse ripple: it was not whole), clear the three flags and run the
+        // Find the output, RETURNING the demoted row, take both lock classes in
+        // order, drop its producer's upstream trust, retire the `cached_path` row
+        // (no reverse ripple: it was not whole), clear `is_cached` and run the
         // readiness pass; then the object is removed.
         let retired = BTreeMap::from([
             ("hash".to_owned(), Value::from(hash.to_owned())),
@@ -609,13 +618,18 @@ mod tests {
         );
         assert_eq!(
             log.len(),
-            12,
-            "outputs, demote, path lock, trust clear, retire lock, delete, is_cached, two flag clears, producers, owners, un-promote: {log:?}"
+            11,
+            "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
+             is_cached, producers, owners, un-promote: {log:?}"
         );
         let paths = log
             .iter()
             .position(|s| s.contains("FROM cached_path WHERE hash = ANY($1)"))
             .expect("the path lock is taken first");
+        let anchors = log
+            .iter()
+            .position(|s| s.contains("FROM derivation_build WHERE derivation = ANY($1::uuid[])"))
+            .expect("the anchor lock is taken");
         let trust = log
             .iter()
             .position(|s| s.contains("SET substitutable = false"))
@@ -627,6 +641,12 @@ mod tests {
         assert!(
             paths < trust,
             "this is the one path that writes derivation_build before a retire, so it takes the cached_path lock first or it deadlocks against a concurrent eviction: {log:?}"
+        );
+        assert!(
+            paths < anchors && anchors < trust,
+            "the trust clear names its producers in one UPDATE, so it acquires them in \
+             plan order: the ordered anchor pass has to precede it or it deadlocks \
+             against the readiness repair's chunk: {log:?}"
         );
         assert!(
             trust < retire,
@@ -677,7 +697,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                4
+                5
             ])
             .into_connection();
         let (ctx, pool) = crate::test_ctx::ctx_at(db, tmp.path()).await;
@@ -688,8 +708,9 @@ mod tests {
         let log = crate::pool::statements(pool.into_transaction_log());
         assert_eq!(
             log.len(),
-            13,
-            "outputs, demote, path lock, trust clear, retire lock, delete, producers, anchor lock, mark, ripple, reset, owners, un-promote: {log:?}"
+            14,
+            "outputs, demote, path lock, anchor lock, trust clear, retire lock, delete, \
+             producers, anchor lock, mark, ripple, reset, owners, un-promote: {log:?}"
         );
         assert!(
             !log.iter()
