@@ -119,6 +119,54 @@ Builds can fail in three distinct ways:
 
 Per-derivation `.drv` attributes `timeout`, `maxSilent`, and `preferLocalBuild` override the server defaults when present on a derivation. Note that Nix `meta.*` attributes do **not** propagate to the `.drv`; these must be set as top-level derivation attributes.
 
+## Postgres Sizing
+
+The NixOS module does not manage the Postgres instance: `databaseUrl` may point at
+a socket on the same host or at a cluster somewhere else, so the memory settings
+are the host's to own. Gradient's working set is the build graph, and it is
+index-bound rather than table-bound. On the reference deployment a 17 GB database
+carries 8.5 GB of indexes, of which `cached_path_reference` alone holds 3.2 GB, so
+a stock 128 MB `shared_buffers` cannot keep even the hot index set resident and
+every recursive graph walk re-reads it from the page cache.
+
+Size the cluster against the host's RAM:
+
+```nix
+services.postgresql.settings = {
+  # A quarter of RAM resident, three quarters assumed cached by the kernel.
+  shared_buffers = "4GB";
+  effective_cache_size = "12GB";
+  # Per sort or hash node, not per connection. The graph walks raise their own
+  # ceiling for the duration of one statement; this is the floor everything else
+  # gets.
+  work_mem = "32MB";
+  # Index builds and the autovacuum passes on the edge tables.
+  maintenance_work_mem = "1GB";
+  # SSD: a random page costs almost what a sequential one does, and at the
+  # default of 4 the planner picks bitmap heap scans over index-only scans on the
+  # edge tables.
+  random_page_cost = 1.1;
+};
+```
+
+The example is for 16 GB of RAM. Scale `shared_buffers` and
+`effective_cache_size` with the host and leave the other three alone.
+
+`max_connections` has to cover every server process's three pools at once:
+`databaseMaxConnections` plus `databaseWebMaxConnections` plus
+`databaseCacheMaxConnections` (80 in total by default), with headroom for
+`maintenance_work_mem`-sized autovacuum workers and for `psql`. The stock 100 is
+enough for one server, not for two.
+
+Two things Gradient handles itself, so they do not belong in the host config. The
+three edge tables (`cached_path_reference`, `derivation_dependency`,
+`derivation_closure`) carry per-table autovacuum overrides set by migration: all
+three scale factors go to 0.02, because these tables are append-heavy and read
+through index-only scans, and what keeps those scans index-only is a fresh
+visibility map rather than a low dead-tuple count. And the recursive walks raise
+`work_mem` to 32 MB with `SET LOCAL` inside their own transaction, so the frontier
+deduplication does not spill even where the cluster floor is lower.
+
 ## Reverse Proxies
 
 The Gradient server does not come with a built-in http server for the frontend. 
