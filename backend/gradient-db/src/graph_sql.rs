@@ -215,12 +215,14 @@ pub fn gates_predicate(alias: &str) -> String {
     )
 }
 
-/// [`gates_predicate`] on a `Created` anchor: what promotion writes, and the whole
-/// of what makes `Queued` mean the gates held. Dispatch does not re-derive this; it
-/// reads the status, so the promotion write and the matching un-promote
-/// ([`crate::readiness::unpromote_ungated`]) are the only two things maintaining the
-/// invariant, with [`crate::readiness::repair_pending`] as the backstop for a counter
-/// that drifted.
+/// [`gates_predicate`] on a `Created` anchor: what promotion writes.
+///
+/// Dispatch does not re-derive this: it reads the status. So the invariant rests on
+/// one rule, which every writer of `Queued` obeys in one of two ways: embed this
+/// predicate in the write, or settle the rows just written with
+/// [`crate::readiness::unpromote_ungated`] in the same call.
+/// [`crate::readiness::repair_pending`] is the backstop for a counter that drifted
+/// under a lost move.
 pub fn promotable_predicate(alias: &str) -> String {
     format!(
         "({alias}.status = {created} AND {gates})",

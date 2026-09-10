@@ -741,10 +741,9 @@ pub(crate) async fn dispatch_ready_builds(scheduler: &Scheduler) -> anyhow::Resu
 
     let state = &scheduler.state;
 
-    // The select reads the queue invariant and re-derives no readiness term:
-    // `Queued` means `graph_sql::gates_predicate` held when the anchor was promoted,
-    // and every writer of that status settles against the gate. See
-    // `gradient_db::find_ready_anchors`.
+    // The select re-derives no readiness term: it trusts `Queued` to mean the gates
+    // held, which holds because of the one rule every writer of that status obeys.
+    // The rule is stated at `graph_sql::promotable_predicate`.
     let started = std::time::Instant::now();
     let anchors = gradient_db::find_ready_anchors(&state.worker_db).await?;
     if anchors.is_empty() {
