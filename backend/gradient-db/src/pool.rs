@@ -183,8 +183,75 @@ macro_rules! impl_connection_trait {
     };
 }
 
+/// The read pools forward `TransactionTrait` for the same reason [`WorkerDb`]
+/// implements it: a graph walk has to raise `work_mem` with `SET LOCAL`, which
+/// Postgres honours only inside a transaction block (see
+/// [`crate::graph_sql::begin_walk`]).
+macro_rules! impl_transaction_trait {
+    ($ty:ty) => {
+        #[async_trait::async_trait]
+        impl TransactionTrait for $ty {
+            type Transaction = DatabaseTransaction;
+
+            async fn begin(&self) -> Result<DatabaseTransaction, DbErr> {
+                self.0.begin().await
+            }
+
+            async fn begin_with_config(
+                &self,
+                isolation_level: Option<IsolationLevel>,
+                access_mode: Option<AccessMode>,
+            ) -> Result<DatabaseTransaction, DbErr> {
+                self.0.begin_with_config(isolation_level, access_mode).await
+            }
+
+            async fn begin_with_options(
+                &self,
+                options: TransactionOptions,
+            ) -> Result<DatabaseTransaction, DbErr> {
+                self.0.begin_with_options(options).await
+            }
+
+            async fn transaction<F, T, E>(&self, callback: F) -> Result<T, TransactionError<E>>
+            where
+                F: for<'c> FnOnce(
+                        &'c DatabaseTransaction,
+                    )
+                        -> Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'c>>
+                    + Send,
+                T: Send,
+                E: std::fmt::Display + std::fmt::Debug + Send,
+            {
+                self.0.transaction(callback).await
+            }
+
+            async fn transaction_with_config<F, T, E>(
+                &self,
+                callback: F,
+                isolation_level: Option<IsolationLevel>,
+                access_mode: Option<AccessMode>,
+            ) -> Result<T, TransactionError<E>>
+            where
+                F: for<'c> FnOnce(
+                        &'c DatabaseTransaction,
+                    )
+                        -> Pin<Box<dyn Future<Output = Result<T, E>> + Send + 'c>>
+                    + Send,
+                T: Send,
+                E: std::fmt::Display + std::fmt::Debug + Send,
+            {
+                self.0
+                    .transaction_with_config(callback, isolation_level, access_mode)
+                    .await
+            }
+        }
+    };
+}
+
 impl_connection_trait!(WebDb);
 impl_connection_trait!(CacheDb);
+impl_transaction_trait!(WebDb);
+impl_transaction_trait!(CacheDb);
 
 #[async_trait::async_trait]
 impl ConnectionTrait for WorkerDb {
