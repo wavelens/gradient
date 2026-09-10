@@ -202,8 +202,8 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
         ),
         spec!(
             "derivation_build",
-            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, closure_complete INTEGER, drv_closure_cached INTEGER, fetchable INTEGER, unready_deps INTEGER)",
-            "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.closure_complete::int::text, db.drv_closure_cached::int::text, db.fetchable::int::text, db.unready_deps::text FROM derivation_build db WHERE db.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
+            "CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER, substitutable INTEGER, substituted INTEGER, attempt INTEGER, timeout_secs INTEGER, max_silent_secs INTEGER, created_at TEXT, updated_at TEXT, queued_at TEXT, ready_at TEXT, dispatched_at TEXT, fetchable INTEGER, unready_deps INTEGER)",
+            "SELECT db.id::text, db.derivation::text, db.status::text, db.substitutable::int::text, db.substituted::int::text, db.attempt::text, db.timeout_secs::text, db.max_silent_secs::text, db.created_at::text, db.updated_at::text, db.queued_at::text, db.ready_at::text, db.dispatched_at::text, db.fetchable::int::text, db.unready_deps::text FROM derivation_build db WHERE db.derivation IN (SELECT derivation FROM build_job WHERE evaluation = $1)",
             "the evaluation's derivations, shared with every other evaluation that built them",
             [
                 "id",
@@ -219,8 +219,6 @@ pub fn eval_scope_tables() -> &'static [TableSpec] {
                 "queued_at",
                 "ready_at",
                 "dispatched_at",
-                "closure_complete",
-                "drv_closure_cached",
                 "fetchable",
                 "unready_deps"
             ]

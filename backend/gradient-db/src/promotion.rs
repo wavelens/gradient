@@ -4,46 +4,16 @@
  * SPDX-License-Identifier: AGPL-3.0-only
  */
 
-//! Graph-driven `Created -> Queued` promotion over the global
-//! `derivation_dependency` graph. A derivation becomes buildable the moment
-//! all its dependency anchors reach terminal-success - independent of any
-//! single evaluation's completion (this replaces eval-completion-bound
-//! promotion, the root cause of builds stuck in `Created`).
+//! Anchor transitions that are not the readiness promotion: the substitution of
+//! anchors an evaluation found whole in our cache, the failure cascade and its
+//! eval-scoped sweep, the requeue thaws, and the dispatch gate. Promotion itself
+//! lives in [`crate::readiness`], which owns the `fetchable` / `unready_deps`
+//! counters every gate is built from.
 //!
-//! Promotion is gated on reachability: an anchor is queued only while some
-//! `build_job` references its derivation. The anchor table is global and
-//! `derivation_build` rows are seeded for every derivation, so without this
-//! gate promotion would queue derivations no surviving evaluation needs, which
-//! the dispatcher then cannot attribute to a driving evaluation.
-//!
-//! # Derived-flag maintenance contract
-//!
-//! The gates in this module trust derived flags on `derivation_build`; each has
-//! an explicit discipline, and mixing them up re-opens a dead-zone class:
-//!
-//! | flag                             | discipline                | heal                                                          |
-//! |----------------------------------|---------------------------|---------------------------------------------------------------|
-//! | `fetchable` / `unready_deps`     | moved by the event that changes it ([`crate::readiness`]) | [`crate::readiness::repair_pending`] over the pending anchors |
-//! | `derivation_output.is_cached`    | event-driven (set on NAR ingest, cleared by demote) | [`crate::cache_storage::demote_unbacked_trusted_outputs`] keys on ground truth, not this flag |
-//! | `cached_path.missing_references` | moved by the reference ripple (commit / retire) | [`crate::nar_closure::repair_counters_for`] over the gating paths |
-//!
-//! `closure_complete` and `drv_closure_cached` are NOT in that table any more.
-//! Nothing writes them and no scope runs [`reconcile_closure_complete`] or
-//! [`reconcile_drv_closure_cached`]; the readiness pair replaced what they cached,
-//! and #591 removes the columns and the two fixpoints together. Until it does, the
-//! dispatch gate still reads `closure_complete`, so this branch is not complete
-//! until that gate moves.
-//!
-//! Everything in the table caches ground truth that can REGRESS (GC deletes a NAR,
-//! an output is evicted, an edge is recorded late), so every forward move needs its
-//! symmetric loss - a stale-true gate dispatches a build whose inputs are gone,
-//! the terminal-`InputsUnavailable` poison class.
-//!
-//! The gates additionally require `derivation.walked` (via
-//! [`crate::graph_sql::walked_predicate`]): an anchor's edge set is only
-//! trustworthy once the ingest wrote the derivation's whole record. That bit is
-//! an immutable ingest fact, written in the same transaction as the edges and
-//! never cleared, so it needs no heal of its own.
+//! The dispatch gate reads the queue invariant instead of re-deriving readiness:
+//! `Queued` means [`crate::graph_sql::gates_predicate`] held when the anchor was
+//! promoted, and the event that breaks one of those gates un-promotes the row.
+//! Re-evaluating the gates per dispatch candidate is the per-row work #591 removed.
 
 use crate::graph_sql::{
     ClosureDirection, bounded_dependency_closure_cte_body, dependency_closure_cte,
@@ -108,78 +78,6 @@ pub(crate) fn transitions_from(
         .collect()
 }
 
-/// Re-evaluate the dependents of a just-finished `completed_derivation`:
-/// mark any dependent with a terminal-failed dependency `DependencyFailed`,
-/// then promote every `Created` dependent whose dependency anchors are all
-/// terminal-success to `Queued`. Returns the changes it made so the caller can
-/// feed [`crate::status::emit_transition_effects`].
-pub async fn promote_dependents<C: ConnectionTrait>(
-    db: &C,
-    completed_derivation: DerivationId,
-) -> Result<Vec<TransitionChange>, DbErr> {
-    let id = || Value::Uuid(Some(completed_derivation.into_inner()));
-
-    let mut affected = returned_transitions(
-        db.query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            format!(
-                r#"
-            UPDATE derivation_build AS db
-            SET status = {dependency_failed}, updated_at = (now() AT TIME ZONE 'UTC')
-            FROM derivation_build old
-            WHERE old.id = db.id
-              AND db.status IN ({pending})
-              AND db.derivation IN (
-                SELECT dd.derivation FROM derivation_dependency dd WHERE dd.dependency = $1)
-              AND EXISTS (
-                SELECT 1 FROM derivation_dependency e
-                JOIN derivation_build dep ON dep.derivation = e.dependency
-                WHERE e.derivation = db.derivation AND dep.status IN ({terminal_failure}))
-            RETURNING db.derivation, old.status AS from_status, db.status AS to_status
-            "#,
-                dependency_failed = status_sql::build(BuildStatus::DependencyFailed),
-                pending = status_sql::build_in(&BuildStatus::PENDING),
-                terminal_failure = status_sql::build_in(&BuildStatus::TERMINAL_FAILURE),
-            ),
-            [id()],
-        ))
-        .await?,
-    );
-
-    let deps_ready = crate::graph_sql::deps_ready_predicate("db");
-    let walked = crate::graph_sql::walked_predicate("db");
-    affected.extend(transitions_from(
-        returned_derivations(
-            db.query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                format!(
-                    r#"
-            UPDATE derivation_build AS db
-            SET status = {queued}, queued_at = (now() AT TIME ZONE 'UTC'),
-                updated_at = (now() AT TIME ZONE 'UTC')
-            WHERE db.status = {created}
-              AND {walked}
-              AND db.derivation IN (
-                SELECT dd.derivation FROM derivation_dependency dd WHERE dd.dependency = $1)
-              AND EXISTS (
-                SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
-              AND (db.substitutable OR ({deps_ready}))
-            RETURNING db.derivation
-            "#,
-                    queued = status_sql::build(BuildStatus::Queued),
-                    created = status_sql::build(BuildStatus::Created),
-                ),
-                [id()],
-            ))
-            .await?,
-        ),
-        BuildStatus::Created,
-        BuildStatus::Queued,
-    ));
-
-    Ok(affected)
-}
-
 /// Anchors an evaluation found whole in our cache move from `Created` to
 /// `Substituted`; a new anchor is inserted that way, this catches the ones a
 /// prior evaluation left pending. Returns the transitions for the effects
@@ -213,269 +111,6 @@ fn substitute_created_anchors_sql() -> String {
         substituted = status_sql::build(BuildStatus::Substituted),
         created = status_sql::build(BuildStatus::Created),
     )
-}
-
-/// Closure-complete gate for a terminal-success anchor `db`, shared verbatim by
-/// the targeted up-ripple (`propagate_closure_complete`) and the global
-/// self-heal fixpoint (`reconcile_closure_complete`). Completed arm: outputs
-/// cached, derivation walked, and every build dependency itself `closure_complete`
-/// **or** `substitutable`. Substituted arm: we never held the build closure, so
-/// key on the runtime-closure ground truth instead - every output's `cached_path`
-/// row is whole, the same check `compute_truly_substituted` makes before
-/// inserting such anchors with the flag already set. Without this arm the CLEAR
-/// pass strips the flag from every truly-substituted anchor (whose
-/// `substitutable` is false - a cache hit, not an upstream offer) and the
-/// readiness predicate can never pass either way: dependents stall Queued
-/// forever. Self-parenthesized: callers embed it as `AND {gate}`.
-pub(crate) fn closure_complete_gate() -> String {
-    let walked = crate::graph_sql::walked_predicate("db");
-    let whole = crate::nar_closure::whole_predicate("cp");
-    format!(
-        r#"
-    ((db.status = {completed}
-    AND {walked}
-    AND NOT EXISTS (
-        SELECT 1 FROM derivation_output o
-        LEFT JOIN cached_path cp ON cp.hash = o.hash
-        WHERE o.derivation = db.derivation AND cp.file_hash IS NULL)
-    AND NOT EXISTS (
-        SELECT 1 FROM derivation_dependency e
-        LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
-        WHERE e.derivation = db.derivation
-          AND (dep.derivation IS NULL OR NOT (dep.closure_complete OR dep.substitutable))))
-    OR (db.status = {substituted}
-    AND NOT EXISTS (
-        SELECT 1 FROM derivation_output o
-        LEFT JOIN cached_path cp ON cp.hash = o.hash
-        WHERE o.derivation = db.derivation
-          AND NOT {whole})))
-"#,
-        completed = status_sql::build(BuildStatus::Completed),
-        substituted = status_sql::build(BuildStatus::Substituted),
-    )
-}
-
-/// Recompute closure-completeness up the build-dependency graph from a just-
-/// finished `completed` derivation. A built (`Completed`) anchor becomes
-/// `closure_complete` once its outputs are cached, its derivation is walked, and
-/// every build dependency is itself `closure_complete` **or** `substitutable`
-/// (its closure is fetchable from upstream on demand). A Substituted anchor is
-/// marked through the gate's substituted arm - its outputs' `cached_path` rows
-/// carry the runtime-closure ground truth its missing build closure cannot.
-///
-/// Marking ripples to dependents: completing one anchor can complete those that
-/// were waiting only on it. This is the missing up-propagation - a dependent that
-/// finished before its dependency did never re-evaluated its own completeness.
-pub async fn propagate_closure_complete<C: ConnectionTrait>(
-    db: &C,
-    completed: DerivationId,
-) -> Result<(), DbErr> {
-    // Round-1 candidates: `completed` itself (it may now be closure_complete)
-    // plus its direct dependents, which may have been waiting only on it.
-    let mut frontier = returned_derivations(
-        db.query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = $1",
-            [completed.into_inner().into()],
-        ))
-        .await?,
-    );
-    frontier.push(completed);
-    let gate = closure_complete_gate();
-    let update = format!(
-        "UPDATE derivation_build db SET closure_complete = true \
-         WHERE db.derivation = ANY($1) AND NOT db.closure_complete AND {gate} \
-         RETURNING db.derivation"
-    );
-    while !frontier.is_empty() {
-        let ids: Vec<uuid::Uuid> = frontier.iter().map(|d| d.into_inner()).collect();
-        let newly = returned_derivations(
-            db.query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                &update,
-                [ids.into()],
-            ))
-            .await?,
-        );
-        if newly.is_empty() {
-            break;
-        }
-
-        let newly_ids: Vec<uuid::Uuid> = newly.iter().map(|d| d.into_inner()).collect();
-        frontier = returned_derivations(
-            db.query_all_raw(Statement::from_sql_and_values(
-                DatabaseBackend::Postgres,
-                "SELECT DISTINCT e.derivation FROM derivation_dependency e WHERE e.dependency = ANY($1)",
-                [newly_ids.into()],
-            ))
-            .await?,
-        );
-    }
-    Ok(())
-}
-
-/// Bidirectional self-heal fixpoint over `closure_complete`.
-///
-/// `propagate_closure_complete` only fires on a fresh completion event, so
-/// anchors that completed under older code (e.g. before output-only
-/// substitution) sit at `closure_complete = false` forever and strand their
-/// dependents in `Created` with no error to trigger a reactive heal - the SET
-/// pass below heals those.
-///
-/// The flag is otherwise monotonic, which is itself unsound: once true it
-/// survives a closure member being demoted/evicted, or a dependency edge being
-/// recorded after the fact (a dependent instantiated before its dependency).
-/// The dispatch gate trusts `closure_complete` for direct deps, so a stale-true
-/// flag dispatches a build whose transitive closure is not actually cached -
-/// terminal `InputsUnavailable` on a tiny transitive output (e.g.
-/// `unit-*.service`). The CLEAR pass restores soundness: any anchor whose gate
-/// no longer holds (its output is uncached, a dependency regressed, or a newly
-/// recorded dependency is not itself complete) is reset to false. Clearing
-/// ripples up - a cleared dep fails its dependents' gate, cleared the next pass.
-///
-/// Run CLEAR to a fixpoint first (remove stale-true), then SET (mark genuinely
-/// satisfied), each converging in O(longest affected chain). A converged graph
-/// costs two zero-row statements.
-pub async fn reconcile_closure_complete<C: ConnectionTrait>(
-    db: &C,
-    scope: Option<gradient_types::EvaluationId>,
-) -> Result<(), DbErr> {
-    let (clear, set) = closure_complete_statements(scope);
-    run_bidirectional_fixpoint(db, &clear, &set, scope).await
-}
-
-/// Closure CTE prelude and `db` membership filter that bound a fixpoint sweep to
-/// one eval's dependency closure. `None` yields empty fragments - the global
-/// full-table pass carried only by the tick/backstop cadence; `Some` prepends
-/// `eval_closure_cte()` (eval id bound as `$1`) and the `IN (closure)` predicate
-/// so a per-worker-event self-heal (`Eval`/`Unstick`) walks only that eval's
-/// closure, never re-scanning the whole table.
-fn eval_scope_fragments(scope: Option<gradient_types::EvaluationId>) -> (String, String) {
-    match scope {
-        None => (String::new(), String::new()),
-        Some(_) => (
-            format!("{} ", eval_closure_cte()),
-            " AND db.derivation IN (SELECT derivation FROM closure)".to_string(),
-        ),
-    }
-}
-
-/// Bind the eval id as `$1` for a scoped sweep; empty values for the global pass.
-fn fixpoint_params(scope: Option<gradient_types::EvaluationId>) -> Vec<Value> {
-    scope
-        .map(|id| vec![Value::Uuid(Some(id.into_inner()))])
-        .unwrap_or_default()
-}
-
-/// Run a bidirectional flag fixpoint: CLEAR (strip stale-true) to convergence,
-/// then SET (mark genuinely satisfied) to convergence. Each converges in
-/// O(longest affected chain); a converged graph costs two zero-row statements.
-async fn run_bidirectional_fixpoint<C: ConnectionTrait>(
-    db: &C,
-    clear: &str,
-    set: &str,
-    scope: Option<gradient_types::EvaluationId>,
-) -> Result<(), DbErr> {
-    let params = fixpoint_params(scope);
-    for stmt in [clear, set] {
-        loop {
-            let changed = db
-                .execute_raw(Statement::from_sql_and_values(
-                    DatabaseBackend::Postgres,
-                    stmt,
-                    params.clone(),
-                ))
-                .await?
-                .rows_affected();
-            if changed == 0 {
-                break;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// CLEAR + SET statements for the `closure_complete` fixpoint, sharing
-/// `closure_complete_gate()` (so both passes key on the same ground truth) and
-/// `eval_scope_fragments(scope)` (so both see the same closure bound).
-fn closure_complete_statements(scope: Option<gradient_types::EvaluationId>) -> (String, String) {
-    let gate = closure_complete_gate();
-    let (prelude, filter) = eval_scope_fragments(scope);
-    let clear = format!(
-        "{prelude}UPDATE derivation_build db SET closure_complete = false \
-         WHERE db.closure_complete{filter} AND NOT ({gate})"
-    );
-    let set = format!(
-        "{prelude}UPDATE derivation_build db SET closure_complete = true \
-         WHERE NOT db.closure_complete{filter} AND {gate}"
-    );
-    (clear, set)
-}
-
-/// `.drv`-closure gate for anchor `db`: its own `.drv` is cached (a `.drv`'s
-/// store-path hash is the derivation hash) and every build dependency is itself
-/// `drv_closure_cached`. The recursion mirrors [`closure_complete_gate`] but tracks
-/// the build-INPUT `.drv` closure instead of the OUTPUT closure, and is
-/// independent of build/substitute status: a substitutable dependency's `.drv`
-/// is still a structural reference of any dependent's `.drv` and so must be
-/// cached for the dependent's import to succeed.
-pub(crate) fn drv_closure_cached_gate() -> String {
-    let walked = crate::graph_sql::walked_predicate("db");
-    format!(
-        r#"
-    {walked}
-    AND EXISTS (
-        SELECT 1 FROM derivation d
-        JOIN cached_path cp ON cp.hash = d.hash
-        WHERE d.id = db.derivation AND cp.file_hash IS NOT NULL)
-    AND NOT EXISTS (
-        SELECT 1 FROM derivation_dependency e
-        LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
-        WHERE e.derivation = db.derivation
-          AND (dep.derivation IS NULL OR NOT dep.drv_closure_cached))
-"#
-    )
-}
-
-/// CLEAR + SET statements for the `drv_closure_cached` fixpoint, sharing
-/// `drv_closure_cached_gate()` (so both passes key on the same `.drv`-cached
-/// ground truth and can never drift from each other or from the test that pins
-/// them) and `eval_scope_fragments(scope)` (so both see the same closure bound).
-fn drv_closure_cached_statements(scope: Option<gradient_types::EvaluationId>) -> (String, String) {
-    let gate = drv_closure_cached_gate();
-    let (prelude, filter) = eval_scope_fragments(scope);
-    let clear = format!(
-        "{prelude}UPDATE derivation_build db SET drv_closure_cached = false \
-         WHERE db.drv_closure_cached{filter} AND NOT ({gate})"
-    );
-    let set = format!(
-        "{prelude}UPDATE derivation_build db SET drv_closure_cached = true \
-         WHERE NOT db.drv_closure_cached{filter} AND {gate}"
-    );
-    (clear, set)
-}
-
-/// Bidirectional self-heal fixpoint over `drv_closure_cached`, the dispatch gate's
-/// ".drv closure is importable" trust flag. The eval pushes `.drv`s progressively,
-/// so the SET pass marks anchors whose full input-`.drv` closure has landed - a
-/// layer per pass, a freshly marked dep unblocking its dependents next pass.
-///
-/// The flag is not monotonic-safe: GC deletes a `.drv`'s `cached_path` row once
-/// its NAR object is gone (`purge_zombie_cached_paths`), and the post-GC
-/// `demote_unbacked_trusted_outputs` backstop only heals OUTPUT trust, never this
-/// INPUT flag. A stale-true `drv_closure_cached` then dispatches a build whose
-/// `.drv` is not actually cached - terminal `InputsUnavailable` on the build's own
-/// `.drv`, poisoning the whole dependent closure. The CLEAR pass restores
-/// soundness: any anchor whose `.drv` is no longer backed (or whose dependency
-/// regressed) is reset, rippling up to dependents. Run CLEAR to a fixpoint first,
-/// then SET; a converged graph costs two zero-row statements.
-pub async fn reconcile_drv_closure_cached<C: ConnectionTrait>(
-    db: &C,
-    scope: Option<gradient_types::EvaluationId>,
-) -> Result<(), DbErr> {
-    let (clear, set) = drv_closure_cached_statements(scope);
-    run_bidirectional_fixpoint(db, &clear, &set, scope).await
 }
 
 /// Recursively mark every dependent of `failed_derivation` `DependencyFailed`.
@@ -587,62 +222,9 @@ fn dependency_failed_reconcile_sql() -> String {
     )
 }
 
-/// Promote every `Created` anchor whose dependency anchors are all terminal-
-/// success (`Completed`/`Substituted`) to `Queued`. Only a `walked` derivation
-/// qualifies, so an anchor is weighed no earlier than the batch that wrote its
-/// declared edges: this seeds the graph from its leaves and from anchors whose
-/// deps were already cached/substituted at resolve time (for which no
-/// completion event ever fires). Subsequent completions cascade via
-/// [`promote_dependents`]. Returns the changes it made so the caller can feed
-/// the effects emitter.
-pub async fn promote_ready<C: ConnectionTrait>(db: &C) -> Result<Vec<TransitionChange>, DbErr> {
-    let rows = db
-        .query_all_raw(Statement::from_string(
-            DatabaseBackend::Postgres,
-            promote_ready_sql(),
-        ))
-        .await?;
-
-    Ok(transitions_from(
-        returned_derivations(rows),
-        BuildStatus::Created,
-        BuildStatus::Queued,
-    ))
-}
-
-fn promote_ready_sql() -> String {
-    let deps_ready = crate::graph_sql::deps_ready_predicate("db");
-    let walked = crate::graph_sql::walked_predicate("db");
-    format!(
-        r#"
-        UPDATE derivation_build AS db
-        SET status = {queued}, queued_at = (now() AT TIME ZONE 'UTC'),
-            updated_at = (now() AT TIME ZONE 'UTC')
-        WHERE db.status = {created}
-          AND {walked}
-          AND EXISTS (
-            SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
-          AND (db.substitutable OR ({deps_ready}))
-        RETURNING db.derivation
-        "#,
-        queued = status_sql::build(BuildStatus::Queued),
-        created = status_sql::build(BuildStatus::Created),
-    )
-}
-
-/// The dispatch gate: every `Queued` anchor whose inputs are genuinely present
-/// right now. Reachability (`build_job` EXISTS) skips anchors left Queued after
-/// their last referencing eval was torn down; a `substitutable` anchor dispatches
-/// with no dependency wait at all (its NAR is on an upstream cache); otherwise the
-/// shared readiness predicate must hold and the anchor's own `.drv` closure must be
-/// importable, satisfied by either the build-graph `drv_closure_cached` flag or the
-/// `.drv` row being whole (via [`crate::graph_sql::drv_whole_predicate`]). The
-/// flag diverges from that NAR ground truth when eval pruning leaves a dependency
-/// unwalked, so keying on it alone stalls a build whose `.drv` closure is in fact
-/// fully cached.
-/// Ordered by dependency count desc (integration builds first), then age. This is
-/// [`promote_ready`]'s predicate applied one step later - both embed
-/// [`crate::graph_sql::deps_ready_predicate`].
+/// The dispatch gate reads the invariant: `Queued` means the gates held when the
+/// anchor was promoted, and a regression un-promotes. Reachability still filters
+/// anchors left queued after their last referencing evaluation was torn down.
 pub async fn find_ready_anchors<C: ConnectionTrait>(
     db: &C,
 ) -> Result<Vec<gradient_types::MDerivationBuild>, DbErr> {
@@ -657,18 +239,13 @@ pub async fn find_ready_anchors<C: ConnectionTrait>(
 }
 
 fn find_ready_anchors_sql() -> String {
-    let deps_ready = crate::graph_sql::deps_ready_predicate("db");
-    let drv_whole = crate::graph_sql::drv_whole_predicate("db");
-    let walked = crate::graph_sql::walked_predicate("db");
     format!(
         r#"
         SELECT db.*
         FROM derivation_build db
         WHERE db.status = {queued}
-          AND {walked}
           AND EXISTS (
             SELECT 1 FROM build_job bj WHERE bj.derivation = db.derivation)
-          AND (db.substitutable OR ((db.drv_closure_cached OR {drv_whole}) AND {deps_ready}))
         ORDER BY
             (SELECT count(*)
                FROM derivation_dependency dd
@@ -1022,166 +599,24 @@ mod tests {
         );
     }
 
-    /// The anchor-side flag fixpoints are global full-table sweeps on the
-    /// tick/backstop cadence, but on a per-eval scope (`Eval`/`Unstick`, fired
-    /// inline on every worker event) they must bound the UPDATE to that eval's
-    /// dependency closure - the unthrottled 56k-row scan at ~1.5/s otherwise
-    /// saturates Postgres and starves dispatch. Pin that a scope toggles the
-    /// closure CTE + membership filter (no live DB in unit tests).
+    /// Dispatch trusts the queue invariant: no readiness term is re-evaluated
+    /// per row here, only the status and the reachability check.
     #[test]
-    fn closure_complete_fixpoint_bounds_to_eval_closure_when_scoped() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        for s in {
-            let (clear, set) = closure_complete_statements(None);
-            [clear, set]
-        } {
-            assert!(
-                !norm(s.clone()).contains("FROM closure"),
-                "global pass scans the whole table, no closure walk: {s}"
-            );
-        }
-        let eval = gradient_types::EvaluationId::now_v7();
-        for s in {
-            let (clear, set) = closure_complete_statements(Some(eval));
-            [clear, set]
-        } {
-            let s = norm(s);
-            assert!(
-                s.contains("WITH RECURSIVE closure(derivation) AS"),
-                "eval scope must walk the eval closure: {s}"
-            );
-            assert!(
-                s.contains("db.derivation IN (SELECT derivation FROM closure)"),
-                "eval scope must bound the update to the closure: {s}"
-            );
-        }
-    }
-
-    /// Same closure-bounding contract for the `.drv`-closure fixpoint.
-    #[test]
-    fn drv_closure_cached_fixpoint_bounds_to_eval_closure_when_scoped() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let (clear_global, _) = drv_closure_cached_statements(None);
-        assert!(
-            !norm(clear_global).contains("FROM closure"),
-            "global pass scans the whole table"
-        );
-        let eval = gradient_types::EvaluationId::now_v7();
-        for s in {
-            let (clear, set) = drv_closure_cached_statements(Some(eval));
-            [clear, set]
-        } {
-            let s = norm(s);
-            assert!(
-                s.contains("WITH RECURSIVE closure(derivation) AS"),
-                "eval scope must walk the eval closure: {s}"
-            );
-            assert!(
-                s.contains("db.derivation IN (SELECT derivation FROM closure)"),
-                "eval scope must bound the update to the closure: {s}"
-            );
-        }
-    }
-
-    /// Promotion and the dispatch gate must share one readiness definition: both
-    /// statements embed `deps_ready_predicate` verbatim, and only the dispatch
-    /// gate adds the `.drv`-importability arm. That arm accepts either the
-    /// build-graph `drv_closure_cached` flag OR the `.drv` row being whole (the
-    /// ground truth) - the flag diverges when eval pruning leaves a dependency
-    /// unwalked, so keying on it alone dead-zones a build whose `.drv` closure is
-    /// in fact fully cached. A drift between the two statements is a latent dead
-    /// zone.
-    #[test]
-    fn promotion_and_dispatch_share_the_readiness_predicate() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let predicate = norm(crate::graph_sql::deps_ready_predicate("db"));
-        let promote = norm(promote_ready_sql());
-        let dispatch = norm(find_ready_anchors_sql());
-        assert!(
-            promote.contains(&predicate),
-            "promote_ready must embed the shared predicate: {promote}"
-        );
-        assert!(
-            dispatch.contains(&predicate),
-            "find_ready_anchors must embed the shared predicate: {dispatch}"
-        );
-        assert!(
-            dispatch.contains("db.substitutable OR ((db.drv_closure_cached OR")
-                && dispatch.contains("cp.missing_references = 0"),
-            "dispatch accepts the build-graph flag OR the .drv row being whole: {dispatch}"
-        );
-        assert!(
-            promote.contains("db.substitutable OR (NOT EXISTS"),
-            "promotion must not gate on drv_closure_cached (the eval pushes .drvs progressively): {promote}"
-        );
-
-        let walked = norm(crate::graph_sql::walked_predicate("db"));
-        assert!(
-            promote.contains(&walked) && dispatch.contains(&walked),
-            "both gates must require the derivation's walked bit: {promote} | {dispatch}"
-        );
-    }
-
-    /// Truly-substituted anchors are inserted `Substituted + closure_complete`
-    /// with `substitutable = false` (a cache hit, not an upstream offer). The
-    /// gate must accept that state via a substituted arm keyed on the same
-    /// `cached_path` ground truth the eval checked, or the reconcile CLEAR pass
-    /// strips the flag and the readiness predicate (terminal-success AND
-    /// closure_complete, OR substitutable) can never pass - dependents stall
-    /// Queued forever while the eval sits Building.
-    #[test]
-    fn closure_complete_gate_accepts_substituted_anchors_on_cached_ground_truth() {
-        let gate = closure_complete_gate()
+    fn dispatch_reads_the_queued_invariant_only() {
+        let sql = find_ready_anchors_sql()
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
-        let completed = status_sql::build(BuildStatus::Completed);
-        let substituted = status_sql::build(BuildStatus::Substituted);
+        assert!(sql.contains(&format!(
+            "db.status = {}",
+            status_sql::build(BuildStatus::Queued)
+        )));
+        assert!(sql.contains("FROM build_job bj WHERE bj.derivation = db.derivation"));
         assert!(
-            gate.starts_with("((") && gate.ends_with("))"),
-            "gate must be self-parenthesized (callers embed it as AND {{gate}}): {gate}"
-        );
-        assert!(
-            gate.contains(&format!(
-                "((db.status = {completed} AND EXISTS (SELECT 1 FROM derivation w WHERE w.id = db.derivation AND w.walked)"
-            )),
-            "completed arm keeps the walked bit + dependency recursion: {gate}"
-        );
-        assert!(
-            gate.contains(&format!("OR (db.status = {substituted}")),
-            "gate must have a substituted arm: {gate}"
-        );
-        assert!(
-            gate.contains("NOT (cp.file_hash IS NOT NULL AND cp.missing_references = 0)"),
-            "substituted arm keys on whole cached_path rows: {gate}"
-        );
-    }
-
-    /// `drv_closure_cached` is the dispatch gate's ".drv closure is importable"
-    /// trust flag. GC deletes a `.drv`'s `cached_path` row once its NAR object
-    /// goes missing (`purge_zombie_cached_paths`), so the flag must be
-    /// BIDIRECTIONAL like `closure_complete`: CLEAR a stale-true flag whose `.drv`
-    /// is no longer backed before SETting genuinely satisfied anchors. A set-only
-    /// reconcile leaves the gate trusting a vanished `.drv`, stranding the build in
-    /// a terminal `InputsUnavailable` dead zone. Pin the SQL shape (no live DB).
-    #[test]
-    fn drv_closure_cached_reconcile_is_bidirectional() {
-        let norm = |s: String| s.split_whitespace().collect::<Vec<_>>().join(" ");
-        let (clear, set) = drv_closure_cached_statements(None);
-        let (clear, set) = (norm(clear), norm(set));
-        assert!(
-            clear.contains("SET drv_closure_cached = false")
-                && clear.contains("WHERE db.drv_closure_cached AND NOT ("),
-            "CLEAR pass must reset anchors whose .drv is no longer backed: {clear}"
-        );
-        assert!(
-            set.contains("SET drv_closure_cached = true")
-                && set.contains("WHERE NOT db.drv_closure_cached AND"),
-            "SET pass must mark anchors whose .drv closure has landed: {set}"
-        );
-        assert!(
-            clear.contains("JOIN cached_path cp") && set.contains("JOIN cached_path cp"),
-            "both passes must key on real .drv NAR backing (ground truth): {clear} | {set}"
+            !sql.contains("unready_deps")
+                && !sql.contains("fetchable")
+                && !sql.contains("cached_path"),
+            "{sql}"
         );
     }
 

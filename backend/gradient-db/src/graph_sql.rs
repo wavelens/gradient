@@ -123,40 +123,14 @@ pub fn reference_closure_cte_body(name: &str, seed_select: &str) -> String {
     )
 }
 
-/// Dependency-readiness of anchor `{alias}`: every build dependency is
-/// terminal-success AND `closure_complete`, or itself `substitutable`; and
-/// every recorded input source is fully cached. This is THE readiness
-/// definition - shared verbatim by promotion (`promote_ready`/
-/// `promote_dependents`) and the dispatch gate (`find_ready_anchors`) so a
-/// drift between them (a latent dead zone) is impossible by construction.
-pub fn deps_ready_predicate(alias: &str) -> String {
-    let terminal_success =
-        crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS);
-    format!(
-        r#"NOT EXISTS (
-        SELECT 1 FROM derivation_dependency e
-        LEFT JOIN derivation_build dep ON dep.derivation = e.dependency
-        WHERE e.derivation = {alias}.derivation
-          AND (dep.status IS NULL
-               OR NOT (((dep.status IN ({terminal_success})) AND dep.closure_complete)
-                       OR dep.substitutable)))
-      AND NOT EXISTS (
-        SELECT 1 FROM derivation_input_source s
-        WHERE s.derivation = {alias}.derivation
-          AND NOT EXISTS (
-            SELECT 1 FROM cached_path cp
-            WHERE cp.hash = s.hash AND cp.file_hash IS NOT NULL))"#
-    )
-}
-
 /// The build target `{alias}`'s own `.drv` is whole: its NAR is stored and every
 /// reference counted by `cached_path.missing_references` resolves. A `.drv` is an
 /// ordinary compressed-NAR store path, so this is the authoritative "the worker
 /// can fetch and import the whole input-`.drv` closure" signal - computed over the
-/// actual `.drv` NAR references, not the eval-time build graph. The build-graph
-/// `drv_closure_cached` flag mirrors it but diverges when eval pruning leaves a
-/// dependency unwalked, dead-zoning a build whose `.drv` closure is in fact fully
-/// cached; the dispatch gate accepts either signal.
+/// actual `.drv` NAR references, not the eval-time build graph. It is a term of
+/// [`gates_predicate`], so a build-graph mirror of it would only diverge from the
+/// NAR ground truth when eval pruning leaves a dependency unwalked, and dead-zone
+/// a build whose `.drv` closure is in fact fully cached.
 pub fn drv_whole_predicate(alias: &str) -> String {
     format!(
         r#"EXISTS (
@@ -331,31 +305,11 @@ mod tests {
         );
     }
 
-    /// The readiness predicate must require terminal-success + closure_complete
-    /// (or substitutable) on every dependency AND every input source cached -
-    /// dropping either arm re-opens the InputsUnavailable poison class.
-    #[test]
-    fn readiness_predicate_gates_deps_and_input_sources() {
-        let p = norm(&deps_ready_predicate("db"));
-        let terminal_success =
-            crate::status_sql::build_in(&gradient_entity::build::BuildStatus::TERMINAL_SUCCESS);
-        assert!(
-            p.contains(&format!(
-                "(((dep.status IN ({terminal_success})) AND dep.closure_complete) OR dep.substitutable)"
-            )),
-            "deps must be terminal-success + closure_complete or substitutable: {p}"
-        );
-        assert!(
-            p.contains("FROM derivation_input_source s") && p.contains("cp.file_hash IS NOT NULL"),
-            "every input source must be fully cached: {p}"
-        );
-    }
-
     /// A `.drv` is an ordinary NAR store path, so the authoritative "the worker
     /// can import the whole input-`.drv` closure" signal is the `.drv` row's own
-    /// reference counter (computed over real NAR references), not the
-    /// eval-build-graph `drv_closure_cached` flag that diverges when pruning
-    /// leaves a dependency unwalked. The predicate must key on that.
+    /// reference counter (computed over real NAR references), not an
+    /// eval-build-graph mirror of it that diverges when pruning leaves a
+    /// dependency unwalked. The predicate must key on that.
     #[test]
     fn drv_whole_predicate_reads_the_reference_counter() {
         let p = norm(&drv_whole_predicate("db"));

@@ -358,7 +358,7 @@ pub struct Retired {
 
 /// Delete `hashes` from the index and move every counter, flag and anchor that
 /// trusted them, in the caller's transaction: the reverse ripple from the rows that
-/// were whole, `is_cached` off the deleted outputs, the anchor flags, and then the
+/// were whole, `is_cached` off the deleted outputs, and then the
 /// readiness side - the producers lose `fetchable` and a terminal-success producer
 /// left with nothing to serve resets to `Created`, while the owner of a `.drv` that
 /// is gone leaves the queue. `Retired::deleted` names the rows that actually went
@@ -463,30 +463,6 @@ async fn retire(
             DatabaseBackend::Postgres,
             "UPDATE derivation_output SET is_cached = false WHERE is_cached AND hash = ANY($1)",
             [deleted.clone().into()],
-        ))
-        .await?;
-    }
-
-    if !gated.is_empty() {
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"
-            UPDATE derivation_build db SET drv_closure_cached = false
-            FROM derivation d
-            WHERE d.id = db.derivation AND db.drv_closure_cached AND d.hash = ANY($1)
-            "#,
-            [gated.clone().into()],
-        ))
-        .await?;
-
-        db.execute_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Postgres,
-            r#"
-            UPDATE derivation_build db SET closure_complete = false
-            WHERE db.closure_complete
-              AND db.derivation IN (SELECT o.derivation FROM derivation_output o WHERE o.hash = ANY($1))
-            "#,
-            [gated.clone().into()],
         ))
         .await?;
     }
@@ -997,18 +973,17 @@ mod tests {
 
     /// Retiring seeds the reverse ripple only from rows that were whole: a
     /// referrer of a row that was already incomplete counted it as missing
-    /// already, so it must not be incremented twice. The flag clears and the
-    /// readiness side do NOT split that way: `is_cached` follows what was deleted,
-    /// the anchor flags follow the union of what was deleted and what stopped being
-    /// whole, and the producer/owner pass follows that union plus every hash the
-    /// caller asked for, because none of them reads the counter - a row deleted
-    /// while it was not whole (`b` here) would otherwise keep a stale-true gate and
-    /// dispatch a build against a `.drv` that is gone. The unguarded retire opens
-    /// with the same hash-ordered lock pass as the guarded one: it decides nothing
-    /// there, but an unordered acquisition deadlocks against every other writer's
-    /// ordered one.
+    /// already, so it must not be incremented twice. The anchor side does NOT
+    /// split that way: `is_cached` follows what was deleted, and the
+    /// producer/owner pass follows the union of deleted and newly-unwhole plus
+    /// every hash the caller asked for, because neither statement reads the
+    /// counter - a row deleted while it was not whole (`b` here) would otherwise
+    /// keep a stale-true gate and dispatch a build against a `.drv` that is gone.
+    /// The unguarded retire opens with the same hash-ordered lock pass as the
+    /// guarded one: it decides nothing there, but an unordered acquisition
+    /// deadlocks against every other writer's ordered one.
     #[tokio::test]
-    async fn retire_clears_the_anchor_flags_for_every_retired_path() {
+    async fn the_anchor_side_of_a_retire_covers_every_asked_for_hash() {
         let db = MockDatabase::new(DatabaseBackend::Postgres)
             .append_query_results([vec![
                 row("a", "was_whole", true),
@@ -1022,7 +997,7 @@ mod tests {
                     last_insert_id: 0,
                     rows_affected: 1,
                 };
-                4
+                2
             ])
             .into_connection();
 
@@ -1037,8 +1012,8 @@ mod tests {
         let log = crate::pool::statements(db.into_transaction_log());
         assert_eq!(
             log.len(),
-            8,
-            "lock, delete, one ripple level, three flag clears, producers, owners: {log:?}"
+            6,
+            "lock, delete, one ripple level, is_cached, producers, owners: {log:?}"
         );
         assert!(log[0].contains("FOR UPDATE") && !log[0].contains("DELETE"));
         assert!(log[1].contains("DELETE FROM cached_path") && log[1].contains("RETURNING"));
@@ -1053,24 +1028,22 @@ mod tests {
                 && log[3].contains("\"b\""),
             "is_cached follows every deleted hash: {log:?}"
         );
-        for clear in &log[4..] {
+        for anchor_side in &log[4..] {
             assert!(
-                clear.contains("\"a\"") && clear.contains("\"b\""),
+                anchor_side.contains("\"a\"") && anchor_side.contains("\"b\""),
                 "the anchor side follows every retired path, whole or not: {log:?}"
             );
         }
 
-        assert!(log[4].contains("drv_closure_cached = false"));
-        assert!(log[5].contains("closure_complete = false"));
         assert!(
-            log[6].contains("FROM derivation_output o WHERE o.hash = ANY($1)"),
+            log[4].contains("FROM derivation_output o WHERE o.hash = ANY($1)"),
             "the producers of every retired path are resolved: {log:?}"
         );
         assert!(
-            log[7].contains(&format!(
+            log[5].contains(&format!(
                 "SET status = {created}",
                 created = crate::status_sql::build(BuildStatus::Created)
-            )) && log[7].contains("d.hash = ANY($1::text[])"),
+            )) && log[5].contains("d.hash = ANY($1::text[])"),
             "the owner of a `.drv` that is gone leaves the queue: {log:?}"
         );
     }
@@ -1143,10 +1116,7 @@ mod tests {
             .append_query_results([vec![drv(producer)]])
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
             .append_query_results([vec![BTreeMap::from([
-                (
-                    "derivation".to_owned(),
-                    Value::from(producer.into_inner()),
-                ),
+                ("derivation".to_owned(), Value::from(producer.into_inner())),
                 (
                     "from_status".to_owned(),
                     Value::from(crate::status_sql::build(BuildStatus::Completed)),

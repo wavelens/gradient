@@ -27,7 +27,7 @@ use crate::proto::prefetch::{
 /// its NAR from upstream, decompress + verify, recompress to zstd, and push it
 /// straight into our cache - without importing into the nix store or fetching the
 /// runtime closure. The closure is mirrored separately as each of its members is
-/// substituted by its own anchor; the `closure_complete` gate orders dependents.
+/// substituted by its own anchor; the `unready_deps` gate orders dependents.
 /// Returns the output `(name, path)` pairs. Errors map to `SubstituteUnavailable`.
 pub async fn relay_external_cached_outputs(
     task: &BuildSpec,

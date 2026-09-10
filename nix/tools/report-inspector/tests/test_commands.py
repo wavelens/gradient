@@ -30,7 +30,7 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
             building_started_at TEXT, finished_at TEXT);
         CREATE TABLE derivation (id TEXT, name TEXT, walked INTEGER);
         CREATE TABLE derivation_build (id TEXT, derivation TEXT, status INTEGER,
-            closure_complete INTEGER, drv_closure_cached INTEGER);
+            fetchable INTEGER, unready_deps INTEGER);
         CREATE TABLE derivation_dependency (id TEXT, derivation TEXT, dependency TEXT);
         CREATE TABLE build_attempt (id TEXT, outcome INTEGER, reason INTEGER,
             failure_message TEXT, build_started_at TEXT, build_finished_at TEXT);
@@ -52,9 +52,15 @@ def build_report(path, *, schema_version: int = SUPPORTED_SCHEMA, with_instance:
     )
     conn.execute("INSERT INTO derivation VALUES ('d1', 'vendor-registry', 0)")
     conn.execute("INSERT INTO derivation VALUES ('d2', 'cargo-package-clap_complete-4.6.9', 1)")
+    conn.execute("INSERT INTO derivation VALUES ('d3', 'nixos-system-builder-1', 1)")
+    # b1 is blocked on both gates the report carries, b3 only on the count, so
+    # the two are proven separately and neither is named while it is open.
     conn.execute("INSERT INTO derivation_build VALUES ('b1', 'd1', 1, 0, 1)")
-    conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 1, 1)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b2', 'd2', 4, 0, 0)")
+    conn.execute("INSERT INTO derivation_build VALUES ('b3', 'd3', 1, 0, 2)")
     conn.execute("INSERT INTO derivation_dependency VALUES ('dd1', 'd1', 'd2')")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd2', 'd3', 'd1')")
+    conn.execute("INSERT INTO derivation_dependency VALUES ('dd3', 'd3', 'd2')")
     conn.execute(
         "INSERT INTO build_attempt VALUES ('a1', 3, 8, 'input prefetch failed', "
         "'2026-08-31T23:47:30', '2026-08-31T23:47:50')"
@@ -132,12 +138,19 @@ def test_manifest_shows_what_was_filtered_out(report):
 
 
 def test_why_stuck_names_the_gate_and_the_blocking_dependency(report):
-    out = commands.why_stuck(report)
-    assert "vendor-registry" in out
-    assert "walked" in out
-    assert "closure_complete" in out
-    assert "drv_closure_cached" not in out.split("waiting on")[1].split("\n")[0]
-    assert "cargo-package-clap_complete-4.6.9" in out
+    lines = commands.why_stuck(report).splitlines()
+    stuck = next(line for line in lines if line.startswith("vendor-registry"))
+    counted = next(line for line in lines if line.startswith("nixos-system-builder-1"))
+
+    assert "walked" in stuck
+    assert "unready_deps = 1" in stuck
+    # `fetchable` says whether this anchor can serve its DEPENDENTS, so it is
+    # never a gate on the anchor itself, and `walked` is open on b3.
+    assert "fetchable" not in stuck
+    assert "unready_deps = 2" in counted
+    assert "walked" not in counted
+
+    assert "    dep cargo-package-clap_complete-4.6.9 status FailedPermanent not fetchable" in lines
 
 
 def test_failed_lists_attempts_and_dumps_one_log(report):

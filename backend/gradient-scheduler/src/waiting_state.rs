@@ -449,8 +449,8 @@ pub async fn recover_drv_stuck_evals(state: &Arc<ServerState>) -> Result<()> {
 
 /// True when a pending anchor of `evaluation_id` is dispatch-blocked solely by
 /// its own missing `.drv`: its build dependencies are all satisfied and it is
-/// not substitutable, yet neither the build-graph `drv_closure_cached` flag nor
-/// the `.drv`'s own NAR-closure holds. That is the zone-B signature - a `.drv`
+/// not substitutable, yet the `.drv`'s own NAR closure does not hold and its NAR
+/// is absent from our cache entirely. That is the zone-B signature - a `.drv`
 /// our cache never received or lost - distinct from a failed-dependency block,
 /// whose anchors the dependency-failed cascade has already demoted.
 async fn eval_blocked_on_unproducible_drv(

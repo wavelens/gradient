@@ -351,11 +351,12 @@ pub async fn demote_cached_output(
 /// referrers are demoted ([`OUTPUT_REFERRERS_SELECT`]): a producerless referrer -
 /// a `.drv` or an input source - is left in place. Deleting one re-pushes nothing
 /// (no producer rebuilds) and would strand the `.drv`'s own live dependents behind
-/// the `drv_closure_cached` dispatch gate, a permanent dead zone, since a genuinely
-/// missing input `.drv`/source is re-supplied only by a full re-eval. The
-/// transitive completeness invariant is handled by the reverse ripple inside
-/// [`crate::nar_closure::retire_paths`], which raises the referrers' counters and
-/// leaves their healthy NARs in place. Returns the producers reset to `Created`.
+/// the `.drv`-importable term of [`crate::graph_sql::gates_predicate`], a permanent
+/// dead zone, since a genuinely missing input `.drv`/source is re-supplied only by
+/// a full re-eval. The transitive completeness invariant is handled by the reverse
+/// ripple inside [`crate::nar_closure::retire_paths`], which raises the referrers'
+/// counters and leaves their healthy NARs in place. Returns the producers reset to
+/// `Created`.
 pub async fn demote_referrers_of(
     ctx: &crate::DbContext,
     missing_hash: &str,
@@ -485,7 +486,7 @@ pub async fn demote_unbacked_trusted_outputs(
 /// or an input source - are excluded on purpose: demoting one deletes a
 /// `.drv`/source the cache cannot re-supply without a full re-eval, rebuilds
 /// nothing, and strands the deleted `.drv`'s own live dependents behind the
-/// `drv_closure_cached` dispatch gate - the exact dead zone this filter prevents.
+/// `.drv`-importable promotion gate - the exact dead zone this filter prevents.
 const OUTPUT_REFERRERS_SELECT: &str = "SELECT DISTINCT r.referrer \
      FROM cached_path_reference r \
      WHERE r.reference_hash = $1 \
@@ -760,8 +761,8 @@ mod tests {
     /// anchors: any output with no backing NAR is demoted. It must key on the
     /// **ground truth** (a missing `cached_path` NAR), NOT the derived
     /// `is_cached` flag - that flag is `false` for the never-cached-output
-    /// dead zone this sweep must rescue - nor `closure_complete` (false for every
-    /// dead-zone anchor), and must skip upstream-fetchable outputs (`external_url`).
+    /// dead zone this sweep must rescue - and must skip upstream-fetchable outputs
+    /// (`external_url`).
     #[test]
     fn unbacked_trusted_select_matches_the_gate() {
         let sql = unbacked_trusted_outputs_select()
@@ -776,10 +777,6 @@ mod tests {
         assert!(
             !sql.contains("o.is_cached"),
             "must NOT gate on is_cached (it is false for the never-cached-output dead zone): {sql}"
-        );
-        assert!(
-            !sql.contains("db.closure_complete"),
-            "must NOT gate on closure_complete (it is false for the dead-zone anchors): {sql}"
         );
         assert!(
             sql.contains("o.external_url IS NULL"),
@@ -816,7 +813,7 @@ mod tests {
     /// `demote_referrers_of` may only demote referrers that are rebuildable
     /// outputs. A producerless `.drv`/source referrer must be excluded: deleting it
     /// re-pushes nothing (no producer rebuilds) and strands the `.drv`'s own live
-    /// dependents behind the `drv_closure_cached` dispatch gate - a permanent dead
+    /// dependents behind the `.drv`-importable promotion gate - a permanent dead
     /// zone (a completed, substitutable dep whose `.drv` a demote deleted, blocking
     /// every non-substitutable dependent from ever dispatching).
     #[test]

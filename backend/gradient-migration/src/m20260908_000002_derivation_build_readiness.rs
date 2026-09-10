@@ -69,6 +69,13 @@ fn up_statements() -> Vec<String> {
          WHERE db.derivation = c.derivation".into(),
         format!("UPDATE derivation_build db SET status = 0, updated_at = (now() AT TIME ZONE 'UTC') WHERE db.status = 1 AND NOT {}", gates()),
         format!("UPDATE derivation_build db SET status = 1, queued_at = coalesce(db.queued_at, now() AT TIME ZONE 'UTC'), updated_at = (now() AT TIME ZONE 'UTC') WHERE db.status = 0 AND {}", gates()),
+        "DROP INDEX IF EXISTS \"idx-derivation_build-closure_complete\"".into(),
+        "DROP INDEX IF EXISTS \"idx-derivation_build-closure_pending\"".into(),
+        "DROP INDEX IF EXISTS \"idx-derivation_build-drv_closure_cached\"".into(),
+        "DROP INDEX IF EXISTS \"idx-derivation_build-drv_closure_pending\"".into(),
+        "DROP INDEX IF EXISTS \"idx-derivation_build-promote-ready\"".into(),
+        "ALTER TABLE derivation_build DROP COLUMN IF EXISTS closure_complete".into(),
+        "ALTER TABLE derivation_build DROP COLUMN IF EXISTS drv_closure_cached".into(),
         "CREATE INDEX IF NOT EXISTS \"idx-derivation_build-promotable\" ON derivation_build (derivation) WHERE status = 0 AND unready_deps = 0".into(),
     ]
 }
@@ -114,17 +121,26 @@ mod tests {
     use super::{DOWN, up_statements};
 
     /// Every value this migration writes is re-derived from ground truth, so no
-    /// statement may READ the two flags it replaces. `down` restores them, so it
-    /// is exempt; Task 5 appends the `DROP COLUMN`s here and must not break this.
+    /// statement may READ the two flags it replaces. Only the tail that removes
+    /// them may name them, and a `DROP INDEX` names an index rather than a column,
+    /// so it cannot be a read either. `down` restores them and is exempt.
     #[test]
     fn the_backfill_never_reads_the_flags_it_replaces() {
-        for stmt in up_statements() {
-            for flag in ["closure_complete", "drv_closure_cached"] {
+        for flag in ["closure_complete", "drv_closure_cached"] {
+            let drop_column = format!("ALTER TABLE derivation_build DROP COLUMN IF EXISTS {flag}");
+            for stmt in up_statements() {
                 assert!(
-                    !stmt.contains(flag) || stmt.contains(&format!("DROP COLUMN IF EXISTS {flag}")),
+                    !stmt.contains(flag)
+                        || stmt.starts_with("DROP INDEX IF EXISTS")
+                        || stmt == drop_column,
                     "up reads {flag}: {stmt}"
                 );
             }
+
+            assert!(
+                up_statements().contains(&drop_column),
+                "up must drop {flag} once nothing reads it"
+            );
         }
 
         assert!(
