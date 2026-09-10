@@ -359,9 +359,8 @@ fn build_duration_sql(m: &BuildDuration) -> String {
     )
 }
 
-/// `builds.duration_ms`: wall-clock build time for completed builds. The
-/// start/finish timestamps live on `build_attempt` after the split, so they are
-/// read from each build's most recent attempt via a `LATERAL` join.
+/// `builds.duration_ms`: wall-clock time of the newest finished attempt per
+/// build, seeded from the attempts finished inside the window.
 fn build_duration_attempt_sql() -> String {
     let ms = "extract(epoch from (ba.build_finished_at - ba.build_started_at)) * 1000";
     format!(
@@ -371,18 +370,18 @@ fn build_duration_attempt_sql() -> String {
                 jsonb_build_object('project', pr.project::text), \
                 hashtextextended(pr.project::text, 0), \
                 count(*)::bigint, sum({ms}), min({ms}), max({ms}), sum(power({ms}, 2)), NULL \
-         FROM build_job bj \
-         JOIN derivation_build b ON b.id = bj.derivation_build \
+         FROM build_attempt ba \
+         JOIN derivation_build b ON b.id = ba.derivation_build AND b.status = {completed} \
+         JOIN build_job bj ON bj.derivation_build = b.id \
          JOIN evaluation ev ON ev.id = bj.evaluation \
          JOIN task pr ON pr.id = ev.task \
-         JOIN LATERAL ( \
-             SELECT ba2.build_started_at, ba2.build_finished_at \
-             FROM build_attempt ba2 WHERE ba2.derivation_build = b.id \
-             ORDER BY ba2.created_at DESC LIMIT 1 \
-         ) ba ON TRUE \
-         WHERE ba.build_finished_at IS NOT NULL AND ba.build_started_at IS NOT NULL \
-           AND ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
-           AND b.status = {completed} \
+         WHERE ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '{window}' \
+           AND ba.build_started_at IS NOT NULL \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM build_attempt later \
+             WHERE later.derivation_build = ba.derivation_build \
+               AND (later.created_at > ba.created_at \
+                    OR (later.created_at = ba.created_at AND later.id > ba.id))) \
          GROUP BY date_trunc('minute', ba.build_finished_at), pr.project \
          ON CONFLICT (metric, granularity, bucket_start, scope_hash) \
          DO UPDATE SET scope = EXCLUDED.scope, count = EXCLUDED.count, sum = EXCLUDED.sum, \
@@ -511,11 +510,25 @@ mod tests {
         }
     }
 
+    /// The window must be the seed, not a filter after a join over every
+    /// Completed anchor: an idle window then reads nothing (#629).
     #[test]
-    fn duration_rollup_reads_timestamps_from_build_attempt() {
+    fn duration_rollup_seeds_from_attempts_finished_in_the_window() {
         let sql = build_duration_attempt_sql();
-        assert!(sql.contains("build_attempt"));
-        assert!(sql.contains("ba.build_started_at") && sql.contains("ba.build_finished_at"));
+
+        assert!(sql.contains("FROM build_attempt ba"), "{sql}");
+        assert!(
+            sql.contains(
+                "WHERE ba.build_finished_at >= (now() AT TIME ZONE 'UTC') - interval '15 minutes'"
+            ),
+            "{sql}"
+        );
+        assert!(
+            sql.contains("NOT EXISTS ( SELECT 1 FROM build_attempt later"),
+            "{sql}"
+        );
+        assert!(!sql.contains("LATERAL"), "{sql}");
+        assert!(sql.contains("ba.build_started_at IS NOT NULL"), "{sql}");
     }
 
     /// Every rollup statement's `GROUP BY` must be exactly the unique index
