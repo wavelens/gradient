@@ -38,7 +38,7 @@ pub struct RecoveryReport {
     pub attempts_aborted: u64,
     pub builds_requeued: u64,
     /// How many of `builds_requeued` the gate pulled straight back to `Created`.
-    pub builds_unpromoted: usize,
+    pub builds_unpromoted: u64,
     pub builds_aborted: u64,
     pub evals_aborted: u64,
     pub tasks_forced: u64,
@@ -66,30 +66,28 @@ pub async fn recover_interrupted_work<C: ConnectionTrait>(
     report.attempts_aborted = res.rows_affected;
 
     // 2. Re-queue anchors that were mid-flight (Building back to Queued). The
-    // requeue itself evaluates no gate, and since #591 nothing downstream re-checks
-    // a `Queued` row, so the ids are read before the write and settled after it: a
-    // mid-flight anchor's dependencies can have regressed while the server was down,
-    // and on the first start after `m20260908_000000` every derivation is unwalked.
-    let mid_flight = crate::promotion::returned_derivations(
+    // requeue evaluates no gate and since #591 nothing downstream re-checks a
+    // `Queued` row, so it settles what it wrote: a mid-flight anchor's dependencies
+    // can have regressed while the server was down, and on the first start after
+    // `m20260908_000000` every derivation is unwalked. `RETURNING` names exactly the
+    // rows this statement moved, so the settle cannot miss one that arrived late.
+    let requeued = crate::promotion::returned_derivations(
         conn.query_all_raw(Statement::from_string(
             DatabaseBackend::Postgres,
             format!(
-                "SELECT derivation FROM derivation_build WHERE status = {building}",
-                building = BuildStatus::Building as i32,
+                "UPDATE derivation_build SET status = {queued}, \
+                 updated_at = (now() AT TIME ZONE 'UTC') \
+                 WHERE status = {building} RETURNING derivation",
+                queued = crate::status_sql::build(BuildStatus::Queued),
+                building = crate::status_sql::build(BuildStatus::Building),
             ),
         ))
         .await?,
     );
-    let res = EDerivationBuild::update_many()
-        .col_expr(CDerivationBuild::Status, Expr::value(BuildStatus::Queued))
-        .col_expr(CDerivationBuild::UpdatedAt, Expr::value(now))
-        .filter(CDerivationBuild::Status.eq(BuildStatus::Building))
-        .exec(conn)
-        .await?;
-    report.builds_requeued = res.rows_affected;
-    report.builds_unpromoted = crate::readiness::unpromote_ungated(conn, &mid_flight)
+    report.builds_requeued = requeued.len() as u64;
+    report.builds_unpromoted = crate::readiness::unpromote_ungated(conn, &requeued)
         .await?
-        .len();
+        .len() as u64;
 
     // 3a. Collect the evals a restart lost, `Building` included: their anchors
     // and their terminal transition are this sweep's to finish.
@@ -288,7 +286,8 @@ mod tests {
     /// The mid-flight requeue evaluates no gate, so the settle after it is part of
     /// the step and not an optimisation: an anchor whose dependencies regressed while
     /// the server was down must leave the queue again before the first dispatch pass
-    /// reads it. The count is reported rather than folded into `builds_requeued`.
+    /// reads it. It settles the requeue's own `RETURNING` rows, so `builds_requeued`
+    /// and the settle's scope cannot disagree, and the count is reported separately.
     #[tokio::test]
     async fn all_operations_populate_report() {
         let task_id = TaskId::now_v7();
@@ -299,16 +298,11 @@ mod tests {
                 last_insert_id: 0,
                 rows_affected: 3,
             }])
-            // 2. the ids about to be requeued, read before the write
+            // 2. re-queue Building builds, naming the rows it moved
             .append_query_results([vec![
                 derivation_row(mid_flight),
                 derivation_row(DerivationId::now_v7()),
             ]])
-            // 2. re-queue Building builds
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 2,
-            }])
             // 2. the settle pulls one of them straight back
             .append_query_results([vec![unpromoted_row(mid_flight)]])
             // 3a. SELECT pre-build inflight evals
@@ -350,11 +344,6 @@ mod tests {
             }])
             // 2. nothing was mid-flight, so the settle issues no statement at all
             .append_query_results([Vec::<BTreeMap<String, Value>>::new()])
-            // 2. re-queue Building builds (none)
-            .append_exec_results([MockExecResult {
-                last_insert_id: 0,
-                rows_affected: 0,
-            }])
             // 3a. SELECT pre-build evals: empty, so steps 3b/3c/3d are skipped
             .append_query_results([Vec::<MEval>::new()])
             .into_connection();
